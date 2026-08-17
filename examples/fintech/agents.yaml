@@ -1,0 +1,27 @@
+# An example tenant package. Every Bot here is reachable the moment the deployment starts, so the
+# surface never registers an endpoint that is unavailable by default.
+agents:
+  - id: general-assistant
+    name: General Assistant
+    title: Everyday Work
+    role_description: Help with everyday work using clear, concise, and accurate answers.
+    avatar_seed: general-assistant
+    type: built-in
+    system_prompt: You are a helpful general assistant. Give clear, concise, and accurate answers.
+  - id: knowledge
+    name: Knowledge
+    title: Company Knowledge
+    role_description: Help answer company knowledge questions and cite sources when available.
+    avatar_seed: knowledge
+    type: built-in
+    system_prompt: Answer from authorized company knowledge and cite every source.
+  # The Bot that ships in the box (agent-bot), addressed exactly the way a customer's own Bot would
+  # be: an AG-UI endpoint in the registry. Names in dollar-brace form are read from the environment,
+  # so the address belongs to the deployment. Replace it with your own service and nothing changes.
+  - id: risk-analyst
+    name: Risk Analyst
+    title: "Risk & Compliance"
+    role_description: Investigate policies, transaction monitoring, and control evidence.
+    avatar_seed: risk-analyst
+    type: remote-ag-ui
+    endpoint: ${MANAGED_AGENT_AG_UI_URL:-http://localhost:4200/ag-ui}

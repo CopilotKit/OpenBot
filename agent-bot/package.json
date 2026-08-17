@@ -1,0 +1,15 @@
+{
+  "name": "@openbot/agent-bot",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@ag-ui/core": "0.0.57",
+    "@ag-ui/encoder": "0.0.57",
+    "openai": "^4.104.0"
+  }
+}

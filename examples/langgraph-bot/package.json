@@ -1,0 +1,16 @@
+{
+  "name": "@openbot/example-langgraph-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env --watch src/index.ts",
+    "start": "bun --env-file=../../.env src/index.ts"
+  },
+  "dependencies": {
+    "@ag-ui/core": "0.0.57",
+    "@ag-ui/encoder": "0.0.57",
+    "@langchain/core": "^0.3.66",
+    "@langchain/langgraph": "^0.4.9",
+    "@langchain/openai": "^0.6.3"
+  }
+}

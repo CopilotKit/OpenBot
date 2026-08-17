@@ -1,0 +1,56 @@
+name: security / zizmor
+
+# zizmor runs static analysis over every workflow under .github/workflows looking for the well-known
+# classes of GitHub Actions footguns: template injection from untrusted input, dangerous triggers
+# like `pull_request_target`, unpinned `uses:` refs, excessive token scopes, secret exfiltration
+# through job outputs, and a long tail of others.
+#
+# Public pull requests make workflow inputs and token scopes a security boundary.
+#
+# Findings at `low` confidence and above fail the job. Intentional exceptions belong in
+# `.github/zizmor.yml` with a justification.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - ".github/zizmor.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - ".github/zizmor.yml"
+  schedule:
+    # Catch findings introduced by newly-published advisories even in a week when no workflow changed.
+    - cron: "0 9 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  zizmor:
+    name: Static analysis (zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        # `min-severity: low` blocks on the broadest set of findings without flagging
+        # hypothetical-only informational notes.
+        uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
+        with:
+          min-severity: low
+          advanced-security: false
+          config: .github/zizmor.yml

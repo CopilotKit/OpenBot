@@ -1,0 +1,35 @@
+import { queryOptions } from "@tanstack/react-query";
+
+export type AuthenticatedUser = {
+  id: string;
+  email: string;
+  name?: string | null;
+  image?: string | null;
+  role: "admin" | "user";
+};
+
+export const authKeys = {
+  all: ["auth"] as const,
+  currentUser: () => [...authKeys.all, "current-user"] as const,
+};
+
+async function currentUser(): Promise<AuthenticatedUser | null> {
+  const response = await fetch("/api/me", { credentials: "include" });
+  if (response.status === 401) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`Could not load the current user (${response.status})`);
+  }
+
+  const body = (await response.json()) as { user: AuthenticatedUser };
+  return body.user;
+}
+
+export function currentUserQueryOptions() {
+  return queryOptions({
+    queryKey: authKeys.currentUser(),
+    queryFn: currentUser,
+    staleTime: 60_000,
+  });
+}
