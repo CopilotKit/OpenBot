@@ -1,0 +1,19 @@
+.worktrees/
+.superpowers/
+docs/superpowers/
+
+docs/specs/
+docs/plans/
+.env
+.env.*
+!.env.example
+node_modules/
+**/dist/
+app/src/lib/generated/application-config.ts
+.logs/
+.demo-logs/
+**/.impeccable
+.wave-state.md
+
+# TanStack Router scratch output
+app/.tanstack/

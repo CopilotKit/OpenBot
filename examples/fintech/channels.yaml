@@ -1,0 +1,16 @@
+channels:
+  - id: general-assistant
+    name: General Assistant
+    description: Ask for help with everyday work.
+    permitted_agents: [general-assistant]
+    allowed_groups: [all]
+  - id: risk-and-compliance
+    name: Risk & Compliance
+    description: Investigate policies, transaction monitoring, and control evidence.
+    permitted_agents: [knowledge, risk-analyst]
+    allowed_groups: [risk, compliance]
+  - id: company-knowledge
+    name: Company Knowledge
+    description: Find authorized answers from company documents.
+    permitted_agents: [knowledge]
+    allowed_groups: [all]

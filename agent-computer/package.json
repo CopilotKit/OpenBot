@@ -1,0 +1,19 @@
+{
+  "name": "@openbot/agent-computer",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright": "1.62.1",
+    "spiffe": "^0.5.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

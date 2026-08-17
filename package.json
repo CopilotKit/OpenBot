@@ -1,0 +1,31 @@
+{
+  "name": "openbot",
+  "license": "MIT",
+  "private": true,
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "app",
+    "server",
+    "worker"
+  ],
+  "scripts": {
+    "build": "bun run generate:app-config && bun run --filter '*' build",
+    "dev": "bun run generate:app-config && bun run --filter '*' --parallel dev",
+    "generate:app-config": "bun --env-file=.env scripts/generate-app-config.ts",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format .",
+    "lint": "bunx biome lint .",
+    "test": "bun test",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test:ci": "bun scripts/test-ci.ts",
+    "pretest": "bun run generate:app-config",
+    "test:smoke": "OPENBOT_SMOKE=1 bun test tests/smoke"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.8",
+    "@types/bun": "^1.3.3",
+    "typescript": "^5.9.3",
+    "yaml": "^2.9.0"
+  },
+  "dependencies": {}
+}

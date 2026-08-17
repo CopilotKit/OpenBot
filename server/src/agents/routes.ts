@@ -1,0 +1,370 @@
+import type { Context, MiddlewareHandler } from "hono";
+import { Hono } from "hono";
+import type { AuditStore } from "../audit";
+import { recordAuditEvent } from "../audit";
+import type { AppVariables } from "../auth/guards";
+import { testAgentConnection } from "./connection-test";
+import { checkAgentEndpoint } from "./endpoint";
+import { canManageAgent } from "./profile-policy";
+import {
+  AgentNotFoundError,
+  AgentNotManageableError,
+  type AgentProfileStore,
+  ProtectedAgentError,
+} from "./profile-store";
+import type {
+  AgentActor,
+  AgentProfile,
+  CreateAgentInput,
+} from "./profile-types";
+
+type AgentInputParseResult =
+  | { ok: true; value: CreateAgentInput }
+  | { ok: false; error: string };
+
+type AgentInputObject = {
+  name?: unknown;
+  title?: unknown;
+  roleDescription?: unknown;
+  visibility?: unknown;
+  endpoint?: unknown;
+  auth?: unknown;
+};
+
+/**
+ * Parse and validate what a user typed into the agent form.
+ *
+ * `allowPrivateHosts` is passed in rather than read from configuration here so this stays a pure
+ * function: a developer's own agent lives on localhost, and a hosted deployment must refuse exactly
+ * that, so the answer depends on the deployment and the test suite needs to exercise both.
+ */
+export function parseAgentInput(
+  input: unknown,
+  allowPrivateHosts = false,
+): AgentInputParseResult {
+  if (!isAgentInputObject(input)) {
+    return { ok: false, error: "Agent input must be a JSON object." };
+  }
+
+  const name = boundedText(
+    input.name,
+    80,
+    "Name must be text between 1 and 80 characters.",
+  );
+  if (typeof name !== "string") return name;
+
+  const title = boundedText(
+    input.title,
+    120,
+    "Title must be text between 1 and 120 characters.",
+  );
+  if (typeof title !== "string") return title;
+
+  const roleDescription = boundedText(
+    input.roleDescription,
+    1000,
+    "Role description must be text between 1 and 1000 characters.",
+  );
+  if (typeof roleDescription !== "string") return roleDescription;
+
+  if (typeof input.visibility !== "string") {
+    return { ok: false, error: "Visibility must be public or private." };
+  }
+  const visibility = input.visibility.trim();
+  if (visibility !== "public" && visibility !== "private") {
+    return { ok: false, error: "Visibility must be public or private." };
+  }
+
+  // The endpoint is optional and checked. Absent means the Bot in the box, which is what most people
+  // want on their first go. Present means this server will POST to an address a person chose, so it
+  // goes through the same target check as navigation before it is allowed anywhere near the database.
+  let endpoint: string | undefined;
+  if (input.endpoint !== undefined && input.endpoint !== "") {
+    const verdict = checkAgentEndpoint(input.endpoint, { allowPrivateHosts });
+    if (!verdict.allowed) return { ok: false, error: verdict.reason };
+    endpoint = verdict.url;
+  }
+
+  // The key is optional and write-only. An absent field leaves an existing key alone; sending one
+  // replaces it. There is no way to read one back, here or anywhere.
+  let auth: { header: string; value: string } | undefined;
+  if (input.auth !== undefined && input.auth !== null) {
+    const supplied = input.auth as { header?: unknown; value?: unknown };
+    const value =
+      typeof supplied.value === "string" ? supplied.value.trim() : "";
+    if (value) {
+      const header =
+        typeof supplied.header === "string" && supplied.header.trim()
+          ? supplied.header.trim()
+          : "Authorization";
+      if (!/^[A-Za-z0-9-]+$/.test(header)) {
+        return { ok: false, error: "That is not a valid header name." };
+      }
+      auth = { header, value };
+    }
+  }
+
+  return {
+    ok: true,
+    value: { name, title, roleDescription, visibility, endpoint, auth },
+  };
+}
+
+function isAgentInputObject(input: unknown): input is AgentInputObject {
+  return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+/**
+ * The local development actor, which is not a row in `users`.
+ *
+ * The audit table has a foreign key to that table, so writing this id would fail the constraint and
+ * lose the row entirely. Who it was is in the payload either way.
+ */
+const DEV_ACTOR_EMAIL = "dev@openbot.local";
+
+export function createAgentRoutes(
+  store: AgentProfileStore,
+  requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+  /** Whether this deployment may talk to its own network. True on a laptop, false when hosted. */
+  allowPrivateHosts = false,
+  /** Where a Bot's own refusal is recorded. Absent in tests that do not care about the trail. */
+  auditStore?: AuditStore,
+) {
+  const routes = new Hono<{ Variables: AppVariables }>();
+
+  /**
+   * The Bot declined something, and says so.
+   *
+   * The audit trail records what a Bot did, decided by the gateway on the way to an action. A model
+   * that refuses before calling any tool takes no action, so this records the attempted request.
+   *
+   * Self-reported, and said so in the row. The Bot calls this because its tool description tells it
+   * to, so a model that declines without a tool call still writes nothing. This is evidence, not enforcement:
+   * nothing is prevented by it, and a reader must not mistake an empty list for an untroubled Bot.
+   */
+  routes.post("/:agentId/declined", requireUser, async (context) => {
+    const agentId = context.req.param("agentId");
+    const body = (await context.req.json().catch(() => null)) as {
+      reason?: unknown;
+      request?: unknown;
+    } | null;
+
+    const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
+    if (!reason) {
+      return context.json({ error: "A reason is required." }, 400);
+    }
+
+    if (auditStore) {
+      const actor = context.var.actor;
+      await recordAuditEvent(auditStore, {
+        eventType: "bot.declined",
+        targetType: "agent",
+        targetId: agentId,
+        ...(actor?.id && actor.email !== DEV_ACTOR_EMAIL
+          ? { actorUserId: actor.id }
+          : {}),
+        payload: {
+          bot: agentId,
+          actor: actor?.email ?? "unknown",
+          reason: reason.slice(0, 500),
+          // What it was asked, in the Bot's own words and only if it offered them. Truncated for the
+          // same reason every other payload here is: a trail is not a transcript.
+          ...(typeof body?.request === "string" && body.request.trim()
+            ? { request: body.request.trim().slice(0, 500) }
+            : {}),
+          reportedBy: "the Bot itself",
+        },
+      });
+    }
+
+    return context.json({ recorded: true });
+  });
+
+  routes.get("/", requireUser, async (context) => {
+    try {
+      const hidden = context.req.query("hidden") === "true";
+      const agents = await store.list(context.var.actor, hidden);
+      return context.json({
+        agents: agents.map((agent) => agentDto(context.var.actor, agent)),
+      });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.get("/:agentId", requireUser, async (context) => {
+    try {
+      const agent = await store.get(
+        context.var.actor,
+        context.req.param("agentId"),
+      );
+      if (!agent) {
+        return context.json({ error: "Agent not found." }, 404);
+      }
+      return context.json({ agent: agentDto(context.var.actor, agent) });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  /**
+   * Try an endpoint before saving it.
+   *
+   * Deliberately not part of create: a person needs to know whether their agent answers before they
+   * commit to it, and they need to be able to try again without creating dead
+   * Bots on the way. It runs the same target check as saving, so it cannot probe addresses that
+   * registration would refuse.
+   */
+  routes.post("/test-connection", requireUser, async (context) => {
+    const body = (await context.req.json().catch(() => null)) as {
+      endpoint?: unknown;
+      headers?: unknown;
+    } | null;
+    const headers =
+      body?.headers && typeof body.headers === "object"
+        ? (body.headers as Record<string, string>)
+        : undefined;
+    const result = await testAgentConnection(body?.endpoint, {
+      headers,
+      allowPrivateHosts,
+    });
+    // 200 either way: the request succeeded, and the verdict is the payload. A failed connection test
+    // is an answer, not an error, and a 4xx here would have the surface render it as a broken button.
+    return context.json(result);
+  });
+
+  routes.post("/", requireUser, async (context) => {
+    // Malformed JSON is a recoverable client-input error and is validated by the same parser.
+    const parsed = parseAgentInput(
+      await context.req.json().catch(() => null),
+      allowPrivateHosts,
+    );
+    if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+
+    try {
+      const agent = await store.create(context.var.actor, parsed.value);
+      return context.json({ agent: agentDto(context.var.actor, agent) }, 201);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.patch("/:agentId", requireUser, async (context) => {
+    // Malformed JSON is a recoverable client-input error and is validated by the same parser.
+    const parsed = parseAgentInput(
+      await context.req.json().catch(() => null),
+      allowPrivateHosts,
+    );
+    if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+
+    try {
+      const agent = await store.update(
+        context.var.actor,
+        context.req.param("agentId"),
+        parsed.value,
+      );
+      return context.json({ agent: agentDto(context.var.actor, agent) });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.post("/:agentId/duplicate", requireUser, async (context) => {
+    try {
+      const agent = await store.duplicate(
+        context.var.actor,
+        context.req.param("agentId"),
+      );
+      return context.json({ agent: agentDto(context.var.actor, agent) }, 201);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.post("/:agentId/hide", requireUser, async (context) => {
+    try {
+      await store.setHidden(
+        context.var.actor,
+        context.req.param("agentId"),
+        true,
+      );
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.post("/:agentId/unhide", requireUser, async (context) => {
+    try {
+      await store.setHidden(
+        context.var.actor,
+        context.req.param("agentId"),
+        false,
+      );
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.delete("/:agentId", requireUser, async (context) => {
+    try {
+      await store.softDelete(context.var.actor, context.req.param("agentId"));
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  return routes;
+}
+
+function boundedText(
+  value: unknown,
+  maximumLength: number,
+  error: string,
+): string | { ok: false; error: string } {
+  if (typeof value !== "string") return { ok: false, error };
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= maximumLength
+    ? trimmed
+    : { ok: false, error };
+}
+
+function agentDto(actor: AgentActor, agent: AgentProfile) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    title: agent.title,
+    roleDescription: agent.roleDescription,
+    avatarSeed: agent.avatarSeed,
+    visibility: agent.visibility,
+    hidden: agent.hidden,
+    systemOwned: agent.systemOwned,
+    // Published so the edit form can show it. Safe to expose: it is an address the person supplied,
+    // and any credential for it lives in the vault, never in this row.
+    endpoint: agent.endpoint,
+    hasAuth: agent.hasAuth,
+    canManage: canManageAgent(actor, agent),
+    // Ownership, kept separate from permission. `canManage` is also true for an administrator on
+    // another user's teammate, so a roster that split "mine" on it would file other people's work
+    // under yours, and only for administrators, who are the least likely to notice.
+    mine: agent.ownerUserId === actor.id,
+  };
+}
+
+function mapStoreError(context: Context, error: unknown): Response {
+  if (error instanceof AgentNotFoundError) {
+    return context.json({ error: "Agent not found." }, 404);
+  }
+  if (error instanceof AgentNotManageableError) {
+    return context.json(
+      { error: "You do not have permission to manage this agent." },
+      403,
+    );
+  }
+  if (error instanceof ProtectedAgentError) {
+    return context.json({ error: "System-owned agents are protected." }, 403);
+  }
+  throw error;
+}

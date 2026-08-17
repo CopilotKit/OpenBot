@@ -1,0 +1,15 @@
+# zizmor configuration, static analysis for GitHub Actions workflows.
+#
+# Docs: https://docs.zizmor.sh/configuration/
+#
+# This lives at `.github/zizmor.yml` because zizmor discovers it there. The workflow at
+# `.github/workflows/security_zizmor.yml` runs it and fails on findings at the configured level.
+#
+# Findings that cannot be remediated belong under `rules:` with a justification. Blanket suppressions
+# are not allowed.
+
+rules:
+  # `template-injection` flags untrusted ${{ }} expansions inside `run:` scripts. Route values
+  # through `env:` and reference the environment variable inside the shell.
+  template-injection:
+    ignore: []

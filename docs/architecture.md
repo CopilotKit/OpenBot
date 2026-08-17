@@ -1,0 +1,146 @@
+# Architecture
+
+OpenBot combines a React app, a Hono API server, PostgreSQL, CopilotKit Intelligence, AG-UI Bot endpoints, and governed browser computers.
+
+## Services and ports
+
+| Component                | Port                       | Responsibility                                                                                                                              |
+| ------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`                    | 3010                       | React/Vite interface for channels, Bot chat, live screen, settings, and admin pages.                                                        |
+| `server`                 | 3001                       | API, CopilotKit runtime, auth, roles, tenant package, teammates, channels, policy, audit, credentials, plugins, components, and connectors. |
+| `agent-computer`         | 4100                       | Chromium, `/workspace`, browser profile, screenshots, snapshots, and file tools.                                                            |
+| `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                                                                     |
+| `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                                                                        |
+| `supervisor`             | 4500 host / 4300 container | Creates, stops, resets, and lists per-Bot computer containers.                                                                              |
+| PostgreSQL with pgvector | 5432                       | Product data, audit rows, credentials, policy, grants, channels, components, connector state, and knowledge records.                        |
+| CopilotKit Intelligence  | external                   | Durable threads, memory, and realtime gateway.                                                                                              |
+
+`scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-bot`, `agent-langgraph`, and the supervisor through Docker Compose, then starts `server` and `app` on the host.
+
+The compose file also defines optional SPIRE services. `start.sh` does not start them.
+
+## Runtime flow
+
+1. The app opens a channel or direct Bot session.
+2. The server resolves the signed-in actor and selected teammate.
+3. CopilotKit runtime sends the turn to the configured AG-UI endpoint.
+4. The surface registers available frontend tools: browser tools, MCP tools, and components granted to that Bot.
+5. Acting browser/file/MCP calls return to the server for authorization and audit.
+6. The server streams results back to the app and Intelligence thread.
+
+## Browser action governance
+
+The computer itself does not decide policy. The server gateway is the action boundary:
+
+1. resolve the target from the server-held snapshot or request subject;
+2. evaluate the current action policy;
+3. write an audit row for the decision;
+4. call the computer only when the decision forwards;
+5. write a second audit row if a forwarded action fails.
+
+Policy rules can inspect:
+
+- `tool.name`
+- `intent`
+- `bot.id`
+- `actor.id`
+- `page.url`, `page.host`
+- `element.ref`, `element.role`, `element.name`, `element.type`
+- `key`
+- `file.path`, `file.name`, `file.extension`
+- `mcp.server`, `mcp.tool`, `mcp.effect`
+
+Rules use CEL expressions plus case-insensitive `contains()` and `matches()`.
+Deny rules are evaluated before allow rules. The policy engine fails closed: a
+missing or empty policy permits nothing, a broken deny rule denies, and a broken
+allow rule does not permit. OpenBot's shipped startup default is explicit:
+`deny: []` and `allow: ["true"]`, unless `AGENT_COMPUTER_POLICY` or a saved
+administrator policy replaces it. A malformed configured policy stops server
+startup.
+
+## Computers
+
+`agent-computer` requires `COMPUTER_TOKEN` and permits only `/health` without it. Docker Compose binds it to `127.0.0.1:4100`.
+
+With `COMPUTER_SUPERVISOR_URL`, each Bot gets its own computer container, workspace volume, and browser profile. Without it, all Bots share `AGENT_COMPUTER_URL`.
+
+The supervisor exposes only ensure, stop, reset, and list operations. It holds the Docker socket, so do not expose it outside the deployment network. Set `COMPUTER_RUNTIME=runsc` to run computers under gVisor on hosts that support it.
+
+## Human control and secrets
+
+Handovers are audited as control events:
+
+- `computer.help_requested`
+- `computer.control_taken`
+- `computer.control_released`
+
+While a person controls the browser, Bot actions are refused rather than queued.
+
+Secret entry is separate from chat content. The audit trail records that a secret was requested or supplied and the character count, not the secret value.
+
+## Teammates and channels
+
+A teammate is a durable Bot profile:
+
+- `agents` stores runtime identity and endpoint/key reference.
+- `agent_profiles` stores name, title, role, owner, visibility, and deletion state.
+- `agent_preferences` stores per-user roster state.
+
+A channel is a conversation with one teammate and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
+
+See [teammates.md](teammates.md).
+
+## Components
+
+Components are frontend tools a Bot can call instead of answering only in prose.
+
+Sources:
+
+- compiled React components in `app/src/components/gallery/`;
+- sandboxed components authored and published from `/admin/playground`.
+
+Governance:
+
+- compiled components are published when first seen by the app catalogue sync;
+- sandboxed components are saved as drafts and become usable only after publish;
+- every call asks the server whether the component exists, is published, and is not withheld from the Bot;
+- component data functions require a separate per-component grant.
+
+The shipped component data functions read the audit trail: `botActivity` and `recentRefusals`.
+
+## MCP and skills
+
+MCP servers and skills share the plugin grant table, but they have different ownership rules.
+
+- MCP tools are admin-governed because they can reach external systems with stored credentials.
+- Skills are reusable instructions. A person can create personal skills and attach them only to Bots they own. Administrators create deployment skills.
+
+The curated MCP catalogue contains Atlassian, Box, Slack, Salesforce, and ServiceNow. Custom MCP servers must pass URL checks; unknown tools and custom-server tools are treated as writes unless positively classified as reads.
+
+Every MCP call checks the grant first, then evaluates the same action policy engine with MCP context, then audits the result.
+
+## Tenant package and knowledge
+
+`TENANT_PACKAGE_DIR` points at the tenant package. The default is `../examples/fintech`.
+
+Required package files:
+
+- `brand.yaml`
+- `agents.yaml`
+- `channels.yaml`
+- `model.yaml`
+- `knowledge.yaml`
+
+The server validates the package at startup. Channel agent IDs must match declared agents. Knowledge sources currently support Google Drive and Microsoft OneDrive declarations.
+
+Connector credentials are stored through the credential vault and referenced by id, not stored inline in YAML.
+
+## Security boundaries
+
+- Server routes enforce auth and roles; admin pages are backed by server-side administrator checks.
+- `OPENBOT_DEV_NO_AUTH=true` is local-only and is refused with `NODE_ENV=production`.
+- `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`.
+- Credential plaintext is encrypted at rest, never returned by APIs, and redacted from audit events.
+- Browser navigation allows `http` and `https`; cloud metadata addresses are refused under every configuration.
+- `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true` is for local development only.
+- Computer tokens and supervisor tokens must be long random values outside local development.

@@ -1,0 +1,4 @@
+[test]
+# See server/scripts/test-preload.ts: makes the module graph deterministic so a test file cannot fail to
+# import depending on the order the suite happened to be walked.
+preload = ["./server/scripts/test-preload.ts"]

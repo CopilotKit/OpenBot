@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege by default. Jobs that need more must declare it locally.
+permissions:
+  contents: read
+
+# The newest push on a branch wins; main runs are retained for badge and release history.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # Formatting, linting, typing and tests are independent checks, so each reports its own result.
+  static:
+    name: format, lint, types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Checkout leaves a usable credential in the runner otherwise, which every later step and
+          # every action it calls can read. Nothing here pushes.
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run format:check
+      - run: bun run lint
+      - run: bun run typecheck
+
+  test:
+    name: tests
+    runs-on: ubuntu-latest
+    # The suite includes a real database integration test. Without a database it fails on every run,
+    # including on main, which trains everyone to read a red CI as normal. pgvector rather than plain
+    # postgres because the knowledge schema uses the extension.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: openbot
+          POSTGRES_USER: openbot
+          POSTGRES_PASSWORD: openbot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openbot -d openbot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
+      # comes from the job env instead, which drizzle.config.ts already reads.
+      - run: bunx drizzle-kit migrate --config=drizzle.config.ts
+        working-directory: server
+      # A passing job must include the expected test floor. Import-time failures can otherwise skip
+      # files before their tests are registered.
+      - run: bun run test:ci
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run build

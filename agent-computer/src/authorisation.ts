@@ -1,0 +1,49 @@
+/**
+ * Who may speak to a computer at all.
+ *
+ * This check is the boundary in front of the browser process. Policy, audit and sign-in live in the
+ * API server and are not on the direct computer port.
+ *
+ * It lives here rather than in `index.ts` because that file imports Playwright at module scope, so
+ * anything in it needs Chrome merely to be imported by a test. The same reasoning moved the control
+ * state machine out: if a decision matters, it does not belong next to `chromium.launch()`.
+ */
+
+/**
+ * Does this secret match?
+ *
+ * Constant-time comparison prevents prefix timing leaks. Length still leaks, but not token content.
+ */
+export function matchesToken(expected: string, offered: string): boolean {
+  if (expected.length === 0) return false;
+  if (offered.length !== expected.length) return false;
+  let difference = 0;
+  for (let index = 0; index < offered.length; index += 1) {
+    difference |= offered.charCodeAt(index) ^ expected.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+/**
+ * The secret a caller offered, however it could carry it.
+ *
+ * WebSocket clients cannot set upgrade headers, so the stream also accepts the token as a query
+ * parameter.
+ */
+export function offeredToken(headers: Headers, url: URL): string {
+  if (url.pathname === "/stream") return url.searchParams.get("token") ?? "";
+  const header = headers.get("x-openbot-computer-token")?.trim();
+  if (header) return header;
+  const authorization = headers.get("authorization")?.trim() ?? "";
+  return authorization.replace(/^Bearer /i, "");
+}
+
+/**
+ * Health is the one thing an unauthenticated caller may ask.
+ *
+ * An orchestrator has to be able to check whether this process is up without holding a secret, and
+ * the answer names no Bot, touches no browser and reveals nothing about what is running.
+ */
+export function isOpenPath(pathname: string): boolean {
+  return pathname === "/health";
+}
