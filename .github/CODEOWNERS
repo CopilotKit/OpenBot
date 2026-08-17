@@ -1,15 +1,13 @@
-# Who has to approve a change before it can reach main.
+# Who can approve a change, and who can land it.
 #
-# This repository is public and its collaborator list is inherited from the
-# organisation, so a great many people can open and push branches. Merging is
-# deliberately narrower: `main` requires an approving review from an owner
-# listed here.
+# Both powers belong to the people named here and to nobody else. GitHub does
+# not count an approving review from anyone without write access, the branch
+# rule on `main` requires the approval to come from an owner in this file, and
+# it restricts merging to the same accounts. A passer-by can open a pull
+# request and comment on one, which is the point of a public repository, and
+# can neither approve nor land it.
 #
-# Widening this list widens who can approve. Add people who know the codebase
-# well enough to say no.
+# Adding a name here grants both powers. Add people who know this codebase well
+# enough to say no.
 
 *  @davidmckayv @guidovizoso
-
-# Workflows are the supply chain. A change here runs with the repository's
-# credentials, so engineering reviews it alongside the owners above.
-/.github/workflows/  @CopilotKit/engineering @davidmckayv @guidovizoso
