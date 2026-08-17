@@ -7,7 +7,10 @@
 # request and comment on one, which is the point of a public repository, and
 # can neither approve nor land it.
 #
+# Nobody can approve their own pull request, so this list needs enough people
+# that work does not stall when one of them is away.
+#
 # Adding a name here grants both powers. Add people who know this codebase well
 # enough to say no.
 
-*  @davidmckayv @guidovizoso
+*  @davidmckayv @guidovizoso @tylerslaton @MikeRyanDev
