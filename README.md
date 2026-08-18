@@ -1,23 +1,36 @@
+<div align="center">
+
 # OpenBot
 
-Bots are teammates you hand real work to. They sign in to apps and websites and use them the way you do, on a computer that stays theirs between sessions. Name one, give it a role, grant it access as it earns it, and talk to it in a channel.
+**Give an agent a computer of its own: a browser, a filesystem and the tools you grant it, with every action decided before it happens and recorded after.**
 
-OpenBot is the open one. It runs on your own machine, it takes any AG-UI agent you bring, and it puts the boundaries where they belong.
+[**Quick start**](#quick-start) · [**Main surfaces**](#main-surfaces) · [**Features**](#features) · [**Bring your own agent**](#bring-your-own-agent) · [**Architecture**](#architecture) · [**Docs**](docs/README.md)
 
-**Every Bot gets a computer of its own.** Not one machine per account that everything you have made shares. Each Bot gets a container to itself: its own Chromium holding its own logins, its own filesystem, and only the tools you granted it. No Bot can read another's files or reuse another's sign-ins, so separate Bots really are separate boundaries.
+[![CI](https://github.com/CopilotKit/openbot/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/ci.yml)
+[![security](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml/badge.svg)](https://github.com/CopilotKit/openbot/actions/workflows/security_zizmor.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+![Alpha](https://img.shields.io/badge/status-alpha-orange.svg)
 
-**Every action is decided before it happens and recorded after.** Each page opened, file written, MCP tool called and component drawn goes past a policy you write, and into a trail that keeps what was allowed and what was refused, every refusal naming the rule that refused it. When a Bot reaches something it should not do alone it stops and asks, and you can take the wheel in its browser and hand it back.
-
-**It answers in components, not only prose.** Charts, tables and forms are drawn into the conversation, and you can write a new component in the browser and publish it without a rebuild. Threads and memory are durable through CopilotKit Intelligence.
+</div>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg">
   <img src="assets/architecture-light.svg" alt="You talk to the server, which sends the turn to a Bot over AG-UI. Every tool call the Bot makes comes back through the gateway, which resolves the target, decides it against your policy, records an audit row, and only then acts, or refuses and names the rule. Allowed browser and file actions reach that Bot's own computer, one container each with its own Chromium, logins and workspace, built by the supervisor. Decisions land in PostgreSQL and threads in CopilotKit Intelligence.">
 </picture>
 
+<div align="center">
+
+Bots are teammates you hand real work to. They sign in to apps and websites and
+use them the way you do, on a computer that stays theirs between sessions. Name
+one, give it a role, grant it access as it earns it, and talk to it in a
+channel. Bring any AG-UI agent, run the whole thing on your own machine, and
+keep the boundaries where they belong.
+
+</div>
+
 > **Alpha, and under active development.** OpenBot is early. Expect rough edges and bugs, and expect things to move. Issues and pull requests are welcome.
 
-> **Runs on your machine.** Everything below is written for a laptop. Out of the box OpenBot runs with `OPENBOT_DEV_NO_AUTH`, which skips signing in and admits every request as one administrator; [Google sign-in](#sign-in-with-google) can be wired up instead.
+> **Runs on your machine.** Everything below is written for a laptop. Out of the box OpenBot runs with `OPENBOT_DEV_NO_AUTH`, which skips signing in and admits every request as one administrator. [Google sign-in](#sign-in-with-google) can be wired up instead.
 
 ## Requirements
 
@@ -93,6 +106,22 @@ OpenBot is the open one. It runs on your own machine, it takes any AG-UI agent y
 | `/admin/plugins`     | Configure MCP servers, MCP grants, and deployment skills.          |
 | `/admin/audit`       | Review permitted, refused, and failed actions.                     |
 
+## Features
+
+- **A computer per Bot**: the supervisor gives each Bot its own container, its own `/workspace` volume and its own browser profile. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
+- **The gateway is the only way in**: it resolves the target from a server-held snapshot, evaluates the policy, writes the audit row, and only then calls the computer. There is no path that acts without the record existing first.
+- **CEL policy, fail closed**: rules can inspect `tool.name`, `intent`, `bot.id`, `actor.id`, `page.url`, `page.host`, `element.*`, `key`, `file.*` and `mcp.*`. Deny is evaluated before allow, a missing policy permits nothing, and a broken rule refuses rather than opens.
+- **Take the wheel**: a Bot that hits a login wall or a 2FA prompt asks for help. Control is handed over in the same panel and recorded as `computer.help_requested`, `computer.control_taken` and `computer.control_released`. While a person is driving, Bot actions are refused rather than queued.
+- **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
+- **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
+- **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
+- **Governed MCP**: a curated catalogue ships for Atlassian, Box, Slack, Salesforce and ServiceNow. Custom servers must pass URL checks, and any tool not positively classified as a read is treated as a write.
+- **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer.
+- **An audit trail you can read**: `/admin/audit` lists what was permitted, what was refused and what failed, and every refusal carries the rule that caused it.
+- **Credentials encrypted at rest**: stored through `/admin/credentials`, never returned by an API, and redacted from audit events.
+- **Loopback by default**: computers bind to `127.0.0.1` and require a per-container token, so nothing reaches a logged-in browser by knowing its port.
+- **Durable threads and memory**: conversations survive restarts through CopilotKit Intelligence, and each deployment stamps the threads it owns.
+
 ## Bring your own agent
 
 Any AG-UI endpoint can be a Bot.
@@ -160,16 +189,6 @@ It resolves the target, evaluates policy, writes an audit row, and then calls
 endpoints; keep them private and do not use them to bypass the gateway.
 
 More detail: [docs/architecture.md](docs/architecture.md).
-
-## Components, MCP, and skills
-
-- Compiled React components live in `app/src/components/gallery/` and register through the app.
-- Sandboxed components are authored in `/admin/playground`, then published without a rebuild.
-- Component use is checked at call time. A component must exist, be published, and not be withheld from the Bot.
-- Component data functions are granted per component; the shipped functions read the audit trail.
-- Curated MCP catalogue entries ship for Atlassian, Box, Slack, Salesforce, and ServiceNow.
-- Custom MCP servers must pass URL checks and are treated fail-closed.
-- Skills are instructions, not capabilities. Personal skills can be attached only to Bots the author owns; deployment skills are admin-owned.
 
 ## Sign in with Google
 
