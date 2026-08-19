@@ -190,10 +190,32 @@ export type ScheduleDecision =
  * `lastRunAt` is the start of the most recent run of any kind, including a manual one. That is
  * deliberate: somebody who pressed Run now at 07:58 does not want it again at 08:00, and treating a
  * manual run as unrelated would give them two.
+ *
+ * `createdAt` is what stops a brand new routine being told off for a morning it did not exist for.
+ * Somebody who writes "every weekday at eight" at three in the afternoon has a schedule whose most
+ * recent window is seven hours old and has never been run, which without this reads as a window the
+ * deployment slept through: within a minute they are looking at a history that says "Missed, nothing
+ * was running", and at an audit row agreeing with it, about a machine that was running perfectly
+ * well. It is the most ordinary path there is, and the answer given on it has to be true or the
+ * distinction the whole feature is built on — "it ran and found nothing" against "it never ran" — is
+ * worth nothing. A window inside the grace period still runs, because somebody writing that schedule
+ * at three minutes past eight has just said what they want and would be puzzled to wait a day.
+ *
+ * What that costs is a `once` written for a moment that had already gone: it never fires and is
+ * never recorded, and the list goes on showing it as expected. That is the same answer given to a
+ * time somebody typed wrongly and to one they typed a day late, and it is preferred to the
+ * alternative, which is a run history asserting that this deployment was asleep when it was not.
  */
 export function decideScheduleAction(
   schedule: RoutineSchedule,
-  options: { now: Date; lastRunAt: Date | null; graceMs?: number },
+  options: {
+    now: Date;
+    lastRunAt: Date | null;
+    /** When the routine came into existence. Optional so a caller reasoning about a schedule alone
+     * need not invent one; the scheduler always has it. */
+    createdAt?: Date;
+    graceMs?: number;
+  },
 ): ScheduleDecision {
   const graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
   const window = lastOccurrenceOnOrBefore(schedule, options.now);
@@ -209,6 +231,11 @@ export function decideScheduleAction(
   }
 
   if (options.now.getTime() - window.getTime() > graceMs) {
+    // A window older than the routine is not a window anybody missed. Nothing is recorded and
+    // nothing is run: there was no routine at eight o'clock, so nothing happened at eight o'clock.
+    if (options.createdAt && window.getTime() < options.createdAt.getTime()) {
+      return { action: "wait", nextDueAt: nextDueAt(schedule, options) };
+    }
     return { action: "missed", dueAt: window };
   }
   return { action: "run", dueAt: window };

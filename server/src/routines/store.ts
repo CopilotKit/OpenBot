@@ -12,7 +12,7 @@
  * index and this returns null rather than pretending. A delivery is counted, which cannot fail and
  * must not stop the work if it does.
  */
-import { and, desc, eq, inArray, max, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, max, sql } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { Database } from "../db/client";
 import { routineRuns, routines, webhookTriggers } from "../db/schema";
@@ -130,6 +130,15 @@ export type DueCandidate = {
   name: string;
   prompt: string;
   schedule: RoutineSchedule | null;
+  /**
+   * When the routine came into existence.
+   *
+   * Carried because a window before this moment is not a window this routine had. Without it the
+   * first tick after somebody writes "every weekday at eight" at three in the afternoon records a
+   * run that says the deployment was asleep at eight, which is false and is the one thing the
+   * missed row exists to be trusted about. See decideScheduleAction.
+   */
+  createdAt: Date;
   lastRunAt: Date | null;
   activeRun: boolean;
 };
@@ -142,26 +151,26 @@ export function createRoutineStore(
   auditStore: AuditStore,
 ) {
   /**
-   * The most recent run of each routine, in one query rather than one per row.
+   * The most recent run of each routine, one row per routine.
    *
-   * Every run of the listed routines is read and the newest of each is kept here, rather than
-   * issuing a query per routine on a page whose entire job is to list routines. The
-   * (routine_id, started_at) index serves the ordering, so the database does the sorting and this
-   * walks the result once.
+   * `distinct on` rather than reading every run and keeping the first of each in JavaScript. The
+   * difference is the whole life of a deployment: the run history of a daily routine grows by one
+   * row a day forever, this backs the routines page, and the page refetches every fifteen seconds
+   * while somebody has it open. Reading all of it would mean ten routines and two years costing
+   * seven thousand rows fetched and discarded to produce ten values, and getting worse every week.
+   *
+   * The (routine_id, started_at) index is what makes it cheap: the ordering this asks for is the
+   * order the index is already in, so the database walks to the newest of each and stops.
    */
   async function latestRuns(routineIds: string[]) {
     if (routineIds.length === 0) return new Map<string, RoutineRunRecord>();
     const rows = await database
-      .select()
+      .selectDistinctOn([routineRuns.routineId])
       .from(routineRuns)
       .where(inArray(routineRuns.routineId, routineIds))
       .orderBy(routineRuns.routineId, desc(routineRuns.startedAt));
 
-    const latest = new Map<string, RoutineRunRecord>();
-    for (const row of rows) {
-      if (!latest.has(row.routineId)) latest.set(row.routineId, asRun(row));
-    }
-    return latest;
+    return new Map(rows.map((row) => [row.routineId, asRun(row)] as const));
   }
 
   async function decorate(
@@ -396,11 +405,73 @@ export function createRoutineStore(
     },
 
     /**
+     * Close out runs that nothing is coming back for.
+     *
+     * A run row is claimed before the work starts and closed when it ends, which leaves one shape of
+     * row nothing else in this file can clear: the process that owned the run died between the two.
+     * A killed container, a machine that lost power, a deploy that rolled while a Bot was browsing.
+     * The row stays `running` forever, it holds the one-live-run index, and the routine never fires
+     * again — not from the clock, not from Run now, not from a delivery — with nothing on the page
+     * to say why and no way to fix it short of deleting the routine and its whole history.
+     *
+     * So the next process to tick puts them down. `startedBefore` is what makes that safe: a ceiling
+     * comfortably longer than any run the runner will allow means anything older than it belongs to
+     * a process that is not alive to finish it. A shorter one would be this deployment shooting its
+     * own healthy long runs.
+     *
+     * Recorded as failed rather than deleted, and the error says what is actually known, which is
+     * that how the run ended is not known. A run that vanished from the history would leave the
+     * person who reads it believing nothing was started, and something was.
+     */
+    reapStaleRuns: async (input: {
+      startedBefore: Date;
+      actor: { id: string; userId?: string };
+    }): Promise<number> => {
+      const rows = await database
+        .update(routineRuns)
+        .set({
+          status: "failed",
+          finishedAt: new Date(),
+          error:
+            "This deployment stopped while the run was going, so how it ended is not known. The run was closed out so the routine can run again.",
+        })
+        .where(
+          and(
+            inArray(routineRuns.status, ["queued", "running"]),
+            lt(routineRuns.startedAt, input.startedBefore),
+          ),
+        )
+        .returning();
+
+      for (const row of rows) {
+        await recordAuditEvent(auditStore, {
+          eventType: "routine.run_failed",
+          targetType: "routine",
+          targetId: row.routineId,
+          ...(input.actor.userId ? { actorUserId: input.actor.userId } : {}),
+          payload: {
+            actor: input.actor.id,
+            run: row.id,
+            failure: row.error,
+            started: row.startedAt.toISOString(),
+          },
+        });
+      }
+      return rows.length;
+    },
+
+    /**
      * Record a window that came and went with nobody awake for it.
      *
      * Stamped with the window's own time rather than with now. That makes it idempotent: the next
      * tick sees a run at or after the window and decides there is nothing to do, instead of writing
      * the same miss again once a minute until the following window comes round.
+     *
+     * One row per gap, not one per window in it. `lastOccurrenceOnOrBefore` returns only the most
+     * recent occurrence, so a laptop shut for a week records a miss for Friday and says nothing
+     * about Monday to Thursday. That is the deliberate choice: the fact somebody needs is that the
+     * routine has not been running, and four more rows saying the same thing on four consecutive
+     * mornings would bury it rather than sharpen it.
      */
     recordMissed: async (input: {
       routineId: string;
@@ -482,6 +553,7 @@ export function createRoutineStore(
           name: row.name,
           prompt: row.prompt,
           schedule: parseRoutineSchedule(row.schedule),
+          createdAt: row.createdAt,
           lastRunAt: runs?.lastRunAt ? new Date(runs.lastRunAt) : null,
           activeRun: runs?.activeRun === true,
         };
@@ -510,18 +582,30 @@ export function createRoutineStore(
         name: row.name,
         prompt: row.prompt,
         schedule: parseRoutineSchedule(row.schedule),
+        createdAt: row.createdAt,
         lastRunAt: null,
         activeRun: false,
       };
     },
 
-    listTriggers: async (
-      ownerUserId: string,
-    ): Promise<WebhookTriggerRecord[]> => {
+    /**
+     * Every trigger in this deployment, not one person's.
+     *
+     * Deliberately not scoped the way routines are, and the difference is what a trigger is. A
+     * routine is somebody's own work and nobody else's business. A trigger is a URL on the public
+     * internet that sets a Bot working, which is a fact about the deployment rather than about the
+     * person who happened to create it, and the question an administrator opens this page to ask is
+     * "what is reachable from outside here" — a question a per-person list answers wrongly and
+     * confidently. An administrator who could see only their own triggers could not shut a door
+     * somebody else opened, which is exactly the moment somebody needs to.
+     *
+     * The routes are what keep this away from everybody else: the whole trigger surface requires an
+     * administrator. See routines/routes.ts.
+     */
+    listTriggers: async (): Promise<WebhookTriggerRecord[]> => {
       const rows = await database
         .select()
         .from(webhookTriggers)
-        .where(eq(webhookTriggers.ownerUserId, ownerUserId))
         .orderBy(desc(webhookTriggers.createdAt));
       return rows.map(asTrigger);
     },
@@ -581,19 +665,13 @@ export function createRoutineStore(
      */
     rotateTriggerSecret: async (
       id: string,
-      ownerUserId: string,
       actor: { id: string; userId?: string },
     ): Promise<{ trigger: WebhookTriggerRecord; secret: string } | null> => {
       const minted = mintWebhookSecret();
       const [row] = await database
         .update(webhookTriggers)
         .set({ secretHash: minted.hash, updatedAt: new Date() })
-        .where(
-          and(
-            eq(webhookTriggers.id, id),
-            eq(webhookTriggers.ownerUserId, ownerUserId),
-          ),
-        )
+        .where(eq(webhookTriggers.id, id))
         .returning();
       if (!row) return null;
 
@@ -612,10 +690,18 @@ export function createRoutineStore(
       return { trigger: asTrigger(row), secret: minted.secret };
     },
 
+    /**
+     * Narrow a trigger, or switch it off.
+     *
+     * Recorded, unlike most edits in this product, because both things this can do are things a
+     * public endpoint stops accepting: an administrator who finds that deliveries stopped last
+     * Tuesday is owed the row that says who did it and when, and "somebody turned it off" is not an
+     * answer a database can give afterwards from the row alone.
+     */
     updateTrigger: async (
       id: string,
-      ownerUserId: string,
       patch: { enabled?: boolean; eventTypes?: string[] },
+      actor: { id: string; userId?: string },
     ): Promise<WebhookTriggerRecord | null> => {
       const [row] = await database
         .update(webhookTriggers)
@@ -626,14 +712,24 @@ export function createRoutineStore(
             : {}),
           updatedAt: new Date(),
         })
-        .where(
-          and(
-            eq(webhookTriggers.id, id),
-            eq(webhookTriggers.ownerUserId, ownerUserId),
-          ),
-        )
+        .where(eq(webhookTriggers.id, id))
         .returning();
-      return row ? asTrigger(row) : null;
+      if (!row) return null;
+
+      await recordAuditEvent(auditStore, {
+        eventType: "webhook.trigger_updated",
+        targetType: "webhook_trigger",
+        targetId: row.id,
+        ...(actor.userId ? { actorUserId: actor.userId } : {}),
+        payload: {
+          actor: actor.id,
+          name: row.name,
+          endpoint: row.endpointId,
+          enabled: row.enabled,
+          eventTypes: row.eventTypes,
+        },
+      });
+      return asTrigger(row);
     },
 
     /**
@@ -642,10 +738,14 @@ export function createRoutineStore(
      * Refused unless a sample has actually arrived. Confirming a trigger nothing has ever called is
      * confirming nothing, and it would turn the one gate that catches a misdirected hook into a
      * checkbox somebody ticks on the way past.
+     *
+     * The row it leaves is the most important one in this file. Every delivery before this point ran
+     * nothing; every delivery after it sets a Bot working on somebody's live systems, and the trail
+     * has to be able to say who moved the endpoint from one state to the other.
      */
     verifyTrigger: async (
       id: string,
-      ownerUserId: string,
+      actor: { id: string; userId?: string },
     ): Promise<WebhookTriggerRecord | null> => {
       const [row] = await database
         .update(webhookTriggers)
@@ -657,28 +757,52 @@ export function createRoutineStore(
         .where(
           and(
             eq(webhookTriggers.id, id),
-            eq(webhookTriggers.ownerUserId, ownerUserId),
             sql`${webhookTriggers.sample} is not null`,
           ),
         )
         .returning();
-      return row ? asTrigger(row) : null;
+      if (!row) return null;
+
+      await recordAuditEvent(auditStore, {
+        eventType: "webhook.trigger_verified",
+        targetType: "webhook_trigger",
+        targetId: row.id,
+        ...(actor.userId ? { actorUserId: actor.userId } : {}),
+        payload: {
+          actor: actor.id,
+          name: row.name,
+          endpoint: row.endpointId,
+          note: "Deliveries to this endpoint now run work.",
+        },
+      });
+      return asTrigger(row);
     },
 
     deleteTrigger: async (
       id: string,
-      ownerUserId: string,
+      actor: { id: string; userId?: string },
     ): Promise<boolean> => {
       const [row] = await database
         .delete(webhookTriggers)
-        .where(
-          and(
-            eq(webhookTriggers.id, id),
-            eq(webhookTriggers.ownerUserId, ownerUserId),
-          ),
-        )
+        .where(eq(webhookTriggers.id, id))
         .returning();
-      return Boolean(row);
+      if (!row) return false;
+
+      // The row outlives the trigger on purpose. A deleted endpoint is one that stops answering, and
+      // the deletion is the only place that fact can be written down: the table it was in no longer
+      // has anything to say about it.
+      await recordAuditEvent(auditStore, {
+        eventType: "webhook.trigger_deleted",
+        targetType: "webhook_trigger",
+        targetId: row.id,
+        ...(actor.userId ? { actorUserId: actor.userId } : {}),
+        payload: {
+          actor: actor.id,
+          name: row.name,
+          endpoint: row.endpointId,
+        },
+      });
+      return true;
     },
 
     /** The receiver's lookup. Carries the hash, which is why it is not the shape the routes return. */
@@ -694,7 +818,15 @@ export function createRoutineStore(
     },
 
     /**
-     * Note that a delivery arrived, and keep the first one.
+     * Note that a delivery arrived, and keep the FIRST one.
+     *
+     * First, not latest, and the database is what decides that rather than the caller: the sample is
+     * only ever written where there is not one already. Every delivery that arrives before somebody
+     * confirms the trigger is a delivery this may be called for, and a `set` would leave the row
+     * holding whichever one landed last. That is the failure the verification gate is built to
+     * prevent, wearing the gate's own clothes: the person opens the page, reads the delivery that is
+     * there, presses "this is right, start running it", and confirms a payload they never saw
+     * because another one arrived while they were reading.
      *
      * The sample is written only while verification is pending, so a trigger in use does not
      * accumulate somebody else's payloads in this deployment's database. What it keeps afterwards is
@@ -710,21 +842,39 @@ export function createRoutineStore(
         .set({
           deliveryCount: sql`${webhookTriggers.deliveryCount} + 1`,
           lastReceivedAt: new Date(),
-          ...(input.captureSample ? { sample: asSample(input.body) } : {}),
+          ...(input.captureSample
+            ? {
+                // The delivery travels as a bound parameter and the column keeps the first
+                // non-null, so two deliveries arriving a second apart cannot race over the sample
+                // either: whichever statement runs second finds a value there and leaves it.
+                sample: sql`coalesce(${webhookTriggers.sample}, ${asSample(input.body)}::jsonb)`,
+              }
+            : {}),
         })
         .where(eq(webhookTriggers.id, input.id));
     },
 
-    /** One row for a delivery that was answered, whichever way it was answered. */
+    /**
+     * One row for a delivery that was answered, whichever way it was answered.
+     *
+     * Three outcomes rather than a boolean. A captured delivery is not a refused one: it presented
+     * the right secret and was deliberately kept, and a trail that files it under "refused" answers
+     * "did my sample arrive" with the word no.
+     */
     recordDeliveryEvent: async (input: {
       endpointId: string;
       triggerId?: string;
-      accepted: boolean;
+      outcome: "ran" | "captured" | "refused";
       reason: string;
       eventType: string | null;
     }): Promise<void> => {
       await recordAuditEvent(auditStore, {
-        eventType: input.accepted ? "webhook.received" : "webhook.rejected",
+        eventType:
+          input.outcome === "ran"
+            ? "webhook.received"
+            : input.outcome === "captured"
+              ? "webhook.captured"
+              : "webhook.rejected",
         targetType: "webhook_trigger",
         targetId: input.triggerId ?? input.endpointId,
         payload: {

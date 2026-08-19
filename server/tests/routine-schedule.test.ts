@@ -272,6 +272,58 @@ describe("deciding what to do about a daily routine", () => {
     });
   });
 
+  /*
+   * The most ordinary path there is: somebody writes "overnight alerts, eight o'clock, weekdays" at
+   * three in the afternoon. The most recent window is seven hours old and has never been run, which
+   * without the routine's own age reads as a window the deployment slept through — and within a
+   * minute they are looking at a run history saying nothing was running, about a machine that was
+   * running perfectly well.
+   */
+  test("a window older than the routine is neither run nor recorded as missed", () => {
+    const decision = decideScheduleAction(weekdaysAtEight, {
+      now: at("2026-08-13T15:00:30.000Z"),
+      lastRunAt: null,
+      createdAt: at("2026-08-13T15:00:00.000Z"),
+    });
+    expect(decision).toEqual({
+      action: "wait",
+      nextDueAt: at("2026-08-14T08:00:00.000Z"),
+    });
+  });
+
+  /*
+   * The other side of it. A routine that existed at eight and did not run is a routine whose window
+   * this deployment genuinely slept through, and that has to keep being recorded or the distinction
+   * the whole run history rests on is worth nothing.
+   */
+  test("a window after the routine was written is still recorded as missed", () => {
+    const decision = decideScheduleAction(weekdaysAtEight, {
+      now: at("2026-08-13T15:00:30.000Z"),
+      lastRunAt: null,
+      createdAt: at("2026-08-01T09:00:00.000Z"),
+    });
+    expect(decision).toEqual({
+      action: "missed",
+      dueAt: at("2026-08-13T08:00:00.000Z"),
+    });
+  });
+
+  /*
+   * Inside the grace period it still runs, whatever its age. Somebody writing that schedule at three
+   * minutes past eight has just said what they want, and would be puzzled to wait a day for it.
+   */
+  test("a window inside the grace period runs even for a routine written after it", () => {
+    const decision = decideScheduleAction(weekdaysAtEight, {
+      now: at("2026-08-13T08:03:00.000Z"),
+      lastRunAt: null,
+      createdAt: at("2026-08-13T08:02:00.000Z"),
+    });
+    expect(decision).toEqual({
+      action: "run",
+      dueAt: at("2026-08-13T08:00:00.000Z"),
+    });
+  });
+
   test("a schedule with no days never runs and never misses", () => {
     const decision = decideScheduleAction(
       { type: "daily", time: "08:00", weekdays: [] },

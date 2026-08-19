@@ -175,16 +175,29 @@ export const auditEventTypes = [
   /*
    * The one door in this product that opens to somebody who has not signed in.
    *
-   * Creating a trigger and rotating its secret are recorded because they are the two moments the
-   * door's key changes hands. `webhook.received` and `webhook.rejected` are recorded for every
-   * delivery, including the refused ones, because an endpoint on the public internet gets probed and
-   * "this endpoint was called forty times last night with the wrong secret" is exactly what a trail
-   * exists to be able to say. Neither row carries the secret that was presented: a failed guess is
-   * still somebody's secret somewhere.
+   * Every moment the door changes state is a row, because "when did this endpoint start working, and
+   * who made it" is the first question asked about a public URL that turned out to be doing
+   * something unexpected. Creating a trigger and rotating its secret are the two moments the key
+   * changes hands. Confirming one is the moment an inert endpoint starts setting a Bot working, which
+   * is the single most consequential thing anybody does to a trigger. Changing and deleting are the
+   * moments a door narrows or closes, and an administrator asking why deliveries stopped is owed an
+   * answer other than silence.
+   *
+   * `webhook.received`, `webhook.captured` and `webhook.rejected` are recorded for every delivery,
+   * including the refused ones, because an endpoint on the public internet gets probed and "this
+   * endpoint was called forty times last night with the wrong secret" is exactly what a trail exists
+   * to be able to say. Captured is its own row rather than a refusal: that delivery presented the
+   * right secret and was deliberately kept as the sample somebody is about to confirm, and calling
+   * it a refusal tells them their sample never arrived. No row carries the secret that was
+   * presented: a failed guess is still somebody's secret somewhere.
    */
   "webhook.trigger_created",
   "webhook.trigger_rotated",
+  "webhook.trigger_verified",
+  "webhook.trigger_updated",
+  "webhook.trigger_deleted",
   "webhook.received",
+  "webhook.captured",
   "webhook.rejected",
 ] as const;
 

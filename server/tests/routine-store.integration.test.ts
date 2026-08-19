@@ -246,6 +246,87 @@ describe("claiming a run", () => {
   });
 
   /*
+   * The row nothing else in the store can clear: the process that owned the run died between
+   * claiming it and finishing it. It holds the one-live-run index, so the routine never fires again
+   * by any route at all, and the only cure without this is deleting the routine and its history.
+   */
+  test("a run left behind by a process that stopped is closed out, and the routine can run again", async () => {
+    const routine = await makeRoutine();
+    const abandoned = await store.startRun({
+      routineId: routine.id,
+      trigger: "schedule",
+      threadId: "thread-a",
+      // Claimed an hour and a half ago, by a process that is no longer here to finish it.
+      startedAt: new Date(Date.now() - 90 * 60_000),
+      actor: owner,
+    });
+    expect(
+      await store.startRun({
+        routineId: routine.id,
+        trigger: "manual",
+        threadId: "thread-b",
+        actor: owner,
+      }),
+    ).toBeNull();
+
+    const reaped = await store.reapStaleRuns({
+      startedBefore: new Date(Date.now() - 60 * 60_000),
+      actor: { id: "scheduler" },
+    });
+    expect(reaped).toBeGreaterThanOrEqual(1);
+
+    const [closed] = await store.runs(routine.id);
+    expect(closed?.id).toBe(abandoned?.id as string);
+    expect(closed?.status).toBe("failed");
+    // Says what is actually known, which is that how it ended is not known. A row that vanished
+    // would leave the person reading the history believing nothing had been started, and it was.
+    expect(closed?.error).toContain("stopped while the run was going");
+
+    expect(
+      await store.startRun({
+        routineId: routine.id,
+        trigger: "manual",
+        threadId: "thread-c",
+        actor: owner,
+      }),
+    ).not.toBeNull();
+
+    await store.remove(routine.id, ownerId, owner);
+  });
+
+  /*
+   * The routines page refetches every fifteen seconds while it is open, and a daily routine's
+   * history grows by one row a day forever. What it needs is the newest run of each, which the
+   * database returns; reading the whole history to find it is a page that gets slower every week.
+   */
+  test("the list carries the newest run of each routine, and only that one", async () => {
+    const routine = await makeRoutine();
+    for (const [index, summary] of ["older", "newer"].entries()) {
+      const run = await store.startRun({
+        routineId: routine.id,
+        trigger: "schedule",
+        threadId: `thread-${index}`,
+        startedAt: new Date(Date.now() - (10 - index) * 60_000),
+        actor: owner,
+      });
+      await store.finishRun({
+        runId: run?.id as string,
+        routineId: routine.id,
+        status: "completed",
+        summary,
+        actor: owner,
+      });
+    }
+
+    const listed = (await store.list(ownerId)).find(
+      (entry) => entry.id === routine.id,
+    );
+    expect(listed?.lastRun?.summary).toBe("newer");
+
+    await store.remove(routine.id, ownerId, owner);
+  });
+
+  /*
    * A person deleting a routine has asked for it to be gone. The runner finishing a moment later
    * must not turn that into an unhandled failure, and the run rows must not outlive the thing they
    * were runs of.
@@ -343,7 +424,7 @@ describe("webhook triggers", () => {
     const found = await store.triggerByEndpoint(created.trigger.endpointId);
     expect(found?.secretHash).toBe(hashWebhookSecret(created.secret));
 
-    const listed = await store.listTriggers(ownerId);
+    const listed = await store.listTriggers();
     expect(JSON.stringify(listed)).not.toContain(created.secret);
 
     await store.remove(routine.id, ownerId, owner);
@@ -355,11 +436,7 @@ describe("webhook triggers", () => {
       { name: "Build finished", ownerUserId: ownerId, routineId: routine.id },
       owner,
     );
-    const rotated = await store.rotateTriggerSecret(
-      created.trigger.id,
-      ownerId,
-      owner,
-    );
+    const rotated = await store.rotateTriggerSecret(created.trigger.id, owner);
 
     expect(rotated?.secret).not.toBe(created.secret);
     const found = await store.triggerByEndpoint(created.trigger.endpointId);
@@ -384,7 +461,7 @@ describe("webhook triggers", () => {
       owner,
     );
 
-    expect(await store.verifyTrigger(created.trigger.id, ownerId)).toBeNull();
+    expect(await store.verifyTrigger(created.trigger.id, owner)).toBeNull();
 
     await store.recordDelivery({
       id: created.trigger.id,
@@ -392,7 +469,7 @@ describe("webhook triggers", () => {
       captureSample: true,
     });
 
-    const verified = await store.verifyTrigger(created.trigger.id, ownerId);
+    const verified = await store.verifyTrigger(created.trigger.id, owner);
     expect(verified?.verificationPending).toBe(false);
     expect(verified?.verifiedAt).not.toBeNull();
     expect(verified?.sample).toEqual({
@@ -410,42 +487,132 @@ describe("webhook triggers", () => {
       { name: "Build finished", ownerUserId: ownerId, routineId: routine.id },
       owner,
     );
+    /*
+     * Both deliveries ask for the sample, which is what the receiver actually does: the decision is
+     * "capture" for every delivery that arrives while verification is pending, and a CI system given
+     * the secret starts posting every minute. What must not happen is the person reading sample A on
+     * the page and confirming sample B.
+     */
     await store.recordDelivery({
       id: created.trigger.id,
       body: { event: "first" },
       captureSample: true,
     });
-    await store.verifyTrigger(created.trigger.id, ownerId);
     await store.recordDelivery({
       id: created.trigger.id,
       body: { event: "second" },
+      captureSample: true,
+    });
+
+    const beforeConfirming = (await store.listTriggers()).find(
+      (entry) => entry.id === created.trigger.id,
+    );
+    expect(beforeConfirming?.sample).toEqual({ event: "first" });
+
+    await store.verifyTrigger(created.trigger.id, owner);
+    await store.recordDelivery({
+      id: created.trigger.id,
+      body: { event: "third" },
       captureSample: false,
     });
 
-    const [listed] = await store.listTriggers(ownerId);
-    expect(listed?.deliveryCount).toBe(2);
+    const listed = (await store.listTriggers()).find(
+      (entry) => entry.id === created.trigger.id,
+    );
+    expect(listed?.deliveryCount).toBe(3);
     // A trigger in use must not accumulate somebody else's payloads in this deployment's database.
     expect(listed?.sample).toEqual({ event: "first" });
 
     await store.remove(routine.id, ownerId, owner);
   });
 
-  test("somebody else cannot rotate, confirm or delete a trigger", async () => {
+  /*
+   * Not scoped to whoever created it, unlike everything about a routine. A trigger is a URL on the
+   * public internet, the page that lists them is the administrators' one, and an administrator who
+   * could only shut the doors they personally opened could not answer the question they came to the
+   * page with. The routes are what keep this away from everybody else; see routines/routes.ts.
+   */
+  test("a trigger somebody else created can still be listed, confirmed and shut off", async () => {
     const routine = await makeRoutine();
     const created = await store.createTrigger(
       { name: "Build finished", ownerUserId: ownerId, routineId: routine.id },
       owner,
     );
+    const other = { id: strangerId, userId: strangerId };
 
     expect(
-      await store.rotateTriggerSecret(created.trigger.id, strangerId, owner),
-    ).toBeNull();
+      (await store.listTriggers()).some(
+        (entry) => entry.id === created.trigger.id,
+      ),
+    ).toBe(true);
+
+    await store.recordDelivery({
+      id: created.trigger.id,
+      body: { event: "build.finished" },
+      captureSample: true,
+    });
     expect(
-      await store.verifyTrigger(created.trigger.id, strangerId),
-    ).toBeNull();
-    expect(await store.deleteTrigger(created.trigger.id, strangerId)).toBe(
-      false,
+      (await store.verifyTrigger(created.trigger.id, other))
+        ?.verificationPending,
+    ).toBe(false);
+    expect(
+      (await store.updateTrigger(created.trigger.id, { enabled: false }, other))
+        ?.enabled,
+    ).toBe(false);
+    expect(await store.deleteTrigger(created.trigger.id, other)).toBe(true);
+
+    await store.remove(routine.id, ownerId, owner);
+  });
+
+  /*
+   * Confirming a trigger is the moment an inert endpoint starts setting a Bot working, and turning
+   * one off or deleting it are the moments a door closes. An administrator asking why deliveries
+   * stopped last Tuesday is owed an answer other than silence.
+   */
+  test("confirming, changing and deleting a trigger each leave a row", async () => {
+    const routine = await makeRoutine();
+    const created = await store.createTrigger(
+      { name: "Build finished", ownerUserId: ownerId, routineId: routine.id },
+      owner,
     );
+    await store.recordDelivery({
+      id: created.trigger.id,
+      body: { event: "build.finished" },
+      captureSample: true,
+    });
+    // Its own event, not a refusal: this delivery had the right secret and was kept on purpose.
+    await store.recordDeliveryEvent({
+      endpointId: created.trigger.endpointId,
+      triggerId: created.trigger.id,
+      outcome: "captured",
+      reason: "The first delivery to a new trigger is kept as a sample.",
+      eventType: "build.finished",
+    });
+    await store.verifyTrigger(created.trigger.id, owner);
+    await store.updateTrigger(created.trigger.id, { enabled: false }, owner);
+    await store.deleteTrigger(created.trigger.id, owner);
+
+    const rows = await database
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.targetType, "webhook_trigger"),
+          eq(auditEvents.targetId, created.trigger.id),
+        ),
+      );
+    expect(rows.map((row) => row.eventType).sort()).toEqual([
+      "webhook.captured",
+      "webhook.trigger_created",
+      "webhook.trigger_deleted",
+      "webhook.trigger_updated",
+      "webhook.trigger_verified",
+    ]);
+    // The secret is in none of them. A trail that could hand somebody the key is a trail that has
+    // to be guarded as closely as the endpoint.
+    for (const row of rows) {
+      expect(JSON.stringify(row.payload)).not.toContain(created.secret);
+    }
 
     await store.remove(routine.id, ownerId, owner);
   });

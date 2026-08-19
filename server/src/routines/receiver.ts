@@ -24,7 +24,19 @@ import { serve } from "bun";
 import type { RoutineStore } from "./store";
 import { decideWebhookDelivery, eventTypeOf } from "./webhooks";
 
-/** The most a delivery body may be. Somebody else's payload, so it needs a stated ceiling. */
+/**
+ * The most a delivery body may be, in bytes.
+ *
+ * Somebody else's payload, so it needs a stated ceiling. Bytes rather than characters, and the
+ * difference is not pedantry: `"😀".repeat(400_000)` is 800,000 characters and 1.6MB of memory, so a
+ * ceiling measured in string length is a ceiling an emoji walks straight through.
+ *
+ * Enforced in three places for one reason each. Bun is told it at {@link startWebhookReceiver}, which
+ * is the only one that refuses before the body is in memory. The declared length is checked first in
+ * the handler, so a caller who announces an oversized body is answered in this product's own words
+ * rather than with Bun's bare 413. And what actually arrived is measured after reading, because a
+ * chunked request declares nothing at all.
+ */
 export const MAX_DELIVERY_BYTES = 1_000_000;
 
 export type WebhookReceiverOptions = {
@@ -71,6 +83,16 @@ export function startWebhookReceiver(
   const server = serve({
     port: options.port,
     hostname,
+    /*
+     * The only limit that means anything on a port a stranger can reach.
+     *
+     * Left unset, Bun buffers up to its own default of 128MB before the handler is called at all, so
+     * a check inside the handler is a check performed on memory that has already been allocated: a
+     * handful of concurrent unauthenticated posts is enough to take the process down, and none of
+     * them has presented a secret. Told the ceiling, Bun refuses the request on the socket and never
+     * calls the handler, which is the difference between a limit and a report.
+     */
+    maxRequestBodySize: MAX_DELIVERY_BYTES,
     fetch: (request) => handle(request, options, log),
   });
 
@@ -121,12 +143,18 @@ async function handle(
     return new Response("Deliveries are POSTed.", { status: 405 });
   }
 
+  // Before anything is read. A sender that declares an oversized body is refused on the strength of
+  // its own header, which costs nothing and is the common case: the systems that send large payloads
+  // are the ones that know how large they are.
+  if (declaredTooLarge(request.headers.get("content-length"))) {
+    return tooLarge();
+  }
+
   const raw = await request.text().catch(() => "");
-  if (raw.length > MAX_DELIVERY_BYTES) {
-    return Response.json(
-      { error: "That delivery is larger than this endpoint accepts." },
-      { status: 413 },
-    );
+  // A chunked delivery declares no length, so what arrived is measured. Bytes, not characters: the
+  // string this returns can be half the size of the request that carried it.
+  if (Buffer.byteLength(raw, "utf8") > MAX_DELIVERY_BYTES) {
+    return tooLarge();
   }
   let body: unknown = null;
   try {
@@ -164,7 +192,7 @@ async function handle(
       .recordDeliveryEvent({
         endpointId,
         ...(trigger ? { triggerId: trigger.id } : {}),
-        accepted: false,
+        outcome: "refused",
         reason: decision.reason,
         eventType,
       })
@@ -185,11 +213,14 @@ async function handle(
     .catch(() => undefined);
 
   if (decision.outcome === "capture") {
+    // Its own outcome, not a refusal. This delivery presented the right secret and was deliberately
+    // kept, which is the one thing the whole verification gate exists to do; a trail that files it
+    // under "a delivery was refused" tells the person looking for their sample that it never came.
     await options.store
       .recordDeliveryEvent({
         endpointId,
         ...(trigger ? { triggerId: trigger.id } : {}),
-        accepted: false,
+        outcome: "captured",
         reason: decision.reason,
         eventType,
       })
@@ -232,10 +263,10 @@ async function handle(
     .recordDeliveryEvent({
       endpointId,
       triggerId: trigger.id,
-      accepted: started,
+      outcome: started ? "ran" : "refused",
       reason: started
         ? "The delivery started a run."
-        : "The delivery arrived while a run of the same routine was already going, so nothing was started.",
+        : "The delivery arrived while the last one was still being worked on, so nothing was started.",
       eventType,
     })
     .catch(() => undefined);
@@ -245,7 +276,32 @@ async function handle(
   return started
     ? Response.json({ status: "started" }, { status: 202 })
     : Response.json(
-        { status: "busy", detail: "A run of this routine is already going." },
+        {
+          status: "busy",
+          detail: "The last delivery to this trigger is still being worked on.",
+        },
         { status: 409 },
       );
+}
+
+/**
+ * Whether the caller has said, in its own header, that the body is too big.
+ *
+ * A header that is missing or is not a number is not a refusal. It means only that the caller did
+ * not say, which is what a chunked sender does, and what actually arrived is measured afterwards.
+ * Refusing on a malformed header would turn deliveries this endpoint can perfectly well accept into
+ * a failure the sender cannot see the cause of.
+ */
+function declaredTooLarge(header: string | null): boolean {
+  if (!header) return false;
+  const declared = Number.parseInt(header, 10);
+  return Number.isFinite(declared) && declared > MAX_DELIVERY_BYTES;
+}
+
+/** One sentence, whichever check caught it, so one problem has one answer. */
+function tooLarge(): Response {
+  return Response.json(
+    { error: "That delivery is larger than this endpoint accepts." },
+    { status: 413 },
+  );
 }

@@ -153,4 +153,46 @@ describe("deployment configuration", () => {
       }),
     ).toThrow("Google authentication requires BETTER_AUTH_SECRET");
   });
+
+  /*
+   * The routine settings decide two things somebody can be surprised by: whether this deployment
+   * runs unattended work at all, and which port a stranger's delivery arrives on. Both are read at
+   * boot and never again, so a value the product cannot honour has to stop the boot rather than be
+   * quietly replaced by a default.
+   */
+  test("runs routines by default, on the port above the API's", () => {
+    const config = loadConfig({ ...baseEnvironment, PORT: "3001" });
+
+    expect(config.routines.schedulerEnabled).toBe(true);
+    expect(config.routines.webhookPort).toBe(3002);
+    // Localhost unless a deployment says otherwise. A webhook endpoint reachable from the internet
+    // the moment somebody sets a variable is a decision, not something to inherit.
+    expect(config.routines.webhookHost).toBe("127.0.0.1");
+  });
+
+  test("the switch that stops everything is spelled on or off, and nothing else", () => {
+    expect(
+      loadConfig({ ...baseEnvironment, ROUTINE_SCHEDULER: "off" }).routines
+        .schedulerEnabled,
+    ).toBe(false);
+    // Not "false", not "0", not "no". A misspelling that quietly meant "on" would leave somebody
+    // who restored a production dump onto a laptop with a deployment that runs their real work.
+    expect(() =>
+      loadConfig({ ...baseEnvironment, ROUTINE_SCHEDULER: "false" }),
+    ).toThrow('ROUTINE_SCHEDULER must be "on" or "off"');
+  });
+
+  test("a webhook port that is not a port refuses to start", () => {
+    expect(
+      loadConfig({ ...baseEnvironment, ROUTINE_WEBHOOK_PORT: "9100" }).routines
+        .webhookPort,
+    ).toBe(9100);
+    // Falling back to the default here would serve the endpoint on the very port the operator was
+    // moving it off, which is the one outcome that would surprise them at the worst moment.
+    for (const port of ["not-a-port", "0", "70000"]) {
+      expect(() =>
+        loadConfig({ ...baseEnvironment, ROUTINE_WEBHOOK_PORT: port }),
+      ).toThrow("ROUTINE_WEBHOOK_PORT must be a port number");
+    }
+  });
 });

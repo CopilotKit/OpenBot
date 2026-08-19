@@ -81,8 +81,10 @@ function WebhooksPage() {
           A trigger is a URL another system can call to set a Bot working.
           Deliveries arrive on their own listener, not on this one:{" "}
           <code>ROUTINE_WEBHOOK_PORT</code>, which defaults to one above the
-          API's and serves nothing but these paths. Every delivery is recorded
-          in{" "}
+          API's and serves nothing but these paths. Every trigger in this
+          deployment is listed here, whoever created it, because the question
+          this page answers is what can reach us from outside. Every delivery is
+          recorded in{" "}
           <Link className="underline" to="/admin/audit">
             Audit
           </Link>
@@ -319,7 +321,7 @@ function TriggerRow({
            */}
           <p className="text-sm">
             {trigger.sample
-              ? "This is what actually arrived. Look at it, then confirm: nothing has run yet."
+              ? "This is the first delivery that arrived, kept as it came. Later ones are counted and do not replace it, so what you confirm is what you are reading. Nothing has run yet."
               : "Nothing has arrived yet. Send one delivery to the endpoint above; it will be kept here and nothing will run."}
           </p>
           {trigger.sample ? (

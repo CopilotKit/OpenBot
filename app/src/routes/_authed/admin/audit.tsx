@@ -300,7 +300,13 @@ const DECISIONS: Record<string, string> = {
 
   "webhook.trigger_created": "Trigger created",
   "webhook.trigger_rotated": "Trigger secret rotated",
+  "webhook.trigger_verified": "Trigger confirmed, and now runs work",
+  "webhook.trigger_updated": "Trigger changed",
+  "webhook.trigger_deleted": "Trigger deleted",
   "webhook.received": "A delivery arrived",
+  // Not a refusal. This delivery had the right secret and was kept on purpose, as the sample
+  // somebody confirms before the trigger does any work.
+  "webhook.captured": "A delivery was kept as a sample",
   "webhook.rejected": "A delivery was refused",
 
   "configuration.changed": "Configuration changed",

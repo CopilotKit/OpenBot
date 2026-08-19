@@ -34,6 +34,7 @@ function fakeStore(candidates: DueCandidate[]) {
   const started: { routineId: string; trigger: string }[] = [];
   const finished: { runId: string; status: string; error?: string }[] = [];
   const missed: { routineId: string; dueAt: Date }[] = [];
+  const reaped: { startedBefore: Date }[] = [];
   /** Which routines currently hold a live run, which is what the unique index really enforces. */
   const live = new Set<string>();
   let runNumber = 0;
@@ -65,9 +66,13 @@ function fakeStore(candidates: DueCandidate[]) {
     recordMissed: async (input: { routineId: string; dueAt: Date }) => {
       missed.push({ routineId: input.routineId, dueAt: input.dueAt });
     },
+    reapStaleRuns: async (input: { startedBefore: Date }) => {
+      reaped.push({ startedBefore: input.startedBefore });
+      return 0;
+    },
   } as unknown as RoutineStore;
 
-  return { store, started, finished, missed, live };
+  return { store, started, finished, missed, reaped, live };
 }
 
 const routine = (overrides: Partial<DueCandidate> = {}): DueCandidate => ({
@@ -77,6 +82,9 @@ const routine = (overrides: Partial<DueCandidate> = {}): DueCandidate => ({
   name: "Overnight alerts",
   prompt: "Check the overnight alerts.",
   schedule: weekdaysAtEight,
+  // Long before any window these tests ask about, so the routine existed for all of them. The one
+  // test that cares about creation time sets its own.
+  createdAt: new Date("2026-07-01T00:00:00.000Z"),
   lastRunAt: null,
   activeRun: false,
   ...overrides,
@@ -133,6 +141,55 @@ describe("the tick", () => {
     expect(started).toEqual([]);
     expect(missed).toEqual([
       { routineId: "routine-1", dueAt: new Date("2026-08-13T08:00:00.000Z") },
+    ]);
+  });
+
+  /*
+   * The window before the routine existed. A person writing "every weekday at eight" at three in the
+   * afternoon is the most ordinary path there is, and within a minute the old behaviour told them
+   * the deployment had not been running at eight, which is false and is the one thing a missed row
+   * has to be trusted about.
+   */
+  test("does not record a miss for a window that predates the routine", async () => {
+    const { store, started, missed } = fakeStore([
+      routine({ createdAt: new Date("2026-08-13T15:00:00.000Z") }),
+    ]);
+    const scheduler = createScheduler({
+      store,
+      runner: {
+        run: async () => ({ summary: "", turns: 1, stoppedAtCap: false }),
+      },
+      threadIdFor: (id) => `thread-${id}`,
+    });
+
+    await scheduler.tick(new Date("2026-08-13T15:00:30.000Z"));
+    await settle();
+
+    expect(missed).toEqual([]);
+    expect(started).toEqual([]);
+  });
+
+  /*
+   * A process killed mid-run leaves a row that says `running` and nothing that will ever finish it.
+   * The row holds the one-live-run index, so the routine never fires again by any route, and the
+   * only cure in the product without this is deleting the routine and its whole history.
+   */
+  test("closes out runs left behind by a process that stopped, before deciding anything else", async () => {
+    const { store, reaped } = fakeStore([routine()]);
+    const scheduler = createScheduler({
+      store,
+      runner: {
+        run: async () => ({ summary: "", turns: 1, stoppedAtCap: false }),
+      },
+      threadIdFor: (id) => `thread-${id}`,
+      staleRunMs: 60_000,
+    });
+
+    await scheduler.tick(EIGHT);
+    await settle();
+
+    expect(reaped).toEqual([
+      { startedBefore: new Date(EIGHT.getTime() - 60_000) },
     ]);
   });
 
@@ -399,6 +456,42 @@ describe("running what a delivery asked for", () => {
     // history. Stated here as much as in the code, because it is the cost of the shape.
     expect(started).toEqual([]);
     expect(seen.startsWith("Tell me what broke.")).toBe(true);
+  });
+
+  /*
+   * The routine-backed path is serialised by a unique index on a row. A prompt-carrying trigger has
+   * no row, so without something holding it, whoever has the secret can start one unattended agent
+   * run per delivery by posting in a loop.
+   */
+  test("a second delivery to a prompt-carrying trigger, while the first is still going, starts nothing", async () => {
+    const held = heldRunner();
+    const { store } = fakeStore([]);
+    const scheduler = createScheduler({
+      store,
+      runner: held.runner,
+      threadIdFor: (id) => `thread-${id}`,
+    });
+
+    const delivery = {
+      triggerId: "trigger-1",
+      routineId: null,
+      agentId: "risk-analyst",
+      prompt: "Tell me what broke.",
+      ownerUserId: "someone",
+      body: {},
+      eventType: null,
+    };
+
+    expect(await scheduler.runFromWebhook(delivery)).toBe(true);
+    await settle();
+    expect(await scheduler.runFromWebhook(delivery)).toBe(false);
+
+    // And released when the run ends, so the trigger is not busy for the life of the process.
+    held.release();
+    await settle();
+    expect(await scheduler.runFromWebhook(delivery)).toBe(true);
+    held.release();
+    await settle();
   });
 
   test("a delivery for a routine that has gone starts nothing", async () => {

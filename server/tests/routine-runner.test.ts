@@ -11,6 +11,7 @@ import type { ComputerGateway } from "../src/computer/gateway";
 import {
   createRoutineRunner,
   RoutineBotUnavailableError,
+  RoutineRunDeadlineError,
   UNATTENDED_TOOLS,
 } from "../src/routines/runner";
 
@@ -50,6 +51,30 @@ function stream(events: BaseEvent[], failure?: Error): Observable<BaseEvent> {
         observer.complete?.();
       }
       return { unsubscribe: () => undefined };
+    },
+  } as unknown as Observable<BaseEvent>;
+}
+
+/**
+ * A stream that takes a while, and can be cancelled.
+ *
+ * Needed for the deadline: a turn that returns instantly can never run out of time, and the shape
+ * being guarded against is one that takes longer than the run has left.
+ */
+function slowStream(
+  events: BaseEvent[],
+  afterMs: number,
+): Observable<BaseEvent> {
+  return {
+    subscribe(observer: {
+      next?: (event: BaseEvent) => void;
+      complete?: () => void;
+    }) {
+      const timer = setTimeout(() => {
+        for (const event of events) observer.next?.(event);
+        observer.complete?.();
+      }, afterMs);
+      return { unsubscribe: () => clearTimeout(timer) };
     },
   } as unknown as Observable<BaseEvent>;
 }
@@ -477,6 +502,60 @@ describe("running a routine with nobody watching", () => {
     });
 
     await expect(runner.run(REQUEST)).rejects.toThrow("the connection closed");
+  });
+
+  /*
+   * The failure the turn cap cannot see: a stream that never completes and never errors. A remote
+   * AG-UI Bot whose connection drops does exactly this, and the promise underneath waits on
+   * `complete` or `error`, so without a deadline the run waits forever. Forever is not a figure of
+   * speech here — the run row stays `running`, holds the one-live-run index, and the routine never
+   * fires again from the clock, from Run now or from a delivery.
+   */
+  test("a stream that never settles ends the run rather than hanging on it", async () => {
+    const { gateway } = fakeGateway();
+    let unsubscribed = false;
+    const runner = createRoutineRunner({
+      gateway,
+      deadlineMs: 20,
+      resolveAgent: async () =>
+        ({
+          run: () =>
+            ({
+              subscribe: () => ({
+                unsubscribe: () => {
+                  unsubscribed = true;
+                },
+              }),
+            }) as unknown as Observable<BaseEvent>,
+        }) as unknown as AbstractAgent,
+    });
+
+    await expect(runner.run(REQUEST)).rejects.toThrow(RoutineRunDeadlineError);
+    // And the stream is dropped rather than left running: an agent still emitting into a turn
+    // nobody is waiting for is an agent still spending somebody's model budget.
+    expect(unsubscribed).toBe(true);
+  });
+
+  /*
+   * One deadline for the whole run, not one per turn. Twenty turns of fourteen minutes each would
+   * otherwise add up to nearly five hours with every individual turn looking well behaved.
+   */
+  test("the deadline covers the whole run, not each turn", async () => {
+    const { gateway, seen } = fakeGateway();
+    const runner = createRoutineRunner({
+      gateway,
+      deadlineMs: 60,
+      // Twenty turns are allowed, so nothing here is stopped by the cap.
+      maxTurns: 20,
+      resolveAgent: async () =>
+        ({
+          run: () => slowStream(calls("t1", "computer_snapshot", {}), 20),
+        }) as unknown as AbstractAgent,
+    });
+
+    await expect(runner.run(REQUEST)).rejects.toThrow(RoutineRunDeadlineError);
+    // A handful of turns, each of them perfectly well behaved on its own.
+    expect(seen.length).toBeLessThan(20);
   });
 
   /*

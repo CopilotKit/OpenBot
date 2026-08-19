@@ -145,8 +145,10 @@ export const routines = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
-    // The scheduler's own query, run once a minute forever. Without this it is a scan of the whole
-    // table on every tick.
+    // The scheduler's own query, run once a minute forever. Worth having for the deployment whose
+    // routines are mostly switched off, which is what a long-lived one drifts towards; it buys
+    // nothing while most rows are enabled, because a planner reading most of the table will read all
+    // of it and be right to.
     index("routines_enabled_idx").on(table.enabled),
     index("routines_owner_idx").on(table.ownerUserId),
   ],
@@ -180,11 +182,23 @@ export const routineRuns = pgTable(
     /** Why it did not work, in the words a person reads. Null unless the status is `failed`. */
     error: text("error"),
     /**
-     * The thread this run spoke in.
+     * The name given to the conversation this run had.
      *
-     * Kept so an unattended run is not a black box. A person handed a summary and nothing else has
-     * to take the Bot's word for what it did; a thread id is the whole conversation, including every
-     * tool call the transcript would have shown had anybody been watching.
+     * A name, and deliberately described as one. It is minted in the same namespace every other
+     * conversation in this deployment is minted in, and it is what tells one run's turns apart from
+     * another run of the same routine wherever both are visible: the `routine.run_started` row
+     * carries it, and so does the run row.
+     *
+     * What it is not is a transcript. An unattended run speaks to the Bot directly rather than
+     * through the runtime that owns durable threads, so nothing writes the messages anywhere and
+     * opening this id would find an empty conversation. That is the honest state of it, and stating
+     * it here is the point: the alternative is a field that reads like a link to the whole
+     * conversation and is a link to nothing, which is worse than no field at all.
+     *
+     * What a person actually gets for an unattended run is the summary on this row and the audit
+     * rows for every action the Bot took, which the gateway writes whether anybody is watching or
+     * not. Persisting the turns themselves is the obvious next thing to add, and this column is
+     * where it would attach.
      */
     threadId: text("thread_id"),
   },

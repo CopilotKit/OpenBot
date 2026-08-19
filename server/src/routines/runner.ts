@@ -37,12 +37,40 @@ import { ActionRefusedError } from "../computer/gateway";
  */
 export const DEFAULT_MAX_TURNS = 20;
 
+/**
+ * How long the whole run may take, however many turns that is.
+ *
+ * The turn cap above stops a loop; this stops a stall, and they are different failures. A cap counts
+ * things that finish, and the shape that has to be survived here is a call that never finishes at
+ * all: a remote AG-UI Bot whose connection drops without the stream erroring, or any agent that
+ * hands back an observable which neither completes nor fails. `collectOneTurn` waits on `complete` or
+ * `error`, so a stream that does neither leaves it waiting forever, and forever is not an
+ * exaggeration — there is no socket timeout underneath it and nothing else watching.
+ *
+ * What that costs without a deadline is not one lost run. The run row stays `running`, which holds
+ * the one-live-run index, and the routine never fires again by any route: the tick skips it, Run now
+ * answers "already running", every delivery answers the same, and the only cure in the product is
+ * deleting the routine and its whole history. A deadline turns all of that into an ordinary failed
+ * run that says what happened.
+ *
+ * Fifteen minutes is generous for the work a routine describes and short enough that a stuck run
+ * costs a quarter of an hour rather than a night. A routine that genuinely needs longer is a routine
+ * that should be split, because nothing is watching this one.
+ */
+export const DEFAULT_RUN_DEADLINE_MS = 15 * 60_000;
+
 export type RoutineRunRequest = {
   /** Which Bot. Resolved to an agent by the caller's loader, so visibility rules still apply. */
   agentId: string;
   /** What the routine says, put to the Bot exactly as a person would have typed it. */
   prompt: string;
-  /** The thread this run speaks in, so the conversation can be opened afterwards. */
+  /**
+   * The name this run's conversation is given.
+   *
+   * Passed to the agent and written on the run row, so one run's turns are told apart from another's
+   * by anything that sees both. It is a name and not a stored transcript: nothing here persists the
+   * conversation. See the note on `routine_runs.thread_id`.
+   */
   threadId: string;
   /** Who it runs as. The gateway records this and the boundary can read it. */
   actor: ActionActor;
@@ -72,6 +100,8 @@ export type RoutineRunnerOptions = {
     actor: ActionActor;
   }) => Promise<AbstractAgent | null>;
   maxTurns?: number;
+  /** The wall clock a run is held to. See {@link DEFAULT_RUN_DEADLINE_MS}. */
+  deadlineMs?: number;
 };
 
 export type RoutineRunner = {
@@ -88,13 +118,37 @@ export class RoutineBotUnavailableError extends Error {
   }
 }
 
+/**
+ * A run that was still going when its time ran out.
+ *
+ * Its own class rather than a plain Error, following computer/client.ts: this is not the Bot failing
+ * at the work, it is the work not ending, and somebody reading a run history needs to be able to
+ * tell a Bot that could not do the job from one that never came back.
+ */
+export class RoutineRunDeadlineError extends Error {
+  constructor(deadlineMs: number) {
+    super(
+      `The run was still going after ${Math.round(deadlineMs / 60_000)} minutes and was stopped. The Bot may have been waiting on something that never answered.`,
+    );
+    this.name = "RoutineRunDeadlineError";
+  }
+}
+
 export function createRoutineRunner(
   options: RoutineRunnerOptions,
 ): RoutineRunner {
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+  const deadlineMs = options.deadlineMs ?? DEFAULT_RUN_DEADLINE_MS;
 
   return {
     run: async (request) => {
+      /*
+       * One deadline for the run, spent across however many turns it takes, rather than one per
+       * turn. A per-turn timeout would let twenty turns of fourteen minutes each add up to nearly
+       * five hours while every individual turn looked well behaved, which is precisely the run
+       * nobody is watching.
+       */
+      const expiresAt = Date.now() + deadlineMs;
       const agent = await options.resolveAgent({
         agentId: request.agentId,
         actor: request.actor,
@@ -111,9 +165,18 @@ export function createRoutineRunner(
 
       let said = "";
       for (let turn = 1; turn <= maxTurns; turn += 1) {
+        // Raised rather than returned. A run that ran out of time did not finish the work, and a
+        // summary is the shape of an answer; the scheduler writes this as a failed run, which
+        // releases the routine's one-live-run claim and says why on the page.
+        if (Date.now() >= expiresAt)
+          throw new RoutineRunDeadlineError(deadlineMs);
+
         const spoke = await collectOneTurn(agent, {
           threadId: request.threadId,
           messages,
+          // What is left of the run's own clock, so a turn that never settles cannot outlive it.
+          remainingMs: expiresAt - Date.now(),
+          deadlineMs,
         });
         if (spoke.text.trim()) said = spoke.text.trim();
 
@@ -190,7 +253,14 @@ type TurnResult = {
  */
 async function collectOneTurn(
   agent: AbstractAgent,
-  input: { threadId: string; messages: Message[] },
+  input: {
+    threadId: string;
+    messages: Message[];
+    /** What is left of the run's deadline. */
+    remainingMs: number;
+    /** The whole run's allowance, for the sentence a person reads. */
+    deadlineMs: number;
+  },
 ): Promise<TurnResult> {
   const messageId = `routine-said-${crypto.randomUUID()}`;
   let text = "";
@@ -214,6 +284,27 @@ async function collectOneTurn(
   };
 
   await new Promise<void>((resolve, reject) => {
+    let subscription: { unsubscribe: () => void } | undefined;
+    /*
+     * The turn's share of the run's clock, and the only thing that ends a stream which does neither.
+     *
+     * Held here rather than around the whole loop because this is where the waiting happens: a
+     * promise that settles on `complete` or `error` and nothing else settles never, and every layer
+     * above it is then waiting on a promise, not on a socket. Cleared on both ways out so a finished
+     * turn does not leave a timer keeping anything alive.
+     */
+    const expiry = setTimeout(
+      () => {
+        // Safe to reach for the subscription from in here, unlike the error path below: this callback
+        // cannot run in the same tick that created it, so the binding exists by the time it does. The
+        // stream is dropped rather than left running, because an agent that is still emitting into a
+        // turn nobody is waiting for is an agent still spending somebody's model budget.
+        subscription?.unsubscribe();
+        reject(new RoutineRunDeadlineError(input.deadlineMs));
+      },
+      Math.max(0, input.remainingMs),
+    );
+
     const events = agent.run({
       threadId: input.threadId,
       runId: crypto.randomUUID(),
@@ -224,7 +315,7 @@ async function collectOneTurn(
       forwardedProps: {},
     });
 
-    events.subscribe({
+    subscription = events.subscribe({
       next: (event: BaseEvent) => {
         switch (event.type) {
           case EventType.TEXT_MESSAGE_CONTENT:
@@ -279,9 +370,14 @@ async function collectOneTurn(
       // reaching for the subscription from inside the callback that created it is a reference to a
       // binding that does not exist yet when the failure is synchronous, which is exactly the case a
       // broken agent produces.
-      error: (caught: unknown) =>
-        reject(caught instanceof Error ? caught : new Error(String(caught))),
-      complete: () => resolve(),
+      error: (caught: unknown) => {
+        clearTimeout(expiry);
+        reject(caught instanceof Error ? caught : new Error(String(caught)));
+      },
+      complete: () => {
+        clearTimeout(expiry);
+        resolve();
+      },
     });
   });
 

@@ -341,20 +341,36 @@ const scheduler = computerGateway
           return agents[agentId] ?? null;
         },
       }),
-      // The same namespace every other conversation is minted in, so an unattended run's thread is
-      // found where a person expects to find their conversations rather than in a space of its own.
+      // The same namespace every other conversation is minted in, so an unattended run's id cannot
+      // be mistaken for another deployment's. It names the run's conversation; it does not create
+      // one. See the note on `routine_runs.thread_id`.
       threadIdFor: () => threadIdentity.mint(),
     })
   : undefined;
 
-if (scheduler && config.routines.schedulerEnabled) {
-  scheduler.start();
+/**
+ * The scheduler, when this deployment runs unattended work at all.
+ *
+ * One value rather than the same condition written in three places, because three things have to
+ * agree about it: the clock, Run now, and the public port. ROUTINE_SCHEDULER=off is set by somebody
+ * who has restored a production dump onto a laptop, and what they are buying is that nothing in the
+ * restored database can set a Bot working. A switch that stopped the clock and left the door open
+ * would give them the opposite of what they asked for, quietly, because the triggers in that dump
+ * keep their endpoint ids and their secret hashes and the sender configured against them is still
+ * configured.
+ */
+const runningScheduler = config.routines.schedulerEnabled
+  ? scheduler
+  : undefined;
+
+if (runningScheduler) {
+  runningScheduler.start();
 } else {
   // Said out loud at boot. A deployment whose routines never fire looks exactly like one whose
   // routines all found nothing, and the difference is a variable nobody remembers setting.
   console.warn(
     scheduler
-      ? "ROUTINE_SCHEDULER is off: routines can be written and run by hand, and nothing fires on its own."
+      ? "ROUTINE_SCHEDULER is off: routines can be written and read, and nothing runs them. Not the clock, not Run now, and not a webhook delivery."
       : "No computer is configured, so routines cannot run. Set AGENT_COMPUTER_URL to enable them.",
   );
 }
@@ -364,14 +380,15 @@ if (scheduler && config.routines.schedulerEnabled) {
  *
  * Started only when there is something for a delivery to start. A port that accepts deliveries and
  * can do nothing with them is worse than a closed one: the sender is told 202 and the work never
- * happens.
+ * happens. The same reasoning is why the switch above closes it: a delivery does not go through the
+ * clock, so nothing about the interval being stopped would have stopped a run this port started.
  */
-const webhookReceiver = scheduler
+const webhookReceiver = runningScheduler
   ? startWebhookReceiver({
       port: config.routines.webhookPort,
       hostname: config.routines.webhookHost,
       store: routineStore,
-      dispatch: (work) => scheduler.runFromWebhook(work),
+      dispatch: (work) => runningScheduler.runFromWebhook(work),
     })
   : undefined;
 
@@ -434,9 +451,9 @@ const app = createApp(
   // Routines and their triggers. The store is mounted whether or not the clock is running, so a
   // deployment with the scheduler off can still be looked at and edited.
   routineStore,
-  // Passed only when the clock is actually running, so Run now refuses in words rather than
+  // Passed only when this deployment runs routines at all, so Run now refuses in words rather than
   // reporting success and doing nothing.
-  config.routines.schedulerEnabled ? scheduler : undefined,
+  runningScheduler,
 );
 
 /**

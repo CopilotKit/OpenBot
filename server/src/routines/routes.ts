@@ -1,16 +1,21 @@
 /**
  * The signed-in surface for routines and webhook triggers.
  *
- * Everything here is scoped to the person asking, in the query rather than after it. A routine
- * carries a prompt somebody wrote about their own work, and a webhook trigger is a door into this
- * deployment; neither is something an ownership check applied late should be trusted with.
+ * Two different things behind one prefix, and they are guarded differently because they belong to
+ * different people. A routine is somebody's own work: every route for one is scoped to the person
+ * asking, in the query rather than after it, because a routine carries a prompt they wrote about
+ * their own job and "we fetched it and then decided not to show it" is the shape most accidental
+ * disclosures take. A webhook trigger is a door in the side of the deployment, so it belongs to
+ * whoever answers for the deployment: the trigger routes require an administrator and are not scoped
+ * to a creator at all, because the question they exist to answer is "what can reach us from
+ * outside", which no per-person list answers correctly.
  *
  * The public side of a webhook is not here. It is a different process on a different port, see
  * receiver.ts, and this file only ever manages the triggers rather than receiving anything.
  */
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import type { AppVariables } from "../auth/guards";
+import { type AppVariables, requireAdmin } from "../auth/guards";
 import { parseRoutineSchedule, type RoutineSchedule } from "./schedule";
 import type { Scheduler } from "./scheduler";
 import type { RoutineStore } from "./store";
@@ -176,9 +181,26 @@ export function createRoutineRoutes(
       : context.json({ status: "started" }, 202);
   });
 
-  routes.get("/triggers", requireUser, async (context) =>
-    context.json({ triggers: await store.listTriggers(context.var.actor.id) }),
-  );
+  /*
+   * Everything below this line is an administrator's.
+   *
+   * A trigger is not somebody's own work the way a routine is. It is a URL on the public internet
+   * that sets a Bot working, which is a fact about the whole deployment, and the two halves of that
+   * have to agree about whose it is. They did not: the routes admitted any signed-in person and the
+   * only page that renders them is behind the administrator guard, so an ordinary user could mint a
+   * publicly reachable endpoint through the API and then had nowhere to see or revoke it, while an
+   * administrator opening the page to review this deployment's exposure was shown only the triggers
+   * they had personally created and could not shut a door anybody else had opened.
+   *
+   * So: an administrator, and every trigger, not their own. What it costs is that somebody who is
+   * not an administrator cannot give their routine a webhook at all, and has to ask. That is the
+   * right way round for the one surface in this product that answers to strangers.
+   */
+  routes.get("/triggers", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    return context.json({ triggers: await store.listTriggers() });
+  });
 
   /**
    * Make a trigger, and show its secret exactly once.
@@ -189,6 +211,9 @@ export function createRoutineRoutes(
    * again on a screen anybody with the session can open.
    */
   routes.post("/triggers", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
     const body = (await context.req.json().catch(() => null)) as Record<
       string,
       unknown
@@ -213,6 +238,10 @@ export function createRoutineRoutes(
       );
     }
     if (routineId) {
+      // Their own routine, even here. An administrator may manage every door in the deployment, and
+      // that is not the same as being able to point a new one at somebody else's work: a routine
+      // runs with its owner's authority, so wiring a stranger's routine to a public URL would be
+      // handing out somebody else's access without their knowing.
       const routine = await store.get(routineId, context.var.actor.id);
       if (!routine) return context.json({ error: "No such routine." }, 404);
     }
@@ -240,6 +269,9 @@ export function createRoutineRoutes(
   });
 
   routes.patch("/triggers/:triggerId", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
     const body = (await context.req.json().catch(() => null)) as Record<
       string,
       unknown
@@ -264,8 +296,8 @@ export function createRoutineRoutes(
 
     const trigger = await store.updateTrigger(
       context.req.param("triggerId"),
-      context.var.actor.id,
       patch,
+      actorOf(context),
     );
     return trigger
       ? context.json({ trigger })
@@ -280,9 +312,12 @@ export function createRoutineRoutes(
    * on their way past.
    */
   routes.post("/triggers/:triggerId/verify", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
     const trigger = await store.verifyTrigger(
       context.req.param("triggerId"),
-      context.var.actor.id,
+      actorOf(context),
     );
     return trigger
       ? context.json({ trigger })
@@ -296,9 +331,11 @@ export function createRoutineRoutes(
   });
 
   routes.post("/triggers/:triggerId/rotate", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
     const rotated = await store.rotateTriggerSecret(
       context.req.param("triggerId"),
-      context.var.actor.id,
       actorOf(context),
     );
     return rotated
@@ -307,9 +344,12 @@ export function createRoutineRoutes(
   });
 
   routes.delete("/triggers/:triggerId", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
     const removed = await store.deleteTrigger(
       context.req.param("triggerId"),
-      context.var.actor.id,
+      actorOf(context),
     );
     return removed
       ? context.json({ deleted: true })

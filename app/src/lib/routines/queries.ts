@@ -108,6 +108,12 @@ export function routineRunsQueryOptions(routineId: string) {
   });
 }
 
+/**
+ * Every trigger in the deployment, which is what the administrators' page shows.
+ *
+ * Not this person's own, unlike the routines above. A trigger is a URL somebody outside can call,
+ * so the useful list is all of them; the server refuses this to anybody who is not an administrator.
+ */
 export function webhookTriggerQueryOptions() {
   return queryOptions({
     queryKey: routineKeys.triggers(),
@@ -147,10 +153,17 @@ export async function callRoutines(
   return body;
 }
 
-/** How a schedule reads on screen. The same words the server uses, so the two agree. */
+/**
+ * How a schedule reads on screen.
+ *
+ * The same words as routines/schedule.ts on the server, written twice because the two sides share no
+ * module and the browser cannot import from the server's. Nothing enforces the agreement, so the
+ * cheap thing that can be done is done: the same normalisation, through `Date`, rather than a string
+ * slice that quietly disagrees the moment a schedule arrives spelled `+00:00` instead of `Z`.
+ */
 export function describeSchedule(schedule: RoutineSchedule): string {
   if (schedule.type === "once") {
-    return `Once, at ${schedule.at.replace("T", " ").slice(0, 16)} UTC`;
+    return `Once, at ${new Date(schedule.at).toISOString().replace("T", " ").slice(0, 16)} UTC`;
   }
   if (schedule.weekdays.length === 0) return "Never, no days are selected";
   if (schedule.weekdays.length === 7)
