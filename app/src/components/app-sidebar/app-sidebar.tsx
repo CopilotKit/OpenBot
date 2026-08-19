@@ -1,5 +1,6 @@
 import {
   IconBolt,
+  IconClockPlay,
   IconLogout,
   IconPlus,
   IconSearch,
@@ -284,6 +285,30 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <IconBox />
               </div>
               <span className="text-sm trackint-tight">Skills</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            {/*
+             * Beside Skills rather than inside Admin, and for the same reason: a routine is work a
+             * person schedules for their own Bot, not a deployment-wide setting. What an
+             * administrator governs is the boundary those runs meet, which is already in Admin.
+             */}
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/routines"
+                  activeProps={{
+                    className: "bg-foreground/5",
+                  }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconClockPlay />
+              </div>
+              <span className="text-sm trackint-tight">Routines</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

@@ -29,6 +29,7 @@ import {
   type IdentifyActor,
   type IdentifyUser,
   mountCopilotRuntime,
+  resolveRuntimeAgents,
 } from "./copilot";
 import {
   createCredentialAdminService,
@@ -37,6 +38,10 @@ import {
 } from "./credentials";
 import { createDatabase } from "./db/client";
 import { createPluginStore } from "./plugins/store";
+import { startWebhookReceiver } from "./routines/receiver";
+import { createRoutineRunner } from "./routines/runner";
+import { createScheduler } from "./routines/scheduler";
+import { createRoutineStore } from "./routines/store";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -281,6 +286,95 @@ process.on("unhandledRejection", (reason) => {
   );
 });
 
+/**
+ * The only path to an acting call, held in a name rather than built inline.
+ *
+ * Two things need it now: the computer routes, which the browser calls, and the routine runner,
+ * which nothing calls because nobody is there. They must be the same gateway rather than two, or the
+ * boundary an administrator wrote would apply to one of them and not the other, and which one would
+ * depend on which object a call happened to be holding.
+ */
+const computerGateway = computerClient
+  ? createComputerGateway({
+      client: computerClient,
+      auditStore: bootAuditStore,
+      // Read on every decision rather than captured once, so a rule an administrator adds while the
+      // server is running applies to the very next action instead of after a restart.
+      policy: () => policyStore.get(),
+      // Stop, reset and the listing act on containers when there are containers to act on.
+      ...(supervisor ? { supervisor } : {}),
+    })
+  : undefined;
+
+const routineStore = createRoutineStore(database, bootAuditStore);
+
+/**
+ * The unattended runner, and the clock that drives it.
+ *
+ * Both need a computer, because a routine that cannot browse or write a file is a routine that can
+ * only talk to itself. Without one they are absent and the routes say so, rather than existing and
+ * failing on the first tool call.
+ *
+ * The owner is resolved as an ordinary user, never as an administrator, whatever role they hold
+ * while signed in. A routine is work left running, and the Bots it may reach should be the ones its
+ * owner personally has: their own and the deployment's public ones. Nobody should be able to leave
+ * an elevated run going and then change job.
+ */
+const scheduler = computerGateway
+  ? createScheduler({
+      store: routineStore,
+      runner: createRoutineRunner({
+        gateway: computerGateway,
+        resolveAgent: async ({ agentId, actor }) => {
+          const agents = await resolveRuntimeAgents(
+            () => loadAgentsForActor({ id: actor.id, role: "user" }),
+            tenantPackage.model,
+            () =>
+              resolveModelApiKey({
+                encryptionKey: config.keyEncryptionKey,
+                reader: credentialStore,
+                provider: tenantPackage.model.provider,
+                keyId: tenantPackage.model.credentialSecretRef,
+                environment: process.env,
+              }),
+          );
+          return agents[agentId] ?? null;
+        },
+      }),
+      // The same namespace every other conversation is minted in, so an unattended run's thread is
+      // found where a person expects to find their conversations rather than in a space of its own.
+      threadIdFor: () => threadIdentity.mint(),
+    })
+  : undefined;
+
+if (scheduler && config.routines.schedulerEnabled) {
+  scheduler.start();
+} else {
+  // Said out loud at boot. A deployment whose routines never fire looks exactly like one whose
+  // routines all found nothing, and the difference is a variable nobody remembers setting.
+  console.warn(
+    scheduler
+      ? "ROUTINE_SCHEDULER is off: routines can be written and run by hand, and nothing fires on its own."
+      : "No computer is configured, so routines cannot run. Set AGENT_COMPUTER_URL to enable them.",
+  );
+}
+
+/**
+ * The public door, on its own listener.
+ *
+ * Started only when there is something for a delivery to start. A port that accepts deliveries and
+ * can do nothing with them is worse than a closed one: the sender is told 202 and the work never
+ * happens.
+ */
+const webhookReceiver = scheduler
+  ? startWebhookReceiver({
+      port: config.routines.webhookPort,
+      hostname: config.routines.webhookHost,
+      store: routineStore,
+      dispatch: (work) => scheduler.runFromWebhook(work),
+    })
+  : undefined;
+
 const app = createApp(
   config,
   auth,
@@ -319,18 +413,8 @@ const app = createApp(
     identifyActor,
   ),
   computerClient,
-  // The only path to an acting call.
-  computerClient
-    ? createComputerGateway({
-        client: computerClient,
-        auditStore: bootAuditStore,
-        // Read on every decision rather than captured once, so a rule an administrator adds while the
-        // server is running applies to the very next action instead of after a restart.
-        policy: () => policyStore.get(),
-        // Stop, reset and the listing act on containers when there are containers to act on.
-        ...(supervisor ? { supervisor } : {}),
-      })
-    : undefined,
+  // The only path to an acting call, shared with the unattended runner above.
+  computerGateway,
   policyStore,
   // Bots as durable objects, and the channels they run in.
   agentProfileStore,
@@ -347,6 +431,12 @@ const app = createApp(
   sandboxedStore,
   // How a thread that has no channel is named, so the direct Bot chat is in the same namespace.
   threadIdentity,
+  // Routines and their triggers. The store is mounted whether or not the clock is running, so a
+  // deployment with the scheduler off can still be looked at and edited.
+  routineStore,
+  // Passed only when the clock is actually running, so Run now refuses in words rather than
+  // reporting success and doing nothing.
+  config.routines.schedulerEnabled ? scheduler : undefined,
 );
 
 /**
@@ -488,7 +578,14 @@ if (config.devNoAuth) {
 // way out, so a watch-mode restart does not leave one behind on every reload.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void channelActivityListener.stop().finally(() => process.exit(0));
+    // The clock and the public port go down with the process rather than after it. A receiver left
+    // listening through a watch-mode restart takes the port with it, and the next boot fails on an
+    // address already in use for a reason nothing on screen explains.
+    scheduler?.stop();
+    void Promise.allSettled([
+      channelActivityListener.stop(),
+      webhookReceiver?.stop() ?? Promise.resolve(),
+    ]).finally(() => process.exit(0));
   });
 }
 

@@ -112,6 +112,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 | `/channel/:id`       | Converse with one coworker and view its live screen/profile panel. |
 | `/bot`               | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/skills`            | Create and enable personal skills.                                 |
+| `/routines`          | Schedule unattended work, run one now, and read its run history.   |
 | `/settings`          | User preferences.                                                  |
 | `/admin/connectors`  | Configure deployment knowledge sources.                            |
 | `/admin/credentials` | Store write-only encrypted credentials.                            |
@@ -120,6 +121,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 | `/admin/components`  | Publish components and govern which Bots may use them.             |
 | `/admin/playground`  | Draft and publish sandboxed components in the browser.             |
 | `/admin/plugins`     | Configure MCP servers, MCP grants, and deployment skills.          |
+| `/admin/webhooks`    | Create webhook triggers, confirm a first delivery, rotate secrets. |
 | `/admin/audit`       | Review permitted, refused, and failed actions.                     |
 
 ## Features
@@ -133,6 +135,8 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 - **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
 - **Governed MCP**: a curated catalogue ships for Atlassian, Box, Slack, Salesforce and ServiceNow. Custom servers must pass URL checks, and any tool not positively classified as a read is treated as a write.
 - **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer.
+- **Routines run unattended, through the same gateway**: a scheduled run drives the Bot server side with no browser in the loop, and every tool call still goes through the gateway, so the same policy decides it and the same audit row records it. A window the deployment slept through is recorded as `missed` rather than fired late. `run.unattended` is a policy attribute, so a deployment can write `run.unattended && intent == "activate"` to let a routine read and never press.
+- **Webhook triggers on their own port**: deliveries arrive on `ROUTINE_WEBHOOK_PORT` (default `PORT + 1`), which serves `/health` and `/hooks/:endpointId` and nothing else. A bearer secret is stored only as a hash and compared in constant time, and a new trigger keeps its first authenticated delivery as a sample and runs nothing until a person has looked at it.
 - **An audit trail you can read**: `/admin/audit` lists what was permitted, what was refused and what failed, and every refusal carries the rule that caused it.
 - **Credentials encrypted at rest**: stored through `/admin/credentials`, never returned by an API, and redacted from audit events.
 - **Loopback by default**: computers bind to `127.0.0.1` and require a per-container token, so nothing reaches a logged-in browser by knowing its port.

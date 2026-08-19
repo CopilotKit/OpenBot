@@ -141,6 +141,51 @@ export const auditEventTypes = [
   "component.function_called",
   "component.function_refused",
   "component.function_failed",
+
+  /*
+   * Standing work: who told a Bot to do something on its own, and when they changed their mind.
+   *
+   * A routine is a grant of unattended work. Every other grant in this trail records who made it,
+   * and this one has more reason to than most: the thing being granted is permission to act while
+   * nobody is watching, and the person who wrote it will not be there when it happens. The prompt is
+   * deliberately not in these payloads, for the same reason typed text is not in a computer action.
+   */
+  "routine.created",
+  "routine.updated",
+  "routine.deleted",
+
+  /*
+   * What actually happened at eight o'clock.
+   *
+   * Started and finished are separate rows because a run that took the process down with it would
+   * otherwise leave nothing behind, and "it never started" and "it started and we lost the end of
+   * it" are different facts about a Bot that was acting unsupervised.
+   *
+   * `routine.run_missed` is the one that would be easy to leave out and must not be. A deployment
+   * that was not running at eight o'clock did not do the eight o'clock work, and the two wrong
+   * answers are firing it at noon as though nothing had happened and recording nothing at all. A
+   * person reading a run history needs to be able to tell "it ran and found nothing" from "it never
+   * ran", and only this row can tell them.
+   */
+  "routine.run_started",
+  "routine.run_finished",
+  "routine.run_failed",
+  "routine.run_missed",
+
+  /*
+   * The one door in this product that opens to somebody who has not signed in.
+   *
+   * Creating a trigger and rotating its secret are recorded because they are the two moments the
+   * door's key changes hands. `webhook.received` and `webhook.rejected` are recorded for every
+   * delivery, including the refused ones, because an endpoint on the public internet gets probed and
+   * "this endpoint was called forty times last night with the wrong secret" is exactly what a trail
+   * exists to be able to say. Neither row carries the secret that was presented: a failed guess is
+   * still somebody's secret somewhere.
+   */
+  "webhook.trigger_created",
+  "webhook.trigger_rotated",
+  "webhook.received",
+  "webhook.rejected",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

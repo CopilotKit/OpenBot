@@ -798,6 +798,10 @@ export function createPluginStore(options: PluginStoreOptions) {
         tool: { name: toolNameFor(input.ref) },
         bot: { id: input.botId },
         actor: { id: input.actorId },
+        // Tool calls arrive from a person's browser; the unattended runner offers computer tools and
+        // nothing else. Said rather than left absent for the same reason as everything below it: an
+        // absent field makes any rule naming it unevaluable, and unevaluable reads as a match.
+        run: { unattended: false },
         page: { url: "", host: "" },
         element: { ref: "", role: "", name: "", type: "" },
         key: "",

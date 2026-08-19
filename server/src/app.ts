@@ -28,6 +28,9 @@ import type { ConnectorAdminService } from "./connectors";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
+import { createRoutineRoutes } from "./routines/routes";
+import type { Scheduler } from "./routines/scheduler";
+import type { RoutineStore } from "./routines/store";
 import type { PackageStatusReader } from "./tenant-package";
 
 export function createApp(
@@ -95,6 +98,19 @@ export function createApp(
    * says nothing about which deployment the conversation belongs to.
    */
   threadIdentity?: ThreadIdentity,
+  /**
+   * Work a Bot does without being asked, and the triggers other systems can start it with.
+   *
+   * Absent leaves the routes unmounted rather than mounted and failing, the same stance the computer
+   * takes: a capability this deployment does not have should be missing, not broken.
+   */
+  routineStore?: RoutineStore,
+  /**
+   * The clock. Absent when a deployment has switched it off, which leaves routines writable and Run
+   * now refusing in words rather than the page disappearing: somebody who wrote a routine should be
+   * told the deployment is not running them, not left wondering why nothing happens.
+   */
+  scheduler?: Scheduler,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -353,6 +369,13 @@ export function createApp(
 
   if (threadIdentity) {
     app.route("/api/threads", createThreadRoutes(threadIdentity, requireUser));
+  }
+
+  if (routineStore) {
+    app.route(
+      "/api/routines",
+      createRoutineRoutes(routineStore, scheduler, requireUser),
+    );
   }
 
   return app;

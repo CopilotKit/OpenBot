@@ -20,6 +20,10 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
     tool: { name: "computer_click" },
     bot: { id: "risk-analyst" },
     actor: { id: "dev-local-user" },
+    // Somebody is at the screen unless a case says otherwise. Present on every context here for the
+    // reason the field exists: an absent one makes any rule naming it unevaluable, and this engine
+    // reads unevaluable as a match.
+    run: { unattended: false },
     page: { url: "https://example.com/order", host: "example.com" },
     element: { ref: "e13", role: "button", name: "Submit order" },
     ...overrides,
@@ -216,6 +220,7 @@ describe("a rule written about what an action does", () => {
     tool: { name: "computer_click" },
     bot: { id: "b" },
     actor: { id: "a" },
+    run: { unattended: false },
     page: { url: "https://example.com/", host: "example.com" },
     intent: "activate",
     ...extra,
@@ -306,6 +311,7 @@ describe("a rule that names an identifier only some actions carry", () => {
     tool: { name: "computer_navigate" },
     bot: { id: "b" },
     actor: { id: "a" },
+    run: { unattended: false },
     page: { url: "https://httpbin.org/forms/post", host: "httpbin.org" },
     intent: "navigate",
   };
@@ -348,5 +354,47 @@ describe("a rule that names an identifier only some actions carry", () => {
       },
     );
     expect(decision.allowed).toBe(false);
+  });
+});
+
+/**
+ * A boundary that can be stricter about work nobody is watching.
+ *
+ * The second case is the one that matters. `run.unattended` is only useful if the same rule leaves
+ * an attended click alone, and that is not automatic: this engine treats an expression it cannot
+ * evaluate as a match, so a context that sometimes omitted the field would turn a rule about
+ * routines into a rule that refuses everybody.
+ */
+describe("a rule about whether anybody is watching", () => {
+  const rule = 'run.unattended && intent == "activate"';
+  const policy: ActionPolicy = {
+    mode: "enforce",
+    deny: [rule],
+    allow: ["true"],
+  };
+
+  test("refuses a scheduled run pressing a button", () => {
+    const decision = evaluateActionPolicy(
+      policy,
+      context({ intent: "activate", run: { unattended: true } }),
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.matched).toBe(rule);
+  });
+
+  test("leaves the same click alone when somebody is at the screen", () => {
+    const decision = evaluateActionPolicy(
+      policy,
+      context({ intent: "activate", run: { unattended: false } }),
+    );
+    expect(decision.allowed).toBe(true);
+  });
+
+  test("still lets the scheduled run read the page", () => {
+    const decision = evaluateActionPolicy(
+      policy,
+      context({ intent: "read", run: { unattended: true } }),
+    );
+    expect(decision.allowed).toBe(true);
   });
 });

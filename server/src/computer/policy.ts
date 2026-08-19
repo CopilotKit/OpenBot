@@ -46,6 +46,25 @@ export type PolicyContext = {
   bot: { id: string };
   page: { url: string; host: string };
   actor: { id: string };
+  /**
+   * Whether anybody is watching this run.
+   *
+   * A scheduled or webhook-triggered run has no person at the screen: nobody can take the wheel,
+   * nobody can answer a question, and nobody notices the wrong button being pressed until the
+   * consequence arrives. That is a real difference in risk from the same action taken while somebody
+   * is sitting there, and until now the policy could not see it, so a deployment had to choose one
+   * boundary for both.
+   *
+   * With this a rule can be stricter about work nobody is supervising without being stricter about
+   * everything: `run.unattended && intent == "activate"` lets a routine read, browse and write
+   * notes, and forbids it pressing anything.
+   *
+   * Always present, never optional. This engine treats an expression it cannot evaluate as a match,
+   * which for a deny rule means refusing. A context that sometimes omitted this field would turn
+   * every rule naming it into a rule that refuses every attended action too, which is the opposite
+   * of what whoever wrote it meant. Same reasoning as the neutral values plugins/store.ts fills in.
+   */
+  run: { unattended: boolean };
   element?: {
     ref: string;
     role: string;

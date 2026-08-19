@@ -8,6 +8,7 @@ import {
   IconPlugConnected,
   IconPuzzle,
   IconShieldCheck,
+  IconWebhook,
 } from "@tabler/icons-react";
 import {
   createFileRoute,
@@ -101,6 +102,12 @@ const SECTIONS: {
         description: "Write a component and watch it render as you type.",
         icon: IconCode,
         linkOptions: { to: "/admin/playground" },
+      },
+      {
+        title: "Webhooks",
+        description: "URLs another system can call to set a Bot working.",
+        icon: IconWebhook,
+        linkOptions: { to: "/admin/webhooks" },
       },
     ],
   },

@@ -396,4 +396,35 @@ describe("the computer gateway", () => {
     // could not identify what was touched, rather than omitting the field.
     expect(rows[0]?.payload.element).toBe("not in the current snapshot");
   });
+
+  /*
+   * The end of the chain a routine's actions travel down. The runner marks its actor as unattended,
+   * the gateway puts that in the policy context, and a rule can refuse on it. Asserted here rather
+   * than only in the policy tests because the gateway is where the two meet, and a context that
+   * simply never set the field would leave both halves passing and the boundary inert.
+   */
+  test("a rule can refuse an action because nobody is watching", async () => {
+    const { gateway, calls } = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ['run.unattended && intent == "activate"'],
+    });
+
+    await expect(
+      gateway.click(
+        "default",
+        "bot-1",
+        { ...ACTOR, unattended: true },
+        { ref: "e9", snapshotId: 7 },
+      ),
+    ).rejects.toThrow(ActionRefusedError);
+    expect(calls).toEqual([]);
+
+    // And the same click, by the same person, with somebody at the screen, goes through. A rule that
+    // could not tell those apart would be a rule nobody could switch on.
+    await gateway.click("default", "bot-1", ACTOR, {
+      ref: "e9",
+      snapshotId: 7,
+    });
+    expect(calls).toEqual(["click"]);
+  });
 });

@@ -8,6 +8,7 @@ import {
   IconPlugConnected,
   IconPuzzle,
   IconShieldCheck,
+  IconWebhook,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
@@ -83,6 +84,13 @@ const GROUPS: {
         title: "Playground",
         icon: IconCode,
         linkOptions: { to: "/admin/playground" },
+      },
+      // Under what Bots can do rather than what they can reach: a trigger does not grant a Bot
+      // anything, it lets somebody else start work the Bot could already do.
+      {
+        title: "Webhooks",
+        icon: IconWebhook,
+        linkOptions: { to: "/admin/webhooks" },
       },
     ],
   },

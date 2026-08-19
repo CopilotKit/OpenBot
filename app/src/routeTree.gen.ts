@@ -16,6 +16,7 @@ import { Route as AuthedAdminRouteRouteImport } from './routes/_authed/admin/rou
 import { Route as AuthedSettingsRouteRouteImport } from './routes/_authed/settings/route'
 import { Route as AuthedAppIndexRouteImport } from './routes/_authed/_app/index'
 import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
+import { Route as AuthedAppRoutinesRouteImport } from './routes/_authed/_app/routines'
 import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skills'
 import { Route as AuthedAdminIndexRouteImport } from './routes/_authed/admin/index'
 import { Route as AuthedAdminAuditRouteImport } from './routes/_authed/admin/audit'
@@ -26,6 +27,7 @@ import { Route as AuthedAdminConnectorsRouteImport } from './routes/_authed/admi
 import { Route as AuthedAdminCredentialsRouteImport } from './routes/_authed/admin/credentials'
 import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admin/playground'
 import { Route as AuthedAdminPluginsRouteImport } from './routes/_authed/admin/plugins'
+import { Route as AuthedAdminWebhooksRouteImport } from './routes/_authed/admin/webhooks'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedAppAgentsIndexRouteImport } from './routes/_authed/_app/agents/index'
 import { Route as AuthedAppChannelChannelIdRouteImport } from './routes/_authed/_app/channel/$channelId'
@@ -63,6 +65,11 @@ const AuthedAppIndexRoute = AuthedAppIndexRouteImport.update({
 const AuthedAppBotRoute = AuthedAppBotRouteImport.update({
   id: '/bot',
   path: '/bot',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppRoutinesRoute = AuthedAppRoutinesRouteImport.update({
+  id: '/routines',
+  path: '/routines',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAppSkillsRoute = AuthedAppSkillsRouteImport.update({
@@ -115,6 +122,11 @@ const AuthedAdminPluginsRoute = AuthedAdminPluginsRouteImport.update({
   path: '/plugins',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
+const AuthedAdminWebhooksRoute = AuthedAdminWebhooksRouteImport.update({
+  id: '/webhooks',
+  path: '/webhooks',
+  getParentRoute: () => AuthedAdminRouteRoute,
+} as any)
 const AuthedSettingsIndexRoute = AuthedSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -149,6 +161,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AuthedAdminRouteRouteWithChildren
   '/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/bot': typeof AuthedAppBotRoute
+  '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -158,6 +171,7 @@ export interface FileRoutesByFullPath {
   '/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/plugins': typeof AuthedAdminPluginsRoute
+  '/admin/webhooks': typeof AuthedAdminWebhooksRoute
   '/admin/': typeof AuthedAdminIndexRoute
   '/settings/': typeof AuthedSettingsIndexRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
@@ -169,6 +183,7 @@ export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
   '/sign': typeof SignRoute
   '/bot': typeof AuthedAppBotRoute
+  '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -178,6 +193,7 @@ export interface FileRoutesByTo {
   '/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/plugins': typeof AuthedAdminPluginsRoute
+  '/admin/webhooks': typeof AuthedAdminWebhooksRoute
   '/admin': typeof AuthedAdminIndexRoute
   '/settings': typeof AuthedSettingsIndexRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
@@ -193,6 +209,7 @@ export interface FileRoutesById {
   '/_authed/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/_authed/_app': typeof AuthedAppRouteWithChildren
   '/_authed/_app/bot': typeof AuthedAppBotRoute
+  '/_authed/_app/routines': typeof AuthedAppRoutinesRoute
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
   '/_authed/admin/audit': typeof AuthedAdminAuditRoute
   '/_authed/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -202,6 +219,7 @@ export interface FileRoutesById {
   '/_authed/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/_authed/admin/plugins': typeof AuthedAdminPluginsRoute
+  '/_authed/admin/webhooks': typeof AuthedAdminWebhooksRoute
   '/_authed/_app/': typeof AuthedAppIndexRoute
   '/_authed/admin/': typeof AuthedAdminIndexRoute
   '/_authed/settings/': typeof AuthedSettingsIndexRoute
@@ -218,6 +236,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/settings'
     | '/bot'
+    | '/routines'
     | '/skills'
     | '/admin/audit'
     | '/admin/boundaries'
@@ -227,6 +246,7 @@ export interface FileRouteTypes {
     | '/admin/credentials'
     | '/admin/playground'
     | '/admin/plugins'
+    | '/admin/webhooks'
     | '/admin/'
     | '/settings/'
     | '/channel/$channelId'
@@ -238,6 +258,7 @@ export interface FileRouteTypes {
     | '/'
     | '/sign'
     | '/bot'
+    | '/routines'
     | '/skills'
     | '/admin/audit'
     | '/admin/boundaries'
@@ -247,6 +268,7 @@ export interface FileRouteTypes {
     | '/admin/credentials'
     | '/admin/playground'
     | '/admin/plugins'
+    | '/admin/webhooks'
     | '/admin'
     | '/settings'
     | '/channel/$channelId'
@@ -261,6 +283,7 @@ export interface FileRouteTypes {
     | '/_authed/settings'
     | '/_authed/_app'
     | '/_authed/_app/bot'
+    | '/_authed/_app/routines'
     | '/_authed/_app/skills'
     | '/_authed/admin/audit'
     | '/_authed/admin/boundaries'
@@ -270,6 +293,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/credentials'
     | '/_authed/admin/playground'
     | '/_authed/admin/plugins'
+    | '/_authed/admin/webhooks'
     | '/_authed/_app/'
     | '/_authed/admin/'
     | '/_authed/settings/'
@@ -333,6 +357,13 @@ declare module '@tanstack/react-router' {
       path: '/bot'
       fullPath: '/bot'
       preLoaderRoute: typeof AuthedAppBotRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/routines': {
+      id: '/_authed/_app/routines'
+      path: '/routines'
+      fullPath: '/routines'
+      preLoaderRoute: typeof AuthedAppRoutinesRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/skills': {
@@ -405,6 +436,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminPluginsRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
+    '/_authed/admin/webhooks': {
+      id: '/_authed/admin/webhooks'
+      path: '/webhooks'
+      fullPath: '/admin/webhooks'
+      preLoaderRoute: typeof AuthedAdminWebhooksRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
     '/_authed/settings/': {
       id: '/_authed/settings/'
       path: '/'
@@ -465,6 +503,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminCredentialsRoute: typeof AuthedAdminCredentialsRoute
   AuthedAdminPlaygroundRoute: typeof AuthedAdminPlaygroundRoute
   AuthedAdminPluginsRoute: typeof AuthedAdminPluginsRoute
+  AuthedAdminWebhooksRoute: typeof AuthedAdminWebhooksRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
 }
 
@@ -477,6 +516,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminCredentialsRoute: AuthedAdminCredentialsRoute,
   AuthedAdminPlaygroundRoute: AuthedAdminPlaygroundRoute,
   AuthedAdminPluginsRoute: AuthedAdminPluginsRoute,
+  AuthedAdminWebhooksRoute: AuthedAdminWebhooksRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
 }
 
@@ -496,6 +536,7 @@ const AuthedSettingsRouteRouteWithChildren =
 
 interface AuthedAppRouteChildren {
   AuthedAppBotRoute: typeof AuthedAppBotRoute
+  AuthedAppRoutinesRoute: typeof AuthedAppRoutinesRoute
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
   AuthedAppIndexRoute: typeof AuthedAppIndexRoute
   AuthedAppChannelChannelIdRoute: typeof AuthedAppChannelChannelIdRoute
@@ -505,6 +546,7 @@ interface AuthedAppRouteChildren {
 
 const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppBotRoute: AuthedAppBotRoute,
+  AuthedAppRoutinesRoute: AuthedAppRoutinesRoute,
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
   AuthedAppIndexRoute: AuthedAppIndexRoute,
   AuthedAppChannelChannelIdRoute: AuthedAppChannelChannelIdRoute,

@@ -56,6 +56,15 @@ export type ActionActor = {
   id: string;
   /** Null unless this is a real row in `users`, because the audit table has a foreign key to it. */
   userId?: string;
+  /**
+   * True when nobody is watching: a routine on a schedule, or a webhook handing the Bot work.
+   *
+   * The person is still named above, because a routine belongs to somebody and the trail has to say
+   * whose authority the run carried. What this adds is that they are not present, which the boundary
+   * can be written against. Absent means attended, so every existing caller keeps meaning what it
+   * always meant.
+   */
+  unattended?: boolean;
 };
 
 export type ComputerGatewayOptions = {
@@ -173,6 +182,10 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       tool: { name: toolName },
       bot: { id: botId },
       actor: { id: actor.id },
+      // Stated on every action, attended or not, so a rule naming it is evaluable in both cases. See
+      // the note on PolicyContext.run: a field that is sometimes absent is a deny rule that
+      // sometimes refuses everything.
+      run: { unattended: actor.unattended === true },
       page: { url: pageUrl, host: hostOf(pageUrl) },
       ...(intent ? { intent } : {}),
       ...(subject.key ? { key: subject.key } : {}),

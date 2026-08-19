@@ -255,6 +255,8 @@ const NAMED_TARGETS = new Set([
   "mcp_server",
   "skill",
   "credential",
+  "routine",
+  "webhook_trigger",
 ]);
 
 const DECISIONS: Record<string, string> = {
@@ -285,6 +287,21 @@ const DECISIONS: Record<string, string> = {
   "mcp.call_succeeded": "Called on this Bot's behalf",
   "mcp.call_rejected": "Blocked",
   "mcp.call_failed": "The server did not answer",
+
+  "routine.created": "Routine created",
+  "routine.updated": "Routine changed",
+  "routine.deleted": "Routine deleted",
+  "routine.run_started": "A routine started running",
+  "routine.run_finished": "A routine finished",
+  "routine.run_failed": "A routine did not work",
+  // Not a failure of the Bot. The deployment was not running when the window came round, which is a
+  // fact about the machine, and reading it as an error sends somebody to check a prompt that is fine.
+  "routine.run_missed": "Missed: nothing was running",
+
+  "webhook.trigger_created": "Trigger created",
+  "webhook.trigger_rotated": "Trigger secret rotated",
+  "webhook.received": "A delivery arrived",
+  "webhook.rejected": "A delivery was refused",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",

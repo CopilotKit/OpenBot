@@ -33,6 +33,13 @@ const PRESETS: { label: string; rule: string; cost?: string }[] = [
     cost: "A password box the page labels something else is not covered, the rule matches the label.",
   },
   {
+    label: "Let a scheduled run look, never press",
+    // `run.unattended` is true for a routine on its schedule and for a webhook delivery, and false
+    // whenever somebody is at the screen, so the same Bot keeps working normally in a conversation.
+    rule: 'run.unattended && intent == "activate"',
+    cost: "A routine can browse, read and write notes, and cannot press anything at all — including a Next button it needs to get past a page it was only going to read.",
+  },
+  {
     label: "Stay off social media",
     rule: 'intent == "navigate" && (contains(page.host, "facebook.com") || contains(page.host, "x.com"))',
     cost: "Only the two hosts named. A link that redirects there from somewhere else is allowed.",

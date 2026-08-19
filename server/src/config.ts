@@ -74,6 +74,37 @@ export type DeploymentConfig = {
      */
     policy?: ActionPolicy;
   };
+  /** Work a Bot does without being asked, and the port another system can ask for it on. */
+  routines: RoutineSettings;
+};
+
+export type RoutineSettings = {
+  /**
+   * Whether the clock runs.
+   *
+   * Off leaves routines writable, listable and runnable by hand, and stops anything firing on its
+   * own. That is the shape a second copy of a deployment needs: a developer with a database dump
+   * should not have somebody's real routines browsing their real systems at eight o'clock because
+   * they restored a backup. Off is a whole-deployment answer rather than a per-routine one for
+   * exactly that reason, and it is loud at boot.
+   */
+  schedulerEnabled: boolean;
+  /**
+   * Where deliveries arrive.
+   *
+   * A port of its own, not a path on the API. This is the one surface meant to be reachable by a
+   * third party, and the way to keep the rest of the API away from it is for the rest of the API not
+   * to be on it; see routines/receiver.ts. Defaults to one above `PORT` so a laptop needs no
+   * configuration and two ports are still obviously related.
+   */
+  webhookPort: number;
+  /**
+   * What it binds to. 127.0.0.1 unless a deployment says otherwise.
+   *
+   * The same posture as everything else here: a webhook endpoint reachable from the internet should
+   * be a decision somebody made, not one they inherited by starting the server.
+   */
+  webhookHost: string;
 };
 
 type Environment = Record<string, string | undefined>;
@@ -314,6 +345,39 @@ function actionPolicy(environment: Environment): ActionPolicy | undefined {
   return result.policy;
 }
 
+/**
+ * The routine settings, with the webhook port defaulting to one above the API's.
+ *
+ * A bad port refuses to start rather than falling back to the default. An operator who set
+ * ROUTINE_WEBHOOK_PORT meant to move the endpoint, and quietly serving it on the port they were
+ * moving it off is the one outcome that would surprise them at the worst moment. Same reasoning as
+ * the action policy above: configuration the product cannot honour belongs at the boot boundary.
+ */
+function routineSettings(environment: Environment): RoutineSettings {
+  const apiPort = Number.parseInt(environment.PORT ?? "3001", 10);
+  const configured = optional(environment, "ROUTINE_WEBHOOK_PORT");
+  let webhookPort = (Number.isFinite(apiPort) ? apiPort : 3001) + 1;
+
+  if (configured) {
+    const parsed = Number.parseInt(configured, 10);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+      throw new Error("ROUTINE_WEBHOOK_PORT must be a port number");
+    }
+    webhookPort = parsed;
+  }
+
+  const scheduler = optional(environment, "ROUTINE_SCHEDULER") ?? "on";
+  if (scheduler !== "on" && scheduler !== "off") {
+    throw new Error('ROUTINE_SCHEDULER must be "on" or "off"');
+  }
+
+  return {
+    schedulerEnabled: scheduler === "on",
+    webhookPort,
+    webhookHost: optional(environment, "ROUTINE_WEBHOOK_HOST") ?? "127.0.0.1",
+  };
+}
+
 export function loadConfig(
   environment: Environment = process.env,
 ): DeploymentConfig {
@@ -334,5 +398,6 @@ export function loadConfig(
     auth: authConfig(environment, google),
     devNoAuth: devAuthEnabled(environment),
     computer: computerConfig(environment),
+    routines: routineSettings(environment),
   };
 }
