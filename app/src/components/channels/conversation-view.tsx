@@ -1,11 +1,20 @@
 import type { Message } from "@ag-ui/core";
-import type { ReactNode } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { ChatTranscript } from "@/components/channels/chat-transcript";
 import {
   type AgentOption,
   type CommandOption,
   Composer,
   type ComposerDraft,
+  type QueueAction,
+  type QueuedMessage,
+  reduceQueue,
 } from "@/components/channels/composer";
 
 export function ConversationView({
@@ -16,6 +25,7 @@ export function ConversationView({
   commands,
   disabled = false,
   pending = false,
+  queueWhileBusy = false,
   onSubmit,
   onStop,
 }: {
@@ -30,10 +40,120 @@ export function ConversationView({
   commands?: readonly CommandOption[];
   disabled?: boolean;
   pending?: boolean;
+  /**
+   * Let somebody type at a Bot that is already working, and run what they typed when it finishes.
+   *
+   * Off by default, and asked for rather than assumed, because it is only true of a conversation
+   * that will still be here when the turn ends. The compose screen creates the channel on send and
+   * navigates away; a message parked there would go down with the unmount, and a message that
+   * silently disappears is a worse answer than a send button that will not go.
+   */
+  queueWhileBusy?: boolean;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
 }) {
+  /*
+   * THE QUEUE LIVES HERE BECAUSE BOTH HALVES OF IT DO.
+   *
+   * The composer is what knows a turn is in flight and is where a message is typed; the transcript
+   * is where the person has to be able to see that it landed. This is the nearest thing that owns
+   * them both, and putting the list in either one would mean handing it straight back out again.
+   *
+   * See `composer/queue.ts` for what this state is worth: it is memory in one tab, it does not
+   * survive a reload, and it is not an outbox.
+   */
+  const [queued, setQueued] = useState<readonly QueuedMessage[]>([]);
+  const queuedRef = useRef<readonly QueuedMessage[]>(queued);
+
+  /**
+   * A turn this screen started and has not seen finish.
+   *
+   * `pending` alone will not do. It says the agent is running, and there is a gap between calling
+   * `onSubmit` and the agent reporting itself as running in which a person typing quickly would
+   * otherwise have their second message read as the start of a second turn — two runs at once, on
+   * the same thread, racing each other's history.
+   *
+   * The composer tracks the same await for its own send button. Two trackers of one promise, which
+   * is duplication, and they cannot drift: they rise in the same tick and fall on the same resolve.
+   * The alternative is a callback out of the composer announcing an edge, which is a larger surface
+   * for the same fact.
+   */
+  const [running, setRunning] = useState(false);
+  const inFlight = pending || running;
+
+  /**
+   * Every change to the queue goes through here, so the ref and the state can never disagree.
+   *
+   * The ref is what the decisions read. React state is a render behind, and both callers below have
+   * to know what is actually queued at the moment they are called rather than at the moment they
+   * were last rendered — one of them is an effect firing on the same commit that emptied the list.
+   */
+  const apply = useCallback((action: QueueAction) => {
+    const next = reduceQueue(queuedRef.current, action);
+    queuedRef.current = next.queue;
+    setQueued(next.queue);
+    return next.run;
+  }, []);
+
+  const start = async (draft: ComposerDraft) => {
+    setRunning(true);
+    try {
+      await onSubmit(draft);
+    } finally {
+      setRunning(false);
+    }
+  };
+  /** Read through a ref so an inline `onSubmit` from the route does not re-run the drain effect. */
+  const startRef = useRef(start);
+  startRef.current = start;
+
+  /**
+   * Send now, or park it. Which one is the composer's call: it holds the only accurate view of
+   * whether a turn is in flight, and `reduceQueue` holds what follows from the answer.
+   */
+  const submit = useCallback(
+    (draft: ComposerDraft, whileBusy: boolean) => {
+      const run = apply({
+        busy: whileBusy,
+        draft,
+        id: crypto.randomUUID(),
+        type: "submit",
+      });
+      return run ? startRef.current(run) : undefined;
+    },
+    [apply],
+  );
+
+  /**
+   * The turn ended. Whatever was waiting for it goes now, as one message.
+   *
+   * KEYED ON THE TURN BEING OVER AND NOT ON HOW IT ENDED, which is what makes Stop useful rather
+   * than final: a person who parks a correction and then presses Stop has said "not that, this",
+   * and this is the line that hears the second half of it. A finished run, a failed one and a
+   * stopped one all arrive here the same way, so there is no stop path to forget.
+   *
+   * The one edge it watches is `inFlight` falling, and it does not watch the queue. Nothing can be
+   * parked while the conversation is idle: the composer only parks when it believes a turn is in
+   * flight, and it believes that from the same value this effect reads. A queue that grew here
+   * without a turn to wait for would be a queue that never drains, so if that ever becomes possible
+   * this dependency list is where it will show up.
+   */
+  useEffect(() => {
+    if (inFlight || queuedRef.current.length === 0) {
+      return;
+    }
+    const run = apply({ type: "settle" });
+    if (!run) {
+      return;
+    }
+    void startRef.current(run).catch(() => {
+      // Swallowed on purpose, and only here. A failed send from the composer throws so the composer
+      // can put the words back in the box; there is no box to put these back into, and the screen
+      // already reports a failed turn through its own notice.
+    });
+  }, [apply, inFlight]);
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-1 min-h-0">
@@ -51,6 +171,10 @@ export function ConversationView({
             .map((command) => command.name)
             .join(",")}
           messages={messages}
+          onRemoveQueued={(id) => {
+            apply({ id, type: "remove" });
+          }}
+          queued={queued}
         />
       </div>
       <div className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0">
@@ -61,9 +185,23 @@ export function ConversationView({
           className="w-full mt-auto"
           compact
           disabled={disabled}
+          onQueue={
+            queueWhileBusy
+              ? (draft) => {
+                  submit(draft, true);
+                }
+              : undefined
+          }
           onStop={onStop}
-          onSubmit={onSubmit}
-          pending={pending}
+          onSubmit={(draft) => submit(draft, false)}
+          /*
+           * `inFlight` rather than the `pending` this was given. A drained turn is started from the
+           * effect above rather than from the composer, so the composer's own send tracking knows
+           * nothing about it — told only `pending`, it would believe the conversation was idle for
+           * as long as the drained run took to start, and the next thing typed would open a third
+           * turn instead of joining the queue.
+           */
+          pending={inFlight}
         />
       </div>
     </div>

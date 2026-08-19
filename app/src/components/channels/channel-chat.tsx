@@ -336,6 +336,13 @@ export function ChannelChat({
           copilotkit.stopAgent({ agent });
         }}
         pending={agent.isRunning}
+        /*
+         * A channel outlives its turns, so it is the screen where waiting is worth offering. A
+         * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the
+         * moment this one is over — including when it is over because somebody pressed the button
+         * above.
+         */
+        queueWhileBusy
       />
     </ConversationProvider>
   );
