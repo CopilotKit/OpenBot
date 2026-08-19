@@ -1,6 +1,8 @@
 import { useFrontendTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
+import { ApprovalRequest } from "@/components/channels/approval-request";
 import { ToolLine } from "@/components/channels/tool-line";
+import { readApprovals } from "@/components/computer/approvals";
 import { ComputerView } from "@/components/computer/computer-view";
 import {
   type ControlState,
@@ -42,7 +44,101 @@ async function waitForPerson(
   return "gave up";
 }
 
+/**
+ * Wait for somebody to answer, then send the same call again with their answer on it.
+ *
+ * The retry is the whole reason this exists. A boundary that only stopped the Bot would cost the
+ * person the turn and everything the model had worked out to reach it, so the call is held open and
+ * re-issued unchanged; from the model's side an approved action looks exactly like an ordinary one
+ * that took a while.
+ */
+async function waitForApproval(
+  botId: string,
+  approvalId: string,
+  signal: AbortSignal | undefined,
+): Promise<"granted" | "declined" | "gave up" | "cancelled"> {
+  const deadline = Date.now() + WAIT_FOR_PERSON_MS;
+  while (Date.now() < deadline) {
+    // Stop must work out of this wait as well, or pressing it leaves a Bot parked on a question
+    // nobody is going to answer.
+    if (signal?.aborted) return "cancelled";
+    const approvals = await readApprovals(botId);
+    if (approvals) {
+      const mine = approvals.find((one) => one.id === approvalId);
+      // Gone from a list we did read means it expired and was swept, which is the same outcome as
+      // running out of patience here. A list we could NOT read says nothing, so it is not read as an
+      // answer.
+      if (!mine) return "gave up";
+      if (mine.granted === true) return "granted";
+      if (mine.granted === false) return "declined";
+    }
+    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+  }
+  return "gave up";
+}
+
+/**
+ * The same request, carrying an answer.
+ *
+ * Rebuilt rather than mutated, because every acting route is a POST of one JSON object and the
+ * approval is one more field on it. Sending the identical arguments matters: the server binds an
+ * approval to a fingerprint of the action, so a retry that differed in any way it hashes would be
+ * refused as a different action, which is exactly what that binding is for.
+ */
+function withApproval(
+  init: RequestInit | undefined,
+  approvalId: string,
+): RequestInit {
+  const sent =
+    typeof init?.body === "string"
+      ? (JSON.parse(init.body) as Record<string, unknown>)
+      : {};
+  return {
+    ...init,
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...sent, approvalId }),
+  };
+}
+
+/**
+ * One computer call, including the pause where a person is asked about it.
+ *
+ * The waiting lives here rather than in each tool's handler so that a tool cannot be added without
+ * it: an acting route that met an ask rule and got back a bare failure would report to the model
+ * that the action was impossible, when in fact nobody had been asked yet.
+ */
 async function callComputer(
+  botId: string,
+  path: string,
+  init?: RequestInit,
+  signal?: AbortSignal,
+): Promise<ToolOutcome> {
+  const outcome = await sendToComputer(botId, path, init, signal);
+  if (outcome.awaitingApproval !== true) return outcome;
+
+  const approvalId = String(outcome.approvalId ?? "");
+  const answer = await waitForApproval(botId, approvalId, signal);
+  if (answer === "granted") {
+    // Sent once, not through this function again. A second ask on the retry would mean the approval
+    // did not fit the action, and looping on that would hold the turn open until the deadline instead
+    // of telling the model something it can act on.
+    return sendToComputer(botId, path, withApproval(init, approvalId), signal);
+  }
+  if (answer === "cancelled") {
+    return { ok: false, reason: "Stopped.", stopped: true };
+  }
+  return answer === "declined"
+    ? { ok: false, refused: true, reason: "A person declined that." }
+    : {
+        ok: false,
+        reason:
+          "Nobody answered the request to allow that, so it did not happen. Say what you were " +
+          "waiting for rather than trying another way round it.",
+      };
+}
+
+async function sendToComputer(
   botId: string,
   path: string,
   init?: RequestInit,
@@ -75,6 +171,19 @@ async function callComputer(
   > | null;
 
   if (!response.ok) {
+    // Read before anything else a 409 can mean. The other two, stale refs and a person holding the
+    // wheel, are conditions the model reacts to; this one it must not see at all, because the caller
+    // above is going to wait and then send the very same request again.
+    if (response.status === 409 && body?.awaitingApproval === true) {
+      return {
+        ok: false,
+        awaitingApproval: true,
+        approvalId: body.approvalId ?? "",
+        question: body.question ?? "",
+        rule: body.rule ?? null,
+        reason: (body.error as string) ?? "Somebody is being asked about that.",
+      };
+    }
     return {
       ok: false,
       reason: (body?.error as string) ?? "That did not work.",
@@ -140,14 +249,24 @@ function labelOf(result: string | undefined): string | undefined {
 
 /**
  * A compact transcript line that distinguishes policy refusals from ordinary failures.
+ *
+ * While the action is still running it also carries the place a question about it appears. The card
+ * belongs on the line for the action it is about, in sequence, rather than somewhere else on the
+ * screen: a person deciding whether to allow a click wants to see what the Bot did to get there.
  */
 function ActionLine({
+  botId,
   label,
   detail,
   running,
   refused,
   failed,
 }: {
+  /**
+   * Whose computer this action is on. Only the acting tools pass it; a line for reading the page
+   * has nothing anybody could be asked about.
+   */
+  botId?: string;
   label: string;
   detail?: string;
   running?: boolean;
@@ -157,13 +276,18 @@ function ActionLine({
   failed?: boolean;
 }) {
   return (
-    <ToolLine
-      detail={detail}
-      failed={failed}
-      label={label}
-      refused={refused}
-      running={running}
-    />
+    <>
+      {botId ? (
+        <ApprovalRequest active={running === true} botId={botId} />
+      ) : null}
+      <ToolLine
+        detail={detail}
+        failed={failed}
+        label={label}
+        refused={refused}
+        running={running}
+      />
+    </>
   );
 }
 
@@ -211,6 +335,12 @@ export function ComputerTools() {
     },
     render: ({ status }) => (
       <div className="my-2">
+        {/*
+         * Above the screen rather than through ActionLine, because opening a page draws the live
+         * view instead of a line. A question about where the Bot is about to go still belongs
+         * beside it.
+         */}
+        <ApprovalRequest active={status !== "complete"} botId={bot.current} />
         <ComputerView computerId={bot.current} active={status !== "complete"} />
       </div>
     ),
@@ -292,6 +422,7 @@ export function ComputerTools() {
       ),
     render: ({ args, result, status }) => (
       <ActionLine
+        botId={bot.current}
         running={status !== "complete"}
         label="Filled in"
         detail={
@@ -336,6 +467,7 @@ export function ComputerTools() {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
+          botId={bot.current}
           running={status !== "complete"}
           label="Clicked"
           detail={
@@ -385,6 +517,7 @@ export function ComputerTools() {
       ),
     render: ({ args, result, status }) => (
       <ActionLine
+        botId={bot.current}
         running={status !== "complete"}
         label="Pressed"
         detail={typeof args?.key === "string" ? args.key : undefined}
@@ -571,6 +704,7 @@ export function ComputerTools() {
       const entries = Array.isArray(outcome.entries) ? outcome.entries : [];
       return (
         <ActionLine
+          botId={bot.current}
           running={status !== "complete"}
           label="Listed files"
           detail={
@@ -608,6 +742,7 @@ export function ComputerTools() {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
+          botId={bot.current}
           running={status !== "complete"}
           label="Read file"
           detail={
@@ -656,6 +791,7 @@ export function ComputerTools() {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
+          botId={bot.current}
           running={status !== "complete"}
           label={args?.append === true ? "Added to file" : "Saved file"}
           // Show the path, never file contents.
@@ -699,6 +835,7 @@ export function ComputerTools() {
       ),
     render: ({ result, status }) => (
       <ActionLine
+        botId={bot.current}
         running={status !== "complete"}
         label="Scrolled"
         refused={outcomeOf(result).refused === true}

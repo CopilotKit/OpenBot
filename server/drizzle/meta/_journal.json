@@ -8,6 +8,13 @@
       "when": 1786891733850,
       "tag": "0000_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787171220703,
+      "tag": "0001_gigantic_sumo",
+      "breakpoints": true
     }
   ]
 }

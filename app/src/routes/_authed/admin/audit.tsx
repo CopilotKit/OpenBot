@@ -34,9 +34,11 @@ const FILTERS = [
   { label: "Computer actions", search: "?eventType=computer.action_allowed" },
   {
     label: "Blocked",
-    // Include every refusal family, not only browser policy refusals.
+    // Include every refusal family, not only browser policy refusals. A person declining a request
+    // stopped an action just as surely as a deny rule did, and it leaves no action row of its own,
+    // so without it here the trail's answer to "was anything blocked" is missing a whole family.
     search:
-      "?eventType=computer.action_refused,mcp.call_rejected,component.refused,component.function_refused",
+      "?eventType=computer.action_refused,computer.approval_denied,mcp.call_rejected,component.refused,component.function_refused",
   },
   { label: "Did not happen", search: "?eventType=computer.action_failed" },
 ] as const;
@@ -126,6 +128,7 @@ function Row({
     allowed?: boolean;
     mode?: string;
     rule?: string | null;
+    approvedBy?: string;
     carriedOut?: boolean;
   };
   const element = payload.element as
@@ -134,9 +137,13 @@ function Row({
     | undefined;
   const refused =
     event.eventType === "computer.action_refused" ||
+    event.eventType === "computer.approval_denied" ||
     event.eventType === "component.refused" ||
     event.eventType === "component.function_refused" ||
     event.eventType === "mcp.call_rejected";
+  // The three rows a question leaves behind carry their rule at the top level rather than under a
+  // decision, because no decision was reached: the policy stopped and waited for a person.
+  const approval = event.eventType.startsWith("computer.approval_");
   // Allowed by policy but not carried out.
   const failed = event.eventType === "computer.action_failed";
 
@@ -228,10 +235,26 @@ function Row({
             {payload.failure}
           </div>
         ) : null}
+        {approval && typeof payload.reason === "string" ? (
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {payload.reason}
+          </div>
+        ) : null}
         {/* Show concrete policy rules, but suppress the uninformative default `true` allow rule. */}
         {decision.rule && decision.rule !== "true" ? (
           <div className="mt-0.5 font-mono text-xs text-muted-foreground">
             {decision.rule}
+          </div>
+        ) : null}
+        {approval && typeof payload.rule === "string" && payload.rule ? (
+          <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+            {payload.rule}
+          </div>
+        ) : null}
+        {/* Who stood behind an action, when the boundary asked and somebody said yes. */}
+        {typeof decision.approvedBy === "string" ? (
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            allowed by {decision.approvedBy}
           </div>
         ) : null}
         {decision.mode === "dry-run" && decision.carriedOut ? (
@@ -268,6 +291,9 @@ const DECISIONS: Record<string, string> = {
   "computer.secret_supplied": "A person supplied a secret",
   "computer.reset": "The computer was reset",
   "computer.stopped": "A person pressed stop",
+  "computer.approval_requested": "The boundary asked a person",
+  "computer.approval_granted": "A person allowed it",
+  "computer.approval_denied": "A person declined it",
 
   "component.granted": "Granted to this Bot",
   "component.revoked": "Taken away from this Bot",

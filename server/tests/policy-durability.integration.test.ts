@@ -38,13 +38,31 @@ describe("a boundary set while running", () => {
     const before = createPolicyStore(configured, database);
     await before.load();
     await before.set(
-      { mode: "enforce", deny: [rule], allow: ["true"] },
+      { mode: "enforce", deny: [rule], ask: [], allow: ["true"] },
       "admin@example.test",
     );
 
     const after = createPolicyStore(configured, database);
     expect(await after.load()).toBe("the database");
     expect(after.get().deny).toEqual([rule]);
+  });
+
+  test("the rules that ask a person survive a restart too", async () => {
+    // The list that stops and asks has to be as durable as the one that refuses. A boundary that
+    // silently stopped asking after a deployment came back up would be indistinguishable, from the
+    // trail, from one whose questions were all answered yes.
+    const asking = 'intent == "write_file" && !matches(file.path, "^notes/")';
+    const before = createPolicyStore(configured, database);
+    await before.set({
+      mode: "enforce",
+      deny: [],
+      ask: [asking],
+      allow: ["true"],
+    });
+
+    const after = createPolicyStore(configured, database);
+    expect(await after.load()).toBe("the database");
+    expect(after.get().ask).toEqual([asking]);
   });
 
   test("a deployment that never set one gets its configured default", async () => {
@@ -55,7 +73,12 @@ describe("a boundary set while running", () => {
 
   test("resetting forgets it, so a restart returns to configuration", async () => {
     const store = createPolicyStore(configured, database);
-    await store.set({ mode: "enforce", deny: [rule], allow: ["true"] });
+    await store.set({
+      mode: "enforce",
+      deny: [rule],
+      ask: [],
+      allow: ["true"],
+    });
     await store.reset();
 
     // The saved row is removed rather than overwritten, so changing what configuration says then
@@ -67,8 +90,18 @@ describe("a boundary set while running", () => {
 
   test("setting twice keeps one row and the latest rule", async () => {
     const store = createPolicyStore(configured, database);
-    await store.set({ mode: "enforce", deny: ["first"], allow: ["true"] });
-    await store.set({ mode: "dry-run", deny: ["second"], allow: ["true"] });
+    await store.set({
+      mode: "enforce",
+      deny: ["first"],
+      ask: [],
+      allow: ["true"],
+    });
+    await store.set({
+      mode: "dry-run",
+      deny: ["second"],
+      ask: [],
+      allow: ["true"],
+    });
 
     const rows = await database.select().from(actionPolicy);
     // One boundary per deployment, by construction. Two rows would mean something has to choose.
@@ -80,7 +113,7 @@ describe("a boundary set while running", () => {
   test("records who changed it", async () => {
     const store = createPolicyStore(configured, database);
     await store.set(
-      { mode: "enforce", deny: [rule], allow: ["true"] },
+      { mode: "enforce", deny: [rule], ask: [], allow: ["true"] },
       "admin@example.test",
     );
 
@@ -93,7 +126,12 @@ describe("a boundary set while running", () => {
     // bigger problems than an unsaved rule.
     const store = createPolicyStore(configured);
     expect(await store.load()).toBe("configuration");
-    await store.set({ mode: "enforce", deny: [rule], allow: ["true"] });
+    await store.set({
+      mode: "enforce",
+      deny: [rule],
+      ask: [],
+      allow: ["true"],
+    });
     expect(store.get().deny).toEqual([rule]);
     await store.reset();
     expect(store.get()).toEqual(configured);

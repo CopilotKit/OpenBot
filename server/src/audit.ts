@@ -60,6 +60,23 @@ export const auditEventTypes = [
   // which field it went in; the value is on a path this trail is not on.
   "computer.secret_requested",
   "computer.secret_supplied",
+  /**
+   * The boundary stopping to ask a person, and what they said.
+   *
+   * Three rows rather than a flag on the action, because the three facts are separable and the gaps
+   * between them are where the interesting failures live. A question that was asked and never
+   * answered leaves only the first row, and that is the shape of "the Bot sat waiting while nobody
+   * was watching the screen", which nothing else in this trail would show. An answer that was given
+   * and never spent leaves the first two, which is what a stopped run looks like from here.
+   *
+   * `approval_granted` and `approval_denied` are written by the person answering, under their own
+   * actor, minutes after the Bot's turn raised the question and often by somebody else entirely.
+   * Folding consent into the action row would credit it to whoever was driving the Bot, which is the
+   * one thing an approval trail must never do.
+   */
+  "computer.approval_requested",
+  "computer.approval_granted",
+  "computer.approval_denied",
   // The computer itself being stopped or wiped. `reset` destroys every login the Bot had, which is
   // both the recovery path and the most consequential button on the admin page, so who pressed it and
   // when is exactly the sort of thing an investigator needs and nothing else records.

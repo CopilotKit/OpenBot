@@ -58,12 +58,20 @@ Policy rules can inspect:
 - `mcp.server`, `mcp.tool`, `mcp.effect`
 
 Rules use CEL expressions plus case-insensitive `contains()` and `matches()`.
-Deny rules are evaluated before allow rules. The policy engine fails closed: a
-missing or empty policy permits nothing, a broken deny rule denies, and a broken
-allow rule does not permit. OpenBot's shipped startup default is explicit:
-`deny: []` and `allow: ["true"]`, unless `AGENT_COMPUTER_POLICY` or a saved
-administrator policy replaces it. A malformed configured policy stops server
-startup.
+Rules are evaluated in three lists, in order: `deny`, then `ask`, then `allow`.
+The policy engine fails closed: a missing or empty policy permits nothing, a
+broken deny rule denies, a broken ask rule asks, and a broken allow rule does not
+permit. OpenBot's shipped startup default is explicit: `deny: []`, `ask: []` and
+`allow: ["true"]`, unless `AGENT_COMPUTER_POLICY` or a saved administrator policy
+replaces it. A malformed configured policy stops server startup.
+
+An `ask` match stops the action and puts it in front of a person in the
+conversation, then carries on with the same call if they allow it. The pending
+question lives in the server process, is bound to a fingerprint of the exact
+action it was raised for, and is single use, so an approval cannot be replayed
+against a different one. Answering writes `computer.approval_granted` or
+`computer.approval_denied` under the answering person's own actor, separately
+from the action row. In `dry-run` an ask is recorded and interrupts nobody.
 
 ## Computers
 

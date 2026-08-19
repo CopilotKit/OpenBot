@@ -11,8 +11,15 @@
  * thought of; an expression language can express the one they thought of. This is also the language
  * the enterprise gateway already speaks, so a rule written here means the same thing there.
  *
- * Precedence: deny beats allow. A rule that removes permission must never be
+ * Precedence: deny, then ask, then allow. A rule that removes permission must never be
  * defeated by a broader rule that grants it, or a company cannot reason about what it has forbidden.
+ *
+ * `ask` sits between the two, and both halves of that position are deliberate. It must not soften a
+ * `deny`, because a thing a deployment has forbidden is not up for renegotiation at a prompt, and an
+ * approval box in front of a tired person at the end of a task is not the review anybody signed off
+ * when they wrote the deny rule. And it must beat `allow`, because the policy this product ships with
+ * is `allow: ["true"]`: an ask evaluated after the allow list would be unreachable in the default
+ * configuration, so the first rule anybody ever wrote here would silently do nothing.
  */
 import { evaluate } from "cel-js";
 
@@ -27,8 +34,18 @@ export type ActionPolicy = {
    * governance feature.
    */
   mode: PolicyMode;
-  /** Evaluated first. Any expression true means refused, whatever `allow` says. */
+  /** Evaluated first. Any expression true means refused, whatever `ask` or `allow` says. */
   deny: string[];
+  /**
+   * Any expression true means a person is asked before the action runs.
+   *
+   * The middle answer a boundary with two lists cannot give. "It may spend money, but not more than
+   * fifty pounds without me" and "it may do this, but I want to see the first one" are the shapes
+   * every deployment reaches for once it trusts a Bot enough to let it act at all, and until this
+   * list existed the only way to express either was to forbid the action and have a person take the
+   * wheel, which throws away the Bot's turn and everything it had worked out to get there.
+   */
+  ask: string[];
   /** Any expression true means permitted. Empty means nothing is permitted. */
   allow: string[];
 };
@@ -138,8 +155,15 @@ export type PolicyDecision = {
   mode: PolicyMode;
   /** Which expression decided it, so the audit row can say why and an operator can find the rule. */
   matched: string | null;
-  /** Which list that expression came from. `default` means nothing matched and the floor applied. */
-  source: "deny" | "allow" | "default";
+  /**
+   * Which list that expression came from. `default` means nothing matched and the floor applied.
+   *
+   * `ask` is not a verdict on its own: it says the boundary wants a person's answer, and the caller
+   * decides what to do about that. The gateway either finds an approval already granted for this
+   * exact action or stops and asks; both outcomes are recorded with this source, so the trail can
+   * tell an action a person consented to from one nothing ever questioned.
+   */
+  source: "deny" | "ask" | "allow" | "default";
   /** True when the action should actually be carried out. False for a refusal in `enforce`. */
   forward: boolean;
   /** Why, in words that go in front of a person. */
@@ -219,6 +243,7 @@ export function evaluateActionPolicy(
 ): PolicyDecision {
   const mode: PolicyMode = policy?.mode ?? "enforce";
   const deny = policy?.deny ?? [];
+  const ask = policy?.ask ?? [];
   const allow = policy?.allow ?? [];
 
   // Deny first, and a broken deny expression still denies. One typo in a rule therefore blocks the
@@ -235,6 +260,27 @@ export function evaluateActionPolicy(
         // switch on against live traffic.
         forward: mode === "dry-run",
         reason: describeRefusal(context, expression),
+      };
+    }
+  }
+
+  // Ask second, and a broken ask expression asks. The same reasoning as the deny loop, with a gentler
+  // cost: a typo here interrupts somebody who was not expecting to be interrupted, which is a
+  // nuisance, whereas the alternative is a rule that quietly permits exactly the thing it was written
+  // to hold back. A boundary whose failures land on the permissive side is not a boundary.
+  for (const expression of ask) {
+    if (matches(expression, context, true)) {
+      return {
+        allowed: false,
+        mode,
+        matched: expression,
+        source: "ask",
+        // Nothing happens until somebody says so, except in dry-run, where the whole promise is that
+        // switching the policy on changes nothing. A dry-run ask is a note in the trail saying "here
+        // is where you would have been interrupted", which is precisely what an operator trying a
+        // rule out against real traffic wants to find out before it starts stopping anybody.
+        forward: mode === "dry-run",
+        reason: describeAsk(context),
       };
     }
   }
@@ -262,6 +308,40 @@ export function evaluateActionPolicy(
       "No rule in this deployment's policy permits that action, so it was refused. " +
       "An administrator can add one.",
   };
+}
+
+/**
+ * The verb a person reads, chosen from what the action does rather than which tool ran.
+ *
+ * A question phrased as "allow computer_write_file?" asks somebody to translate an implementation
+ * detail before they can decide, and a question nobody understands gets answered yes.
+ */
+const ASK_VERBS: Record<string, string> = {
+  activate: "press",
+  type: "type into",
+  navigate: "open",
+  read: "look at",
+  read_file: "read",
+  write_file: "write to",
+  list_files: "list",
+  read_tool: "call",
+  write_tool: "call",
+};
+
+/**
+ * The question itself: what is about to happen, in one sentence.
+ *
+ * The rule that asked is deliberately not in here. It travels beside the question as its own field,
+ * so the surface can show it as a rule and the trail can record it as one, and a person reading the
+ * prompt is not made to parse CEL before they can answer a question about a button.
+ */
+function describeAsk(context: PolicyContext): string {
+  const what = context.file
+    ? context.file.path
+    : context.element?.name
+      ? `“${context.element.name}” on ${context.page.host}`
+      : context.page.host || "this page";
+  return `The Bot wants to ${ASK_VERBS[context.intent ?? ""] ?? "act on"} ${what}.`;
 }
 
 /** A refusal a person can act on: what was refused, and on what. */

@@ -26,7 +26,12 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
   };
 }
 
-const permissive: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
+const permissive: ActionPolicy = {
+  mode: "enforce",
+  deny: [],
+  ask: [],
+  allow: ["true"],
+};
 
 describe("evaluateActionPolicy", () => {
   test("an absent policy refuses, rather than permitting everything", () => {
@@ -38,7 +43,7 @@ describe("evaluateActionPolicy", () => {
 
   test("an empty allow list refuses", () => {
     const decision = evaluateActionPolicy(
-      { mode: "enforce", deny: [], allow: [] },
+      { mode: "enforce", deny: [], ask: [], allow: [] },
       context(),
     );
     expect(decision.allowed).toBe(false);
@@ -89,7 +94,7 @@ describe("evaluateActionPolicy", () => {
 
   test("a broken allow expression does not permit", () => {
     const decision = evaluateActionPolicy(
-      { mode: "enforce", deny: [], allow: ["also not ( valid"] },
+      { mode: "enforce", deny: [], ask: [], allow: ["also not ( valid"] },
       context(),
     );
     expect(decision.allowed).toBe(false);
@@ -101,6 +106,7 @@ describe("evaluateActionPolicy", () => {
       {
         mode: "dry-run",
         deny: ['contains(element.name, "submit")'],
+        ask: [],
         allow: ["true"],
       },
       context(),
@@ -160,8 +166,41 @@ describe("parseActionPolicy", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.policy.deny).toEqual([]);
+      expect(result.policy.ask).toEqual([]);
       expect(result.policy.allow).toEqual([]);
     }
+  });
+
+  test("a policy written before the ask list existed still parses", () => {
+    // Every deployment already running has a saved policy with two lists in it. Rejecting one, or
+    // reading its absence as anything other than "asks nobody anything", would change what an
+    // existing boundary means at the moment the server came back up.
+    const result = parseActionPolicy({
+      mode: "enforce",
+      deny: ['contains(element.name, "pay")'],
+      allow: ["true"],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.policy.ask).toEqual([]);
+  });
+
+  test("keeps the ask rules it was given", () => {
+    const result = parseActionPolicy({
+      mode: "enforce",
+      deny: [],
+      ask: ['intent == "write_file"'],
+      allow: ["true"],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.policy.ask).toEqual(['intent == "write_file"']);
+  });
+
+  test("rejects an ask list that is not a list of expressions", () => {
+    expect(parseActionPolicy({ mode: "enforce", ask: "everything" }).ok).toBe(
+      false,
+    );
+    expect(parseActionPolicy({ mode: "enforce", ask: [7] }).ok).toBe(false);
   });
 
   test.each([
@@ -184,6 +223,7 @@ describe("the second door", () => {
     const policy = {
       mode: "enforce" as const,
       deny: ['tool.name == "computer_key" && key == "Enter"'],
+      ask: [],
       allow: ["true"],
     };
     const refused = evaluateActionPolicy(policy, {
@@ -224,6 +264,7 @@ describe("a rule written about what an action does", () => {
   const policy = {
     mode: "enforce" as const,
     deny: ['intent == "activate" && contains(element.name, "submit")'],
+    ask: [],
     allow: ["true"],
   };
 
@@ -312,7 +353,7 @@ describe("a rule that names an identifier only some actions carry", () => {
 
   test("unguarded, it refuses a navigation that has no key at all", () => {
     const decision = evaluateActionPolicy(
-      { mode: "enforce", deny: ['key == "Enter"'], allow: ["true"] },
+      { mode: "enforce", deny: ['key == "Enter"'], ask: [], allow: ["true"] },
       navigating,
     );
     // Failing closed on an unevaluable rule is the safe answer. The shipped preset carries the guard
@@ -325,6 +366,7 @@ describe("a rule that names an identifier only some actions carry", () => {
       {
         mode: "enforce",
         deny: ['tool.name == "computer_key" && key == "Enter"'],
+        ask: [],
         allow: ["true"],
       },
       navigating,
@@ -337,6 +379,7 @@ describe("a rule that names an identifier only some actions carry", () => {
       {
         mode: "enforce",
         deny: ['tool.name == "computer_key" && key == "Enter"'],
+        ask: [],
         allow: ["true"],
       },
       {
@@ -347,6 +390,128 @@ describe("a rule that names an identifier only some actions carry", () => {
         element: { ref: "e1", role: "textbox", name: "E-mail address:" },
       },
     );
+    expect(decision.allowed).toBe(false);
+  });
+});
+
+/**
+ * The third answer, and the order it is asked in.
+ *
+ * Precedence is the whole design here and none of it is visible from the types. An ask that could
+ * soften a deny would let a person wave through something a deployment forbade; an ask evaluated
+ * after allow would never fire at all, because the shipped policy permits everything. Both mistakes
+ * produce a rule that looks configured and does nothing anybody intended, so both are tested against
+ * the permissive default deployments actually run.
+ */
+describe("asking a person", () => {
+  const asking: ActionPolicy = {
+    ...permissive,
+    ask: ['contains(element.name, "submit")'],
+  };
+
+  test("an ask beats allow, in the configuration everybody ships with", () => {
+    const decision = evaluateActionPolicy(asking, context());
+    expect(decision.source).toBe("ask");
+    expect(decision.allowed).toBe(false);
+    // Nothing happens until somebody says so.
+    expect(decision.forward).toBe(false);
+    expect(decision.matched).toBe('contains(element.name, "submit")');
+  });
+
+  test("a deny beats an ask, so a forbidden thing is never offered as a question", () => {
+    const decision = evaluateActionPolicy(
+      { ...asking, deny: ['contains(element.name, "submit")'] },
+      context(),
+    );
+    expect(decision.source).toBe("deny");
+  });
+
+  test("an ask rule leaves everything else alone", () => {
+    const decision = evaluateActionPolicy(
+      asking,
+      context({ element: { ref: "e6", role: "input", name: "Quantity" } }),
+    );
+    expect(decision.source).toBe("allow");
+    expect(decision.allowed).toBe(true);
+  });
+
+  test("a BROKEN ask expression asks, rather than quietly permitting", () => {
+    // Fail-closed, the same way a broken deny denies. A typo in the rule interrupts somebody, which
+    // is a nuisance; the alternative is that `allow: ["true"]` waves through exactly the action the
+    // rule was written to hold back, and nothing anywhere says so.
+    const decision = evaluateActionPolicy(
+      { ...permissive, ask: ["this is not ( valid cel"] },
+      context(),
+    );
+    expect(decision.source).toBe("ask");
+    expect(decision.forward).toBe(false);
+  });
+
+  test("a rule about an element still asks when the element is unknown", () => {
+    // `contains` on a missing field throws, and a throwing ask expression asks. An action on
+    // something the server could not resolve is exactly the case a person should look at.
+    const decision = evaluateActionPolicy(
+      asking,
+      context({ element: undefined }),
+    );
+    expect(decision.source).toBe("ask");
+  });
+
+  test("dry-run records the question and interrupts nobody", () => {
+    // The promise of dry-run is that switching a policy on changes nothing, so an ask there is a note
+    // saying where somebody would have been stopped, not a stop.
+    const decision = evaluateActionPolicy(
+      { ...asking, mode: "dry-run" },
+      context(),
+    );
+    expect(decision.source).toBe("ask");
+    expect(decision.allowed).toBe(false);
+    expect(decision.forward).toBe(true);
+  });
+
+  test("the question names what is about to happen, and not the rule", () => {
+    // The rule travels as its own field. A person answering a question about a button should not
+    // have to read CEL to work out what they are agreeing to.
+    const decision = evaluateActionPolicy(
+      asking,
+      context({ intent: "activate" }),
+    );
+    expect(decision.reason).toContain("Submit order");
+    expect(decision.reason).toContain("example.com");
+    expect(decision.reason).not.toContain("contains(");
+  });
+
+  test("a file question names the file rather than whatever page is open", () => {
+    const decision = evaluateActionPolicy(
+      { ...permissive, ask: ['intent == "write_file"'] },
+      context({
+        tool: { name: "computer_write_file" },
+        intent: "write_file",
+        element: undefined,
+        file: {
+          path: "reports/august.csv",
+          name: "august.csv",
+          extension: "csv",
+        },
+      }),
+    );
+    expect(decision.reason).toContain("reports/august.csv");
+    expect(decision.reason).not.toContain("example.com");
+  });
+
+  test("an empty allow list still refuses what nobody asked about", () => {
+    // The floor is unchanged. An ask list is a third answer, not a way of turning default-deny into
+    // default-ask: an action no rule mentions is still refused rather than put to somebody.
+    const decision = evaluateActionPolicy(
+      {
+        mode: "enforce",
+        deny: [],
+        ask: ['tool.name == "computer_write_file"'],
+        allow: [],
+      },
+      context(),
+    );
+    expect(decision.source).toBe("default");
     expect(decision.allowed).toBe(false);
   });
 });
