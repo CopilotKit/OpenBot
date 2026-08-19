@@ -55,7 +55,15 @@ const PORT = Number.parseInt(process.env.PORT ?? "4201", 10);
  * The default is unchanged so the two shipped Bots stay comparable out of the box.
  */
 const PROVIDER = (process.env.BOT_PROVIDER ?? "openai").toLowerCase();
-const MODEL = process.env.BOT_MODEL ?? defaultModelFor(PROVIDER);
+/*
+ * An unset model and an empty one are the same thing.
+ *
+ * `??` only catches undefined, and a compose file passing `BOT_MODEL: ${BOT_MODEL:-}` hands this an
+ * empty string, which is a value. The agent then asked its provider for a model named "" and the
+ * run died with "you must provide a model parameter", which reads as a broken Bot rather than as
+ * missing configuration.
+ */
+const MODEL = process.env.BOT_MODEL?.trim() || defaultModelFor(PROVIDER);
 /** OpenAI only. Its newer models require the Responses API, which the integration handles. */
 const USE_RESPONSES_API = process.env.BOT_RESPONSES_API === "true";
 /**
@@ -216,13 +224,62 @@ function buildModel() {
 }
 
 /**
- * The graph.
+ * Where this Bot runs a tool.
  *
- * One node is enough while the tool loop lives on the client. The graph provides model orchestration
- * without changing the AG-UI contract.
+ * Not the vendor: this deployment. A Bot that called an MCP server directly would be a Bot that
+ * walked around the grant, the policy and the audit row, and those are the product. So the loop runs
+ * here, in this process, and every call it makes goes back through the deployment that granted it.
+ */
+const TOOL_URL =
+  process.env.OPENBOT_TOOL_URL ?? "http://localhost:3001/api/agent-tools/call";
+const TOOL_TOKEN = process.env.AGENT_TOOL_TOKEN ?? "";
+
+async function callTool(
+  botId: string,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  if (!TOOL_TOKEN) {
+    return "Refused. This Bot has no credential for calling tools back through its deployment.";
+  }
+  try {
+    const response = await fetch(TOOL_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-openbot-agent-token": TOOL_TOKEN,
+      },
+      body: JSON.stringify({ botId, name, args }),
+    });
+    const body = (await response.json()) as { text?: string };
+    return body.text ?? "The tool returned nothing.";
+  } catch (error) {
+    // Reported to the model as a result rather than thrown: the run continues and says what broke.
+    return `That tool could not be called: ${
+      error instanceof Error ? error.message : "unknown error"
+    }`;
+  }
+}
+
+/** Which Bot is running, so the deployment can attribute the call it is about to be asked for. */
+function botIdOf(input: RunAgentInput): string {
+  const props = input.forwardedProps as { openbotBotId?: unknown } | undefined;
+  return typeof props?.openbotBotId === "string" ? props.openbotBotId : "";
+}
+
+/**
+ * The graph, with the tool loop where it belongs.
+ *
+ * The loop used to run in the browser: this emitted a call, ended the run, and waited for a surface
+ * to execute it and start another. That made a watching browser a requirement for a Bot to do
+ * anything, which rules out an embed, a schedule, and anything unattended.
+ *
+ * Now it answers, calls what it needs, reads the results and answers again, which is what a harness
+ * is for. `recursionLimit` bounds a model that would otherwise call tools in a circle.
  */
 function buildGraph(input: RunAgentInput) {
   const model = buildModel();
+  const botId = botIdOf(input);
 
   const tools = toBoundTools(input);
   const bound = tools.length > 0 ? model.bindTools(tools) : model;
@@ -231,8 +288,30 @@ function buildGraph(input: RunAgentInput) {
     .addNode("answer", async (state) => ({
       messages: [await bound.invoke(state.messages)],
     }))
+    .addNode("tools", async (state) => {
+      const last = state.messages.at(-1) as AIMessage;
+      const results = await Promise.all(
+        (last.tool_calls ?? []).map(async (call) => {
+          const text = await callTool(
+            botId,
+            call.name,
+            (call.args ?? {}) as Record<string, unknown>,
+          );
+          return new ToolMessage({
+            content: text,
+            tool_call_id: call.id ?? call.name,
+            name: call.name,
+          });
+        }),
+      );
+      return { messages: results };
+    })
     .addEdge(START, "answer")
-    .addEdge("answer", END)
+    .addConditionalEdges("answer", (state) => {
+      const last = state.messages.at(-1) as AIMessage | undefined;
+      return (last?.tool_calls?.length ?? 0) > 0 ? "tools" : END;
+    })
+    .addEdge("tools", "answer")
     .compile();
 }
 
@@ -250,8 +329,23 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
         runId: input.runId,
       } as BaseEvent);
 
-      const messageId = `msg_${input.runId}`;
+      /*
+       * One message id per stretch of prose.
+       *
+       * A run is several turns now: the Bot may speak, call a tool, read the result and speak
+       * again. Reusing one id reopens a message the surface has already closed, and the second half
+       * of the answer is dropped.
+       */
+      let messageIndex = 0;
+      let messageId = `msg_${input.runId}_0`;
       let textOpen = false;
+      const closeText = () => {
+        if (!textOpen) return;
+        send({ type: "TEXT_MESSAGE_END", messageId } as BaseEvent);
+        textOpen = false;
+        messageIndex += 1;
+        messageId = `msg_${input.runId}_${messageIndex}`;
+      };
 
       try {
         const graph = buildGraph(input);
@@ -264,6 +358,11 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
         // fragments and AG-UI wants one call. The framework hands back assembled `tool_calls` on the
         // final message, which is precisely the plumbing agent-bot does by hand.
         let finalMessage: AIMessage | null = null;
+        /** Calls seen on the way past, so a result can be paired with the arguments it answered. */
+        const pending = new Map<
+          string,
+          { name: string; args: Record<string, unknown> }
+        >();
 
         for await (const event of events) {
           if (event.event === "on_chat_model_stream") {
@@ -291,31 +390,56 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
 
           if (event.event === "on_chat_model_end") {
             const output = event.data?.output as AIMessage | undefined;
-            if (output) finalMessage = output;
+            if (output) {
+              finalMessage = output;
+              for (const call of output.tool_calls ?? []) {
+                pending.set(call.id ?? call.name, {
+                  name: call.name,
+                  args: (call.args ?? {}) as Record<string, unknown>,
+                });
+              }
+            }
+          }
+
+          /*
+           * The tools node finished. Reported here, in order, rather than collected for the end: the
+           * surface draws a conversation, and a call arriving after the answer it informed reads as
+           * though the Bot spoke first and did the work afterwards.
+           */
+          if (event.event === "on_chain_end" && event.name === "tools") {
+            const output = event.data?.output as
+              | { messages?: { tool_call_id?: string; content?: unknown }[] }
+              | undefined;
+            // Prose and tool calls cannot interleave inside one message.
+            closeText();
+            for (const message of output?.messages ?? []) {
+              const id = message.tool_call_id ?? "";
+              const call = pending.get(id);
+              if (!call) continue;
+              send({
+                type: "TOOL_CALL_START",
+                toolCallId: id,
+                toolCallName: call.name,
+              } as BaseEvent);
+              send({
+                type: "TOOL_CALL_ARGS",
+                toolCallId: id,
+                delta: JSON.stringify(call.args),
+              } as BaseEvent);
+              send({ type: "TOOL_CALL_END", toolCallId: id } as BaseEvent);
+              send({
+                type: "TOOL_CALL_RESULT",
+                messageId: `${id}-result`,
+                toolCallId: id,
+                content: String(message.content ?? ""),
+                role: "tool",
+              } as BaseEvent);
+              pending.delete(id);
+            }
           }
         }
 
-        if (textOpen) {
-          send({ type: "TEXT_MESSAGE_END", messageId } as BaseEvent);
-        }
-
-        for (const call of finalMessage?.tool_calls ?? []) {
-          send({
-            type: "TOOL_CALL_START",
-            toolCallId: call.id ?? `call_${input.runId}_${call.name}`,
-            toolCallName: call.name,
-            parentMessageId: messageId,
-          } as BaseEvent);
-          send({
-            type: "TOOL_CALL_ARGS",
-            toolCallId: call.id ?? `call_${input.runId}_${call.name}`,
-            delta: JSON.stringify(call.args ?? {}),
-          } as BaseEvent);
-          send({
-            type: "TOOL_CALL_END",
-            toolCallId: call.id ?? `call_${input.runId}_${call.name}`,
-          } as BaseEvent);
-        }
+        closeText();
 
         send({
           type: "RUN_FINISHED",

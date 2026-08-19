@@ -27,6 +27,7 @@ import type { DeploymentConfig } from "./config";
 import type { ConnectorAdminService } from "./connectors";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createPluginRoutes } from "./plugins/routes";
+import { REFUSAL_MARKER } from "./plugins/tools";
 import type { PluginStore } from "./plugins/store";
 import type { PackageStatusReader } from "./tenant-package";
 
@@ -342,6 +343,54 @@ export function createApp(
 
   if (pluginStore) {
     app.route("/api/plugins", createPluginRoutes(pluginStore, requireUser));
+  }
+
+  /*
+   * Where a framework Bot runs a tool.
+   *
+   * A Bot that runs its own loop, in its own process, is the honest shape: the run does not need a
+   * browser and does not stop when one closes. What it must not have is a route to a vendor that
+   * goes around this deployment, so it calls here and this calls the plugin store, which asks the
+   * same two questions it asks of everything else and writes the same audit row.
+   *
+   * Authenticated by a shared secret rather than a session, because the caller is a service and has
+   * no person behind it. Absent secret means the route does not exist: a deployment that has not
+   * configured this refuses rather than accepting anybody who can reach the port.
+   */
+  if (pluginStore && config.agentToolToken) {
+    const token = config.agentToolToken;
+    app.post("/api/agent-tools/call", async (context) => {
+      if (context.req.header("x-openbot-agent-token") !== token) {
+        return context.json({ error: "Not authorised." }, 401);
+      }
+      const body = (await context.req.json().catch(() => null)) as {
+        botId?: string;
+        actorId?: string;
+        name?: string;
+        args?: Record<string, unknown>;
+      } | null;
+      if (!body?.botId || !body.name) {
+        return context.json({ error: "A Bot and a tool are required." }, 400);
+      }
+      try {
+        const result = await pluginStore.callTool({
+          // The model is offered `mcp__server__tool`; the store speaks `server/tool`.
+          ref: body.name.replace(/^mcp__/, "").replace("__", "/"),
+          args: body.args ?? {},
+          botId: body.botId,
+          actorId: body.actorId ?? "agent",
+        });
+        return context.json({ text: result.text, isError: result.isError });
+      } catch (error) {
+        // A refusal is an answer, not a failure: the Bot says what was blocked and carries on. The
+        // marker leads it for the same reason it does on the in-process path, so a transcript can
+        // draw a refusal as one without reading the wording.
+        return context.json({
+          text: `${REFUSAL_MARKER} ${error instanceof Error ? error.message : "That tool could not be called."}`,
+          isError: true,
+        });
+      }
+    });
   }
 
   if (sandboxedStore) {

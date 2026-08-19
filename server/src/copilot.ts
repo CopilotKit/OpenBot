@@ -9,6 +9,7 @@ import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
+import { z } from "zod";
 import type { GrantedTool } from "./plugins/tools";
 
 /**
@@ -257,7 +258,11 @@ async function buildAgent(
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
   }
-  return remoteAgentWithStandingRole(agent, stallGuard);
+  return remoteAgentWithStandingRole(
+    agent,
+    stallGuard,
+    await loadTools(agent.id),
+  );
 }
 
 /**
@@ -274,7 +279,15 @@ async function buildAgent(
  */
 function remoteAgentWithStandingRole(
   agent: RegisteredRemoteAgent,
-  stallGuard?: StallGuard,
+  stallGuard: StallGuard | undefined,
+  /**
+   * What this Bot was granted, described rather than executable.
+   *
+   * A framework Bot runs its own loop and calls these back through `/api/agent-tools/call`, so what
+   * it needs from here is the offer: the name, what the tool is for, and the arguments it takes.
+   * The executing half stays on this side, where the grant and the policy are.
+   */
+  tools: GrantedTool[] = [],
 ) {
   const remote = new HttpAgent({
     url: agent.endpoint,
@@ -295,7 +308,30 @@ function remoteAgentWithStandingRole(
           (message) => message.id !== agent.standingMessage.id,
         ),
       ],
-    }),
+      /*
+       * The Bot's own grants, added to whatever the surface offered.
+       *
+       * Sent on every run rather than configured once on the endpoint, because a grant an
+       * administrator adds or revokes has to apply to the next run and the endpoint is somebody
+       * else's process.
+       */
+      tools: [
+        ...(input.tools ?? []),
+        ...tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: z.toJSONSchema(tool.parameters) as Record<
+            string,
+            unknown
+          >,
+        })),
+      ],
+      // Who the Bot is calling back as, so the audit row names it rather than "an agent".
+      forwardedProps: {
+        ...(input.forwardedProps ?? {}),
+        openbotBotId: agent.id,
+      },
+    } as never),
   );
   return remote;
 }
