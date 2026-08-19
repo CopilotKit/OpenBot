@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/message-scroller";
 import { toVisibleChatItems } from "./chat-messages";
 import { forDisplay } from "@/lib/plugins/tool-result";
+import { readToolName } from "@/lib/plugins/tool-name";
 import type { QueuedMessage } from "./composer";
 import { ToolLine } from "./tool-line";
 import { ToolRenderBoundary } from "./tool-boundary";
@@ -476,19 +477,34 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
          * What was called, shimmering until its result arrives, and then the server's own words
          * drawn the way a Bot's prose is drawn.
          */}
-        {drawn ?? (
-          <ToolLine label={name} running={result === undefined}>
-            {result ? (
-              <Streamdown components={markdownComponents}>
-                {forDisplay(result)}
-              </Streamdown>
-            ) : null}
-          </ToolLine>
-        )}
+        {drawn ?? <ServerToolLine name={name} result={result} />}
       </ToolRenderBoundary>
     </Arriving>
   );
 });
+
+/**
+ * A tool the runtime executed, drawn for the person watching.
+ *
+ * Named from the reader's side: what was done, against which server, with the server's own words
+ * behind a disclosure. The identifier the model was offered never reaches the screen.
+ */
+function ServerToolLine({ name, result }: { name: string; result?: string }) {
+  const { label, detail } = readToolName(name);
+  return (
+    <ToolLine
+      {...(detail ? { detail } : {})}
+      label={label}
+      running={result === undefined}
+    >
+      {result ? (
+        <Streamdown components={markdownComponents}>
+          {forDisplay(result)}
+        </Streamdown>
+      ) : null}
+    </ToolLine>
+  );
+}
 
 export function ChatTranscript({
   busy = false,

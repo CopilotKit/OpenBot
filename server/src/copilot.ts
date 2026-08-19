@@ -191,9 +191,26 @@ export function builtInAgentConfiguration(
     model: `${model.provider}/${model.defaultModel}`,
     prompt: agent.systemPrompt,
     apiKey,
-    ...(tools.length > 0 ? { tools } : {}),
+    /*
+     * A run stops after one step unless told otherwise, which for a Bot with tools means it calls
+     * one and never speaks: the tool executes, the result arrives, and the run ends before the model
+     * can say what it found. The person sees their own question and nothing else.
+     *
+     * Only set when there are tools, because a Bot with none has nothing to continue for. The cap
+     * bounds a model that would otherwise call tools in a circle. Interrupt tools, if any are ever
+     * added here, require the default of one and must not be mixed in.
+     */
+    ...(tools.length > 0 ? { tools, maxSteps: TOOL_STEPS } : {}),
   };
 }
+
+/**
+ * How many turns of the tool loop one run may take.
+ *
+ * Enough for a Bot to search, read what came back, search again on a better term, and answer.
+ * Beyond that a model is not making progress, and every extra step is somebody's money.
+ */
+const TOOL_STEPS = 8;
 
 /**
  * Build the built-in and remote AG-UI agent map the runtime serves.
