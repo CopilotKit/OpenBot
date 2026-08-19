@@ -25,6 +25,10 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
     // reads unevaluable as a match.
     run: { unattended: false },
     page: { url: "https://example.com/order", host: "example.com" },
+    // The first time this Bot has made this call, which is what a context with nothing to say about
+    // repetition means. Always present: an absent field throws inside CEL, and a throwing deny rule
+    // denies, so a rule about repetition would otherwise refuse everything.
+    repeat: { count: 1 },
     element: { ref: "e13", role: "button", name: "Submit order" },
     ...overrides,
   };
@@ -195,6 +199,7 @@ describe("the second door", () => {
       bot: { id: "sales" },
       actor: { id: "someone" },
       page: { url: "https://example.com/order", host: "example.com" },
+      repeat: { count: 1 },
       key: "Enter",
     });
     expect(refused.allowed).toBe(false);
@@ -205,6 +210,7 @@ describe("the second door", () => {
       bot: { id: "sales" },
       actor: { id: "someone" },
       page: { url: "https://example.com/order", host: "example.com" },
+      repeat: { count: 1 },
       key: "a",
     });
     expect(allowed.allowed).toBe(true);
@@ -222,6 +228,7 @@ describe("a rule written about what an action does", () => {
     actor: { id: "a" },
     run: { unattended: false },
     page: { url: "https://example.com/", host: "example.com" },
+    repeat: { count: 1 },
     intent: "activate",
     ...extra,
   });
@@ -313,6 +320,7 @@ describe("a rule that names an identifier only some actions carry", () => {
     actor: { id: "a" },
     run: { unattended: false },
     page: { url: "https://httpbin.org/forms/post", host: "httpbin.org" },
+    repeat: { count: 1 },
     intent: "navigate",
   };
 
@@ -354,6 +362,46 @@ describe("a rule that names an identifier only some actions carry", () => {
       },
     );
     expect(decision.allowed).toBe(false);
+  });
+});
+
+/**
+ * The one attribute that separates the thirtieth click on a button from the first.
+ *
+ * Both are the same action on the same element, and any rule able to refuse the thirtieth by its
+ * shape would refuse the first as well. So the count is the whole of it, and these check that a rule
+ * written against it actually evaluates: `repeat` is a nested field like `page` and `element`, and a
+ * rule the engine cannot evaluate denies, which would turn one restriction into a Bot that can do
+ * nothing at all.
+ */
+describe("a rule about a Bot repeating itself", () => {
+  const repeating: ActionPolicy = {
+    mode: "enforce",
+    deny: ["repeat.count >= 10"],
+    allow: ["true"],
+  };
+
+  test("leaves the attempts below the line alone", () => {
+    expect(
+      evaluateActionPolicy(repeating, context({ repeat: { count: 9 } }))
+        .allowed,
+    ).toBe(true);
+  });
+
+  test("refuses the attempt that crosses it, not the one after", () => {
+    const decision = evaluateActionPolicy(
+      repeating,
+      context({ repeat: { count: 10 } }),
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.matched).toBe("repeat.count >= 10");
+  });
+
+  test("goes on refusing past it", () => {
+    expect(
+      evaluateActionPolicy(repeating, context({ repeat: { count: 40 } }))
+        .allowed,
+    ).toBe(false);
   });
 });
 

@@ -33,6 +33,12 @@ const PRESETS: { label: string; rule: string; cost?: string }[] = [
     cost: "A password box the page labels something else is not covered, the rule matches the label.",
   },
   {
+    label: "Stop a Bot repeating itself",
+    // The count includes the attempt being decided, so this refuses the tenth, not the eleventh.
+    rule: "repeat.count >= 10",
+    cost: "Two calls count as the same call when the thing acted on is the same, whatever was typed into it, so a Bot running ten searches from one box, or reading one file ten times, is refused on the tenth. It misses the other way too: a Bot slow enough to spread its attempts wider than a few minutes is never caught, one that changes a single argument each time is ten different calls, and calls to another server's tools are not counted at all. Worth adding while a match is recorded and allowed, before it starts refusing anybody's work.",
+  },
+  {
     label: "Let a scheduled run look, never press",
     // `run.unattended` is true for a routine on its schedule and for a webhook delivery, and false
     // whenever somebody is at the screen, so the same Bot keeps working normally in a conversation.

@@ -43,6 +43,20 @@ export type ComposerProps = {
    * structured data instead of something it would have to re-parse out of the text.
    */
   onSubmit?: (draft: ComposerDraft) => void | Promise<void>;
+  /**
+   * Park this message until the turn in flight is over, instead of refusing the keystroke.
+   *
+   * Its presence is what lets a person type at a Bot that is already working. Without it the
+   * composer goes on refusing mid-turn sends, which is still the right answer for a screen that has
+   * nowhere to put a parked message — the compose screen creates the channel on send and then
+   * navigates away, so anything parked there would be dropped on unmount, and a message that
+   * silently disappears is worse than a send button that visibly will not go.
+   *
+   * Called instead of `onSubmit`, not as well as it, and it does not return a promise: parking is
+   * a state change, and awaiting one would hold the composer's send lock for the length of somebody
+   * else's turn and block the next correction.
+   */
+  onQueue?: (draft: ComposerDraft) => void;
   /** Stop the Bot mid-answer; while pending, the send button becomes a stop button. */
   onStop?: () => void;
   /**
@@ -52,10 +66,23 @@ export type ComposerProps = {
    */
   disabled?: boolean;
   /**
-   * A run is in flight. It gates sending, not writing: a channel is `pending` while it is still
+   * A turn is in flight. It gates sending, not writing: a channel is `pending` while it is still
    * connecting and restoring its history, and the composer is on screen throughout.
    */
   pending?: boolean;
+  /**
+   * There is a run on the wire for Stop to reach.
+   *
+   * Not the same question as `pending`, and telling them apart is the whole reason this exists. A
+   * turn is in flight from the moment somebody presses send; the run it becomes does not exist
+   * until the caller has waited for whatever it has to wait for, which on a channel that is still
+   * joining is up to a second and a half. A Stop button drawn in that window aborts a controller
+   * nobody has made yet: the press is swallowed, the message goes anyway, and the one control the
+   * whole affordance leans on has quietly lied.
+   *
+   * Defaults to `pending`, which is the right answer for a caller with no gap between the two.
+   */
+  stoppable?: boolean;
 };
 
 export function Composer({
@@ -64,9 +91,11 @@ export function Composer({
   agents = [],
   commands = PLACEHOLDER_COMMANDS,
   onSubmit,
+  onQueue,
   onStop,
   disabled = false,
   pending = false,
+  stoppable,
 }: ComposerProps) {
   const [value, setValue] = useState<Segment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -107,13 +136,32 @@ export function Composer({
   const submitDraft = useCallback(
     async (segments: Segment[]) => {
       const submitted = toDraft(segments);
-      if (
-        submitted.isEmpty ||
-        disabled ||
-        isBusy ||
-        submitInFlight.current ||
-        !onSubmit
-      ) {
+      if (submitted.isEmpty || disabled) {
+        return;
+      }
+
+      /*
+       * A TURN IS IN FLIGHT, AND THIS IS THE FORK THE WHOLE AFFORDANCE HANGS ON.
+       *
+       * With somewhere to park it the message goes there and the box empties, so the person sees
+       * their words land. Without, we are back to refusing, which is what every caller that does
+       * not queue still gets.
+       *
+       * It returns before `submitInFlight` and `isSubmitting` are touched on purpose. Those guard
+       * one send from starting twice; a send here is held open for the length of the whole run, so
+       * borrowing them for a parked message would let the first turn lock out every correction
+       * typed while it worked — the exact thing this exists to allow.
+       */
+      if (isBusy) {
+        if (!onQueue) {
+          return;
+        }
+        setValue([]);
+        onQueue(submitted);
+        return;
+      }
+
+      if (submitInFlight.current || !onSubmit) {
         return;
       }
 
@@ -134,7 +182,7 @@ export function Composer({
         wantsFocus.current = true;
       }
     },
-    [disabled, isBusy, onSubmit],
+    [disabled, isBusy, onQueue, onSubmit],
   );
 
   /**
@@ -157,9 +205,36 @@ export function Composer({
     void submitDraft(value);
   };
 
-  const canSend = !disabled && !isBusy && !draft.isEmpty;
-  /** Stop is available only once the agent run is actually pending. */
-  const canStop = Boolean(onStop) && pending;
+  /**
+   * There is a turn in flight and somewhere to park what is being typed.
+   *
+   * Not the same question as "is anything typed" — an empty composer mid-turn can queue nothing,
+   * and the button it wants is Stop.
+   */
+  const canQueue = Boolean(onQueue) && isBusy && !disabled;
+  /** Something is typed, mid-turn, with a queue to put it in. */
+  const parking = canQueue && !draft.isEmpty;
+  const canSend = !disabled && !draft.isEmpty && (!isBusy || canQueue);
+  /**
+   * Stop is available only once there is a run for it to reach, and it gives way to Send the moment
+   * there is something typed to park.
+   *
+   * `stoppable` rather than `pending`, because a turn is in flight before its run is, and a button
+   * that cannot do the thing it names is worse than no button at all.
+   *
+   * One button, so one of the two has to yield. Send wins because the correction is the thing that
+   * cannot wait: park it and the box empties, which brings Stop straight back — so stopping is
+   * never more than one press away, and the press before it is the one that saves the sentence.
+   * Showing both would be honest and would also put two round buttons in a row on a compact
+   * composer that has room for one.
+   */
+  const canStop = Boolean(onStop) && (stoppable ?? pending) && !parking;
+  /**
+   * The same arrow either way, because it is the same gesture, but a screen reader is told which of
+   * the two it is about to do. "Send" on a button that will not send for another minute is a small
+   * lie told to exactly the people who cannot see the queue it lands in.
+   */
+  const sendLabel = parking ? "Queue message" : "Send message";
 
   if (compact) {
     return (
@@ -217,7 +292,7 @@ export function Composer({
           </Button>
         ) : (
           <Button
-            aria-label="Send message"
+            aria-label={sendLabel}
             className="size-8 rounded-full p-0"
             disabled={!canSend}
             size="icon"
@@ -271,7 +346,7 @@ export function Composer({
               </Button>
             ) : (
               <Button
-                aria-label="Send message"
+                aria-label={sendLabel}
                 className="size-7 rounded-full bg-primary p-0 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={!canSend}
                 type="submit"

@@ -6,6 +6,10 @@ import {
   createComputerGateway,
 } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
+import {
+  createRepeatDetector,
+  type RepeatDetector,
+} from "../src/computer/repeat";
 import type { SnapshotResult } from "../src/computer/schema";
 
 /**
@@ -103,13 +107,18 @@ function fakeAudit() {
 const ACTOR = { id: "dev-local-user" };
 const PERMISSIVE: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
-async function gatewayWith(policy: ActionPolicy | undefined) {
+async function gatewayWith(
+  policy: ActionPolicy | undefined,
+  /** Only the repetition tests supply one; everything else gets the gateway's own. */
+  repeat?: RepeatDetector,
+) {
   const { client, calls } = fakeClient();
   const { store, rows } = fakeAudit();
   const gateway = createComputerGateway({
     client,
     auditStore: store,
     policy: () => policy,
+    ...(repeat ? { repeat } : {}),
   });
   // Every test acts on refs, so the server must hold a snapshot first, exactly as the real flow does.
   await gateway.snapshot("default");
@@ -426,5 +435,214 @@ describe("the computer gateway", () => {
       snapshotId: 7,
     });
     expect(calls).toEqual(["click"]);
+  });
+});
+
+/**
+ * The gateway is the only place that can count this, which is why it does.
+ *
+ * Every governed action already passes through one function that already writes a row for it, so
+ * counting is very nearly free here and impossible anywhere else. The part that matters is where the
+ * count goes: into the policy context, before the decision, so a deployment can act on it rather than
+ * read about it a week later.
+ */
+describe("a Bot going in circles", () => {
+  const click = { ref: "e9", snapshotId: 7 };
+
+  test("the count reaches the policy, and the rule refuses the attempt that crosses the line", async () => {
+    const { gateway, calls, rows } = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ["repeat.count >= 3"],
+    });
+
+    await gateway.click("default", "bot-1", ACTOR, click);
+    await gateway.click("default", "bot-1", ACTOR, click);
+    // The first two are the same action on the same button and nothing about them is objectionable.
+    expect(calls).toEqual(["click", "click"]);
+
+    await expect(
+      gateway.click("default", "bot-1", ACTOR, click),
+    ).rejects.toThrow(ActionRefusedError);
+    // Counted before the decision, so the third attempt is the one refused rather than the fourth.
+    expect(calls).toEqual(["click", "click"]);
+    expect(rows.at(-1)?.eventType).toBe("computer.action_refused");
+  });
+
+  test("a rule about repetition leaves a Bot doing varied work alone", async () => {
+    // The failure that would take this feature back out again: a Bot working steadily down a form
+    // refused for doing its job.
+    const { gateway, calls } = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ["repeat.count >= 3"],
+    });
+
+    await gateway.click("default", "bot-1", ACTOR, {
+      ref: "e1",
+      snapshotId: 7,
+    });
+    await gateway.click("default", "bot-1", ACTOR, {
+      ref: "e9",
+      snapshotId: 7,
+    });
+    await gateway.type("default", "bot-1", ACTOR, {
+      ref: "e1",
+      snapshotId: 7,
+      text: "Grace Hopper",
+    });
+
+    expect(calls).toEqual(["click", "click", "type"]);
+  });
+
+  test("crossing a threshold writes its own row, ahead of the decision it explains", async () => {
+    const { gateway, rows } = await gatewayWith(
+      PERMISSIVE,
+      createRepeatDetector({ thresholds: [3] }),
+    );
+
+    await gateway.click("default", "bot-1", ACTOR, click);
+    await gateway.click("default", "bot-1", ACTOR, click);
+    await gateway.click("default", "bot-1", ACTOR, click);
+
+    // Two allowed actions, then the observation, then the third allowed action. Filed the other way
+    // round a reader has to deduce the cause from a row written after its effect.
+    expect(rows.map((row) => row.eventType)).toEqual([
+      "computer.action_allowed",
+      "computer.action_allowed",
+      "computer.action_repeated",
+      "computer.action_allowed",
+    ]);
+  });
+
+  test("the row says which call, and how many times", async () => {
+    const { gateway, rows } = await gatewayWith(
+      PERMISSIVE,
+      createRepeatDetector({ thresholds: [2] }),
+    );
+
+    await gateway.click("default", "bot-1", ACTOR, click);
+    await gateway.click("default", "bot-1", ACTOR, click);
+
+    const repeated = rows.find(
+      (row) => row.eventType === "computer.action_repeated",
+    );
+    expect(repeated?.payload).toMatchObject({
+      action: "computer_click",
+      bot: "bot-1",
+      fingerprint: "computer_click ref=e9",
+      count: 2,
+    });
+    // Not a refusal, and it must not carry the furniture of one. A row with a `decision` block would
+    // read as the policy having answered a question nobody asked it.
+    expect(repeated?.payload.decision).toBeUndefined();
+  });
+
+  test("a refused action is still counted, because the Bot still tried", async () => {
+    // A Bot hammering a button the policy forbids is going in circles as surely as one hammering a
+    // button that works, and it is the case an operator most wants to see.
+    const { gateway, rows } = await gatewayWith(
+      { ...PERMISSIVE, deny: ['contains(element.name, "submit")'] },
+      createRepeatDetector({ thresholds: [2] }),
+    );
+
+    await gateway.click("default", "bot-1", ACTOR, click).catch(() => {});
+    await gateway.click("default", "bot-1", ACTOR, click).catch(() => {});
+
+    expect(rows.map((row) => row.eventType)).toEqual([
+      "computer.action_refused",
+      "computer.action_repeated",
+      "computer.action_refused",
+    ]);
+  });
+
+  test("two Bots on one gateway do not pool a count", async () => {
+    const { gateway, rows } = await gatewayWith(
+      PERMISSIVE,
+      createRepeatDetector({ thresholds: [2] }),
+    );
+
+    await gateway.click("default", "sales-bot", ACTOR, click);
+    await gateway.click("default", "research-bot", ACTOR, click);
+
+    // One click each. A pooled count would file this against whichever Bot happened to go second.
+    expect(
+      rows.some((row) => row.eventType === "computer.action_repeated"),
+    ).toBe(false);
+  });
+
+  test("a call with nothing to distinguish it is never reported as a repeat", async () => {
+    // Scrolling names no element. Counting it by tool name alone would report a Bot reaching the
+    // bottom of a long page as one going in circles.
+    const { gateway, rows } = await gatewayWith(
+      PERMISSIVE,
+      createRepeatDetector({ thresholds: [2] }),
+    );
+
+    await gateway.scroll("default", "bot-1", ACTOR, { direction: "down" });
+    await gateway.scroll("default", "bot-1", ACTOR, { direction: "down" });
+    await gateway.scroll("default", "bot-1", ACTOR, { direction: "down" });
+
+    expect(
+      rows.every((row) => row.eventType === "computer.action_allowed"),
+    ).toBe(true);
+  });
+
+  test("a lost observation row does not refuse an action the policy allows", async () => {
+    // The detector observes and the policy decides, and that has to survive the audit store having a
+    // bad moment. Letting the observation row throw would refuse every third, tenth and twenty-fifth
+    // identical call, before the policy had been asked, on an action nothing objected to.
+    const { client, calls } = fakeClient();
+    const rows: AuditEventInput[] = [];
+    const store: AuditStore = {
+      insert: async (event) => {
+        if (event.eventType === "computer.action_repeated") {
+          throw new Error("the audit store is unreachable");
+        }
+        rows.push(event);
+      },
+    };
+    const gateway = createComputerGateway({
+      client,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      repeat: createRepeatDetector({ thresholds: [2] }),
+    });
+    await gateway.snapshot("default");
+
+    await gateway.click("default", "bot-1", ACTOR, click);
+    await gateway.click("default", "bot-1", ACTOR, click);
+
+    // Both clicks happened and both decisions are on the record. What was lost is the note saying
+    // they were the same click twice, which is the only thing that may be lost here.
+    expect(calls).toEqual(["click", "click"]);
+    expect(rows.map((row) => row.eventType)).toEqual([
+      "computer.action_allowed",
+      "computer.action_allowed",
+    ]);
+  });
+
+  test("a repeated file write names the path and not the browser's page", async () => {
+    // The workspace has nothing to do with whatever the browser happens to be showing, and naming a
+    // host on that row sends a reader somewhere irrelevant.
+    const { gateway, rows } = await gatewayWith(
+      PERMISSIVE,
+      createRepeatDetector({ thresholds: [2] }),
+    );
+
+    await gateway.writeFile("default", "bot-1", ACTOR, {
+      path: "notes.md",
+      contents: "again",
+    });
+    await gateway.writeFile("default", "bot-1", ACTOR, {
+      path: "notes.md",
+      contents: "again",
+    });
+
+    const repeated = rows.find(
+      (row) => row.eventType === "computer.action_repeated",
+    );
+    expect(repeated?.payload.fingerprint).toBe(
+      "computer_write_file file=notes.md",
+    );
+    expect(repeated?.payload.page).toBeUndefined();
   });
 });

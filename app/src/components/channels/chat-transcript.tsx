@@ -7,7 +7,11 @@ import { Streamdown } from "streamdown";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
-import { MessageContent, Message as MessageRow } from "@/components/ui/message";
+import {
+  MessageContent,
+  MessageFooter,
+  Message as MessageRow,
+} from "@/components/ui/message";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -15,8 +19,10 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { toVisibleChatItems } from "./chat-messages";
+import type { QueuedMessage } from "./composer";
 import { ToolLine } from "./tool-line";
 import { ToolRenderBoundary } from "./tool-boundary";
 
@@ -25,7 +31,17 @@ type ChatTranscriptProps = {
   /** Comma-separated `/` command names, used to tell a skill chip from a leading slash. */
   commandNames?: string;
   messages: ReadonlyArray<Readonly<Message>>;
+  /**
+   * Typed while the Bot had the turn, and waiting for it to finish. Empty on a screen that does not
+   * offer queueing at all.
+   */
+  queued?: readonly QueuedMessage[];
+  /** Take one back before it runs. Without it a queued line is shown but cannot be undone. */
+  onRemoveQueued?: (id: string) => void;
 };
+
+/** One shared empty array, so a screen without a queue does not hand down a new one per render. */
+const EMPTY_QUEUE: readonly QueuedMessage[] = [];
 
 /**
  * Split a person's message into the skill they invoked and the rest of what they typed.
@@ -73,6 +89,102 @@ function Thinking() {
       Thinking
     </p>
   );
+}
+
+/**
+ * Something the person said while the Bot was working, waiting its turn.
+ *
+ * IT IS DRAWN AS THEIR MESSAGE, NOT AS A NOTICE ABOUT ONE. The whole point of letting somebody type
+ * mid-turn is that they can see their words landed, and a status line saying "1 message queued"
+ * does not do that — they would still be wondering whether the sentence they typed is the sentence
+ * that will run. So it is the same bubble, in the same column, with the same wrapping, and only two
+ * things say it has not run yet: it is faded, and it says so underneath.
+ *
+ * The footer carries the taking-back too, because that is where the reader's eye already is once
+ * they have decided this was a mistake, and because a control on the bubble itself would have to
+ * hover over the words it is offering to delete.
+ */
+function Queued({
+  text,
+  onRemove,
+}: {
+  text: string;
+  onRemove?: (() => void) | undefined;
+}) {
+  return (
+    <MessageRow align="end">
+      <MessageContent>
+        <Bubble align="end" className="opacity-60" variant="muted">
+          <BubbleContent>
+            {/* Shown exactly as typed, for the same reason a sent message is. */}
+            <span className="whitespace-pre-wrap">{text}</span>
+          </BubbleContent>
+        </Bubble>
+        <MessageFooter>
+          {/*
+           * `status` rather than `alert`, matching the thinking line: a person who has just chosen
+           * to queue something is not being interrupted by the news that it is queued.
+           */}
+          <span role="status">Queued</span>
+          {onRemove ? (
+            <button
+              /*
+               * The sentence it deletes, in the name. Three parked corrections put three buttons
+               * called "Remove" in a row, and somebody reading by name alone is told what they can
+               * do and nothing about which one it would happen to. The visible word stays short
+               * because the bubble it sits under is the answer for everybody who can see it.
+               */
+              aria-label={`Remove queued message: ${text}`}
+              className="ml-2 underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              onClick={onRemove}
+              type="button"
+            >
+              Remove
+            </button>
+          ) : null}
+        </MessageFooter>
+      </MessageContent>
+    </MessageRow>
+  );
+}
+
+/**
+ * Put the newest queued message where the person who just typed it can see it.
+ *
+ * WITHOUT THIS THE AFFORDANCE IS INVISIBLE EXACTLY WHEN IT MATTERS. The scroller holds its anchor on
+ * the turn being answered rather than following the bottom, so during a long streamed answer the
+ * transcript sits a screen or so above the end — and a line appended below it lands off screen.
+ * Measured at the point somebody would actually use this: eighty-odd pixels under the fold, with
+ * the composer emptying at the same moment. They would have watched their correction vanish.
+ *
+ * Keyed on the newest queued id rather than on the list, so it does not fire again for every chunk
+ * of the answer still streaming above it. It does fire when the bottom-most queued line is taken
+ * back, which is a scroll nobody asked for and which lands on the end of the conversation anyway,
+ * and it stays quiet on a drain, when the id goes to null.
+ *
+ * IT COSTS THE ANCHOR, AND THAT IS THE PRICE OF THE SCROLL RATHER THAN A SIDE EFFECT OF IT.
+ * `scrollToEnd` drops whatever turn the scroller was holding its position against and starts
+ * following the bottom instead, so the rest of that answer streams past under the reader rather
+ * than staying put beneath the question. Somebody who has just typed at the bottom of the
+ * conversation has asked to be at the bottom of the conversation, so following it is the reading
+ * they chose; but they chose it for the whole turn and not only for the moment, and the button
+ * back to the anchored view is the scroller's own, not ours to restore.
+ *
+ * Rendering nothing and living inside the provider is what buys access to the scroller at all; the
+ * alternative is threading a ref out through three components with no other reason to know a
+ * scroller exists.
+ */
+function ScrollNewestQueuedIntoView({ newest }: { newest: string | null }) {
+  const { scrollToEnd } = useMessageScroller();
+
+  useEffect(() => {
+    if (newest === null) {
+      return;
+    }
+    scrollToEnd();
+  }, [newest, scrollToEnd]);
+
+  return null;
 }
 
 /**
@@ -341,6 +453,8 @@ export function ChatTranscript({
   busy = false,
   commandNames = "",
   messages,
+  onRemoveQueued,
+  queued = EMPTY_QUEUE,
 }: ChatTranscriptProps) {
   /*
    * NOT MEMOISED, AND THAT IS DELIBERATE. `useMemo` keyed on `messages` looks obviously right and
@@ -436,9 +550,26 @@ export function ChatTranscript({
              * the scroller to measure and anchor something that exists for a second and a half.
              */}
             {waitingOnFirstToken ? <Thinking /> : null}
+            {/*
+             * Below the thinking line, and outside the item list for the same reason it is: these
+             * are not yet turns. They have ids of their own, but they are this tab's ids and not the
+             * thread's, so handing them to the scroller would ask it to anchor on something that is
+             * about to be replaced by a message with a different id — and the replacement is the
+             * one worth scrolling to.
+             */}
+            {queued.map((message) => (
+              <Queued
+                key={message.id}
+                onRemove={
+                  onRemoveQueued ? () => onRemoveQueued(message.id) : undefined
+                }
+                text={message.text}
+              />
+            ))}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />
+        <ScrollNewestQueuedIntoView newest={queued.at(-1)?.id ?? null} />
       </MessageScroller>
     </MessageScrollerProvider>
   );
