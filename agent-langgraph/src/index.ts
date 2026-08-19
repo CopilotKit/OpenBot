@@ -58,6 +58,24 @@ const PROVIDER = (process.env.BOT_PROVIDER ?? "openai").toLowerCase();
 const MODEL = process.env.BOT_MODEL ?? defaultModelFor(PROVIDER);
 /** OpenAI only. Its newer models require the Responses API, which the integration handles. */
 const USE_RESPONSES_API = process.env.BOT_RESPONSES_API === "true";
+/**
+ * OpenAI only, and the same variable the API server reads for its built-in agents.
+ *
+ * Unset, `openai` means OpenAI. Set, it means any endpoint speaking that API: a gateway in front of
+ * several providers, a proxy, or a model on hardware you control. The integration owns the HTTP, so
+ * this is a base URL rather than another provider branch, and `BOT_MODEL` is sent verbatim because
+ * an endpoint names its own catalogue.
+ */
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
+/**
+ * The same idea for the other two providers, under the names the API server already reads.
+ *
+ * Sharing the variable names is the point: one line moves the built-in agents and this Bot
+ * together, and a deployment cannot end up with half of itself pointed somewhere else.
+ */
+const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
+const GOOGLE_BASE_URL =
+  process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.trim() || undefined;
 
 function defaultModelFor(provider: string): string {
   if (provider === "anthropic") return "claude-sonnet-4-5";
@@ -177,6 +195,7 @@ function buildModel() {
       model: MODEL,
       apiKey: API_KEY,
       streaming: true,
+      ...(ANTHROPIC_BASE_URL ? { anthropicApiUrl: ANTHROPIC_BASE_URL } : {}),
     });
   }
   if (PROVIDER === "google") {
@@ -184,12 +203,14 @@ function buildModel() {
       model: MODEL,
       apiKey: API_KEY,
       streaming: true,
+      ...(GOOGLE_BASE_URL ? { baseUrl: GOOGLE_BASE_URL } : {}),
     });
   }
   return new ChatOpenAI({
     model: MODEL,
     apiKey: API_KEY,
     streaming: true,
+    ...(OPENAI_BASE_URL ? { configuration: { baseURL: OPENAI_BASE_URL } } : {}),
     ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),
   });
 }

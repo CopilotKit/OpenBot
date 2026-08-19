@@ -64,6 +64,22 @@ export const auditEventTypes = [
   // Permitted by policy, attempted, and did not succeed. Its own type because "allowed" reads as
   // "happened", and a trail that cannot tell those apart misleads exactly when it matters most.
   "computer.action_failed",
+  /**
+   * The same call, again, and again.
+   *
+   * The rows above record actions one at a time, which is the only way to record them and the reason
+   * a Bot stuck in a retry loop is invisible here: thirty identical rows look like thirty rows. This
+   * one says the thing the sequence cannot, that these are the same call, and how many times.
+   *
+   * It is not a refusal. Nothing was forbidden and nothing was stopped; a Bot did the same thing
+   * again, which is often merely a retry that is about to work. Filing it as a refusal would teach a
+   * reader to skim past the refusals that are real, so it is its own type and the audit page gives it
+   * its own words.
+   *
+   * Written when a count crosses a threshold rather than on every repeat, because a row per attempt
+   * would bury the attempts themselves under the observation that they kept happening.
+   */
+  "computer.action_repeated",
   // A person taking the wheel and giving it back. Recorded as a period rather than as keystrokes: the
   // useful fact for an investigator is that a human drove this browser between these two times, and
   // logging every click a person made would bury it while telling nobody anything.
