@@ -14,8 +14,12 @@ import { useSyncExternalStore } from "react";
  * somewhere else shows nothing, which is honest, because the socket does not replay either.
  *
  * Deliberately not on the server. A row per outstanding notification would be a second answer to
- * "is this Bot waiting", and the first one already exists and is authoritative: the computer's own
- * control state, which the screen polls.
+ * "is this Bot waiting", and there is already an authoritative one: the computer's own control
+ * state. The cost of that choice is real and is not argued away here. Nothing re-derives this record
+ * from control state, and nothing replays what the socket missed, so a notification raised while a
+ * browser was disconnected — across a deploy, say — leaves no trace on any of these three surfaces.
+ * The Bot is still visibly waiting on its own screen and the handover is still in the audit trail,
+ * which is what makes that survivable rather than good.
  */
 
 /** A notification as it arrives from the server. See server/src/notifications.ts. */
@@ -153,6 +157,29 @@ export function noteBotWaiting(notification: BotNotification) {
 /** Clear a Bot's marker. Called when somebody opens it, which is the only thing that answers it. */
 export function clearBotWaiting(botId: string) {
   commit(withoutWaitingBot(snapshot(), botId));
+}
+
+/**
+ * Another tab of this browser, writing the same key.
+ *
+ * Without this the two diverge and one of them wins by accident. `current` is a module value, so a
+ * tab whose copy predates another tab clearing a marker writes that marker back on its next commit,
+ * and a Bot somebody has already dealt with reappears in their sidebar. The event does not fire in
+ * the tab that wrote, which is what makes listening to it safe.
+ *
+ * Registered once at import rather than by a hook, because the store is read from two places that
+ * mount and unmount independently and this has to hold whether or not either of them is on screen.
+ */
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    // A null key is the whole of storage being cleared, which is also news.
+    if (event.key !== null && event.key !== WAITING_STORAGE_KEY) return;
+    current = parseWaitingBots(
+      event.newValue ?? storage()?.getItem(WAITING_STORAGE_KEY) ?? null,
+    );
+    loaded = true;
+    for (const listener of listeners) listener();
+  });
 }
 
 /** Which Bots are waiting, live. */

@@ -40,7 +40,6 @@ import {
   type ChannelSummary,
   channelListQueryOptions,
 } from "@/lib/channels/queries";
-import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
 import { useWaitingBots } from "@/lib/notifications/waiting";
 import { Button } from "../ui/button";
@@ -157,9 +156,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
   const channels = useQuery(channelListQueryOptions());
-  // One socket for the app, opened where the roster is kept live. It also carries the notifications
-  // that set the markers below.
-  useChannelEvents();
+  // The socket that keeps this roster live, and carries the notifications behind the markers below,
+  // is opened on the authed boundary. A Bot does not stop needing somebody when they leave this
+  // shell, so it cannot be owned by the shell.
   const waitingBots = useWaitingBots();
   const [search, setSearch] = useState("");
   const searching = search.trim().length > 0;

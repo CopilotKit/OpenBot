@@ -74,13 +74,21 @@ function RouteComponent() {
    * every change instead, which also covers arriving from the sidebar, from a bookmark, or from a
    * toast; a marker only the toast could clear would stay up for anybody who did not use one.
    *
+   * Every coworker in the channel, not the one the transcript is routed to. The sidebar marks a row
+   * when any Bot behind it is waiting, and the API will create a channel with more than one, so
+   * clearing only the first leaves a marker on a row that has already been opened with no way left
+   * to answer it. The two ends of the same marker have to agree about what a row means.
+   *
    * The toast still appears for the Bot on screen. The two say different things: the toast says this
    * has just happened, and the marker says this is outstanding and nobody has looked yet.
    */
+  const memberIds = channel.data?.agentIds;
   const waitingBots = useWaitingBots();
   useEffect(() => {
-    if (agentId && waitingBots[agentId]) clearBotWaiting(agentId);
-  }, [agentId, waitingBots]);
+    for (const memberId of memberIds ?? []) {
+      if (waitingBots[memberId]) clearBotWaiting(memberId);
+    }
+  }, [memberIds, waitingBots]);
 
   // Needs-you prompts auto-open the screen because the actionable prompt is rendered there.
   useEffect(() => {

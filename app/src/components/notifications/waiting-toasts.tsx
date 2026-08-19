@@ -2,7 +2,8 @@ import { IconX } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { channelListQueryOptions } from "@/lib/channels/queries";
 import {
   DESKTOP_NOTIFICATIONS_STORAGE_KEY,
@@ -35,6 +36,13 @@ import { Button } from "../ui/button";
  * Long enough to notice out of the corner of an eye and act on, short enough that the corner of the
  * screen does not accumulate. It can afford to be short because the sidebar marker is the thing that
  * persists; nothing is lost when this goes.
+ *
+ * Counted by each card for itself rather than by the list that holds them. A timer owned by the list
+ * has to be torn down whenever the list is rebuilt, and the list is rebuilt every time any Bot's
+ * marker changes anywhere in the product: a second Bot asking, or the first one's marker being
+ * cleared by somebody opening it, would cancel the countdown of a card already on screen and leave
+ * it there for good. That is the opposite of what this surface promises, and because the cards take
+ * pointer events, a stranded one goes on covering the corner of somebody's work.
  */
 const VISIBLE_MS = 12_000;
 
@@ -45,6 +53,15 @@ export function WaitingToasts() {
   const waiting = useWaitingBots();
   const navigate = useNavigate();
   const channels = useQuery(channelListQueryOptions());
+  /**
+   * The roster, for the name on the card.
+   *
+   * The channel list is not that. A channel is named after everybody in it, so in a channel with two
+   * Bots it would put both names in front of somebody and say one of them was waiting. Read from the
+   * roster the name belongs to instead, and fall back to the id, which is a poor label and an honest
+   * one.
+   */
+  const agents = useQuery(agentListQueryOptions());
   /**
    * Which notifications have already been announced.
    *
@@ -59,15 +76,22 @@ export function WaitingToasts() {
   );
   const [showing, setShowing] = useState<BotNotification[]>([]);
 
-  const names = new Map(
-    (channels.data ?? []).flatMap((channel) =>
-      channel.agentIds.map((agentId) => [agentId, channel.name] as const),
-    ),
-  );
+  const roster = agents.data;
   /** The Bot's name where the roster knows it. An id is a poor label, and better than none. */
-  const nameOf = (botId: string) => names.get(botId) ?? botId;
+  const nameOf = useCallback(
+    (botId: string) =>
+      roster?.find((agent) => agent.id === botId)?.name ?? botId,
+    [roster],
+  );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `names` is rebuilt every render and is read, not depended on.
+  /*
+   * Re-running when the roster arrives is free, and refusing to would not be.
+   *
+   * `announced` is what stops a notification being told twice, so an extra run finds nothing new and
+   * returns. Leaving the roster out of the dependencies to avoid those runs is the version that goes
+   * wrong: the first notification of a session lands before the roster does, and the desktop
+   * notification would then carry an id where a name should be.
+   */
   useEffect(() => {
     const arrived = Object.values(waiting).filter(
       (notification) => !announced.has(notification.id),
@@ -82,15 +106,7 @@ export function WaitingToasts() {
       }
     }
     setShowing((current) => [...current, ...arrived]);
-
-    const timer = window.setTimeout(() => {
-      const expiring = new Set(arrived.map((notification) => notification.id));
-      setShowing((current) =>
-        current.filter((notification) => !expiring.has(notification.id)),
-      );
-    }, VISIBLE_MS);
-    return () => window.clearTimeout(timer);
-  }, [waiting]);
+  }, [waiting, announced, nameOf]);
 
   const dismiss = (id: string) =>
     setShowing((current) =>
@@ -159,6 +175,23 @@ function Toast({
   onOpen: () => void;
 }) {
   const shouldReduceMotion = useReducedMotion();
+  /**
+   * The card's own countdown, started when it appeared and cancelled only when it goes.
+   *
+   * Reached through a ref so the effect has nothing to depend on but the mount. `onDismiss` closes
+   * over the list's state and is a new function on every render of it, and an effect that listed it
+   * would restart the countdown every time any Bot's marker changed anywhere — the slower version of
+   * never expiring at all.
+   */
+  const expire = useRef(onDismiss);
+  useEffect(() => {
+    expire.current = onDismiss;
+  });
+  useEffect(() => {
+    const timer = window.setTimeout(() => expire.current(), VISIBLE_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   return (
     <motion.div
       animate={{ opacity: 1, transform: "translateY(0px)" }}

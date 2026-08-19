@@ -9,8 +9,12 @@ import { type ChannelSummary, channelKeys } from "./queries";
 /**
  * Keep the roster live, and hear about a Bot that has stopped and is waiting.
  *
- * The query remains the source of truth; socket events only patch its cache. Reconnects refetch the
- * list to recover events missed while disconnected.
+ * The query remains the source of truth; socket events only patch its cache, and a reconnect refetches
+ * the list to recover the activity missed while disconnected. Notifications have no equivalent, and
+ * the gap is worth stating rather than leaving to be discovered: nothing on the server holds an
+ * outstanding notification, so one raised while this socket was down is not delivered late. A Bot in
+ * that position is still waiting on its own screen and the handover is still in the audit trail, but
+ * the corner of the screen and the sidebar marker will not know about it.
  *
  * One socket for both, because it is one socket: the server tags what it sends and this dispatches
  * on the tag. A second connection would need its own upgrade, its own reconnect and its own backoff
@@ -58,7 +62,8 @@ export function useChannelEvents() {
 
       socket.onopen = () => {
         retryDelay = FIRST_RETRY_MS;
-        // Recover events missed while the socket was disconnected.
+        // Recover the roster activity missed while the socket was disconnected. Notifications are not
+        // recovered here; see the header.
         void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
       };
 
