@@ -50,8 +50,16 @@ test("gives both shipped Bots the OpenAI-compatible endpoint", () => {
     "utf8",
   );
 
-  const passthrough = compose.match(/OPENAI_BASE_URL: \$\{OPENAI_BASE_URL:-\}/g);
-  expect(passthrough).toHaveLength(2);
+  // Both Bots speak OpenAI; only the framework Bot can be pointed at the other two.
+  expect(
+    compose.match(/OPENAI_BASE_URL: \$\{OPENAI_BASE_URL:-?\}/g),
+  ).toHaveLength(2);
+  for (const variable of [
+    "ANTHROPIC_BASE_URL",
+    "GOOGLE_GENERATIVE_AI_BASE_URL",
+  ]) {
+    expect(compose).toContain(`${variable}: \${${variable}:-}`);
+  }
 });
 
 test("enables pgvector before creating vector columns", () => {

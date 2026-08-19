@@ -67,6 +67,15 @@ const USE_RESPONSES_API = process.env.BOT_RESPONSES_API === "true";
  * an endpoint names its own catalogue.
  */
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
+/**
+ * The same idea for the other two providers, under the names the API server already reads.
+ *
+ * Sharing the variable names is the point: one line moves the built-in agents and this Bot
+ * together, and a deployment cannot end up with half of itself pointed somewhere else.
+ */
+const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
+const GOOGLE_BASE_URL =
+  process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.trim() || undefined;
 
 function defaultModelFor(provider: string): string {
   if (provider === "anthropic") return "claude-sonnet-4-5";
@@ -186,6 +195,7 @@ function buildModel() {
       model: MODEL,
       apiKey: API_KEY,
       streaming: true,
+      ...(ANTHROPIC_BASE_URL ? { anthropicApiUrl: ANTHROPIC_BASE_URL } : {}),
     });
   }
   if (PROVIDER === "google") {
@@ -193,15 +203,14 @@ function buildModel() {
       model: MODEL,
       apiKey: API_KEY,
       streaming: true,
+      ...(GOOGLE_BASE_URL ? { baseUrl: GOOGLE_BASE_URL } : {}),
     });
   }
   return new ChatOpenAI({
     model: MODEL,
     apiKey: API_KEY,
     streaming: true,
-    ...(OPENAI_BASE_URL
-      ? { configuration: { baseURL: OPENAI_BASE_URL } }
-      : {}),
+    ...(OPENAI_BASE_URL ? { configuration: { baseURL: OPENAI_BASE_URL } } : {}),
     ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),
   });
 }
