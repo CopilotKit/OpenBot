@@ -16,6 +16,7 @@ export function ConversationView({
   commands,
   disabled = false,
   pending = false,
+  stopped,
   onSubmit,
   onStop,
 }: {
@@ -30,6 +31,8 @@ export function ConversationView({
   commands?: readonly CommandOption[];
   disabled?: boolean;
   pending?: boolean;
+  /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
+  stopped?: string;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
@@ -51,6 +54,7 @@ export function ConversationView({
             .map((command) => command.name)
             .join(",")}
           messages={messages}
+          {...(stopped ? { stopped } : {})}
         />
       </div>
       <div className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0">

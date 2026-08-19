@@ -259,6 +259,8 @@ const NAMED_TARGETS = new Set([
 
 const DECISIONS: Record<string, string> = {
   "bot.declined": "The Bot declined",
+  // Not a refusal and not a failed action: the Bot said nothing and the turn was ended for it.
+  "agent.stream_stalled": "The Bot stopped responding",
   "computer.policy_loaded": "Boundary at start-up",
   "computer.isolation_loaded": "Isolation at start-up",
   "computer.control_taken": "A person took the wheel",

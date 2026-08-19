@@ -163,6 +163,70 @@ describe("registered Copilot agents", () => {
     expect(agents.risk).toBeInstanceOf(HttpAgent);
   });
 
+  /*
+   * The watch goes on the fetch of a remote Bot and nowhere else.
+   *
+   * A built-in agent talks to a model provider through the AI SDK rather than over an AG-UI stream,
+   * so there is no response body here to watch and nothing for the guard to be given. Asserting the
+   * Bot's own name reaches it matters because that name is what the person is shown when its stream
+   * goes quiet, and a guard handed the wrong one would say so convincingly.
+   */
+  test("hands a remote Bot's fetch to the stall guard, and a built-in Bot none", () => {
+    const watched: { id: string; name: string }[] = [];
+    const stallGuard = {
+      watch: (bot: { id: string; name: string }) => {
+        watched.push(bot);
+        return async () => new Response(null);
+      },
+      stop: () => undefined,
+    };
+
+    const agents = buildAgents(
+      [
+        {
+          id: "general-assistant",
+          name: "General Assistant",
+          type: "built_in",
+          systemPrompt: "Be helpful.",
+        },
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui",
+          endpoint: "http://risk.internal/ag-ui",
+        },
+      ],
+      { provider: "openai", defaultModel: "gpt-4.1" },
+      "openai-secret",
+      stallGuard,
+    );
+
+    expect(watched).toEqual([{ id: "risk", name: "Risk" }]);
+    expect(agents.risk).toBeInstanceOf(HttpAgent);
+  });
+
+  test("leaves a remote Bot's fetch alone when no timeout is configured", () => {
+    const agents = buildAgents(
+      [
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui",
+          endpoint: "http://risk.internal/ag-ui",
+        },
+      ],
+      { provider: "openai", defaultModel: "gpt-4.1" },
+      null,
+    );
+
+    const remote = agents.risk;
+    if (!(remote instanceof HttpAgent)) {
+      throw new Error("Expected the remote agent");
+    }
+    // @ag-ui/client defaults this to its own fetch when the config does not carry one.
+    expect(typeof remote.fetch).toBe("function");
+  });
+
   test("resolves fresh built-in agents and credentials for every request", async () => {
     const registered = [
       {

@@ -34,6 +34,15 @@ export type DeploymentConfig = {
   deploymentId: string | undefined;
   tenantPackageDirectory: string;
   runtime: RuntimeCapabilities;
+  /**
+   * How long a Bot's stream may say nothing before this deployment ends the turn, in milliseconds.
+   *
+   * Zero means no watchdog, and an unset variable means zero. A turn that is ended is a turn
+   * somebody loses, so a deployment that has not said it wants that gets the behaviour it already
+   * had. `.env.example` ships a value, so a new clone starts with the watch on and an upgraded
+   * deployment does not acquire it without being asked.
+   */
+  agentStallTimeoutMs: number;
   oauth: {
     google?: { clientId: string; clientSecret: string };
   };
@@ -314,6 +323,31 @@ function actionPolicy(environment: Environment): ActionPolicy | undefined {
   return result.policy;
 }
 
+/**
+ * How long silence on a Bot's stream is allowed to last.
+ *
+ * Refuses to start on anything that is not a whole number of milliseconds, rather than falling back
+ * to the default. Same reasoning as the action policy above it: an operator who meant to write a
+ * two-minute timeout and typed something else would otherwise get a running deployment with a
+ * silently different boundary, and no indication that anything was wrong.
+ *
+ * Zero is a legitimate value and means off. It is not the same as a malformed one.
+ */
+function agentStallTimeoutMs(environment: Environment): number {
+  const raw = optional(environment, "AGENT_STALL_TIMEOUT_MS");
+  if (!raw) {
+    return 0;
+  }
+
+  const milliseconds = Number(raw);
+  if (!Number.isInteger(milliseconds) || milliseconds < 0) {
+    throw new Error(
+      "AGENT_STALL_TIMEOUT_MS must be a whole number of milliseconds, or 0 to switch the watchdog off",
+    );
+  }
+  return milliseconds;
+}
+
 export function loadConfig(
   environment: Environment = process.env,
 ): DeploymentConfig {
@@ -330,6 +364,7 @@ export function loadConfig(
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
+    agentStallTimeoutMs: agentStallTimeoutMs(environment),
     oauth: { google },
     auth: authConfig(environment, google),
     devNoAuth: devAuthEnabled(environment),

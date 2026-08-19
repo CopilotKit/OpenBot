@@ -289,23 +289,12 @@ export function ChannelChat({
         disabled={!channel.active}
         messages={transcriptMessages(agent.messages, seed)}
         notice={
-          <>
-            {runError ? (
-              <p
-                className="pb-2 text-sm text-destructive"
-                data-testid="channel-run-error"
-                role="alert"
-              >
-                {runError}
-              </p>
-            ) : null}
-            {channel.active ? null : (
-              <p className="pb-2 text-sm text-muted-foreground" role="status">
-                This coworker has been deleted. The conversation stays readable,
-                but it can no longer reply.
-              </p>
-            )}
-          </>
+          channel.active ? null : (
+            <p className="pb-2 text-sm text-muted-foreground" role="status">
+              This coworker has been deleted. The conversation stays readable,
+              but it can no longer reply.
+            </p>
+          )
         }
         onSubmit={async (draft) => {
           // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this
@@ -336,6 +325,17 @@ export function ChannelChat({
           copilotkit.stopAgent({ agent });
         }}
         pending={agent.isRunning}
+        /*
+         * At the END OF THE TRANSCRIPT rather than above the composer, which is where this used to
+         * be. A turn that ends without an answer leaves a gap exactly where the reply was going to
+         * appear, and the person is already looking at it; an explanation in the composer area is a
+         * different part of the screen from the thing it explains.
+         *
+         * `runError` carries whatever ended the turn, in that thing's own words. A Bot that stopped
+         * streaming says so, because the deployment's stall watchdog writes that sentence into the
+         * run before closing it; see server/src/channels/stall-guard.ts.
+         */
+        stopped={runError ?? undefined}
       />
     </ConversationProvider>
   );
