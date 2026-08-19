@@ -22,6 +22,7 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { toVisibleChatItems } from "./chat-messages";
+import { forDisplay } from "@/lib/plugins/tool-result";
 import type { QueuedMessage } from "./composer";
 import { ToolLine } from "./tool-line";
 import { ToolRenderBoundary } from "./tool-boundary";
@@ -467,16 +468,23 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
     <Arriving delay={delay}>
       <ToolRenderBoundary name={name}>
         {/*
-         * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED. `renderToolCall` draws whatever was
-         * registered for the name and nothing at all for anything else, which left a Bot that called
-         * something the app does not know about looking like a Bot that did nothing — the same
-         * failure `ToolRenderBoundary` exists to prevent, arriving by a different route.
+         * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
+         * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
+         * and register no renderer here at all. `renderToolCall` still draws the components the app
+         * registers, and everything else lands below.
          *
-         * The fallback is a plain tool line: what was called, shimmering until its result lands. It
-         * is the same line the computer and MCP tools draw, so an unrecognised call reads as an
-         * ordinary event rather than as damage.
+         * What was called, shimmering until its result arrives, and then the server's own words
+         * drawn the way a Bot's prose is drawn.
          */}
-        {drawn ?? <ToolLine label={name} running={result === undefined} />}
+        {drawn ?? (
+          <ToolLine label={name} running={result === undefined}>
+            {result ? (
+              <Streamdown components={markdownComponents}>
+                {forDisplay(result)}
+              </Streamdown>
+            ) : null}
+          </ToolLine>
+        )}
       </ToolRenderBoundary>
     </Arriving>
   );
