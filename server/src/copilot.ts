@@ -46,7 +46,7 @@ type RegisteredRemoteAgent = {
 };
 
 /**
- * A teammate the caller may see but may not run: its profile was deleted while a channel it worked
+ * A coworker the caller may see but may not run: its profile was deleted while a channel it worked
  * in still exists. It is registered so Intelligence can restore that thread and the person can read
  * what was said; every run is refused here, without contacting the endpoint.
  */
@@ -66,7 +66,7 @@ type AgentRunInput = Parameters<AbstractAgent["run"]>[0];
 type AgentMessage = AgentRunInput["messages"][number];
 export type StandingRoleMessage = Extract<AgentMessage, { role: "system" }>;
 
-/** The durable part of a teammate: who it is and what its standing job is. */
+/** The durable part of a coworker: who it is and what its standing job is. */
 export type AgentStandingProfile = {
   id: string;
   name: string;
@@ -75,7 +75,7 @@ export type AgentStandingProfile = {
 };
 
 /**
- * The teammate's job, as one system message.
+ * The coworker's job, as one system message.
  *
  * It is an ordinary AG-UI system message rather than `forwardedProps` or framework-specific state
  * because the endpoint on the other side may be LangGraph, Mastra, ADK or a hand-written server, and
@@ -217,7 +217,7 @@ function buildAgent(
  * A remote AG-UI agent that states its standing role on every run.
  *
  * This is standard AG-UI middleware rather than a request transformation on one provider's client,
- * so the same teammate works against any endpoint that speaks the protocol. Any copy of the standing
+ * so the same coworker works against any endpoint that speaks the protocol. Any copy of the standing
  * message already in the conversation is dropped: the endpoint must receive exactly one, first,
  * however many times the thread has been replayed.
  */
@@ -251,7 +251,7 @@ class UnavailableAgent extends AbstractAgent {
     this.reason = agent.reason;
   }
 
-  // Refused here rather than at the endpoint: a deleted teammate has no endpoint worth contacting,
+  // Refused here rather than at the endpoint: a deleted coworker has no endpoint worth contacting,
   // and the person is owed the reason rather than a transport error.
   run(): never {
     throw new Error(this.reason);
@@ -287,8 +287,8 @@ export type LoadAgentsForActor = (
 /**
  * Build the runtime's per-request agent factory.
  *
- * Resolution is per request, not per boot, because who may run a teammate is a property of the
- * person asking: a private teammate must be absent for everybody else, and a role edited a moment
+ * Resolution is per request, not per boot, because who may run a coworker is a property of the
+ * person asking: a private coworker must be absent for everybody else, and a role edited a moment
  * ago must apply to the next run without a restart. Both fall out of rebuilding the map here.
  */
 export function createRequestAgents(
@@ -339,7 +339,7 @@ export function mountCopilotRuntime(
     }),
     licenseToken: intelligence.licenseToken,
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
-    // one resolver decides both whose threads these are and whose teammates exist.
+    // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(
       identifyActor,
       loadAgents,

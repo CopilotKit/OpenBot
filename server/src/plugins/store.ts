@@ -512,7 +512,7 @@ export function createPluginStore(options: PluginStoreOptions) {
     /**
      * Whose a Bot is, or `undefined` if there is no such Bot.
      *
-     * Read here rather than through the teammate store because the only question this file asks is
+     * Read here rather than through the coworker store because the only question this file asks is
      * "may this person put their skill on that Bot", and a whole profile is more than that needs.
      */
     async agentOwner(agentId: string): Promise<string | null | undefined> {

@@ -398,8 +398,8 @@ describe("agent lifecycle routes", () => {
       await appFor(store, requireAdministrator).request("http://openbot.test/"),
     )) as { agents: { id: string; canManage: boolean; mine: boolean }[] };
 
-    // An administrator may manage everybody's teammates but only created their own. A roster that
-    // split on `canManage` would file somebody else's private teammate under theirs.
+    // An administrator may manage everybody's coworkers but only created their own. A roster that
+    // split on `canManage` would file somebody else's private coworker under theirs.
     expect(body.agents).toEqual([
       expect.objectContaining({ id: "theirs", canManage: true, mine: false }),
       expect.objectContaining({ id: "ours", canManage: true, mine: true }),

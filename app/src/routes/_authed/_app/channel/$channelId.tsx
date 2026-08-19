@@ -60,7 +60,7 @@ function RouteComponent() {
   const isSettingsOpen = settings === true;
   const prefersReducedMotion = useReducedMotion();
   const isWatching = watch === true;
-  /** Channel routing currently supports one teammate. */
+  /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
   /** Needs-you state is rendered by the screen when the screen is already open. */
   const needsYou = useNeedsYou(agentId, !isWatching);
@@ -178,7 +178,7 @@ function RouteComponent() {
               ) : null}
             </Button>
             <Button
-              aria-label="Channel teammate"
+              aria-label="Channel coworker"
               aria-pressed={isSettingsOpen}
               className={isSettingsOpen ? "bg-foreground/5" : undefined}
               disabled={agentId === undefined}
@@ -201,7 +201,7 @@ function RouteComponent() {
 }
 
 /**
- * A channel holds exactly one teammate. More than one is not supported yet, and rendering a shared
+ * A channel holds exactly one coworker. More than one is not supported yet, and rendering a shared
  * transcript for several agents before the runtime can route between them would look like it works.
  */
 function ChannelBody({
@@ -231,7 +231,7 @@ function ChannelBody({
   if (!runtimeAgentId) {
     return (
       <p className="p-8 text-sm text-muted-foreground">
-        This channel has more than one teammate, which is not supported yet.
+        This channel has more than one coworker, which is not supported yet.
       </p>
     );
   }

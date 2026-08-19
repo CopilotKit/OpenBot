@@ -1,5 +1,5 @@
 /**
- * Teammate tables: bots, skills, routines, bot-to-bot handoff.
+ * Coworker tables: bots, skills, routines, bot-to-bot handoff.
  *
  * Split by owner so two people can add tables all day without touching the same lines. Add tables
  * here; never edit core.ts or computer.ts to do it.

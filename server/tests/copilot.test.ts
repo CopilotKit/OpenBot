@@ -10,7 +10,7 @@ import {
   standingRoleMessage,
 } from "../src/copilot";
 
-// Every agent row now joins its profile, so the row a teammate is built from always names it.
+// Every agent row now joins its profile, so the row a coworker is built from always names it.
 const assistantRow = {
   id: "general-assistant",
   name: "General Assistant",
@@ -225,9 +225,9 @@ describe("registered Copilot agents", () => {
 });
 
 /**
- * A teammate's job is durable: it lives on the profile, not in the conversation. Every run of a
+ * A coworker's job is durable: it lives on the profile, not in the conversation. Every run of a
  * remote agent therefore carries a standing role message the person never has to retype, and the
- * runtime resolves which agents exist per request so one person's private teammate is not another's.
+ * runtime resolves which agents exist per request so one person's private coworker is not another's.
  */
 describe("standing agent roles", () => {
   const profile = {
@@ -293,7 +293,7 @@ describe("standing agent roles", () => {
     expect(JSON.stringify(sent?.state ?? {})).not.toContain("standing-role");
   });
 
-  test("resolves a deleted teammate as a tombstone that never reaches its endpoint", async () => {
+  test("resolves a deleted coworker as a tombstone that never reaches its endpoint", async () => {
     await using endpoint = fakeAgUiEndpoint();
     const agents = buildAgents(
       [
@@ -330,7 +330,7 @@ describe("standing agent roles", () => {
       },
       async (actor) => {
         seen.actors.push(actor);
-        return [remoteAgent("http://teammate.internal/ag-ui")];
+        return [remoteAgent("http://coworker.internal/ag-ui")];
       },
       { provider: "openai", defaultModel: "gpt-4.1" },
       async () => null,
@@ -349,7 +349,7 @@ describe("standing agent roles", () => {
     const factory = createRequestAgents(
       async () => ({ id: "user-7", role: "user" as const }),
       async () => [
-        remoteAgent("http://teammate.internal/ag-ui", { roleDescription }),
+        remoteAgent("http://coworker.internal/ag-ui", { roleDescription }),
       ],
       { provider: "openai", defaultModel: "gpt-4.1" },
       async () => null,

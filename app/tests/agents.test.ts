@@ -3,7 +3,7 @@ import { agentFormSchema } from "@/lib/agents/form";
 import { agentKeys } from "@/lib/agents/queries";
 import { channelKeys } from "@/lib/channels/queries";
 
-describe("teammate query keys", () => {
+describe("coworker query keys", () => {
   test("separates the visible roster from the hidden one", () => {
     expect(agentKeys.list()).toEqual(["agents", "list", { hidden: false }]);
     expect(agentKeys.list(true)).toEqual(["agents", "list", { hidden: true }]);
@@ -17,7 +17,7 @@ describe("teammate query keys", () => {
   });
 });
 
-describe("teammate form validation", () => {
+describe("coworker form validation", () => {
   test("accepts the fields a person fills in", () => {
     expect(
       agentFormSchema.parse({

@@ -16,7 +16,7 @@ export type AgentProfile = {
   systemOwned: boolean;
   hidden: boolean;
   deletedAt: Date | null;
-  /** Where this teammate runs. Null for the Bot in the box. */
+  /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;
   /** Whether a key is set for it. Never the key. */
   hasAuth: boolean;

@@ -1,6 +1,6 @@
-# Teammates
+# Coworkers
 
-A teammate is a Bot with a durable profile and standing role. The role is sent with every run so the user does not have to restate the job in each channel.
+A coworker is a Bot with a durable profile and standing role. The role is sent with every run so the user does not have to restate the job in each channel.
 
 ## Data model
 
@@ -9,14 +9,14 @@ A teammate is a Bot with a durable profile and standing role. The role is sent w
 | Runtime agent        | `agents`                        | AG-UI endpoint and optional key reference.                            |
 | Profile              | `agent_profiles`                | Name, title, role, avatar seed, owner, visibility, and soft deletion. |
 | Personal roster      | `agent_preferences`             | Per-user hidden state.                                                |
-| Channel              | `channels`                      | Conversation membership and teammate binding.                         |
+| Channel              | `channels`                      | Conversation membership and coworker binding.                         |
 | Intelligence mapping | `intelligence_channel_mappings` | Channel-to-thread mapping.                                            |
 
-Package-provided agents are public and ownerless. User-created teammates are owned by the creator.
+Package-provided agents are public and ownerless. User-created coworkers are owned by the creator.
 
 ## Standing role
 
-Remote teammates receive a system message derived from their title and role description:
+Remote coworkers receive a system message derived from their title and role description:
 
 ```text
 You are Expense Manager, Finance Operations.
@@ -39,19 +39,19 @@ Filtering happens in server/database queries. Package-provided agents cannot be 
 
 ## Channels
 
-Starting a channel creates a new conversation and Intelligence thread. Two channels with the same teammate stay separate.
+Starting a channel creates a new conversation and Intelligence thread. Two channels with the same coworker stay separate.
 
-Each channel routes through a channel-local proxy agent id, pinned to that channel's thread id, then forwards to the teammate runtime id.
+Each channel routes through a channel-local proxy agent id, pinned to that channel's thread id, then forwards to the coworker runtime id.
 
 ## Deleting and hiding
 
-Deleting is soft. The teammate stops running, but existing channels remain readable for their members and restore as tombstones.
+Deleting is soft. The coworker stops running, but existing channels remain readable for their members and restore as tombstones.
 
-Hiding is personal roster state. It removes the teammate from one user's list without disabling the teammate for anyone else.
+Hiding is personal roster state. It removes the coworker from one user's list without disabling the coworker for anyone else.
 
 ## Default endpoint
 
-Product-created teammates use:
+Product-created coworkers use:
 
 ```dotenv
 MANAGED_AGENT_AG_UI_URL=http://localhost:4200/ag-ui
@@ -73,7 +73,7 @@ agents:
     endpoint: http://risk.internal/ag-ui
 ```
 
-In the product, create or edit a teammate from `/agents` and set:
+In the product, create or edit a coworker from `/agents` and set:
 
 - name;
 - title;
@@ -88,7 +88,7 @@ Endpoint registration uses target checks. Cloud metadata addresses are refused u
 
 ## Capabilities
 
-A teammate's role does not grant capabilities. Capabilities are governed separately:
+A coworker's role does not grant capabilities. Capabilities are governed separately:
 
 - browser and file actions go through the computer gateway policy;
 - components are published deployment-wide and can be withheld per Bot;

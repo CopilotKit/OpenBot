@@ -321,7 +321,7 @@ function render(t: Theme): string {
     weight: 700,
     fill: t.ink,
   });
-  text(svX + 22, svY + 58, "CopilotKit runtime, auth, roles, teammates", {
+  text(svX + 22, svY + 58, "CopilotKit runtime, auth, roles, coworkers", {
     size: 13,
     fill: t.muted,
   });

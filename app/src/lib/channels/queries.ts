@@ -3,8 +3,8 @@ import { queryOptions } from "@tanstack/react-query";
 /**
  * A channel as the browser sees it.
  *
- * `threadId` is what makes two channels with the same teammate independent conversations, and
- * `active` is false once a linked teammate has been deleted: the transcript stays readable, but
+ * `threadId` is what makes two channels with the same coworker independent conversations, and
+ * `active` is false once a linked coworker has been deleted: the transcript stays readable, but
  * nothing more can be said in it.
  */
 export type AgentChannel = {

@@ -2,7 +2,7 @@
  * Computer tables: agent computers, sessions, computer-use audit.
  *
  * Split by owner so two people can add tables all day without touching the same lines. Add tables
- * here; never edit core.ts or teammate.ts to do it.
+ * here; never edit core.ts or coworker.ts to do it.
  */
 import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 

@@ -10,13 +10,13 @@ export type Recipient = {
 };
 
 /**
- * One teammate per channel.
+ * One coworker per channel.
  *
- * Matches the chat screen's current one-teammate render contract.
+ * Matches the chat screen's current one-coworker render contract.
  */
 export const MAX_RECIPIENTS = 1;
 
-/** Add a teammate, replacing the oldest once the channel recipient cap is reached. */
+/** Add a coworker, replacing the oldest once the channel recipient cap is reached. */
 export function addRecipient(
   current: readonly Recipient[],
   next: Recipient,

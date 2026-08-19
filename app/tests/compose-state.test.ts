@@ -15,11 +15,11 @@ describe("addRecipient", () => {
   });
 
   test("replaces rather than appends once the cap is reached", () => {
-    // One teammate per channel today; a second pick replaces the first.
+    // One coworker per channel today; a second pick replaces the first.
     expect(addRecipient([KNOWLEDGE], RISK)).toEqual([RISK]);
   });
 
-  test("adding the teammate already chosen is a no-op", () => {
+  test("adding the coworker already chosen is a no-op", () => {
     expect(addRecipient([KNOWLEDGE], KNOWLEDGE)).toEqual([KNOWLEDGE]);
   });
 });

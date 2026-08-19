@@ -47,8 +47,8 @@ import {
  * Who is asking, for a CopilotKit request.
  *
  * One resolver, because a run has two questions to answer about the same person: whose threads and
- * memory these are, and which teammates they may run. Answering them from different places is how
- * one person ends up running another's private teammate, or reading their thread.
+ * memory these are, and which coworkers they may run. Answering them from different places is how
+ * one person ends up running another's private coworker, or reading their thread.
  */
 async function resolveRequestActor(request: Request): Promise<{
   id: string;

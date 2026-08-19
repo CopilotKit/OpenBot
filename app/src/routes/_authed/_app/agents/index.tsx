@@ -12,7 +12,7 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 
 /**
- * Creating and inspecting a teammate are search-parameter states so the roster remains mounted and
+ * Creating and inspecting a coworker are search-parameter states so the roster remains mounted and
  * Back closes the detail pane.
  */
 const agentsSearchSchema = z.object({

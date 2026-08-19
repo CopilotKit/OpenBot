@@ -14,7 +14,7 @@ import type { AgentActor } from "./profile-types";
 /**
  * Read the agents one person may run, on every request.
  *
- * The filtering is in the query, not in JavaScript afterwards: a private teammate must never be
+ * The filtering is in the query, not in JavaScript afterwards: a private coworker must never be
  * read into the process for an actor who cannot see it, and "we fetched it but did not show it" is
  * the shape most accidental disclosures take.
  */
@@ -87,11 +87,11 @@ function selectActiveAgents(database: Database, actor: AgentActor) {
 }
 
 /**
- * Deleted teammates the caller still has history with.
+ * Deleted coworkers the caller still has history with.
  *
  * Registered so Intelligence can restore the thread the person is reading. Membership of a channel
  * the agent worked in is what authorizes this, not the profile's visibility, which is why deleting
- * a teammate leaves its conversations readable instead of erasing them.
+ * a coworker leaves its conversations readable instead of erasing them.
  */
 function selectTombstoneAgents(database: Database, actor: AgentActor) {
   return database

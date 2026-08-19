@@ -23,7 +23,7 @@ import { useStartChannel } from "@/lib/channels/start";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 
 /**
- * Creates the channel on first send. The selected teammate stays in the URL so profile links and
+ * Creates the channel on first send. The selected coworker stays in the URL so profile links and
  * reloads preserve the pending recipient without creating an empty channel.
  */
 export const Route = createFileRoute("/_authed/_app/channel/new")({
@@ -46,8 +46,8 @@ function RouteComponent() {
   // Stale or private `?agent=` values are ignored because the roster is permission-filtered.
   const listed = profiles?.find((profile) => profile.id === agent);
   /**
-   * Hidden teammates are omitted from the roster but may still be valid recipients from a profile
-   * link, so fetch the URL-selected teammate when it is absent from the visible list.
+   * Hidden coworkers are omitted from the roster but may still be valid recipients from a profile
+   * link, so fetch the URL-selected coworker when it is absent from the visible list.
    */
   const { data: fetched } = useQuery({
     ...agentQueryOptions(agent ?? ""),
@@ -84,7 +84,7 @@ function RouteComponent() {
           value={chosen ?? null}
         >
           <ComboboxInput
-            placeholder="Choose a teammate…"
+            placeholder="Choose a coworker…"
             // InputGroup owns focus rings via `has-[…:focus-visible]`; disable that wrapper ring here.
             className="border-none w-full bg-transparent! text-sm has-[[data-slot=input-group-control]:focus-visible]:ring-0"
           />

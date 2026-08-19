@@ -3,7 +3,7 @@ import { queryOptions } from "@tanstack/react-query";
 export type AgentVisibility = "public" | "private";
 
 /**
- * A teammate as the browser sees it.
+ * A coworker as the browser sees it.
  *
  * `canManage` and `systemOwned` are server-decided authorization facts; components render from the
  * returned flags rather than recomputing ownership rules.
@@ -15,7 +15,7 @@ export type AgentProfile = {
   roleDescription: string;
   avatarSeed: string;
   visibility: AgentVisibility;
-  /** Where this teammate runs. Null for the Bot in the box. */
+  /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
@@ -23,9 +23,9 @@ export type AgentProfile = {
   systemOwned: boolean;
   canManage: boolean;
   /**
-   * Whether the signed-in person created this teammate.
+   * Whether the signed-in person created this coworker.
    *
-   * Separate from `canManage`, which is also true for administrators on everybody's teammates. Split
+   * Separate from `canManage`, which is also true for administrators on everybody's coworkers. Split
    * a roster on `canManage` and an administrator's "mine" fills up with other people's work.
    */
   mine: boolean;
@@ -47,7 +47,7 @@ export function agentListQueryOptions(hidden = false) {
           credentials: "include",
         },
       );
-      if (!response.ok) throw new Error("Could not load teammates");
+      if (!response.ok) throw new Error("Could not load coworkers");
       return ((await response.json()) as { agents: AgentProfile[] }).agents;
     },
   });
@@ -60,7 +60,7 @@ export function agentQueryOptions(agentId: string) {
       const response = await fetch(`/api/agents/${agentId}`, {
         credentials: "include",
       });
-      if (!response.ok) throw new Error("Could not load this teammate");
+      if (!response.ok) throw new Error("Could not load this coworker");
       return ((await response.json()) as { agent: AgentProfile }).agent;
     },
   });

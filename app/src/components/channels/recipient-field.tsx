@@ -19,7 +19,7 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
  * Who a conversation that does not exist yet is with.
  *
  * Uses the same recipient list model as compose state, even while channels are capped at one
- * teammate.
+ * coworker.
  */
 export function RecipientField({
   recipients,
@@ -61,9 +61,9 @@ export function RecipientField({
         {isFull ? null : (
           <InputGroup className="h-8 w-56 border-none bg-transparent">
             <InputGroupInput
-              aria-label="Choose a teammate"
+              aria-label="Choose a coworker"
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Choose a teammate…"
+              placeholder="Choose a coworker…"
               value={search}
             />
             <InputGroupAddon />
@@ -96,7 +96,7 @@ export function RecipientField({
           ))}
           {matches.length === 0 ? (
             <li className="px-2 py-1.5 text-sm text-muted-foreground">
-              No teammate by that name.
+              No coworker by that name.
             </li>
           ) : null}
         </ul>

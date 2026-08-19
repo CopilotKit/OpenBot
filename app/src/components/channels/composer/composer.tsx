@@ -47,7 +47,7 @@ export type ComposerProps = {
   onStop?: () => void;
   /**
    * The conversation cannot take another message at all, which is a property of the conversation
-   * rather than of the moment: a channel whose teammate was deleted. This is the only thing that
+   * rather than of the moment: a channel whose coworker was deleted. This is the only thing that
    * stops a person typing.
    */
   disabled?: boolean;

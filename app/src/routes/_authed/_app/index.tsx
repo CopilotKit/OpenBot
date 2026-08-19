@@ -36,7 +36,7 @@ function RouteComponent() {
           className="w-full max-w-2xl"
           disabled={!fallback}
           onSubmit={async (draft) => {
-            // A channel is pinned to one teammate for the life of its thread.
+            // A channel is pinned to one coworker for the life of its thread.
             const agentId = draft.agentId ?? fallback?.id;
             if (!agentId) return;
 

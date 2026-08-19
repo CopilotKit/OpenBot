@@ -132,7 +132,7 @@ function mapProfile(
 }
 
 /**
- * The AG-UI address this teammate runs on, read back out of its stored configuration.
+ * The AG-UI address this coworker runs on, read back out of its stored configuration.
  *
  * Needed so an edit does not destroy it. The edit form is the same form as create, so without the
  * current endpoint to fill it with, saving a change of title would submit an empty endpoint and

@@ -20,7 +20,7 @@ export default defineConfig({
   schema: [
     "./src/db/schema/core.ts",
     "./src/db/schema/computer.ts",
-    "./src/db/schema/teammate.ts",
+    "./src/db/schema/coworker.ts",
     "./src/db/schema/components.ts",
     "./src/db/schema/plugins.ts",
   ],

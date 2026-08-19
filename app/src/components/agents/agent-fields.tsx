@@ -33,7 +33,7 @@ export function AgentFields({
   onCancel,
 }: {
   defaultValues: AgentFormValues;
-  /** Whether this teammate already has a key, so the field can say so without showing it. */
+  /** Whether this coworker already has a key, so the field can say so without showing it. */
   hasAuth?: boolean;
   submitLabel: string;
   onSubmit: (values: AgentFormValues) => Promise<unknown>;

@@ -347,7 +347,7 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     hasAuth: agent.hasAuth,
     canManage: canManageAgent(actor, agent),
     // Ownership, kept separate from permission. `canManage` is also true for an administrator on
-    // another user's teammate, so a roster that split "mine" on it would file other people's work
+    // another user's coworker, so a roster that split "mine" on it would file other people's work
     // under yours, and only for administrators, who are the least likely to notice.
     mine: agent.ownerUserId === actor.id,
   };

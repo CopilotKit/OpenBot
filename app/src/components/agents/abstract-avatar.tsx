@@ -16,7 +16,7 @@ export function AbstractAvatar({
       className="inline-flex shrink-0 overflow-hidden rounded-full"
       style={{ height: size, width: size }}
     >
-      {/* The drawing carries its own role; hidden so the teammate is announced once, by name. */}
+      {/* The drawing carries its own role; hidden so the coworker is announced once, by name. */}
       <span aria-hidden="true" className="contents">
         <Avatar name={seed} size={size} />
       </span>

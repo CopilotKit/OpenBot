@@ -20,7 +20,7 @@ const PORT = Number.parseInt(process.env.PORT ?? "4400", 10);
 const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
 
 const bot = new Agent({
-  name: "OpenBot Mastra teammate",
+  name: "OpenBot Mastra coworker",
   instructions:
     "You are a Bot running on Mastra inside OpenBot. You have a real web browser available through " +
     "the tools you are given.\n\n" +

@@ -27,9 +27,9 @@ import { useSkillCommands } from "@/lib/plugins/skill-commands";
 const SEND_WITHOUT_JOIN_AFTER_MS = 1500;
 
 /**
- * One channel's conversation with one teammate.
+ * One channel's conversation with one coworker.
  *
- * The local agent id is channel-scoped so two channels with the same teammate keep separate
+ * The local agent id is channel-scoped so two channels with the same coworker keep separate
  * durable threads.
  */
 export function ChannelChat({
@@ -132,7 +132,7 @@ export function ChannelChat({
     };
   }, [copilotkit, agent, isReady, channel.threadId, runtimeAgentId]);
 
-  // Tool calls from this conversation act on this teammate's own computer.
+  // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
@@ -301,14 +301,14 @@ export function ChannelChat({
             ) : null}
             {channel.active ? null : (
               <p className="pb-2 text-sm text-muted-foreground" role="status">
-                This teammate has been deleted. The conversation stays readable,
+                This coworker has been deleted. The conversation stays readable,
                 but it can no longer reply.
               </p>
             )}
           </>
         }
         onSubmit={async (draft) => {
-          // `draft.agentId` carries the @mentioned teammate, but nothing routes on it yet: this
+          // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this
           // channel is pinned to one `runtimeAgentId` for the life of its thread, so honouring a
           // per-message mention is a change to that binding, not to the composer.
           //

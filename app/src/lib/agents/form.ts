@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Browser-side teammate form contract. Limits match the server parser so validation errors can be
+ * Browser-side coworker form contract. Limits match the server parser so validation errors can be
  * shown next to fields before submit.
  */
 export const agentFormSchema = z.object({
@@ -22,7 +22,7 @@ export const agentFormSchema = z.object({
     .max(1000, "Role description must be 1000 characters or fewer."),
   visibility: z.enum(["public", "private"]),
   /**
-   * The AG-UI endpoint this teammate runs on. Empty means the Bot in the box.
+   * The AG-UI endpoint this coworker runs on. Empty means the Bot in the box.
    *
    * Only URL shape is checked here; deployment allow/deny rules are server-side.
    */

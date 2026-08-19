@@ -2,7 +2,7 @@ import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { type AgentChannel, channelKeys } from "./queries";
 
 /**
- * Start a new channel with one or more teammates.
+ * Start a new channel with one or more coworkers.
  *
  * Deliberately not idempotent: every call creates a channel with its own thread.
  */

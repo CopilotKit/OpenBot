@@ -12,9 +12,9 @@ export function NewAgent() {
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
       <header>
-        <h1 className="text-2xl font-semibold">New teammate</h1>
+        <h1 className="text-2xl font-semibold">New coworker</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          The role you write here applies in every channel this teammate works
+          The role you write here applies in every channel this coworker works
           in.
         </p>
       </header>
@@ -23,12 +23,12 @@ export function NewAgent() {
         defaultValues={emptyAgentForm}
         error={createAgent.error}
         onSubmit={async (values) => {
-          // The panel swaps from the form to the new teammate's profile, and the roster behind it
+          // The panel swaps from the form to the new coworker's profile, and the roster behind it
           // picks up the new card: the next thing to do is start a channel with it.
           const agent = await createAgent.mutateAsync(agentInputFrom(values));
           await navigate({ search: { agent: agent.id }, to: "/agents" });
         }}
-        submitLabel="Create teammate"
+        submitLabel="Create coworker"
       />
     </div>
   );

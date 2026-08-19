@@ -68,7 +68,7 @@ async function createUser(role: AgentActor["role"] = "user") {
   return { id, role } satisfies AgentActor;
 }
 
-async function createTeammate(
+async function createCoworker(
   owner: AgentActor,
   overrides: { name?: string; visibility?: "public" | "private" } = {},
 ) {
@@ -88,14 +88,14 @@ function idsOf(loaded: Awaited<ReturnType<typeof loadAgents>>) {
 }
 
 /**
- * Which teammates exist is a per-person question, answered on every request. These assertions are
+ * Which coworkers exist is a per-person question, answered on every request. These assertions are
  * against the database rather than a fake, because the whole point of resolving here is that the
  * filtering happens in the query and not in JavaScript after every row has already been read.
  */
 describe("runtime agent loading", () => {
-  test("carries the owner's teammate with its standing role and managed endpoint", async () => {
+  test("carries the owner's coworker with its standing role and managed endpoint", async () => {
     const owner = await createUser();
-    const profile = await createTeammate(owner);
+    const profile = await createCoworker(owner);
 
     const loaded = await loadAgents(owner);
 
@@ -114,21 +114,21 @@ describe("runtime agent loading", () => {
     });
   });
 
-  test("hides a private teammate from everybody but its owner and administrators", async () => {
+  test("hides a private coworker from everybody but its owner and administrators", async () => {
     const owner = await createUser();
     const otherUser = await createUser();
     const administrator = await createUser("admin");
-    const profile = await createTeammate(owner);
+    const profile = await createCoworker(owner);
 
     expect(idsOf(await loadAgents(owner))).toContain(profile.id);
     expect(idsOf(await loadAgents(otherUser))).not.toContain(profile.id);
     expect(idsOf(await loadAgents(administrator))).toContain(profile.id);
   });
 
-  test("shares a public teammate with everybody", async () => {
+  test("shares a public coworker with everybody", async () => {
     const owner = await createUser();
     const otherUser = await createUser();
-    const profile = await createTeammate(owner, {
+    const profile = await createCoworker(owner, {
       name: "Company Helper",
       visibility: "public",
     });
@@ -136,19 +136,19 @@ describe("runtime agent loading", () => {
     expect(idsOf(await loadAgents(otherUser))).toContain(profile.id);
   });
 
-  test("drops a deleted teammate that has no history to restore", async () => {
+  test("drops a deleted coworker that has no history to restore", async () => {
     const owner = await createUser();
-    const profile = await createTeammate(owner);
+    const profile = await createCoworker(owner);
 
     await profileStore.softDelete(owner, profile.id);
 
     expect(idsOf(await loadAgents(owner))).not.toContain(profile.id);
   });
 
-  test("keeps a deleted teammate as a tombstone for a channel member", async () => {
+  test("keeps a deleted coworker as a tombstone for a channel member", async () => {
     const owner = await createUser();
     const otherUser = await createUser();
-    const profile = await createTeammate(owner);
+    const profile = await createCoworker(owner);
     const channel = await channelStore.create(owner, [profile.id]);
     createdChannelIds.push(channel.id);
 
@@ -167,7 +167,7 @@ describe("runtime agent loading", () => {
 
   test("applies an edited role to the next load without a restart", async () => {
     const owner = await createUser();
-    const profile = await createTeammate(owner);
+    const profile = await createCoworker(owner);
 
     await profileStore.update(owner, profile.id, {
       name: "Expense Manager",

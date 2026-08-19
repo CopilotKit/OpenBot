@@ -289,7 +289,7 @@ describe("agent profile store integration", () => {
       visibility: "public",
       id: "forged-id",
       // The endpoint IS editable, and is the one field in this hostile payload that lands. A service
-      // moves host, and the alternative is deleting the teammate and losing its conversations. It
+      // moves host, and the alternative is deleting the coworker and losing its conversations. It
       // reaches here already validated by the same check that guards creation.
       endpoint: "https://moved.example.test/ag-ui",
       ownerUserId: "forged-owner",

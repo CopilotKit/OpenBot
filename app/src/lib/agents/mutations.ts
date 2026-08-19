@@ -6,7 +6,7 @@ export type AgentInput = {
   title: string;
   roleDescription: string;
   visibility: AgentVisibility;
-  /** Where this teammate runs. Empty means the Bot in the box. */
+  /** Where this coworker runs. Empty means the Bot in the box. */
   endpoint?: string;
   /** Write-only auth value; omitted when the user leaves the key field empty. */
   auth?: { header: string; value: string };
@@ -28,7 +28,7 @@ async function agentRequest(
       .json()
       .then((body: { error?: string }) => body.error)
       .catch(() => undefined);
-    throw new Error(message ?? "Teammate operation failed");
+    throw new Error(message ?? "Coworker operation failed");
   }
   return response;
 }
