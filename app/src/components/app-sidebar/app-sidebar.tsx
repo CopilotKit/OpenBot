@@ -42,6 +42,7 @@ import {
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
+import { useWaitingBots } from "@/lib/notifications/waiting";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -116,9 +117,11 @@ function matchingChannels(
 function ChannelRow({
   channel,
   animateOrder,
+  waiting,
 }: {
   channel: ChannelSummary;
   animateOrder: boolean;
+  waiting: boolean;
 }) {
   const shouldReduceMotion = useReducedMotion();
   return (
@@ -142,6 +145,7 @@ function ChannelRow({
             ? relativeTime(channel.lastMessageAt)
             : undefined
         }
+        waiting={waiting}
       />
     </motion.div>
   );
@@ -153,8 +157,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
   const channels = useQuery(channelListQueryOptions());
-  // One socket for the app, opened where the roster is kept live.
+  // One socket for the app, opened where the roster is kept live. It also carries the notifications
+  // that set the markers below.
   useChannelEvents();
+  const waitingBots = useWaitingBots();
   const [search, setSearch] = useState("");
   const searching = search.trim().length > 0;
   const visibleChannels = matchingChannels(channels.data, search);
@@ -258,6 +264,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   key={channel.id}
                   animateOrder={animateOrder}
                   channel={channel}
+                  // Written for however many coworkers a channel holds rather than for the one it
+                  // holds: the marker belongs to the row somebody would click, and any Bot behind it
+                  // waiting is reason enough to mark it.
+                  waiting={channel.agentIds.some(
+                    (agentId) => waitingBots[agentId] !== undefined,
+                  )}
                 />
               ))}
             </AnimatePresence>

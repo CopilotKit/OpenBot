@@ -1,20 +1,38 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import {
+  type BotNotification,
+  noteBotWaiting,
+} from "@/lib/notifications/waiting";
 import { type ChannelSummary, channelKeys } from "./queries";
 
 /**
- * Keep the roster live.
+ * Keep the roster live, and hear about a Bot that has stopped and is waiting.
  *
  * The query remains the source of truth; socket events only patch its cache. Reconnects refetch the
  * list to recover events missed while disconnected.
+ *
+ * One socket for both, because it is one socket: the server tags what it sends and this dispatches
+ * on the tag. A second connection would need its own upgrade, its own reconnect and its own backoff
+ * to carry a payload this one is already open for. An event whose tag this build does not recognise
+ * is ignored rather than guessed at, so a tab left open across a deploy skips what it cannot read
+ * instead of corrupting its roster with it.
  */
 
 type ChannelActivityEvent = {
+  type: "channel.activity";
   channelId: string;
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
 };
+
+type NotificationEvent = {
+  type: "notification";
+  notification: BotNotification;
+};
+
+type LiveEvent = ChannelActivityEvent | NotificationEvent;
 
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
@@ -45,12 +63,25 @@ export function useChannelEvents() {
       };
 
       socket.onmessage = (message) => {
-        let activity: ChannelActivityEvent;
+        let event: LiveEvent;
         try {
-          activity = JSON.parse(message.data as string);
+          event = JSON.parse(message.data as string);
         } catch {
           return;
         }
+
+        switch (event.type) {
+          case "notification":
+            noteBotWaiting(event.notification);
+            return;
+          case "channel.activity":
+            break;
+          default:
+            // A tag this build has never heard of, from a server that has been deployed since this
+            // tab was opened. Skipped, not guessed at.
+            return;
+        }
+        const activity = event;
 
         queryClient.setQueryData(
           channelKeys.list(),
@@ -70,7 +101,14 @@ export function useChannelEvents() {
             const previous = channels[index];
             if (!previous) return channels;
 
-            const patched = { ...previous, ...activity };
+            // Named fields rather than a spread of the event. The event carries a tag as well as the
+            // preview, and a spread would put it in the cached row for no reason.
+            const patched = {
+              ...previous,
+              lastMessage: activity.lastMessage,
+              lastMessageAt: activity.lastMessageAt,
+              lastMessageAgentId: activity.lastMessageAgentId,
+            };
             const next = channels.slice();
             next[index] = patched;
             next.sort(byRecency);

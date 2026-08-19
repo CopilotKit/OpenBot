@@ -89,6 +89,27 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/**
+ * Silence one Bot's notifications, or let it speak again.
+ *
+ * Two endpoints rather than one taking a boolean, matching hide and unhide: a person pressing a
+ * switch is asking for a state, and a toggle that arrives twice because the network was slow leaves
+ * them with the opposite of what they asked for.
+ */
+export function setAgentNotificationsMutedMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: async (variables: { agentId: string; muted: boolean }) => {
+      await agentRequest(
+        `/api/agents/${variables.agentId}/notifications/${variables.muted ? "mute" : "unmute"}`,
+        { method: "POST" },
+      );
+    },
+    onSuccess: () => invalidateAgents(queryClient),
+  });
+}
+
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {

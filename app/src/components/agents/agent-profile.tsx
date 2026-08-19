@@ -11,6 +11,7 @@ import {
   deleteAgentMutationOptions,
   duplicateAgentMutationOptions,
   setAgentHiddenMutationOptions,
+  setAgentNotificationsMutedMutationOptions,
   updateAgentMutationOptions,
 } from "@/lib/agents/mutations";
 import { agentQueryOptions } from "@/lib/agents/queries";
@@ -68,6 +69,9 @@ export function AgentProfile({ agentId }: { agentId: string }) {
     duplicateAgentMutationOptions(queryClient),
   );
   const setHidden = useMutation(setAgentHiddenMutationOptions(queryClient));
+  const setNotificationsMuted = useMutation(
+    setAgentNotificationsMutedMutationOptions(queryClient),
+  );
   const deleteAgent = useMutation(deleteAgentMutationOptions(queryClient));
 
   if (agent.isPending) {
@@ -83,7 +87,10 @@ export function AgentProfile({ agentId }: { agentId: string }) {
 
   const profile = agent.data;
   const actionError =
-    duplicateAgent.error ?? setHidden.error ?? deleteAgent.error;
+    duplicateAgent.error ??
+    setHidden.error ??
+    setNotificationsMuted.error ??
+    deleteAgent.error;
 
   return (
     <div className="flex w-full flex-col gap-6 p-8">
@@ -200,6 +207,34 @@ export function AgentProfile({ agentId }: { agentId: string }) {
             <p className="-mt-1 text-xs text-muted-foreground">
               Hidden from your agents list. This changes nothing for anyone
               else.
+            </p>
+          ) : null}
+
+          {/*
+           * Beside Hide, because it is the same kind of thing: an opinion you hold about this Bot
+           * that changes nothing for anybody else and nothing about what the Bot may do.
+           */}
+          <Button
+            className="w-full text-sm!"
+            disabled={setNotificationsMuted.isPending}
+            onClick={async () => {
+              await setNotificationsMuted.mutateAsync({
+                agentId,
+                muted: !profile.notificationsMuted,
+              });
+            }}
+            variant="outline"
+          >
+            {profile.notificationsMuted
+              ? "Notify me when this Bot needs me"
+              : "Stop notifying me about this Bot"}
+          </Button>
+
+          {profile.notificationsMuted ? (
+            <p className="-mt-1 text-xs text-muted-foreground">
+              You will not be told when this Bot stops and waits for you. It
+              still asks, its screen still shows the prompt, and the audit trail
+              still records the handover.
             </p>
           ) : null}
 

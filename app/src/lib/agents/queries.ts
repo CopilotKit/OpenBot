@@ -20,6 +20,13 @@ export type AgentProfile = {
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
   hidden: boolean;
+  /**
+   * Whether this person has silenced this Bot's notifications.
+   *
+   * Per person, like `hidden`. Silencing changes nothing about what the Bot does or what the audit
+   * trail records; it only stops this person being interrupted by it.
+   */
+  notificationsMuted: boolean;
   systemOwned: boolean;
   canManage: boolean;
   /**

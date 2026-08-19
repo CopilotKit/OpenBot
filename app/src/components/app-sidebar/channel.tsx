@@ -12,12 +12,21 @@ export const Channel = memo(function Channel({
   name,
   lastMessage,
   lastMessageAt,
+  waiting,
 }: {
   channelId: string;
   participantIds: string[];
   name: string;
   lastMessage?: string;
   lastMessageAt?: string;
+  /**
+   * Whether a Bot in this channel has stopped and is waiting for this person.
+   *
+   * The trace a missed toast leaves. It sits on the row rather than replacing the preview, because
+   * the preview is how somebody recognises which conversation this is, and a row that stops saying
+   * what it is about is harder to find, not easier.
+   */
+  waiting?: boolean;
 }) {
   return (
     <Link
@@ -43,6 +52,14 @@ export const Channel = memo(function Channel({
           <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-muted-foreground">
             {lastMessage}
           </span>
+          {/* Named for a screen reader, because a coloured dot says nothing to one. */}
+          {waiting ? (
+            <span
+              aria-label="Waiting for you"
+              className="size-2 shrink-0 rounded-full bg-amber-500"
+              role="status"
+            />
+          ) : null}
         </div>
       </div>
     </Link>

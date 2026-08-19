@@ -4,6 +4,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { DesktopNotificationsSetting } from "@/components/settings/desktop-notifications";
 import { useTheme } from "@/components/theme-provider";
 import {
   Item,
@@ -48,6 +49,19 @@ function RouteComponent() {
               />
             </ItemActions>
           </Item>
+        </PageRows>
+      </PageSection>
+      {/*
+       * Its own section rather than a third row under General, because unlike the theme this one is
+       * about this browser and not about the account, and the description has to be able to say so.
+       */}
+      <PageSection title="Notifications">
+        <PageRows>
+          <DesktopNotificationsSetting />
+          <p className="px-1 text-xs text-muted-foreground">
+            This applies to this browser only, because the permission is granted
+            per browser. Silencing an individual Bot is on that Bot's profile.
+          </p>
         </PageRows>
       </PageSection>
     </PageShell>

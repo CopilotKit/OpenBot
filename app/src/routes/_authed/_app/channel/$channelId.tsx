@@ -13,6 +13,7 @@ import { DetailPanel } from "@/components/layout/detail-panel";
 import { Button } from "@/components/ui/button";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import { onComputerActivity } from "@/lib/copilot/computer-activity";
+import { clearBotWaiting, useWaitingBots } from "@/lib/notifications/waiting";
 
 const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
@@ -64,6 +65,22 @@ function RouteComponent() {
   const agentId = channel.data?.agentIds[0];
   /** Needs-you state is rendered by the screen when the screen is already open. */
   const needsYou = useNeedsYou(agentId, !isWatching);
+
+  /*
+   * A Bot cannot be marked as unseen while it is the one on screen.
+   *
+   * Not on arrival alone, because a Bot can ask while somebody is already looking at it, and a
+   * marker that only the act of navigating could clear would then sit on the row they are on. On
+   * every change instead, which also covers arriving from the sidebar, from a bookmark, or from a
+   * toast; a marker only the toast could clear would stay up for anybody who did not use one.
+   *
+   * The toast still appears for the Bot on screen. The two say different things: the toast says this
+   * has just happened, and the marker says this is outstanding and nobody has looked yet.
+   */
+  const waitingBots = useWaitingBots();
+  useEffect(() => {
+    if (agentId && waitingBots[agentId]) clearBotWaiting(agentId);
+  }, [agentId, waitingBots]);
 
   // Needs-you prompts auto-open the screen because the actionable prompt is rendered there.
   useEffect(() => {
