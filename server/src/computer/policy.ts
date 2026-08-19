@@ -46,6 +46,34 @@ export type PolicyContext = {
   bot: { id: string };
   page: { url: string; host: string };
   actor: { id: string };
+  /**
+   * How many times this Bot has just made this exact call, counting the one being decided.
+   *
+   * A stuck model retries, and every retry is a real action on somebody's live website. Each one is
+   * permitted on its own terms, because each one is: the rule that would refuse the thirtieth click
+   * on a button would refuse the first, and refusing the first is refusing the product. Only the
+   * count separates them, so the count is here, and a deployment that wants to stop a Bot going in
+   * circles writes `repeat.count >= 10` and nothing else changes.
+   *
+   * Always present, at one on a call the Bot has not made before, so that a rule mentioning it is
+   * evaluable on every action. An absent field would throw inside CEL, and a deny rule that throws
+   * denies, so an optional `repeat` would turn one rule about repetition into a deployment that
+   * refuses everything.
+   *
+   * It is wrong in both directions, and a rule written against it has to be worth both. Under, three
+   * ways: the window is time-based, so a Bot slow enough to spread its attempts wider than the window
+   * never trips this, and one that varies a single argument each time round is thirty calls; the
+   * count is held by the process that served the call, so a deployment behind two API replicas
+   * splits every count and a rule about ten attempts fires at twenty or never; and a call to another
+   * server's tools over MCP is not counted at all, because only the computer gateway counts.
+   *
+   * Over, once, and that one costs somebody their Bot rather than their evidence. Two calls are the
+   * same call when the thing acted on is the same, whatever was typed into it, so ten searches typed
+   * into one box and one file read ten times while a Bot works through it are both ten repeats, and
+   * `repeat.count >= 10` refuses the tenth. It is a backstop against the loop that actually happens,
+   * not a guarantee, which is the argument for trying a rule about it in `dry-run` first.
+   */
+  repeat: { count: number };
   element?: {
     ref: string;
     role: string;

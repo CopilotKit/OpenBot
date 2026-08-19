@@ -73,6 +73,15 @@ export type DeploymentConfig = {
      * precedence, which is the only subtle thing about them, impossible to see.
      */
     policy?: ActionPolicy;
+    /**
+     * How long two identical calls count as the same repetition, in milliseconds.
+     *
+     * Absent uses the built-in window, which assumes a retry loop is a model round trip apart. It is
+     * here because that assumption is about someone else's model: a deployment on a slow or heavily
+     * queued provider can have genuine retries minutes apart, and there the built-in window counts
+     * every attempt as the first one and a rule about repetition never fires at all.
+     */
+    repeatWindowMs?: number;
   };
 };
 
@@ -269,11 +278,13 @@ function computerConfig(
   const computerToken = optional(environment, "COMPUTER_TOKEN");
   const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
   const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+  const repeatWindowMs = milliseconds(environment, "COMPUTER_REPEAT_WINDOW_MS");
   return {
     baseUrl,
     allowPrivateHosts:
       optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true",
     ...(policy ? { policy } : {}),
+    ...(repeatWindowMs ? { repeatWindowMs } : {}),
     ...(computerToken ? { token: computerToken } : {}),
     ...(supervisorUrl
       ? {
@@ -284,6 +295,29 @@ function computerConfig(
         }
       : {}),
   };
+}
+
+/**
+ * A duration in milliseconds, or a refusal to start.
+ *
+ * Refused rather than quietly defaulted, for the same reason a malformed policy is. An operator who
+ * widened a window and typed `3m` would otherwise get a running deployment on the built-in value,
+ * and the only evidence would be a rule that never fires, which reads exactly like a Bot behaving
+ * itself.
+ */
+function milliseconds(
+  environment: Environment,
+  name: string,
+): number | undefined {
+  const raw = optional(environment, name);
+  if (!raw) {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive whole number of milliseconds`);
+  }
+  return value;
 }
 
 /**

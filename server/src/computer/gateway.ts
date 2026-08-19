@@ -26,6 +26,7 @@ import {
   type PolicyContext,
   type PolicyDecision,
 } from "./policy";
+import { createRepeatDetector, type RepeatDetector } from "./repeat";
 import type {
   ClickInput,
   KeyInput,
@@ -78,6 +79,15 @@ export type ComputerGatewayOptions = {
   /** Absent denies everything. See evaluateActionPolicy. */
   policy: () => ActionPolicy | undefined;
   /**
+   * Counts a Bot repeating itself, so that the policy can be told how many times.
+   *
+   * Absent, the gateway makes its own, which is what almost every deployment gets. Passed in only to
+   * widen the window for a slow provider, or to hand a test a clock it can move, because otherwise
+   * proving that a window expires means a test that waits three minutes, and a test that waits three
+   * minutes is a test somebody eventually deletes.
+   */
+  repeat?: RepeatDetector;
+  /**
    * Where "this Bot has stopped and is waiting for you" is announced.
    *
    * Optional, and absent leaves every handover working exactly as it did: the Bot still asks, the
@@ -107,6 +117,7 @@ type CachedSnapshot = {
 export function createComputerGateway(options: ComputerGatewayOptions) {
   const { client, auditStore, supervisor, notify } = options;
   const snapshots = new Map<string, CachedSnapshot>();
+  const repeat = options.repeat ?? createRepeatDetector();
 
   /**
    * The computer, addressed as the Bot that is asking.
@@ -181,11 +192,29 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
 
     const intent = intentOf(toolName, subject.key);
 
+    /*
+     * Counted before the policy is asked, so that a rule written against the count decides the very
+     * attempt that crossed the line rather than the one after it. Off by one here would mean a
+     * deployment forbidding a tenth identical click allows the tenth and refuses the eleventh, which
+     * is the kind of thing nobody notices until they are counting rows in an incident.
+     *
+     * Reading a page never reaches this function, so nothing counts a Bot looking at the same screen
+     * over and over. That is the cheapest thing it does and the one nobody minds.
+     */
+    const repetition = repeat.observe(botId, {
+      tool: toolName,
+      ref,
+      key: subject.key,
+      filePath,
+      targetUrl: subject.targetUrl,
+    });
+
     const context: PolicyContext = {
       tool: { name: toolName },
       bot: { id: botId },
       actor: { id: actor.id },
       page: { url: pageUrl, host: hostOf(pageUrl) },
+      repeat: { count: repetition.count },
       ...(intent ? { intent } : {}),
       ...(subject.key ? { key: subject.key } : {}),
       ...(element
@@ -200,6 +229,44 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         : {}),
       ...(filePath ? { file: describeFile(filePath) } : {}),
     };
+
+    if (repetition.threshold !== null && repetition.fingerprint) {
+      /*
+       * Ahead of the decision row, so the trail reads in the order the thing happened: this was the
+       * tenth identical attempt, and this is what the policy did about it. Filed the other way round
+       * a reader has to deduce the cause from a row written after its effect.
+       *
+       * Its failure is swallowed, which nothing else in this file does. This row is an observation,
+       * and an observation is not allowed to refuse anything: letting a lost insert throw from here
+       * would stop every third, tenth and twenty-fifth identical call before the policy had even
+       * been asked, so a deployment that permits an action would lose it to a moment's trouble at the
+       * audit store. Nothing is weakened by that. An action that was not recorded still does not
+       * happen, because the decision row goes to the same store a few lines below, and a store that
+       * is genuinely down refuses the action there.
+       */
+      try {
+        await writeRepeat(auditStore, {
+          toolName,
+          botId,
+          actor,
+          computerId,
+          pageUrl,
+          filePath,
+          fingerprint: repetition.fingerprint,
+          count: repetition.count,
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "computer-repeat-row-lost",
+            bot: botId,
+            fingerprint: repetition.fingerprint,
+            count: repetition.count,
+            error: String(error),
+          }),
+        );
+      }
+    }
 
     const decision = evaluateActionPolicy(options.policy(), context);
     await write(auditStore, {
@@ -757,6 +824,49 @@ async function write(
         /** Present so the trail explains a dry-run row that was recorded as refused but still ran. */
         carriedOut: entry.decision.forward,
       },
+    },
+  });
+}
+
+/**
+ * One row for a Bot going round in circles.
+ *
+ * Separate from `write` because there is no policy decision to record. This row is an observation
+ * about the call that is about to be decided, not the decision, and giving it a `decision` block
+ * would mean inventing an answer the policy was never asked for. It is also why it is not a refusal:
+ * nothing was forbidden here.
+ *
+ * The fingerprint goes in as written, which is why `repeat.ts` builds a readable one. A reader
+ * arriving at "the same call, 25 times" needs to be told which call in the row itself.
+ */
+async function writeRepeat(
+  auditStore: AuditStore,
+  entry: {
+    toolName: string;
+    botId: string;
+    actor: ActionActor;
+    computerId: string;
+    pageUrl: string;
+    filePath: string | undefined;
+    fingerprint: string;
+    count: number;
+  },
+) {
+  await recordAuditEvent(auditStore, {
+    eventType: "computer.action_repeated",
+    targetType: "computer",
+    targetId: entry.computerId,
+    ...(entry.actor.userId ? { actorUserId: entry.actor.userId } : {}),
+    payload: {
+      action: entry.toolName,
+      bot: entry.botId,
+      actor: entry.actor.id,
+      // The page, for a browser action only. A file call has nothing to do with whatever the browser
+      // happens to be showing, and naming a host on that row sends a reader somewhere irrelevant, the
+      // same trap `describeRefusal` avoids.
+      ...(entry.filePath ? {} : { page: entry.pageUrl }),
+      fingerprint: entry.fingerprint,
+      count: entry.count,
     },
   });
 }

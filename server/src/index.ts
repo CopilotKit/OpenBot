@@ -23,6 +23,7 @@ import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
 } from "./computer/policy-store";
+import { createRepeatDetector } from "./computer/repeat";
 import { createSupervisorClient } from "./computer/supervisor";
 import { loadConfig } from "./config";
 import { createConnectorAdminService } from "./connectors";
@@ -377,6 +378,15 @@ const app = createApp(
         notify: raiseNotification,
         // Stop, reset and the listing act on containers when there are containers to act on.
         ...(supervisor ? { supervisor } : {}),
+        // Only when a deployment has said its Bots retry on a slower rhythm than the built-in window
+        // assumes. Otherwise the gateway makes its own and nobody has to know it exists.
+        ...(config.computer?.repeatWindowMs
+          ? {
+              repeat: createRepeatDetector({
+                windowMs: config.computer.repeatWindowMs,
+              }),
+            }
+          : {}),
       })
     : undefined,
   policyStore,
