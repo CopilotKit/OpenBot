@@ -18,13 +18,17 @@ import type { ComposerDraft } from "./draft";
  * correction, press Stop, and the correction is what runs next. Nothing here special-cases the stop
  * button, and that is the point — a path with its own branch is a path that can be forgotten.
  *
- * THE QUEUE IS MEMORY IN ONE TAB AND NOTHING HERE PRETENDS OTHERWISE. The turn is driven from the
+ * THE QUEUE IS MEMORY IN ONE MOUNT AND NOTHING HERE PRETENDS OTHERWISE. The turn is driven from the
  * browser, so the browser is the only place that knows one is in flight, and this state lives and
- * dies with the tab holding it. A reload loses the intent to run these words later. The words are
- * the person's own and sit on screen for as long as they wait, so nothing is being kept from
- * anybody; but a queue is not an outbox and must not be read as one. It is drawn only while a turn
- * is in flight, so a reload finds no queue and shows none, which is better than a list of messages
- * quietly promising to run and never running.
+ * dies with the component holding it. A reload loses the intent to run these words later, and so
+ * does walking to another channel: the channel view is keyed on the channel, so switching unmounts
+ * the conversation and takes anything parked in it with it, after the person has watched their
+ * words land on screen. Neither is worth a persistence layer for words that only mean anything
+ * inside a turn that is already over by the time you come back, but both are worth saying out loud.
+ * The words are the person's own and sit on screen for as long as they wait, so nothing is being
+ * kept from anybody; but a queue is not an outbox and must not be read as one. It is drawn only
+ * while a turn is in flight, so a reload finds no queue and shows none, which is better than a list
+ * of messages quietly promising to run and never running.
  */
 
 /** One message waiting for the Bot to finish, in the words the person typed. */
@@ -75,10 +79,33 @@ export function reduceQueue(
 ): QueueTransition {
   switch (action.type) {
     case "submit": {
-      // An idle send is not a queue of one. There is nothing to wait behind, so it goes straight
-      // out exactly as it did before any of this existed, and the queue is not involved at all.
+      /*
+       * An idle send is not a queue of one. There is nothing to wait behind, so it goes straight
+       * out exactly as it did before any of this existed.
+       *
+       * WITH SOMETHING ALREADY WAITING IT TAKES THAT WITH IT rather than going first. The two
+       * disagreeing is not supposed to be reachable — the drain empties the queue on the same edge
+       * that frees the composer — but "not supposed to be reachable" is an argument about two
+       * components' timing, and this file is meant to hold the rule on its own. Jumping the line
+       * would run a correction after the sentence correcting it, which is the exact reordering the
+       * whole queue exists to prevent, so the safe reading of an impossible state is the one that
+       * keeps what the person typed in the order they typed it.
+       */
       if (!action.busy) {
-        return { queue, run: action.draft };
+        if (queue.length === 0) {
+          return { queue, run: action.draft };
+        }
+        return {
+          queue: [],
+          run: joinQueued([
+            ...queue,
+            {
+              id: action.id,
+              text: action.draft.text,
+              commandIds: [...action.draft.commandIds],
+            },
+          ]),
+        };
       }
       return {
         queue: [

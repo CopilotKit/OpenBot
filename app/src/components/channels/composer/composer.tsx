@@ -66,10 +66,23 @@ export type ComposerProps = {
    */
   disabled?: boolean;
   /**
-   * A run is in flight. It gates sending, not writing: a channel is `pending` while it is still
+   * A turn is in flight. It gates sending, not writing: a channel is `pending` while it is still
    * connecting and restoring its history, and the composer is on screen throughout.
    */
   pending?: boolean;
+  /**
+   * There is a run on the wire for Stop to reach.
+   *
+   * Not the same question as `pending`, and telling them apart is the whole reason this exists. A
+   * turn is in flight from the moment somebody presses send; the run it becomes does not exist
+   * until the caller has waited for whatever it has to wait for, which on a channel that is still
+   * joining is up to a second and a half. A Stop button drawn in that window aborts a controller
+   * nobody has made yet: the press is swallowed, the message goes anyway, and the one control the
+   * whole affordance leans on has quietly lied.
+   *
+   * Defaults to `pending`, which is the right answer for a caller with no gap between the two.
+   */
+  stoppable?: boolean;
 };
 
 export function Composer({
@@ -82,6 +95,7 @@ export function Composer({
   onStop,
   disabled = false,
   pending = false,
+  stoppable,
 }: ComposerProps) {
   const [value, setValue] = useState<Segment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -202,8 +216,11 @@ export function Composer({
   const parking = canQueue && !draft.isEmpty;
   const canSend = !disabled && !draft.isEmpty && (!isBusy || canQueue);
   /**
-   * Stop is available only once the agent run is actually pending, and it gives way to Send the
-   * moment there is something typed to park.
+   * Stop is available only once there is a run for it to reach, and it gives way to Send the moment
+   * there is something typed to park.
+   *
+   * `stoppable` rather than `pending`, because a turn is in flight before its run is, and a button
+   * that cannot do the thing it names is worse than no button at all.
    *
    * One button, so one of the two has to yield. Send wins because the correction is the thing that
    * cannot wait: park it and the box empties, which brings Stop straight back — so stopping is
@@ -211,7 +228,7 @@ export function Composer({
    * Showing both would be honest and would also put two round buttons in a row on a compact
    * composer that has room for one.
    */
-  const canStop = Boolean(onStop) && pending && !parking;
+  const canStop = Boolean(onStop) && (stoppable ?? pending) && !parking;
   /**
    * The same arrow either way, because it is the same gesture, but a screen reader is told which of
    * the two it is about to do. "Send" on a button that will not send for another minute is a small

@@ -128,6 +128,13 @@ function Queued({
           <span role="status">Queued</span>
           {onRemove ? (
             <button
+              /*
+               * The sentence it deletes, in the name. Three parked corrections put three buttons
+               * called "Remove" in a row, and somebody reading by name alone is told what they can
+               * do and nothing about which one it would happen to. The visible word stays short
+               * because the bubble it sits under is the answer for everybody who can see it.
+               */
+              aria-label={`Remove queued message: ${text}`}
               className="ml-2 underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               onClick={onRemove}
               type="button"
@@ -154,6 +161,14 @@ function Queued({
  * of the answer still streaming above it. It does fire when the bottom-most queued line is taken
  * back, which is a scroll nobody asked for and which lands on the end of the conversation anyway,
  * and it stays quiet on a drain, when the id goes to null.
+ *
+ * IT COSTS THE ANCHOR, AND THAT IS THE PRICE OF THE SCROLL RATHER THAN A SIDE EFFECT OF IT.
+ * `scrollToEnd` drops whatever turn the scroller was holding its position against and starts
+ * following the bottom instead, so the rest of that answer streams past under the reader rather
+ * than staying put beneath the question. Somebody who has just typed at the bottom of the
+ * conversation has asked to be at the bottom of the conversation, so following it is the reading
+ * they chose; but they chose it for the whole turn and not only for the moment, and the button
+ * back to the anchored view is the scroller's own, not ours to restore.
  *
  * Rendering nothing and living inside the provider is what buys access to the scroller at all; the
  * alternative is threading a ref out through three components with no other reason to know a

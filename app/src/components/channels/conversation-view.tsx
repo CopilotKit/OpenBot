@@ -25,6 +25,7 @@ export function ConversationView({
   commands,
   disabled = false,
   pending = false,
+  stoppable,
   queueWhileBusy = false,
   onSubmit,
   onStop,
@@ -39,7 +40,21 @@ export function ConversationView({
    */
   commands?: readonly CommandOption[];
   disabled?: boolean;
+  /**
+   * A turn is in flight: the Bot has been asked something and has not come back yet.
+   *
+   * It has to mean the TURN and not the run underneath it. A turn that uses the browser is several
+   * runs in a row with the agent reporting itself idle between them, and a caller that passes its
+   * agent's run status straight through will tell this component the conversation is free in the
+   * middle of an answer. `queueWhileBusy` is the part that cannot survive that, because the queue
+   * drains on this falling.
+   */
   pending?: boolean;
+  /**
+   * There is a run for Stop to abort, which is a narrower fact than `pending` and is the honest one
+   * to draw a Stop button from. Defaults to `pending` for a caller with no gap between the two.
+   */
+  stoppable?: boolean;
   /**
    * Let somebody type at a Bot that is already working, and run what they typed when it finishes.
    *
@@ -47,6 +62,11 @@ export function ConversationView({
    * that will still be here when the turn ends. The compose screen creates the channel on send and
    * navigates away; a message parked there would go down with the unmount, and a message that
    * silently disappears is a worse answer than a send button that will not go.
+   *
+   * The other place somebody talks to a Bot, the direct `/bot` chat, does not get this either, and
+   * not by a decision made here: that screen draws CopilotKit's own chat rather than this composer,
+   * so there is nothing on it for this flag to reach. Giving it the same affordance means either
+   * moving it onto this composer or asking for it upstream, and neither is a queue.
    */
   queueWhileBusy?: boolean;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
@@ -69,10 +89,17 @@ export function ConversationView({
   /**
    * A turn this screen started and has not seen finish.
    *
-   * `pending` alone will not do. It says the agent is running, and there is a gap between calling
-   * `onSubmit` and the agent reporting itself as running in which a person typing quickly would
-   * otherwise have their second message read as the start of a second turn — two runs at once, on
-   * the same thread, racing each other's history.
+   * It is a backstop under `pending` rather than the thing that makes `pending` usable. A caller
+   * that reports the turn honestly already covers the gap between `onSubmit` being called and the
+   * turn showing up in its own state; one that does not leaves a gap in which a person typing
+   * quickly would have their second message read as the start of a second turn, two runs at once on
+   * one thread racing each other's history.
+   *
+   * It cannot be the whole answer, and it was a mistake to let it look like one. This only knows
+   * about turns that came in through the composer. A channel starts turns by other routes — the
+   * first message of a new channel, a button inside a rendered component — and for those the only
+   * thing standing between a parked correction and a mid-answer drain is what the caller passes as
+   * `pending`.
    *
    * The composer tracks the same await for its own send button. Two trackers of one promise, which
    * is duplication, and they cannot drift: they rise in the same tick and fall on the same resolve.
@@ -138,9 +165,16 @@ export function ConversationView({
    * flight, and it believes that from the same value this effect reads. A queue that grew here
    * without a turn to wait for would be a queue that never drains, so if that ever becomes possible
    * this dependency list is where it will show up.
+   *
+   * IT REFUSES WHILE THE CONVERSATION IS DISABLED, which is the one thing "however it ended" must
+   * not be read to cover. A coworker deleted mid-turn takes the channel with it: the composer stops
+   * accepting messages and the notice under it says the conversation can no longer reply, and a
+   * queue that drained anyway would post one more user turn into a channel the screen has already
+   * said is finished. The cost is that anything parked when that happens stays on screen unrun,
+   * under a notice that explains why, which is the honest half of the trade.
    */
   useEffect(() => {
-    if (inFlight || queuedRef.current.length === 0) {
+    if (disabled || inFlight || queuedRef.current.length === 0) {
       return;
     }
     const run = apply({ type: "settle" });
@@ -152,7 +186,7 @@ export function ConversationView({
       // can put the words back in the box; there is no box to put these back into, and the screen
       // already reports a failed turn through its own notice.
     });
-  }, [apply, inFlight]);
+  }, [apply, disabled, inFlight]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -202,6 +236,13 @@ export function ConversationView({
            * turn instead of joining the queue.
            */
           pending={inFlight}
+          /*
+           * The caller's answer, not `inFlight`. `running` is true from the instant `start` is
+           * entered, which is before `onSubmit` has done anything at all, so a Stop drawn from
+           * `inFlight` appears while there is still nothing to stop — the press is swallowed and the
+           * message goes anyway.
+           */
+          stoppable={stoppable ?? pending}
         />
       </div>
     </div>

@@ -141,6 +141,33 @@ export function ChannelChat({
   const [runError, setRunError] = useState<string | null>(null);
   const awaitingReply = useRef(false);
 
+  /*
+   * TWO DIFFERENT FACTS ABOUT ONE TURN, AND NEITHER OF THEM IS `agent.isRunning`.
+   *
+   * `turnsInFlight` counts what a person would call the Bot having the turn: from the moment `say`
+   * is entered until the whole thing has come back, browser actions in the middle included. It is
+   * what decides whether the next thing typed is sent or parked, and what tells the queue its wait
+   * is over.
+   *
+   * `runsInFlight` counts what Stop can actually reach: the run `copilotkit.runAgent` opens, and
+   * nothing before it. A turn can be in flight for a second and a half before that, while `say`
+   * waits for the runtime agent, and a Stop drawn in that window aborts a controller nobody has
+   * made yet.
+   *
+   * `agent.isRunning` looks like both and is neither. It reports the run on the wire, and a turn
+   * that touches the browser is several runs in a row: the Bot asks for a click, the run ENDS so
+   * the browser can answer it, and another run starts carrying the answer. The agent reports itself
+   * idle in every one of those gaps — the truth about the wire and a lie about the turn. OpenBot
+   * registers every computer tool as a frontend tool, so the gaps open on ordinary work rather than
+   * on some edge case, and anything keyed on the turn ending fires in the middle of one instead.
+   *
+   * Counters rather than booleans because nothing stops a second turn being started from a
+   * component button while the first is still going, and two overlapping turns must not have the
+   * first one to finish declare the conversation idle.
+   */
+  const [turnsInFlight, setTurnsInFlight] = useState(0);
+  const [runsInFlight, setRunsInFlight] = useState(0);
+
   /**
    * Tell the roster what was just said. Failures here must not block the conversation.
    */
@@ -159,12 +186,10 @@ export function ChannelChat({
   reportRef.current = report;
 
   /**
-   * Send a user turn through the channel, including activity reporting and history repair.
+   * Everything `say` does once it has something worth sending, split out so the counter it is
+   * wrapped in covers every way out of here, a throw included.
    */
-  const say = async (text: string, skillInstructions: string[] = []) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
+  const deliver = async (trimmed: string, skillInstructions: string[]) => {
     // Wait briefly for the runtime agent instance before adding the message.
     if (!isReadyRef.current) {
       await Promise.race([
@@ -211,7 +236,32 @@ export function ChannelChat({
       agent.setMessages(repaired as typeof agent.messages);
     }
 
-    await copilotkit.runAgent({ agent });
+    setRunsInFlight((count) => count + 1);
+    try {
+      await copilotkit.runAgent({ agent });
+    } finally {
+      setRunsInFlight((count) => count - 1);
+    }
+  };
+
+  /**
+   * Send a user turn through the channel, including activity reporting and history repair.
+   *
+   * Every user turn in this channel goes through here — what the composer sends, the seed from the
+   * compose screen, and a button inside a rendered component. That is what makes the counter worth
+   * keeping here rather than in the view: the view sees only the turns it started itself, and a
+   * queue that drains on the wrong one of those posts a correction into the middle of an answer.
+   */
+  const say = async (text: string, skillInstructions: string[] = []) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    setTurnsInFlight((count) => count + 1);
+    try {
+      await deliver(trimmed, skillInstructions);
+    } finally {
+      setTurnsInFlight((count) => count - 1);
+    }
   };
 
   useEffect(() => {
@@ -335,7 +385,13 @@ export function ChannelChat({
           awaitingReply.current = false;
           copilotkit.stopAgent({ agent });
         }}
-        pending={agent.isRunning}
+        /*
+         * The turn, not the run. A browser action ends one run and starts another, and telling the
+         * conversation it is idle in between is what would drain a parked correction into the
+         * middle of an answer: a second turn racing the first on one thread, with a fabricated
+         * result stitched over a tool call that is still executing.
+         */
+        pending={agent.isRunning || turnsInFlight > 0}
         /*
          * A channel outlives its turns, so it is the screen where waiting is worth offering. A
          * correction typed mid-answer is held here, in this tab, and runs as one follow-up turn the
@@ -343,6 +399,12 @@ export function ChannelChat({
          * above.
          */
         queueWhileBusy
+        /*
+         * The run, not the turn. Stop reaches a run through the core's abort controller, and that
+         * controller does not exist until `say` has finished waiting for the runtime agent — so
+         * this is the one place the narrower fact is the honest one to draw a button from.
+         */
+        stoppable={agent.isRunning || runsInFlight > 0}
       />
     </ConversationProvider>
   );

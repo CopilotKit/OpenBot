@@ -35,18 +35,31 @@ describe("submitting", () => {
     expect(result.queue).toEqual([]);
   });
 
-  test("an idle send leaves an existing queue exactly where it was", () => {
-    // Not a state this reaches in the app, but the rule is about the message and not about the
-    // queue: nothing already waiting is disturbed by something that did not have to wait.
+  test("an idle send takes anything already waiting with it", () => {
+    // Not a state the app is supposed to reach, which is exactly why the rule has to hold here on
+    // its own: a new message that jumped the queue would run before the correction it corrects.
     const waiting = park([], "one", "no, the other one");
     const result = reduceQueue(waiting, {
       busy: false,
-      draft: draft("hello"),
+      draft: draft("the Q3 file"),
       id: "two",
       type: "submit",
     });
 
-    expect(result.queue).toBe(waiting);
+    expect(result.run?.text).toBe("no, the other one\nthe Q3 file");
+    expect(result.queue).toEqual([]);
+  });
+
+  test("an idle send that empties a queue carries its skills too", () => {
+    const waiting = park([], "one", "/search invoices", ["search"]);
+    const result = reduceQueue(waiting, {
+      busy: false,
+      draft: draft("/summarize it", ["summarize"]),
+      id: "two",
+      type: "submit",
+    });
+
+    expect(result.run?.commandIds).toEqual(["search", "summarize"]);
   });
 
   test("a send while the Bot is working waits instead of running", () => {
