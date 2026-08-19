@@ -2,7 +2,7 @@
 
 # OpenBot
 
-**AI teammates you can hand real work to, and actually trust with the access.** Each gets a computer of its own: a real browser with its own logins, its own files, and only the tools you grant. Every action decided before it happens and recorded after.
+**AI coworkers you can hand real work to, and actually trust with the access.** Each gets a computer of its own: a real browser with its own logins, its own files, and only the tools you grant. Every action decided before it happens and recorded after.
 
 [**copilotkit.ai/openbot**](https://copilotkit.ai/openbot) · [**Quick start**](#quick-start) · [**Features**](#features) · [**Bring your own agent**](#bring-your-own-agent) · [**Architecture**](#architecture) · [**Docs**](docs/README.md)
 
@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/535ef7ee-1631-4a69-b839-564c56cf90b4
 <div align="center">
 
 Bring any AG-UI agent, written on a framework or by hand, and it arrives as a
-teammate with a channel of its own. Watch it work on its own screen, take the
+coworker with a channel of its own. Watch it work on its own screen, take the
 wheel when it reaches something it should not do alone, then hand it back. It
 answers with components rather than only prose, and the whole thing runs on
 your own machine.
@@ -33,7 +33,7 @@ your own machine.
 
 An agent platform that runs inside your own infrastructure. Docker Compose brings up every part of it, the data sits in your PostgreSQL, and the model is yours to choose: no model ships in the box, and an administrator supplies the credential, which is encrypted at rest and never logged.
 
-Three teammates ship in the example package, and they are configuration rather than code: **General Assistant** for everyday work, **Knowledge** for company questions, **Risk Analyst** for risk and compliance. Add your own by editing `agents.yaml` or from `/agents` in the UI.
+Three coworkers ship in the example package, and they are configuration rather than code: **General Assistant** for everyday work, **Knowledge** for company questions, **Risk Analyst** for risk and compliance. Add your own by editing `agents.yaml` or from `/agents` in the UI.
 
 Anything a Bot does to a computer, a file, an MCP server or a component goes through one gateway that decides and records it. That is the difference between an agent that can use your tools and an agent you can let near them.
 
@@ -101,15 +101,15 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 - Open `/bot` and ask: `Open news.ycombinator.com and tell me the top story.`
 - Ask the Bot to fill out <https://httpbin.org/forms/post>, then inspect `/admin/audit`.
 - Open `/admin/boundaries`, add a deny rule or preset, and retry the same browser action.
-- Create a teammate from `/agents`, give it a standing role, and start a channel with it.
+- Create a coworker from `/agents`, give it a standing role, and start a channel with it.
 
 ## Main surfaces
 
 | Route                | Purpose                                                            |
 | -------------------- | ------------------------------------------------------------------ |
 | `/`                  | Start and browse channels.                                         |
-| `/agents`            | Create, edit, duplicate, hide, delete, and launch teammates.       |
-| `/channel/:id`       | Converse with one teammate and view its live screen/profile panel. |
+| `/agents`            | Create, edit, duplicate, hide, delete, and launch coworkers.       |
+| `/channel/:id`       | Converse with one coworker and view its live screen/profile panel. |
 | `/bot`               | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/skills`            | Create and enable personal skills.                                 |
 | `/settings`          | User preferences.                                                  |
@@ -142,14 +142,14 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 Any AG-UI endpoint can be a Bot.
 
-From `/agents`, create a teammate with:
+From `/agents`, create a coworker with:
 
 - name, title, and role description;
 - private or public visibility;
 - optional AG-UI endpoint;
 - optional write-only authorization header.
 
-The server validates agent endpoints with the same target checks used for browser navigation. If no custom endpoint is set, product-created teammates use `MANAGED_AGENT_AG_UI_URL`.
+The server validates agent endpoints with the same target checks used for browser navigation. If no custom endpoint is set, product-created coworkers use `MANAGED_AGENT_AG_UI_URL`.
 
 Tenant package agents are declared in `agents.yaml` as either:
 
@@ -191,7 +191,7 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | Service                  | Port                       | Purpose                                                                                          |
 | ------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------ |
 | `app`                    | 3010                       | React/Vite UI.                                                                                   |
-| `server`                 | 3001                       | Hono API, CopilotKit runtime, auth, policy, audit, plugins, components, teammates, and channels. |
+| `server`                 | 3001                       | Hono API, CopilotKit runtime, auth, policy, audit, plugins, components, coworkers, and channels. |
 | `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
 | `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                          |
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                             |
