@@ -38,9 +38,18 @@ const FILTERS = [
     // stopped an action just as surely as a deny rule did, and it leaves no action row of its own,
     // so without it here the trail's answer to "was anything blocked" is missing a whole family.
     search:
-      "?eventType=computer.action_refused,computer.approval_denied,mcp.call_rejected,component.refused,component.function_refused",
+      "?eventType=computer.action_refused,approval.denied,mcp.call_rejected,component.refused,component.function_refused",
   },
   { label: "Did not happen", search: "?eventType=computer.action_failed" },
+  {
+    /*
+     * The questions, so the one a person never answered can be found rather than looked for by eye.
+     * A request with no answer beside it is the Bot having sat waiting while nobody was watching the
+     * screen, which is the case this trail records that nothing else in the product would show.
+     */
+    label: "Asked a person",
+    search: "?eventType=approval.requested,approval.granted,approval.denied",
+  },
 ] as const;
 
 function AuditPage() {
@@ -137,13 +146,13 @@ function Row({
     | undefined;
   const refused =
     event.eventType === "computer.action_refused" ||
-    event.eventType === "computer.approval_denied" ||
+    event.eventType === "approval.denied" ||
     event.eventType === "component.refused" ||
     event.eventType === "component.function_refused" ||
     event.eventType === "mcp.call_rejected";
   // The three rows a question leaves behind carry their rule at the top level rather than under a
   // decision, because no decision was reached: the policy stopped and waited for a person.
-  const approval = event.eventType.startsWith("computer.approval_");
+  const approval = event.eventType.startsWith("approval.");
   // Allowed by policy but not carried out.
   const failed = event.eventType === "computer.action_failed";
 
@@ -291,9 +300,9 @@ const DECISIONS: Record<string, string> = {
   "computer.secret_supplied": "A person supplied a secret",
   "computer.reset": "The computer was reset",
   "computer.stopped": "A person pressed stop",
-  "computer.approval_requested": "The boundary asked a person",
-  "computer.approval_granted": "A person allowed it",
-  "computer.approval_denied": "A person declined it",
+  "approval.requested": "The boundary asked a person",
+  "approval.granted": "A person allowed it",
+  "approval.denied": "A person declined it",
 
   "component.granted": "Granted to this Bot",
   "component.revoked": "Taken away from this Bot",

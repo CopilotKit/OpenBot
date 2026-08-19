@@ -83,6 +83,22 @@ export type PolicyContext = {
    */
   key?: string;
   /**
+   * Whether a `computer_type` call will press Enter when it has finished typing.
+   *
+   * The third door into a form, and the one a rule about clicking and a rule about `key` both miss.
+   * The type tool takes a flag meaning "and submit", the computer presses Enter itself, and no
+   * keypress ever reaches the gateway as its own action, so a boundary written against Enter watched
+   * the Bot walk past it: a preset named "never submit a form" left the one call that submits a
+   * single-field form untouched.
+   *
+   * Present on every action rather than only on the calls that can set it, and false is doing work
+   * there. `key` is absent unless a key was pressed, which is why the presets that mention it have
+   * to be guarded by tool name to stay evaluable; a rule saying `submit` should not need that
+   * ceremony, because the whole point of the field is that an operator writes one short sentence
+   * about form submission and it holds everywhere.
+   */
+  submit?: boolean;
+  /**
    * What the action does, rather than which tool was called.
    *
    * `tool.name` describes mechanism. An operator thinks in effects, "do not activate anything called
@@ -99,7 +115,8 @@ export type PolicyContext = {
    * from Enter in any field of it, and the element a keypress names is the field, not the form. The
    * gateway would need to know the page's structure at decision time, which it does not, refs are
    * held off-DOM by Playwright and the policy runs before the action reaches the browser. So a rule
-   * that must stop a submission still has to refuse Enter outright, and the preset says so.
+   * that must stop a submission still has to refuse Enter outright, and the preset says so. `submit`
+   * above covers the one case where the intention is not a guess, because the Bot asked for it.
    */
   intent?:
     | "activate"
@@ -336,19 +353,21 @@ const ASK_VERBS: Record<string, string> = {
  * prompt is not made to parse CEL before they can answer a question about a button.
  */
 function describeAsk(context: PolicyContext): string {
-  const what = context.file
-    ? context.file.path
-    : context.element?.name
-      ? `“${context.element.name}” on ${context.page.host}`
-      : context.page.host || "this page";
-  return `The Bot wants to ${ASK_VERBS[context.intent ?? ""] ?? "act on"} ${what}.`;
+  return `The Bot wants to ${ASK_VERBS[context.intent ?? ""] ?? "act on"} ${subjectOf(context)}.`;
 }
 
 /** A refusal a person can act on: what was refused, and on what. */
 function describeRefusal(context: PolicyContext, expression: string): string {
-  // A file refusal must not be phrased as happening "on <host>": the workspace has nothing to do with
-  // whatever page the browser happens to be showing, and saying so sends somebody to the wrong place.
-  if (context.file) {
+  // A file or tool refusal must not be phrased as happening "on <host>": neither the workspace nor
+  // somebody else's server has anything to do with whatever page the browser happens to be showing,
+  // and saying so sends somebody to the wrong place.
+  if (context.mcp) {
+    return (
+      `This deployment's policy does not allow that: ${subjectOf(context)} ` +
+      `is blocked by the rule \`${expression}\`.`
+    );
+  }
+  if (context.file?.path) {
     return (
       `This deployment's policy does not allow that: the file ${context.file.path} ` +
       `is blocked by the rule \`${expression}\`.`
@@ -361,4 +380,23 @@ function describeRefusal(context: PolicyContext, expression: string): string {
     `This deployment's policy does not allow that: ${what} on ${context.page.host} ` +
     `is blocked by the rule \`${expression}\`.`
   );
+}
+
+/**
+ * The thing an action is aimed at, named the way the person who has to decide would name it.
+ *
+ * Every branch is checked for content rather than presence, because a caller judging something that
+ * is not a browser action fills the browser fields in with empty strings on purpose: a rule about
+ * element names must evaluate to false against a tool call rather than becoming unevaluable and
+ * therefore matching. Reading those blanks as "a file" produced a question with a hole in it, "The
+ * Bot wants to call .", which is a sentence nobody can answer and which arrived attached to two
+ * buttons.
+ */
+function subjectOf(context: PolicyContext): string {
+  if (context.mcp) return `${context.mcp.tool} on ${context.mcp.server}`;
+  if (context.file?.path) return context.file.path;
+  if (context.element?.name) {
+    return `“${context.element.name}” on ${context.page.host}`;
+  }
+  return context.page.host || "this page";
 }

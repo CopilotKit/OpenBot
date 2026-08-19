@@ -26,8 +26,9 @@ type Preset = { label: string; rule: string; cost?: string };
 const PRESETS: Preset[] = [
   {
     label: "Never submit a form",
-    // `key` exists only on keypress actions; guard it by tool name to keep other actions evaluable.
-    rule: '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter")',
+    // Three doors, not two. `key` exists only on keypress actions, so it is guarded by tool name to
+    // keep the rule evaluable elsewhere; `submit` is on every action and needs no guard.
+    rule: '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter") || submit',
     cost: "Also stops the Bot pressing Enter for anything else, because a form submits from Enter in any of its fields.",
   },
   {
@@ -52,7 +53,7 @@ const PRESETS: Preset[] = [
 const ASK_PRESETS: Preset[] = [
   {
     label: "Ask before submitting a form",
-    rule: '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter")',
+    rule: '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter") || submit',
     cost: "Asks about every Enter the Bot presses, because a form submits from Enter in any of its fields. Expect to be asked while it is filling one in, not only at the end.",
   },
   {

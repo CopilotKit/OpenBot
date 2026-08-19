@@ -2,12 +2,12 @@ import { useFrontendTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { ApprovalRequest } from "@/components/channels/approval-request";
 import { ToolLine } from "@/components/channels/tool-line";
-import { readApprovals } from "@/components/computer/approvals";
 import { ComputerView } from "@/components/computer/computer-view";
 import {
   type ControlState,
   readControl,
 } from "@/components/computer/take-the-wheel";
+import { closeQuestion, openQuestion, waitForApproval } from "@/lib/approvals";
 import { useActiveBotHolder } from "./active-bot";
 import { reportComputerActivity } from "./computer-activity";
 
@@ -17,6 +17,16 @@ import { reportComputerActivity } from "./computer-activity";
 
 /** What every computer call returns to the model: either the result, or a reason it did not happen. */
 type ToolOutcome = Record<string, unknown> & { ok: boolean };
+
+/**
+ * What the SDK hands a running tool call, as much of it as this file needs.
+ *
+ * Passed around whole rather than unpicked into an abort signal, because the id matters as much as
+ * the abort does: it is what lets a question about this call be drawn on this call's line and
+ * nowhere else. Optional throughout, because the SDK's context argument is optional and a handler
+ * that destructures it unconditionally throws on any call that omits it.
+ */
+type ToolCallContext = { signal?: AbortSignal; toolCall?: { id?: string } };
 
 /**
  * Human-assistance wait window. Long enough for a user to return, finite so the run can unblock.
@@ -39,39 +49,6 @@ async function waitForPerson(
     if (signal?.aborted) return "cancelled";
     const state = await readControl(botId).catch(() => null);
     if (state && done(state)) return "answered";
-    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
-  }
-  return "gave up";
-}
-
-/**
- * Wait for somebody to answer, then send the same call again with their answer on it.
- *
- * The retry is the whole reason this exists. A boundary that only stopped the Bot would cost the
- * person the turn and everything the model had worked out to reach it, so the call is held open and
- * re-issued unchanged; from the model's side an approved action looks exactly like an ordinary one
- * that took a while.
- */
-async function waitForApproval(
-  botId: string,
-  approvalId: string,
-  signal: AbortSignal | undefined,
-): Promise<"granted" | "declined" | "gave up" | "cancelled"> {
-  const deadline = Date.now() + WAIT_FOR_PERSON_MS;
-  while (Date.now() < deadline) {
-    // Stop must work out of this wait as well, or pressing it leaves a Bot parked on a question
-    // nobody is going to answer.
-    if (signal?.aborted) return "cancelled";
-    const approvals = await readApprovals(botId);
-    if (approvals) {
-      const mine = approvals.find((one) => one.id === approvalId);
-      // Gone from a list we did read means it expired and was swept, which is the same outcome as
-      // running out of patience here. A list we could NOT read says nothing, so it is not read as an
-      // answer.
-      if (!mine) return "gave up";
-      if (mine.granted === true) return "granted";
-      if (mine.granted === false) return "declined";
-    }
     await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
   }
   return "gave up";
@@ -112,30 +89,53 @@ async function callComputer(
   botId: string,
   path: string,
   init?: RequestInit,
-  signal?: AbortSignal,
+  call: ToolCallContext = {},
 ): Promise<ToolOutcome> {
+  const signal = call.signal;
   const outcome = await sendToComputer(botId, path, init, signal);
   if (outcome.awaitingApproval !== true) return outcome;
 
   const approvalId = String(outcome.approvalId ?? "");
-  const answer = await waitForApproval(botId, approvalId, signal);
-  if (answer === "granted") {
-    // Sent once, not through this function again. A second ask on the retry would mean the approval
-    // did not fit the action, and looping on that would hold the turn open until the deadline instead
-    // of telling the model something it can act on.
-    return sendToComputer(botId, path, withApproval(init, approvalId), signal);
+  // Put in front of the person on this call's own line rather than left to be found. The id is what
+  // ties the card to the action it is about; see lib/approvals.ts for why anything looser gets it
+  // wrong.
+  const toolCallId = call.toolCall?.id ?? "";
+  openQuestion(toolCallId, {
+    approvalId,
+    botId,
+    question: String(outcome.question ?? outcome.reason ?? ""),
+    rule: typeof outcome.rule === "string" ? outcome.rule : null,
+  });
+  try {
+    const answer = await waitForApproval(botId, approvalId, signal);
+    if (answer === "granted") {
+      // Sent once, not through this function again. A second ask on the retry would mean the approval
+      // did not fit the action, and looping on that would hold the turn open until the deadline instead
+      // of telling the model something it can act on.
+      return sendToComputer(
+        botId,
+        path,
+        withApproval(init, approvalId),
+        signal,
+      );
+    }
+    if (answer === "cancelled") {
+      return { ok: false, reason: "Stopped.", stopped: true };
+    }
+    return answer === "declined"
+      ? { ok: false, refused: true, reason: "A person declined that." }
+      : {
+          ok: false,
+          reason:
+            "Nobody answered the request to allow that, so it did not happen. Say what you were " +
+            "waiting for rather than trying another way round it.",
+        };
+  } finally {
+    // However the wait ended, nothing should still be offering buttons for it. A run that was
+    // stopped leaves its question open on the server for the rest of its ten minutes, and a card
+    // that outlived its own call would be collecting consent nobody is waiting for.
+    closeQuestion(toolCallId);
   }
-  if (answer === "cancelled") {
-    return { ok: false, reason: "Stopped.", stopped: true };
-  }
-  return answer === "declined"
-    ? { ok: false, refused: true, reason: "A person declined that." }
-    : {
-        ok: false,
-        reason:
-          "Nobody answered the request to allow that, so it did not happen. Say what you were " +
-          "waiting for rather than trying another way round it.",
-      };
 }
 
 async function sendToComputer(
@@ -255,7 +255,7 @@ function labelOf(result: string | undefined): string | undefined {
  * screen: a person deciding whether to allow a click wants to see what the Bot did to get there.
  */
 function ActionLine({
-  botId,
+  toolCallId,
   label,
   detail,
   running,
@@ -263,10 +263,13 @@ function ActionLine({
   failed,
 }: {
   /**
-   * Whose computer this action is on. Only the acting tools pass it; a line for reading the page
-   * has nothing anybody could be asked about.
+   * Which call this line is reporting.
+   *
+   * The card shows a question only when this exact call raised one, so a line for an action nobody
+   * was asked about stays a line. Passing the Bot instead would draw whatever that Bot happened to
+   * be waiting on, which on a second turn is somebody else's abandoned question.
    */
-  botId?: string;
+  toolCallId?: string;
   label: string;
   detail?: string;
   running?: boolean;
@@ -277,9 +280,7 @@ function ActionLine({
 }) {
   return (
     <>
-      {botId ? (
-        <ApprovalRequest active={running === true} botId={botId} />
-      ) : null}
+      <ApprovalRequest toolCallId={toolCallId} />
       <ToolLine
         detail={detail}
         failed={failed}
@@ -308,11 +309,7 @@ export function ComputerTools() {
     parameters: z.object({
       url: z.string().describe("Full web address to open, including https://"),
     }),
-    handler: async (
-      { url }: { url: string },
-      // Context is optional in the SDK.
-      { signal }: { signal?: AbortSignal } = {},
-    ) => {
+    handler: async ({ url }: { url: string }, call: ToolCallContext = {}) => {
       const result = await callComputer(
         bot.current,
         "/navigate",
@@ -321,7 +318,7 @@ export function ComputerTools() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ url }),
         },
-        signal,
+        call,
       );
       return result.ok
         ? {
@@ -333,14 +330,14 @@ export function ComputerTools() {
           }
         : result;
     },
-    render: ({ status }) => (
+    render: ({ status, toolCallId }) => (
       <div className="my-2">
         {/*
          * Above the screen rather than through ActionLine, because opening a page draws the live
          * view instead of a line. A question about where the Bot is about to go still belongs
          * beside it.
          */}
-        <ApprovalRequest active={status !== "complete"} botId={bot.current} />
+        <ApprovalRequest toolCallId={toolCallId} />
         <ComputerView computerId={bot.current} active={status !== "complete"} />
       </div>
     ),
@@ -408,7 +405,7 @@ export function ComputerTools() {
         text: string;
         submit?: boolean;
       },
-      { signal }: { signal?: AbortSignal } = {},
+      call: ToolCallContext = {},
     ) =>
       callComputer(
         bot.current,
@@ -418,11 +415,11 @@ export function ComputerTools() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(input),
         },
-        signal,
+        call,
       ),
-    render: ({ args, result, status }) => (
+    render: ({ args, result, status, toolCallId }) => (
       <ActionLine
-        botId={bot.current}
+        toolCallId={toolCallId}
         running={status !== "complete"}
         label="Filled in"
         detail={
@@ -451,7 +448,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
+      call: ToolCallContext = {},
     ) =>
       callComputer(
         bot.current,
@@ -461,13 +458,13 @@ export function ComputerTools() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(input),
         },
-        signal,
+        call,
       ),
-    render: ({ args, result, status }) => {
+    render: ({ args, result, status, toolCallId }) => {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
-          botId={bot.current}
+          toolCallId={toolCallId}
           running={status !== "complete"}
           label="Clicked"
           detail={
@@ -503,7 +500,7 @@ export function ComputerTools() {
         ref?: string;
         snapshotId?: number;
       },
-      { signal }: { signal?: AbortSignal } = {},
+      call: ToolCallContext = {},
     ) =>
       callComputer(
         bot.current,
@@ -513,11 +510,11 @@ export function ComputerTools() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(input),
         },
-        signal,
+        call,
       ),
-    render: ({ args, result, status }) => (
+    render: ({ args, result, status, toolCallId }) => (
       <ActionLine
-        botId={bot.current}
+        toolCallId={toolCallId}
         running={status !== "complete"}
         label="Pressed"
         detail={typeof args?.key === "string" ? args.key : undefined}
@@ -551,7 +548,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { label: string; ref: string; snapshotId: number },
-      { signal }: { signal?: AbortSignal } = {},
+      call: ToolCallContext = {},
     ) => {
       const botId = bot.current;
       const asked = await callComputer(
@@ -562,7 +559,7 @@ export function ComputerTools() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(input),
         },
-        signal,
+        call,
       );
       if (!asked.ok) return asked;
 
@@ -570,7 +567,7 @@ export function ComputerTools() {
       const outcome = await waitForPerson(
         botId,
         (state) => state.secretWanted === undefined,
-        signal,
+        call.signal,
       );
       return {
         ok: true,
@@ -606,7 +603,7 @@ export function ComputerTools() {
     }),
     handler: async (
       input: { reason: string; request?: string },
-      { signal }: { signal?: AbortSignal } = {},
+      call: ToolCallContext = {},
     ) => {
       try {
         const response = await fetch(
@@ -616,7 +613,7 @@ export function ComputerTools() {
             credentials: "include",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(input),
-            ...(signal ? { signal } : {}),
+            ...(call.signal ? { signal: call.signal } : {}),
           },
         );
         return response.ok
@@ -644,10 +641,7 @@ export function ComputerTools() {
           "What you need the person to do, in one sentence, e.g. 'This page is asking for a code sent to your phone.'",
         ),
     }),
-    handler: async (
-      input: { reason: string },
-      { signal }: { signal?: AbortSignal } = {},
-    ) => {
+    handler: async (input: { reason: string }, call: ToolCallContext = {}) => {
       const botId = bot.current;
       const asked = await callComputer(
         botId,
@@ -657,7 +651,7 @@ export function ComputerTools() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(input),
         },
-        signal,
+        call,
       );
       if (!asked.ok) return asked;
 
@@ -665,7 +659,7 @@ export function ComputerTools() {
       const outcome = await waitForPerson(
         botId,
         (state) => state.holder === "bot" && !state.requested,
-        signal,
+        call.signal,
       );
       return {
         ok: true,
@@ -693,18 +687,23 @@ export function ComputerTools() {
         .optional()
         .describe("Optional folder to list. Omit for the whole workspace."),
     }),
-    handler: async (input: { path?: string }) =>
-      callComputer(bot.current, "/files/list", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input ?? {}),
-      }),
-    render: ({ result, status }) => {
+    handler: async (input: { path?: string }, call: ToolCallContext = {}) =>
+      callComputer(
+        bot.current,
+        "/files/list",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input ?? {}),
+        },
+        call,
+      ),
+    render: ({ result, status, toolCallId }) => {
       const outcome = outcomeOf(result);
       const entries = Array.isArray(outcome.entries) ? outcome.entries : [];
       return (
         <ActionLine
-          botId={bot.current}
+          toolCallId={toolCallId}
           running={status !== "complete"}
           label="Listed files"
           detail={
@@ -732,17 +731,22 @@ export function ComputerTools() {
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (input: { path: string }) =>
-      callComputer(bot.current, "/files/read", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
-      }),
-    render: ({ args, result, status }) => {
+    handler: async (input: { path: string }, call: ToolCallContext = {}) =>
+      callComputer(
+        bot.current,
+        "/files/read",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        },
+        call,
+      ),
+    render: ({ args, result, status, toolCallId }) => {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
-          botId={bot.current}
+          toolCallId={toolCallId}
           running={status !== "complete"}
           label="Read file"
           detail={
@@ -777,21 +781,29 @@ export function ComputerTools() {
         .optional()
         .describe("Add to the end of the file instead of replacing it"),
     }),
-    handler: async (input: {
-      path: string;
-      contents: string;
-      append?: boolean;
-    }) =>
-      callComputer(bot.current, "/files/write", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
-      }),
-    render: ({ args, result, status }) => {
+    handler: async (
+      input: {
+        path: string;
+        contents: string;
+        append?: boolean;
+      },
+      call: ToolCallContext = {},
+    ) =>
+      callComputer(
+        bot.current,
+        "/files/write",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        },
+        call,
+      ),
+    render: ({ args, result, status, toolCallId }) => {
       const outcome = outcomeOf(result);
       return (
         <ActionLine
-          botId={bot.current}
+          toolCallId={toolCallId}
           running={status !== "complete"}
           label={args?.append === true ? "Added to file" : "Saved file"}
           // Show the path, never file contents.
@@ -819,10 +831,7 @@ export function ComputerTools() {
         .optional()
         .describe("Pixels to scroll; positive is down. Defaults to 600."),
     }),
-    handler: async (
-      input: { deltaY?: number },
-      { signal }: { signal?: AbortSignal } = {},
-    ) =>
+    handler: async (input: { deltaY?: number }, call: ToolCallContext = {}) =>
       callComputer(
         bot.current,
         "/scroll",
@@ -831,11 +840,11 @@ export function ComputerTools() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(input),
         },
-        signal,
+        call,
       ),
-    render: ({ result, status }) => (
+    render: ({ result, status, toolCallId }) => (
       <ActionLine
-        botId={bot.current}
+        toolCallId={toolCallId}
         running={status !== "complete"}
         label="Scrolled"
         refused={outcomeOf(result).refused === true}

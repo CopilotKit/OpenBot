@@ -69,14 +69,20 @@ export const auditEventTypes = [
    * was watching the screen", which nothing else in this trail would show. An answer that was given
    * and never spent leaves the first two, which is what a stopped run looks like from here.
    *
-   * `approval_granted` and `approval_denied` are written by the person answering, under their own
+   * `approval.granted` and `approval.denied` are written by the person answering, under their own
    * actor, minutes after the Bot's turn raised the question and often by somebody else entirely.
    * Folding consent into the action row would credit it to whoever was driving the Bot, which is the
    * one thing an approval trail must never do.
+   *
+   * Not named for the computer, unlike the rows above, because the same boundary judges a Bot's
+   * calls to somebody else's servers and stops to ask about those too. Each row is filed against the
+   * thing the question was about, a computer or a tool, so a reader filtering by either sees the
+   * question, the answer and the action together rather than a grant filed under a browser for
+   * something that happened in Jira.
    */
-  "computer.approval_requested",
-  "computer.approval_granted",
-  "computer.approval_denied",
+  "approval.requested",
+  "approval.granted",
+  "approval.denied",
   // The computer itself being stopped or wiped. `reset` destroys every login the Bot had, which is
   // both the recovery path and the most consequential button on the admin page, so who pressed it and
   // when is exactly the sort of thing an investigator needs and nothing else records.

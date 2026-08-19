@@ -245,6 +245,45 @@ describe("the second door", () => {
     });
     expect(allowed.allowed).toBe(true);
   });
+
+  test("a rule can refuse the type tool's own Enter, which is neither a click nor a keypress", () => {
+    // The type tool takes a flag meaning "and submit", and the computer presses Enter itself, so no
+    // keypress ever arrives as an action of its own. A boundary written about clicking and about
+    // `key` watched the one call that submits a single-field form go straight past it.
+    const policy = {
+      mode: "enforce" as const,
+      deny: [
+        '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter") || submit',
+      ],
+      ask: [],
+      allow: ["true"],
+    };
+    const typing = (submit: boolean): PolicyContext => ({
+      tool: { name: "computer_type" },
+      bot: { id: "sales" },
+      actor: { id: "someone" },
+      page: { url: "https://example.com/order", host: "example.com" },
+      element: { ref: "e6", role: "input", name: "Postcode" },
+      intent: "type",
+      submit,
+    });
+
+    expect(evaluateActionPolicy(policy, typing(true)).allowed).toBe(false);
+    // Filling the field in is still allowed, or the rule would stop the Bot typing at all.
+    expect(evaluateActionPolicy(policy, typing(false)).allowed).toBe(true);
+    // And the same rule stays evaluable on an action that cannot submit anything, which is why the
+    // field is on every context rather than only on the calls that can set it.
+    expect(
+      evaluateActionPolicy(policy, {
+        tool: { name: "computer_scroll" },
+        bot: { id: "sales" },
+        actor: { id: "someone" },
+        page: { url: "https://example.com/order", host: "example.com" },
+        intent: "read",
+        submit: false,
+      }).allowed,
+    ).toBe(true);
+  });
 });
 
 /**
@@ -497,6 +536,53 @@ describe("asking a person", () => {
     );
     expect(decision.reason).toContain("reports/august.csv");
     expect(decision.reason).not.toContain("example.com");
+  });
+
+  test("a question about a tool call names the tool and the server", () => {
+    // The context a tool call is judged in fills the browser fields with empty strings on purpose,
+    // so that a rule about element names evaluates to false rather than becoming unevaluable. Read
+    // as though a file were present, that produced "The Bot wants to call ." in front of a person,
+    // with two buttons under it.
+    const decision = evaluateActionPolicy(
+      { ...permissive, ask: ['intent == "write_tool"'] },
+      {
+        tool: { name: "mcp__jira__editJiraIssue" },
+        bot: { id: "b" },
+        actor: { id: "a" },
+        page: { url: "", host: "" },
+        element: { ref: "", role: "", name: "", type: "" },
+        key: "",
+        submit: false,
+        file: { path: "", name: "", extension: "" },
+        intent: "write_tool",
+        mcp: { server: "jira", tool: "editJiraIssue", effect: "write" },
+      },
+    );
+    expect(decision.source).toBe("ask");
+    expect(decision.reason).toBe(
+      "The Bot wants to call editJiraIssue on jira.",
+    );
+  });
+
+  test("a refusal of a tool call names it the same way", () => {
+    const decision = evaluateActionPolicy(
+      { ...permissive, deny: ['mcp.server == "jira"'] },
+      {
+        tool: { name: "mcp__jira__editJiraIssue" },
+        bot: { id: "b" },
+        actor: { id: "a" },
+        page: { url: "", host: "" },
+        element: { ref: "", role: "", name: "", type: "" },
+        key: "",
+        submit: false,
+        file: { path: "", name: "", extension: "" },
+        intent: "write_tool",
+        mcp: { server: "jira", tool: "editJiraIssue", effect: "write" },
+      },
+    );
+    expect(decision.reason).toContain("editJiraIssue on jira");
+    // Nothing about a file, and nothing about whatever page a browser happens to be showing.
+    expect(decision.reason).not.toContain("the file");
   });
 
   test("an empty allow list still refuses what nobody asked about", () => {

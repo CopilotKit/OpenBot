@@ -15,6 +15,12 @@
  * Binding an approval to a hash of the action it was granted for is what stops "yes, click Place
  * order" being replayable as "yes, click Delete account", and it is the reason this is a governance
  * feature rather than a confirmation prompt.
+ *
+ * It lives beside the computer because that is where the boundary it serves was written, and it is
+ * not only the computer's, the same policy judges a Bot's calls to somebody else's servers and those
+ * raise the same questions. One registry per deployment rather than one per subsystem: a Bot waiting
+ * on a person is waiting on a person, and a deployment with two of these would be a deployment where
+ * the surface a person answers on decides which half of a Bot's work they can see.
  */
 import { createHash, randomUUID } from "node:crypto";
 
@@ -31,7 +37,7 @@ export const APPROVAL_TTL_MS = 10 * 60_000;
 /**
  * The action an approval is about, in the fields a fingerprint is taken over.
  *
- * Everything here is known to the gateway before it acts and is derived from the request it is
+ * Everything here is known to the caller before it acts and is derived from the request it is
  * actually about to make, never from anything the model asserted about it.
  */
 export type ApprovalSubject = {
@@ -39,8 +45,22 @@ export type ApprovalSubject = {
   toolName: string;
   ref?: string | undefined;
   key?: string | undefined;
+  /** True when a `computer_type` call will press Enter afterwards. See PolicyContext.submit. */
+  submit?: boolean | undefined;
   filePath?: string | undefined;
   pageUrl?: string | undefined;
+  /**
+   * The arguments a tool call carries, for the calls whose whole meaning is in them.
+   *
+   * A browser action is identified by the thing it touches: a ref, a key, a path. A call to somebody
+   * else's server is not. `postMessage` on the same Bot's same server is one action when it says
+   * "the deploy finished" in a team channel and another when it says something else to a customer,
+   * and a fingerprint that stopped at the tool name would make one person's yes cover both.
+   *
+   * Left out where the arguments are not the identity, so that a person who allowed a click is not
+   * asked again because a snapshot id moved on.
+   */
+  arguments?: Record<string, unknown> | undefined;
 };
 
 export type PendingApproval = {
@@ -52,6 +72,16 @@ export type PendingApproval = {
   rule: string;
   /** What is about to happen, in one sentence, as the policy phrased it. */
   question: string;
+  /**
+   * What the question is about, in the terms the audit trail files things under.
+   *
+   * Carried on the approval because the person answering arrives minutes later on a surface that
+   * knows nothing but an id, and the row their answer writes has to land against the same thing the
+   * action's own row will. Without it every answer would be filed against whichever subsystem
+   * happened to own the endpoint they pressed the button on, so a yes to a tool call on somebody
+   * else's server would be recorded as something that happened on a browser.
+   */
+  target: { type: string; id: string };
   /**
    * The action this approval is good for, and only this one.
    *
@@ -67,6 +97,42 @@ export type PendingApproval = {
   answeredBy?: string;
 };
 
+/**
+ * An approval as a surface is allowed to see it.
+ *
+ * The fingerprint is the binding between an approval and its action, the actor is the person the
+ * turn belonged to, and the target is bookkeeping for the trail. None of the three is any use to a
+ * browser and all three are compared or written on the server, so they do not travel.
+ *
+ * One projection rather than one per handler. The reading endpoint and the answering endpoint sit
+ * four lines apart and return the same record, and the way that goes wrong is that somebody adds a
+ * field to the record and only one of them keeps it out; a stated invariant of a security surface
+ * being quietly broken by a sibling handler is a worse failure than the field itself.
+ */
+export type PresentedApproval = {
+  id: string;
+  botId: string;
+  rule: string;
+  question: string;
+  requestedAt: string;
+  expiresAt: string;
+  granted?: boolean;
+  answeredBy?: string;
+};
+
+export function presentable(approval: PendingApproval): PresentedApproval {
+  return {
+    id: approval.id,
+    botId: approval.botId,
+    rule: approval.rule,
+    question: approval.question,
+    requestedAt: approval.requestedAt,
+    expiresAt: approval.expiresAt,
+    ...(approval.granted === undefined ? {} : { granted: approval.granted }),
+    ...(approval.answeredBy ? { answeredBy: approval.answeredBy } : {}),
+  };
+}
+
 export type ApprovalAnswer =
   | { ok: true; approval: PendingApproval }
   /** One reason, because a person acts on all three identically: that question is no longer open. */
@@ -78,21 +144,6 @@ export type ApprovalConsumption =
       ok: false;
       reason: "unknown" | "unanswered" | "declined" | "a different action";
     };
-
-/**
- * Thrown when somebody answers a question that is not open any more.
- *
- * Its own type so the routes can report it as a conflict rather than a fault: nothing is broken, the
- * question expired or was already answered, most likely in another tab.
- */
-export class ApprovalNotPendingError extends Error {
-  constructor() {
-    super(
-      "That request is no longer waiting for an answer. It may have expired, or somebody else answered it.",
-    );
-    this.name = "ApprovalNotPendingError";
-  }
-}
 
 /**
  * A stable hash of the action, used to bind one approval to one thing.
@@ -114,11 +165,35 @@ export function fingerprintOf(subject: ApprovalSubject): string {
         subject.toolName,
         subject.ref ?? "",
         subject.key ?? "",
+        subject.submit === true ? "submit" : "",
         subject.filePath ?? "",
         subject.pageUrl ?? "",
+        subject.arguments ? canonical(subject.arguments) : "",
       ].join("\u0000"),
     )
     .digest("hex");
+}
+
+/**
+ * JSON with its keys in a fixed order, so two spellings of the same arguments hash the same.
+ *
+ * `JSON.stringify` keeps whatever order an object was built in, and the same call arrives here
+ * twice: once when the question is asked and once when the answer is spent, with a parse in between.
+ * Sorting makes the comparison about what the arguments say rather than about the order somebody's
+ * client happened to write them in, which is not a difference anybody would understand being asked
+ * about twice.
+ */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
+      .join(",")}}`;
+  }
+  // `undefined` stringifies to nothing at all, which would let a field somebody sent as undefined
+  // hash the same as one they never sent.
+  return JSON.stringify(value) ?? "null";
 }
 
 export type ApprovalRegistry = {
@@ -129,6 +204,7 @@ export type ApprovalRegistry = {
     rule: string;
     question: string;
     fingerprint: string;
+    target: { type: string; id: string };
   }) => PendingApproval;
   /**
    * The open questions for one Bot, newest last, expired ones already gone.
@@ -137,7 +213,23 @@ export type ApprovalRegistry = {
    * own id in this list. The surface shows only the unanswered ones.
    */
   pending: (botId: string) => PendingApproval[];
-  answer: (id: string, actor: string, granted: boolean) => ApprovalAnswer;
+  /**
+   * Answer one question, on the Bot it was asked about.
+   *
+   * The Bot is named rather than looked up from the id, and it has to match. The id is enough to
+   * find the entry, so this is not authorisation, it is bookkeeping that cannot be wrong: the
+   * surface takes the Bot from the address it was called on, and the row an answer writes says which
+   * Bot it was about. Without the check those two can disagree, and then the trail holds a grant
+   * filed under one Bot and the action it paid for filed under another, joined by an id that appears
+   * on both and reconciles neither. "Who approved what" is the one question this record exists to
+   * answer.
+   */
+  answer: (
+    id: string,
+    botId: string,
+    actor: string,
+    granted: boolean,
+  ) => ApprovalAnswer;
   /** Spend an approval on one action. Single use: a successful consumption removes it. */
   consume: (id: string, fingerprint: string) => ApprovalConsumption;
 };
@@ -178,6 +270,7 @@ export function createApprovalRegistry(
         rule: input.rule,
         question: input.question,
         fingerprint: input.fingerprint,
+        target: input.target,
         requestedAt: new Date(at).toISOString(),
         expiresAt: new Date(at + ttlMs).toISOString(),
       };
@@ -190,13 +283,20 @@ export function createApprovalRegistry(
       return [...open.values()].filter((approval) => approval.botId === botId);
     },
 
-    answer: (id, actor, granted) => {
+    answer: (id, botId, actor, granted) => {
       sweep();
       const approval = open.get(id);
       // An answered question is not answerable again, whichever way it went. Otherwise a second
       // person, or the same person in a second tab, can quietly overturn a decision that the trail
       // has already recorded as made.
-      if (!approval || approval.granted !== undefined) {
+      //
+      // A question asked about another Bot is reported the same way, because from where the caller
+      // is standing it is the same fact: nothing is open here under that id.
+      if (
+        !approval ||
+        approval.botId !== botId ||
+        approval.granted !== undefined
+      ) {
         return { ok: false, reason: "no longer open" };
       }
       const answered: PendingApproval = {

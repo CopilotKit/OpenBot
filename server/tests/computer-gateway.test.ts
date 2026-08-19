@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
-import { ApprovalNotPendingError } from "../src/computer/approvals";
+import { createApprovalRegistry } from "../src/computer/approvals";
 import type { ComputerClient } from "../src/computer/client";
 import {
   ActionNeedsApprovalError,
@@ -115,14 +115,19 @@ const PERMISSIVE: ActionPolicy = {
 async function gatewayWith(policy: ActionPolicy | undefined) {
   const { client, calls } = fakeClient();
   const { store, rows } = fakeAudit();
+  // The registry the deployment shares between everything that can ask. Held here so these tests can
+  // answer a question the way a person does, without going through the surface they answer it on;
+  // that surface has its own tests.
+  const approvals = createApprovalRegistry();
   const gateway = createComputerGateway({
     client,
     auditStore: store,
     policy: () => policy,
+    approvals,
   });
   // Every test acts on refs, so the server must hold a snapshot first, exactly as the real flow does.
   await gateway.snapshot("default");
-  return { gateway, calls, rows };
+  return { gateway, approvals, calls, rows };
 }
 
 describe("the computer gateway", () => {
@@ -439,7 +444,7 @@ describe("the gateway when the boundary asks a person", () => {
     // One row, and it is the question. Nothing was allowed and nothing was refused, so writing
     // either would put a verdict in the trail that the policy never reached.
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.eventType).toBe("computer.approval_requested");
+    expect(rows[0]?.eventType).toBe("approval.requested");
     expect(rows[0]?.payload.rule).toBe('contains(element.name, "submit")');
     expect(rows[0]?.payload.action).toBe("computer_click");
     expect(rows[0]?.payload.approval).toBe(
@@ -448,12 +453,12 @@ describe("the gateway when the boundary asks a person", () => {
   });
 
   test("carries the action out once a person has allowed it", async () => {
-    const { gateway, calls, rows } = await gatewayWith(ASKING);
+    const { gateway, approvals, calls, rows } = await gatewayWith(ASKING);
     const asked = (await gateway
       .click("default", "bot-1", ACTOR, { ref: "e9", snapshotId: 7 })
       .catch((caught: unknown) => caught)) as ActionNeedsApprovalError;
 
-    await gateway.grantApproval("default", "bot-1", MANAGER, asked.approvalId);
+    approvals.answer(asked.approvalId, "bot-1", MANAGER.id, true);
     await gateway.click(
       "default",
       "bot-1",
@@ -464,14 +469,14 @@ describe("the gateway when the boundary asks a person", () => {
     );
 
     expect(calls).toEqual(["click"]);
-    // Three rows for one action, and each answers a different question: it was asked, somebody said
-    // yes, it happened.
+    // Two rows here, and the third is written where the answer was given: the question, and the
+    // action it turned into. The action's own row says a person stood behind it and names them,
+    // rather than reading as an ordinary permission nobody ever questioned.
     expect(rows.map((row) => row.eventType)).toEqual([
-      "computer.approval_requested",
-      "computer.approval_granted",
+      "approval.requested",
       "computer.action_allowed",
     ]);
-    const decision = rows[2]?.payload.decision as {
+    const decision = rows[1]?.payload.decision as {
       source?: string;
       approvedBy?: string;
     };
@@ -479,30 +484,18 @@ describe("the gateway when the boundary asks a person", () => {
     expect(decision.approvedBy).toBe("manager-user");
   });
 
-  test("credits the answer to whoever answered, not to whoever ran the Bot", async () => {
-    // The row for the answer is written under the answering person's own actor. Folding consent into
-    // the action row would attribute it to whoever was driving, which is the one thing an approval
-    // trail must never do.
-    const { gateway, rows } = await gatewayWith(ASKING);
-    const asked = (await gateway
-      .click("default", "bot-1", ACTOR, { ref: "e9", snapshotId: 7 })
-      .catch((caught: unknown) => caught)) as ActionNeedsApprovalError;
-
-    await gateway.grantApproval("default", "bot-1", MANAGER, asked.approvalId);
-    expect(rows[0]?.payload.actor).toBe("dev-local-user");
-    expect(rows[1]?.payload.actor).toBe("manager-user");
-    expect(rows[1]?.actorUserId).toBe("manager-user");
-  });
-
   test("an approval for one action does not carry to another", async () => {
     // The grant is bound to a fingerprint of the exact call. Pressing a different thing on the same
     // page with the same id in hand asks again rather than going through, which is the difference
     // between an approval and a token good for anything.
-    const { gateway, calls } = await gatewayWith({ ...ASKING, ask: ["true"] });
+    const { gateway, approvals, calls } = await gatewayWith({
+      ...ASKING,
+      ask: ["true"],
+    });
     const asked = (await gateway
       .click("default", "bot-1", ACTOR, { ref: "e9", snapshotId: 7 })
       .catch((caught: unknown) => caught)) as ActionNeedsApprovalError;
-    await gateway.grantApproval("default", "bot-1", MANAGER, asked.approvalId);
+    approvals.answer(asked.approvalId, "bot-1", MANAGER.id, true);
 
     await expect(
       gateway.click(
@@ -518,12 +511,12 @@ describe("the gateway when the boundary asks a person", () => {
   });
 
   test("a declined request asks again rather than acting", async () => {
-    const { gateway, calls, rows } = await gatewayWith(ASKING);
+    const { gateway, approvals, calls, rows } = await gatewayWith(ASKING);
     const asked = (await gateway
       .click("default", "bot-1", ACTOR, { ref: "e9", snapshotId: 7 })
       .catch((caught: unknown) => caught)) as ActionNeedsApprovalError;
 
-    await gateway.refuseApproval("default", "bot-1", MANAGER, asked.approvalId);
+    approvals.answer(asked.approvalId, "bot-1", MANAGER.id, false);
     await expect(
       gateway.click(
         "default",
@@ -536,28 +529,80 @@ describe("the gateway when the boundary asks a person", () => {
     ).rejects.toThrow(ActionNeedsApprovalError);
 
     expect(calls).toEqual([]);
-    expect(rows[1]?.eventType).toBe("computer.approval_denied");
+    // A No leaves a second question rather than a refusal row: nobody has agreed to this, and the
+    // trail says so where it happened.
+    expect(rows[1]?.eventType).toBe("approval.requested");
   });
 
-  test("answering a question nobody is asking any more is a conflict, not a fault", async () => {
-    const { gateway } = await gatewayWith(ASKING);
+  test("a type call that will press Enter is judged as one that submits", async () => {
+    // The third door into a form. The computer presses Enter itself when the Bot asks it to, so no
+    // keypress ever reaches the gateway as an action of its own, and a boundary written about
+    // clicking and about `key` let the one call that submits a single-field form through.
+    const { gateway, calls } = await gatewayWith({
+      ...PERMISSIVE,
+      ask: ["submit"],
+    });
+
     await expect(
-      gateway.grantApproval("default", "bot-1", MANAGER, "not-a-real-id"),
-    ).rejects.toThrow(ApprovalNotPendingError);
+      gateway.type("default", "bot-1", ACTOR, {
+        ref: "e1",
+        snapshotId: 7,
+        text: "SW1A 1AA",
+        submit: true,
+      }),
+    ).rejects.toThrow(ActionNeedsApprovalError);
+    expect(calls).toEqual([]);
+
+    // Filling the same field in without submitting is not the same action and is not asked about.
+    await gateway.type("default", "bot-1", ACTOR, {
+      ref: "e1",
+      snapshotId: 7,
+      text: "SW1A 1AA",
+    });
+    expect(calls).toEqual(["type"]);
+  });
+
+  test("an answer given for typing is not spendable on typing and submitting", async () => {
+    // Submitting is the escalation the binding has to cover: "yes, fill the postcode in" is not
+    // "yes, fill it in and send the form".
+    const { gateway, approvals, calls } = await gatewayWith({
+      ...PERMISSIVE,
+      ask: ["true"],
+    });
+    const asked = (await gateway
+      .type("default", "bot-1", ACTOR, {
+        ref: "e1",
+        snapshotId: 7,
+        text: "SW1A 1AA",
+      })
+      .catch((caught: unknown) => caught)) as ActionNeedsApprovalError;
+    approvals.answer(asked.approvalId, "bot-1", MANAGER.id, true);
+
+    await expect(
+      gateway.type(
+        "default",
+        "bot-1",
+        ACTOR,
+        { ref: "e1", snapshotId: 7, text: "SW1A 1AA", submit: true },
+        undefined,
+        asked.approvalId,
+      ),
+    ).rejects.toThrow(ActionNeedsApprovalError);
+    expect(calls).toEqual([]);
   });
 
   test("the question is visible to the surface while it is open", async () => {
-    const { gateway } = await gatewayWith(ASKING);
+    const { gateway, approvals } = await gatewayWith(ASKING);
     const asked = (await gateway
       .click("default", "bot-1", ACTOR, { ref: "e9", snapshotId: 7 })
       .catch((caught: unknown) => caught)) as ActionNeedsApprovalError;
 
-    const waiting = gateway.pendingApprovals("bot-1");
+    const waiting = approvals.pending("bot-1");
     expect(waiting).toHaveLength(1);
     expect(waiting[0]?.id).toBe(asked.approvalId);
     expect(waiting[0]?.question).toContain("Submit order");
     // Another Bot's screen must not offer somebody a question about this one's computer.
-    expect(gateway.pendingApprovals("bot-2")).toEqual([]);
+    expect(approvals.pending("bot-2")).toEqual([]);
   });
 
   test("dry-run records the question and lets the action through", async () => {

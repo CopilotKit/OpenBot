@@ -20,7 +20,6 @@
 import { type AuditStore, recordAuditEvent } from "../audit";
 import {
   type ApprovalRegistry,
-  ApprovalNotPendingError,
   createApprovalRegistry,
   fingerprintOf,
   type PendingApproval,
@@ -112,10 +111,11 @@ export type ComputerGatewayOptions = {
   /**
    * Where questions raised by the `ask` list wait for an answer.
    *
-   * Owned by the gateway by default rather than wired in from outside, because an approval is only
-   * ever meaningful against the decision that raised it: a deployment that could hand this a second
-   * registry would be a deployment where an approval could be granted somewhere the action is not
-   * decided. Injectable only so a test can control its clock.
+   * Handed in rather than owned, because the deployment has exactly one of these and the gateway is
+   * not the only thing that asks: the same policy judges a Bot's calls to somebody else's servers,
+   * and a person answering should see everything their Bot is waiting on rather than whichever half
+   * belongs to the subsystem that happened to serve the page. A gateway built without one keeps its
+   * own, which is what the tests do so they can control the clock.
    */
   approvals?: ApprovalRegistry;
 };
@@ -197,6 +197,8 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       filePath?: string;
       targetUrl?: string;
       key?: string;
+      /** Whether this call ends by pressing Enter. Only the type tool can, and it says so. */
+      submit?: boolean;
       /** The person's Stop, on its way to the browser. See the acting methods below. */
       signal?: AbortSignal;
       /**
@@ -226,6 +228,9 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       bot: { id: botId },
       actor: { id: actor.id },
       page: { url: pageUrl, host: hostOf(pageUrl) },
+      // Always a boolean, unlike `key`, so a rule about form submission needs no guard to stay
+      // evaluable on the actions that cannot submit anything. See PolicyContext.submit.
+      submit: subject.submit === true,
       ...(intent ? { intent } : {}),
       ...(subject.key ? { key: subject.key } : {}),
       ...(element
@@ -249,7 +254,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * Two outcomes and no third: either an approval already exists for this exact action, in which
      * case the row below says so and names who gave it, or the question is opened and the call stops
      * here. Nothing is written as allowed or refused in the second case, because neither happened:
-     * `computer.approval_requested` is the record of where the turn actually got to.
+     * `approval.requested` is the record of where the turn actually got to.
      *
      * Dry-run never reaches this branch, because the policy forwards an ask there for the same
      * reason it forwards a deny: a mode that promises to change nothing must not start interrupting
@@ -262,6 +267,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         toolName,
         ref,
         key: subject.key,
+        submit: subject.submit,
         filePath,
         pageUrl,
       });
@@ -269,21 +275,29 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         ? approvals.consume(subject.approvalId, fingerprint)
         : undefined;
 
-      if (presented?.ok) {
-        approvedBy = presented.approval.answeredBy ?? presented.approval.actor;
+      if (presented?.ok && presented.approval.answeredBy) {
+        approvedBy = presented.approval.answeredBy;
       } else {
         // Every unsuccessful presentation asks again rather than failing: an expired approval, an id
         // spent already, a person's No being replayed, and an approval granted for a different button
         // all mean the same thing here, which is that nobody has agreed to THIS. Asking twice is
         // annoying and safe; guessing which of those deserves an error is neither.
+        //
+        // An approval with nobody's name on it lands here too. Nothing can produce one, because an
+        // answer always records who gave it and an unanswered approval cannot be spent, and it asks
+        // again rather than falling back to the person whose turn raised the question: crediting
+        // consent to whoever was driving the Bot is the one thing this record must never do.
         const pending = approvals.request({
           botId,
           actor: actor.id,
           rule: decision.matched ?? "",
           question: decision.reason,
           fingerprint,
+          // Where the answer's own row will be filed, decided here where what the question is about
+          // is still known. See PendingApproval.target.
+          target: { type: "computer", id: computerId },
         });
-        await writeApprovalEvent(auditStore, "computer.approval_requested", {
+        await writeApprovalEvent(auditStore, {
           botId,
           actor,
           computerId,
@@ -363,69 +377,9 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       : result;
   }
 
-  /** Shared by grant and refuse, so a Yes and a No cannot drift apart in what they record. */
-  async function answerApproval(
-    computerId: string,
-    botId: string,
-    actor: ActionActor,
-    approvalId: string,
-    granted: boolean,
-  ): Promise<PendingApproval> {
-    const answered = approvals.answer(approvalId, actor.id, granted);
-    if (!answered.ok) throw new ApprovalNotPendingError();
-    await writeApprovalEvent(
-      auditStore,
-      granted ? "computer.approval_granted" : "computer.approval_denied",
-      {
-        botId,
-        actor,
-        computerId,
-        approval: answered.approval,
-      },
-    );
-    return answered.approval;
-  }
-
   return {
     snapshot,
     read,
-
-    /**
-     * The questions this Bot is waiting on, for the surface to poll.
-     *
-     * A read, so no audit row, exactly like asking who holds the wheel. The interesting rows are the
-     * one written when the question was raised and the one written when somebody answered it.
-     */
-    pendingApprovals(botId: string) {
-      return approvals.pending(botId);
-    },
-
-    /**
-     * A person answering one question, audited as its own act by its own actor.
-     *
-     * Deliberately not folded into the action row. The person who approves is frequently not the one
-     * whose turn raised the question, the two happen minutes apart, and an approval that was given
-     * and then never spent, because the run was stopped or the page moved on, leaves no action row at
-     * all. A trail that only recorded consent alongside the thing it consented to would lose every
-     * one of those, and "who approved what" is the question this feature exists to be able to answer.
-     */
-    async grantApproval(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      approvalId: string,
-    ) {
-      return answerApproval(computerId, botId, actor, approvalId, true);
-    },
-
-    async refuseApproval(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      approvalId: string,
-    ) {
-      return answerApproval(computerId, botId, actor, approvalId, false);
-    },
 
     /**
      * Handovers, recorded but not policy-gated.
@@ -684,6 +638,10 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         actor,
         {
           ref: input.ref,
+          // Whether this call ends by pressing Enter, which is the third way into a form and the one
+          // a rule about clicking and a rule about `key` both miss. The computer presses it itself,
+          // so it never arrives here as an action of its own to be judged.
+          submit: input.submit === true,
           ...(signal ? { signal } : {}),
           ...(approvalId ? { approvalId } : {}),
         },
@@ -1005,26 +963,23 @@ async function writeControlEvent(
 }
 
 /**
- * One row for a question, and one for its answer.
+ * The row for a question the boundary stopped to ask.
  *
  * Its own writer rather than a variant of either of the others, because an approval sits between
  * them and fits neither shape. It is not `write`: no decision was reached, the policy said it wanted
  * a person and the turn stopped there, and inventing an allowed-or-refused verdict for that row would
  * be the comfortable fiction the rest of this file is careful to avoid. It is not
  * `writeControlEvent`: a handover is a person taking the browser away from the Bot, whereas this is a
- * person answering about one specific action, so the row has to name the action or a reader cannot
- * tell what was agreed to.
+ * question about one specific action, so the row has to name the action or a reader cannot tell what
+ * was being agreed to.
  *
- * All three rows carry the approval id. That is what lets a reader join a request to its answer and
- * to the action that finally happened, and it is the only way to see the case that matters most: a
- * question that was asked and never answered.
+ * The answer's row is written where the answer is given, which is not here. All of them carry the
+ * approval id: that is what lets a reader join a request to its answer and to the action that
+ * finally happened, and it is the only way to see the case that matters most, a question that was
+ * asked and never answered.
  */
 async function writeApprovalEvent(
   auditStore: AuditStore,
-  eventType:
-    | "computer.approval_requested"
-    | "computer.approval_granted"
-    | "computer.approval_denied",
   entry: {
     botId: string;
     actor: ActionActor;
@@ -1036,7 +991,7 @@ async function writeApprovalEvent(
   },
 ) {
   await recordAuditEvent(auditStore, {
-    eventType,
+    eventType: "approval.requested",
     targetType: "computer",
     targetId: entry.computerId,
     ...(entry.actor.userId ? { actorUserId: entry.actor.userId } : {}),

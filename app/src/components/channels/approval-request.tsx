@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
+import { Button } from "@/components/ui/button";
 import {
   answerApproval,
-  type PendingApproval,
-  readApprovals,
-} from "@/components/computer/approvals";
-import { Button } from "@/components/ui/button";
+  closeQuestion,
+  questionOn,
+  watchQuestions,
+} from "@/lib/approvals";
 
 /**
  * A transcript line that grew two buttons, for the one action a boundary wanted a person to see.
@@ -15,60 +16,47 @@ import { Button } from "@/components/ui/button";
  * people learn to dismiss, and an ask rule that gets reflexively approved is worse than no rule at
  * all: it produces a record of consent that nobody actually gave.
  *
- * It polls rather than being handed its question by the tool call that raised it. The tool call is a
- * promise waiting on a server, with no way to push anything into its own rendering while it waits,
- * and the server already holds the list. Polling costs a request a second while a Bot is acting, and
- * buys a card that is correct even when a person answers from another tab.
+ * It draws the question its own tool call is waiting on, and nothing else. The alternative, asking
+ * the server what this Bot is waiting on and showing the first unanswered thing, cannot tell one
+ * question from another: a run that was stopped or a tab that was reloaded leaves its question open
+ * in the registry for the rest of the ten minutes, so the card would offer somebody a stale question
+ * on the line of an action nobody is being asked about, and record their Allow against the wrong
+ * one. The tool call that raised the question is the only thing that knows which one is its own, so
+ * it is what says so.
  */
 export function ApprovalRequest({
-  botId,
-  /** False once the tool call finishes, so a card cannot outlive the action it is about. */
-  active,
+  /** The tool call this line is reporting. Undefined before the SDK has named it. */
+  toolCallId,
 }: {
-  botId: string;
-  active: boolean;
+  toolCallId: string | undefined;
 }) {
-  const [asking, setAsking] = useState<PendingApproval | null>(null);
+  const asking = useSyncExternalStore(watchQuestions, () =>
+    questionOn(toolCallId ?? ""),
+  );
   const [answering, setAnswering] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!active) {
-      setAsking(null);
-      return;
-    }
-    let live = true;
-    const look = async () => {
-      const approvals = await readApprovals(botId);
-      // A failed read is not an answer. Holding the last question on screen through a blip is better
-      // than clearing the card out from under somebody who was reading it.
-      if (!live || !approvals) return;
-      setAsking(approvals.find((one) => one.granted === undefined) ?? null);
-    };
-    void look();
-    const timer = setInterval(() => void look(), 1_000);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-  }, [botId, active]);
 
   const answer = useCallback(
     async (granted: boolean) => {
       if (!asking) return;
       setAnswering(true);
-      const result = await answerApproval(botId, asking.id, granted);
+      const result = await answerApproval(
+        asking.botId,
+        asking.approvalId,
+        granted,
+      );
       setAnswering(false);
       if (!result.ok) {
         setProblem(result.error ?? "That answer could not be recorded.");
         return;
       }
-      // Cleared here rather than waiting for the next poll, so the buttons stop being pressable the
-      // moment the answer lands. The Bot's turn is still on the server working out what to do with it.
-      setAsking(null);
+      // Taken down here rather than waiting for the call to notice, so the buttons stop being
+      // pressable the moment the answer lands. The Bot's turn is still on the server working out
+      // what to do with it.
+      closeQuestion(toolCallId ?? "");
       setProblem(null);
     },
-    [asking, botId],
+    [asking, toolCallId],
   );
 
   if (!asking) return null;
@@ -76,9 +64,11 @@ export function ApprovalRequest({
   return (
     <div className="my-1.5 rounded-md border border-border bg-card px-3 py-2">
       <p className="text-sm">{asking.question}</p>
-      <p className="mt-1 break-all font-mono text-muted-foreground text-xs">
-        {asking.rule}
-      </p>
+      {asking.rule ? (
+        <p className="mt-1 break-all font-mono text-muted-foreground text-xs">
+          {asking.rule}
+        </p>
+      ) : null}
       <div className="mt-2 flex items-center gap-2">
         <Button
           disabled={answering}

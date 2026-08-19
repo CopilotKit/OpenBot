@@ -54,6 +54,7 @@ Policy rules can inspect:
 - `page.url`, `page.host`
 - `element.ref`, `element.role`, `element.name`, `element.type`
 - `key`
+- `submit`, true when a type call will press Enter when it has finished
 - `file.path`, `file.name`, `file.extension`
 - `mcp.server`, `mcp.tool`, `mcp.effect`
 
@@ -69,9 +70,22 @@ An `ask` match stops the action and puts it in front of a person in the
 conversation, then carries on with the same call if they allow it. The pending
 question lives in the server process, is bound to a fingerprint of the exact
 action it was raised for, and is single use, so an approval cannot be replayed
-against a different one. Answering writes `computer.approval_granted` or
-`computer.approval_denied` under the answering person's own actor, separately
-from the action row. In `dry-run` an ask is recorded and interrupts nobody.
+against a different one. Answering writes `approval.granted` or `approval.denied`
+under the answering person's own actor, separately from the action row, and the
+question itself writes `approval.requested` when it is raised. In `dry-run` an
+ask is recorded and interrupts nobody.
+
+The same three lists judge a Bot's MCP tool calls, `ask` included: a rule such as
+`intent == "write_tool" && mcp.server == "jira"` stops the call and asks rather
+than refusing it, and the question is answered on the same surface, `POST
+/api/approvals/:botId/:approvalId`, as one raised by a click. That surface is
+mounted whether or not a computer is configured, because a question nobody can be
+shown is worse than a rule that never fired.
+
+Pending questions are held in the server process, like the snapshot cache, so a
+deployment running more than one server replica can raise a question on one and
+poll for it on another, where it does not exist. Both features assume a single
+process today.
 
 ## Computers
 
