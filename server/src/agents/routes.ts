@@ -307,6 +307,39 @@ export function createAgentRoutes(
     }
   });
 
+  /*
+   * Issue this agent its callback credential, and show it once.
+   *
+   * A POST because it writes and because it replaces: calling it again rotates, which is how a leaked
+   * token is retired. The token is in the response and nowhere else, ever again, and it is not written
+   * to the audit payload either: a trail that records credentials is a credential store with worse
+   * access control.
+   */
+  routes.post("/:agentId/callback-token", requireUser, async (context) => {
+    try {
+      const token = await store.issueCallbackToken(
+        context.var.actor,
+        context.req.param("agentId"),
+      );
+      return context.json({ token }, 201);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  /** Take it away. The agent may still hold a conversation; it may not reach anything outside one. */
+  routes.delete("/:agentId/callback-token", requireUser, async (context) => {
+    try {
+      await store.revokeCallbackToken(
+        context.var.actor,
+        context.req.param("agentId"),
+      );
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   routes.delete("/:agentId", requireUser, async (context) => {
     try {
       await store.softDelete(context.var.actor, context.req.param("agentId"));
@@ -345,6 +378,8 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     // and any credential for it lives in the vault, never in this row.
     endpoint: agent.endpoint,
     hasAuth: agent.hasAuth,
+    // Whether one exists, never what it is.
+    hasCallbackToken: agent.hasCallbackToken,
     canManage: canManageAgent(actor, agent),
     // Ownership, kept separate from permission. `canManage` is also true for an administrator on
     // another user's coworker, so a roster that split "mine" on it would file other people's work

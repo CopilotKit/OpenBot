@@ -227,12 +227,13 @@ export async function buildAgents(
   stallGuard?: StallGuard,
   /** Absent leaves every Bot with no tools, which is the correct answer when nothing is granted. */
   loadTools: LoadToolsForBot = async () => [],
+  signRun?: SignRun,
 ): Promise<Record<string, AbstractAgent>> {
   return Object.fromEntries(
     await Promise.all(
       agents.map(async (agent) => [
         agent.id,
-        await buildAgent(agent, model, apiKey, stallGuard, loadTools),
+        await buildAgent(agent, model, apiKey, stallGuard, loadTools, signRun),
       ]),
     ),
   );
@@ -244,6 +245,7 @@ async function buildAgent(
   apiKey: string | null,
   stallGuard: StallGuard | undefined,
   loadTools: LoadToolsForBot,
+  signRun?: SignRun,
 ): Promise<AbstractAgent> {
   if (agent.type === "built_in") {
     return new BuiltInAgent(
@@ -262,6 +264,7 @@ async function buildAgent(
     agent,
     stallGuard,
     await loadTools(agent.id),
+    signRun,
   );
 }
 
@@ -288,6 +291,7 @@ function remoteAgentWithStandingRole(
    * The executing half stays on this side, where the grant and the policy are.
    */
   tools: GrantedTool[] = [],
+  signRun?: SignRun,
 ) {
   const remote = new HttpAgent({
     url: agent.endpoint,
@@ -330,6 +334,33 @@ function remoteAgentWithStandingRole(
       forwardedProps: {
         ...(input.forwardedProps ?? {}),
         openbotBotId: agent.id,
+        /*
+         * Which of those tools this deployment runs, as opposed to the surface.
+         *
+         * `tools` mixes two kinds that a name cannot tell apart: the Bot's grants, which execute
+         * here through the policy and the audit trail, and the components the browser draws. A Bot
+         * that ran the second kind through this deployment asked it to execute a chart, was told it
+         * could not, and then apologised to the person for not showing the chart that was on screen
+         * in front of them. Only this side knows which is which, so only this side can say.
+         */
+        openbotDeploymentTools: tools.map((tool) => tool.name),
+        /*
+         * This deployment's own statement of what this run is.
+         *
+         * Signed, short-lived, and naming the Bot and the person. The agent hands it back when it
+         * calls a tool, and that is where the Bot and the actor come from: its own token says which
+         * agent is calling, and this says who it is calling for. Neither is taken from the request
+         * body any more, which is what used to make the audit trail forgeable by anything holding
+         * one shared secret.
+         */
+        ...(signRun
+          ? { openbotRun: signRun(agent.id, input.runId) }
+          : /*
+             * Absent means this deployment cannot sign, so the agent is given nothing to hand back
+             * and its tool calls will be refused. That is the right direction to fail: a Bot that
+             * cannot prove whose run it is should not be spending anybody's grants.
+             */
+            {}),
       },
     } as never),
   );
@@ -357,6 +388,7 @@ export async function resolveRuntimeAgents(
   resolveModelApiKey: () => Promise<string | null>,
   stallGuard?: StallGuard,
   loadTools?: LoadToolsForBot,
+  signRun?: SignRun,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -368,11 +400,20 @@ export async function resolveRuntimeAgents(
   const apiKey = registered.some((agent) => agent.type === "built_in")
     ? await resolveModelApiKey()
     : null;
-  return buildAgents(registered, model, apiKey, stallGuard, loadTools);
+  return buildAgents(registered, model, apiKey, stallGuard, loadTools, signRun);
 }
 
 /** What one Bot may call, for the person whose request this is. */
 export type LoadToolsForBot = (botId: string) => Promise<GrantedTool[]>;
+
+/**
+ * The deployment's signed statement of what a run is, for the agent that will run it.
+ *
+ * A closure rather than a key passed down, so the encryption key stays in the module that owns
+ * configuration and this one never holds a secret. Shaped like `LoadToolsForBot` on purpose: both are
+ * per-actor facts resolved once per request and asked per Bot.
+ */
+export type SignRun = (botId: string, runId: string) => string;
 
 /** Who is asking. Agent visibility is decided per person, so a run has to know this first. */
 export type IdentifyActor = (request: Request) => Promise<AgentActor>;
@@ -402,6 +443,8 @@ export function createRequestAgents(
   stallGuard?: StallGuard,
   /** What each Bot may call, resolved for whoever is asking. Absent means no tools. */
   loadToolsForActor?: (actorId: string) => LoadToolsForBot,
+  /** Resolved per request, because what it signs is who this request turned out to be. */
+  signRunForActor?: (actorId: string) => SignRun,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -411,6 +454,7 @@ export function createRequestAgents(
       resolveModelApiKey,
       stallGuard,
       loadToolsForActor?.(actor.id),
+      signRunForActor?.(actor.id),
     );
   };
 }
@@ -436,6 +480,7 @@ export function mountCopilotRuntime(
    */
   stallGuard: StallGuard,
   loadToolsForActor?: (actorId: string) => LoadToolsForBot,
+  signRunForActor?: (actorId: string) => SignRun,
   basePath = "/api/copilotkit",
 ) {
   const { intelligence } = config.runtime;
@@ -462,6 +507,7 @@ export function mountCopilotRuntime(
       resolveModelApiKey,
       stallGuard,
       loadToolsForActor,
+      signRunForActor,
     ) as never,
   });
 
