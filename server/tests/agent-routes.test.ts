@@ -42,6 +42,7 @@ function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     ownerUserId: actor.id,
     systemOwned: false,
     hidden: false,
+    notificationsMuted: false,
     deletedAt: null,
     ...overrides,
   };
@@ -80,6 +81,13 @@ function fakeStore(
     },
     async setHidden(receivedActor, id, hidden) {
       calls.push(["setHidden", receivedActor, id, hidden]);
+    },
+    async setNotificationsMuted(receivedActor, id, muted) {
+      calls.push(["setNotificationsMuted", receivedActor, id, muted]);
+    },
+    async notificationsMuted(userId, id) {
+      calls.push(["notificationsMuted", userId, id]);
+      return false;
     },
     async softDelete(receivedActor, id) {
       calls.push(["softDelete", receivedActor, id]);
@@ -226,6 +234,8 @@ describe("agent lifecycle routes", () => {
       ["/agent-1/duplicate", { method: "POST" }],
       ["/agent-1/hide", { method: "POST" }],
       ["/agent-1/unhide", { method: "POST" }],
+      ["/agent-1/notifications/mute", { method: "POST" }],
+      ["/agent-1/notifications/unmute", { method: "POST" }],
       ["/agent-1", { method: "DELETE" }],
     ];
 
@@ -289,6 +299,14 @@ describe("agent lifecycle routes", () => {
     const unhidden = await app.request("http://openbot.test/agent-1/unhide", {
       method: "POST",
     });
+    const muted = await app.request(
+      "http://openbot.test/agent-1/notifications/mute",
+      { method: "POST" },
+    );
+    const unmuted = await app.request(
+      "http://openbot.test/agent-1/notifications/unmute",
+      { method: "POST" },
+    );
     const deleted = await app.request("http://openbot.test/agent-1", {
       method: "DELETE",
     });
@@ -300,6 +318,10 @@ describe("agent lifecycle routes", () => {
     expect(duplicated.status).toBe(201);
     expect(hidden.status).toBe(204);
     expect(unhidden.status).toBe(204);
+    // Two routes rather than one taking a boolean, so a request that arrives twice because the
+    // network was slow leaves somebody with the state they asked for rather than its opposite.
+    expect(muted.status).toBe(204);
+    expect(unmuted.status).toBe(204);
     expect(deleted.status).toBe(204);
     expect(store.calls).toEqual([
       ["list", actor, false],
@@ -309,6 +331,8 @@ describe("agent lifecycle routes", () => {
       ["duplicate", actor, "agent-1"],
       ["setHidden", actor, "agent-1", true],
       ["setHidden", actor, "agent-1", false],
+      ["setNotificationsMuted", actor, "agent-1", true],
+      ["setNotificationsMuted", actor, "agent-1", false],
       ["softDelete", actor, "agent-1"],
     ]);
   });
@@ -318,7 +342,13 @@ describe("agent lifecycle routes", () => {
       async list() {
         return [
           profile(),
-          profile({ id: "agent-2", ownerUserId: "user-2" }),
+          // Silenced, so the projection is shown carrying the preference rather than defaulting it.
+          // Every row reading false would pass just as well against a field that was never read.
+          profile({
+            id: "agent-2",
+            ownerUserId: "user-2",
+            notificationsMuted: true,
+          }),
           profile({
             id: "system-agent",
             ownerUserId: null,
@@ -341,6 +371,7 @@ describe("agent lifecycle routes", () => {
           avatarSeed: "expense-manager",
           visibility: "private",
           hidden: false,
+          notificationsMuted: false,
           systemOwned: false,
           canManage: true,
           mine: true,
@@ -353,6 +384,7 @@ describe("agent lifecycle routes", () => {
           avatarSeed: "expense-manager",
           visibility: "private",
           hidden: false,
+          notificationsMuted: true,
           systemOwned: false,
           canManage: false,
           mine: false,
@@ -365,6 +397,7 @@ describe("agent lifecycle routes", () => {
           avatarSeed: "expense-manager",
           visibility: "public",
           hidden: false,
+          notificationsMuted: false,
           systemOwned: true,
           canManage: false,
           mine: false,

@@ -33,10 +33,19 @@ describe("what is worth interrupting somebody for", () => {
     expect(isWorthInterrupting("secret_requested")).toBe(true);
   });
 
-  test("every kind in the vocabulary has an answer", () => {
+  test("every kind in the vocabulary is framed the way the rule says it should be", () => {
     expect(notificationKinds.length).toBeGreaterThan(0);
     for (const kind of notificationKinds) {
-      expect(typeof isWorthInterrupting(kind)).toBe("boolean");
+      const raised = notificationFor({ ...BLOCKED, kind }, HEARD);
+
+      // The rule and the frame are two functions reading one table, and they must not be able to
+      // disagree: a kind that says it blocks and then produces nothing is a Bot that waits in
+      // silence, and one that says it does not and produces a card is the interruption this module
+      // exists to refuse.
+      expect(raised !== null).toBe(isWorthInterrupting(kind));
+      // A kind added with a `blocking` answer and no words is a card that says the Bot's name and
+      // then stops, which is worse than not showing it at all.
+      if (raised) expect(raised.headline.trim()).not.toBe("");
     }
   });
 
@@ -105,6 +114,18 @@ describe("summarize", () => {
 
   test("removes control characters a page could have put in front of the model", () => {
     expect(summarize("Sign in now\u001b[31m.")).toBe("Sign in now [31m.");
+  });
+
+  test("removes the invisible characters that survive a control-character strip", () => {
+    // A right-to-left override reaches the model from whatever page the Bot is on, and would
+    // otherwise render a notification that reads backwards from the audit row describing the same
+    // handover. Zero-width characters go for the same reason: invisible to the person reading the
+    // sentence, and perfectly visible to whatever reads it after them.
+    expect(summarize("Sign in \u202eyalpsid\u202c now")).toBe(
+      "Sign in yalpsid now",
+    );
+    expect(summarize("pass\u200bword\ufeff wanted")).toBe("password wanted");
+    expect(summarize("\u200b\u2066\u2069")).toBe("");
   });
 
   test("clips with an ellipsis at the limit, and leaves shorter text alone", () => {

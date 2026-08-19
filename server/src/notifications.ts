@@ -155,6 +155,14 @@ export function notificationFor(
  * Control characters go too. This text is rendered in a toast and handed to the operating system's
  * own notification, and a terminal escape somebody's page put in front of the model has no business
  * following it into either.
+ *
+ * So do the characters that are invisible rather than unprintable: zero-width joiners and spaces,
+ * the byte order mark, and the bidirectional overrides and isolates. They survive a control-character
+ * strip and whitespace collapsing untouched, and they are the same threat by another route — a page
+ * can put a right-to-left override in front of the model, the model repeats it in its reason, and the
+ * notification then renders a sentence that reads backwards from the one the audit trail recorded.
+ * Removed rather than replaced with a space, because a character of no width is not a word boundary
+ * and substituting one would split words that were never apart.
  */
 export function summarize(
   text: string,
@@ -163,7 +171,11 @@ export function summarize(
   const unfenced = text.replaceAll(/```[^\n`]*/g, " ").replaceAll("`", "");
   // biome-ignore lint/suspicious/noControlCharactersInRegex: removing them is the point.
   const printable = unfenced.replaceAll(/[\u0000-\u001f\u007f-\u009f]+/g, " ");
-  const collapsed = printable.replaceAll(/\s+/g, " ").trim();
+  const visible = printable.replaceAll(
+    /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g,
+    "",
+  );
+  const collapsed = visible.replaceAll(/\s+/g, " ").trim();
 
   // Counted in code points rather than UTF-16 units, so a clip never lands between the halves of a
   // surrogate pair and leaves a replacement character in front of somebody.

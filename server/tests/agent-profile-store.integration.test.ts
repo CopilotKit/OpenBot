@@ -264,6 +264,67 @@ describe("agent profile store integration", () => {
     expect(preference?.hiddenAt).toBeNull();
   });
 
+  test("stores silencing per user, and the notification path reads back what the switch wrote", async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const source = await createProfileFixture({ owner, visibility: "public" });
+
+    expect(await store.notificationsMuted(owner.id, source.agentId)).toBe(
+      false,
+    );
+    expect((await profileById(owner, source.agentId)).notificationsMuted).toBe(
+      false,
+    );
+
+    await store.setNotificationsMuted(owner, source.agentId, true);
+
+    // The seam this covers is the whole feature for a person who has silenced a Bot: the switch
+    // writes a row, and the thing that decides whether to interrupt them reads it. Nothing else in
+    // the suite joins those two ends, so a rename on either side would go unnoticed until somebody
+    // was paged by a Bot they had turned off.
+    expect(await store.notificationsMuted(owner.id, source.agentId)).toBe(true);
+    expect((await profileById(owner, source.agentId)).notificationsMuted).toBe(
+      true,
+    );
+    // An opinion one person holds, like hiding. Everybody else still hears from this Bot.
+    expect(await store.notificationsMuted(other.id, source.agentId)).toBe(
+      false,
+    );
+
+    await store.setNotificationsMuted(owner, source.agentId, false);
+    expect(await store.notificationsMuted(owner.id, source.agentId)).toBe(
+      false,
+    );
+  });
+
+  test("silencing and hiding share a row without overwriting each other", async () => {
+    const owner = await createUser();
+    const source = await createProfileFixture({ owner, visibility: "public" });
+
+    await store.setNotificationsMuted(owner, source.agentId, true);
+    // Two preferences in one row, so an upsert that wrote the whole row from either control would
+    // silently undo the other. A person who hides a Bot has said nothing about being interrupted by
+    // it, and the reverse.
+    await store.setHidden(owner, source.agentId, true);
+
+    expect(await store.notificationsMuted(owner.id, source.agentId)).toBe(true);
+    expectListed(await store.list(owner), source.agentId, false);
+
+    await store.setNotificationsMuted(owner, source.agentId, false);
+    expectListed(await store.list(owner, true), source.agentId, true);
+  });
+
+  test("answers for a Bot nobody has an opinion about, and for one that does not exist", async () => {
+    const owner = await createUser();
+
+    // The notification path calls this with whatever the gateway handed it, before anything has
+    // checked that the pair means something. Not muted is the answer that costs somebody an
+    // unwanted notification rather than a Bot that waits all afternoon.
+    expect(await store.notificationsMuted(owner.id, id("absent-agent"))).toBe(
+      false,
+    );
+  });
+
   test("takes the endpoint and ignores every field a caller must not set", async () => {
     const owner = await createUser();
     const deploymentPackage = await createPackage();
