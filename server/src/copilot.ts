@@ -9,6 +9,7 @@ import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
+import type { GrantedTool } from "./plugins/tools";
 
 /**
  * The CopilotKit runtime, always in Intelligence mode.
@@ -164,6 +165,15 @@ export function builtInAgentConfiguration(
   agent: RegisteredBuiltInAgent,
   model: RuntimeModel,
   apiKey: string | null,
+  /**
+   * What this Bot may call, resolved for the person asking.
+   *
+   * Handed to the agent rather than registered by the surface, so a run needs no browser. These are
+   * not raw MCP servers on purpose: each one executes through the plugin store, which checks the
+   * grant, evaluates the policy and writes the audit row. Passing `mcpServers` here instead would
+   * let the agent reach a vendor directly and walk around all three.
+   */
+  tools: GrantedTool[] = [],
 ): BuiltInAgentConfiguration {
   if (!apiKey) {
     return {
@@ -181,6 +191,7 @@ export function builtInAgentConfiguration(
     model: `${model.provider}/${model.defaultModel}`,
     prompt: agent.systemPrompt,
     apiKey,
+    ...(tools.length > 0 ? { tools } : {}),
   };
 }
 
@@ -190,29 +201,41 @@ export function builtInAgentConfiguration(
  * Keyed by the registry id, which is what the browser sends as the agent name, so the two cannot
  * drift apart without the lookup failing loudly rather than silently running the wrong Bot.
  */
-export function buildAgents(
+export async function buildAgents(
   agents: RegisteredAgent[],
   model: RuntimeModel,
   apiKey: string | null,
   /** Absent leaves every stream unwatched, which is what an unconfigured timeout means. */
   stallGuard?: StallGuard,
-): Record<string, AbstractAgent> {
+  /** Absent leaves every Bot with no tools, which is the correct answer when nothing is granted. */
+  loadTools: LoadToolsForBot = async () => [],
+): Promise<Record<string, AbstractAgent>> {
   return Object.fromEntries(
-    agents.map((agent) => [
-      agent.id,
-      buildAgent(agent, model, apiKey, stallGuard),
-    ]),
+    await Promise.all(
+      agents.map(async (agent) => [
+        agent.id,
+        await buildAgent(agent, model, apiKey, stallGuard, loadTools),
+      ]),
+    ),
   );
 }
 
-function buildAgent(
+async function buildAgent(
   agent: RegisteredAgent,
   model: RuntimeModel,
   apiKey: string | null,
-  stallGuard?: StallGuard,
-): AbstractAgent {
+  stallGuard: StallGuard | undefined,
+  loadTools: LoadToolsForBot,
+): Promise<AbstractAgent> {
   if (agent.type === "built_in") {
-    return new BuiltInAgent(builtInAgentConfiguration(agent, model, apiKey));
+    return new BuiltInAgent(
+      builtInAgentConfiguration(
+        agent,
+        model,
+        apiKey,
+        await loadTools(agent.id),
+      ),
+    );
   }
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -280,6 +303,7 @@ export async function resolveRuntimeAgents(
   model: RuntimeModel,
   resolveModelApiKey: () => Promise<string | null>,
   stallGuard?: StallGuard,
+  loadTools?: LoadToolsForBot,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -291,8 +315,11 @@ export async function resolveRuntimeAgents(
   const apiKey = registered.some((agent) => agent.type === "built_in")
     ? await resolveModelApiKey()
     : null;
-  return buildAgents(registered, model, apiKey, stallGuard);
+  return buildAgents(registered, model, apiKey, stallGuard, loadTools);
 }
+
+/** What one Bot may call, for the person whose request this is. */
+export type LoadToolsForBot = (botId: string) => Promise<GrantedTool[]>;
 
 /** Who is asking. Agent visibility is decided per person, so a run has to know this first. */
 export type IdentifyActor = (request: Request) => Promise<AgentActor>;
@@ -320,6 +347,8 @@ export function createRequestAgents(
    * that opened it has been answered.
    */
   stallGuard?: StallGuard,
+  /** What each Bot may call, resolved for whoever is asking. Absent means no tools. */
+  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -328,6 +357,7 @@ export function createRequestAgents(
       model,
       resolveModelApiKey,
       stallGuard,
+      loadToolsForActor?.(actor.id),
     );
   };
 }
@@ -352,6 +382,7 @@ export function mountCopilotRuntime(
    * there is no reason for a caller to have to say `undefined` here to reach `basePath`.
    */
   stallGuard: StallGuard,
+  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
   basePath = "/api/copilotkit",
 ) {
   const { intelligence } = config.runtime;
@@ -377,6 +408,7 @@ export function mountCopilotRuntime(
       model,
       resolveModelApiKey,
       stallGuard,
+      loadToolsForActor,
     ) as never,
   });
 

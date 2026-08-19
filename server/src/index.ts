@@ -38,6 +38,7 @@ import {
 } from "./credentials";
 import { createDatabase } from "./db/client";
 import { createPluginStore } from "./plugins/store";
+import { grantedTools } from "./plugins/tools";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -333,6 +334,10 @@ const app = createApp(
     identifyUser,
     identifyActor,
     stallGuard,
+    // Tools run here, not in the browser. Each one still executes through the plugin store, so the
+    // grant, the policy and the audit row are exactly where they were.
+    (actorId) => (botId) =>
+      grantedTools({ store: pluginStore, botId, actorId }),
   ),
   computerClient,
   // The only path to an acting call.
