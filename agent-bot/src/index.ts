@@ -26,7 +26,21 @@ const PORT = Number.parseInt(process.env.PORT ?? "4200", 10);
  */
 const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+/**
+ * Where that model is answered from.
+ *
+ * Unset, this is OpenAI. Set, it is any endpoint speaking the same `/v1/chat/completions` API: a
+ * gateway in front of several providers, a proxy, or a model on hardware you control. Which is the
+ * point of writing against that API by hand rather than against one company's URL.
+ *
+ * `BOT_MODEL` is sent verbatim, because an endpoint names its own catalogue.
+ */
+const BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: BASE_URL,
+});
 
 /** Translate the conversation AG-UI carries into the shape the model provider expects. */
 function toProviderMessages(input: RunAgentInput) {

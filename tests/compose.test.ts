@@ -37,6 +37,23 @@ test("publishes every service on a settable port with the documented default", (
   }
 });
 
+/**
+ * Both Bots are reachable at whatever `OPENAI_BASE_URL` names.
+ *
+ * The API server reads that variable from `.env` directly, so it moves with the deployment. The
+ * Bots run in containers and see only what compose hands them, and a deployment that moved its
+ * models to a gateway and found half of itself still calling OpenAI would have no way to tell.
+ */
+test("gives both shipped Bots the OpenAI-compatible endpoint", () => {
+  const compose = readFileSync(
+    join(import.meta.dir, "..", "docker-compose.yml"),
+    "utf8",
+  );
+
+  const passthrough = compose.match(/OPENAI_BASE_URL: \$\{OPENAI_BASE_URL:-\}/g);
+  expect(passthrough).toHaveLength(2);
+});
+
 test("enables pgvector before creating vector columns", () => {
   const migration = readFileSync(
     join(import.meta.dir, "..", "server", "drizzle", "0000_schema.sql"),

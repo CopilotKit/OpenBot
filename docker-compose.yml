@@ -163,6 +163,9 @@ services:
       - "${BOT_PORT:-4200}:4200"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
+      # to it verbatim.
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4200/health')\""]
@@ -182,6 +185,7 @@ services:
       # BOT_RESPONSES_API instead of changing the streaming loop here.
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       BOT_MODEL: ${BOT_MODEL:-}
