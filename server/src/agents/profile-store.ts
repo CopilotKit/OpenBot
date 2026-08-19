@@ -46,6 +46,29 @@ export type AgentProfileStore = {
   ): Promise<AgentProfile>;
   duplicate(actor: AgentActor, id: string): Promise<AgentProfile>;
   setHidden(actor: AgentActor, id: string, hidden: boolean): Promise<void>;
+  /**
+   * Silence, or unsilence, one Bot's notifications for one person.
+   *
+   * Beside `setHidden` rather than somewhere of its own because it is the same kind of thing: an
+   * opinion one person holds about one Bot, kept in the same row, changing nothing for anybody else.
+   */
+  setNotificationsMuted(
+    actor: AgentActor,
+    id: string,
+    muted: boolean,
+  ): Promise<void>;
+  /**
+   * Whether this person has silenced this Bot.
+   *
+   * Takes a user id rather than an actor, and does no access check, because the only caller is the
+   * notification path and it is about to address this person by that id. There is nothing to leak:
+   * an id that names nobody, or a Bot this person has never heard of, has no row and is not muted.
+   *
+   * False when the read fails, which is the deliberate choice. A preference store that is briefly
+   * unreachable should cost somebody an unwanted notification, not a Bot that waits all afternoon
+   * because nothing told them.
+   */
+  notificationsMuted(userId: string, id: string): Promise<boolean>;
   softDelete(actor: AgentActor, id: string): Promise<void>;
 };
 
@@ -80,6 +103,7 @@ const joinedProjection = {
   ownerUserId: agentProfiles.ownerUserId,
   packageId: deploymentPackages.id,
   hiddenAt: agentPreferences.hiddenAt,
+  notificationsMutedAt: agentPreferences.notificationsMutedAt,
   deletedAt: agentProfiles.deletedAt,
   configuration: agents.configuration,
 };
@@ -123,6 +147,7 @@ function mapProfile(
     ownerUserId: row.ownerUserId,
     systemOwned: row.packageId !== null,
     hidden: row.hiddenAt !== null,
+    notificationsMuted: row.notificationsMutedAt !== null,
     deletedAt: row.deletedAt,
     endpoint: endpointOf(row.configuration),
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
@@ -385,6 +410,51 @@ export function createAgentProfileStore(
             set: { hiddenAt: hidden ? new Date() : null },
           });
       });
+    },
+
+    setNotificationsMuted(actor, id, muted) {
+      return database.transaction(async (transaction) => {
+        const profile = await findAccessibleProfile(transaction, actor, id);
+        if (!profile) throw new AgentNotFoundError(id);
+
+        const notificationsMutedAt = muted ? new Date() : null;
+        await transaction
+          .insert(agentPreferences)
+          .values({ userId: actor.id, agentId: id, notificationsMutedAt })
+          // This column alone. The row is shared with `hiddenAt`, and an upsert that wrote the whole
+          // row would unhide a Bot somebody had hidden, from a control that says nothing about
+          // hiding.
+          .onConflictDoUpdate({
+            target: [agentPreferences.userId, agentPreferences.agentId],
+            set: { notificationsMutedAt },
+          });
+      });
+    },
+
+    async notificationsMuted(userId, id) {
+      try {
+        const [row] = await database
+          .select({ mutedAt: agentPreferences.notificationsMutedAt })
+          .from(agentPreferences)
+          .where(
+            and(
+              eq(agentPreferences.userId, userId),
+              eq(agentPreferences.agentId, id),
+            ),
+          )
+          .limit(1);
+        return row?.mutedAt != null;
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "notification-preference-read-failed",
+            agent: id,
+            error: String(error),
+            note: "Read as not muted, so a Bot waiting on somebody is still announced.",
+          }),
+        );
+        return false;
+      }
     },
 
     softDelete(actor, id) {

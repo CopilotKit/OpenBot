@@ -307,6 +307,43 @@ export function createAgentRoutes(
     }
   });
 
+  /**
+   * Silence one Bot, and let it speak again.
+   *
+   * Two routes rather than one taking a boolean, matching hide and unhide above. A person pressing
+   * a switch is asking for a state, not for a toggle, and a toggle that arrives twice because the
+   * network was slow leaves them with the opposite of what they asked for.
+   */
+  routes.post("/:agentId/notifications/mute", requireUser, async (context) => {
+    try {
+      await store.setNotificationsMuted(
+        context.var.actor,
+        context.req.param("agentId"),
+        true,
+      );
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.post(
+    "/:agentId/notifications/unmute",
+    requireUser,
+    async (context) => {
+      try {
+        await store.setNotificationsMuted(
+          context.var.actor,
+          context.req.param("agentId"),
+          false,
+        );
+        return context.body(null, 204);
+      } catch (error) {
+        return mapStoreError(context, error);
+      }
+    },
+  );
+
   routes.delete("/:agentId", requireUser, async (context) => {
     try {
       await store.softDelete(context.var.actor, context.req.param("agentId"));
@@ -340,6 +377,7 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     avatarSeed: agent.avatarSeed,
     visibility: agent.visibility,
     hidden: agent.hidden,
+    notificationsMuted: agent.notificationsMuted,
     systemOwned: agent.systemOwned,
     // Published so the edit form can show it. Safe to expose: it is an address the person supplied,
     // and any credential for it lives in the vault, never in this row.

@@ -7,6 +7,7 @@ import {
 } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
 import type { SnapshotResult } from "../src/computer/schema";
+import type { BlockedBot } from "../src/notifications";
 
 /**
  * What the gateway must guarantee, tested as properties rather than as call sequences.
@@ -395,5 +396,80 @@ describe("the computer gateway", () => {
     // Permitted here only because the shipped default permits; the row says plainly that the server
     // could not identify what was touched, rather than omitting the field.
     expect(rows[0]?.payload.element).toBe("not in the current snapshot");
+  });
+});
+
+/** A computer that can be asked for a handover, which the acting fake above has no need to be. */
+function fakeHandoverClient() {
+  const state = { holder: "bot" as const, since: "", requested: true };
+  const client = {
+    requestControl: async () => state,
+    requestSecret: async () => state,
+    forBot: () => client,
+  } as unknown as ComputerClient;
+  return client;
+}
+
+function handoverGateway() {
+  const { store, rows } = fakeAudit();
+  const raised: BlockedBot[] = [];
+  const gateway = createComputerGateway({
+    client: fakeHandoverClient(),
+    auditStore: store,
+    policy: () => PERMISSIVE,
+    notify: (blocked) => void raised.push(blocked),
+  });
+  return { gateway, rows, raised };
+}
+
+/**
+ * A Bot that has stopped and is waiting is the one thing here worth interrupting somebody for, and
+ * until it is raised nothing outside that Bot's own screen knows it happened.
+ */
+describe("a Bot blocked on a person", () => {
+  test("raises a notification where it writes the audit row for the handover", async () => {
+    const { gateway, rows, raised } = handoverGateway();
+
+    await gateway.requestHelp("default", "bot-1", ACTOR, "Sign me in, please.");
+
+    expect(rows.map((row) => row.eventType)).toEqual([
+      "computer.help_requested",
+    ]);
+    expect(raised).toEqual([
+      {
+        kind: "help_requested",
+        botId: "bot-1",
+        userId: ACTOR.id,
+        detail: "Sign me in, please.",
+      },
+    ]);
+  });
+
+  test("names the value a secret request is for, and never a ref or a value", async () => {
+    const { gateway, raised } = handoverGateway();
+
+    await gateway.requestSecret("default", "bot-1", ACTOR, {
+      label: "the code sent to your phone",
+      ref: "e12",
+      snapshotId: 7,
+    });
+
+    // The label is the part that tells somebody whether to get up. A ref means nothing away from the
+    // screen, and the value is on a path this one is not on.
+    expect(raised[0]?.detail).toBe("the code sent to your phone");
+  });
+
+  test("hands over even when nothing is listening for notifications", async () => {
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      client: fakeHandoverClient(),
+      auditStore: store,
+      policy: () => PERMISSIVE,
+    });
+
+    // A deployment with no notification wiring is a deployment that tells nobody, not one where a
+    // blocked Bot cannot be rescued.
+    await gateway.requestHelp("default", "bot-1", ACTOR, "Sign me in, please.");
+    expect(rows).toHaveLength(1);
   });
 });

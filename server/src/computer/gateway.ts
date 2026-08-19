@@ -18,6 +18,7 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
+import type { NotificationRaiser } from "../notifications";
 import type { ComputerClient } from "./client";
 import {
   type ActionPolicy,
@@ -76,6 +77,17 @@ export type ComputerGatewayOptions = {
   auditStore: AuditStore;
   /** Absent denies everything. See evaluateActionPolicy. */
   policy: () => ActionPolicy | undefined;
+  /**
+   * Where "this Bot has stopped and is waiting for you" is announced.
+   *
+   * Optional, and absent leaves every handover working exactly as it did: the Bot still asks, the
+   * control state still flips, and the screen still shows the prompt. What is lost is the person
+   * being told when they are not looking at that screen, which is a courtesy and not a control.
+   *
+   * A courtesy is the reason this is raised rather than awaited. Telling somebody must never be
+   * able to delay, or fail, the handover that lets them unblock the Bot.
+   */
+  notify?: NotificationRaiser;
 };
 
 /**
@@ -93,7 +105,7 @@ type CachedSnapshot = {
 };
 
 export function createComputerGateway(options: ComputerGatewayOptions) {
-  const { client, auditStore, supervisor } = options;
+  const { client, auditStore, supervisor, notify } = options;
   const snapshots = new Map<string, CachedSnapshot>();
 
   /**
@@ -269,6 +281,14 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         computerId,
         reason,
       });
+      // After the row, because the trail is the record and the notification is a message about it.
+      // A person told about something the trail does not contain would have nothing to look at.
+      notify?.({
+        kind: "help_requested",
+        botId,
+        userId: actor.id,
+        detail: reason,
+      });
       return state;
     },
 
@@ -408,6 +428,15 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         actor,
         computerId,
         reason: `${input.label} (into ${input.ref})`,
+      });
+      // The label only. It is what the page asked for, which is the part that tells a person whether
+      // to get up; the ref means nothing away from the screen and the value is on another path
+      // entirely, and a notification is read in places an audit row is not.
+      notify?.({
+        kind: "secret_requested",
+        botId,
+        userId: actor.id,
+        detail: input.label,
       });
       return state;
     },

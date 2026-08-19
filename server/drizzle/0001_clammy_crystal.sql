@@ -1,0 +1,1 @@
+ALTER TABLE "agent_preferences" ADD COLUMN "notifications_muted_at" timestamp with time zone;

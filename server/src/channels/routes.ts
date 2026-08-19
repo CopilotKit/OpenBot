@@ -323,8 +323,9 @@ export function createChannelStore(
           // back is never announced. The payload carries the members because the writer has already
           // resolved them; NOTIFY caps at 8000 bytes, which a 200-character preview leaves room in.
           const event: ChannelActivityEvent = {
+            type: "channel.activity",
             channelId,
-            memberIds: members.map((member) => member.userId),
+            recipientIds: members.map((member) => member.userId),
             lastMessage,
             lastMessageAt: activity.at.toISOString(),
             lastMessageAgentId: activity.agentId,

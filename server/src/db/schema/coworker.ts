@@ -49,6 +49,14 @@ export const agentProfiles = pgTable(
   ],
 );
 
+/**
+ * What one person has decided about one Bot.
+ *
+ * Per person and per Bot, because both of the things kept here are opinions rather than facts about
+ * the Bot: hiding it from a roster changes nothing for anybody else, and neither does silencing it.
+ * A row exists only once somebody has said something, so the absence of a row is the default answer
+ * to every column, which is why every column is nullable.
+ */
 export const agentPreferences = pgTable(
   "agent_preferences",
   {
@@ -59,6 +67,20 @@ export const agentPreferences = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     hiddenAt: timestamp("hidden_at", { withTimezone: true }),
+    /**
+     * When this person silenced this Bot's notifications, or null.
+     *
+     * A timestamp rather than a boolean, matching `hiddenAt`, because "when did this stop telling me
+     * anything" is the question somebody asks after a Bot has been quiet for a week and they cannot
+     * remember doing it.
+     *
+     * Silences the notification only. The Bot still asks for help, its screen still shows the
+     * prompt, and the audit trail still records the handover, because a preference about being
+     * interrupted must not be able to turn into a preference about being governed.
+     */
+    notificationsMutedAt: timestamp("notifications_muted_at", {
+      withTimezone: true,
+    }),
   },
   (table) => [primaryKey({ columns: [table.userId, table.agentId] })],
 );

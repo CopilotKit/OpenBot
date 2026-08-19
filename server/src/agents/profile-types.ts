@@ -15,6 +15,14 @@ export type AgentProfile = {
   ownerUserId: string | null;
   systemOwned: boolean;
   hidden: boolean;
+  /**
+   * Whether this person has silenced this Bot's notifications.
+   *
+   * Per person, like `hidden`, so it is on the profile the way that is: what the roster shows is
+   * already whatever the person asking has decided about it, and a second shape for a second
+   * preference would be two answers to the same question.
+   */
+  notificationsMuted: boolean;
   deletedAt: Date | null;
   /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;

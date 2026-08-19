@@ -193,6 +193,16 @@ describe("OpenBot database schema", () => {
         hasDefault: false,
         primary: false,
       },
+      // Nullable and without a default, like `hidden_at` beside it. A person who has never said
+      // anything about a Bot has no row at all, so the absence of one has to be the answer to every
+      // question this table can be asked.
+      {
+        name: "notifications_muted_at",
+        sqlType: "timestamp with time zone",
+        notNull: false,
+        hasDefault: false,
+        primary: false,
+      },
     ]);
 
     expect(

@@ -8,8 +8,9 @@ import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
 import type { OpenBotRole } from "./auth/roles";
 import {
+  announceNotification,
   createChannelEventHub,
-  startChannelActivityListener,
+  startLiveEventListener,
 } from "./channels/events";
 import { createChannelStore } from "./channels/routes";
 import { createThreadIdentity } from "./channels/thread-identity";
@@ -36,6 +37,7 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { type NotificationRaiser, notificationFor } from "./notifications";
 import { createPluginStore } from "./plugins/store";
 import {
   createPackageStatusReader,
@@ -139,9 +141,9 @@ const channelEvents = createChannelEventHub();
  * and owns only what may be done with it.
  */
 const componentStore = createComponentStore(database);
-// Its own connection is held for the life of the process; announced activity from any instance
-// arrives here and is fanned out to connected members.
-const channelActivityListener = await startChannelActivityListener(
+// Its own connection is held for the life of the process; anything announced by any instance
+// arrives here and is fanned out to whichever of this instance's connections it is addressed to.
+const liveEventListener = await startLiveEventListener(
   config.databaseUrl,
   channelEvents,
 );
@@ -254,6 +256,49 @@ console.info(
   }),
 );
 /**
+ * A Bot that has stopped and is waiting for somebody, on its way to that somebody.
+ *
+ * Three parts that are deliberately three modules. `notifications.ts` decides whether this is worth
+ * an interruption and frames it, the profile store answers whether this person has silenced this
+ * Bot, and `announceNotification` puts it on the wire for whichever process the person is connected
+ * to. Composing them is this file's job because this file is where the deployment's parts meet, and
+ * because none of the three should have to know the other two exist.
+ *
+ * Nothing awaits this. A handover is what makes a blocked Bot recoverable, and it must not be able
+ * to fail, or to wait, because the database that holds a preference is slow. The consequence is
+ * accepted rather than papered over: a notification that cannot be delivered is gone, and the
+ * person finds out the way they did before, by looking. The audit row is written either way and is
+ * the record.
+ */
+const raiseNotification: NotificationRaiser = (blocked) => {
+  void (async () => {
+    const muted = await agentProfileStore.notificationsMuted(
+      blocked.userId,
+      blocked.botId,
+    );
+    const notification = notificationFor(blocked, { muted });
+    if (!notification) return;
+    await announceNotification(database, {
+      type: "notification",
+      recipientIds: [blocked.userId],
+      notification,
+    });
+  })().catch((error: unknown) => {
+    // Said out loud. A courtesy that silently stops working is indistinguishable from a product that
+    // never had it, and the first report will be somebody saying their Bot "just hangs".
+    console.error(
+      JSON.stringify({
+        type: "notification-not-raised",
+        bot: blocked.botId,
+        kind: blocked.kind,
+        error: error instanceof Error ? error.message : String(error),
+        note: "The handover itself was unaffected and is in the audit trail.",
+      }),
+    );
+  });
+};
+
+/**
  * One Bot's endpoint must not take down the platform.
  *
  * Restarting a remote agent while a run is in flight resets the socket. The rejection reaches the top
@@ -327,6 +372,9 @@ const app = createApp(
         // Read on every decision rather than captured once, so a rule an administrator adds while the
         // server is running applies to the very next action instead of after a restart.
         policy: () => policyStore.get(),
+        // A Bot asking for help or for a secret is the one thing here worth interrupting somebody
+        // for. Without this it announces itself only on a screen nobody may be looking at.
+        notify: raiseNotification,
         // Stop, reset and the listing act on containers when there are containers to act on.
         ...(supervisor ? { supervisor } : {}),
       })
@@ -484,11 +532,11 @@ if (config.devNoAuth) {
   );
 }
 
-// The activity listener holds a connection of its own for the life of the process. Released on the
+// The live event listener holds a connection of its own for the life of the process. Released on the
 // way out, so a watch-mode restart does not leave one behind on every reload.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void channelActivityListener.stop().finally(() => process.exit(0));
+    void liveEventListener.stop().finally(() => process.exit(0));
   });
 }
 
