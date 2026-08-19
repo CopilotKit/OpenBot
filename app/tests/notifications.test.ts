@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   parseDesktopNotificationsPreference,
+  reconcileDesktopNotifications,
   requestDesktopNotifications,
 } from "@/lib/notifications/desktop";
 import {
@@ -107,5 +108,54 @@ describe("desktop notifications", () => {
     // Different sentences: denied is a decision somebody can revisit in their browser, unsupported
     // sends them looking for a control that is not there.
     expect(await requestDesktopNotifications(null)).toBe("unsupported");
+  });
+});
+
+describe("the switch settled against what the browser will still do", () => {
+  const granted = {
+    permission: "granted",
+    requestPermission: async () => "granted",
+  } as const;
+  const denied = {
+    permission: "denied",
+    requestPermission: async () => "denied",
+  } as const;
+
+  test("sits at on only while the grant it was given still stands", () => {
+    expect(reconcileDesktopNotifications(true, granted)).toEqual({
+      enabled: true,
+      withdrawn: null,
+    });
+    expect(reconcileDesktopNotifications(false, granted)).toEqual({
+      enabled: false,
+      withdrawn: null,
+    });
+  });
+
+  test("goes off when the browser has taken the grant back, and says which way", () => {
+    // The failure this exists for: somebody revokes notifications in site settings long after
+    // turning the switch on, the stored preference still says "on", and every notification is then
+    // dropped at the permission check with the switch reporting that they are being told.
+    expect(reconcileDesktopNotifications(true, denied)).toEqual({
+      enabled: false,
+      withdrawn: "denied",
+    });
+    expect(reconcileDesktopNotifications(true, null)).toEqual({
+      enabled: false,
+      withdrawn: "unsupported",
+    });
+  });
+
+  test("says nothing about a browser somebody never asked to be notified by", () => {
+    // A sentence about a blocked browser in front of somebody who has the switch off would be an
+    // answer to a question they did not put.
+    expect(reconcileDesktopNotifications(false, denied)).toEqual({
+      enabled: false,
+      withdrawn: null,
+    });
+    expect(reconcileDesktopNotifications(false, null)).toEqual({
+      enabled: false,
+      withdrawn: null,
+    });
   });
 });

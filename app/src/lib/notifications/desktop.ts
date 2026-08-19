@@ -34,6 +34,9 @@ export function parseDesktopNotificationsPreference(
  */
 export type DesktopPermission = "granted" | "denied" | "unsupported";
 
+/** The answers that are not "granted", which are the ones a person has to be told about. */
+export type DesktopRefusal = Exclude<DesktopPermission, "granted">;
+
 type PermissionApi = {
   permission: NotificationPermission;
   requestPermission: () => Promise<NotificationPermission>;
@@ -62,6 +65,42 @@ export async function requestDesktopNotifications(
   // immediately with the old answer, so this needs no special case beyond reporting it honestly.
   const answer = await api.requestPermission();
   return answer === "granted" ? "granted" : "denied";
+}
+
+/** Where the switch may honestly sit. */
+export type DesktopNotificationsState = {
+  enabled: boolean;
+  /**
+   * Why it is off, when somebody had asked for it to be on.
+   *
+   * Null when nothing was withdrawn, which covers both "off because nobody turned it on" and "on and
+   * working". A sentence about a blocked browser in front of somebody who never asked for
+   * notifications would be an answer to a question they did not put.
+   */
+  withdrawn: DesktopRefusal | null;
+};
+
+/**
+ * Settle what was asked for against what the browser will still do.
+ *
+ * The stored preference is not the answer on its own. A grant can be taken away long after it was
+ * given — somebody revokes it in site settings, or clears the profile, or the browser expires it —
+ * and none of that comes back through the tab that asked for it. Reading only what was stored leaves
+ * a switch sitting at "on" while `showDesktopNotification` quietly returns at its permission check,
+ * which is the one failure this control must not have: somebody trusts it, is not told, and misses
+ * the Bot that was waiting for them.
+ *
+ * Takes the stored preference rather than reading it, and takes the permission API rather than
+ * reaching for it, so the rule can be argued with in a test rather than only in a browser.
+ */
+export function reconcileDesktopNotifications(
+  stored: boolean,
+  api: PermissionApi | null = permissionApi(),
+): DesktopNotificationsState {
+  if (!stored) return { enabled: false, withdrawn: null };
+  if (!api) return { enabled: false, withdrawn: "unsupported" };
+  if (api.permission === "granted") return { enabled: true, withdrawn: null };
+  return { enabled: false, withdrawn: "denied" };
 }
 
 /**
