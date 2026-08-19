@@ -13,6 +13,8 @@
 
 </div>
 
+https://github.com/user-attachments/assets/535ef7ee-1631-4a69-b839-564c56cf90b4
+
 <div align="center">
 
 Bots are teammates you hand real work to. They sign in to apps and websites and
