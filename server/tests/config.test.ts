@@ -153,4 +153,37 @@ describe("deployment configuration", () => {
       }),
     ).toThrow("Google authentication requires BETTER_AUTH_SECRET");
   });
+
+  test("takes a widened repetition window, and leaves it absent when nobody set one", () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        AGENT_COMPUTER_URL: "http://localhost:4100",
+        COMPUTER_REPEAT_WINDOW_MS: "600000",
+      }).computer?.repeatWindowMs,
+    ).toBe(600_000);
+
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        AGENT_COMPUTER_URL: "http://localhost:4100",
+      }).computer?.repeatWindowMs,
+    ).toBeUndefined();
+  });
+
+  // Refused rather than quietly defaulted, like a malformed policy. An operator who typed `3m` would
+  // otherwise get a deployment running the built-in window, and the only evidence would be a rule
+  // about repetition that never fires, which reads exactly like a Bot behaving itself.
+  test.each(["3m", "0", "-1", "180000.5"])(
+    "refuses to start on a repetition window of %p",
+    (value) => {
+      expect(() =>
+        loadConfig({
+          ...baseEnvironment,
+          AGENT_COMPUTER_URL: "http://localhost:4100",
+          COMPUTER_REPEAT_WINDOW_MS: value,
+        }),
+      ).toThrow("COMPUTER_REPEAT_WINDOW_MS");
+    },
+  );
 });

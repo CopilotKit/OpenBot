@@ -46,6 +46,25 @@ export type PolicyContext = {
   bot: { id: string };
   page: { url: string; host: string };
   actor: { id: string };
+  /**
+   * How many times this Bot has just made this exact call, counting the one being decided.
+   *
+   * A stuck model retries, and every retry is a real action on somebody's live website. Each one is
+   * permitted on its own terms, because each one is: the rule that would refuse the thirtieth click
+   * on a button would refuse the first, and refusing the first is refusing the product. Only the
+   * count separates them, so the count is here, and a deployment that wants to stop a Bot going in
+   * circles writes `repeat.count >= 10` and nothing else changes.
+   *
+   * Always present, at one on a call the Bot has not made before, so that a rule mentioning it is
+   * evaluable on every action. An absent field would throw inside CEL, and a deny rule that throws
+   * denies, so an optional `repeat` would turn one rule about repetition into a deployment that
+   * refuses everything.
+   *
+   * The cost is that the window is time-based: a Bot slow enough to spread its attempts wider than
+   * the window never trips this, and one that varies a single argument each time round is thirty
+   * different calls. It is a backstop against the loop that actually happens, not a guarantee.
+   */
+  repeat: { count: number };
   element?: {
     ref: string;
     role: string;
