@@ -2,7 +2,7 @@
 
 # OpenBot
 
-**Give an agent a computer of its own: a browser, a filesystem and the tools you grant it, with every action decided before it happens and recorded after.**
+**AI teammates you can hand real work to, and actually trust with the access.** Each gets a computer of its own: a real browser with its own logins, its own files, and only the tools you grant. Every action decided before it happens and recorded after.
 
 [**copilotkit.ai/openbot**](https://copilotkit.ai/openbot) · [**Quick start**](#quick-start) · [**Features**](#features) · [**Bring your own agent**](#bring-your-own-agent) · [**Architecture**](#architecture) · [**Docs**](docs/README.md)
 
@@ -17,11 +17,11 @@ https://github.com/user-attachments/assets/535ef7ee-1631-4a69-b839-564c56cf90b4
 
 <div align="center">
 
-Bots are teammates you hand real work to. They sign in to apps and websites and
-use them the way you do, on a computer that stays theirs between sessions. Name
-one, give it a role, grant it access as it earns it, and talk to it in a
-channel. Bring any AG-UI agent, run the whole thing on your own machine, and
-keep the boundaries where they belong.
+Bring any AG-UI agent, written on a framework or by hand, and it arrives as a
+teammate with a channel of its own. Watch it work on its own screen, take the
+wheel when it reaches something it should not do alone, then hand it back. It
+answers with components rather than only prose, and the whole thing runs on
+your own machine.
 
 </div>
 
