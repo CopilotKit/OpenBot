@@ -56,12 +56,12 @@ The other two providers work the same way under their own names, because they ar
 
 Model names travel verbatim, so use whatever the endpoint publishes. An endpoint that namespaces its catalogue wants both halves of the name, in `BOT_MODEL` and in the tenant package's `default_model` alike.
 
-[LLMTR](https://llmtr.com) is one such gateway. It fronts OpenAI, Anthropic, Google and others behind one key, and hosts models in Turkey for deployments that need the data to stay there, which is the same reason a deployment runs OpenBot on its own infrastructure. Addressed the usual way:
+A gateway that fronts several providers behind one key is addressed the usual way:
 
 ```sh
-OPENAI_BASE_URL=https://llmtr.com/v1
-OPENAI_API_KEY=llmtr-...
-BOT_MODEL=openai/gpt-4o          # or llmtr/gemma-4, or anthropic/claude-sonnet-4.5
+OPENAI_BASE_URL=https://gateway.internal/v1
+OPENAI_API_KEY=...
+BOT_MODEL=openai/gpt-4o
 ```
 
 and in the tenant package, where the name is namespaced the same way:
@@ -73,11 +73,7 @@ model:
   default_model: openai/gpt-4o
 ```
 
-Its catalogue is public and needs no key, so the names above can be checked before anything is configured:
-
-```sh
-curl -s https://llmtr.com/v1/models
-```
+Most gateways publish a model list, which is the way to check a name before configuring it.
 
 Two things are worth knowing before pointing a deployment at any gateway. Not every catalogue entry accepts tools, and a Bot without tool calling cannot drive its computer; the model list says which do. And `BOT_RESPONSES_API=true` needs an endpoint that implements the Responses API, not only chat completions.
 
