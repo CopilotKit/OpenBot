@@ -8,6 +8,14 @@
  * Bot is allowed to do, which nobody asked for, whereas a silence limit puts a ceiling on how long a
  * person is asked to watch a spinner, which is the actual complaint.
  *
+ * SILENCE ONLY MEANS ANYTHING WHILE THIS PROCESS IS WAITING TO HEAR FROM THE BOT. The Bot's stream
+ * is relayed onward as it arrives, and whoever reads the relayed copy is entitled to take its time:
+ * in Intelligence mode that reader is publishing every event on to the gateway over the network. A
+ * chunk sitting in that handover is quiet that says nothing about the endpoint, and counting it
+ * would end a run that was streaming perfectly and put the blame on a Bot for a pause on this side
+ * of the wire. That is the one outcome a watchdog must never produce, so the clock is stopped for
+ * the handover and started again when it completes, which is what `pause` and `resume` are for.
+ *
  * WHAT THE STREAM ACTUALLY DOES IN THIS PRODUCT, measured before any of this was designed, because
  * the answer decides whether a long tool call would be reported as a stall.
  *
@@ -38,7 +46,12 @@
 /** Milliseconds, from whatever source the caller trusts. Injected so tests need not sleep. */
 export type Clock = () => number;
 
-/** One stream under watch. */
+/**
+ * What the watch is told about a stream, which is deliberately almost nothing: a way to find it
+ * again and the Bot on the far end. Never the bytes, because nothing in here is allowed to read
+ * them, and never the response, because holding one would make this a party to the stream rather
+ * than an observer of it.
+ */
 export type WatchedStream = {
   /**
    * How the caller finds this stream again. Minted per stream rather than taken from the run,
@@ -74,6 +87,8 @@ export type TurnWatchdogOptions = {
 type OpenStream = WatchedStream & {
   lastChunkAt: number;
   chunks: number;
+  /** While true the clock is not running, because the wait is not on the Bot. See `pause`. */
+  paused: boolean;
 };
 
 export class TurnWatchdog {
@@ -93,7 +108,10 @@ export class TurnWatchdog {
     return this.stallMs > 0;
   }
 
-  /** How many streams are currently being watched. */
+  /**
+   * Read by whoever owns the sweep, so a process with nothing to watch can stop looking rather than
+   * hold a timer that ticks for the life of the deployment.
+   */
   get watching(): number {
     return this.streams.size;
   }
@@ -115,11 +133,16 @@ export class TurnWatchdog {
       ...stream,
       lastChunkAt: this.now(),
       chunks: 0,
+      paused: false,
     });
   }
 
   /**
-   * Note that something arrived.
+   * Note that something arrived from the Bot.
+   *
+   * Called when a read off the Bot's own body resolves, which is the only moment this process learns
+   * anything about the endpoint. Anywhere later in the relay would be measuring how promptly the
+   * next component took delivery instead.
    *
    * An id that is not being watched is ignored rather than started, and that is what makes the
    * callback fire exactly once per stream: `sweep` removes a stream as it reports it, so a chunk
@@ -133,13 +156,46 @@ export class TurnWatchdog {
     stream.chunks += 1;
   }
 
+  /**
+   * Stop counting silence against a stream, because the wait has stopped being the Bot's.
+   *
+   * Between one chunk and the next, this process is not waiting on the endpoint at all: it is
+   * waiting for whoever reads the relayed stream to take the chunk it already has. That wait can be
+   * long for reasons that have nothing to do with the Bot, and a Bot that is streaming steadily must
+   * not be ended because the far side of the relay went to sleep. Counting only the stretches spent
+   * waiting on the endpoint is what keeps the number in the audit row true to its own name.
+   *
+   * The cost is that a stream whose reader stops for good is never reported. It is not silent from
+   * the Bot, so nothing here ends it, and it stays in the watch until the relay errors and the pump
+   * releases it. That is the right way round: believing a healthy Bot is broken ends somebody's
+   * turn, and believing a broken reader is healthy costs an entry in a map.
+   */
+  pause(id: string): void {
+    const stream = this.streams.get(id);
+    if (!stream) return;
+    stream.paused = true;
+  }
+
+  /**
+   * Start counting again, from now rather than from the last chunk.
+   *
+   * The stretch that just ended was not the Bot's, so it must not be carried forward into the next
+   * deadline; a handover that took most of the timeout would otherwise leave the Bot a sliver of it.
+   */
+  resume(id: string): void {
+    const stream = this.streams.get(id);
+    if (!stream) return;
+    stream.lastChunkAt = this.now();
+    stream.paused = false;
+  }
+
   /** Stop watching. Unknown ids are ignored, so closing a stream that already stalled is harmless. */
   close(id: string): void {
     this.streams.delete(id);
   }
 
   /**
-   * Report every stream that has gone quiet, and returns how many there were.
+   * Reports every stream that has gone quiet, and returns how many there were.
    *
    * Each one is removed before its callback runs, so a callback that throws still leaves the
    * watchdog consistent, and a slow callback cannot be entered twice for the same stream.
@@ -150,6 +206,7 @@ export class TurnWatchdog {
     let stalled = 0;
 
     for (const [id, stream] of this.streams) {
+      if (stream.paused) continue;
       const silentForMs = now - stream.lastChunkAt;
       if (silentForMs < this.stallMs) continue;
 

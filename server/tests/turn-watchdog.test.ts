@@ -88,6 +88,37 @@ describe("a turn is judged on activity, not on how long it has run", () => {
     expect(stalled[0]?.chunks).toBe(2);
   });
 
+  test("silence while the relay's reader has not taken delivery is not charged to the Bot", () => {
+    const { time, stalled, watchdog } = watching(60_000);
+    watchdog.open({ id: "stream-1", botId: "risk-analyst" });
+
+    // The Bot spoke and this process is now holding that chunk out to whoever reads the relayed
+    // stream. In this deployment that is the Intelligence runner, publishing over the network.
+    watchdog.record("stream-1");
+    watchdog.pause("stream-1");
+    time.advance(600_000);
+    expect(watchdog.sweep()).toBe(0);
+    expect(stalled).toHaveLength(0);
+
+    // Ten minutes of it, and the Bot still gets its whole timeout from the moment it is waited on
+    // again. The wait that just ended was not its.
+    watchdog.resume("stream-1");
+    time.advance(59_999);
+    expect(watchdog.sweep()).toBe(0);
+
+    time.advance(1);
+    expect(watchdog.sweep()).toBe(1);
+    expect(stalled[0]?.silentForMs).toBe(60_000);
+    expect(stalled[0]?.chunks).toBe(1);
+  });
+
+  test("pausing or resuming a stream nobody is watching is harmless", () => {
+    const { watchdog } = watching(60_000);
+    expect(() => watchdog.pause("never-opened")).not.toThrow();
+    expect(() => watchdog.resume("never-opened")).not.toThrow();
+    expect(watchdog.watching).toBe(0);
+  });
+
   test("a stream that ends is forgotten and is never reported", () => {
     const { time, stalled, watchdog } = watching(60_000);
     watchdog.open({ id: "stream-1", botId: "risk-analyst" });

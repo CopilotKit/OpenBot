@@ -205,26 +205,37 @@ describe("registered Copilot agents", () => {
     expect(agents.risk).toBeInstanceOf(HttpAgent);
   });
 
+  /*
+   * Told apart by a sentinel, because nothing else tells them apart.
+   *
+   * @ag-ui/client fills `fetch` in with a wrapper of its own whenever the config does not carry one,
+   * so a remote Bot always has a function there and asserting that it does asserts nothing at all.
+   * The same registration is built twice, with a guard whose watch returns a fetch nothing else
+   * could have produced and then without one, and the two are compared.
+   */
   test("leaves a remote Bot's fetch alone when no timeout is configured", () => {
-    const agents = buildAgents(
-      [
-        {
-          id: "risk",
-          name: "Risk",
-          type: "remote_ag_ui",
-          endpoint: "http://risk.internal/ag-ui",
-        },
-      ],
-      { provider: "openai", defaultModel: "gpt-4.1" },
-      null,
-    );
+    const sentinel = async () => new Response(null);
+    const registered = [
+      {
+        id: "risk",
+        name: "Risk",
+        type: "remote_ag_ui" as const,
+        endpoint: "http://risk.internal/ag-ui",
+      },
+    ];
+    const model = { provider: "openai" as const, defaultModel: "gpt-4.1" };
 
-    const remote = agents.risk;
-    if (!(remote instanceof HttpAgent)) {
+    const guarded = buildAgents(registered, model, null, {
+      watch: () => sentinel,
+      stop: () => undefined,
+    }).risk;
+    const unguarded = buildAgents(registered, model, null).risk;
+    if (!(guarded instanceof HttpAgent) || !(unguarded instanceof HttpAgent)) {
       throw new Error("Expected the remote agent");
     }
-    // @ag-ui/client defaults this to its own fetch when the config does not carry one.
-    expect(typeof remote.fetch).toBe("function");
+
+    expect(guarded.fetch).toBe(sentinel);
+    expect(unguarded.fetch).not.toBe(sentinel);
   });
 
   test("resolves fresh built-in agents and credentials for every request", async () => {

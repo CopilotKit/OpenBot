@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { auditEventsQueryOptions } from "@/lib/audit/queries";
+import { silenceOf } from "@/lib/audit/silence";
 
 /**
  * Read surface for policy, computer, component, MCP, and credential audit events.
@@ -38,7 +39,12 @@ const FILTERS = [
     search:
       "?eventType=computer.action_refused,mcp.call_rejected,component.refused,component.function_refused",
   },
-  { label: "Did not happen", search: "?eventType=computer.action_failed" },
+  {
+    label: "Did not happen",
+    // A stalled stream belongs here. It is the same complaint as an action that was allowed and then
+    // did not take: nothing was refused, and nothing came of it either.
+    search: "?eventType=computer.action_failed,agent.stream_stalled",
+  },
 ] as const;
 
 function AuditPage() {
@@ -137,8 +143,12 @@ function Row({
     event.eventType === "component.refused" ||
     event.eventType === "component.function_refused" ||
     event.eventType === "mcp.call_rejected";
-  // Allowed by policy but not carried out.
-  const failed = event.eventType === "computer.action_failed";
+  const stalled = event.eventType === "agent.stream_stalled";
+  // Allowed by policy but not carried out. A stalled turn belongs in the same family: the Bot was
+  // asked and the answer never arrived. Colour is how this table is read, and a row left in the
+  // muted foreground reads as "Allowed", which a turn nobody ever got an answer to was not.
+  const failed = event.eventType === "computer.action_failed" || stalled;
+  const silence = stalled ? silenceOf(payload) : null;
 
   return (
     <tr className="border-border border-t align-top">
@@ -228,6 +238,14 @@ function Row({
             {payload.failure}
           </div>
         ) : null}
+        {/*
+         * The two numbers the stall row is worth reading for. Without them every stalled turn looks
+         * the same, and the difference between an endpoint that dies halfway through an answer and
+         * one that never begins is the difference between a slow Bot and a dead one.
+         */}
+        {silence ? (
+          <div className="mt-0.5 text-xs text-muted-foreground">{silence}</div>
+        ) : null}
         {/* Show concrete policy rules, but suppress the uninformative default `true` allow rule. */}
         {decision.rule && decision.rule !== "true" ? (
           <div className="mt-0.5 font-mono text-xs text-muted-foreground">
@@ -259,7 +277,8 @@ const NAMED_TARGETS = new Set([
 
 const DECISIONS: Record<string, string> = {
   "bot.declined": "The Bot declined",
-  // Not a refusal and not a failed action: the Bot said nothing and the turn was ended for it.
+  // Not a refusal, so not the refusal colour: nothing was blocked. The Bot was asked and never
+  // answered, which is the same complaint as an action that was allowed and then did not happen.
   "agent.stream_stalled": "The Bot stopped responding",
   "computer.policy_loaded": "Boundary at start-up",
   "computer.isolation_loaded": "Isolation at start-up",

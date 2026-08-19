@@ -13,19 +13,33 @@
  * The Bot's response, however, is an ordinary streaming HTTP body that this process reads to the
  * end, so it is both the thing that stalls and the only place a stall can be seen.
  *
- * A PASS-THROUGH TRANSFORM IS THE ONLY ACCEPTABLE SHAPE HERE, and the transform below does exactly
- * one thing besides handing the chunk on. It must not buffer, because a Bot's answer is streamed a
+ * A PASS-THROUGH RELAY IS THE ONLY ACCEPTABLE SHAPE HERE, and the relay below is an identity
+ * transform with nothing in it at all. It must not buffer, because a Bot's answer is streamed a
  * token at a time and holding chunks back to inspect them would turn a live answer into a paragraph
  * that lands all at once. It must not await anything, because a chunk delayed here is a chunk
  * delayed on somebody's screen. And it must not decide anything about the bytes, because the moment
  * it parses them it can be wrong about them, and a watchdog that can misread a working run into a
- * broken one is worse than the failure it was added for. Counting is the whole of its job.
+ * broken one is worse than the failure it was added for.
+ *
+ * THE CLOCK IS KEPT BY THE PUMP AND NOT BY THE RELAY, which is the difference between watching the
+ * Bot and watching whoever is reading it. A `TransformStream` runs its transform only once the
+ * readable side is being pulled, so timestamping in there would record when the CONSUMER took a
+ * chunk rather than when the Bot produced one; a consumer that paused for longer than the timeout
+ * would then be reported as a Bot that had gone silent, on a run that was streaming the whole time.
+ * The pump times the resolution of each read from the Bot instead, and stops the clock entirely
+ * while it waits for the consumer to take delivery, so the only quiet ever counted is quiet on the
+ * wire. In this deployment that consumer is the Intelligence runner publishing every event on to
+ * the gateway over the network, which is exactly the sort of thing that pauses.
  *
  * On a stall it writes one RUN_ERROR event into the same stream and closes it. RUN_ERROR is the
- * event both surfaces already understand: the channel renders it through the subscriber it already
- * has, and the packaged chat shows its message in its own banner, so nothing downstream needs to
- * learn a new event to tell somebody what happened. AG-UI permits RUN_ERROR at any point in a
- * stream, including as the very first event, which is what a Bot that never spoke produces.
+ * event both surfaces already subscribe to, so nothing downstream had to learn a new one. What
+ * neither of them had was anywhere to put it, and both now draw the sentence themselves: see
+ * app/src/components/channels/chat-transcript.tsx for the channel and
+ * app/src/routes/_authed/_app/bot.tsx for the direct Bot chat. The packaged chat draws nothing of
+ * its own for a failed run — the banner that would have done it belongs to the v1 provider this app
+ * does not mount, and is suppressed even there unless the dev console is switched on. AG-UI permits
+ * RUN_ERROR at any point in a stream, including as the very first event, which is what a Bot that
+ * never spoke produces.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { type StalledStream, TurnWatchdog } from "./turn-watchdog";
@@ -61,15 +75,21 @@ export type StallGuard = {
 };
 
 /**
- * Only a stream that says it is server-sent events gets an event written into it.
+ * The one framing a sentence must never be written into.
  *
- * This is deliberately stricter than the AG-UI client's own rule, which treats every content type
- * except the protobuf one as SSE. Being stricter fails in the safe direction: a Bot answering in a
- * framing this does not recognise gets a clean close and the run ends with the client's own terminal
- * event, which is a worse message than ours but is still an ending. Guessing the other way would
- * mean writing SSE bytes into a binary stream and corrupting a run that was merely slow.
+ * @ag-ui/client 0.0.57 picks its parser by comparing the response's content type to exactly this
+ * media type: this value means protocol buffers, and every other value, including one it has never
+ * seen, is read as server-sent events. The rule here is that same rule, deliberately, because the
+ * question being asked is not "what did the Bot mean by this header" but "what will the thing at the
+ * other end of this relay try to parse". Testing for `text/event-stream` instead was stricter than
+ * the client and silently worse: a Bot serving SSE bytes under some other content type had its
+ * stream closed with nothing in it, so the run ended, the composer unlocked, and nobody was told
+ * anything on either surface.
+ *
+ * Guessing the other way is the failure worth avoiding, and this still avoids it. Appending SSE
+ * bytes to a protobuf stream would corrupt a run that was merely slow.
  */
-const SSE_CONTENT_TYPE = "text/event-stream";
+const PROTOBUF_CONTENT_TYPE = "application/vnd.ag-ui.event+proto";
 
 const ENCODER = new TextEncoder();
 
@@ -91,7 +111,7 @@ type OpenStream = {
   writer: WritableStreamDefaultWriter<Uint8Array>;
   /** Cancels the Bot's side, so a wedged endpoint does not keep a socket here forever. */
   cancelUpstream: () => void;
-  /** Whether an event may be written into this stream. See SSE_CONTENT_TYPE. */
+  /** Whether an event may be written into this stream. See PROTOBUF_CONTENT_TYPE. */
   sse: boolean;
   /**
    * The request body, held as the string it was already serialised to.
@@ -159,9 +179,19 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
   /**
    * End a turn whose Bot has stopped talking.
    *
-   * The row is written before the stream is touched. A wedged Bot may also have a consumer that has
-   * stopped reading, in which case the writes below never settle, and the record of what happened
-   * must not depend on a promise that a broken stream owes us.
+   * NOTHING THE PERSON NEEDS WAITS ON ANYTHING THAT CAN FAIL TO SETTLE. Every step of the recovery
+   * below is either synchronous or queued and deliberately unawaited, so the socket is released, the
+   * sentence is queued and the stream is closed within this tick whatever else in the deployment is
+   * unwell. A wedged Bot may also have a consumer that has stopped reading, in which case those
+   * writes never settle; awaiting them would leave the spinner and the locked composer this whole
+   * file exists to end.
+   *
+   * The audit row comes last, after the close, and the same argument is what puts it there. The
+   * store is a bare insert against the pool every other write in this deployment shares (see
+   * `createAuditStore`) with no deadline of its own, and a Bot is most likely to hang in exactly the
+   * conditions where that pool is saturated or Postgres is unreachable. Recovering first and
+   * recording second costs a row if the process dies in between, and a lost row is a smaller loss
+   * than a watchdog that fires and then fails open.
    */
   async function giveUp(stalled: StalledStream): Promise<void> {
     const stream = release(stalled.id);
@@ -179,6 +209,18 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
       }),
     );
 
+    // The Bot's side goes first, so a socket into an endpoint that will never answer is released
+    // whatever the browser's side of the stream is doing.
+    stream.cancelUpstream();
+
+    if (stream.sse) {
+      // The write is queued ahead of the close, so it either lands in order or neither does.
+      void stream.writer
+        .write(stalledEvent(stream.bot.name, options.stallMs))
+        .catch(() => undefined);
+    }
+    void stream.writer.close().catch(() => undefined);
+
     if (options.auditStore) {
       await recordAuditEvent(options.auditStore, {
         eventType: "agent.stream_stalled",
@@ -195,19 +237,6 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
         },
       }).catch(() => undefined);
     }
-
-    // The Bot's side goes first, so a socket into an endpoint that will never answer is released
-    // whatever the browser's side of the stream is doing.
-    stream.cancelUpstream();
-
-    if (stream.sse) {
-      // Deliberately not awaited: see the note above about a consumer that has stopped reading. The
-      // write is queued ahead of the close, so it either lands in order or neither does.
-      void stream.writer
-        .write(stalledEvent(stream.bot.name, options.stallMs))
-        .catch(() => undefined);
-    }
-    void stream.writer.close().catch(() => undefined);
   }
 
   function watch(
@@ -226,12 +255,9 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
       if (!response.ok || body === null) return response;
 
       const id = crypto.randomUUID();
-      const relay = new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, controller) {
-          watchdog.record(id);
-          controller.enqueue(chunk);
-        },
-      });
+      // An identity transform, with no transform in it. All it is here for is a writable end this
+      // process can put one last event into and close from outside the pump; see `giveUp`.
+      const relay = new TransformStream<Uint8Array, Uint8Array>();
       const reader = body.getReader();
       const writer = relay.writable.getWriter();
 
@@ -241,9 +267,7 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
         cancelUpstream: () => {
           void reader.cancel().catch(() => undefined);
         },
-        sse: (response.headers.get("content-type") ?? "").includes(
-          SSE_CONTENT_TYPE,
-        ),
+        sse: response.headers.get("content-type") !== PROTOBUF_CONTENT_TYPE,
         requestBody:
           typeof requestInit.body === "string" ? requestInit.body : null,
         finished: false,
@@ -264,7 +288,14 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
   }
 
   /**
-   * Move bytes across, and end the stream the way the Bot ended it.
+   * Move bytes across, keep the clock, and end the stream the way the Bot ended it.
+   *
+   * This loop is the only place that knows which of its two waits is which, which is why the timing
+   * lives here. A read that resolves is the Bot having said something and is the only evidence the
+   * endpoint is alive. A write that has not resolved yet is the far side of the relay not having
+   * taken delivery, and says nothing about the Bot at all, so the clock is stopped across it and
+   * restarted when the handover completes. Timing the relay instead would have reported a paused
+   * consumer as a silent Bot, which is the one mistake this must not make.
    *
    * A read that throws is passed on as an abort rather than as a clean close. A broken connection
    * carries a real reason, and relabelling it as an ending would file a transport failure as a Bot
@@ -279,7 +310,10 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        watchdog.record(id);
+        watchdog.pause(id);
         await writer.write(value);
+        watchdog.resume(id);
       }
       if (release(id)) await writer.close().catch(() => undefined);
     } catch (error) {
@@ -326,9 +360,10 @@ function turnOf(
  * dependency to produce them would be the larger change. The AG-UI client parses `data:` lines as
  * JSON and validates them against its own schemas, so this is the same shape a Bot would have sent.
  *
- * The wording avoids " - " and a trailing three-digit number. The packaged chat's banner truncates a
- * message at the first of those and strips the second, so a sentence containing either arrives at a
- * person cut in half.
+ * The wording is the whole of what a person gets. Both surfaces draw this message and nothing else
+ * around it, so it names the Bot, says what was observed rather than what was concluded, says the
+ * turn is over, and says what to do next. No identifiers and no milliseconds: a run id in a sentence
+ * is a thing the reader has to decide to ignore, and it is not what they came to find out.
  */
 function stalledEvent(botName: string, stallMs: number): Uint8Array {
   const event = {

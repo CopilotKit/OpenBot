@@ -346,8 +346,12 @@ export function mountCopilotRuntime(
   resolveModelApiKey: () => Promise<string | null>,
   identifyUser: IdentifyUser,
   identifyActor: IdentifyActor,
-  /** The watch on Bot streams. Absent means the deployment has not configured a timeout. */
-  stallGuard?: StallGuard,
+  /**
+   * The watch on Bot streams. Not optional, unlike the parameter it forwards to: a guard built from
+   * a timeout of zero already watches nothing, so an unconfigured deployment has one to hand and
+   * there is no reason for a caller to have to say `undefined` here to reach `basePath`.
+   */
+  stallGuard: StallGuard,
   basePath = "/api/copilotkit",
 ) {
   const { intelligence } = config.runtime;

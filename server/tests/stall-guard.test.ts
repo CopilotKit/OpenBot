@@ -102,7 +102,7 @@ describe("a Bot that stops streaming", () => {
 });
 
 describe("the sentence a person is left with", () => {
-  test("survives the packaged chat's banner, which truncates on its own punctuation", async () => {
+  test("is the whole explanation, because nothing is drawn around it", async () => {
     const guard = createStallGuard({ stallMs: 60 });
     const watched = guard.watch(BOT, async () => sse(saysNothing()));
 
@@ -113,15 +113,17 @@ describe("the sentence a person is left with", () => {
     const message = String(
       (JSON.parse(body.slice("data: ".length)) as { message: unknown }).message,
     );
-    // The banner cuts a message at the first " - ", strips a trailing three-digit number and takes
-    // anything after "See more:" away with it. A sentence containing any of those reaches a person
-    // cut in half, so the wording avoids all three rather than relying on nobody noticing.
-    expect(message).not.toContain(" - ");
-    expect(message).not.toContain("See more:");
-    expect(message).not.toMatch(/:\s*\d{3}$/);
+    // Both surfaces draw this message and nothing else: no banner, no heading, no error code beside
+    // it. So it has to name what went quiet, say the turn is over, and say what to do about it.
+    expect(message).toContain("Risk Analyst");
+    expect(message).toContain("this turn was ended");
+    expect(message).toContain("Ask again");
     // Said in words a person reads, not in the milliseconds a deployment configured, and never as
     // "0 seconds": the timeout here is a test's, and a floor keeps the sentence sane at any value.
     expect(message).toContain("for a second");
+    // No identifiers. The thread and run are in the audit row, where somebody is looking for them.
+    expect(message).not.toContain("thread-7");
+    expect(message).not.toContain("run-9");
   });
 });
 
@@ -137,6 +139,28 @@ describe("a Bot that is answering", () => {
     const watched = guard.watch(BOT, async () => sse(speaks(frames)));
 
     const response = await watched("http://bot.internal/ag-ui", RUN_REQUEST);
+    const body = await new Response(response.body).text();
+    guard.stop();
+
+    expect(body).toBe(frames.join(""));
+    expect(audit.rows).toHaveLength(0);
+  });
+
+  test("is not given up on because whoever reads the relay paused", async () => {
+    const audit = collecting();
+    // Sixty milliseconds of silence ends a turn here, and the reader below waits five times that
+    // before it takes its first chunk. A watch pointed at the wrong end of the relay reports this
+    // as a Bot that never said anything, on a run that had already finished streaming.
+    const guard = createStallGuard({ stallMs: 60, auditStore: audit.store });
+    const frames = [
+      'data: {"type":"RUN_STARTED"}\n\n',
+      'data: {"type":"TEXT_MESSAGE_CHUNK","delta":"hello"}\n\n',
+      'data: {"type":"RUN_FINISHED"}\n\n',
+    ];
+    const watched = guard.watch(BOT, async () => sse(speaks(frames)));
+
+    const response = await watched("http://bot.internal/ag-ui", RUN_REQUEST);
+    await Bun.sleep(300);
     const body = await new Response(response.body).text();
     guard.stop();
 
@@ -172,7 +196,7 @@ describe("what the watch refuses to touch", () => {
     expect(audit.rows).toHaveLength(0);
   });
 
-  test("a framing it does not recognise is closed rather than written into", async () => {
+  test("a protobuf stream is closed rather than written into", async () => {
     const audit = collecting();
     const guard = createStallGuard({ stallMs: 60, auditStore: audit.store });
     const watched = guard.watch(
@@ -192,6 +216,46 @@ describe("what the watch refuses to touch", () => {
     expect(
       audit.rows.some((event) => event.eventType === "agent.stream_stalled"),
     ).toBe(true);
+  });
+
+  test("a Bot serving events under some other content type is still told", async () => {
+    const guard = createStallGuard({ stallMs: 60 });
+    // Not `text/event-stream`, and not the protobuf media type either. The AG-UI client parses
+    // anything but the latter as server-sent events, so this is a stream a sentence reaches, and a
+    // rule stricter than the client's would have ended this run in silence on both surfaces.
+    const watched = guard.watch(
+      BOT,
+      async () =>
+        new Response(saysNothing(), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await watched("http://bot.internal/ag-ui", RUN_REQUEST);
+    const body = await new Response(response.body).text();
+    guard.stop();
+
+    expect(body).toContain("Risk Analyst stopped responding");
+  });
+});
+
+describe("the recovery a person is waiting on", () => {
+  test("does not wait on the database it also writes a row to", async () => {
+    // An audit store whose insert never settles, which is what a saturated pool or an unreachable
+    // Postgres looks like from here. It is also the condition a Bot is most likely to hang in, so a
+    // recovery sequenced behind this write would fail open in exactly the case it exists for.
+    const guard = createStallGuard({
+      stallMs: 60,
+      auditStore: { insert: () => new Promise<void>(() => undefined) },
+    });
+    const watched = guard.watch(BOT, async () => sse(saysNothing()));
+
+    const response = await watched("http://bot.internal/ag-ui", RUN_REQUEST);
+    // This returns only if the stream was closed. Nothing else ever closes it.
+    const body = await new Response(response.body).text();
+    guard.stop();
+
+    expect(body).toContain("Risk Analyst stopped responding");
   });
 });
 

@@ -19,6 +19,7 @@ import type { AgentChannel } from "@/lib/channels/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
+import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 
 /**
@@ -221,14 +222,10 @@ export function ChannelChat({
       setRunError(message);
     };
     const subscription = agent.subscribe?.({
-      onRunErrorEvent: ({ event }) =>
-        fail(event?.message ?? "The Bot stopped without saying why."),
-      onRunFailed: ({ error }) =>
-        fail(
-          error instanceof Error
-            ? error.message
-            : "The Bot stopped without saying why.",
-        ),
+      // Both surfaces fall back to the same sentence, from the same place, so a person who uses
+      // both is not told two different things about the same silence.
+      onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message)),
+      onRunFailed: ({ error }) => fail(stoppedReason(error)),
       onRunFinishedEvent: () => {
         const wasOurs = awaitingReply.current;
         awaitingReply.current = false;
