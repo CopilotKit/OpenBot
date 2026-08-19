@@ -78,9 +78,11 @@ function WebhooksPage() {
     <PageShell
       description={
         <>
-          A trigger is a URL another system can call to set a Bot working. It is
-          served on its own port, not on this one, and every delivery is
-          recorded in{" "}
+          A trigger is a URL another system can call to set a Bot working.
+          Deliveries arrive on their own listener, not on this one:{" "}
+          <code>ROUTINE_WEBHOOK_PORT</code>, which defaults to one above the
+          API's and serves nothing but these paths. Every delivery is recorded
+          in{" "}
           <Link className="underline" to="/admin/audit">
             Audit
           </Link>
