@@ -60,9 +60,18 @@ export type PolicyContext = {
    * denies, so an optional `repeat` would turn one rule about repetition into a deployment that
    * refuses everything.
    *
-   * The cost is that the window is time-based: a Bot slow enough to spread its attempts wider than
-   * the window never trips this, and one that varies a single argument each time round is thirty
-   * different calls. It is a backstop against the loop that actually happens, not a guarantee.
+   * It is wrong in both directions, and a rule written against it has to be worth both. Under, three
+   * ways: the window is time-based, so a Bot slow enough to spread its attempts wider than the window
+   * never trips this, and one that varies a single argument each time round is thirty calls; the
+   * count is held by the process that served the call, so a deployment behind two API replicas
+   * splits every count and a rule about ten attempts fires at twenty or never; and a call to another
+   * server's tools over MCP is not counted at all, because only the computer gateway counts.
+   *
+   * Over, once, and that one costs somebody their Bot rather than their evidence. Two calls are the
+   * same call when the thing acted on is the same, whatever was typed into it, so ten searches typed
+   * into one box and one file read ten times while a Bot works through it are both ten repeats, and
+   * `repeat.count >= 10` refuses the tenth. It is a backstop against the loop that actually happens,
+   * not a guarantee, which is the argument for trying a rule about it in `dry-run` first.
    */
   repeat: { count: number };
   element?: {

@@ -197,6 +197,31 @@ describe("counting a Bot repeating itself", () => {
     expect(detector.observe("bot", call).threshold).toBe(3);
   });
 
+  test("a run that dips without emptying is still the same run", () => {
+    // The run ends when the window is empty, not when the count falls back under a threshold. A row
+    // every time a stuck Bot's count wobbles past the line would be a row per attempt under another
+    // name, which is the thing the thresholds exist to avoid.
+    const time = clock();
+    const detector = createRepeatDetector({
+      now: time.now,
+      windowMs: 60_000,
+      thresholds: [2],
+    });
+    const call = { tool: "computer_click", ref: "e9" };
+
+    detector.observe("bot", call);
+    time.advance(10_000);
+    expect(detector.observe("bot", call).threshold).toBe(2);
+
+    // The first attempt ages out and the second does not, so the count falls to one and climbs
+    // straight back. The key never went quiet, so this is the same incident, already reported.
+    time.advance(55_000);
+    expect(detector.observe("bot", call)).toMatchObject({
+      count: 2,
+      threshold: null,
+    });
+  });
+
   test("two Bots do not share a count", () => {
     // The audit row names a Bot. A count pooled across Bots would report one Bot's loop against
     // another Bot's name, which is the one thing a trail may never do.
@@ -222,17 +247,106 @@ describe("counting a Bot repeating itself", () => {
     detector.observe("bot", { tool: "computer_click", ref: "e1" });
     detector.observe("bot", { tool: "computer_click", ref: "e2" });
     detector.observe("bot", { tool: "computer_click", ref: "e3" });
-    detector.observe("bot", { tool: "computer_click", ref: "e4" });
 
-    // The oldest went, so its history is gone and it counts as new.
-    expect(
-      detector.observe("bot", { tool: "computer_click", ref: "e1" }).count,
-    ).toBe(1);
-    // The newest is still held, which is the half of the cap that matters: a live loop must survive
-    // a Bot doing other things in between.
+    // Full, so the fourth call is not counted. Nothing still inside the window is thrown out to make
+    // room for it, and a call nobody could count reports one, which no rule acts on.
     expect(
       detector.observe("bot", { tool: "computer_click", ref: "e4" }).count,
+    ).toBe(1);
+    expect(
+      detector.observe("bot", { tool: "computer_click", ref: "e4" }).count,
+    ).toBe(1);
+    // The half of the cap that matters: a live loop survives a Bot doing other things in between,
+    // however much of it there is.
+    expect(
+      detector.observe("bot", { tool: "computer_click", ref: "e1" }).count,
     ).toBe(2);
+  });
+
+  test("a Bot going round a loop wider than the cap is still counted", () => {
+    // The failure that would make the whole feature ornamental. Dropping the least recently seen key
+    // to make room drops each key exactly one step before it comes round again, so a Bot circling
+    // all afternoon would report every call as its first and no rule about repetition would ever
+    // fire on the one thing this exists to catch.
+    const detector = createRepeatDetector({
+      now: clock().now,
+      maxKeysPerBot: 3,
+      thresholds: [3],
+    });
+
+    const counts: number[] = [];
+    const fired: number[] = [];
+    for (let round = 0; round < 3; round++) {
+      for (const ref of ["e1", "e2", "e3", "e4"]) {
+        const seen = detector.observe("bot", { tool: "computer_click", ref });
+        counts.push(seen.count);
+        if (seen.threshold !== null) fired.push(seen.threshold);
+      }
+    }
+
+    // Three of the four keys fitted, and three times round is what the trail is told about.
+    expect(Math.max(...counts)).toBe(3);
+    expect(fired).toEqual([3, 3, 3]);
+  });
+
+  test("a call the cap turned away is counted once the window drains", () => {
+    // The cost of not evicting is a blind spot, and this is the thing that makes it bearable: it
+    // ends by itself within a window rather than lasting as long as the Bot does.
+    const time = clock();
+    const detector = createRepeatDetector({
+      now: time.now,
+      windowMs: 60_000,
+      maxKeysPerBot: 2,
+    });
+
+    detector.observe("bot", { tool: "computer_click", ref: "e1" });
+    detector.observe("bot", { tool: "computer_click", ref: "e2" });
+    expect(
+      detector.observe("bot", { tool: "computer_click", ref: "e3" }).count,
+    ).toBe(1);
+
+    time.advance(61_000);
+    detector.observe("bot", { tool: "computer_click", ref: "e3" });
+    expect(
+      detector.observe("bot", { tool: "computer_click", ref: "e3" }).count,
+    ).toBe(2);
+  });
+
+  test("the number of Bots held is capped", () => {
+    // The id counted against is the one in the request path, checked against a session and against
+    // nothing else. A caller naming a fresh Bot on every request would otherwise buy a map of its
+    // own each time, for the life of the process.
+    const detector = createRepeatDetector({ now: clock().now, maxBots: 2 });
+    const call = { tool: "computer_click", ref: "e9" };
+
+    detector.observe("sales-bot", call);
+    detector.observe("research-bot", call);
+    for (let invented = 0; invented < 100; invented++) {
+      detector.observe(`bot-${invented}`, call);
+    }
+
+    // The two that were really working keep their counts, and the hundred invented ones bought
+    // nothing at all.
+    expect(detector.observe("sales-bot", call).count).toBe(2);
+    expect(detector.observe("research-bot", call).count).toBe(2);
+  });
+
+  test("a Bot that has gone quiet gives its place up", () => {
+    const time = clock();
+    const detector = createRepeatDetector({
+      now: time.now,
+      windowMs: 60_000,
+      maxBots: 1,
+    });
+    const call = { tool: "computer_click", ref: "e9" };
+
+    detector.observe("morning-bot", call);
+    // Still working, so it keeps its place and the second Bot is not counted.
+    expect(detector.observe("afternoon-bot", call).count).toBe(1);
+
+    time.advance(61_000);
+    detector.observe("afternoon-bot", call);
+    expect(detector.observe("afternoon-bot", call).count).toBe(2);
   });
 
   test("one Bot's varied work does not evict another Bot's loop", () => {

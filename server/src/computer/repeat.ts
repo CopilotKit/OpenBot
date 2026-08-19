@@ -48,10 +48,39 @@ export const DEFAULT_REPEAT_THRESHOLDS: readonly number[] = [3, 10, 25];
  * How many distinct calls are remembered per Bot.
  *
  * A Bot doing genuinely varied work never repeats anything, so every call it makes is a new key, and
- * without a cap the map grows for exactly the Bots this feature has nothing to say about. The
- * least recently seen key is dropped, which is the one furthest from tripping anything.
+ * without a cap the map grows for exactly the Bots this feature has nothing to say about.
+ *
+ * Full means full. A call the Bot has not made before is not counted, and nothing still inside the
+ * window is dropped to make room for it, because dropping something is a guess at which key will not
+ * come round again and the obvious guess is the one that fails hardest. Least recently seen is
+ * exactly the key a Bot going round a long loop is about to make next, so a loop of more than this
+ * many distinct calls would lose each key one step before it returned, and a Bot in a tight circle
+ * would be reported as making every one of its calls for the first time.
+ *
+ * The cost is the Bot whose first sixty-four distinct calls are honest work and which only then gets
+ * stuck: its loop is invisible until one of those sixty-four falls out of the window, which is at
+ * most one window away. A blind spot that clears itself is worth more than an eviction rule that can
+ * be wrong for as long as the loop lasts, and it buys the other half of the bargain, that a call
+ * already being counted can never be pushed out by a Bot doing other things in between.
  */
 export const DEFAULT_REPEAT_KEYS_PER_BOT = 64;
+
+/**
+ * How many Bots are remembered at once.
+ *
+ * The id counted against is the one in the request path. It is checked against a session and against
+ * nothing else, because a Bot's computer answers to whatever it is addressed as and no acting route
+ * resolves the id to a row in `bots` first. So the number of ids this map can be asked to hold is
+ * not the number of Bots somebody wrote down, it is however many a signed-in caller cares to type,
+ * and an uncapped map of maps would grow for the life of the process on nothing more than a loop of
+ * requests naming a fresh id each time.
+ *
+ * Reclaimed the way the per-Bot cap is: a Bot that has gone quiet for a whole window gives its place
+ * up, and while every place is held by a Bot that is still working, one more Bot is not counted.
+ * Two hundred and fifty-six, which is far more Bots than a deployment has acting inside any three
+ * minutes, and small enough that the worst case is a few megabytes rather than the whole heap.
+ */
+export const DEFAULT_REPEAT_BOTS = 256;
 
 /**
  * One governed call, in the terms the detector cares about.
@@ -68,7 +97,14 @@ export type RepeatedCall = {
 };
 
 export type RepeatObservation = {
-  /** Including the call being observed, so the first one counts as one. */
+  /**
+   * Including the call being observed, so the first one counts as one.
+   *
+   * One is also the answer for a call the detector had no room to remember, and for one carrying
+   * nothing to identify it. It is the only number that cannot make anything happen: a rule about
+   * repetition reads it as a first attempt and stands aside. A count nobody can substantiate must
+   * never be the reason a Bot is refused.
+   */
   count: number;
   /**
    * The call's identity, in a form a person can read.
@@ -80,9 +116,11 @@ export type RepeatObservation = {
   /**
    * The threshold this call has just reached, or null on the overwhelming majority of calls.
    *
-   * Reported once per run of repetition rather than on every call past it. A count that falls back
-   * out of the window and climbs again is a new run and reports again, because it is a Bot that got
-   * stuck twice.
+   * Reported once per run of repetition rather than on every call past it. A run ends when the
+   * window empties completely, and a key that fills it again afterwards reports again, because that
+   * is a Bot that got stuck twice. A count that merely dips and climbs is the same run still going
+   * and says nothing further: one incident, one row per threshold, or a row per wobble would be a
+   * row per attempt under another name.
    */
   threshold: number | null;
 };
@@ -96,6 +134,7 @@ export type RepeatDetectorOptions = {
   windowMs?: number;
   thresholds?: readonly number[];
   maxKeysPerBot?: number;
+  maxBots?: number;
   /** Injected so a test can move time without waiting for it. */
   now?: () => number;
 };
@@ -106,7 +145,16 @@ type Occurrences = {
   at: number[];
   /** Which thresholds this run of repetition has already reported. */
   reported: Set<number>;
-  /** Used to choose what to drop when a Bot is at its key limit. */
+};
+
+/**
+ * One Bot's history, and when it was last heard from.
+ *
+ * The time is kept here as well as inside the keys because a Bot that has stopped acting has to give
+ * its place up without anybody walking its whole map to work out that it has.
+ */
+type BotHistory = {
+  calls: Map<string, Occurrences>;
   lastSeen: number;
 };
 
@@ -115,6 +163,7 @@ export function createRepeatDetector(
 ): RepeatDetector {
   const windowMs = options.windowMs ?? DEFAULT_REPEAT_WINDOW_MS;
   const maxKeysPerBot = options.maxKeysPerBot ?? DEFAULT_REPEAT_KEYS_PER_BOT;
+  const maxBots = options.maxBots ?? DEFAULT_REPEAT_BOTS;
   // Ascending, so the loop below ends on the highest threshold a call crossed rather than on
   // whichever one the caller happened to list last.
   const thresholds = [
@@ -126,10 +175,14 @@ export function createRepeatDetector(
    * Per Bot, then per call.
    *
    * Nested rather than keyed on a combined string so that one Bot's varied work cannot push another
-   * Bot's history out: the cap is per Bot, and a shared map would make it a race between them. The
-   * outer map is bounded by how many Bots a deployment has, which is a list somebody wrote down.
+   * Bot's history out: the cap is per Bot, and a shared map would make it a race between them.
+   *
+   * Both levels are capped, and neither ever drops something that is still inside the window. What
+   * is in here is therefore the recent past and nothing else, which is the only claim about memory
+   * this module can honestly make: an id it has never usefully counted cannot be made to sit here
+   * for the life of the process.
    */
-  const perBot = new Map<string, Map<string, Occurrences>>();
+  const perBot = new Map<string, BotHistory>();
 
   return {
     observe(botId, call) {
@@ -139,23 +192,29 @@ export function createRepeatDetector(
       }
 
       const now = clock();
-      let calls = perBot.get(botId);
-      if (!calls) {
-        calls = new Map<string, Occurrences>();
-        perBot.set(botId, calls);
+      const cutoff = now - windowMs;
+
+      let history = perBot.get(botId);
+      if (!history) {
+        if (perBot.size >= maxBots) forgetQuietBots(perBot, cutoff);
+        if (perBot.size >= maxBots) return untracked(fingerprint);
+        history = { calls: new Map<string, Occurrences>(), lastSeen: now };
+        perBot.set(botId, history);
       }
+      // Whether or not the call itself is counted. A Bot making calls is a Bot at work, and one that
+      // has filled its keys with a long loop must not lose the loop by looking idle.
+      history.lastSeen = now;
+      const calls = history.calls;
 
       let entry = calls.get(fingerprint);
       if (!entry) {
-        if (calls.size >= maxKeysPerBot) {
-          evictLeastRecent(calls);
-        }
-        entry = { at: [], reported: new Set<number>(), lastSeen: now };
+        if (calls.size >= maxKeysPerBot) forgetExpiredCalls(calls, cutoff);
+        if (calls.size >= maxKeysPerBot) return untracked(fingerprint);
+        entry = { at: [], reported: new Set<number>() };
         calls.set(fingerprint, entry);
       }
 
-      const cutoff = now - windowMs;
-      entry.at = entry.at.filter((time) => time > cutoff);
+      trimToWindow(entry.at, cutoff);
       if (entry.at.length === 0) {
         // Nothing survived the window, so whatever run of repetition this key was in has ended and
         // its thresholds are free to report again. Without this a Bot that got stuck, recovered and
@@ -163,7 +222,6 @@ export function createRepeatDetector(
         entry.reported.clear();
       }
       entry.at.push(now);
-      entry.lastSeen = now;
 
       const count = entry.at.length;
       let threshold: number | null = null;
@@ -231,15 +289,48 @@ function normalize(value: string | undefined): string {
   return (value ?? "").replaceAll(/\s+/g, " ").trim();
 }
 
-/** The key a Bot touched longest ago, which is the one least likely to be part of a live loop. */
-function evictLeastRecent(calls: Map<string, Occurrences>) {
-  let oldestKey: string | null = null;
-  let oldestSeen = Number.POSITIVE_INFINITY;
-  for (const [key, entry] of calls) {
-    if (entry.lastSeen < oldestSeen) {
-      oldestSeen = entry.lastSeen;
-      oldestKey = key;
-    }
+/**
+ * What a call is worth when there was no room to remember it.
+ *
+ * The fingerprint is still returned, because it is a fact about the call and costs nothing to say.
+ * The count is one and the threshold is null, so nothing downstream acts on a number this module
+ * could not stand behind.
+ */
+function untracked(fingerprint: string): RepeatObservation {
+  return { count: 1, fingerprint, threshold: null };
+}
+
+/**
+ * Timestamps outside the window, dropped in place.
+ *
+ * Oldest first, so the scan stops at the first survivor and costs what it actually removes rather
+ * than the length of the list. Rebuilding the list instead would make a Bot hammering one call pay
+ * for its own history on every attempt, which is the Bot this module exists to describe.
+ */
+function trimToWindow(at: number[], cutoff: number) {
+  const surviving = at.findIndex((time) => time > cutoff);
+  if (surviving === -1) {
+    at.length = 0;
+    return;
   }
-  if (oldestKey !== null) calls.delete(oldestKey);
+  if (surviving > 0) at.splice(0, surviving);
+}
+
+/**
+ * Keys whose last call has aged out, which are the only ones safe to forget.
+ *
+ * They carry no count any more: the next call on one of them would start from one whether it was
+ * held or not, so dropping it loses nothing and frees the place for a call that might.
+ */
+function forgetExpiredCalls(calls: Map<string, Occurrences>, cutoff: number) {
+  for (const [key, entry] of calls) {
+    if ((entry.at.at(-1) ?? 0) <= cutoff) calls.delete(key);
+  }
+}
+
+/** The same rule one level up: a Bot that has not acted for a whole window has nothing left to say. */
+function forgetQuietBots(perBot: Map<string, BotHistory>, cutoff: number) {
+  for (const [botId, history] of perBot) {
+    if (history.lastSeen <= cutoff) perBot.delete(botId);
+  }
 }

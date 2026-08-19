@@ -36,7 +36,7 @@ const PRESETS: { label: string; rule: string; cost?: string }[] = [
     label: "Stop a Bot repeating itself",
     // The count includes the attempt being decided, so this refuses the tenth, not the eleventh.
     rule: "repeat.count >= 10",
-    cost: "Counts identical calls within a few minutes, so a Bot slow enough to spread its attempts wider is never caught, and one that changes a single argument each time is ten different calls.",
+    cost: "Two calls count as the same call when the thing acted on is the same, whatever was typed into it, so a Bot running ten searches from one box, or reading one file ten times, is refused on the tenth. It misses the other way too: a Bot slow enough to spread its attempts wider than a few minutes is never caught, one that changes a single argument each time is ten different calls, and calls to another server's tools are not counted at all. Worth adding while a match is recorded and allowed, before it starts refusing anybody's work.",
   },
   {
     label: "Stay off social media",

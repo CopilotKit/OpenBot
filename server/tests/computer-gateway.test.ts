@@ -555,6 +555,40 @@ describe("a Bot going in circles", () => {
     ).toBe(true);
   });
 
+  test("a lost observation row does not refuse an action the policy allows", async () => {
+    // The detector observes and the policy decides, and that has to survive the audit store having a
+    // bad moment. Letting the observation row throw would refuse every third, tenth and twenty-fifth
+    // identical call, before the policy had been asked, on an action nothing objected to.
+    const { client, calls } = fakeClient();
+    const rows: AuditEventInput[] = [];
+    const store: AuditStore = {
+      insert: async (event) => {
+        if (event.eventType === "computer.action_repeated") {
+          throw new Error("the audit store is unreachable");
+        }
+        rows.push(event);
+      },
+    };
+    const gateway = createComputerGateway({
+      client,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      repeat: createRepeatDetector({ thresholds: [2] }),
+    });
+    await gateway.snapshot("default");
+
+    await gateway.click("default", "bot-1", ACTOR, click);
+    await gateway.click("default", "bot-1", ACTOR, click);
+
+    // Both clicks happened and both decisions are on the record. What was lost is the note saying
+    // they were the same click twice, which is the only thing that may be lost here.
+    expect(calls).toEqual(["click", "click"]);
+    expect(rows.map((row) => row.eventType)).toEqual([
+      "computer.action_allowed",
+      "computer.action_allowed",
+    ]);
+  });
+
   test("a repeated file write names the path and not the browser's page", async () => {
     // The workspace has nothing to do with whatever the browser happens to be showing, and naming a
     // host on that row sends a reader somewhere irrelevant.

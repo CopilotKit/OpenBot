@@ -223,17 +223,37 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
        * Ahead of the decision row, so the trail reads in the order the thing happened: this was the
        * tenth identical attempt, and this is what the policy did about it. Filed the other way round
        * a reader has to deduce the cause from a row written after its effect.
+       *
+       * Its failure is swallowed, which nothing else in this file does. This row is an observation,
+       * and an observation is not allowed to refuse anything: letting a lost insert throw from here
+       * would stop every third, tenth and twenty-fifth identical call before the policy had even
+       * been asked, so a deployment that permits an action would lose it to a moment's trouble at the
+       * audit store. Nothing is weakened by that. An action that was not recorded still does not
+       * happen, because the decision row goes to the same store a few lines below, and a store that
+       * is genuinely down refuses the action there.
        */
-      await writeRepeat(auditStore, {
-        toolName,
-        botId,
-        actor,
-        computerId,
-        pageUrl,
-        filePath,
-        fingerprint: repetition.fingerprint,
-        count: repetition.count,
-      });
+      try {
+        await writeRepeat(auditStore, {
+          toolName,
+          botId,
+          actor,
+          computerId,
+          pageUrl,
+          filePath,
+          fingerprint: repetition.fingerprint,
+          count: repetition.count,
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            type: "computer-repeat-row-lost",
+            bot: botId,
+            fingerprint: repetition.fingerprint,
+            count: repetition.count,
+            error: String(error),
+          }),
+        );
+      }
     }
 
     const decision = evaluateActionPolicy(options.policy(), context);
