@@ -19,7 +19,6 @@ import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
-import type { ComputerClient } from "./computer/client";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
@@ -49,9 +48,7 @@ export function createApp(
    * scope broke every server test that touches createApp even though none of them use CopilotKit.
    */
   copilotHandler?: HonoApp,
-  /** Absent when no computer is configured, and the routes are then not mounted at all. */
-  computerClient?: ComputerClient,
-  /** The only path to an acting call: policy decision, then audit row, then the action. */
+  /** The single governed computer module: policy, audit trail, transport, and provider lifecycle. */
   computerGateway?: ComputerGateway,
   /** What the gateway enforces, and what an administrator can change while running. */
   computerPolicy?: PolicyStore,
@@ -292,24 +289,19 @@ export function createApp(
   if (copilotHandler) {
     // Mounted at the ROOT with the handler carrying its own basePath. Mounting it at
     // "/api/copilotkit" as well double-prefixes it: Hono strips the prefix before the handler sees
-    // the path, so every route lands at /api/copilotkit/api/copilotkit/* and /info 404s. The client
+    // the path, so every route lands at /api/copilotkit/api/copilotkit/* and /info 404s. The browser
     // reports that as "Runtime info request failed with status 404" and every run fails before it
     // starts, with nothing at all in the server log.
     app.route("/", copilotHandler);
   }
 
-  // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so all
-  // three arrive together or the routes are not mounted: a computer whose actions were ungoverned is
-  // not a reduced feature, it is the one shape of this feature that must not exist.
-  if (computerClient && computerGateway && computerPolicy) {
+  // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
+  // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is
+  // the one shape of this feature that must not exist.
+  if (computerGateway && computerPolicy) {
     app.route(
       "/api/computers",
-      createComputerRoutes(
-        computerClient,
-        computerGateway,
-        computerPolicy,
-        requireUser,
-      ),
+      createComputerRoutes(computerGateway, computerPolicy, requireUser),
     );
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  createComputerClient,
+  createComputerTransport,
   ElementNotFoundError,
   NavigationRefusedError,
 } from "../src/computer/client";
@@ -9,12 +9,19 @@ function clientWith(
   handler: (url: string, init?: RequestInit) => Promise<Response> | Response,
   allowPrivateHosts = false,
 ) {
-  return createComputerClient({
-    baseUrl: "http://agent-computer:4100",
+  const transport = createComputerTransport({
     allowPrivateHosts,
     fetchImpl: ((url: string, init?: RequestInit) =>
       Promise.resolve(handler(url, init))) as unknown as typeof fetch,
   });
+  const baseUrl = "http://agent-computer:4100";
+  const botId = "bot-1";
+  return {
+    navigate: (url: string) => transport.navigate(baseUrl, botId, url),
+    screenshot: () => transport.call(baseUrl, botId, "/screenshot"),
+    click: (input: unknown, signal?: AbortSignal) =>
+      transport.post(baseUrl, botId, "/click", input, signal),
+  };
 }
 
 const ok = (body: unknown) =>
@@ -102,6 +109,15 @@ describe("computer client", () => {
       "The assistant's computer is not running.",
     );
 
+    const timedOut = clientWith(() => {
+      const error = new Error("timed out");
+      error.name = "TimeoutError";
+      throw error;
+    });
+    await expect(timedOut.navigate("https://example.com")).rejects.toThrow(
+      "The assistant's computer did not respond in time.",
+    );
+
     const badPage = clientWith(
       () =>
         new Response(JSON.stringify({ error: "net::ERR_NAME_NOT_RESOLVED" }), {
@@ -112,18 +128,6 @@ describe("computer client", () => {
     await expect(badPage.navigate("https://nope.example")).rejects.toThrow(
       "net::ERR_NAME_NOT_RESOLVED",
     );
-  });
-
-  test("status reports unreachable rather than throwing", async () => {
-    const client = clientWith(() => {
-      throw new Error("down");
-    });
-
-    await expect(client.status("bot-1")).resolves.toEqual({
-      botId: "bot-1",
-      state: "unreachable",
-      reason: "The assistant's computer is not running.",
-    });
   });
 
   test("screenshot returns the png a transcript can render", async () => {
@@ -139,19 +143,6 @@ describe("computer client", () => {
     await expect(client.screenshot()).resolves.toMatchObject({
       base64: "aGVsbG8=",
       width: 1280,
-    });
-  });
-
-  test("surfaces a timeout as the computer not responding", async () => {
-    const client = clientWith(() => {
-      const error = new Error("timed out");
-      error.name = "TimeoutError";
-      throw error;
-    });
-
-    await expect(client.status("bot-1")).resolves.toMatchObject({
-      state: "unreachable",
-      reason: "The assistant's computer did not respond in time.",
     });
   });
 });

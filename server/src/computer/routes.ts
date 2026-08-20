@@ -3,18 +3,15 @@ import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import {
-  type ComputerClient,
+  type ActionActor,
+  ActionRefusedError,
+  type ComputerGateway,
   ComputerUnavailableError,
   ElementNotFoundError,
   NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
-} from "./client";
-import {
-  type ActionActor,
-  ActionRefusedError,
-  type ComputerGateway,
 } from "./gateway";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
 
@@ -25,27 +22,24 @@ import { type PolicyStore, parseActionPolicy } from "./policy-store";
  * session guard because `COMPUTER_TOKEN` proves the caller is an internal service, not which user is
  * asking to drive the browser.
  *
- * Read-only calls go to the client; acting calls go to the gateway. That split is the governance
- * boundary: every acting route in this file passes through a policy decision and audit row before it
- * reaches the computer.
+ * Every computer call goes through the gateway. That is the governance seam: each acting route in
+ * this file passes through a policy decision and audit row before it reaches the computer.
  */
 export function createComputerRoutes(
-  client: ComputerClient,
   gateway: ComputerGateway,
   policyStore: PolicyStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
-  routes.get("/:botId/status", requireUser, async (context) =>
-    context.json(await client.status(context.req.param("botId"))),
-  );
+  routes.get("/:botId/status", requireUser, async (context) => {
+    const botId = context.req.param("botId");
+    return context.json(await gateway.status(botId));
+  });
 
   routes.get("/:botId/screenshot", requireUser, async (context) => {
     try {
-      return context.json(
-        await client.forBot(context.req.param("botId")).screenshot(),
-      );
+      return context.json(await gateway.screenshot(context.req.param("botId")));
     } catch (error) {
       return context.json({ error: describe(error) }, statusFor(error));
     }
@@ -70,7 +64,6 @@ export function createComputerRoutes(
     try {
       return context.json(
         await gateway.navigate(
-          context.req.param("botId") ?? "default",
           context.req.param("botId") ?? "default",
           {
             id: context.var.actor.id,
@@ -106,14 +99,14 @@ export function createComputerRoutes(
   /**
    * The acting routes.
    *
-   * Each one hands the gateway the computer id, the Bot, the actor and the input, and does no checking
+   * Each one hands the gateway the Bot, the actor and the input, and does no checking
    * of its own beyond the shape of the request. Where a decision gets made is a single place.
    */
   routes.post("/:botId/click", requireUser, (context) =>
     act(context, (botId, actor, body, signal) => {
       const ref = asRef(body);
       if (!ref) return badRef;
-      return gateway.click(botId, botId, actor, ref, signal);
+      return gateway.click(botId, actor, ref, signal);
     }),
   );
 
@@ -125,7 +118,6 @@ export function createComputerRoutes(
         return { error: "The text to enter is required." };
       }
       return gateway.type(
-        botId,
         botId,
         actor,
         {
@@ -146,7 +138,6 @@ export function createComputerRoutes(
       const ref = asRef(body);
       return gateway.key(
         botId,
-        botId,
         actor,
         {
           key: body.key,
@@ -159,7 +150,7 @@ export function createComputerRoutes(
 
   routes.post("/:botId/scroll", requireUser, (context) =>
     act(context, (botId, actor, body) =>
-      gateway.scroll(botId, botId, actor, {
+      gateway.scroll(botId, actor, {
         ...(typeof body?.deltaY === "number" ? { deltaY: body.deltaY } : {}),
       }),
     ),
@@ -180,7 +171,6 @@ export function createComputerRoutes(
   routes.post("/:botId/control/request", requireUser, (context) =>
     act(context, (botId, actor, body) =>
       gateway.requestHelp(
-        botId,
         botId,
         actor,
         typeof body?.reason === "string" && body.reason.trim()
@@ -207,20 +197,20 @@ export function createComputerRoutes(
 
   /** Stop the browser, keep the logins. */
   routes.post("/:botId/computers/stop", requireUser, (context) =>
-    act(context, (botId, actor) => gateway.stopComputer(botId, botId, actor)),
+    act(context, (botId, actor) => gateway.stopComputer(botId, actor)),
   );
 
   /** Delete the profile. Every login goes with it, which is the point and also the danger. */
   routes.post("/:botId/computers/reset", requireUser, (context) =>
-    act(context, (botId, actor) => gateway.resetComputer(botId, botId, actor)),
+    act(context, (botId, actor) => gateway.resetComputer(botId, actor)),
   );
 
   routes.post("/:botId/control/take", requireUser, (context) =>
-    act(context, (botId, actor) => gateway.takeControl(botId, botId, actor)),
+    act(context, (botId, actor) => gateway.takeControl(botId, actor)),
   );
 
   routes.post("/:botId/control/release", requireUser, (context) =>
-    act(context, (botId, actor) => gateway.releaseControl(botId, botId, actor)),
+    act(context, (botId, actor) => gateway.releaseControl(botId, actor)),
   );
 
   /** The Bot asking for a value it must not be told. */
@@ -235,7 +225,7 @@ export function createComputerRoutes(
       if (typeof body?.snapshotId !== "number") {
         return { error: "The snapshotId the ref came from is required." };
       }
-      return gateway.requestSecret(botId, botId, actor, {
+      return gateway.requestSecret(botId, actor, {
         label:
           typeof body?.label === "string" && body.label.trim()
             ? body.label.trim()
@@ -258,17 +248,16 @@ export function createComputerRoutes(
       if (typeof body?.text !== "string" || !body.text) {
         return { error: "A value is required." };
       }
-      return gateway.supplySecret(botId, botId, actor, body.text);
+      return gateway.supplySecret(botId, actor, body.text);
     }),
   );
 
   /**
    * A person's own mouse and keyboard.
    *
-   * Not through the policy gateway, and not audited per keystroke, see the note on `humanInput` in
-   * client.ts. The takeover is the audited event; what the person typed during it is deliberately
-   * unrecorded, because the reason a takeover exists is to let them enter the thing nothing else
-   * should keep.
+   * Not through the policy decision, and not audited per keystroke. See `ComputerGateway.humanInput`.
+   * The takeover is the audited event; what the person typed during it is deliberately unrecorded,
+   * because the reason a takeover exists is to let them enter the thing nothing else should keep.
    */
   routes.post("/:botId/human/:kind", requireUser, async (context) => {
     const kind = context.req.param("kind");
@@ -299,7 +288,7 @@ export function createComputerRoutes(
   /** The Bot's files. Through the gateway, like every other acting call. */
   routes.post("/:botId/files/list", requireUser, (context) =>
     act(context, (botId, actor, body) =>
-      gateway.listFiles(botId, botId, actor, {
+      gateway.listFiles(botId, actor, {
         ...(typeof body?.path === "string" && body.path.trim()
           ? { path: body.path.trim() }
           : {}),
@@ -312,7 +301,7 @@ export function createComputerRoutes(
       if (typeof body?.path !== "string" || !body.path.trim()) {
         return { error: "A file path is required." };
       }
-      return gateway.readFile(botId, botId, actor, { path: body.path.trim() });
+      return gateway.readFile(botId, actor, { path: body.path.trim() });
     }),
   );
 
@@ -328,7 +317,7 @@ export function createComputerRoutes(
       if (typeof body?.command !== "string" || !body.command.trim()) {
         return { error: "A command is required." };
       }
-      return gateway.runCommand(botId, botId, actor, {
+      return gateway.runCommand(botId, actor, {
         command: body.command,
         ...(typeof body.timeoutMs === "number"
           ? { timeoutMs: body.timeoutMs }
@@ -345,7 +334,7 @@ export function createComputerRoutes(
       if (typeof body?.contents !== "string") {
         return { error: "The contents to write are required." };
       }
-      return gateway.writeFile(botId, botId, actor, {
+      return gateway.writeFile(botId, actor, {
         path: body.path.trim(),
         contents: body.contents,
         append: body.append === true,

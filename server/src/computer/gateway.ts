@@ -18,26 +18,47 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
-import type { ComputerClient } from "./client";
+import { createComputerTransport } from "./client";
+export {
+  ComputerUnavailableError,
+  ElementNotFoundError,
+  NavigationRefusedError,
+  StaleSnapshotError,
+  WorkspaceRefusedError,
+  WorkspaceRequestError,
+} from "./client";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
   type PolicyDecision,
 } from "./policy";
+import type { ComputerProvider } from "./provider";
 import type {
+  ActionResult,
   ClickInput,
+  ComputerStatus,
+  ControlState,
+  HumanInput,
+  HumanInputResult,
   KeyInput,
   ListFilesInput,
+  ListFilesResult,
+  NavigateResult,
   ReadFileInput,
+  ReadFileResult,
   ReadResult,
+  ScreenshotResult,
   ScrollInput,
   SecretRequest,
+  SecretResult,
   SnapshotElement,
   SnapshotResult,
   TypeInput,
   RunCommandInput,
+  RunCommandResult,
   WriteFileInput,
+  WriteFileResult,
 } from "./schema";
 
 export class ActionRefusedError extends Error {
@@ -60,24 +81,111 @@ export type ActionActor = {
 };
 
 export type ComputerGatewayOptions = {
-  /**
-   * The container supervisor, when each Bot has a computer of its own.
-   *
-   * Stop and reset prefer it: a computer that is wedged cannot be asked to stop itself, and that is
-   * exactly the state where a person reaches for the button. Without a supervisor these stay profile
-   * operations performed by the computer itself, which fits the single-computer deployment where
-   * nothing else holds the Docker socket.
-   */
-  supervisor?: {
-    stop(botId: string): Promise<void>;
-    reset(botId: string): Promise<void>;
-    list?(): Promise<{ botId: string; status: string; startedAt?: string }[]>;
-  };
-  client: ComputerClient;
+  provider: ComputerProvider;
   auditStore: AuditStore;
   /** Absent denies everything. See evaluateActionPolicy. */
   policy: () => ActionPolicy | undefined;
+  /** True on a laptop, where browsing private network addresses is required. */
+  allowPrivateHosts?: boolean;
+  /** The secret that agent-computer requires on each request. */
+  token?: string;
+  /** An injectable fetch implementation for focused gateway tests. */
+  fetchImpl?: typeof fetch;
 };
+
+export interface ComputerGateway {
+  readonly provider: ComputerProvider;
+  locate(botId: string): Promise<string>;
+  status(botId: string): Promise<ComputerStatus>;
+  screenshot(botId: string): Promise<ScreenshotResult>;
+  snapshot(botId: string): Promise<SnapshotResult>;
+  read(botId: string): Promise<ReadResult>;
+  navigate(
+    botId: string,
+    actor: ActionActor,
+    url: string,
+  ): Promise<NavigateResult>;
+  click(
+    botId: string,
+    actor: ActionActor,
+    input: ClickInput,
+    signal?: AbortSignal,
+  ): Promise<ActionResult>;
+  type(
+    botId: string,
+    actor: ActionActor,
+    input: TypeInput,
+    signal?: AbortSignal,
+  ): Promise<ActionResult>;
+  key(
+    botId: string,
+    actor: ActionActor,
+    input: KeyInput,
+    signal?: AbortSignal,
+  ): Promise<ActionResult>;
+  scroll(
+    botId: string,
+    actor: ActionActor,
+    input: ScrollInput,
+  ): Promise<ActionResult>;
+  readFile(
+    botId: string,
+    actor: ActionActor,
+    input: ReadFileInput,
+  ): Promise<ReadFileResult>;
+  listFiles(
+    botId: string,
+    actor: ActionActor,
+    input: ListFilesInput,
+  ): Promise<ListFilesResult>;
+  runCommand(
+    botId: string,
+    actor: ActionActor,
+    input: RunCommandInput,
+    signal?: AbortSignal,
+  ): Promise<RunCommandResult>;
+  writeFile(
+    botId: string,
+    actor: ActionActor,
+    input: WriteFileInput,
+  ): Promise<WriteFileResult>;
+  control(botId: string): Promise<ControlState>;
+  requestHelp(
+    botId: string,
+    actor: ActionActor,
+    reason: string,
+  ): Promise<ControlState>;
+  takeControl(botId: string, actor: ActionActor): Promise<ControlState>;
+  releaseControl(botId: string, actor: ActionActor): Promise<ControlState>;
+  requestSecret(
+    botId: string,
+    actor: ActionActor,
+    input: SecretRequest,
+  ): Promise<ControlState>;
+  supplySecret(
+    botId: string,
+    actor: ActionActor,
+    text: string,
+  ): Promise<SecretResult>;
+  humanInput(botId: string, input: HumanInput): Promise<HumanInputResult>;
+  computers(): Promise<{
+    isolation: "per-bot" | "shared";
+    computers: {
+      botId: string;
+      running: boolean;
+      startedAt: string | null;
+      egress?: string | null;
+    }[];
+  }>;
+  stopComputer(
+    botId: string,
+    actor: ActionActor,
+  ): Promise<{ wasRunning: boolean }>;
+  resetComputer(
+    botId: string,
+    actor: ActionActor,
+  ): Promise<{ cleared: boolean }>;
+}
 
 /**
  * The last snapshot the server took, per computer.
@@ -93,23 +201,59 @@ type CachedSnapshot = {
   url: string;
 };
 
-export function createComputerGateway(options: ComputerGatewayOptions) {
-  const { client, auditStore, supervisor } = options;
+export function createComputerGateway(
+  options: ComputerGatewayOptions,
+): ComputerGateway {
+  const { provider, auditStore } = options;
+  const transport = createComputerTransport({
+    ...(options.token ? { token: options.token } : {}),
+    ...(options.allowPrivateHosts !== undefined
+      ? { allowPrivateHosts: options.allowPrivateHosts }
+      : {}),
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
   const snapshots = new Map<string, CachedSnapshot>();
 
-  /**
-   * The computer, addressed as the Bot that is asking.
-   *
-   * Every call goes through this. The Bot's browser, its logins and the proxy its traffic leaves
-   * through are all keyed on this id at the far end, so a call that forgets it lands on the wrong
-   * computer, because there is always a computer to answer.
-   */
-  const as = (botId: string) => client.forBot(botId);
+  function locate(botId: string): Promise<string> {
+    return provider.locate(botId);
+  }
+
+  async function get<T>(
+    botId: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return transport.call<T>(
+      await locate(botId),
+      botId,
+      path,
+      undefined,
+      signal,
+    );
+  }
+
+  async function post<T>(
+    botId: string,
+    path: string,
+    payload: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return transport.post<T>(await locate(botId), botId, path, payload, signal);
+  }
 
   /** Read-only, so it passes straight through. Nothing has changed and there is nothing to decide. */
-  async function snapshot(computerId: string): Promise<SnapshotResult> {
-    const result = await as(computerId).snapshot();
-    snapshots.set(computerId, {
+  async function screenshot(botId: string): Promise<ScreenshotResult> {
+    return get<ScreenshotResult>(botId, "/screenshot");
+  }
+
+  async function snapshot(botId: string): Promise<SnapshotResult> {
+    const result = await transport.call<SnapshotResult>(
+      await locate(botId),
+      botId,
+      "/snapshot",
+      { method: "POST" },
+    );
+    snapshots.set(botId, {
       snapshotId: result.snapshotId,
       url: result.url,
       elements: new Map(
@@ -120,7 +264,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
   }
 
   async function read(botId: string): Promise<ReadResult> {
-    return as(botId).read();
+    return get<ReadResult>(botId, "/read");
   }
 
   /**
@@ -131,11 +275,11 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
    * A deny rule written against a page a Bot has not snapshotted should still refuse it.
    */
   function resolve(
-    computerId: string,
+    botId: string,
     ref: string | undefined,
   ): SnapshotElement | undefined {
     if (!ref) return undefined;
-    return snapshots.get(computerId)?.elements.get(ref);
+    return snapshots.get(botId)?.elements.get(ref);
   }
 
   /**
@@ -146,7 +290,6 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
    * show that sequence.
    */
   async function govern<T>(
-    computerId: string,
     toolName: string,
     botId: string,
     actor: ActionActor,
@@ -163,8 +306,8 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
     run: () => Promise<T>,
   ): Promise<T> {
     const { ref, filePath } = subject;
-    const element = resolve(computerId, ref);
-    const cached = snapshots.get(computerId);
+    const element = resolve(botId, ref);
+    const cached = snapshots.get(botId);
     // For a navigation the relevant page is the one being opened, not the one already loaded. Using
     // the cached URL would mean `page.host == "..."` could never match the destination, which is the
     // only thing a rule about navigation would ever want to say.
@@ -198,7 +341,6 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       toolName,
       botId,
       actor,
-      computerId,
       element,
       ref,
       ...(subject.key ? { key: subject.key } : {}),
@@ -207,7 +349,6 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       pageUrl,
       decision,
     });
-
     if (!decision.forward) {
       throw new ActionRefusedError(decision.reason, decision.matched);
     }
@@ -230,7 +371,6 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         toolName,
         botId,
         actor,
-        computerId,
         element,
         ref,
         filePath,
@@ -249,8 +389,15 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
   }
 
   return {
+    provider,
+    locate,
+    screenshot,
     snapshot,
     read,
+
+    status(botId: string): Promise<ComputerStatus> {
+      return provider.status(botId);
+    },
 
     /**
      * Handovers, recorded but not policy-gated.
@@ -261,28 +408,23 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * row and do not ask. What IS recorded is the period: who, when, and why the Bot asked, the fact
      * an investigator wants is that a human drove this browser between two times.
      */
-    async requestHelp(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      reason: string,
-    ) {
-      const state = await as(botId).requestControl(reason);
+    async requestHelp(botId: string, actor: ActionActor, reason: string) {
+      const state = await post<ControlState>(botId, "/control/request", {
+        reason,
+      });
       await writeControlEvent(auditStore, "computer.help_requested", {
         botId,
         actor,
-        computerId,
         reason,
       });
       return state;
     },
 
-    async takeControl(computerId: string, botId: string, actor: ActionActor) {
-      const state = await as(botId).takeControl();
+    async takeControl(botId: string, actor: ActionActor) {
+      const state = await post<ControlState>(botId, "/control/take", {});
       await writeControlEvent(auditStore, "computer.control_taken", {
         botId,
         actor,
-        computerId,
         // Carried onto the row so the trail says what the person was handed, not merely that they
         // took over.
         reason: state.reason,
@@ -290,49 +432,31 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       return state;
     },
 
-    async releaseControl(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-    ) {
-      const state = await as(botId).releaseControl();
+    async releaseControl(botId: string, actor: ActionActor) {
+      const state = await post<ControlState>(botId, "/control/release", {});
       await writeControlEvent(auditStore, "computer.control_released", {
         botId,
         actor,
-        computerId,
       });
       return state;
     },
 
-    control(botId: string) {
-      return as(botId).control();
+    control(botId: string): Promise<ControlState> {
+      return get<ControlState>(botId, "/control");
     },
 
-    /**
-     * The computers, for the admin surface. A read, so no audit row.
-     *
-     * With a supervisor the list is the containers, because that is what a computer is: one per
-     * Bot, each with its own storage, and the page's Stop and Reset act on those. Asking a single
-     * computer for its profiles would answer for the one shared browser instead, which is the older
-     * arrangement and no longer what an administrator is looking at.
-     */
+    /** Return every computer that the configured provider owns. */
     async computers() {
-      if (supervisor?.list) {
-        const running = await supervisor.list();
-        return {
-          // Said, not inferred. Without a supervisor every Bot shares one browser, which looks
-          // identical on every screen to each having its own, same cards, same trail, same
-          // screenshots. A reader has to be told which deployment they are looking at.
-          isolation: "per-bot" as const,
-          computers: running.map((computer) => ({
-            botId: computer.botId,
-            running: computer.status === "running",
-            startedAt: computer.startedAt ?? null,
-            egress: null,
-          })),
-        };
-      }
-      return { isolation: "shared" as const, ...(await client.computers()) };
+      const computers = await provider.list();
+      return {
+        isolation: provider.isolation,
+        computers: computers.map((computer) => ({
+          botId: computer.botId,
+          running: computer.status === "running",
+          startedAt: computer.startedAt ?? null,
+          egress: computer.egress,
+        })),
+      };
     },
 
     /**
@@ -343,25 +467,14 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * fact worth having, and a trail that only records effective actions cannot tell you what somebody
      * tried.
      */
-    async stopComputer(computerId: string, botId: string, actor: ActionActor) {
-      if (supervisor) {
-        await supervisor.stop(botId);
-        await writeControlEvent(auditStore, "computer.stopped", {
-          botId,
-          actor,
-          computerId,
-          reason: "the container was stopped",
-        });
-        return { wasRunning: true };
-      }
-      const result = await as(botId).stopComputer();
+    async stopComputer(botId: string, actor: ActionActor) {
+      const result = await provider.stop(botId);
       await writeControlEvent(auditStore, "computer.stopped", {
         botId,
         actor,
-        computerId,
         reason: result.wasRunning
-          ? "browser was running"
-          : "no browser was running",
+          ? "the computer was stopped"
+          : "the computer was already stopped",
       });
       return result;
     },
@@ -372,23 +485,15 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * The most destructive button we have. Every login the Bot had is gone and no undo exists, so the
      * row is written whatever happens next.
      */
-    async resetComputer(computerId: string, botId: string, actor: ActionActor) {
-      if (supervisor) {
-        await supervisor.reset(botId);
-        await writeControlEvent(auditStore, "computer.reset", {
-          botId,
-          actor,
-          computerId,
-          reason: "the container and its profile were deleted",
-        });
-        return { cleared: true };
-      }
-      const result = await as(botId).resetComputer();
+    async resetComputer(botId: string, actor: ActionActor) {
+      const result = await provider.reset(botId);
+      snapshots.delete(botId);
       await writeControlEvent(auditStore, "computer.reset", {
         botId,
         actor,
-        computerId,
-        reason: "every saved login on this computer was deleted",
+        reason: result.cleared
+          ? "the computer and its saved state were deleted"
+          : "no saved state was present to delete",
       });
       return result;
     },
@@ -402,129 +507,104 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * keyboard to the page, and is not on this one.
      */
     async requestSecret(
-      computerId: string,
       botId: string,
       actor: ActionActor,
       input: SecretRequest,
     ) {
-      const state = await as(botId).requestSecret(input);
+      const state = await post<ControlState>(botId, "/control/secret", input);
       await writeControlEvent(auditStore, "computer.secret_requested", {
         botId,
         actor,
-        computerId,
         reason: `${input.label} (into ${input.ref})`,
       });
       return state;
     },
 
-    async supplySecret(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      text: string,
-    ) {
-      const result = await as(botId).supplySecret(text);
+    async supplySecret(botId: string, actor: ActionActor, text: string) {
+      const result = await post<SecretResult>(botId, "/human/secret", { text });
       await writeControlEvent(auditStore, "computer.secret_supplied", {
         botId,
         actor,
-        computerId,
         // Length, never content. Enough to show something real was entered.
         reason: `${result.characters} characters`,
       });
       return result;
     },
 
-    humanInput(
+    async humanInput(
       botId: string,
-      input: Parameters<ComputerClient["humanInput"]>[0],
-    ) {
-      return as(botId).humanInput(input);
+      input: HumanInput,
+    ): Promise<HumanInputResult> {
+      const { kind, ...payload } = input;
+      return post<HumanInputResult>(botId, `/human/${kind}`, payload);
     },
 
     /**
      * Opening a page, through the gateway so it lands in the audit trail.
      *
-     * The client still applies its target guard, which is the floor that holds under every policy,
-     * including one that permits everything. This adds the record and the per-Bot decision on top: a
-     * refusal by either produces a row, so navigation denials are visible in the audit trail.
+     * The transport applies its target guard before it sends a request. This is
+     * the minimum rule that applies even when the action policy permits the URL.
      */
-    navigate(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      url: string,
-    ) {
+    navigate(botId: string, actor: ActionActor, url: string) {
       return govern(
-        computerId,
         "computer_navigate",
         botId,
         actor,
         { targetUrl: url },
-        () => as(botId).navigate(url),
+        async () => transport.navigate(await locate(botId), botId, url),
       );
     },
 
     click(
-      computerId: string,
       botId: string,
       actor: ActionActor,
       input: ClickInput,
       signal?: AbortSignal,
     ) {
       return govern(
-        computerId,
         "computer_click",
         botId,
         actor,
         { ref: input.ref, ...(signal ? { signal } : {}) },
-        () => as(botId).click(input, signal),
+        () => post<ActionResult>(botId, "/click", input, signal),
       );
     },
 
     type(
-      computerId: string,
       botId: string,
       actor: ActionActor,
       input: TypeInput,
       signal?: AbortSignal,
     ) {
       return govern(
-        computerId,
         "computer_type",
         botId,
         actor,
         { ref: input.ref, ...(signal ? { signal } : {}) },
-        () => as(botId).type(input, signal),
+        () => post<ActionResult>(botId, "/type", input, signal),
       );
     },
 
     key(
-      computerId: string,
       botId: string,
       actor: ActionActor,
       input: KeyInput,
       signal?: AbortSignal,
     ) {
       return govern(
-        computerId,
         "computer_key",
         botId,
         actor,
         // The key is part of the subject, so a rule can tell Enter from a letter. Form submission can
         // happen through a keypress as well as a click, so the policy context carries the key.
         { ref: input.ref, key: input.key, ...(signal ? { signal } : {}) },
-        () => as(botId).key(input, signal),
+        () => post<ActionResult>(botId, "/key", input, signal),
       );
     },
 
-    scroll(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      input: ScrollInput,
-    ) {
-      return govern(computerId, "computer_scroll", botId, actor, {}, () =>
-        as(botId).scroll(input),
+    scroll(botId: string, actor: ActionActor, input: ScrollInput) {
+      return govern("computer_scroll", botId, actor, {}, () =>
+        post<ActionResult>(botId, "/scroll", input),
       );
     },
 
@@ -535,19 +615,13 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * workspace accumulates whatever a Bot has saved across every task it has ever run, so which of
      * those files it may read back is a real question for a deployment to be able to answer.
      */
-    readFile(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      input: ReadFileInput,
-    ) {
+    readFile(botId: string, actor: ActionActor, input: ReadFileInput) {
       return govern(
-        computerId,
         "computer_read_file",
         botId,
         actor,
         { filePath: input.path },
-        () => as(botId).readFile(input),
+        () => post<ReadFileResult>(botId, "/files/read", input),
       );
     },
 
@@ -556,19 +630,13 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * every task it has run is worth being able to restrict. A rule denying a folder hides it from the
      * listing as well as from reads, which is the consistent answer.
      */
-    listFiles(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      input: ListFilesInput,
-    ) {
+    listFiles(botId: string, actor: ActionActor, input: ListFilesInput) {
       return govern(
-        computerId,
         "computer_list_files",
         botId,
         actor,
         { filePath: input.path ?? "." },
-        () => as(botId).listFiles(input),
+        () => post<ListFilesResult>(botId, "/files/list", input),
       );
     },
 
@@ -580,35 +648,27 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * particular commands, and either way the attempt is a row in the trail whether or not it ran.
      */
     runCommand(
-      computerId: string,
       botId: string,
       actor: ActionActor,
       input: RunCommandInput,
       caller?: AbortSignal,
     ) {
       return govern(
-        computerId,
         "computer_run_command",
         botId,
         actor,
         { command: input.command, ...(caller ? { signal: caller } : {}) },
-        () => as(botId).runCommand(input, caller),
+        () => post<RunCommandResult>(botId, "/exec", input, caller),
       );
     },
 
-    writeFile(
-      computerId: string,
-      botId: string,
-      actor: ActionActor,
-      input: WriteFileInput,
-    ) {
+    writeFile(botId: string, actor: ActionActor, input: WriteFileInput) {
       return govern(
-        computerId,
         "computer_write_file",
         botId,
         actor,
         { filePath: input.path },
-        () => as(botId).writeFile(input),
+        () => post<WriteFileResult>(botId, "/files/write", input),
       );
     },
   };
@@ -635,8 +695,6 @@ function describeFile(path: string): {
     extension: dot > 0 ? name.slice(dot + 1).toLowerCase() : "",
   };
 }
-
-export type ComputerGateway = ReturnType<typeof createComputerGateway>;
 
 /**
  * One audit row for one decision.
@@ -696,7 +754,6 @@ async function write(
     toolName: string;
     botId: string;
     actor: ActionActor;
-    computerId: string;
     element: SnapshotElement | undefined;
     ref: string | undefined;
     /** Which key, for a keypress. Recorded because a keypress can act without naming a button. */
@@ -719,7 +776,7 @@ async function write(
         ? "computer.action_allowed"
         : "computer.action_refused",
     targetType: "computer",
-    targetId: entry.computerId,
+    targetId: entry.botId,
     // Only ever a real users row. The audit table has a foreign key to it, so writing the local
     // development actor's id here makes every action fail on a constraint violation instead of being
     // recorded. Who it was is in the payload either way.
@@ -803,14 +860,13 @@ async function writeControlEvent(
   entry: {
     botId: string;
     actor: ActionActor;
-    computerId: string;
     reason?: string;
   },
 ) {
   await recordAuditEvent(auditStore, {
     eventType,
     targetType: "computer",
-    targetId: entry.computerId,
+    targetId: entry.botId,
     ...(entry.actor.userId ? { actorUserId: entry.actor.userId } : {}),
     payload: {
       bot: entry.botId,
