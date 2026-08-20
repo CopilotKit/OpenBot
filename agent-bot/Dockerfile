@@ -3,12 +3,14 @@
 FROM oven/bun:1.3-alpine
 
 WORKDIR /app
-COPY agent-bot/package.json ./agent-bot/
+RUN chown bun:bun /app
+USER bun
+COPY --chown=bun:bun agent-bot/package.json ./agent-bot/
 RUN cd agent-bot && bun install
 
 # Preserve the repo layout so `../../shared/bot-prompt` resolves the same in the image and locally.
-COPY shared ./shared
-COPY agent-bot/src ./agent-bot/src
+COPY --chown=bun:bun shared ./shared
+COPY --chown=bun:bun agent-bot/src ./agent-bot/src
 
 ENV PORT=4200
 EXPOSE 4200
