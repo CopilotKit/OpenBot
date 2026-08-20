@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 
 export type AgentVisibility = "public" | "private";
 
@@ -40,28 +41,19 @@ export const agentKeys = {
 export function agentListQueryOptions(hidden = false) {
   return queryOptions({
     queryKey: agentKeys.list(hidden),
-    queryFn: async (): Promise<AgentProfile[]> => {
-      const response = await fetch(
-        `/api/agents${hidden ? "?hidden=true" : ""}`,
-        {
-          credentials: "include",
-        },
-      );
-      if (!response.ok) throw new Error("Could not load coworkers");
-      return ((await response.json()) as { agents: AgentProfile[] }).agents;
-    },
+    queryFn: (): Promise<AgentProfile[]> =>
+      client(`/api/agents${hidden ? "?hidden=true" : ""}`, "agents", {
+        fallback: "Could not load coworkers",
+      }),
   });
 }
 
 export function agentQueryOptions(agentId: string) {
   return queryOptions({
     queryKey: agentKeys.detail(agentId),
-    queryFn: async (): Promise<AgentProfile> => {
-      const response = await fetch(`/api/agents/${agentId}`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Could not load this coworker");
-      return ((await response.json()) as { agent: AgentProfile }).agent;
-    },
+    queryFn: (): Promise<AgentProfile> =>
+      client(`/api/agents/${agentId}`, "agent", {
+        fallback: "Could not load this coworker",
+      }),
   });
 }

@@ -1,6 +1,6 @@
 ---
 name: openbot-data-access
-description: Governs how the OpenBot browser app reads and writes server data — every read is a queryOptions factory in app/src/lib/<entity>/queries.ts, every write is a mutationOptions factory in app/src/lib/<entity>/mutations.ts, and components consume them through useQuery/useMutation. Use when adding or changing a screen that loads server data, calling a /api/... endpoint from the browser, adding a query key, writing a create/update/delete flow, deciding where a fetch belongs, or reviewing a diff that contains the word fetch under app/src. Don't use for server-side route handlers under server/ (that is not browser code), for form validation schemas (those live in lib/<entity>/form.ts), for page layout and Item rows, or for CopilotKit runtime traffic under lib/copilot/ which is streamed by the runtime rather than fetched.
+description: Governs how the OpenBot browser app reads and writes server data — every request goes through `client` in app/src/lib/client.ts, every read is a queryOptions factory in app/src/lib/<entity>/queries.ts, every write is a mutationOptions factory in app/src/lib/<entity>/mutations.ts, and components consume them through useQuery/useMutation. Use when adding or changing a screen that loads server data, calling a /api/... endpoint from the browser, adding a query key, writing a create/update/delete flow, deciding where a fetch belongs, or reviewing a diff that contains the word fetch under app/src. Don't use for server-side route handlers under server/ (that is not browser code), for form validation schemas (those live in lib/<entity>/form.ts), for page layout and Item rows, or for CopilotKit runtime traffic under lib/copilot/ which is streamed by the runtime rather than fetched.
 ---
 
 # OpenBot Data Access
@@ -20,11 +20,27 @@ than fetching.
 Every entity the browser knows about owns a directory under `app/src/lib/`:
 
 ```
-app/src/lib/<entity>/
-  queries.ts     # read types, key factory, queryOptions factories
-  mutations.ts   # input type, request helper, mutationOptions factories
-  form.ts        # zod schema (a different skill's territory)
+app/src/lib/
+  client.ts      # the only fetch in the app
+  <entity>/
+    queries.ts   # read types, key factory, queryOptions factories
+    mutations.ts # input type, mutationOptions factories
+    form.ts      # zod schema (a different skill's territory)
 ```
+
+`client.ts` owns the transport: credentials, the JSON content type, body serialisation, and turning a
+failed status into an `Error` carrying the server's own message. It owns nothing about meaning — the
+envelope key and the sentence a person reads stay at the call site, because those are facts about one
+endpoint rather than about requests in general.
+
+```ts
+client<T>(path, key, options?): Promise<T>    // parsed, and `key` unwrapped
+client(path, options?): Promise<Response>     // for a caller that only needed it to work
+tryClient(path, options?): Promise<Response>  // never throws; the status is the answer
+```
+
+`options` is `{ method?, body?, fallback?, signal? }`. `body` is serialised by the client, which is
+also what sets the content type.
 
 There are twelve of these today — `agents`, `audit`, `auth`, `channels`, `components`,
 `connectors`, `credentials`, `package`, `plugins`, `sandboxed`, and so on. They all look the same on
@@ -64,35 +80,39 @@ before writing a new one.
 6. Export a factory function returning `queryOptions({ queryKey, queryFn })`, named
    `<subject>QueryOptions`. Existing spellings: `agentListQueryOptions`, `agentQueryOptions`,
    `agentComponentsQueryOptions`, `activePackageQueryOptions`.
-7. Inside `queryFn`: `fetch` with `credentials: "include"`, check `response.ok`, throw an
-   `Error` with a sentence a person could read, and **unwrap the envelope** so the caller receives
-   the payload rather than the wrapper:
+7. Inside `queryFn`, call `client` with the path, the envelope key, and a `fallback` sentence. It
+   sends the credentials, checks the status, raises the server's message when there is one, and
+   unwraps the key so the caller receives the payload rather than the wrapper:
 
    ```ts
-   if (!response.ok) throw new Error("Could not load coworkers");
-   return ((await response.json()) as { agents: AgentProfile[] }).agents;
+   queryFn: (): Promise<AgentProfile[]> =>
+     client("/api/agents", "agents", { fallback: "Could not load coworkers" }),
    ```
 
-8. Annotate the `queryFn` return type explicitly (`async (): Promise<AgentProfile[]>`). It is what
-   makes the unwrap type-safe.
+   Where the whole body is the payload, omit the key and read it: `(await client(path, { fallback
+   })).json()`. Where a failed status is an *answer* rather than an error — a refused component call,
+   a 401 that means "not signed in" — use `tryClient` and read the status.
+
+8. Annotate the `queryFn` return type explicitly (`(): Promise<AgentProfile[]>`). `client` is generic
+   in its payload, so the annotation is what fixes what the key unwraps to.
 
 ### Procedure 2: Add a write
 
 1. Create or open `app/src/lib/<entity>/mutations.ts`.
 2. Declare the input type as `<Entity>Input` — the shape the API accepts, which is not the form's
    shape. Mapping between them is `form.ts`'s job (`agentInputFrom`).
-3. If the file will hold more than one write, add a single module-private request helper that owns
-   `credentials`, headers, and error extraction. `agentRequest` in `lib/agents/mutations.ts` is the
-   model. Error extraction surfaces **the server's** message, because that is the one naming the
-   field or the permission that failed:
+3. Call `client`. Do **not** write a per-entity request helper — `agentRequest`,
+   `componentRequest` and two others each owned a private copy of the same credentials, headers and
+   error extraction, and one of the four had quietly dropped the extraction. `client` owns it now:
 
    ```ts
-   const message = await response
-     .json()
-     .then((body: { error?: string }) => body.error)
-     .catch(() => undefined);
-   throw new Error(message ?? "Coworker operation failed");
+   mutationFn: (input: AgentInput): Promise<AgentProfile> =>
+     client("/api/agents", "agent", { method: "POST", body: input, fallback: FALLBACK }),
    ```
+
+   Where the write returns nothing a caller needs, omit the key and `await client(path, { ... })`.
+   Keep one `const FALLBACK` per file rather than repeating the sentence: the reader of the failure
+   cares which entity failed, and within one file that never changes.
 
 4. Export one factory per write, named `<verb><Entity>MutationOptions(queryClient)`, returning
    `mutationOptions({ mutationFn, onSuccess })`. Existing spellings: `createAgentMutationOptions`,
@@ -199,7 +219,10 @@ before writing a new one.
 
 | Signal | What it means | Do instead |
 |--------|---------------|------------|
-| `fetch(` in a file under `components/` or `routes/` | The read has no key, so nothing can invalidate it | Move it into `lib/<entity>/queries.ts` behind a `queryOptions` factory |
+| `fetch(` anywhere but `lib/client.ts` | Either the read has no key and nothing can invalidate it, or the transport has been rewritten by hand | Move it into `lib/<entity>/` behind a factory, and call `client` |
+| A module-private `<entity>Request` helper | Superseded. Four of these existed and one had lost its `body.error` extraction | Call `client` |
+| `client` on an endpoint whose refusal is an answer | Turns the boundary working into an exception the caller has to catch | `tryClient`, and read the status |
+| A `fallback` sentence repeated on every write in a file | The reader cares which entity failed, and that does not change within a file | One `const FALLBACK` per file |
 | `<PageEmpty>Loading …</PageEmpty>`, a spinner, or a `Skeleton` while a query is pending | OpenBot uses no loading placeholder; the flicker costs more than the reassurance buys | Return `null` from the pending branch |
 | The pending branch deleted rather than returning `null` | The empty-state sentence shows for the length of the fetch, asserting something false | Keep the branch, first in the chain, returning `null` |
 | `const queryClient = useQueryClient()` | A hook call and a local binding for an object that is one import away, and unavailable outside a component | `import { queryClient } from "@/query-client"` |
@@ -208,18 +231,20 @@ before writing a new one.
 | `queryClient.setQueryData(...)` after a mutation | Guesses at server-derived fields; wrong the moment the server adds a rule | `invalidateQueries({ queryKey: <entity>Keys.all })` |
 | A component computing `user.role === "admin" && thing.ownerId === user.id` | Duplicates an authorization rule that the server already decided | Render the server's flag (`canManage`, `mine`) |
 | A read type carrying a token, key, or `plaintext` | Secrets are write-only in OpenBot | Expose `hasAuth: boolean` or a `revokedAt` timestamp |
-| `catch { throw new Error("Something went wrong") }` | Discards the server's message, which is the one naming the field that failed | Extract `body.error` and fall back to a specific sentence |
-| A `fetch` without `credentials: "include"` | The session cookie is not sent; it fails as a 401 that reads like a bug | Add it; every request in this app is authenticated |
+| A hand-written `body.error` extraction | `client` already does it, and did it more consistently than the four copies did | Pass `fallback` and let it raise |
 | `queryFn` returning `{ agents: [...] }` | Leaks the transport envelope into every component | Unwrap in the `queryFn`; components see the array |
 | A second `<entity>Keys` object, or keys defined in `mutations.ts` | Two sources of truth for one cache namespace | One factory per entity, in `queries.ts`; `mutations.ts` imports it |
 
 ## Error Handling
 
-- **A 401 in a `queryFn`**: check `credentials: "include"` first. If present, the session expired —
-  the `_authed` guard handles the redirect on the next navigation. Do not add per-query redirect
-  logic.
-- **The server returns no `error` field**: keep the `?? "…"` fallback sentence and name the entity
-  in it ("Could not load coworkers"). Do not print a status code to a person.
+- **A 401 in a `queryFn`**: `client` sends the credentials, so a 401 means the session expired — the
+  `_authed` guard handles the redirect on the next navigation. Do not add per-query redirect logic.
+  The one place a 401 is expected is `currentUserQueryOptions`, which uses `tryClient` because not
+  being signed in is an answer there rather than a failure.
+- **The server returns no `error` field**: `client` falls back to the `fallback` option. Name the
+  entity in it ("Could not load coworkers"). Do not print a status code to a person.
+- **A refusal arrives as a thrown `Error` instead of a value**: the call site used `client` where it
+  needed `tryClient`. The gateway declining is the product working, not a fault.
 - **An invalidation does not refresh the list**: the key at the call site does not match the key the
   mutation invalidated. Both must come from the same `<entity>Keys` factory. Check for an inline key
   array before anything else.

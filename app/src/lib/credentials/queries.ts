@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 
 export type CredentialStatus = {
   id: string;
@@ -18,12 +19,9 @@ export function credentialListQueryOptions() {
   return queryOptions({
     queryKey: credentialKeys.list(),
     queryFn: async (): Promise<CredentialStatus[]> => {
-      const response = await fetch("/api/admin/credentials", {
-        credentials: "include",
+      return client("/api/admin/credentials", "credentials", {
+        fallback: "Could not load credentials",
       });
-      if (!response.ok) throw new Error("Could not load credentials");
-      return ((await response.json()) as { credentials: CredentialStatus[] })
-        .credentials;
     },
   });
 }

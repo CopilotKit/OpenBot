@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 
 /**
  * A channel as the browser sees it.
@@ -35,12 +36,9 @@ export function channelListQueryOptions() {
   return queryOptions({
     queryKey: channelKeys.list(),
     queryFn: async (): Promise<ChannelSummary[]> => {
-      const response = await fetch("/api/channels", {
-        credentials: "include",
+      return client("/api/channels", "channels", {
+        fallback: "Could not load channels",
       });
-      if (!response.ok) throw new Error("Could not load channels");
-      return ((await response.json()) as { channels: ChannelSummary[] })
-        .channels;
     },
   });
 }
@@ -49,11 +47,9 @@ export function channelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: channelKeys.detail(channelId),
     queryFn: async (): Promise<AgentChannel> => {
-      const response = await fetch(`/api/channels/${channelId}`, {
-        credentials: "include",
+      return client(`/api/channels/${channelId}`, "channel", {
+        fallback: "Could not load this channel",
       });
-      if (!response.ok) throw new Error("Could not load this channel");
-      return ((await response.json()) as { channel: AgentChannel }).channel;
     },
   });
 }

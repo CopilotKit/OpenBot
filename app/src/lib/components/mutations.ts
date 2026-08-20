@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 import { componentKeys } from "./queries";
 
 /**
@@ -8,26 +9,9 @@ import { componentKeys } from "./queries";
  * Every one of these is a decision the server records and may refuse, so none of them patch the
  * cache — the list is invalidated and the screen re-reads whatever was actually decided.
  */
-async function componentRequest(
-  path: string,
-  init: { method: string; body?: unknown },
-): Promise<Response> {
-  const response = await fetch(path, {
-    method: init.method,
-    credentials: "include",
-    headers: init.body ? { "content-type": "application/json" } : undefined,
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
-  if (!response.ok) {
-    // The server's message is the useful one: it names the field or the permission that failed.
-    const message = await response
-      .json()
-      .then((body: { error?: string }) => body.error)
-      .catch(() => undefined);
-    throw new Error(message ?? "Component operation failed");
-  }
-  return response;
-}
+
+/** The sentence for every write here, for the rare case the server sends none of its own. */
+const FALLBACK = "Component operation failed";
 
 /** Server-derived fields are invalidated instead of patched by hand. */
 function invalidateComponents(queryClient: QueryClient) {
@@ -53,13 +37,14 @@ export function setComponentGrantMutationOptions(queryClient: QueryClient) {
       granted: boolean;
     }) => {
       await (variables.granted
-        ? componentRequest(`${componentPath(variables.name)}/grants`, {
+        ? client(`${componentPath(variables.name)}/grants`, {
             method: "POST",
             body: { agentId: variables.agentId },
+            fallback: FALLBACK,
           })
-        : componentRequest(
+        : client(
             `${componentPath(variables.name)}/grants/${encodeURIComponent(variables.agentId)}`,
-            { method: "DELETE" },
+            { method: "DELETE", fallback: FALLBACK },
           ));
     },
     onSuccess: () => invalidateComponents(queryClient),
@@ -75,13 +60,14 @@ export function setComponentFunctionMutationOptions(queryClient: QueryClient) {
       granted: boolean;
     }) => {
       await (variables.granted
-        ? componentRequest(`${componentPath(variables.name)}/functions`, {
+        ? client(`${componentPath(variables.name)}/functions`, {
             method: "POST",
             body: { function: variables.functionName },
+            fallback: FALLBACK,
           })
-        : componentRequest(
+        : client(
             `${componentPath(variables.name)}/functions/${encodeURIComponent(variables.functionName)}`,
-            { method: "DELETE" },
+            { method: "DELETE", fallback: FALLBACK },
           ));
     },
     onSuccess: () => invalidateComponents(queryClient),
@@ -92,9 +78,10 @@ export function setComponentFunctionMutationOptions(queryClient: QueryClient) {
 export function setComponentPublishedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { name: string; published: boolean }) => {
-      await componentRequest(`${componentPath(variables.name)}/publication`, {
+      await client(`${componentPath(variables.name)}/publication`, {
         method: "POST",
         body: { published: variables.published },
+        fallback: FALLBACK,
       });
     },
     onSuccess: () => invalidateComponents(queryClient),
@@ -108,9 +95,10 @@ export function setComponentPublishedMutationOptions(queryClient: QueryClient) {
 export function saveComponentDraftMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { name: string; description: string }) => {
-      await componentRequest(`${componentPath(variables.name)}/draft`, {
+      await client(`${componentPath(variables.name)}/draft`, {
         method: "PUT",
         body: { description: variables.description },
+        fallback: FALLBACK,
       });
     },
     onSuccess: () => invalidateComponents(queryClient),
