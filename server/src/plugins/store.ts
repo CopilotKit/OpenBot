@@ -920,6 +920,12 @@ export function createPluginStore(options: PluginStoreOptions) {
         bot: { id: input.botId },
         actor: { id: input.actorId },
         page: { url: "", host: "" },
+        // One, for the same reason as the empty strings, and with a cost worth naming: repetition is
+        // counted by the computer gateway, and nothing counts a Bot calling the same MCP tool over
+        // and over. A rule about repetition is therefore false here rather than unevaluable, which
+        // keeps a browser rule from refusing every tool call, and leaves a Bot looping through
+        // somebody else's server as a gap this deployment cannot yet see.
+        repeat: { count: 1 },
         element: { ref: "", role: "", name: "", type: "" },
         key: "",
         submit: false,

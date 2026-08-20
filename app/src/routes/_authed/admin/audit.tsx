@@ -50,6 +50,12 @@ const FILTERS = [
     label: "Asked a person",
     search: "?eventType=approval.requested,approval.granted,approval.denied",
   },
+  {
+    // Its own filter rather than a place in "Blocked". A Bot repeating itself has not been stopped by
+    // anything, and putting it beside the refusals would make the refusals look less real.
+    label: "Going in circles",
+    search: "?eventType=computer.action_repeated",
+  },
 ] as const;
 
 function AuditPage() {
@@ -179,6 +185,10 @@ function Row({
               </span>
             ) : null}
           </span>
+        ) : typeof payload.fingerprint === "string" ? (
+          // A repeat row has no element and no file of its own: what it is about is the call, which
+          // the fingerprint names in full.
+          <span className="font-mono text-xs">{payload.fingerprint}</span>
         ) : typeof payload.file === "string" ? (
           <span className="font-mono text-xs">{payload.file}</span>
         ) : typeof element === "object" && element?.name ? (
@@ -237,6 +247,12 @@ function Row({
           <div className="mt-0.5 text-xs text-muted-foreground">
             {payload.reason}
             <span className="italic">, reported by the Bot itself</span>
+          </div>
+        ) : null}
+        {event.eventType === "computer.action_repeated" &&
+        typeof payload.count === "number" ? (
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {payload.count} times within a few minutes
           </div>
         ) : null}
         {failed && typeof payload.failure === "string" ? (
@@ -300,6 +316,8 @@ const DECISIONS: Record<string, string> = {
   "computer.secret_supplied": "A person supplied a secret",
   "computer.reset": "The computer was reset",
   "computer.stopped": "A person pressed stop",
+  // Not "Blocked". Nothing refused this; the Bot did the same thing again and the trail is saying so.
+  "computer.action_repeated": "The Bot repeated itself",
   "approval.requested": "The boundary asked a person",
   "approval.granted": "A person allowed it",
   "approval.denied": "A person declined it",

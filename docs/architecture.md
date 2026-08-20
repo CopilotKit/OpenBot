@@ -57,6 +57,15 @@ Policy rules can inspect:
 - `submit`, true when a type call will press Enter when it has finished
 - `file.path`, `file.name`, `file.extension`
 - `mcp.server`, `mcp.tool`, `mcp.effect`
+- `repeat.count`
+
+`repeat.count` is how many times that Bot has just made that exact call, counting the one being
+decided. The gateway keys it on the tool plus the ref, key, file path, or target URL, over a sliding
+window that defaults to three minutes and is set by `COMPUTER_REPEAT_WINDOW_MS`. Crossing 3, 10, or
+25 writes one `computer.action_repeated` row each; the detector itself never refuses anything, so
+`repeat.count >= 10` in `deny` is what stops a Bot going in circles. The count is held in memory by
+the process that served the call, so two API replicas split it, and it covers the browser and the
+workspace only: a call to another server's tools over MCP always reports one.
 
 Rules use CEL expressions plus case-insensitive `contains()` and `matches()`.
 Rules are evaluated in three lists, in order: `deny`, then `ask`, then `allow`.

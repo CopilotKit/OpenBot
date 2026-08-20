@@ -6,5 +6,11 @@ export {
   type CommandOption,
   type ComposerDraft,
 } from "./draft";
+export {
+  type QueueAction,
+  type QueuedMessage,
+  type QueueTransition,
+  reduceQueue,
+} from "./queue";
 export { PLACEHOLDER_COMMANDS } from "./sources";
 export { type AgentOption, toAgentOptions } from "./triggers";
