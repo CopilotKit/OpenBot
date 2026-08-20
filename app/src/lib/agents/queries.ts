@@ -20,7 +20,7 @@ export type AgentProfile = {
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
   /**
-   * Whether this teammate holds a credential for calling tools back.
+   * Whether this coworker holds a credential for calling tools back.
    *
    * A boolean, because the token is readable exactly once: in the response that issued it. The
    * surface needs this only to decide between offering "generate" and "rotate".

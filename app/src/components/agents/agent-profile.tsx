@@ -144,7 +144,7 @@ export function AgentProfile({ agentId }: { agentId: string }) {
       )}
 
       {/*
-       * Only for a teammate that runs somewhere else, and only for somebody who may change it.
+       * Only for a coworker that runs somewhere else, and only for somebody who may change it.
        * The Bot in the box has no endpoint and nothing to authenticate as.
        */}
       {!isEditing && profile.endpoint && profile.canManage ? (

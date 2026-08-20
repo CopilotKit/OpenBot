@@ -7,16 +7,16 @@ import {
 } from "@/lib/agents/mutations";
 
 /**
- * The credential this teammate presents when it calls a tool back.
+ * The credential this coworker presents when it calls a tool back.
  *
- * Only for a teammate that runs somewhere else. The Bot in the box has no endpoint and nothing to
+ * Only for a coworker that runs somewhere else. The Bot in the box has no endpoint and nothing to
  * authenticate as, and offering it a token would imply otherwise.
  *
  * Shown once, and said plainly. This deployment keeps a hash, so there is no screen that can show the
  * token again: an operator who loses it rotates, and rotating retires the old one, which is also how a
  * leak is handled.
  *
- * A teammate with no token can still hold a conversation. What it cannot do is reach anything outside
+ * A coworker with no token can still hold a conversation. What it cannot do is reach anything outside
  * one, which is the right default for a URL somebody pasted.
  */
 export function CallbackTokenPanel({
@@ -42,8 +42,8 @@ export function CallbackTokenPanel({
 
       <p className="text-muted-foreground text-sm">
         {hasToken
-          ? "This teammate holds a credential, so it can use the tools it has been granted. Rotating replaces it, and the old one stops working straight away."
-          : "This teammate has no credential, so it can hold a conversation but cannot use any tool it has been granted. Generate one and put it in that agent's configuration."}
+          ? "This coworker holds a credential, so it can use the tools it has been granted. Rotating replaces it, and the old one stops working straight away."
+          : "This coworker has no credential, so it can hold a conversation but cannot use any tool it has been granted. Generate one and put it in that agent's configuration."}
       </p>
 
       {token ? (

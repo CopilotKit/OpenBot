@@ -22,7 +22,7 @@ describe("an agent's callback token", () => {
 
   test("does not accept something that is not one of ours", () => {
     expect(looksLikeCallbackToken("Bearer hunter2")).toBe(false);
-    expect(looksLikeCallbackToken("okai_agt_")).toBe(false);
+    expect(looksLikeCallbackToken("obot_agt_")).toBe(false);
   });
 
   test("matches only its own hash", () => {

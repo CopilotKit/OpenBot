@@ -22,7 +22,7 @@ import { sign, verify } from "../auth/signed-value";
  */
 
 /** Recognisable on sight, so a leaked one can be found in a log or by a secret scanner. */
-const TOKEN_PREFIX = "okai_agt_";
+const TOKEN_PREFIX = "obot_agt_";
 
 /**
  * Long enough that guessing is not a strategy.
