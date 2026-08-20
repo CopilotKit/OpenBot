@@ -53,6 +53,14 @@ const store = createPluginStore({
   credentials: {
     // No credential is ever read in these tests, because every call is refused before the vault.
     readSecret: async () => null,
+    // Nor written. Loud rather than absent: a call reaching either of these would mean this file had
+    // started exercising something it does not claim to, and a silent no-op would hide that.
+    create: async () => {
+      throw new Error("this suite does not write credentials");
+    },
+    revoke: async () => {
+      throw new Error("this suite does not revoke credentials");
+    },
   },
   encryptionKey: "x".repeat(44),
   policy: () => policy,

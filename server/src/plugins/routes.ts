@@ -2,7 +2,16 @@ import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
-import { CATALOGUE } from "./catalogue";
+import { CATALOGUE, catalogueEntry } from "./catalogue";
+import {
+  authorizationUrlFor,
+  challengeFor,
+  createVerifier,
+  readConnectState,
+  redeemAuthorizationCode,
+  redirectUriFor,
+  signConnectState,
+} from "./oauth";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
@@ -30,6 +39,14 @@ import {
 export function createPluginRoutes(
   store: PluginStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+  /**
+   * What the connect flow needs that the store does not hold: the key its state is signed with, and
+   * the address a vendor sends people back to.
+   *
+   * Optional, so a deployment with no public URL configured simply cannot start a connect flow and
+   * says so, rather than building a redirect URI out of a request header and failing at the vendor.
+   */
+  connect?: { encryptionKey: string; publicUrl: string | undefined },
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -159,6 +176,50 @@ export function createPluginRoutes(
     }
   });
 
+  /**
+   * Register this deployment's OAuth client for a server reached as the person asking.
+   *
+   * Its own endpoint rather than a field on `POST /servers`, because it is a separate act with a
+   * separate lifetime: a client is rotated without the server being re-added, and re-adding a server
+   * should not require re-typing a client. An administrator's, like everything else that decides what
+   * a Bot can reach.
+   */
+  routes.post("/servers/:id/oauth-client", requireUser, async (context) => {
+    const forbidden = requireAdmin(context);
+    if (forbidden) return forbidden;
+
+    const body = (await context.req.json().catch(() => null)) as {
+      clientId?: string;
+      clientSecret?: string;
+    } | null;
+    if (!body?.clientId?.trim() || !body.clientSecret?.trim()) {
+      return context.json(
+        { error: "A client id and a client secret are both required." },
+        400,
+      );
+    }
+
+    try {
+      await store.registerOAuthClient({
+        serverId: context.req.param("id"),
+        client: {
+          clientId: body.clientId.trim(),
+          clientSecret: body.clientSecret.trim(),
+        },
+        by: actorEmail(context),
+      });
+      return context.json({ ok: true });
+    } catch (error) {
+      if (
+        error instanceof CatalogueEntryUnknownError ||
+        error instanceof CustomServerRefusedError
+      ) {
+        return context.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
+  });
+
   routes.delete("/servers/:id", requireUser, async (context) => {
     const forbidden = requireAdmin(context);
     if (forbidden) return forbidden;
@@ -188,6 +249,125 @@ export function createPluginRoutes(
       }
       throw error;
     }
+  });
+
+  /**
+   * Where a person's own connections are, and how to start a new one.
+   *
+   * Not admin-only, and that is the point: an administrator registers the connector once, and then
+   * everybody connects their own account. Somebody can only ever see or start their own.
+   */
+  routes.get("/connections", requireUser, async (context) => {
+    const connections = await store.connectionsFor(context.var.actor.id);
+    return context.json({
+      connections,
+      // Shown to an administrator so they can register the client at the vendor with the exact value
+      // this deployment will send. Null means the deployment has no public URL and cannot connect.
+      redirectUri: connect?.publicUrl
+        ? redirectUriFor(connect.publicUrl)
+        : null,
+    });
+  });
+
+  /**
+   * Begin connecting one person's own account.
+   *
+   * Answers with a URL rather than redirecting, so the browser decides when to leave the page. The
+   * state is minted here, from the session, and the person's identity never comes off the callback.
+   */
+  routes.post("/servers/:id/connect", requireUser, async (context) => {
+    const serverId = context.req.param("id");
+    if (!connect?.publicUrl) {
+      return context.json(
+        {
+          error:
+            "This deployment has no public URL configured, so it cannot complete a consent flow. Set OPENBOT_PUBLIC_URL.",
+        },
+        503,
+      );
+    }
+
+    const entry = catalogueEntry(serverId);
+    if (entry?.auth.kind !== "user-oauth") {
+      return context.json(
+        { error: `${serverId} is not connected as an individual person.` },
+        400,
+      );
+    }
+
+    const client = await store.oauthClientFor(serverId);
+    if (!client) {
+      return context.json(
+        {
+          error: `${entry.title} has no OAuth client registered yet. An administrator has to add one first.`,
+        },
+        409,
+      );
+    }
+
+    const verifier = createVerifier();
+    return context.json({
+      authorizationUrl: authorizationUrlFor({
+        auth: entry.auth,
+        clientId: client.clientId,
+        redirectUri: redirectUriFor(connect.publicUrl),
+        state: signConnectState(
+          { userId: context.var.actor.id, serverId, verifier },
+          connect.encryptionKey,
+        ),
+        codeChallenge: challengeFor(verifier),
+      }),
+    });
+  });
+
+  /**
+   * Where the vendor sends somebody back.
+   *
+   * Deliberately not behind `requireUser`. The person arrives on a redirect from another company's
+   * server, and whose connection this is comes from the signed state rather than from whatever
+   * session the browser happens to be carrying — which is what stops a callback delivered to the
+   * wrong browser from attaching one person's Google account to another person's row.
+   *
+   * Every failure ends the same way: back at Settings with a word about what happened, and nothing
+   * written. There is no useful distinction here for the person between a forged state and an expired
+   * one, and spelling out which is which tells anybody probing this endpoint how far they got.
+   */
+  routes.get("/oauth/callback", async (context) => {
+    const settings = "/settings";
+    const failed = `${settings}?connected=failed`;
+    if (!connect?.publicUrl) return context.redirect(failed);
+
+    const code = context.req.query("code");
+    const state = readConnectState(
+      context.req.query("state") ?? "",
+      connect.encryptionKey,
+    );
+    if (!code || !state) return context.redirect(failed);
+
+    const entry = catalogueEntry(state.serverId);
+    if (entry?.auth.kind !== "user-oauth") return context.redirect(failed);
+
+    const client = await store.oauthClientFor(state.serverId);
+    if (!client) return context.redirect(failed);
+
+    const grant = await redeemAuthorizationCode({
+      tokenUrl: entry.auth.tokenUrl,
+      clientId: client.clientId,
+      clientSecret: client.clientSecret,
+      code,
+      redirectUri: redirectUriFor(connect.publicUrl),
+      verifier: state.verifier,
+    });
+    if (!grant) return context.redirect(failed);
+
+    await store.recordConnection({
+      serverId: state.serverId,
+      userId: state.userId,
+      refreshToken: grant.refreshToken,
+      scope: grant.scope,
+    });
+
+    return context.redirect(`${settings}?connected=${state.serverId}`);
   });
 
   /**

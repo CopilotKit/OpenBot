@@ -90,6 +90,14 @@ const store = createPluginStore({
         .where(eq(credentials.id, id));
       return row ?? null;
     },
+    // This suite writes its rows directly, so that what is under test is the selection rather than
+    // the connect flow. Loud rather than absent, so a call here shows up instead of passing quietly.
+    create: async () => {
+      throw new Error("this suite writes credentials directly");
+    },
+    revoke: async () => {
+      throw new Error("this suite does not revoke credentials");
+    },
   },
   encryptionKey: ENCRYPTION_KEY,
   policy: () => policy,

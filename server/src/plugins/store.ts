@@ -7,7 +7,9 @@ import {
 } from "../computer/policy";
 import {
   type CredentialSecretReader,
+  type CredentialStore,
   decryptCredentialForUse,
+  encryptSecret,
 } from "../credentials";
 import type { Database } from "../db/client";
 import {
@@ -220,7 +222,15 @@ export type AccessToken = { accessToken: string; expiresInSeconds?: number };
 export type PluginStoreOptions = {
   database: Database;
   auditStore: AuditStore;
-  credentials: CredentialSecretReader;
+  /**
+   * The vault, read and write.
+   *
+   * Writing is here rather than left to the browser posting `/api/admin/credentials` first. An OAuth
+   * client belongs to the server registration and a refresh token belongs to a connection, so both
+   * are written by the code that owns those acts — otherwise the first of two calls can succeed and
+   * the second fail, leaving a secret in the vault that nothing points at and nobody knows to revoke.
+   */
+  credentials: CredentialSecretReader & CredentialStore;
   encryptionKey: string;
   /** Read at call time, never captured, so a policy changed a moment ago applies to this call. */
   policy: () => ActionPolicy;
@@ -903,6 +913,188 @@ export function createPluginStore(options: PluginStoreOptions) {
           instructions: row.instructions,
         })),
       };
+    },
+
+    /**
+     * Register the deployment's OAuth client for a `user-oauth` server.
+     *
+     * Both halves go into one encrypted value, so a single vault read yields a usable client. The id
+     * is copied into `metadata` as well — it is not a secret, and a page listing what the deployment
+     * holds should be able to name it without decrypting anything.
+     *
+     * Replacing a client revokes the previous one rather than orphaning it, so "what does this
+     * deployment hold" keeps having one answer per server. Nobody's connection breaks: a refresh
+     * token is the person's, and it is the client that is being rotated underneath it.
+     */
+    async registerOAuthClient(input: {
+      serverId: string;
+      client: OAuthClient;
+      by: string;
+    }): Promise<void> {
+      const { row, entry } = await requireServer(input.serverId);
+      if (entry?.auth.kind !== "user-oauth") {
+        throw new CustomServerRefusedError(
+          `${input.serverId} is not reached with an OAuth client.`,
+        );
+      }
+
+      const stored = await credentials.create({
+        kind: "mcp_oauth_client",
+        provider: input.serverId,
+        keyId: `oauth-client-${input.serverId}`,
+        metadata: { server: input.serverId, clientId: input.client.clientId },
+        encryptedValue: await encryptSecret(
+          encryptionKey,
+          JSON.stringify(input.client),
+        ),
+      });
+
+      await database
+        .update(mcpServers)
+        .set({ credentialId: stored.id, updatedAt: new Date() })
+        .where(eq(mcpServers.id, input.serverId));
+
+      if (row.credentialId) {
+        await credentials.revoke(row.credentialId).catch(() => {
+          // A previous client that cannot be revoked must not stop the new one taking effect. The
+          // pointer has already moved, so nothing reaches the old row; it is a tidiness failure.
+        });
+      }
+
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.oauth_client_registered",
+        targetType: "mcp_server",
+        targetId: input.serverId,
+        payload: {
+          actor: input.by,
+          server: input.serverId,
+          // The id, never the secret. It identifies the client an administrator registered, which is
+          // what somebody reading the trail needs in order to check it against the vendor's console.
+          clientId: input.client.clientId,
+          replaced: row.credentialId !== null,
+        },
+      });
+    },
+
+    /**
+     * Record that one person connected their own account to one server.
+     *
+     * Upserted on the pair, so reconnecting replaces rather than accumulating. The credential the row
+     * used to point at is revoked in the same breath: a refresh token nothing points at is still a
+     * live grant at the vendor, and leaving it behind would mean a person who reconnected had two
+     * valid grants and could only ever see one of them to disconnect it.
+     */
+    async recordConnection(input: {
+      serverId: string;
+      userId: string;
+      refreshToken: string;
+      scope: string;
+    }): Promise<void> {
+      const [previous] = await database
+        .select({ credentialId: mcpUserCredentials.credentialId })
+        .from(mcpUserCredentials)
+        .where(
+          and(
+            eq(mcpUserCredentials.serverId, input.serverId),
+            eq(mcpUserCredentials.userId, input.userId),
+          ),
+        )
+        .limit(1);
+
+      const stored = await credentials.create({
+        kind: "mcp_user_token",
+        provider: input.serverId,
+        keyId: input.userId,
+        metadata: { server: input.serverId, scope: input.scope },
+        encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
+      });
+
+      await database
+        .insert(mcpUserCredentials)
+        .values({
+          serverId: input.serverId,
+          userId: input.userId,
+          credentialId: stored.id,
+          scope: input.scope,
+        })
+        .onConflictDoUpdate({
+          target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
+          set: {
+            credentialId: stored.id,
+            scope: input.scope,
+            updatedAt: new Date(),
+          },
+        });
+
+      if (previous) {
+        await credentials.revoke(previous.credentialId).catch(() => {
+          // Same reasoning as above: the pointer has moved, so this is tidiness rather than access.
+        });
+      }
+
+      await recordAuditEvent(auditStore, {
+        eventType: "mcp.account_connected",
+        targetType: "mcp_server",
+        targetId: input.serverId,
+        payload: {
+          actor: input.userId,
+          server: input.serverId,
+          // What the vendor granted, so a later refusal for want of a scope can be explained.
+          scope: input.scope,
+          reconnected: previous !== undefined,
+        },
+      });
+    },
+
+    /**
+     * The deployment's OAuth client for a server, or null if none is registered.
+     *
+     * Decrypted, because both halves are needed: the id to build a consent URL and the secret to
+     * redeem the code it comes back with. Held for the length of one request, like every other
+     * secret this module reads.
+     */
+    async oauthClientFor(serverId: string): Promise<OAuthClient | null> {
+      const [row] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId))
+        .limit(1);
+      if (!row?.credentialId) return null;
+
+      try {
+        return JSON.parse(
+          await decryptCredentialForUse(
+            encryptionKey,
+            credentials,
+            row.credentialId,
+          ),
+        ) as OAuthClient;
+      } catch {
+        // A revoked, missing or unreadable client is the same as none for every caller: there is
+        // nothing to send anybody to consent with, and the answer is for an administrator to add one.
+        return null;
+      }
+    },
+
+    /** Which `user-oauth` servers this person has connected, for their own settings page. */
+    async connectionsFor(
+      userId: string,
+    ): Promise<{ serverId: string; scope: string; connectedAt: string }[]> {
+      const rows = await database
+        .select({
+          serverId: mcpUserCredentials.serverId,
+          scope: mcpUserCredentials.scope,
+          connectedAt: mcpUserCredentials.connectedAt,
+        })
+        .from(mcpUserCredentials)
+        .where(eq(mcpUserCredentials.userId, userId))
+        .orderBy(asc(mcpUserCredentials.serverId));
+
+      return rows.map((row) => ({
+        serverId: row.serverId,
+        scope: row.scope,
+        connectedAt: iso(row.connectedAt) ?? "",
+      }));
     },
 
     /**

@@ -57,6 +57,23 @@ export const auditEventTypes = [
   "agent.stream_stalled",
   "mcp.call_succeeded",
   "mcp.call_rejected",
+  /*
+   * An administrator registered this deployment's OAuth client with a vendor.
+   *
+   * Recorded because it decides what every subsequent consent screen belongs to. If a client is
+   * replaced, every person who connects afterwards is granting access to a different registration,
+   * and the row is what lets somebody reading the trail line a connection up against the client that
+   * was current when it was made. The client id, never the secret.
+   */
+  "mcp.oauth_client_registered",
+  /*
+   * One person connected their own account to one server.
+   *
+   * Its own row rather than a credential event, because what happened is not "a secret was stored" —
+   * it is a person granting a deployment continuing access to their documents, which is the kind of
+   * thing they are entitled to see a record of. Carries the scope the vendor actually granted.
+   */
+  "mcp.account_connected",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
   // only what was permitted cannot answer whether the Bot tried.
   "computer.action_allowed",

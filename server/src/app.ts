@@ -306,7 +306,13 @@ export function createApp(
   }
 
   if (pluginStore) {
-    app.route("/api/plugins", createPluginRoutes(pluginStore, requireUser));
+    app.route(
+      "/api/plugins",
+      createPluginRoutes(pluginStore, requireUser, {
+        encryptionKey: config.keyEncryptionKey,
+        publicUrl: config.publicUrl,
+      }),
+    );
   }
 
   /*

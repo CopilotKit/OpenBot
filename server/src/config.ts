@@ -32,6 +32,19 @@ export type DeploymentConfig = {
    * packages but not a copy of one running alongside the original. See channels/thread-identity.ts.
    */
   deploymentId: string | undefined;
+  /**
+   * Where this deployment is reached from outside, with no trailing slash.
+   *
+   * Needed because an OAuth redirect URI has to match what an administrator registered with the
+   * vendor character for character, and it is shown on the Plugins page for them to copy. Built from
+   * configuration rather than from the incoming request: a redirect URI assembled out of a Host
+   * header is one an attacker has a say in.
+   *
+   * `OPENBOT_PUBLIC_URL` when set, otherwise `BETTER_AUTH_URL`, which is the same public address for
+   * every deployment that has real sign-in. Undefined only where neither exists, which is a local
+   * deployment running without authentication — and there is nothing to connect there anyway.
+   */
+  publicUrl: string | undefined;
   tenantPackageDirectory: string;
   runtime: RuntimeCapabilities;
   /**
@@ -364,6 +377,7 @@ export function loadConfig(
   environment: Environment = process.env,
 ): DeploymentConfig {
   const google = oauthClient(environment, "GOOGLE");
+  const auth = authConfig(environment, google);
 
   return {
     databaseUrl: required(environment, "DATABASE_URL"),
@@ -373,12 +387,15 @@ export function loadConfig(
       "MANAGED_AGENT_AG_UI_URL",
     ),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
+    publicUrl: (
+      optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
+    )?.replace(/\/+$/, ""),
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
     oauth: { google },
-    auth: authConfig(environment, google),
+    auth,
     devNoAuth: devAuthEnabled(environment),
     computer: computerConfig(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
