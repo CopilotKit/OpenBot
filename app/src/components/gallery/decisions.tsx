@@ -254,6 +254,23 @@ export const GALLERY: GalleryComponent[] = [
       "Ask the person to approve or decline something, and WAIT for their answer. Use before doing anything you cannot undo, spending money, sending a message, changing a record. You are given their decision and any reason they typed.",
     parameters: ApprovalCardProps,
     Component: ApprovalCard as GalleryComponent["Component"],
+    /*
+     * Previewed mid-decision rather than decided: the controls ARE the component, and a recorded
+     * answer shows none of them. Admin draws previews inert, so `respond` is never reachable.
+     */
+    preview: {
+      status: "executing",
+      args: {
+        title: "Pay invoice 4417",
+        summary:
+          "Northwind Traders, due on 28 March. Paying it now settles the account.",
+        details: [
+          { label: "Amount", value: "£12,480.00" },
+          { label: "Account", value: "Operations current" },
+        ],
+      },
+      respond: async () => {},
+    },
   },
   {
     name: "askChoice",
@@ -263,5 +280,25 @@ export const GALLERY: GalleryComponent[] = [
       "Ask the person to pick one of several options, and WAIT for their answer. Use when you cannot sensibly guess which one they meant. You are given the id of the option they chose.",
     parameters: ChoiceCardProps,
     Component: ChoiceCard as GalleryComponent["Component"],
+    preview: {
+      status: "executing",
+      args: {
+        title: "Which mailbox should the reply come from?",
+        summary: "Both are yours; the reply is otherwise identical.",
+        options: [
+          {
+            id: "support",
+            label: "Support",
+            description: "Threaded with the original ticket",
+          },
+          {
+            id: "personal",
+            label: "Your own address",
+            description: "Starts a new conversation",
+          },
+        ],
+      },
+      respond: async () => {},
+    },
   },
 ];

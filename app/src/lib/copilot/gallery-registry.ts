@@ -41,6 +41,18 @@ export type GalleryComponent = {
    * that data is decided before the model is told the component is on screen.
    */
   reads?: (args: Record<string, unknown>) => readonly string[];
+  /**
+   * Props for drawing this component in Admin, passed to `Component` verbatim.
+   *
+   * Not the tool arguments: a chart is called with its arguments flat, while a `decision` is handed
+   * a `status`/`args`/`respond` contract, and a preview has to satisfy whichever one it is. Nor is
+   * it derivable from `parameters` — these components say so when they have nothing to draw, so a
+   * synthesised value renders an empty state rather than an example.
+   *
+   * Omitted by a component that cannot be drawn away from a conversation, which is then shown as an
+   * unpreviewable tile rather than as a component that failed.
+   */
+  preview?: Record<string, unknown>;
 };
 
 /**
@@ -91,3 +103,17 @@ export function galleryManifest(): GalleryManifestEntry[] {
 export const RENDERABLE_NAMES: ReadonlySet<string> = new Set(
   GALLERY_COMPONENTS.map((component) => component.name),
 );
+
+const BY_NAME: ReadonlyMap<string, GalleryComponent> = new Map(
+  GALLERY_COMPONENTS.map((component) => [component.name, component]),
+);
+
+/**
+ * The component behind a catalogue name, or `undefined` where this build has no renderer for it.
+ *
+ * A deployment's component rows are governance state and outlive the build that drew them, so a
+ * name arriving from the server is not a promise that anything here can draw it.
+ */
+export function galleryComponent(name: string): GalleryComponent | undefined {
+  return BY_NAME.get(name);
+}

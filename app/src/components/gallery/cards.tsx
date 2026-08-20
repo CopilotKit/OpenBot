@@ -231,6 +231,17 @@ export const GALLERY: GalleryComponent[] = [
     parameters: RecordCardProps,
     Component: RecordCard as GalleryComponent["Component"],
     confirmation: "The record is now on screen for the person.",
+    preview: {
+      title: "Invoice 4417",
+      subtitle: "Northwind Traders",
+      status: "Approved",
+      statusTone: "positive",
+      fields: [
+        { label: "Amount", value: "£12,480.00" },
+        { label: "Raised", value: "14 March 2026" },
+        { label: "Owner", value: "Priya Raman" },
+      ],
+    },
   },
   {
     name: "showMetrics",
@@ -241,6 +252,25 @@ export const GALLERY: GalleryComponent[] = [
     parameters: MetricsCardProps,
     Component: MetricsCard as GalleryComponent["Component"],
     confirmation: "The figures are now on screen for the person.",
+    preview: {
+      title: "This quarter",
+      caption: "Against the one before it.",
+      metrics: [
+        {
+          label: "Revenue",
+          value: "£1.24m",
+          change: "+12% on last quarter",
+          changeTone: "positive",
+        },
+        {
+          label: "Churn",
+          value: "2.1%",
+          change: "+0.4pp",
+          changeTone: "caution",
+        },
+        { label: "Accounts", value: "1,308", change: "+64" },
+      ],
+    },
   },
   {
     name: "showChecklist",
@@ -251,6 +281,21 @@ export const GALLERY: GalleryComponent[] = [
     parameters: ChecklistCardProps,
     Component: ChecklistCard as GalleryComponent["Component"],
     confirmation: "The checklist is now on screen for the person.",
+    preview: {
+      title: "Before the migration",
+      caption: "Three of five done.",
+      items: [
+        { text: "Freeze schema changes", done: true },
+        { text: "Take a verified backup", done: true },
+        { text: "Notify the support team", done: true },
+        {
+          text: "Dry run against staging",
+          done: false,
+          note: "waiting on Ops",
+        },
+        { text: "Agree the rollback window", done: false },
+      ],
+    },
   },
   {
     name: "showNotice",
@@ -261,5 +306,14 @@ export const GALLERY: GalleryComponent[] = [
     parameters: NoticeCardProps,
     Component: NoticeCard as GalleryComponent["Component"],
     confirmation: "The notice is now on screen for the person.",
+    preview: {
+      title: "The export stopped early",
+      body: "Two of the eleven files could not be read, so the archive is incomplete. Nothing was deleted.",
+      tone: "caution",
+      points: [
+        "march-ledger.csv was locked by another process",
+        "april-ledger.csv is larger than the 2GB limit",
+      ],
+    },
   },
 ];

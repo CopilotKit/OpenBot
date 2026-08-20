@@ -396,6 +396,13 @@ export function ProgressChartCard({
 }
 
 /** Gallery component registration kept beside the chart implementations. */
+/**
+ * Preview data is deliberately plausible rather than pretty: the Admin grid is where somebody
+ * decides whether to publish a component, and a shape that only reads well on invented numbers is
+ * worth seeing before a Bot draws it in front of a customer.
+ */
+const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
+
 export const GALLERY: GalleryComponent[] = [
   {
     name: "showBarChart",
@@ -406,6 +413,16 @@ export const GALLERY: GalleryComponent[] = [
     parameters: BarChartProps,
     Component: BarChartCard as GalleryComponent["Component"],
     confirmation: "The bar chart is now on screen for the person.",
+    preview: {
+      title: "Spend by team",
+      caption: "The current quarter, in thousands.",
+      points: [
+        { label: "Support", value: 128 },
+        { label: "Platform", value: 96 },
+        { label: "Sales", value: 74 },
+        { label: "Research", value: 41 },
+      ],
+    },
   },
   {
     name: "showPieChart",
@@ -416,6 +433,16 @@ export const GALLERY: GalleryComponent[] = [
     parameters: PieChartProps,
     Component: PieChartCard as GalleryComponent["Component"],
     confirmation: "The donut chart is now on screen for the person.",
+    preview: {
+      title: "Where the budget went",
+      caption: "Every line sums to the whole.",
+      points: [
+        { label: "Salaries", value: 62 },
+        { label: "Hosting", value: 21 },
+        { label: "Tooling", value: 11 },
+        { label: "Travel", value: 6 },
+      ],
+    },
   },
   {
     name: "showLineChart",
@@ -426,6 +453,15 @@ export const GALLERY: GalleryComponent[] = [
     parameters: LineChartProps,
     Component: LineChartCard as GalleryComponent["Component"],
     confirmation: "The line chart is now on screen for the person.",
+    preview: {
+      title: "Tickets over the year",
+      caption: "Opened against closed.",
+      labels: QUARTERS,
+      series: [
+        { name: "Opened", values: [180, 220, 260, 240] },
+        { name: "Closed", values: [150, 210, 250, 265] },
+      ],
+    },
   },
   {
     name: "showAreaChart",
@@ -436,6 +472,12 @@ export const GALLERY: GalleryComponent[] = [
     parameters: AreaChartProps,
     Component: AreaChartCard as GalleryComponent["Component"],
     confirmation: "The area chart is now on screen for the person.",
+    preview: {
+      title: "Storage used",
+      caption: "Gigabytes, accumulating.",
+      labels: QUARTERS,
+      series: [{ name: "Used", values: [120, 260, 430, 610] }],
+    },
   },
   {
     name: "showProgress",
@@ -446,5 +488,14 @@ export const GALLERY: GalleryComponent[] = [
     parameters: ProgressChartProps,
     Component: ProgressChartCard as GalleryComponent["Component"],
     confirmation: "The progress chart is now on screen for the person.",
+    preview: {
+      title: "Migration progress",
+      caption: "Services moved, against the plan.",
+      points: [
+        { label: "Billing", value: 18, target: 18 },
+        { label: "Identity", value: 11, target: 14 },
+        { label: "Reporting", value: 4, target: 12 },
+      ],
+    },
   },
 ];

@@ -56,5 +56,11 @@ export const GALLERY: GalleryComponent[] = [
     parameters: QuoteCardProps,
     Component: QuoteCard as GalleryComponent["Component"],
     confirmation: "The quotation is now on screen for the person.",
+    preview: {
+      quote:
+        "The most damaging phrase in the language is: it's always been done that way.",
+      attribution: "Grace Hopper",
+      context: "Quoted in Computerworld, 1976.",
+    },
   },
 ];
