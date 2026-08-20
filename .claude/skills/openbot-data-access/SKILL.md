@@ -1,6 +1,6 @@
 ---
 name: openbot-data-access
-description: Governs how the OpenBot browser app reads and writes server data — every request goes through `client` in app/src/lib/client.ts, every read is a queryOptions factory in app/src/lib/<entity>/queries.ts, every write is a mutationOptions factory in app/src/lib/<entity>/mutations.ts, and components consume them through useQuery/useMutation. Use when adding or changing a screen that loads server data, calling a /api/... endpoint from the browser, adding a query key, writing a create/update/delete flow, deciding where a fetch belongs, or reviewing a diff that contains the word fetch under app/src. Don't use for server-side route handlers under server/ (that is not browser code), for form validation schemas (those live in lib/<entity>/form.ts), for page layout and Item rows, or for CopilotKit runtime traffic under lib/copilot/ which is streamed by the runtime rather than fetched.
+description: Governs how the OpenBot browser app reads and writes server data — every request goes through `client` in app/src/lib/client.ts, every read is a queryOptions factory in app/src/lib/<entity>/queries.ts, every write is a mutationOptions factory in app/src/lib/<entity>/mutations.ts, and components consume them through useQuery/useMutation. Use when adding or changing a screen that loads server data, calling a /api/... endpoint from the browser, adding a query key, writing a create/update/delete flow, deciding where a fetch belongs, or reviewing a diff that contains the word fetch under app/src. Don't use for server-side route handlers under server/ (that is not browser code), for form validation schemas (those live in lib/<entity>/form.ts), for page layout and Item rows, or or for the AG-UI stream itself, which the runtime carries rather than the client.
 ---
 
 # OpenBot Data Access
@@ -9,11 +9,12 @@ description: Governs how the OpenBot browser app reads and writes server data �
 
 This skill applies to any change under `app/src` that moves data between the browser and the API
 server. It fires on new screens, new endpoints, new query keys, and on any diff that introduces
-`fetch` outside `app/src/lib/<entity>/`.
+`fetch` anywhere but `app/src/lib/client.ts`.
 
-It does not cover server handlers under `server/`, zod form schemas (`lib/<entity>/form.ts`), page
-layout, or the CopilotKit runtime surface under `lib/copilot/`, which streams over AG-UI rather
-than fetching.
+It does not cover server handlers under `server/`, zod form schemas (`lib/<entity>/form.ts`), or page
+layout. It does cover `lib/copilot/`: the conversation itself streams over AG-UI, but the tool calls a
+Bot makes during a turn are ordinary authenticated requests and go through the client like everything
+else.
 
 ## The Shape
 
@@ -40,11 +41,29 @@ tryClient(path, options?): Promise<Response>  // never throws; the status is the
 ```
 
 `options` is `{ method?, body?, fallback?, signal? }`. `body` is serialised by the client, which is
-also what sets the content type.
+also what sets the content type — so a caller passes an object, never a string. Passing
+`JSON.stringify(x)` sends a JSON string of a JSON string, which no endpoint accepts.
 
-There are twelve of these today — `agents`, `audit`, `auth`, `channels`, `components`,
-`connectors`, `credentials`, `package`, `plugins`, `sandboxed`, and so on. They all look the same on
-purpose. `lib/agents/queries.ts` and `lib/agents/mutations.ts` are the reference pair; read them
+### Three kinds of request
+
+Not everything crossing the wire is cached state, and the shape follows from which kind it is.
+
+1. **A cached read** is a `queryOptions` factory in `queries.ts`. It has a key, and something can
+   invalidate it.
+2. **A write somebody asked for** is a `mutationOptions` factory in `mutations.ts`. It invalidates on
+   success.
+3. **Everything else is a plain exported function**, living beside the factories for its entity.
+   A verdict about this moment (`decideComponent`, `testAgentConnection`), a tool call during a
+   Bot's turn (`callPluginTool`, the computer control surface), a frame of a screen, a step inside
+   another write (`storeMcpToken`). These fail closed and return a value rather than throwing,
+   because a refusal is usually the answer. Giving one a cache key would create a key nothing reads
+   and an invalidation nothing triggers.
+
+The third kind still lives under `lib/`. It is not licence to call the server from a component.
+
+There are thirteen of these today — `agents`, `audit`, `auth`, `channels`, `components`, `computers`,
+`connectors`, `credentials`, `package`, `plugins`, `sandboxed`, `skills`, `copilot`. They all look the
+same on purpose. `lib/agents/queries.ts` and `lib/agents/mutations.ts` are the reference pair; read them
 before writing a new one.
 
 **The one rule that matters:** a React component never calls `fetch`. If a component file contains
@@ -222,6 +241,8 @@ before writing a new one.
 | `fetch(` anywhere but `lib/client.ts` | Either the read has no key and nothing can invalidate it, or the transport has been rewritten by hand | Move it into `lib/<entity>/` behind a factory, and call `client` |
 | A module-private `<entity>Request` helper | Superseded. Four of these existed and one had lost its `body.error` extraction | Call `client` |
 | `client` on an endpoint whose refusal is an answer | Turns the boundary working into an exception the caller has to catch | `tryClient`, and read the status |
+| `body: JSON.stringify(x)` at a call site | Double-encoded; the client serialises | Pass the object |
+| A one-shot tool call written as a `mutationOptions` factory | Gets a `queryClient` and an invalidation it has no use for | A plain function beside the factories |
 | A `fallback` sentence repeated on every write in a file | The reader cares which entity failed, and that does not change within a file | One `const FALLBACK` per file |
 | `<PageEmpty>Loading …</PageEmpty>`, a spinner, or a `Skeleton` while a query is pending | OpenBot uses no loading placeholder; the flicker costs more than the reassurance buys | Return `null` from the pending branch |
 | The pending branch deleted rather than returning `null` | The empty-state sentence shows for the length of the fetch, asserting something false | Keep the branch, first in the chain, returning `null` |
@@ -245,6 +266,8 @@ before writing a new one.
   entity in it ("Could not load coworkers"). Do not print a status code to a person.
 - **A refusal arrives as a thrown `Error` instead of a value**: the call site used `client` where it
   needed `tryClient`. The gateway declining is the product working, not a fault.
+- **The server rejects a body it should accept, or reads it as a string**: something stringified
+  before handing it over. `client` serialises; a caller passes the object.
 - **An invalidation does not refresh the list**: the key at the call site does not match the key the
   mutation invalidated. Both must come from the same `<entity>Keys` factory. Check for an inline key
   array before anything else.

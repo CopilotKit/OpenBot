@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { readControl } from "./take-the-wheel";
+import { readControl } from "@/lib/computers/control";
 
 /**
  * Poll closed screens for control/secret prompts so blocked Bots can surface outside the screen.
