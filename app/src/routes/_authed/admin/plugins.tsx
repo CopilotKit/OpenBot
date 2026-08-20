@@ -24,10 +24,19 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { storeMcpToken } from "@/lib/credentials/mutations";
+import {
+  addCuratedServerMutationOptions,
+  addCustomServerMutationOptions,
+  refreshPluginServerMutationOptions,
+  removePluginServerMutationOptions,
+  removeSkillMutationOptions,
+  saveSkillMutationOptions,
+  setPluginGrantMutationOptions,
+} from "@/lib/plugins/mutations";
 import {
   type PluginServer,
   type PluginSkill,
-  pluginKeys,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 
@@ -46,57 +55,57 @@ function PluginsPage() {
   const [tab, setTab] = useState<"catalogue" | "yours" | "skills">("catalogue");
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = () =>
-    queryClient.invalidateQueries({ queryKey: pluginKeys.all });
-
-  const post = async (path: string, body: unknown) => {
-    setError(null);
-    const response = await fetch(`/api/plugins${path}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => null)) as {
-        error?: string;
-      } | null;
-      throw new Error(detail?.error ?? "That did not work.");
-    }
-    return response.json();
-  };
+  /*
+   * Every write on this page reports into the same banner, so they share one failure handler rather
+   * than each growing its own. `refresh` stays because two of them are chains that end in a server
+   * record the catalogue reads back.
+   */
+  const report = { onError: (thrown: Error) => setError(thrown.message) };
+  const setGrant = useMutation({
+    ...setPluginGrantMutationOptions(queryClient),
+    ...report,
+  });
+  const addCurated = useMutation({
+    ...addCuratedServerMutationOptions(queryClient),
+    ...report,
+  });
+  const addCustom = useMutation({
+    ...addCustomServerMutationOptions(queryClient),
+    ...report,
+  });
+  const refreshServer = useMutation({
+    ...refreshPluginServerMutationOptions(queryClient),
+    ...report,
+  });
+  const removeServer = useMutation({
+    ...removePluginServerMutationOptions(queryClient),
+    ...report,
+  });
+  const saveSkill = useMutation({
+    ...saveSkillMutationOptions(queryClient),
+    ...report,
+  });
+  const removeSkill = useMutation({
+    ...removeSkillMutationOptions(queryClient),
+    ...report,
+  });
 
   /**
-   * Store the token as a credential first; plugin server records keep only the credential id.
+   * Adding a server is two writes: the token becomes a credential, then the record refers to it.
+   * Chained here rather than in a factory because only this page knows a token was typed.
    */
-  const storeToken = async (
+  const addServerWithToken = async (
+    run: (credentialId?: string) => void,
     serverId: string,
     token?: string,
-  ): Promise<string | undefined> => {
-    if (!token?.trim()) return undefined;
-    const response = await fetch("/api/admin/credentials", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        kind: "mcp",
-        provider: serverId,
-        keyId: `mcp-${serverId}`,
-        plaintext: token.trim(),
-        metadata: { server: serverId },
-      }),
-    });
-    if (!response.ok) {
-      throw new Error("The token could not be stored.");
+  ) => {
+    setError(null);
+    try {
+      run(await storeMcpToken(serverId, token));
+    } catch (thrown) {
+      setError((thrown as Error).message);
     }
-    return (await response.json())?.credential?.id;
   };
-
-  const mutate = useMutation({
-    mutationFn: async (action: () => Promise<unknown>) => action(),
-    onSuccess: refresh,
-    onError: (thrown: Error) => setError(thrown.message),
-  });
 
   const bots = (agents ?? []).map((agent: { id: string }) => ({
     id: agent.id,
@@ -147,69 +156,53 @@ function PluginsPage() {
               added={new Set(data.servers.map((server) => server.id))}
               items={data.catalogue}
               onAdd={(key, instanceHost, token) =>
-                mutate.mutate(async () => {
-                  const credentialId = await storeToken(key, token);
-                  return post("/servers", { key, instanceHost, credentialId });
-                })
+                void addServerWithToken(
+                  (credentialId) =>
+                    addCurated.mutate({ key, instanceHost, credentialId }),
+                  key,
+                  token,
+                )
               }
               onAddCustom={(input) =>
-                mutate.mutate(async () => {
-                  const credentialId = await storeToken(input.id, input.token);
-                  return post("/servers/custom", { ...input, credentialId });
-                })
+                void addServerWithToken(
+                  (credentialId) =>
+                    addCustom.mutate({ ...input, credentialId }),
+                  input.id,
+                  input.token,
+                )
               }
             />
           ) : tab === "yours" ? (
             <Yours
               bots={bots}
               onGrant={(ref, agentId, held) =>
-                mutate.mutate(() =>
-                  held
-                    ? fetch(
-                        `/api/plugins/grants?kind=mcp&ref=${encodeURIComponent(ref)}&agentId=${encodeURIComponent(agentId)}`,
-                        { method: "DELETE", credentials: "include" },
-                      )
-                    : post("/grants", { kind: "mcp", ref, agentId }),
-                )
+                setGrant.mutate({
+                  agentId,
+                  granted: !held,
+                  kind: "mcp",
+                  ref,
+                })
               }
-              onRefresh={(id) =>
-                mutate.mutate(() => post(`/servers/${id}/refresh`, {}))
-              }
-              onRemove={(id) =>
-                mutate.mutate(() =>
-                  fetch(`/api/plugins/servers/${encodeURIComponent(id)}`, {
-                    method: "DELETE",
-                    credentials: "include",
-                  }),
-                )
-              }
+              onRefresh={(id) => refreshServer.mutate(id)}
+              onRemove={(id) => removeServer.mutate(id)}
               servers={data.servers}
             />
           ) : (
             <Skills
               bots={bots}
               onGrant={(slug, agentId, held) =>
-                mutate.mutate(() =>
-                  held
-                    ? fetch(
-                        `/api/plugins/grants?kind=skill&ref=${encodeURIComponent(slug)}&agentId=${encodeURIComponent(agentId)}`,
-                        { method: "DELETE", credentials: "include" },
-                      )
-                    : post("/grants", { kind: "skill", ref: slug, agentId }),
-                )
+                setGrant.mutate({
+                  agentId,
+                  granted: !held,
+                  kind: "skill",
+                  ref: slug,
+                })
               }
               // Admin-authored skills are deployment-global; personal skills are created elsewhere.
               onInstall={(input) =>
-                mutate.mutate(() => post("/skills", { ...input, global: true }))
+                saveSkill.mutate({ ...input, global: true })
               }
-              onUninstall={(slug) =>
-                mutate.mutate(() =>
-                  fetch(`/api/plugins/skills/${encodeURIComponent(slug)}`, {
-                    method: "DELETE",
-                    credentials: "include",
-                  }),
-                )
-              }
+              onUninstall={(slug) => removeSkill.mutate(slug)}
               skills={data.skills}
             />
           )}

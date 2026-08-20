@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { SkillFields } from "@/components/skills/skill-fields";
-import { pluginKeys } from "@/lib/plugins/queries";
-import { emptySkillForm, type SkillFormValues } from "@/lib/skills/form";
+import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
+import { emptySkillForm } from "@/lib/skills/form";
 
 /**
  * Writing a skill, in the detail panel beside the list.
@@ -14,30 +14,7 @@ export function NewSkill() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const createSkill = useMutation({
-    mutationFn: async (values: SkillFormValues) => {
-      const response = await fetch("/api/plugins/skills", {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      if (!response.ok) {
-        /*
-         * The server's sentence, not one invented here. It refuses for reasons this form cannot
-         * check — a slug somebody else already owns is the common one — and paraphrasing that into
-         * "That did not work" would throw away the only part worth reading.
-         */
-        const body = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(body?.error ?? "The skill could not be saved.");
-      }
-      return response.json();
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
-  });
+  const createSkill = useMutation(saveSkillMutationOptions(queryClient));
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">

@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { SkillAgents } from "@/components/skills/skill-agents";
 import { SkillFields } from "@/components/skills/skill-fields";
-import { pluginKeys, pluginsPageQueryOptions } from "@/lib/plugins/queries";
-import type { SkillFormValues } from "@/lib/skills/form";
+import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
+import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 
 /**
  * Editing a skill, in the same panel that writes one.
@@ -25,25 +25,7 @@ export function EditSkill({ slug }: { slug: string }) {
    */
   const skill = data?.skills.find((candidate) => candidate.slug === slug);
 
-  const saveSkill = useMutation({
-    mutationFn: async (values: SkillFormValues) => {
-      const response = await fetch("/api/plugins/skills", {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(body?.error ?? "The skill could not be saved.");
-      }
-      return response.json();
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
-  });
+  const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
 
   if (!skill) {
     return (

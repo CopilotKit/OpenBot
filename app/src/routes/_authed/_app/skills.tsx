@@ -15,7 +15,8 @@ import { NewSkill } from "@/components/skills/new-skill";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
-import { pluginKeys, pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { removeSkillMutationOptions } from "@/lib/plugins/mutations";
+import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 import {
   Item,
   ItemActions,
@@ -75,21 +76,10 @@ function SkillsPage() {
   const loading = skillsPending || mePending;
   const [error, setError] = useState<string | null>(null);
 
-  const mutate = useMutation({
-    mutationFn: async (run: () => Promise<Response>) => {
-      const response = await run();
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(body?.error ?? "That did not work.");
-      }
-    },
-    onError: (caught: Error) => setError(caught.message),
-    onSuccess: () => {
-      setError(null);
-      void queryClient.invalidateQueries({ queryKey: pluginKeys.all });
-    },
+  const removeSkill = useMutation({
+    ...removeSkillMutationOptions(queryClient),
+    onError: (thrown: Error) => setError(thrown.message),
+    onSuccess: () => setError(null),
   });
 
   /*
@@ -207,17 +197,10 @@ function SkillsPage() {
                              * opened over the wrong row is the ordinary way this goes wrong.
                              */}
                             <DropdownMenuItem
-                              onClick={() =>
-                                mutate.mutate(() =>
-                                  fetch(
-                                    `/api/plugins/skills/${encodeURIComponent(skill.slug)}`,
-                                    {
-                                      method: "DELETE",
-                                      credentials: "include",
-                                    },
-                                  ),
-                                )
-                              }
+                              onClick={() => {
+                                setError(null);
+                                removeSkill.mutate(skill.slug);
+                              }}
                               variant="destructive"
                             >
                               Delete /{skill.slug}
