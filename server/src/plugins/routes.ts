@@ -10,6 +10,7 @@ import {
   readConnectState,
   redeemAuthorizationCode,
   redirectUriFor,
+  settingsUrlFor,
   signConnectState,
 } from "./oauth";
 import {
@@ -46,7 +47,18 @@ export function createPluginRoutes(
    * Optional, so a deployment with no public URL configured simply cannot start a connect flow and
    * says so, rather than building a redirect URI out of a request header and failing at the vendor.
    */
-  connect?: { encryptionKey: string; publicUrl: string | undefined },
+  connect?: {
+    encryptionKey: string;
+    publicUrl: string | undefined;
+    /**
+     * Where the app is, which is not where this API is.
+     *
+     * The callback lands here and has to send the person back to a page. A relative redirect would
+     * put them on this server's origin, which locally is a Vite-less port that serves no pages at
+     * all — so the flow would complete correctly and end on a 404.
+     */
+    appUrl: string | undefined;
+  },
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -345,8 +357,7 @@ export function createPluginRoutes(
    * one, and spelling out which is which tells anybody probing this endpoint how far they got.
    */
   routes.get("/oauth/callback", async (context) => {
-    const settings = "/settings";
-    const failed = `${settings}?connected=failed`;
+    const failed = settingsUrlFor(connect?.appUrl, "failed");
     if (!connect?.publicUrl) return context.redirect(failed);
 
     const code = context.req.query("code");
@@ -379,7 +390,7 @@ export function createPluginRoutes(
       scope: grant.scope,
     });
 
-    return context.redirect(`${settings}?connected=${state.serverId}`);
+    return context.redirect(settingsUrlFor(connect.appUrl, state.serverId));
   });
 
   /**

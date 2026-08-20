@@ -311,6 +311,7 @@ export function createApp(
       createPluginRoutes(pluginStore, requireUser, {
         encryptionKey: config.keyEncryptionKey,
         publicUrl: config.publicUrl,
+        appUrl: config.appUrl,
       }),
     );
   }

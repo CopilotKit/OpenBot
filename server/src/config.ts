@@ -45,6 +45,19 @@ export type DeploymentConfig = {
    * deployment running without authentication — and there is nothing to connect there anyway.
    */
   publicUrl: string | undefined;
+  /**
+   * Where the browser app is served from, with no trailing slash.
+   *
+   * Separate from {@link DeploymentConfig.publicUrl} because they are genuinely two addresses: the
+   * app is a Vite process on its own port locally, and the API is another. An OAuth callback lands on
+   * the API and has to send the person back to a page, so a relative redirect would put them on the
+   * API's origin, where no page exists.
+   *
+   * `OPENBOT_APP_URL` when set, otherwise the first `TRUSTED_ORIGINS` entry, which is already defined
+   * as where the app is served from. Falls back to the API's own public URL, which is right for a
+   * deployment serving both from one origin.
+   */
+  appUrl: string | undefined;
   tenantPackageDirectory: string;
   runtime: RuntimeCapabilities;
   /**
@@ -389,6 +402,12 @@ export function loadConfig(
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     publicUrl: (
       optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
+    )?.replace(/\/+$/, ""),
+    appUrl: (
+      optional(environment, "OPENBOT_APP_URL") ??
+      commaSeparated(environment, "TRUSTED_ORIGINS")[0] ??
+      optional(environment, "OPENBOT_PUBLIC_URL") ??
+      auth?.baseUrl
     )?.replace(/\/+$/, ""),
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",

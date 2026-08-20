@@ -58,6 +58,26 @@ export function redirectUriFor(publicUrl: string): string {
   return `${publicUrl.replace(/\/+$/, "")}${CALLBACK_PATH}`;
 }
 
+/**
+ * Where the callback sends somebody when it is done, succeeded or failed.
+ *
+ * Absolute, on the app's origin, because the callback lands on the API and those are two different
+ * addresses: locally the app is Vite on one port and this server is another. A relative redirect
+ * resolves against this server, which serves no pages, so the flow would complete correctly — grant
+ * stored, everything right — and drop the person on a 404. Nothing about that reads as a connect
+ * failure, which is what makes it worth naming.
+ *
+ * Relative is still correct for a deployment that serves both from one origin, which is the only
+ * case where `appUrl` is absent and the deployment works.
+ */
+export function settingsUrlFor(
+  appUrl: string | undefined,
+  outcome?: string,
+): string {
+  const base = `${appUrl?.replace(/\/+$/, "") ?? ""}/settings`;
+  return outcome ? `${base}?connected=${outcome}` : base;
+}
+
 /** A fresh PKCE verifier: unreserved characters only, comfortably over the 43-character floor. */
 export function createVerifier(): string {
   return randomBytes(48).toString("base64url");

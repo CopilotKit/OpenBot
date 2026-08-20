@@ -6,6 +6,7 @@ import {
   createVerifier,
   readConnectState,
   redirectUriFor,
+  settingsUrlFor,
   signConnectState,
 } from "../src/plugins/oauth";
 
@@ -167,5 +168,41 @@ describe("the address the vendor sends them back to", () => {
     expect(redirectUriFor("https://openbot.example/")).toBe(
       "https://openbot.example/api/plugins/oauth/callback",
     );
+  });
+});
+
+describe("where the callback sends somebody afterwards", () => {
+  /*
+   * The bug this exists to prevent, found by trying to run the thing rather than by reading it.
+   *
+   * The app and the API are two processes on two ports: Vite on 3010, this server on 3001. The
+   * callback lands on the API, so `redirect("/settings")` resolved against the API's origin and ended
+   * on a 404 — after the consent had succeeded and the grant was already stored. Nothing about that
+   * looks like a failure of the connect flow, which is why it needs a test and not a comment.
+   */
+  test("is the app's origin, not the API's", () => {
+    expect(settingsUrlFor("http://localhost:3010")).toBe(
+      "http://localhost:3010/settings",
+    );
+  });
+
+  test("says that it failed, without saying which way", () => {
+    // One outcome for a forged state and for an expired one. Telling them apart tells anybody
+    // probing the endpoint how far they got.
+    expect(settingsUrlFor("http://localhost:3010", "failed")).toBe(
+      "http://localhost:3010/settings?connected=failed",
+    );
+  });
+
+  test("names the server it connected, so the page can confirm which", () => {
+    expect(settingsUrlFor("http://localhost:3010", "google-drive")).toBe(
+      "http://localhost:3010/settings?connected=google-drive",
+    );
+  });
+
+  test("still points somewhere when no app URL is configured", () => {
+    // Relative is wrong on a split-port deployment and right on a single-origin one, which is the
+    // only case where `appUrl` can be absent and the deployment still works.
+    expect(settingsUrlFor(undefined)).toBe("/settings");
   });
 });
