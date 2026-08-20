@@ -138,6 +138,54 @@ describe("credential encryption", () => {
     ).toEqual(["credential.rotated", "credential.revoked"]);
   });
 
+  test("rolls back the new credential when revoke of the previous one fails", async () => {
+    const created: string[] = [];
+    const revoked: string[] = [];
+    const audited: unknown[] = [];
+    const service = {
+      encryptionKey: key,
+      store: {
+        create: async () => {
+          const id = "credential-new";
+          created.push(id);
+          return { id, revokedAt: null };
+        },
+        revoke: async (id: string) => {
+          revoked.push(id);
+          if (id === "credential-old") {
+            throw new Error("Previous credential not found");
+          }
+          return new Date("2026-08-13T12:00:00.000Z");
+        },
+      },
+      auditStore: {
+        insert: async (event: unknown) => {
+          audited.push(event);
+        },
+      },
+    };
+
+    await expect(
+      rotateCredential(service, {
+        previousCredentialId: "credential-old",
+        kind: "model",
+        provider: "openai",
+        keyId: "primary",
+        metadata: {},
+        plaintext: "new-openai-secret",
+        actorUserId: "admin",
+      }),
+    ).rejects.toThrow("Previous credential not found");
+
+    // The rotation failed, so the vault must not hold an unlinked new secret and the
+    // audit trail must not claim a rotation happened.
+    expect(created).toEqual(["credential-new"]);
+    expect(revoked).toContain("credential-new");
+    expect(
+      audited.map((event) => (event as { eventType: string }).eventType),
+    ).not.toContain("credential.rotated");
+  });
+
   test("decrypts only an active credential for server-side use", async () => {
     const encryptedValue = await encryptSecret(key, "connector-secret");
 

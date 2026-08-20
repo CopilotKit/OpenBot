@@ -305,7 +305,15 @@ export async function rotateCredential(
   input: CredentialInput & { previousCredentialId: string },
 ) {
   const credential = await persistCredential(service, input);
-  await service.store.revoke(input.previousCredentialId);
+  try {
+    await service.store.revoke(input.previousCredentialId);
+  } catch (error) {
+    // Roll back the new secret so a failed rotation does not leave an unlinked
+    // active credential in the vault. The audit event is skipped too, so the
+    // trail reflects only rotations that actually happened.
+    await service.store.revoke(credential.id).catch(() => {});
+    throw error;
+  }
 
   await recordAuditEvent(service.auditStore, {
     eventType: "credential.rotated",
