@@ -316,6 +316,27 @@ export function createComputerRoutes(
     }),
   );
 
+  /*
+   * A command on the Bot's computer.
+   *
+   * Same shape as every other acting route: the gateway decides and records, this only shapes the
+   * request. `timeoutMs` is passed through and capped by the computer rather than here, so one place
+   * owns the limit.
+   */
+  routes.post("/:botId/exec", requireUser, (context) =>
+    act(context, (botId, actor, body) => {
+      if (typeof body?.command !== "string" || !body.command.trim()) {
+        return { error: "A command is required." };
+      }
+      return gateway.runCommand(botId, botId, actor, {
+        command: body.command,
+        ...(typeof body.timeoutMs === "number"
+          ? { timeoutMs: body.timeoutMs }
+          : {}),
+      });
+    }),
+  );
+
   routes.post("/:botId/files/write", requireUser, (context) =>
     act(context, (botId, actor, body) => {
       if (typeof body?.path !== "string" || !body.path.trim()) {

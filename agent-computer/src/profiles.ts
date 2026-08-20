@@ -60,11 +60,47 @@ const SINGLETON_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
  * This is obfuscation at rest, not protection. Anything that can read the volume can read the
  * cookies. The volume's own permissions are the security boundary.
  */
+/**
+ * Whether Chromium gets to use its own sandbox.
+ *
+ * OFF BY DEFAULT, AND THAT IS NOT A PREFERENCE. Chromium's sandbox creates user namespaces, and
+ * Docker's default seccomp profile blocks the syscall it needs, so a container that does nothing
+ * special gets `No usable sandbox!` and the browser will not start at all. Verified both ways in
+ * this image: default profile fails, relaxed profile renders.
+ *
+ * TURN IT ON WHERE THE HOST ALLOWS IT. On a VM or self-hosted Docker, run with a Chromium seccomp
+ * profile and set `COMPUTER_SANDBOX=on`. That is strictly better than everything below, because it
+ * is the boundary Chromium itself maintains against the pages it renders.
+ *
+ * WHERE IT CANNOT BE ON. Serverless container platforms do not let you set a seccomp profile or add
+ * capabilities; Fargate restricts `CAP_SYS_ADMIN` explicitly. There the sandbox is unavailable, and
+ * the compensating controls are the ones this image already has, a non-root user, plus gVisor
+ * underneath, which Cloud Run applies to everything by default.
+ *
+ * Said out loud at start-up either way. An operator should not have to read this file to find out
+ * whether the browser rendering the open internet is sandboxed.
+ */
+const SANDBOX_ENABLED = process.env.COMPUTER_SANDBOX === "on";
+
 const LAUNCH_ARGS = [
-  "--no-sandbox",
+  ...(SANDBOX_ENABLED ? [] : ["--no-sandbox"]),
   "--disable-dev-shm-usage",
   "--password-store=basic",
 ];
+
+console.info(
+  JSON.stringify({
+    type: "computer-sandbox",
+    sandbox: SANDBOX_ENABLED ? "on" : "off",
+    ...(SANDBOX_ENABLED
+      ? {
+          note: "Chromium's own sandbox is in use. It will refuse to start if the host does not permit user namespaces.",
+        }
+      : {
+          note: "Chromium runs without its own sandbox, which is the only thing that works under a default container seccomp profile. Set COMPUTER_SANDBOX=on where the host allows it.",
+        }),
+  }),
+);
 
 /**
  * How long to let a closing browser finish writing before moving on.
@@ -160,6 +196,10 @@ export function createProfiles(root: string) {
         const proxy = egressFor(botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
           args: LAUNCH_ARGS,
+          // Playwright adds `--no-sandbox` on its own unless told otherwise, so leaving this out
+          // means the flag above decides nothing and a deployment that asked for the sandbox does
+          // not get one. Verified by reading the launched process arguments, not by trusting either.
+          chromiumSandbox: SANDBOX_ENABLED,
           viewport: VIEWPORT,
           // This process owns shutdown. Playwright's signal handlers kill Chromium immediately on
           // SIGTERM, before pending cookie writes have time to flush.

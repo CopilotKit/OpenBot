@@ -36,6 +36,7 @@ import type {
   SnapshotElement,
   SnapshotResult,
   TypeInput,
+  RunCommandInput,
   WriteFileInput,
 } from "./schema";
 
@@ -154,6 +155,8 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       filePath?: string;
       targetUrl?: string;
       key?: string;
+      /** The command a shell call is about to run, so a rule can be written against it. */
+      command?: string;
       /** The person's Stop, on its way to the browser. See the acting methods below. */
       signal?: AbortSignal;
     },
@@ -187,6 +190,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
           }
         : {}),
       ...(filePath ? { file: describeFile(filePath) } : {}),
+      ...(subject.command ? { command: subject.command } : {}),
     };
 
     const decision = evaluateActionPolicy(options.policy(), context);
@@ -198,6 +202,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       element,
       ref,
       ...(subject.key ? { key: subject.key } : {}),
+      ...(subject.command ? { command: subject.command } : {}),
       filePath,
       pageUrl,
       decision,
@@ -567,6 +572,30 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       );
     },
 
+    /**
+     * A command, judged before it runs.
+     *
+     * The same four steps as a click: resolve, decide, record, act. The policy sees the command
+     * text, so a deployment can refuse a shell outright with `intent == "run_command"` or refuse
+     * particular commands, and either way the attempt is a row in the trail whether or not it ran.
+     */
+    runCommand(
+      computerId: string,
+      botId: string,
+      actor: ActionActor,
+      input: RunCommandInput,
+      caller?: AbortSignal,
+    ) {
+      return govern(
+        computerId,
+        "computer_run_command",
+        botId,
+        actor,
+        { command: input.command, ...(caller ? { signal: caller } : {}) },
+        () => as(botId).runCommand(input, caller),
+      );
+    },
+
     writeFile(
       computerId: string,
       botId: string,
@@ -652,6 +681,8 @@ function intentOf(
       return "read_file";
     case "computer_write_file":
       return "write_file";
+    case "computer_run_command":
+      return "run_command";
     case "computer_list_files":
       return "list_files";
     default:
@@ -673,6 +704,8 @@ async function write(
     filePath: string | undefined;
     pageUrl: string;
     decision: PolicyDecision;
+    /** The command a shell call ran, so the trail says what was run and not merely that something was. */
+    command?: string;
     /** Set only when a permitted action was attempted and did not succeed. */
     failure?: string;
   },
@@ -706,6 +739,14 @@ async function write(
       // The path, never the contents. A Bot writes down what it was told, so a file body is exactly as
       // sensitive as text typed into a form field, and for the same reason it is not put here.
       ...(entry.filePath ? { file: entry.filePath } : {}),
+      /*
+       * The command, in full, and its output never.
+       *
+       * The opposite call from the file body above, deliberately. A command IS the action, so a
+       * trail recording that a Bot "ran something" answers nothing anyone would ask it. Its output
+       * is the file body of this pair, and stays out.
+       */
+      ...(entry.command ? { command: entry.command } : {}),
       element: entry.element
         ? {
             role: entry.element.role,

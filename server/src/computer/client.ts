@@ -19,6 +19,8 @@ import type {
   SecretResult,
   SnapshotResult,
   TypeInput,
+  RunCommandInput,
+  RunCommandResult,
   WriteFileInput,
   WriteFileResult,
 } from "./schema";
@@ -347,6 +349,13 @@ export function createComputerClient(options: ComputerClientOptions) {
        */
       async readFile(input: ReadFileInput): Promise<ReadFileResult> {
         return (await post("/files/read", input)) as ReadFileResult;
+      },
+
+      async runCommand(
+        input: RunCommandInput,
+        caller?: AbortSignal,
+      ): Promise<RunCommandResult> {
+        return (await post("/exec", input, caller)) as RunCommandResult;
       },
 
       async writeFile(input: WriteFileInput): Promise<WriteFileResult> {

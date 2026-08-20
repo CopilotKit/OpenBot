@@ -625,6 +625,50 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    name: "computer_run_command",
+    description:
+      "Run a shell command on your own computer. Use this for anything the browser cannot do: " +
+      "installing a tool you need, processing a file you saved, running a script. The working " +
+      "directory is your workspace, so paths are relative to it and files you write here are the " +
+      "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
+      "truncated from the start, and a command that runs too long is stopped.",
+    parameters: z.object({
+      command: z
+        .string()
+        .describe("The command to run, such as: apt-get install -y jq"),
+    }),
+    handler: async (input: { command: string }) =>
+      callComputer(bot.current, "/exec", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      }),
+    render: ({ args, result, status }) => {
+      const outcome = outcomeOf(result);
+      /*
+       * The command, not its output. A person watching wants to know what their Bot just ran on a
+       * machine holding their logins, and that is the command; the output belongs in the answer the
+       * Bot gives, where the model has already decided which part of it mattered.
+       */
+      return (
+        <ActionLine
+          running={status !== "complete"}
+          label="Ran a command"
+          detail={
+            outcome.refused === true
+              ? String(outcome.reason ?? "")
+              : typeof args?.command === "string"
+                ? args.command
+                : undefined
+          }
+          refused={outcome.refused === true}
+          failed={didNotWork(outcome)}
+        />
+      );
+    },
+  });
+
+  useFrontendTool({
     name: "computer_write_file",
     description:
       "Save a file in your own workspace so you still have it later. Paths are relative to your " +

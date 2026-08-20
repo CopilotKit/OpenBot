@@ -22,6 +22,7 @@ import {
   WorkspaceFileError,
   WorkspacePathError,
 } from "./workspace";
+import { createShell } from "./shell";
 
 /**
  * The Bot's computer: one long-lived browser, reachable over HTTP.
@@ -165,6 +166,9 @@ const workspace = createWorkspace(process.env.WORKSPACE_DIR ?? "/workspace");
  * mounted volume so sign-in state survives the container.
  */
 const profiles = createProfiles(process.env.PROFILES_DIR ?? "/profiles");
+// Rooted in the same workspace the file tools use, so a command and a written file see one
+// directory rather than two.
+const shell = createShell(process.env.WORKSPACE_DIR ?? "/workspace");
 
 /**
  * The id normally arrives as a header on every request. This is the fallback for a caller that has no
@@ -742,6 +746,39 @@ serve<StreamData>({
         return json(
           { error: describe(error, "The folder could not be listed.") },
           fileStatus(error),
+        );
+      }
+    }
+
+    /*
+     * A command on this computer.
+     *
+     * Nothing here decides whether it may run: the gateway already asked the deployment's policy and
+     * wrote the audit row before this was called. Refusing again here would be a second, quieter
+     * policy nobody configured.
+     */
+    if (url.pathname === "/exec" && request.method === "POST") {
+      const body = (await request.json().catch(() => null)) as {
+        command?: unknown;
+        timeoutMs?: unknown;
+      } | null;
+      if (typeof body?.command !== "string" || !body.command.trim()) {
+        return json({ error: "A command is required." }, 400);
+      }
+      try {
+        return json(
+          await shell.run({
+            command: body.command,
+            ...(typeof body.timeoutMs === "number"
+              ? { timeoutMs: body.timeoutMs }
+              : {}),
+            signal: request.signal,
+          }),
+        );
+      } catch (error) {
+        return json(
+          { error: describe(error, "The command could not be run.") },
+          500,
         );
       }
     }
