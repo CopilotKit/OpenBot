@@ -45,6 +45,68 @@ describe("navigation targets", () => {
     }
   });
 
+  // The same destinations written the other ways a URL can carry them. Chromium resolves every one
+  // of these to the address the tests above refuse, so a floor that only matches dotted quads and
+  // exact names is a floor with a door in it.
+  test.each([
+    [
+      "http://[::ffff:169.254.169.254]/latest/meta-data/",
+      "IPv4-mapped metadata",
+    ],
+    ["http://[fd00:ec2::254]/latest/meta-data/", "AWS metadata over IPv6"],
+    ["http://metadata.google.internal./", "metadata name with a trailing dot"],
+    [
+      "http://[64:ff9b::169.254.169.254]/latest/meta-data/",
+      "metadata behind the NAT64 prefix",
+    ],
+    [
+      "http://[::169.254.169.254]/latest/meta-data/",
+      "metadata as an IPv4-compatible address",
+    ],
+  ])("refuses %s (%s) even with private hosts allowed", (url) => {
+    for (const allowPrivateHosts of [false, true]) {
+      const verdict = checkNavigationTarget(url, { allowPrivateHosts });
+
+      expect(verdict.allowed).toBe(false);
+      expect(verdict.allowed === false && verdict.reason).toContain(
+        "cloud credentials",
+      );
+    }
+  });
+
+  test.each([
+    ["http://[::ffff:127.0.0.1]/", "IPv4-mapped loopback"],
+    ["http://[::ffff:10.0.0.5]/", "IPv4-mapped RFC1918"],
+    ["http://[fe80::1]/", "link-local IPv6"],
+    ["http://[fc00::1]/", "unique local IPv6"],
+    ["http://[0:0:0:0:0:0:0:1]/", "IPv6 loopback written out in full"],
+  ])("refuses %s (%s)", (url) => {
+    const verdict = checkNavigationTarget(url);
+
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.allowed === false && verdict.reason).toContain(
+      "inside this deployment's own network",
+    );
+  });
+
+  // The opt-in still means what it says for these forms: a laptop deployment browsing its own
+  // services over IPv6 is the case it exists for.
+  test("allows IPv6 private addresses when the deployment opts in", () => {
+    expect(
+      checkNavigationTarget("http://[::ffff:127.0.0.1]:3000/", {
+        allowPrivateHosts: true,
+      }).allowed,
+    ).toBe(true);
+  });
+
+  // Public IPv6 is most of the internet. Refusing it to be safe would be its own outage.
+  test("allows ordinary public IPv6", () => {
+    expect(checkNavigationTarget("http://[2606:4700::1111]/").allowed).toBe(
+      true,
+    );
+    expect(checkNavigationTarget("https://example.com./").allowed).toBe(true);
+  });
+
   test("refuses a non-web scheme, naming it", () => {
     const verdict = checkNavigationTarget("file:///etc/passwd");
 
