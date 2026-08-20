@@ -90,6 +90,77 @@ describe("which servers this deployment will talk to", () => {
   });
 });
 
+describe("whose credential a server uses", () => {
+  test("every entry says which, rather than leaving it to be inferred", () => {
+    // The whole point of replacing a `needsCredential` boolean. "Needs a credential" did not say
+    // whose, and a reader who guessed would guess the deployment's, which for a user-oauth vendor
+    // is the one answer that breaks the promise the connector exists to keep.
+    for (const entry of CATALOGUE) {
+      expect(["none", "deployment-bearer", "user-oauth"]).toContain(
+        entry.auth.kind,
+      );
+    }
+  });
+
+  test("a user-oauth entry pins its own endpoints over https and asks for a scope", () => {
+    for (const entry of CATALOGUE) {
+      if (entry.auth.kind !== "user-oauth") continue;
+      // Pinned for the same reason the MCP host is: these are addresses this deployment sends a
+      // person's authorization code and receives their refresh token at.
+      expect(entry.auth.authorizationUrl.startsWith("https://")).toBe(true);
+      expect(entry.auth.tokenUrl.startsWith("https://")).toBe(true);
+      expect(entry.auth.revokeUrl.startsWith("https://")).toBe(true);
+      // No scopes means consent to nothing, which would fail at the vendor with a message that
+      // does not name us.
+      expect(entry.auth.scopes.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("the five token vendors did not quietly become user-oauth", () => {
+    for (const key of [
+      "atlassian",
+      "box",
+      "slack",
+      "salesforce",
+      "servicenow",
+    ]) {
+      expect(catalogueEntry(key)?.auth.kind).toBe("deployment-bearer");
+    }
+  });
+});
+
+describe("Google Drive", () => {
+  const drive = catalogueEntry("google-drive");
+
+  test("resolves to the one address Google publishes for it", () => {
+    expect(drive).not.toBeNull();
+    expect(resolveServerUrl("google-drive")?.url).toBe(
+      "https://drivemcp.googleapis.com/mcp/v1",
+    );
+  });
+
+  test("is reached as the person asking, not as the deployment", () => {
+    expect(drive?.auth.kind).toBe("user-oauth");
+  });
+
+  test("asks only to read", () => {
+    // K1 answers questions and writes nothing. A wider scope would be granted by every person who
+    // connects and used by nothing, which is the kind of permission nobody remembers agreeing to.
+    expect(drive?.auth.kind === "user-oauth" ? drive.auth.scopes : []).toEqual([
+      "https://www.googleapis.com/auth/drive.readonly",
+    ]);
+  });
+
+  test("still calls its writes writes, and lets Google be the one to refuse them", () => {
+    // The read-only scope means these fail at the vendor. They stay classified as writes anyway, so
+    // a boundary written about writes keeps covering them if the scope ever widens.
+    expect(classifyTool(drive, "create_file", true)).toBe("write");
+    expect(classifyTool(drive, "copy_file", true)).toBe("write");
+    expect(classifyTool(drive, "search_files", true)).toBe("read");
+    expect(classifyTool(drive, "read_file_content", true)).toBe("read");
+  });
+});
+
 describe("what a tool does", () => {
   const atlassian = catalogueEntry("atlassian")!;
 

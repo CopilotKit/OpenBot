@@ -18,6 +18,36 @@
  * forgery primitive pointed at the deployment's own network.
  */
 
+/**
+ * How a server is authenticated, and whose credential does it.
+ *
+ * The OAuth addresses are pinned here beside the MCP host, for the same reason and with the same
+ * rule: they come from the vendor's published documentation and are never taken from a caller.
+ * These are where this deployment sends a person's authorization code and receives the refresh
+ * token that stands in for their access, so they are a reviewed source contract too.
+ */
+export type CatalogueAuth =
+  /** Answers without any credential at all. */
+  | { kind: "none" }
+  /** One token, held by the deployment, used for everybody. */
+  | { kind: "deployment-bearer" }
+  /**
+   * The asker's own grant. The deployment registers an OAuth client; each person consents once and
+   * the call runs on their token, so the vendor decides what comes back.
+   */
+  | {
+      kind: "user-oauth";
+      authorizationUrl: string;
+      tokenUrl: string;
+      /** Where a disconnect is sent, so revocation happens at the vendor and not just here. */
+      revokeUrl: string;
+      /**
+       * What to ask a person to consent to. Narrow on purpose: a scope granted by everybody who
+       * connects and used by nothing is a permission nobody remembers agreeing to.
+       */
+      scopes: readonly string[];
+    };
+
 export type CatalogueEntry = {
   /** Stable slug. Prefixes every tool name, so tools from two servers can never collide. */
   key: string;
@@ -36,8 +66,20 @@ export type CatalogueEntry = {
   hostPattern?: string;
   /** The path the MCP endpoint is served at. Frozen here, never taken from a caller. */
   path: string;
-  /** True when this server needs a credential from the vault to answer at all. */
-  needsCredential: boolean;
+  /**
+   * Whose credential this server is reached with.
+   *
+   * This used to be `needsCredential: boolean`, which said that a credential was required and not
+   * whose it was. That is the one thing about a connector worth being unambiguous about: a reader
+   * who has to guess guesses the deployment's, and a deployment-wide credential pointed at a
+   * per-person system means everybody's question is answered from what one account can see. So the
+   * shape names it, and every entry states it.
+   *
+   * `deployment-bearer` is a token an administrator holds on behalf of everybody. `user-oauth` is
+   * the person's own grant, where the deployment holds only the OAuth client and each person
+   * consents for themselves.
+   */
+  auth: CatalogueAuth;
   /**
    * The tools this vendor's server exposes that change something.
    *
@@ -58,7 +100,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     summary: "Jira issues and Confluence pages.",
     host: "https://mcp.atlassian.com",
     path: "/v1/mcp/authv2",
-    needsCredential: true,
+    auth: { kind: "deployment-bearer" },
     writeTools: Object.freeze([
       "createJiraIssue",
       "editJiraIssue",
@@ -80,7 +122,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     summary: "Files and folders in Box.",
     host: "https://mcp.box.com",
     path: "/",
-    needsCredential: true,
+    auth: { kind: "deployment-bearer" },
     writeTools: Object.freeze([
       "copy_file",
       "copy_folder",
@@ -98,7 +140,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     summary: "Search and post in the channels the credential can reach.",
     host: "https://mcp.slack.com",
     path: "/mcp",
-    needsCredential: true,
+    auth: { kind: "deployment-bearer" },
     writeTools: Object.freeze([
       "slack_send_message",
       "slack_send_message_draft",
@@ -121,7 +163,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     // Salesforce publishes this server at `/platform/<server>`, with sandbox orgs under
     // `/sandbox/platform/<server>`. A deployment on a sandbox needs the custom-server form.
     path: "/platform/mcp/v1/platform/sobject-all",
-    needsCredential: true,
+    auth: { kind: "deployment-bearer" },
     writeTools: Object.freeze([
       "create_record",
       "update_record",
@@ -141,7 +183,7 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     hostPattern:
       "^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)\\.service-now\\.com$",
     path: "/sncapps/mcp-server",
-    needsCredential: true,
+    auth: { kind: "deployment-bearer" },
     writeTools: Object.freeze([
       "create_record",
       "update_record",
@@ -149,6 +191,44 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     ]),
     docsUrl:
       "https://www.servicenow.com/docs/bundle/zurich-api-reference/page/integrate/mcp/concept/mcp-server.html",
+  },
+  {
+    key: "google-drive",
+    title: "Google Drive",
+    vendor: "Google",
+    summary: "Files in the Drive of whoever is asking.",
+    /*
+     * Google publishes one MCP server per Workspace product, each on its own host: Gmail, Docs,
+     * Sheets, Slides, Calendar, Chat and People have their own. Drive is here because it is the one
+     * a question about a document needs. Each of the others is a further entry, not a flag on this
+     * one, so adding Gmail stays a reviewed decision about Gmail.
+     */
+    host: "https://drivemcp.googleapis.com",
+    path: "/mcp/v1",
+    /*
+     * The first vendor here that cannot be reached with a token an administrator pastes. Google
+     * issues no such token: access is an authorization-code grant belonging to a person. That is
+     * not a limitation to work around, it is the property this connector exists for — two people
+     * asking the same question should get the answers their own accounts can see.
+     */
+    auth: {
+      kind: "user-oauth",
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      revokeUrl: "https://oauth2.googleapis.com/revoke",
+      // Read-only, because nothing in this slice writes to anybody's Drive.
+      scopes: Object.freeze(["https://www.googleapis.com/auth/drive.readonly"]),
+    },
+    /*
+     * Named writes even though the scope above makes Google refuse them.
+     *
+     * Belt and braces on purpose. The scope is what stops them; this list is what keeps a boundary
+     * written about writes covering them, so widening the scope later cannot quietly turn a write
+     * into something the policy engine has never heard of.
+     */
+    writeTools: Object.freeze(["create_file", "copy_file"]),
+    docsUrl:
+      "https://developers.google.com/workspace/guides/configure-mcp-servers",
   },
 ]);
 

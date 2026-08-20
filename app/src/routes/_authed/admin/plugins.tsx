@@ -231,7 +231,13 @@ function Catalogue({
     vendor: string;
     summary: string;
     docsUrl: string;
-    needsCredential: boolean;
+    /**
+     * Whose credential reaches this server.
+     *
+     * `deployment-bearer` is the only one an administrator can satisfy by typing a token here.
+     * `user-oauth` is reached as whoever is asking, so there is no token for this page to collect.
+     */
+    auth: "none" | "deployment-bearer" | "user-oauth";
     perInstance: boolean;
   }[];
   added: Set<string>;
@@ -302,7 +308,7 @@ function Catalogue({
                 value={instanceHost[item.key] ?? ""}
               />
             ) : null}
-            {item.needsCredential ? (
+            {item.auth === "deployment-bearer" ? (
               /* Mask tokens before they are stored in the credential vault. */
               <Input
                 aria-label={`Access token for ${item.title}`}

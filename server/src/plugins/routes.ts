@@ -70,7 +70,13 @@ export function createPluginRoutes(
         vendor: entry.vendor,
         summary: entry.summary,
         docsUrl: entry.docsUrl,
-        needsCredential: entry.needsCredential,
+        /*
+         * The kind, not the whole thing. The page needs to know what to ask an administrator for;
+         * it has no use for the vendor's OAuth addresses, and a URL this deployment sends an
+         * authorization code to is not improved by also existing in every browser that opens the
+         * Plugins page.
+         */
+        auth: entry.auth.kind,
         perInstance: entry.host === null,
       })),
       servers: await store.listServers(),
