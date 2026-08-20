@@ -6,7 +6,7 @@ import {
   createComputerGateway,
 } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
-import type { SnapshotResult } from "../src/computer/schema";
+import type { ComputerStatus, SnapshotResult } from "../src/computer/schema";
 
 /**
  * What the gateway must guarantee, tested as properties rather than as call sequences.
@@ -76,7 +76,10 @@ function fakeClient() {
       calls.push("writeFile");
       return { path: "notes.md", bytes: 4, appended: false } as never;
     },
-    status: async () => ({ botId: "b", state: "ready" as const }),
+    status: async (botId?: string) => {
+      calls.push("status");
+      return { botId: botId ?? "b", state: "ready" as const };
+    },
     navigate: async () => {
       calls.push("navigate");
       return { url: "https://example.com/", title: "Example" } as never;
@@ -395,5 +398,173 @@ describe("the computer gateway", () => {
     // Permitted here only because the shipped default permits; the row says plainly that the server
     // could not identify what was touched, rather than omitting the field.
     expect(rows[0]?.payload.element).toBe("not in the current snapshot");
+  });
+
+  describe("status", () => {
+    test("with supervisor.list returning no Bot it returns absent without locating or checking health", async () => {
+      // Checking status is an inspection, not an action: it must not create or wake a container.
+      // An absent Bot is simply absent, determined from the supervisor's current inventory.
+      const { client, calls } = fakeClient();
+      const { store } = fakeAudit();
+      const locateCalls: string[] = [];
+      const supervisor = {
+        locate: async (botId: string) => {
+          locateCalls.push(botId);
+          return "http://localhost:4100";
+        },
+        list: async () => [{ botId: "other-bot", status: "running" }],
+        stop: async () => {},
+        reset: async () => {},
+      };
+      const gateway = createComputerGateway({
+        client,
+        supervisor,
+        auditStore: store,
+        policy: () => PERMISSIVE,
+      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
+
+      const status = await gateway.status("sales-bot");
+
+      expect(status).toEqual({ botId: "sales-bot", state: "absent" });
+      expect(calls).toEqual([]);
+      expect(locateCalls).toEqual([]);
+    });
+
+    test("maps started and running supervisor statuses to ready", async () => {
+      const { client, calls } = fakeClient();
+      const { store } = fakeAudit();
+      const locateCalls: string[] = [];
+      const supervisor = {
+        locate: async (botId: string) => {
+          locateCalls.push(botId);
+          return "http://localhost:4100";
+        },
+        list: async () => [
+          { botId: "started-bot", status: "started" },
+          { botId: "running-bot", status: "running" },
+        ],
+        stop: async () => {},
+        reset: async () => {},
+      };
+      const gateway = createComputerGateway({
+        client,
+        supervisor,
+        auditStore: store,
+        policy: () => PERMISSIVE,
+      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
+
+      expect(await gateway.status("started-bot")).toEqual({
+        botId: "started-bot",
+        state: "ready",
+      });
+      expect(await gateway.status("running-bot")).toEqual({
+        botId: "running-bot",
+        state: "ready",
+      });
+      expect(calls).toEqual([]);
+      expect(locateCalls).toEqual([]);
+    });
+
+    test("maps creating and starting supervisor statuses to starting", async () => {
+      const { client, calls } = fakeClient();
+      const { store } = fakeAudit();
+      const supervisor = {
+        list: async () => [
+          { botId: "creating-bot", status: "creating" },
+          { botId: "starting-bot", status: "starting" },
+        ],
+        stop: async () => {},
+        reset: async () => {},
+      };
+      const gateway = createComputerGateway({
+        client,
+        supervisor,
+        auditStore: store,
+        policy: () => PERMISSIVE,
+      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
+
+      expect(await gateway.status("creating-bot")).toEqual({
+        botId: "creating-bot",
+        state: "starting",
+      });
+      expect(await gateway.status("starting-bot")).toEqual({
+        botId: "starting-bot",
+        state: "starting",
+      });
+      expect(calls).toEqual([]);
+    });
+
+    test("maps stopped supervisor status to absent", async () => {
+      const { client, calls } = fakeClient();
+      const { store } = fakeAudit();
+      const supervisor = {
+        list: async () => [{ botId: "stopped-bot", status: "stopped" }],
+        stop: async () => {},
+        reset: async () => {},
+      };
+      const gateway = createComputerGateway({
+        client,
+        supervisor,
+        auditStore: store,
+        policy: () => PERMISSIVE,
+      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
+
+      expect(await gateway.status("stopped-bot")).toEqual({
+        botId: "stopped-bot",
+        state: "absent",
+      });
+      expect(calls).toEqual([]);
+    });
+
+    test("maps error and build_failed supervisor statuses to unreachable with a useful reason", async () => {
+      const { client, calls } = fakeClient();
+      const { store } = fakeAudit();
+      const supervisor = {
+        list: async () => [
+          { botId: "error-bot", status: "error" },
+          { botId: "failed-bot", status: "build_failed" },
+        ],
+        stop: async () => {},
+        reset: async () => {},
+      };
+      const gateway = createComputerGateway({
+        client,
+        supervisor,
+        auditStore: store,
+        policy: () => PERMISSIVE,
+      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
+
+      const errorStatus = await gateway.status("error-bot");
+      expect(errorStatus.botId).toBe("error-bot");
+      expect(errorStatus.state).toBe("unreachable");
+      expect(errorStatus.reason).toBeDefined();
+      expect(typeof errorStatus.reason).toBe("string");
+      expect(errorStatus.reason!.length).toBeGreaterThan(0);
+
+      const failedStatus = await gateway.status("failed-bot");
+      expect(failedStatus.botId).toBe("failed-bot");
+      expect(failedStatus.state).toBe("unreachable");
+      expect(failedStatus.reason).toBeDefined();
+      expect(typeof failedStatus.reason).toBe("string");
+      expect(failedStatus.reason!.length).toBeGreaterThan(0);
+
+      expect(calls).toEqual([]);
+    });
+
+    test("without a supervisor, delegates once to client.status(botId)", async () => {
+      const { client, calls, addressedAs } = fakeClient();
+      const { store } = fakeAudit();
+      const gateway = createComputerGateway({
+        client,
+        auditStore: store,
+        policy: () => PERMISSIVE,
+      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
+
+      const status = await gateway.status("sales-bot");
+
+      expect(status).toEqual({ botId: "sales-bot", state: "ready" });
+      expect(calls).toEqual(["status"]);
+      expect(addressedAs).toContain("sales-bot");
+    });
   });
 });

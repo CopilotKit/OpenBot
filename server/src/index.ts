@@ -243,15 +243,20 @@ void recordAuditEvent(bootAuditStore, {
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.isolation_loaded",
   targetType: "computer",
-  payload: supervisor
+  payload: daytonaSupervisor
     ? {
         isolation: "one computer per Bot",
-        note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
+        note: "Each Bot gets a remote Daytona sandbox with its own /workspace and its own browser profile.",
       }
-    : {
-        isolation: "one shared computer",
-        note: "No supervisor is configured, so every Bot uses the same browser. Sessions, files and logins are shared between them. Set COMPUTER_SUPERVISOR_URL to give each Bot its own.",
-      },
+    : supervisor
+      ? {
+          isolation: "one computer per Bot",
+          note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
+        }
+      : {
+          isolation: "one shared computer",
+          note: "No supervisor is configured, so every Bot uses the same browser. Sessions, files and logins are shared between them. Set COMPUTER_SUPERVISOR_URL or DAYTONA_API_KEY to give each Bot its own.",
+        },
 }).catch(() => undefined);
 
 console.info(
@@ -262,7 +267,7 @@ console.info(
       ? {}
       : {
           warning:
-            "Every Bot shares one browser. Set COMPUTER_SUPERVISOR_URL for a computer each.",
+            "Every Bot shares one browser. Set COMPUTER_SUPERVISOR_URL or DAYTONA_API_KEY for a computer each.",
         }),
   }),
 );

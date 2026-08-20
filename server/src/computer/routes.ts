@@ -39,7 +39,7 @@ export function createComputerRoutes(
 
   routes.get("/:botId/status", requireUser, async (context) => {
     const botId = context.req.param("botId");
-    return context.json(await client.forBot(botId).status(botId));
+    return context.json(await gateway.status(botId));
   });
 
   routes.get("/:botId/screenshot", requireUser, async (context) => {

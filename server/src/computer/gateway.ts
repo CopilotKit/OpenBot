@@ -27,6 +27,7 @@ import {
 } from "./policy";
 import type {
   ClickInput,
+  ComputerStatus,
   KeyInput,
   ListFilesInput,
   ReadFileInput,
@@ -246,6 +247,56 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
   return {
     snapshot,
     read,
+
+    /**
+     * Inspect a Bot's computer status without provisioning or waking it.
+     *
+     * With a supervisor, this reads current inventory from list() and maps the container/sandbox
+     * state to a ComputerStatus. Without a supervisor, it delegates to client.status(botId).
+     */
+    async status(botId: string): Promise<ComputerStatus> {
+      if (supervisor?.list) {
+        const list = await supervisor.list();
+        const entry = list.find((item) => item.botId === botId);
+        if (!entry) {
+          return { botId, state: "absent" };
+        }
+        const rawStatus = entry.status ?? "";
+        const status = rawStatus.toLowerCase();
+        switch (status) {
+          case "running":
+          case "started":
+            return { botId, state: "ready" };
+          case "creating":
+          case "starting":
+          case "restoring":
+          case "pulling_snapshot":
+          case "resuming":
+          case "stopping":
+            return { botId, state: "starting" };
+          case "stopped":
+          case "paused":
+          case "archived":
+          case "exited":
+          case "destroyed":
+            return { botId, state: "absent" };
+          case "error":
+          case "build_failed":
+            return {
+              botId,
+              state: "unreachable",
+              reason: `The computer reported state "${rawStatus}".`,
+            };
+          default:
+            return {
+              botId,
+              state: "unreachable",
+              reason: `The computer reported unknown state "${rawStatus}".`,
+            };
+        }
+      }
+      return as(botId).status(botId);
+    },
 
     /**
      * Handovers, recorded but not policy-gated.

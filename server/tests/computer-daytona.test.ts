@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDaytonaSupervisorClient } from "../src/computer/daytona";
+import {
+  createDaytonaSupervisorClient,
+  type DaytonaSdk,
+  type DaytonaSupervisorOptions,
+  type SandboxHandle,
+} from "../src/computer/daytona";
 import { SupervisorError } from "../src/computer/supervisor";
 
 /**
@@ -45,7 +50,45 @@ type CreateParams = {
   options?: { timeout?: number };
 };
 
-function makeSandboxHandle(sb: FakeSandbox) {
+function makeSandbox(options: {
+  id: string;
+  botId?: string;
+  state?: string;
+  labels?: Record<string, string>;
+  envVars?: Record<string, string>;
+  public?: boolean;
+  autoStopInterval?: number;
+  createdAt?: string;
+  previewUrl?: string;
+  deleteHandler?: (timeout?: number, wait?: boolean) => void | Promise<void>;
+}): FakeSandbox {
+  const botId = options.botId;
+  const defaultLabels = botId
+    ? { "openbot/computer": "true", "openbot/bot-id": botId }
+    : { "openbot/computer": "true" };
+  const labels = options.labels ?? defaultLabels;
+  const envVars =
+    options.envVars ??
+    (botId ? { COMPUTER_TOKEN: "tok", COMPUTER_BOT_ID: botId } : {});
+
+  return {
+    id: options.id,
+    state: options.state ?? "started",
+    labels,
+    envVars,
+    public: options.public ?? true,
+    autoStopInterval: options.autoStopInterval ?? 15,
+    createdAt: options.createdAt ?? "2026-08-20T10:00:00Z",
+    previewUrl:
+      options.previewUrl ?? `https://${options.id}.preview.daytona.app`,
+    startCalls: 0,
+    stopCalls: 0,
+    deleteCalls: 0,
+    ...(options.deleteHandler ? { deleteHandler: options.deleteHandler } : {}),
+  };
+}
+
+function makeSandboxHandle(sb: FakeSandbox): SandboxHandle {
   return {
     id: sb.id,
     state: sb.state,
@@ -71,7 +114,13 @@ function makeSandboxHandle(sb: FakeSandbox) {
   };
 }
 
-function createFakeSdk(initialSandboxes: FakeSandbox[] = []) {
+type FakeSdk = DaytonaSdk & {
+  sandboxes: Map<string, FakeSandbox>;
+  snapshots: Map<string, { state: string }>;
+  creates: CreateParams[];
+};
+
+function createFakeSdk(initialSandboxes: FakeSandbox[] = []): FakeSdk {
   let idCounter = 1;
   const sandboxes = new Map<string, FakeSandbox>();
   const snapshots = new Map<string, { state: string }>();
@@ -81,20 +130,11 @@ function createFakeSdk(initialSandboxes: FakeSandbox[] = []) {
     sandboxes.set(sb.id, sb);
   }
 
-  const sdk = {
+  const sdk: FakeSdk = {
     sandboxes,
     snapshots,
     creates,
-    create: async (
-      params: {
-        snapshot: string;
-        envVars: Record<string, string>;
-        labels: Record<string, string>;
-        public: boolean;
-        autoStopInterval: number;
-      },
-      options?: { timeout?: number },
-    ) => {
+    create: async (params, options) => {
       creates.push({ ...params, options });
       const id = `sb-${idCounter++}`;
       const sb: FakeSandbox = {
@@ -142,10 +182,7 @@ function createFakeSdk(initialSandboxes: FakeSandbox[] = []) {
         }
         return snap;
       },
-      create: async (
-        params: { name: string; image: unknown },
-        _options?: { onLogs?: (line: string) => void; timeout?: number },
-      ) => {
+      create: async (params, _options) => {
         snapshots.set(params.name, { state: "active" });
         return { name: params.name };
       },
@@ -173,6 +210,30 @@ function fakeFetch(
   }) as unknown as typeof fetch;
 }
 
+type ClientOverrides = Partial<DaytonaSupervisorOptions> & {
+  snapshotTimeoutMs?: number;
+};
+
+function makeClient(
+  sdk: FakeSdk = createFakeSdk(),
+  overrides: ClientOverrides = {},
+) {
+  const defaultSnapshot =
+    !overrides.agentComputerDir && overrides.snapshot === undefined
+      ? { snapshot: "prebuilt" }
+      : {};
+  return createDaytonaSupervisorClient({
+    apiKey: "test-api-key",
+    computerToken: "tok",
+    pollIntervalMs: 1,
+    healthTimeoutMs: 200,
+    sdk,
+    fetchImpl: fakeFetch(),
+    ...defaultSnapshot,
+    ...overrides,
+  } as DaytonaSupervisorOptions);
+}
+
 describe("Daytona computer supervisor", () => {
   const tempDirs: string[] = [];
 
@@ -192,26 +253,17 @@ describe("Daytona computer supervisor", () => {
     let healthCheckedUrl: string | undefined;
     let healthHeaders: HeadersInit | undefined;
 
-    const fetchImpl = (async (
-      input: string | URL | Request,
-      init?: RequestInit,
-    ) => {
-      const url = String(input);
+    const fetchImpl = fakeFetch((url, init) => {
       if (url.endsWith("/health")) {
         healthCheckedUrl = url;
         healthHeaders = init?.headers;
         return new Response("ok", { status: 200 });
       }
       return new Response("not found", { status: 404 });
-    }) as unknown as typeof fetch;
+    });
 
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
+    const client = makeClient(sdk, {
       computerToken: "secret-token-123",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
       fetchImpl,
     });
 
@@ -237,36 +289,14 @@ describe("Daytona computer supervisor", () => {
   });
 
   test("stopped labeled sandbox is reused and started", async () => {
-    const existing: FakeSandbox = {
+    const existing = makeSandbox({
       id: "sb-stopped-1",
+      botId: "support",
       state: "stopped",
-      labels: {
-        "openbot/computer": "true",
-        "openbot/bot-id": "support",
-      },
-      envVars: {
-        COMPUTER_TOKEN: "tok",
-        COMPUTER_BOT_ID: "support",
-      },
-      public: true,
-      autoStopInterval: 15,
-      createdAt: "2026-08-20T10:00:00Z",
-      previewUrl: "https://sb-stopped-1.preview.daytona.app",
-      startCalls: 0,
-      stopCalls: 0,
-      deleteCalls: 0,
-    };
+    });
 
     const sdk = createFakeSdk([existing]);
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     const url = await client.locate("support");
 
@@ -288,15 +318,7 @@ describe("Daytona computer supervisor", () => {
       return origCreate(params, options);
     };
 
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     const firstLocate = client.locate("marketing");
     const secondLocate = client.locate("marketing");
@@ -310,15 +332,7 @@ describe("Daytona computer supervisor", () => {
 
   test("reset deletes and the next locate creates fresh", async () => {
     const sdk = createFakeSdk();
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     const firstUrl = await client.locate("finance");
     expect(sdk.creates).toHaveLength(1);
@@ -334,15 +348,7 @@ describe("Daytona computer supervisor", () => {
 
   test("stop with no sandbox is a no-op", async () => {
     const sdk = createFakeSdk();
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     await expect(client.stop("nonexistent")).resolves.toBeUndefined();
     expect(sdk.creates).toHaveLength(0);
@@ -354,87 +360,41 @@ describe("Daytona computer supervisor", () => {
       throw new Error("quota exceeded");
     };
 
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     await expect(client.locate("analytics")).rejects.toThrow(SupervisorError);
     await expect(client.locate("analytics")).rejects.toThrow(/analytics/);
   });
 
   test("list maps openbot/bot-id and skips destroyed", async () => {
-    const activeBot: FakeSandbox = {
+    const activeBot = makeSandbox({
       id: "sb-active",
+      botId: "bot-active",
       state: "started",
-      labels: {
-        "openbot/computer": "true",
-        "openbot/bot-id": "bot-active",
-      },
-      envVars: {},
-      public: true,
-      autoStopInterval: 15,
       createdAt: "2026-08-20T10:00:00Z",
-      previewUrl: "https://sb-active.preview.daytona.app",
-      startCalls: 0,
-      stopCalls: 0,
-      deleteCalls: 0,
-    };
+    });
 
-    const destroyedBot: FakeSandbox = {
+    const destroyedBot = makeSandbox({
       id: "sb-destroyed",
+      botId: "bot-destroyed",
       state: "destroyed",
-      labels: {
-        "openbot/computer": "true",
-        "openbot/bot-id": "bot-destroyed",
-      },
-      envVars: {},
-      public: true,
-      autoStopInterval: 15,
       createdAt: "2026-08-20T09:00:00Z",
-      previewUrl: "https://sb-destroyed.preview.daytona.app",
-      startCalls: 0,
-      stopCalls: 0,
-      deleteCalls: 0,
-    };
+    });
 
-    const stoppedBot: FakeSandbox = {
+    const stoppedBot = makeSandbox({
       id: "sb-stopped",
+      botId: "bot-stopped",
       state: "stopped",
-      labels: {
-        "openbot/computer": "true",
-        "openbot/bot-id": "bot-stopped",
-      },
-      envVars: {},
-      public: true,
-      autoStopInterval: 15,
       createdAt: "2026-08-20T11:00:00Z",
-      previewUrl: "https://sb-stopped.preview.daytona.app",
-      startCalls: 0,
-      stopCalls: 0,
-      deleteCalls: 0,
-    };
+    });
 
-    const unrelatedSandbox: FakeSandbox = {
+    const unrelatedSandbox = makeSandbox({
       id: "sb-unrelated",
-      state: "started",
       labels: {
         "some-other-label": "true",
       },
-      envVars: {},
-      public: true,
-      autoStopInterval: 15,
       createdAt: "2026-08-20T08:00:00Z",
-      previewUrl: "https://sb-unrelated.preview.daytona.app",
-      startCalls: 0,
-      stopCalls: 0,
-      deleteCalls: 0,
-    };
+    });
 
     const sdk = createFakeSdk([
       activeBot,
@@ -442,15 +402,7 @@ describe("Daytona computer supervisor", () => {
       stoppedBot,
       unrelatedSandbox,
     ]);
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     const list = await client.list();
 
@@ -460,13 +412,13 @@ describe("Daytona computer supervisor", () => {
         {
           botId: "bot-active",
           container: "sb-active",
-          status: "started",
+          status: "running",
           startedAt: "2026-08-20T10:00:00Z",
         },
         {
           botId: "bot-stopped",
           container: "sb-stopped",
-          status: "stopped",
+          status: "exited",
           startedAt: "2026-08-20T11:00:00Z",
         },
       ]),
@@ -475,17 +427,12 @@ describe("Daytona computer supervisor", () => {
 
   test("health timeout throws SupervisorError", async () => {
     const sdk = createFakeSdk();
-    const failingFetch = (async () => {
-      return new Response("service unavailable", { status: 503 });
-    }) as unknown as typeof fetch;
+    const failingFetch = fakeFetch(
+      () => new Response("service unavailable", { status: 503 }),
+    );
 
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
+    const client = makeClient(sdk, {
       healthTimeoutMs: 50,
-      sdk: sdk as never,
       fetchImpl: failingFetch,
     });
 
@@ -495,6 +442,121 @@ describe("Daytona computer supervisor", () => {
     await expect(client.locate("unhealthy-bot")).rejects.toThrow(
       /The computer for unhealthy-bot started but never answered \/health/,
     );
+  });
+
+  test("health fetch that never resolves is bounded by healthTimeoutMs and locate rejects with SupervisorError", async () => {
+    const sdk = createFakeSdk();
+    const hangingFetch = fakeFetch(() => {
+      const { promise } = Promise.withResolvers<Response>();
+      return promise;
+    });
+
+    const client = makeClient(sdk, {
+      healthTimeoutMs: 30,
+      fetchImpl: hangingFetch,
+    });
+
+    let locateError: unknown;
+    try {
+      await client.locate("hanging-health-bot");
+    } catch (err) {
+      locateError = err;
+    }
+
+    expect(locateError).toBeInstanceOf(SupervisorError);
+    expect((locateError as Error)?.message).toContain(
+      "The computer for hanging-health-bot started but never answered /health at its preview URL.",
+    );
+  });
+
+  test("snapshot.create that never resolves is bounded by snapshotTimeoutMs and locate rejects with SupervisorError", async () => {
+    const fixtureDir = mkdtempSync(
+      join(tmpdir(), "openbot-agent-computer-test-"),
+    );
+    tempDirs.push(fixtureDir);
+
+    writeFileSync(
+      join(fixtureDir, "package.json"),
+      JSON.stringify({ name: "agent-computer", version: "1.0.0" }),
+    );
+    mkdirSync(join(fixtureDir, "src"), { recursive: true });
+    writeFileSync(
+      join(fixtureDir, "src", "index.ts"),
+      'console.log("agent-computer");\n',
+    );
+
+    const sdk = createFakeSdk();
+    sdk.snapshot.create = () => {
+      const { promise } = Promise.withResolvers<unknown>();
+      return promise;
+    };
+
+    const client = makeClient(sdk, {
+      agentComputerDir: fixtureDir,
+      snapshotTimeoutMs: 30,
+    });
+
+    let locateError: unknown;
+    try {
+      await client.locate("hanging-snapshot-bot");
+    } catch (err) {
+      locateError = err;
+    }
+
+    expect(locateError).toBeInstanceOf(SupervisorError);
+  });
+
+  test("missing agentComputerDir package.json or src directory rejects locate with SupervisorError naming the directory and advising DAYTONA_SNAPSHOT", async () => {
+    const missingPkgDir = mkdtempSync(
+      join(tmpdir(), "openbot-missing-pkg-test-"),
+    );
+    tempDirs.push(missingPkgDir);
+    mkdirSync(join(missingPkgDir, "src"), { recursive: true });
+    writeFileSync(
+      join(missingPkgDir, "src", "index.ts"),
+      'console.log("agent-computer");\n',
+    );
+
+    const clientMissingPkg = makeClient(createFakeSdk(), {
+      agentComputerDir: missingPkgDir,
+      healthTimeoutMs: 50,
+    });
+
+    let pkgError: unknown;
+    try {
+      await clientMissingPkg.locate("missing-pkg-bot");
+    } catch (err) {
+      pkgError = err;
+    }
+
+    expect(pkgError).toBeInstanceOf(SupervisorError);
+    expect((pkgError as Error)?.message).toContain(missingPkgDir);
+    expect((pkgError as Error)?.message).toContain("DAYTONA_SNAPSHOT");
+
+    const missingSrcDir = mkdtempSync(
+      join(tmpdir(), "openbot-missing-src-test-"),
+    );
+    tempDirs.push(missingSrcDir);
+    writeFileSync(
+      join(missingSrcDir, "package.json"),
+      JSON.stringify({ name: "agent-computer", version: "1.0.0" }),
+    );
+
+    const clientMissingSrc = makeClient(createFakeSdk(), {
+      agentComputerDir: missingSrcDir,
+      healthTimeoutMs: 50,
+    });
+
+    let srcError: unknown;
+    try {
+      await clientMissingSrc.locate("missing-src-bot");
+    } catch (err) {
+      srcError = err;
+    }
+
+    expect(srcError).toBeInstanceOf(SupervisorError);
+    expect((srcError as Error)?.message).toContain(missingSrcDir);
+    expect((srcError as Error)?.message).toContain("DAYTONA_SNAPSHOT");
   });
 
   test("snapshot naming is stable for unchanged temp sources and changes when source contents change", async () => {
@@ -514,15 +576,7 @@ describe("Daytona computer supervisor", () => {
     );
 
     const sdk1 = createFakeSdk();
-    const client1 = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      agentComputerDir: fixtureDir,
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk1 as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client1 = makeClient(sdk1, { agentComputerDir: fixtureDir });
 
     await client1.locate("bot-1");
     expect(sdk1.creates).toHaveLength(1);
@@ -530,15 +584,7 @@ describe("Daytona computer supervisor", () => {
     expect(snapshotName1).toMatch(/^openbot-agent-computer-[a-f0-9]{12}$/);
 
     const sdk2 = createFakeSdk();
-    const client2 = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      agentComputerDir: fixtureDir,
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk2 as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client2 = makeClient(sdk2, { agentComputerDir: fixtureDir });
 
     await client2.locate("bot-2");
     expect(sdk2.creates).toHaveLength(1);
@@ -551,15 +597,7 @@ describe("Daytona computer supervisor", () => {
     );
 
     const sdk3 = createFakeSdk();
-    const client3 = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      agentComputerDir: fixtureDir,
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk3 as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client3 = makeClient(sdk3, { agentComputerDir: fixtureDir });
 
     await client3.locate("bot-3");
     expect(sdk3.creates).toHaveLength(1);
@@ -592,15 +630,7 @@ describe("Daytona computer supervisor", () => {
       return originalSnapshotCreate(params, options);
     };
 
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      agentComputerDir: fixtureDir,
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk, { agentComputerDir: fixtureDir });
 
     await client.locate("recipe-test-bot");
 
@@ -620,38 +650,18 @@ describe("Daytona computer supervisor", () => {
   });
 
   test("reset waits for sandbox deletion so list does not return the reset bot", async () => {
-    const existing: FakeSandbox = {
+    const existing = makeSandbox({
       id: "sb-reset-wait-1",
-      state: "started",
-      labels: {
-        "openbot/computer": "true",
-        "openbot/bot-id": "reset-wait-bot",
-      },
-      envVars: {},
-      public: true,
-      autoStopInterval: 15,
-      createdAt: "2026-08-20T10:00:00Z",
-      previewUrl: "https://sb-reset-wait-1.preview.daytona.app",
-      startCalls: 0,
-      stopCalls: 0,
-      deleteCalls: 0,
+      botId: "reset-wait-bot",
       deleteHandler: (_timeout, wait) => {
         if (wait) {
           existing.state = "destroyed";
         }
       },
-    };
+    });
 
     const sdk = createFakeSdk([existing]);
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     await client.reset("reset-wait-bot");
 
@@ -662,22 +672,10 @@ describe("Daytona computer supervisor", () => {
   });
 
   test("reset waits for Daytona list convergence across eventual consistency stale started responses", async () => {
-    const existing: FakeSandbox = {
+    const existing = makeSandbox({
       id: "sb-reset-convergence-1",
-      state: "started",
-      labels: {
-        "openbot/computer": "true",
-        "openbot/bot-id": "reset-convergence-bot",
-      },
-      envVars: {},
-      public: true,
-      autoStopInterval: 15,
-      createdAt: "2026-08-20T10:00:00Z",
-      previewUrl: "https://sb-reset-convergence-1.preview.daytona.app",
-      startCalls: 0,
-      stopCalls: 0,
-      deleteCalls: 0,
-    };
+      botId: "reset-convergence-bot",
+    });
 
     const sdk = createFakeSdk([existing]);
     let postDeleteListCalls = 0;
@@ -707,15 +705,7 @@ describe("Daytona computer supervisor", () => {
       return origList(query);
     };
 
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     await client.reset("reset-convergence-bot");
 
@@ -732,21 +722,9 @@ describe("Daytona computer supervisor", () => {
 
   test("failed reset deletion does not tombstone sandbox so retry deletes it and removes it from list", async () => {
     let deleteAttempts = 0;
-    const existing: FakeSandbox = {
+    const existing = makeSandbox({
       id: "sb-failed-delete-1",
-      state: "started",
-      labels: {
-        "openbot/computer": "true",
-        "openbot/bot-id": "retry-delete-bot",
-      },
-      envVars: {},
-      public: true,
-      autoStopInterval: 15,
-      createdAt: "2026-08-20T10:00:00Z",
-      previewUrl: "https://sb-failed-delete-1.preview.daytona.app",
-      startCalls: 0,
-      stopCalls: 0,
-      deleteCalls: 0,
+      botId: "retry-delete-bot",
       deleteHandler: (_timeout, _wait) => {
         deleteAttempts++;
         if (deleteAttempts === 1) {
@@ -754,18 +732,10 @@ describe("Daytona computer supervisor", () => {
         }
         existing.state = "destroyed";
       },
-    };
+    });
 
     const sdk = createFakeSdk([existing]);
-    const client = createDaytonaSupervisorClient({
-      apiKey: "test-api-key",
-      computerToken: "tok",
-      snapshot: "prebuilt",
-      pollIntervalMs: 1,
-      healthTimeoutMs: 200,
-      sdk: sdk as never,
-      fetchImpl: fakeFetch(),
-    });
+    const client = makeClient(sdk);
 
     let resetError: unknown;
     try {
@@ -785,5 +755,101 @@ describe("Daytona computer supervisor", () => {
     expect(
       remaining.find((bot) => bot.botId === "retry-delete-bot"),
     ).toBeUndefined();
+  });
+
+  test("locate polls stopping sandbox until stopped, calls start(300), and returns preview URL after healthy /health", async () => {
+    const stoppingSandbox = makeSandbox({
+      id: "sb-stopping-1",
+      botId: "stopping-bot",
+      state: "stopping",
+    });
+
+    const sdk = createFakeSdk([stoppingSandbox]);
+    let getCalls = 0;
+    const origGet = sdk.get;
+    sdk.get = async (id: string) => {
+      if (id === stoppingSandbox.id && ++getCalls === 1) {
+        stoppingSandbox.state = "stopped";
+      }
+      return origGet(id);
+    };
+
+    const client = makeClient(sdk);
+
+    const url = await client.locate("stopping-bot");
+
+    expect(url).toBe("https://sb-stopping-1.preview.daytona.app");
+    expect(stoppingSandbox.startCalls).toBe(1);
+    expect(stoppingSandbox.state).toBe("started");
+  });
+
+  test("locate creates a fresh sandbox when a cached sandbox is destroying or not found", async () => {
+    const sdk = createFakeSdk();
+    const client = makeClient(sdk);
+
+    const firstUrl = await client.locate("destroying-bot");
+    expect(sdk.creates).toHaveLength(1);
+    expect(firstUrl).toBe("https://sb-1.preview.daytona.app");
+
+    const firstSandbox = sdk.sandboxes.get("sb-1")!;
+    firstSandbox.state = "destroying";
+
+    const secondUrl = await client.locate("destroying-bot");
+    expect(sdk.creates).toHaveLength(2);
+    expect(secondUrl).toBe("https://sb-2.preview.daytona.app");
+    expect(secondUrl).not.toBe(firstUrl);
+  });
+
+  test("stop on an already stopped sandbox resolves without calling sandbox.stop", async () => {
+    const stoppedSandbox = makeSandbox({
+      id: "sb-already-stopped",
+      botId: "already-stopped-bot",
+      state: "stopped",
+    });
+
+    const sdk = createFakeSdk([stoppedSandbox]);
+    const client = makeClient(sdk);
+
+    await client.stop("already-stopped-bot");
+
+    expect(stoppedSandbox.stopCalls).toBe(0);
+  });
+
+  test("list maps Daytona started to running and stopped to exited in shared supervisor vocabulary", async () => {
+    const startedSandbox = makeSandbox({
+      id: "sb-started-voc",
+      botId: "started-voc-bot",
+      state: "started",
+      createdAt: "2026-08-20T10:00:00Z",
+    });
+
+    const stoppedSandbox = makeSandbox({
+      id: "sb-stopped-voc",
+      botId: "stopped-voc-bot",
+      state: "stopped",
+      createdAt: "2026-08-20T11:00:00Z",
+    });
+
+    const sdk = createFakeSdk([startedSandbox, stoppedSandbox]);
+    const client = makeClient(sdk);
+
+    const list = await client.list();
+
+    expect(list).toEqual(
+      expect.arrayContaining([
+        {
+          botId: "started-voc-bot",
+          container: "sb-started-voc",
+          status: "running",
+          startedAt: "2026-08-20T10:00:00Z",
+        },
+        {
+          botId: "stopped-voc-bot",
+          container: "sb-stopped-voc",
+          status: "exited",
+          startedAt: "2026-08-20T11:00:00Z",
+        },
+      ]),
+    );
   });
 });

@@ -65,6 +65,7 @@ export type DaytonaSupervisorOptions = {
   fetchImpl?: typeof fetch;
   pollIntervalMs?: number;
   healthTimeoutMs?: number;
+  snapshotTimeoutMs?: number;
 };
 
 const COMPUTER_PORT = 4100;
@@ -78,6 +79,7 @@ const DEFAULT_AGENT_COMPUTER_DIR = join(
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const HEALTH_POLL_INTERVAL_MS = 500;
 const DEFAULT_HEALTH_TIMEOUT_MS = 120_000;
+const DEFAULT_SNAPSHOT_TIMEOUT_MS = 15 * 60 * 1000;
 const RECIPE_VERSION = "2";
 
 // The Playwright image tag and dependency must stay aligned with
@@ -132,13 +134,7 @@ function computeSnapshotName(agentComputerDir: string): string {
   hash.update("\0");
 
   const srcDir = join(agentComputerDir, "src");
-  let fileList: string[] = [];
-  try {
-    fileList = getAllFiles(srcDir);
-  } catch {
-    fileList = [];
-  }
-
+  const fileList = getAllFiles(srcDir);
   const items = fileList.map((fullPath) => {
     const rel = relative(srcDir, fullPath).split("\\").join("/");
     return { rel, fullPath };
@@ -200,11 +196,63 @@ function wrapBotError(
     `Daytona could not ${action} the computer for ${botId}: ${toErrorMessage(err)}`,
   );
 }
+function toSupervisorStatus(state?: string): string {
+  if (!state) return "unknown";
+  const lower = state.toLowerCase();
+  if (lower === "started") return "running";
+  if (lower === "stopped" || lower === "archived" || lower === "paused") {
+    return "exited";
+  }
+  return state;
+}
 
 function sleep(ms: number): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>();
   setTimeout(resolve, ms);
   return promise;
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage = "Operation timed out.",
+): Promise<T> {
+  if (timeoutMs <= 0) {
+    return Promise.reject(new Error(errorMessage));
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
+type PollDecision<T> = { done: true; value: T } | { done: false };
+
+async function pollUntil<T>(
+  step: () => Promise<PollDecision<T>>,
+  options: {
+    timeoutMs: number;
+    intervalMs: number;
+    timeoutError: () => Error;
+  },
+): Promise<T> {
+  const startTime = Date.now();
+  while (Date.now() - startTime < options.timeoutMs) {
+    const decision = await step();
+    if (decision.done) {
+      return decision.value;
+    }
+    const elapsed = Date.now() - startTime;
+    const remaining = options.timeoutMs - elapsed;
+    if (remaining <= 0) {
+      break;
+    }
+    await sleep(Math.min(options.intervalMs, remaining));
+  }
+  throw options.timeoutError();
 }
 
 export function createDaytonaSupervisorClient(
@@ -219,6 +267,15 @@ export function createDaytonaSupervisorClient(
     });
 
   const doFetch = options.fetchImpl ?? fetch;
+  /**
+   * In-memory supervisor state:
+   * - `known`: maps botId to { sandboxId, url } for fast locate cache hits. Entries are removed
+   *   on reset, deletion, terminal states (destroyed/destroying/error/build_failed), or 404s.
+   * - `locating`: maps botId to active locate promises to deduplicate concurrent calls. Note:
+   *   this deduplication is local to this single process only (no cross-instance synchronization).
+   * - `resetSandboxes`: maps botId to the deleted sandboxId to mask Daytona list eventual-consistency
+   *   staleness where a deleted sandbox temporarily reappears in list() queries. Cleared on fresh creation.
+   */
   const known = new Map<string, { sandboxId: string; url: string }>();
   const locating = new Map<string, Promise<string>>();
   const resetSandboxes = new Map<string, string>();
@@ -234,33 +291,49 @@ export function createDaytonaSupervisorClient(
       snapshotPromise = (async () => {
         const agentComputerDir =
           options.agentComputerDir ?? DEFAULT_AGENT_COMPUTER_DIR;
-        const snapshotName = computeSnapshotName(agentComputerDir);
+        let snapshotName: string;
+        try {
+          snapshotName = computeSnapshotName(agentComputerDir);
+        } catch (err) {
+          if (err instanceof SupervisorError) throw err;
+          throw new SupervisorError(
+            `Failed to prepare agent-computer sources from "${agentComputerDir}": ${toErrorMessage(err)}. Set DAYTONA_SNAPSHOT to use a prebuilt snapshot.`,
+          );
+        }
+
         const pollInterval = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-        const maxWaitMs = 15 * 60 * 1000;
+        const snapshotTimeout =
+          options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS;
 
         async function pollUntilActive(name: string): Promise<string> {
-          const startTime = Date.now();
-          while (Date.now() - startTime < maxWaitMs) {
-            let snap: { state: string };
-            try {
-              snap = await sdk.snapshot.get(name);
-            } catch (err) {
-              throw new SupervisorError(
-                `Failed to inspect Daytona snapshot ${name} while waiting for active state: ${toErrorMessage(err)}`,
-              );
-            }
-            if (snap.state === "active") {
-              return name;
-            }
-            if (snap.state === "error" || snap.state === "build_failed") {
-              throw new SupervisorError(
-                `Daytona snapshot ${name} failed with state "${snap.state}". Delete it in the Daytona dashboard or set DAYTONA_SNAPSHOT to override.`,
-              );
-            }
-            await sleep(pollInterval);
-          }
-          throw new SupervisorError(
-            `Timed out waiting for Daytona snapshot ${name} to become active.`,
+          return await pollUntil<string>(
+            async () => {
+              let snap: { state: string };
+              try {
+                snap = await sdk.snapshot.get(name);
+              } catch (err) {
+                throw new SupervisorError(
+                  `Failed to inspect Daytona snapshot ${name} while waiting for active state: ${toErrorMessage(err)}`,
+                );
+              }
+              if (snap.state === "active") {
+                return { done: true, value: name };
+              }
+              if (snap.state === "error" || snap.state === "build_failed") {
+                throw new SupervisorError(
+                  `Daytona snapshot ${name} failed with state "${snap.state}". Delete it in the Daytona dashboard or set DAYTONA_SNAPSHOT to override.`,
+                );
+              }
+              return { done: false };
+            },
+            {
+              timeoutMs: snapshotTimeout,
+              intervalMs: pollInterval,
+              timeoutError: () =>
+                new SupervisorError(
+                  `Timed out waiting for Daytona snapshot ${name} to become active.`,
+                ),
+            },
           );
         }
 
@@ -277,14 +350,27 @@ export function createDaytonaSupervisorClient(
           return await pollUntilActive(snapshotName);
         } catch (err) {
           if (isNotFoundError(err)) {
-            const recipe = buildRecipe(agentComputerDir);
+            let recipe: unknown;
             try {
-              await sdk.snapshot.create(
-                { name: snapshotName, image: recipe },
-                {
-                  onLogs: (line: string) => console.info(`[daytona] ${line}`),
-                  timeout: 900,
-                },
+              recipe = buildRecipe(agentComputerDir);
+            } catch (recipeErr) {
+              if (recipeErr instanceof SupervisorError) throw recipeErr;
+              throw new SupervisorError(
+                `Failed to build agent-computer recipe from "${agentComputerDir}": ${toErrorMessage(recipeErr)}. Set DAYTONA_SNAPSHOT to use a prebuilt snapshot.`,
+              );
+            }
+
+            try {
+              await withTimeout(
+                sdk.snapshot.create(
+                  { name: snapshotName, image: recipe },
+                  {
+                    onLogs: (line: string) => console.info(`[daytona] ${line}`),
+                    timeout: Math.ceil(snapshotTimeout / 1000),
+                  },
+                ),
+                snapshotTimeout,
+                `Timed out waiting for Daytona snapshot ${snapshotName} to be created.`,
               );
               return snapshotName;
             } catch (createErr) {
@@ -326,13 +412,19 @@ export function createDaytonaSupervisorClient(
         known.delete(botId);
       } else {
         try {
-          return await sdk.get(knownEntry.sandboxId);
+          const sb = await sdk.get(knownEntry.sandboxId);
+          const state = sb.state?.toLowerCase();
+          if (state === "destroyed" || state === "destroying") {
+            known.delete(botId);
+            return undefined;
+          }
+          return sb;
         } catch (err) {
           if (isNotFoundError(err)) {
             known.delete(botId);
-          } else {
-            throw wrapBotError(botId, action, err);
+            return undefined;
           }
+          throw wrapBotError(botId, action, err);
         }
       }
     }
@@ -382,7 +474,7 @@ export function createDaytonaSupervisorClient(
           }
         }
 
-        if (!sandboxHandle) {
+        async function createFreshSandbox(): Promise<SandboxHandle> {
           const passthroughEnv: Record<string, string> = {};
           if (options.environment) {
             for (const [key, value] of Object.entries(options.environment)) {
@@ -407,7 +499,7 @@ export function createDaytonaSupervisorClient(
           };
 
           try {
-            sandboxHandle = await sdk.create(
+            const handle = await sdk.create(
               {
                 snapshot,
                 envVars,
@@ -418,9 +510,14 @@ export function createDaytonaSupervisorClient(
               { timeout: 300 },
             );
             resetSandboxes.delete(botId);
+            return handle;
           } catch (err) {
             throw wrapBotError(botId, "create", err);
           }
+        }
+
+        if (!sandboxHandle) {
+          sandboxHandle = await createFreshSandbox();
         } else {
           const state = sandboxHandle.state?.toLowerCase();
           if (
@@ -433,31 +530,69 @@ export function createDaytonaSupervisorClient(
             } catch (err) {
               throw wrapBotError(botId, "start", err);
             }
-          } else if (state !== "started") {
-            const pollInterval =
-              options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-            const maxWaitMs = 300 * 1000;
-            const startTime = Date.now();
-            while (sandboxHandle.state?.toLowerCase() !== "started") {
-              if (Date.now() - startTime >= maxWaitMs) {
-                throw new SupervisorError(
-                  `Timed out waiting for computer sandbox for ${botId} to start.`,
-                );
-              }
-              await sleep(pollInterval);
+          }
+        }
+
+        if (sandboxHandle.state?.toLowerCase() !== "started") {
+          const pollInterval =
+            options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+          const maxWaitMs = 300 * 1000;
+
+          sandboxHandle = await pollUntil<SandboxHandle>(
+            async () => {
               try {
-                sandboxHandle = await sdk.get(sandboxHandle.id);
+                sandboxHandle = await sdk.get(sandboxHandle!.id);
               } catch (err) {
+                if (isNotFoundError(err)) {
+                  known.delete(botId);
+                  sandboxHandle = await createFreshSandbox();
+                  if (sandboxHandle.state?.toLowerCase() === "started") {
+                    return { done: true, value: sandboxHandle };
+                  }
+                  return { done: false };
+                }
                 throw wrapBotError(botId, "locate", err);
               }
+
               const cur = sandboxHandle.state?.toLowerCase();
+              if (cur === "started") {
+                return { done: true, value: sandboxHandle };
+              }
+              if (cur === "stopped" || cur === "archived" || cur === "paused") {
+                try {
+                  await sandboxHandle.start(300);
+                } catch (err) {
+                  throw wrapBotError(botId, "start", err);
+                }
+                if (sandboxHandle.state?.toLowerCase() === "started") {
+                  return { done: true, value: sandboxHandle };
+                }
+                return { done: false };
+              }
+              if (cur === "destroyed" || cur === "destroying") {
+                known.delete(botId);
+                sandboxHandle = await createFreshSandbox();
+                if (sandboxHandle.state?.toLowerCase() === "started") {
+                  return { done: true, value: sandboxHandle };
+                }
+                return { done: false };
+              }
               if (cur === "error" || cur === "build_failed") {
                 throw new SupervisorError(
                   `Daytona sandbox for ${botId} failed with state "${cur}".`,
                 );
               }
-            }
-          }
+              return { done: false };
+            },
+            {
+              timeoutMs: maxWaitMs,
+              intervalMs: pollInterval,
+              timeoutError: () =>
+                new SupervisorError(
+                  `Timed out waiting for computer sandbox for ${botId} to start.`,
+                ),
+            },
+          );
         }
 
         let previewUrl: string;
@@ -475,24 +610,36 @@ export function createDaytonaSupervisorClient(
         const healthTimeout =
           options.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
         const healthStart = Date.now();
+        const healthDeadline = healthStart + healthTimeout;
         const healthUrl = `${previewUrl.replace(/\/$/, "")}/health`;
 
         let healthy = false;
-        while (Date.now() - healthStart < healthTimeout) {
+        while (Date.now() < healthDeadline) {
+          const remainingMs = Math.max(1, healthDeadline - Date.now());
           try {
-            const res = await doFetch(healthUrl, {
-              headers: {
-                "X-Daytona-Skip-Preview-Warning": "true",
-              },
-            });
+            const res = await withTimeout(
+              doFetch(healthUrl, {
+                headers: {
+                  "X-Daytona-Skip-Preview-Warning": "true",
+                },
+                signal: AbortSignal.timeout(remainingMs),
+              }),
+              remainingMs,
+            );
             if (res.ok) {
               healthy = true;
               break;
             }
           } catch {
-            // Health endpoint not reachable yet; retry
+            // Health endpoint not reachable yet or timed out; retry
           }
-          await sleep(healthPollInterval);
+          const sleepMs = Math.min(
+            healthPollInterval,
+            Math.max(0, healthDeadline - Date.now()),
+          );
+          if (sleepMs > 0) {
+            await sleep(sleepMs);
+          }
         }
 
         if (!healthy) {
@@ -518,7 +665,7 @@ export function createDaytonaSupervisorClient(
         return;
       }
       const state = sandboxHandle.state?.toLowerCase();
-      if (state === "destroyed" || state === "destroying") {
+      if (state !== "started" && state !== "paused") {
         return;
       }
       try {
@@ -564,7 +711,7 @@ export function createDaytonaSupervisorClient(
           result.push({
             botId,
             container: sb.id,
-            status: sb.state ?? "unknown",
+            status: toSupervisorStatus(sb.state),
             startedAt: sb.createdAt,
           });
         }
