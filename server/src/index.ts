@@ -262,6 +262,11 @@ void recordAuditEvent(bootAuditStore, {
 console.info(
   JSON.stringify({
     type: "computer-isolation",
+    provider: daytonaSupervisor
+      ? "Daytona"
+      : supervisor
+        ? "Docker supervisor"
+        : "shared",
     isolation: supervisor ? "one computer per Bot" : "one shared computer",
     ...(supervisor
       ? {}

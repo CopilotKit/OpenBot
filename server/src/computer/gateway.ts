@@ -256,43 +256,59 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      */
     async status(botId: string): Promise<ComputerStatus> {
       if (supervisor?.list) {
-        const list = await supervisor.list();
-        const entry = list.find((item) => item.botId === botId);
-        if (!entry) {
-          return { botId, state: "absent" };
-        }
-        const rawStatus = entry.status ?? "";
-        const status = rawStatus.toLowerCase();
-        switch (status) {
-          case "running":
-          case "started":
-            return { botId, state: "ready" };
-          case "creating":
-          case "starting":
-          case "restoring":
-          case "pulling_snapshot":
-          case "resuming":
-          case "stopping":
-            return { botId, state: "starting" };
-          case "stopped":
-          case "paused":
-          case "archived":
-          case "exited":
-          case "destroyed":
+        try {
+          const list = await supervisor.list();
+          const entry = list.find((item) => item.botId === botId);
+          if (!entry) {
             return { botId, state: "absent" };
-          case "error":
-          case "build_failed":
-            return {
-              botId,
-              state: "unreachable",
-              reason: `The computer reported state "${rawStatus}".`,
-            };
-          default:
-            return {
-              botId,
-              state: "unreachable",
-              reason: `The computer reported unknown state "${rawStatus}".`,
-            };
+          }
+          const rawStatus = entry.status ?? "";
+          const status = rawStatus.toLowerCase();
+          switch (status) {
+            case "running":
+            case "started":
+              return { botId, state: "ready" };
+            case "created":
+            case "restarting":
+            case "creating":
+            case "starting":
+            case "restoring":
+            case "pulling_snapshot":
+            case "resuming":
+              return { botId, state: "starting" };
+            case "stopped":
+            case "paused":
+            case "archived":
+            case "exited":
+            case "destroyed":
+            case "removing":
+            case "archiving":
+            case "pausing":
+            case "stopping":
+              return { botId, state: "absent" };
+            case "error":
+            case "build_failed":
+              return {
+                botId,
+                state: "unreachable",
+                reason: `The computer reported state "${rawStatus}".`,
+              };
+            default:
+              return {
+                botId,
+                state: "unreachable",
+                reason: `The computer reported unknown state "${rawStatus}".`,
+              };
+          }
+        } catch (error) {
+          return {
+            botId,
+            state: "unreachable",
+            reason:
+              error instanceof Error && error.message.length > 0
+                ? error.message
+                : "Unknown failure.",
+          };
         }
       }
       return as(botId).status(botId);

@@ -26,6 +26,11 @@ class DaytonaNotFoundError extends Error {
   }
 }
 
+type DeleteCall = {
+  timeout?: number;
+  wait?: boolean;
+};
+
 type FakeSandbox = {
   id: string;
   state: string;
@@ -38,6 +43,7 @@ type FakeSandbox = {
   startCalls: number;
   stopCalls: number;
   deleteCalls: number;
+  deleteArgs: DeleteCall[];
   deleteHandler?: (timeout?: number, wait?: boolean) => void | Promise<void>;
 };
 
@@ -84,6 +90,7 @@ function makeSandbox(options: {
     startCalls: 0,
     stopCalls: 0,
     deleteCalls: 0,
+    deleteArgs: [],
     ...(options.deleteHandler ? { deleteHandler: options.deleteHandler } : {}),
   };
 }
@@ -104,6 +111,7 @@ function makeSandboxHandle(sb: FakeSandbox): SandboxHandle {
     },
     delete: async (timeout?: number, wait?: boolean) => {
       sb.deleteCalls++;
+      sb.deleteArgs.push({ timeout, wait });
       if (sb.deleteHandler) {
         await sb.deleteHandler(timeout, wait);
       } else {
@@ -149,6 +157,7 @@ function createFakeSdk(initialSandboxes: FakeSandbox[] = []): FakeSdk {
         startCalls: 0,
         stopCalls: 0,
         deleteCalls: 0,
+        deleteArgs: [],
       };
       sandboxes.set(id, sb);
       return makeSandboxHandle(sb);
@@ -665,6 +674,8 @@ describe("Daytona computer supervisor", () => {
 
     await client.reset("reset-wait-bot");
 
+    expect(existing.deleteCalls).toBe(1);
+    expect(existing.deleteArgs).toEqual([{ timeout: 60, wait: true }]);
     const remaining = await client.list();
     expect(
       remaining.find((bot) => bot.botId === "reset-wait-bot"),
