@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { AgentFields } from "@/components/agents/agent-fields";
+import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -141,6 +142,17 @@ export function AgentProfile({ agentId }: { agentId: string }) {
           </p>
         </section>
       )}
+
+      {/*
+       * Only for a coworker that runs somewhere else, and only for somebody who may change it.
+       * The Bot in the box has no endpoint and nothing to authenticate as.
+       */}
+      {!isEditing && profile.endpoint && profile.canManage ? (
+        <CallbackTokenPanel
+          agentId={agentId}
+          hasToken={profile.hasCallbackToken}
+        />
+      ) : null}
 
       {actionError ? (
         <p className="text-sm text-destructive" role="alert">

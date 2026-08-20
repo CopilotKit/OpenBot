@@ -22,10 +22,12 @@ import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
+import { authoriseAgentCall } from "./agents/callback-token";
 import type { DeploymentConfig } from "./config";
 import type { ConnectorAdminService } from "./connectors";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createPluginRoutes } from "./plugins/routes";
+import { REFUSAL_MARKER } from "./plugins/tools";
 import type { PluginStore } from "./plugins/store";
 import type { PackageStatusReader } from "./tenant-package";
 
@@ -334,6 +336,75 @@ export function createApp(
 
   if (pluginStore) {
     app.route("/api/plugins", createPluginRoutes(pluginStore, requireUser));
+  }
+
+  /*
+   * Where a framework Bot runs a tool.
+   *
+   * A Bot that runs its own loop, in its own process, is the honest shape: the run does not need a
+   * browser and does not stop when one closes. What it must not have is a route to a vendor that
+   * goes around this deployment, so it calls here and this calls the plugin store, which asks the
+   * same two questions it asks of everything else and writes the same audit row.
+   *
+   * Authenticated by a shared secret rather than a session, because the caller is a service and has
+   * no person behind it. Absent secret means the route does not exist: a deployment that has not
+   * configured this refuses rather than accepting anybody who can reach the port.
+   */
+  if (pluginStore) {
+    const legacyToken = config.agentToolToken ?? "";
+    app.post("/api/agent-tools/call", async (context) => {
+      /*
+       * Who is calling, and on whose behalf. Two questions, two credentials.
+       *
+       * The header says which agent: its own token, issued to it, stored here only as a hash. The
+       * body's `run` says which Bot and which person, signed by this deployment for this run.
+       *
+       * Both are required, and they are checked against each other. This used to be one
+       * deployment-wide token with the Bot and the actor read straight out of the body, which meant
+       * anything holding that token could spend any Bot's grants and write any name into the audit
+       * trail. A forgeable trail is worse than no trail, because it is believed.
+       */
+      const body = (await context.req.json().catch(() => null)) as {
+        name?: string;
+        args?: Record<string, unknown>;
+        run?: unknown;
+      } | null;
+
+      const verdict = await authoriseAgentCall({
+        presented: context.req.header("x-openbot-agent-token") ?? "",
+        run: body?.run,
+        encryptionKey: config.keyEncryptionKey,
+        legacyToken,
+        lookup: async (hash) =>
+          (await agentProfileStore?.agentForCallbackToken(hash)) ?? null,
+      });
+      if (!verdict.ok) {
+        return context.json({ error: verdict.reason }, verdict.status);
+      }
+
+      if (!body?.name) {
+        return context.json({ error: "A tool is required." }, 400);
+      }
+
+      try {
+        const result = await pluginStore.callTool({
+          // The model is offered `mcp__server__tool`; the store speaks `server/tool`.
+          ref: body.name.replace(/^mcp__/, "").replace("__", "/"),
+          args: body.args ?? {},
+          botId: verdict.botId,
+          // From the assertion, never the body: this is the name the audit row will carry.
+          actorId: verdict.actorId,
+        });
+        return context.json({ text: result.text, isError: result.isError });
+      } catch (error) {
+        // A refusal is an answer, not a failure: the Bot says what was blocked and carries on. The
+        // marker leads it so a transcript can draw a refusal without reading the wording.
+        return context.json({
+          text: `${REFUSAL_MARKER} ${error instanceof Error ? error.message : "That tool could not be called."}`,
+          isError: true,
+        });
+      }
+    });
   }
 
   if (sandboxedStore) {

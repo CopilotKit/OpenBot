@@ -97,3 +97,35 @@ export function deleteAgentMutationOptions(queryClient: QueryClient) {
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
+
+/**
+ * Issue this coworker a credential for calling tools back, and hand it over once.
+ *
+ * The token is in this response and nowhere else, ever again, so the caller has to show it to the
+ * person immediately. Calling this on a coworker that already has one rotates it, which is how a
+ * leaked token is retired.
+ */
+export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (agentId: string): Promise<string> => {
+      const response = await agentRequest(
+        `/api/agents/${agentId}/callback-token`,
+        { method: "POST" },
+      );
+      return ((await response.json()) as { token: string }).token;
+    },
+    onSuccess: () => invalidateAgents(queryClient),
+  });
+}
+
+/** Take the credential away. The coworker may still talk; it may not reach anything outside a chat. */
+export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (agentId: string) => {
+      await agentRequest(`/api/agents/${agentId}/callback-token`, {
+        method: "DELETE",
+      });
+    },
+    onSuccess: () => invalidateAgents(queryClient),
+  });
+}

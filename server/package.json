@@ -15,6 +15,7 @@
     "@ag-ui/client": "0.0.57",
     "@better-auth/drizzle-adapter": "^1.6.27",
     "@copilotkit/runtime": "1.67.1",
+    "@copilotkit/shared": "1.67.1",
     "@daytona/sdk": "^0.205.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-auth": "^1.6.27",
@@ -22,7 +23,8 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.10.0",
     "postgres": "^3.4.9",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@copilotkit/aimock": "^1.38.0",

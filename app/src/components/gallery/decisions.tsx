@@ -254,6 +254,23 @@ export const GALLERY: GalleryComponent[] = [
       "Ask the person to approve or decline something, and WAIT for their answer. Use before doing anything you cannot undo, spending money, sending a message, changing a record. You are given their decision and any reason they typed.",
     parameters: ApprovalCardProps,
     Component: ApprovalCard as GalleryComponent["Component"],
+    preview: {
+      // The whole interaction, because that is what this component is handed: it suspends a run,
+      // so its arguments arrive wrapped in the state of the decision it is waiting on.
+      status: "executing",
+      args: {
+        title: "Refund this order?",
+        summary:
+          "The customer was charged twice for the same order and the second charge has not settled.",
+        details: [
+          { label: "Amount", value: "$128.40" },
+          { label: "Customer", value: "Northwind Traders" },
+          { label: "Order", value: "2043" },
+        ],
+        approveLabel: "Refund",
+      },
+      respond: async () => {},
+    },
   },
   {
     name: "askChoice",
@@ -263,5 +280,25 @@ export const GALLERY: GalleryComponent[] = [
       "Ask the person to pick one of several options, and WAIT for their answer. Use when you cannot sensibly guess which one they meant. You are given the id of the option they chose.",
     parameters: ChoiceCardProps,
     Component: ChoiceCard as GalleryComponent["Component"],
+    preview: {
+      status: "executing",
+      args: {
+        title: "Which environment should this go to?",
+        summary: "The build is green and nothing else is queued.",
+        options: [
+          {
+            id: "staging",
+            label: "Staging",
+            description: "Safe, and reversible",
+          },
+          {
+            id: "production",
+            label: "Production",
+            description: "Live customers",
+          },
+        ],
+      },
+      respond: async () => {},
+    },
   },
 ];

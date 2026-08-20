@@ -1,5 +1,6 @@
 import { serve } from "bun";
 import { createAgentProfileStore } from "./agents/profile-store";
+import { mintRunAssertion } from "./agents/callback-token";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
@@ -40,6 +41,7 @@ import {
 } from "./credentials";
 import { createDatabase } from "./db/client";
 import { createPluginStore } from "./plugins/store";
+import { grantedTools } from "./plugins/tools";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -329,6 +331,20 @@ const app = createApp(
     identifyUser,
     identifyActor,
     stallGuard,
+    // Tools run here, not in the browser. Each one still executes through the plugin store, so the
+    // grant, the policy and the audit row are exactly where they were.
+    (actorId) => (botId) =>
+      grantedTools({ store: pluginStore, botId, actorId }),
+    /*
+     * What the deployment tells a remote Bot about the run it is starting.
+     *
+     * Signed here, where the encryption key lives, so the runtime module never holds a secret. The Bot
+     * hands this back when it calls a tool, and it is where the Bot id and the person's name come
+     * from: its own token proves which agent is calling, this proves who it is calling for, and
+     * neither is read out of the request body any more.
+     */
+    (actorId) => (botId, runId) =>
+      mintRunAssertion({ botId, actorId, runId }, config.keyEncryptionKey),
   ),
   // The only path to an acting call.
   computerGateway,

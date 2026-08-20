@@ -37,6 +37,20 @@ export const agentProfiles = pgTable(
     roleDescription: text("role_description").notNull(),
     avatarSeed: text("avatar_seed").notNull(),
     visibility: agentVisibility("visibility").notNull(),
+    /*
+     * The credential this Bot's agent presents when it calls a tool back.
+     *
+     * A hash, never the token. We issue it, the agent's owner holds it, and this side only ever needs
+     * to check one: storing the token itself would mean a database dump is a set of working
+     * credentials for every registered agent.
+     *
+     * Null means the agent has not been issued one and may not call tools back, which is the right
+     * default: a URL somebody pasted gets no capability until an administrator hands it one.
+     */
+    callbackTokenHash: text("callback_token_hash"),
+    callbackTokenIssuedAt: timestamp("callback_token_issued_at", {
+      withTimezone: true,
+    }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

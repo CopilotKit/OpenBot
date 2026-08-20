@@ -96,6 +96,18 @@ export type DeploymentConfig = {
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
   computer?: ComputerConfig;
+  /**
+   * The secret a Bot presents when it calls a tool back through this server.
+   *
+   * A framework Bot runs its own tool loop, in its own process, which is what makes it a real
+   * harness rather than a shape the browser drives. It still may not reach a vendor directly: it
+   * calls here, and here is where the grant, the policy and the audit row are. This is what tells
+   * that call apart from anybody else on the network.
+   *
+   * Absent means no Bot may call tools back, and a deployment that wanted them gets a refusal rather
+   * than an open door.
+   */
+  agentToolToken?: string;
 };
 
 type Environment = Record<string, string | undefined>;
@@ -422,5 +434,8 @@ export function loadConfig(
     auth: authConfig(environment, google),
     devNoAuth: devAuthEnabled(environment),
     computer: computerConfig(environment),
+    ...(optional(environment, "AGENT_TOOL_TOKEN")
+      ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
+      : {}),
   };
 }

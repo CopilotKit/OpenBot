@@ -20,6 +20,13 @@ export type AgentProfile = {
   endpoint: string | null;
   /** Whether a key is set for it. Never the key. */
   hasAuth: boolean;
+  /**
+   * Whether this agent holds a credential for calling tools back.
+   *
+   * A boolean, never the token: the token exists in a readable form once, in the response that issued
+   * it. A surface only needs to know whether to offer "generate" or "rotate".
+   */
+  hasCallbackToken: boolean;
 };
 
 export type CreateAgentInput = Pick<
