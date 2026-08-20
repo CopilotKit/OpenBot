@@ -16,9 +16,11 @@ import {
   connectorCursors,
   connectorInstances,
   credentials,
+  credentialKind,
   documentAcls,
   documents,
   intelligenceChannelMappings,
+  mcpUserCredentials,
   sessions,
   syncRuns,
   userRoles,
@@ -69,6 +71,72 @@ describe("OpenBot database schema", () => {
       "audit_events",
       "intelligence_channel_mappings",
     ]);
+  });
+
+  test("names the two kinds of OAuth secret separately from a shared token", () => {
+    /*
+     * Three different things, three names. `mcp` is one token an administrator holds for everybody.
+     * An OAuth client belongs to the deployment and reaches nobody's data by itself; a refresh token
+     * belongs to one person and reaches everything they can see. Filing all three under `mcp` would
+     * make "what does this deployment hold" unanswerable without reading the metadata of every row,
+     * and it is the question the vault exists to answer.
+     */
+    expect(credentialKind.enumValues).toEqual([
+      "model",
+      "connector",
+      "agent",
+      "mcp",
+      "mcp_oauth_client",
+      "mcp_user_token",
+    ]);
+  });
+
+  test("gives one person one credential per server, and makes that the key", () => {
+    expect(getTableName(mcpUserCredentials)).toBe("mcp_user_credentials");
+
+    const config = getTableConfig(mcpUserCredentials);
+
+    /*
+     * A composite primary key, not a surrogate id.
+     *
+     * "Which credential serves this server for this person" must have exactly one answer. With an id
+     * and no unique constraint, two rows for the same pair are legal, and then the answer depends on
+     * whichever the query happened to order first — so a person who reconnected could keep being
+     * served the grant they thought they had replaced.
+     */
+    expect(
+      config.primaryKeys.flatMap((key) =>
+        key.columns.map((column) => column.name),
+      ),
+    ).toEqual(["server_id", "user_id"]);
+
+    expect(
+      config.columns.map((column) => ({
+        name: column.name,
+        notNull: column.notNull,
+      })),
+    ).toEqual([
+      { name: "server_id", notNull: true },
+      { name: "user_id", notNull: true },
+      { name: "credential_id", notNull: true },
+      { name: "scope", notNull: true },
+      { name: "connected_at", notNull: true },
+      { name: "updated_at", notNull: true },
+    ]);
+  });
+
+  test("follows the person and the server when either goes away", () => {
+    const config = getTableConfig(mcpUserCredentials);
+    const cascading = config.foreignKeys.filter(
+      (key) => key.onDelete === "cascade",
+    );
+    /*
+     * Both the person and the server cascade: a deleted user must not leave a row pointing at a
+     * vault secret held on their behalf, and a removed server must not leave rows nobody can reach
+     * to disconnect. The credential reference deliberately does not cascade — a revoked credential
+     * is kept for the trail, and losing the row that says whose it was would take the trail with it.
+     */
+    expect(cascading.length).toBe(2);
   });
 
   test("keeps document embeddings and ACLs separate from document metadata", () => {

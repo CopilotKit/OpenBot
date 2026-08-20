@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "./audit";
 import type { Database } from "./db/client";
-import { credentials } from "./db/schema";
+import { type credentialKind, credentials } from "./db/schema";
 
 type CredentialEnvelope = {
   version: 1;
@@ -12,7 +12,14 @@ type CredentialEnvelope = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export type CredentialKind = "model" | "connector" | "agent" | "mcp";
+/**
+ * Derived from the enum rather than written out again.
+ *
+ * These were two lists that had to agree, and nothing made them. A kind added to the schema and not
+ * here fails at the point of use with a type error about an unrelated call site; a kind removed from
+ * the schema and left here compiles and then violates a check constraint at runtime. One source now.
+ */
+export type CredentialKind = (typeof credentialKind.enumValues)[number];
 
 export type CredentialStatus = {
   id: string;

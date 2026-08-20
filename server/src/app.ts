@@ -400,6 +400,17 @@ function credentialInput(
     return null;
   }
   const body = value as Record<string, unknown>;
+  /*
+   * An allowlist, and deliberately narrower than `CredentialKind`.
+   *
+   * `CredentialKind` is derived from the schema enum, so it now includes `mcp_oauth_client` and
+   * `mcp_user_token`. Neither belongs here. A user token is somebody's own grant and exists only as
+   * the outcome of a consent they gave; a client is registered when a connector is added. Both are
+   * written by the code that owns those flows, and an administrator hand-posting either would be
+   * creating a credential attributed to a person who never agreed to it.
+   *
+   * So this list is not out of date with the enum — do not widen it to match.
+   */
   if (
     (body.kind !== "model" &&
       body.kind !== "connector" &&

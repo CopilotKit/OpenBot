@@ -31,6 +31,23 @@ export const credentialKind = pgEnum("credential_kind", [
   // A token for an MCP server. Same vault and same revocation as everything else, so the server row
   // holds a pointer and never the secret.
   "mcp",
+  /*
+   * A deployment's OAuth client for an MCP server: the id and the secret an administrator registered
+   * with the vendor.
+   *
+   * Its own kind rather than another `mcp`, because it is a different thing with different reach. A
+   * client identifies this deployment to a vendor and can read nobody's data on its own; it is the
+   * thing you must have before anybody can consent, and the thing you rotate when it leaks.
+   */
+  "mcp_oauth_client",
+  /*
+   * One person's refresh token for one MCP server.
+   *
+   * The far end of the same flow and the opposite risk: this reaches everything that person can see.
+   * Distinct from the client so that "what does this deployment hold" stays answerable — one row
+   * that speaks for the deployment, and one row per person that speaks for them.
+   */
+  "mcp_user_token",
 ]);
 export const connectorType = pgEnum("connector_type", [
   "google_drive",
