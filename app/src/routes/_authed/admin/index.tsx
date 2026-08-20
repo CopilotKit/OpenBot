@@ -5,7 +5,6 @@ import {
   IconKey,
   IconLayoutGrid,
   IconListDetails,
-  IconPlugConnected,
   IconPuzzle,
   IconShieldCheck,
 } from "@tabler/icons-react";
@@ -54,12 +53,6 @@ const SECTIONS: {
     description:
       "Everything a Bot can touch outside this app, and the limits on it.",
     items: [
-      {
-        title: "Connectors",
-        description: "The services Bots can read from, and who connected them.",
-        icon: IconPlugConnected,
-        linkOptions: { to: "/admin/connectors" },
-      },
       {
         title: "Credentials",
         description: "Keys and tokens held for this deployment.",

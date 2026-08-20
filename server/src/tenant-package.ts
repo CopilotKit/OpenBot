@@ -115,6 +115,16 @@ export type TenantPackage = {
     credentialSecretRef: string;
     defaultModel: string;
   };
+  /**
+   * What `knowledge.yaml` says this deployment may connect to.
+   *
+   * Parsed and validated, and currently read by nothing. The connector that consumed it synced a
+   * customer's Drive into a local index using a service account, so every person's answer came back
+   * as the deployment rather than as themselves; it was removed rather than fixed. The file stays
+   * part of the package contract because shipped packages carry it and validation should keep
+   * refusing a malformed one, but a reader should not take the presence of this field as evidence
+   * that anything acts on it.
+   */
   knowledgeSources: {
     type: "google-drive" | "microsoft-onedrive";
     roots: string[];

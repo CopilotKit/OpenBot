@@ -25,7 +25,6 @@ import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import { authoriseAgentCall } from "./agents/callback-token";
 import type { DeploymentConfig } from "./config";
-import type { ConnectorAdminService } from "./connectors";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createPluginRoutes } from "./plugins/routes";
 import { REFUSAL_MARKER } from "./plugins/tools";
@@ -39,7 +38,6 @@ export function createApp(
   auditReader?: AuditReader,
   credentialService?: CredentialAdminService,
   packageStatusReader?: PackageStatusReader,
-  connectorService?: ConnectorAdminService,
   /**
    * The CopilotKit endpoint, already built by the caller.
    *
@@ -251,41 +249,6 @@ export function createApp(
     }
     return context.json({ package: await packageStatusReader.active() });
   });
-  app.get("/api/admin/connectors", requireUser, async (context) => {
-    const denied = requireAdmin(context);
-    if (denied) return denied;
-    if (!connectorService) {
-      return context.json(
-        { error: "Connector management is not configured." },
-        503,
-      );
-    }
-
-    return context.json({ connectors: await connectorService.list() });
-  });
-  app.post(
-    "/api/admin/connectors/google-drive/setup",
-    requireUser,
-    async (context) => {
-      const denied = requireAdmin(context);
-      if (denied) return denied;
-      if (!connectorService?.configureGoogleDrive) {
-        return context.json(
-          { error: "Google Drive setup is not configured." },
-          503,
-        );
-      }
-      const body = await context.req.json().catch(() => null);
-      const input = googleDriveSetupInput(body, context.var.actor.id);
-      if (!input)
-        return context.json({ error: "Google Drive setup is invalid." }, 400);
-      return context.json(
-        { connector: await connectorService.configureGoogleDrive(input) },
-        201,
-      );
-    },
-  );
-
   // The CopilotKit runtime, behind the same session guard as every other API route. Mounted last so
   // its own routing under /api/copilotkit cannot shadow an OpenBot route declared above.
   if (copilotHandler) {
@@ -427,28 +390,6 @@ export function createApp(
   }
 
   return app;
-}
-
-function googleDriveSetupInput(value: unknown, actorUserId: string) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const body = value as Record<string, unknown>;
-  if (
-    typeof body.serviceAccountJson !== "string" ||
-    typeof body.impersonationSubject !== "string" ||
-    !body.impersonationSubject.trim()
-  )
-    return null;
-  try {
-    const json = JSON.parse(body.serviceAccountJson) as unknown;
-    if (!json || typeof json !== "object" || Array.isArray(json)) return null;
-  } catch {
-    return null;
-  }
-  return {
-    serviceAccountJson: body.serviceAccountJson,
-    impersonationSubject: body.impersonationSubject.trim(),
-    actorUserId,
-  };
 }
 
 function credentialInput(

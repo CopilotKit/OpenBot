@@ -5,7 +5,6 @@ import {
   IconKey,
   IconLayoutGrid,
   IconListDetails,
-  IconPlugConnected,
   IconPuzzle,
   IconShieldCheck,
 } from "@tabler/icons-react";
@@ -29,9 +28,9 @@ const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
 /**
  * The same three groups, in the same order, as the admin index.
  *
- * A rail that lists eight things flat asks somebody to know which of them is the one they want. The
+ * A rail that lists seven things flat asks somebody to know which of them is the one they want. The
  * grouping is the only navigation help this screen offers, so it has to agree with the page it
- * navigates to — two different orderings of the same eight links is worse than either ordering.
+ * navigates to — two different orderings of the same seven links is worse than either ordering.
  */
 const GROUPS: {
   label: string;
@@ -44,11 +43,6 @@ const GROUPS: {
   {
     label: "What Bots can reach",
     items: [
-      {
-        title: "Connectors",
-        icon: IconPlugConnected,
-        linkOptions: { to: "/admin/connectors" },
-      },
       {
         title: "Credentials",
         icon: IconKey,

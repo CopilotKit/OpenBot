@@ -26,7 +26,6 @@ import {
 } from "./computer/policy-store";
 import { createSupervisorClient } from "./computer/supervisor";
 import { loadConfig } from "./config";
-import { createConnectorAdminService } from "./connectors";
 import {
   type IdentifyActor,
   type IdentifyUser,
@@ -309,15 +308,6 @@ const app = createApp(
     createAuditStore(database),
   ),
   createPackageStatusReader(database),
-  createConnectorAdminService(
-    tenantPackage.knowledgeSources,
-    database,
-    createCredentialAdminService(
-      config.keyEncryptionKey,
-      credentialStore,
-      createAuditStore(database),
-    ),
-  ),
   // The runtime call: the model, per-actor agent loading, and the two identity
   // functions are how a run is attributed to a person.
   mountCopilotRuntime(
