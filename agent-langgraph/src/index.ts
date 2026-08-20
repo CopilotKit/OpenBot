@@ -330,6 +330,7 @@ function buildGraph(input: RunAgentInput) {
 
   const tools = toBoundTools(input);
   const bound = tools.length > 0 ? model.bindTools(tools) : model;
+  const ours = deploymentToolsOf(input);
 
   return new StateGraph(MessagesAnnotation)
     .addNode("answer", async (state) => ({
@@ -338,6 +339,11 @@ function buildGraph(input: RunAgentInput) {
     .addNode("tools", async (state) => {
       const last = state.messages.at(-1) as AIMessage;
       const results = await Promise.all(
+        /*
+         * Only this deployment's own tools. A component is drawn by the surface, and a decision is
+         * answered there by a person, so neither is executed here and neither gets a result invented
+         * here. The run ends instead, and the surface starts the next one carrying what it produced.
+         */
         (last.tool_calls ?? [])
           .filter((call) => ours.has(call.name))
           .map(async (call) => {
@@ -358,7 +364,23 @@ function buildGraph(input: RunAgentInput) {
     .addEdge(START, "answer")
     .addConditionalEdges("answer", (state) => {
       const last = state.messages.at(-1) as AIMessage | undefined;
-      return (last?.tool_calls?.length ?? 0) > 0 ? "tools" : END;
+      const calls = last?.tool_calls ?? [];
+      if (calls.length === 0) return END;
+      /*
+       * A call the surface owns ends the run.
+       *
+       * This is how a tool that lives in the browser is supposed to work: the Bot asks for it, the
+       * run finishes, the surface draws it or puts the question to a person, and the surface begins
+       * the next run with the answer in hand. Running the loop through it here instead invents a
+       * result: the Bot apologises for a chart the person is looking at, and an approval card that
+       * has already been answered on its behalf sits waiting for a click that can never land.
+       *
+       * A turn that asks for both kinds at once ends too, and the model asks again for what it still
+       * has no answer to. That is the rarer case and the safe way round: the alternative runs a
+       * governed tool whose result nobody is waiting for.
+       */
+      if (callsTheSurface(calls, ours)) return END;
+      return "tools";
     })
     .addEdge("tools", "answer")
     .compile();
