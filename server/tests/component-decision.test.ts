@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import { Hono } from "hono";
 import type { AppVariables } from "../src/auth/guards";
 import { createComponentRoutes } from "../src/components/routes";
 import type { ComponentStore } from "../src/components/store";
@@ -34,7 +34,9 @@ const asSignedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
 function app() {
   return new Hono().route(
     "/components",
-    createComponentRoutes(store, asSignedIn),
+    // These cover the decision itself, so every Bot here is one the caller may use. Whether they may
+    // is `bot-access.test.ts`.
+    createComponentRoutes(store, asSignedIn, undefined, async () => true),
   );
 }
 

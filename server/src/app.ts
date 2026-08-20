@@ -596,7 +596,7 @@ export function createApp(
   if (componentStore) {
     app.route(
       "/api/components",
-      createComponentRoutes(componentStore, requireUser, auditStore),
+      createComponentRoutes(componentStore, requireUser, auditStore, canUseBot),
     );
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../src/auth/guards";
+import { createComponentRoutes } from "../src/components/routes";
 import { createComputerRoutes } from "../src/computer/routes";
 import { createPluginRoutes } from "../src/plugins/routes";
 
@@ -42,22 +43,18 @@ describe("the computer surface", () => {
   function app(actorId: string, role: "user" | "admin" = "user") {
     const reached: string[] = [];
     const gateway = {
-      resetComputer: async (_c: string, botId: string) => {
+      resetComputer: async (botId: string) => {
         reached.push(`reset:${botId}`);
-        return { reset: true, botId };
+        return { cleared: true };
       },
       read: async (botId: string) => {
         reached.push(`read:${botId}`);
         return { text: "a page" };
       },
-    } as never;
-    const client = {
-      forBot: () => ({
-        screenshot: async () => {
-          reached.push("screenshot");
-          return { image: "" };
-        },
-      }),
+      screenshot: async (botId: string) => {
+        reached.push(`screenshot:${botId}`);
+        return { image: "" };
+      },
       status: async (botId: string) => {
         reached.push(`status:${botId}`);
         return { botId, state: "ready" };
@@ -65,7 +62,6 @@ describe("the computer surface", () => {
     } as never;
 
     const routes = createComputerRoutes(
-      client,
       gateway,
       { get: () => ({ mode: "enforce", deny: [], allow: [] }) } as never,
       signedIn(actorId, role),
@@ -149,7 +145,6 @@ describe("the computer surface, unauthenticated", () => {
     const asked: string[] = [];
     const reached: string[] = [];
     const routes = createComputerRoutes(
-      {} as never,
       {
         read: async (botId: string) => {
           reached.push(botId);
@@ -182,6 +177,10 @@ describe("calling a tool as a Bot", () => {
         called.push(`${input.ref}@${input.botId}`);
         return { ok: true };
       },
+      listForAgent: async (agentId: string) => {
+        called.push(`list:${agentId}`);
+        return { mcp: [], skills: [] };
+      },
       listServers: async () => [],
       listSkills: async () => [],
     } as never;
@@ -207,6 +206,23 @@ describe("calling a tool as a Bot", () => {
     expect(called).toEqual(["mcp__slack__post@sales"]);
   });
 
+  // What a Bot holds is a fact about that Bot, the same as its components. Left open, this says which
+  // tools somebody else's private coworker has been granted.
+  test("refuses to list what somebody else's Bot holds", async () => {
+    const { hono, called } = app("stranger");
+    const response = await hono.request("http://t/api/plugins/for/sales");
+
+    expect(response.status).toBe(404);
+    expect(called).toEqual([]);
+  });
+
+  test("lets the owner list what their own Bot holds", async () => {
+    const { hono } = app("owner");
+    const response = await hono.request("http://t/api/plugins/for/sales");
+
+    expect(response.status).toBe(200);
+  });
+
   test("refuses a tool call as somebody else's Bot, and does not call it", async () => {
     const { hono, called } = app("stranger");
     const response = await hono.request("http://t/api/plugins/call", {
@@ -219,5 +235,89 @@ describe("calling a tool as a Bot", () => {
     // The grant belongs to the Bot, so the vendor call would have gone out on the deployment's
     // credential. Nothing may reach the vendor before the caller is checked.
     expect(called).toEqual([]);
+  });
+});
+
+describe("components, which a Bot answers with", () => {
+  function app(actorId: string) {
+    const touched: string[] = [];
+    const store = {
+      listForAgent: async (agentId: string) => {
+        touched.push(`list:${agentId}`);
+        return [{ name: "chart" }];
+      },
+      decide: async (name: string, agentId: string) => {
+        touched.push(`decide:${name}:${agentId}`);
+        return { allowed: true };
+      },
+      mayCall: async () => true,
+      callFunction: async () => {
+        touched.push("callFunction");
+        return { rows: [] };
+      },
+    } as never;
+
+    return {
+      touched,
+      hono: new Hono().route(
+        "/api/components",
+        createComponentRoutes(
+          store,
+          signedIn(actorId),
+          undefined,
+          ownedBy("owner"),
+        ),
+      ),
+    };
+  }
+
+  test("lets the owner ask about their own Bot", async () => {
+    const { hono, touched } = app("owner");
+    const response = await hono.request(
+      "http://t/api/components/for-agent/sales",
+    );
+
+    expect(response.status).toBe(200);
+    expect(touched).toEqual(["list:sales"]);
+  });
+
+  // What a Bot may draw is a fact about that Bot. Listing it for a coworker somebody else owns says
+  // which components they have been granted, which is the same leak the roster refuses.
+  test("refuses to list somebody else's Bot components", async () => {
+    const { hono, touched } = app("stranger");
+    const response = await hono.request(
+      "http://t/api/components/for-agent/sales",
+    );
+
+    expect(response.status).toBe(404);
+    expect(touched).toEqual([]);
+  });
+
+  test("refuses a decision asked as somebody else's Bot", async () => {
+    const { hono, touched } = app("stranger");
+    const response = await hono.request(
+      "http://t/api/components/chart/decision",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agentId: "sales" }),
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(touched).toEqual([]);
+  });
+
+  // The one that runs something. A grant belongs to the Bot, so without this the caller borrows it.
+  test("refuses a data function called as somebody else's Bot", async () => {
+    const { hono, touched } = app("stranger");
+    const response = await hono.request("http://t/api/components/chart/call", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId: "sales", function: "rows", args: {} }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(touched).toEqual([]);
   });
 });

@@ -338,9 +338,15 @@ export function createPluginRoutes(
   });
 
   /** What one Bot holds. The runtime reads this to decide what to offer a model. */
-  routes.get("/for/:agentId", requireUser, async (context) =>
-    context.json(await store.listForAgent(context.req.param("agentId"))),
-  );
+  routes.get("/for/:agentId", requireUser, async (context) => {
+    const agentId = context.req.param("agentId");
+    // A grant list is a fact about the Bot it belongs to. Left open it says which tools somebody
+    // else's private coworker has been given.
+    if (!(await canUseBot(context.var.actor, agentId))) {
+      return context.json({ error: "There is no such Bot." }, 404);
+    }
+    return context.json(await store.listForAgent(agentId));
+  });
 
   /**
    * Call a tool, as a Bot.
