@@ -23,6 +23,7 @@ import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
 } from "./computer/policy-store";
+import { createDaytonaSupervisorClient } from "./computer/daytona";
 import { createSupervisorClient } from "./computer/supervisor";
 import { loadConfig } from "./config";
 import { createConnectorAdminService } from "./connectors";
@@ -150,14 +151,25 @@ const roleRepository = createRoleRepository(database);
 const loadAgentsForActor = createRuntimeAgentLoader(database, agentVault);
 await synchronizeTenantPackage(database, tenantPackage);
 const auth = config.auth ? createAuth(config, database) : undefined;
-// One computer each, when a supervisor is configured to give them out. Without one every Bot shares
-// the computer at `baseUrl`, which is what a laptop wants and is honest about being one machine.
-const supervisor = config.computer?.supervisor
-  ? createSupervisorClient(config.computer.supervisor)
-  : undefined;
+const daytonaSupervisor =
+  config.computer?.daytona && config.computer.token
+    ? createDaytonaSupervisorClient({
+        ...config.computer.daytona,
+        computerToken: config.computer.token,
+        environment: process.env,
+      })
+    : undefined;
+// Kick the snapshot build off at boot so the first person to open a computer
+// is not the one who waits minutes for an image build.
+if (daytonaSupervisor) void daytonaSupervisor.warm();
+const supervisor =
+  daytonaSupervisor ??
+  (config.computer?.supervisor
+    ? createSupervisorClient(config.computer.supervisor)
+    : undefined);
 const computerClient = config.computer
   ? createComputerClient({
-      baseUrl: config.computer.baseUrl,
+      ...(config.computer.baseUrl ? { baseUrl: config.computer.baseUrl } : {}),
       allowPrivateHosts: config.computer.allowPrivateHosts,
       ...(config.computer.token ? { token: config.computer.token } : {}),
       ...(supervisor
@@ -432,12 +444,15 @@ serve<SocketData>({
       // Located per Bot when there is a supervisor, and the one shared computer when there is not.
       let upstream: string;
       try {
-        upstream = toStreamUrl(
-          supervisor
-            ? await supervisor.locate(streamBotId)
-            : config.computer.baseUrl,
-          streamBotId,
-        );
+        const streamBase = supervisor
+          ? await supervisor.locate(streamBotId)
+          : config.computer.baseUrl;
+        if (!streamBase) {
+          return new Response("No computer address is configured.", {
+            status: 503,
+          });
+        }
+        upstream = toStreamUrl(streamBase, streamBotId);
       } catch (error) {
         // Said out loud rather than falling back to another Bot's computer, which is the failure this
         // whole path exists to prevent.

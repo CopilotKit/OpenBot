@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ComputerUnavailableError,
   createComputerClient,
   ElementNotFoundError,
   NavigationRefusedError,
@@ -153,6 +154,43 @@ describe("computer client", () => {
       state: "unreachable",
       reason: "The assistant's computer did not respond in time.",
     });
+  });
+
+  test("refuses an unbound call when no baseUrl is configured", async () => {
+    const client = createComputerClient({
+      fetchImpl: ((url: string, init?: RequestInit) =>
+        Promise.resolve(ok({}))) as unknown as typeof fetch,
+    });
+
+    await expect(client.navigate("https://example.com/")).rejects.toThrow(
+      ComputerUnavailableError,
+    );
+    await expect(client.navigate("https://example.com/")).rejects.toThrow(
+      "This deployment locates computers per Bot, and this call named no Bot.",
+    );
+  });
+
+  test("routes to the resolved address when bound to a Bot without a shared baseUrl", async () => {
+    const seen: string[] = [];
+    const client = createComputerClient({
+      resolveBaseUrl: async (botId) => `http://${botId}.daytona.internal:4100`,
+      fetchImpl: ((url: string, init?: RequestInit) => {
+        seen.push(url);
+        return Promise.resolve(
+          ok({
+            url: "https://example.com/",
+            title: "Example",
+            elapsedMs: 10,
+          }),
+        );
+      }) as unknown as typeof fetch,
+    });
+
+    const botClient = client.forBot("bot-123");
+    await expect(
+      botClient.navigate("https://example.com/"),
+    ).resolves.toMatchObject({ title: "Example" });
+    expect(seen).toEqual(["http://bot-123.daytona.internal:4100/navigate"]);
   });
 });
 

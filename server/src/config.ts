@@ -63,7 +63,7 @@ export type DeploymentConfig = {
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
   computer?: {
-    baseUrl: string;
+    baseUrl?: string;
     /** The secret every computer requires of its caller. */
     token?: string;
     /**
@@ -72,6 +72,13 @@ export type DeploymentConfig = {
      * machine.
      */
     supervisor?: { baseUrl: string; token?: string };
+    /** Remote computers on Daytona, when an API key is configured. Mutually exclusive with supervisor. */
+    daytona?: {
+      apiKey: string;
+      apiUrl?: string;
+      target?: string;
+      snapshot?: string;
+    };
     /** True on a laptop, where browsing the deployment's own services is the point. */
     allowPrivateHosts: boolean;
     /**
@@ -266,22 +273,36 @@ function computerConfig(
   environment: Environment,
 ): DeploymentConfig["computer"] {
   const baseUrl = url(environment, "AGENT_COMPUTER_URL");
-  if (!baseUrl) {
+  const daytonaKey = optional(environment, "DAYTONA_API_KEY");
+  const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
+  if (!baseUrl && !daytonaKey) {
     return undefined;
   }
-  const policy = actionPolicy(environment);
+  if (daytonaKey && supervisorUrl) {
+    throw new Error(
+      "Set either DAYTONA_API_KEY or COMPUTER_SUPERVISOR_URL, not both. They are two ways of giving each Bot its own computer.",
+    );
+  }
   /*
    * The secret the computers require. Without it every call to a computer is refused, and that is the
    * intended failure: `agent-computer` drives a browser holding real logins and must not answer
    * unauthenticated callers that can reach its port.
    */
   const computerToken = optional(environment, "COMPUTER_TOKEN");
-  const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
+  if (daytonaKey && !computerToken) {
+    throw new Error(
+      "DAYTONA_API_KEY is set but COMPUTER_TOKEN is not. Daytona computers are reached over a public preview URL, and the token is the only thing that refuses strangers. Generate one: openssl rand -base64 32",
+    );
+  }
+  const policy = actionPolicy(environment);
   const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+  const daytonaUrl = url(environment, "DAYTONA_API_URL");
+  const daytonaTarget = optional(environment, "DAYTONA_TARGET");
+  const daytonaSnapshot = optional(environment, "DAYTONA_SNAPSHOT");
   return {
-    baseUrl,
     allowPrivateHosts:
       optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true",
+    ...(baseUrl ? { baseUrl } : {}),
     ...(policy ? { policy } : {}),
     ...(computerToken ? { token: computerToken } : {}),
     ...(supervisorUrl
@@ -289,6 +310,16 @@ function computerConfig(
           supervisor: {
             baseUrl: supervisorUrl,
             ...(supervisorToken ? { token: supervisorToken } : {}),
+          },
+        }
+      : {}),
+    ...(daytonaKey
+      ? {
+          daytona: {
+            apiKey: daytonaKey,
+            ...(daytonaUrl ? { apiUrl: daytonaUrl } : {}),
+            ...(daytonaTarget ? { target: daytonaTarget } : {}),
+            ...(daytonaSnapshot ? { snapshot: daytonaSnapshot } : {}),
           },
         }
       : {}),

@@ -39,8 +39,13 @@ export type ComputerClientOptions = {
    * is the correct failure: a computer that answers an unauthenticated caller is the bug.
    */
   token?: string;
-  /** Base URL of the Bot's computer, e.g. http://agent-computer:4100 */
-  baseUrl: string;
+  /**
+   * Base URL of the Bot's computer, e.g. http://agent-computer:4100.
+   *
+   * Absent when each Bot is located dynamically (by a supervisor or Daytona). When absent, every call
+   * must name a Bot that `resolveBaseUrl` can locate.
+   */
+  baseUrl?: string;
   /**
    * Where this Bot's computer is, when each Bot has one of its own.
    *
@@ -138,7 +143,7 @@ export function createComputerClient(options: ComputerClientOptions) {
    */
   const token = options.token;
   const timeoutMs = options.timeoutMs ?? 45_000;
-  const base = options.baseUrl.replace(/\/$/, "");
+  const base = options.baseUrl?.replace(/\/$/, "");
 
   /**
    * A view of the computer as one Bot.
@@ -168,6 +173,12 @@ export function createComputerClient(options: ComputerClientOptions) {
         botId && options.resolveBaseUrl
           ? (await options.resolveBaseUrl(botId)).replace(/\/$/, "")
           : base;
+
+      if (!target) {
+        throw new ComputerUnavailableError(
+          "This deployment locates computers per Bot, and this call named no Bot.",
+        );
+      }
 
       // Already stopped before this left: do not dispatch at all. Relying on fetch to reject an
       // aborted signal makes "did the click happen" depend on how quickly the runtime notices, and

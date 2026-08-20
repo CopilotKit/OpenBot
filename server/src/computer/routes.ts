@@ -37,9 +37,10 @@ export function createComputerRoutes(
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
-  routes.get("/:botId/status", requireUser, async (context) =>
-    context.json(await client.status(context.req.param("botId"))),
-  );
+  routes.get("/:botId/status", requireUser, async (context) => {
+    const botId = context.req.param("botId");
+    return context.json(await client.forBot(botId).status(botId));
+  });
 
   routes.get("/:botId/screenshot", requireUser, async (context) => {
     try {

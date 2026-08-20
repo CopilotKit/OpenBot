@@ -1,7 +1,7 @@
 # The Bot's computer uses Playwright's image so Chromium and its system libraries stay matched.
 #
 # The image tag and Playwright dependency must be pinned to the same exact version. Bump both or
-# neither.
+# neither. Also keep aligned with the Daytona Image recipe in server/src/computer/daytona.ts.
 FROM mcr.microsoft.com/playwright:v1.62.1-noble
 
 # unzip is not in the Playwright image and bun's installer needs it.

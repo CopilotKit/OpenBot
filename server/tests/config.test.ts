@@ -186,4 +186,40 @@ describe("deployment configuration", () => {
       expect(attempt).toThrow("AGENT_STALL_TIMEOUT_MS");
     },
   );
+
+  test("enables Daytona remote computers without a shared base address", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      DAYTONA_API_KEY: "dtn_test_key",
+      COMPUTER_TOKEN: "secret-token",
+    });
+
+    expect(config.computer?.daytona?.apiKey).toBe("dtn_test_key");
+    expect(config.computer?.baseUrl).toBeUndefined();
+    expect(config.computer?.token).toBe("secret-token");
+  });
+
+  test("refuses to configure Daytona computers without COMPUTER_TOKEN", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        DAYTONA_API_KEY: "dtn_test_key",
+      }),
+    ).toThrow(
+      "DAYTONA_API_KEY is set but COMPUTER_TOKEN is not. Daytona computers are reached over a public preview URL, and the token is the only thing that refuses strangers. Generate one: openssl rand -base64 32",
+    );
+  });
+
+  test("refuses to configure both Daytona and a container supervisor", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        DAYTONA_API_KEY: "dtn_test_key",
+        COMPUTER_TOKEN: "secret-token",
+        COMPUTER_SUPERVISOR_URL: "http://localhost:4000",
+      }),
+    ).toThrow(
+      "Set either DAYTONA_API_KEY or COMPUTER_SUPERVISOR_URL, not both. They are two ways of giving each Bot its own computer.",
+    );
+  });
 });
