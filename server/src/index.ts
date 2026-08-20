@@ -1,5 +1,6 @@
 import { serve } from "bun";
 import { mintRunAssertion } from "./agents/callback-token";
+import { createAgentFetch } from "./agents/endpoint";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
@@ -488,6 +489,13 @@ const app = createApp(
           },
         });
       },
+    }),
+    // Every run dials the stored endpoint again, so the check that was applied when it was
+    // registered has to be applied to wherever it redirects now.
+    // Absent computer configuration means nothing opted into private hosts, which is the safe
+    // reading and the same one `createApp` takes.
+    createAgentFetch({
+      allowPrivateHosts: config.computer?.allowPrivateHosts === true,
     }),
   ),
   // The only path to an acting call.

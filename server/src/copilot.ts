@@ -15,7 +15,7 @@ import {
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
 import type { AgentActor } from "./agents/profile-types";
-import type { StallGuard } from "./channels/stall-guard";
+import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
@@ -296,6 +296,14 @@ export async function buildAgents(
   loadVendors: () => Promise<readonly string[]> = async () => [],
   /** How a run's tools are narrowed to what it is about. Absent means they are not. */
   selection?: ToolSelection,
+  /**
+   * The fetch a remote agent is dialled with.
+   *
+   * Absent uses the runtime's own, which follows redirects wherever they point. A deployment passes
+   * one that re-checks each hop, because the address a registration was validated against and the
+   * address a run finally reaches are only the same address while nobody redirects.
+   */
+  agentFetch?: AgentFetch,
 ): Promise<Record<string, AbstractAgent>> {
   const vendors = await loadVendors().catch(() => [] as readonly string[]);
   return Object.fromEntries(
@@ -312,6 +320,7 @@ export async function buildAgents(
           computerGuidance,
           vendors,
           selection,
+          agentFetch,
         ),
       ]),
     ),
@@ -328,6 +337,7 @@ async function buildAgent(
   computerGuidance?: string,
   connectedVendors: readonly string[] = [],
   selection?: ToolSelection,
+  agentFetch?: AgentFetch,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -384,6 +394,7 @@ async function buildAgent(
       signRun,
       connectedVendors,
       narrowing ? offeredFor : undefined,
+      agentFetch,
     );
   }
 
@@ -478,6 +489,8 @@ function remoteAgentWithStandingRole(
    * Absent means no narrowing, which is the behaviour every deployment had before this existed.
    */
   narrow?: (input: RunAgentInput) => Promise<GrantedTool[]>,
+  /** The fetch this agent is dialled with. See {@link buildAgents}. */
+  agentFetch?: AgentFetch,
 ) {
   const remote = new HttpAgent({
     url: agent.endpoint,
@@ -485,9 +498,18 @@ function remoteAgentWithStandingRole(
     // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
     // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
     ...(agent.headers ? { headers: agent.headers } : {}),
+    // The watch wraps whichever fetch is underneath, so a deployment gets both the stall timeout and
+    // the redirect check rather than having to choose.
     ...(stallGuard
-      ? { fetch: stallGuard.watch({ id: agent.id, name: agent.name }) }
-      : {}),
+      ? {
+          fetch: stallGuard.watch(
+            { id: agent.id, name: agent.name },
+            agentFetch,
+          ),
+        }
+      : agentFetch
+        ? { fetch: agentFetch }
+        : {}),
   });
   /*
    * What this Bot holds, as a second standing message.
@@ -711,6 +733,7 @@ export async function resolveRuntimeAgents(
   computerGuidance?: string,
   loadVendors?: () => Promise<readonly string[]>,
   selection?: ToolSelection,
+  agentFetch?: AgentFetch,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -732,6 +755,7 @@ export async function resolveRuntimeAgents(
     computerGuidance,
     loadVendors,
     selection,
+    agentFetch,
   );
 }
 
@@ -788,6 +812,8 @@ export function createRequestAgents(
    * grants, and because the discovery row has to name the person the run belongs to.
    */
   selectionForActor?: (actorId: string) => ToolSelection,
+  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
+  agentFetch?: AgentFetch,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -801,6 +827,7 @@ export function createRequestAgents(
       computerGuidance,
       loadVendors,
       selectionForActor?.(actor.id),
+      agentFetch,
     );
   };
 }
@@ -830,6 +857,8 @@ export function mountCopilotRuntime(
   basePath = "/api/copilotkit",
   loadVendors?: () => Promise<readonly string[]>,
   selectionForActor?: (actorId: string) => ToolSelection,
+  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
+  agentFetch?: AgentFetch,
 ) {
   const { intelligence } = config.runtime;
 
@@ -870,6 +899,7 @@ export function mountCopilotRuntime(
       config.computer ? COMPUTER_GUIDANCE : undefined,
       loadVendors,
       selectionForActor,
+      agentFetch,
     ) as never,
   });
 
