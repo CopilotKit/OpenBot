@@ -77,6 +77,11 @@ the container, so there is nothing to share it with.
 the image sets. A deployment anybody can reach needs Google sign-in configured, or every visitor is
 an administrator.
 
+**Put TLS in front of it.** Not only for the cookies. A page served from `http://<address>` is not a
+secure context, which removes a set of browser APIs that are present on `http://localhost` and so
+never missing on a laptop. The app no longer depends on any of them, but sign-in cookies still want
+`Secure`, and every platform below terminates TLS for you.
+
 ## Migrations
 
 With `EMBEDDED_POSTGRES=on` they run at start and there is nothing to do. There is exactly one

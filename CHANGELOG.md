@@ -25,6 +25,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 - **`COMPUTER_SANDBOX=on`** turns on Chromium's own sandbox where the host permits user namespaces.
   Which way it went is printed at start-up either way.
 
+### Fixed
+
+- **A deployment served over plain HTTP could not start a conversation.** The chat surface minted
+  identifiers with `crypto.randomUUID`, which browsers withhold outside a secure context. On a
+  laptop `http://localhost` counts as one, so this never showed up in development; on a real
+  address it does not, and the surface did nothing at all when you pressed send. No message, no
+  error. Ids now come from an API with no such restriction.
+
 ### Changed
 
 - **Where a Bot's computer runs is now a plug.** One `ComputerProvider` interface sits under the

@@ -16,6 +16,7 @@ import {
   type QueuedMessage,
   reduceQueue,
 } from "@/components/channels/composer";
+import { newId } from "../../lib/new-id";
 
 export function ConversationView({
   messages,
@@ -147,7 +148,7 @@ export function ConversationView({
       const run = apply({
         busy: whileBusy,
         draft,
-        id: crypto.randomUUID(),
+        id: newId(),
         type: "submit",
       });
       return run ? startRef.current(run) : undefined;

@@ -1,4 +1,5 @@
 import type { Message } from "@ag-ui/core";
+import { newId } from "../new-id";
 
 /**
  * Insert explanatory tool results for unanswered tool calls before sending history to providers.
@@ -21,7 +22,7 @@ function isToolResult(message: Message): message is Message & ToolResult {
  */
 export function repairUnansweredToolCalls(
   messages: ReadonlyArray<Message>,
-  newId: () => string = () => crypto.randomUUID(),
+  newId: () => string = () => newId(),
 ): ReadonlyArray<Message> {
   const answered = new Set<string>();
   for (const message of messages) {
