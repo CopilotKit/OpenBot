@@ -18,7 +18,8 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
-import { createComputerTransport } from "./client";
+import { ComputerUnavailableError, createComputerTransport } from "./client";
+import { checkComputerAddress } from "./target";
 export {
   ComputerUnavailableError,
   ElementNotFoundError,
@@ -214,8 +215,24 @@ export function createComputerGateway(
   });
   const snapshots = new Map<string, CachedSnapshot>();
 
-  function locate(botId: string): Promise<string> {
-    return provider.locate(botId);
+  /**
+   * Where this Bot's computer is, checked before anything is sent to it.
+   *
+   * The provider decides the address, and a provider is a plug: it can be this deployment's own
+   * supervisor on loopback or a backend somewhere else answering over its own API. Either way the
+   * address goes straight into `fetch` carrying this deployment's computer token, so it is worth
+   * confirming it is an address we speak to rather than whatever came back.
+   *
+   * Not the navigation check. That one refuses private hosts, which is the right answer for where a
+   * Bot may browse and the wrong one here, where loopback is the normal case.
+   */
+  async function locate(botId: string): Promise<string> {
+    const address = await provider.locate(botId);
+    const verdict = checkComputerAddress(address);
+    if (!verdict.allowed) {
+      throw new ComputerUnavailableError(verdict.reason);
+    }
+    return verdict.url;
   }
 
   async function get<T>(
