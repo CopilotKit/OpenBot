@@ -22,6 +22,8 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { toVisibleChatItems } from "./chat-messages";
+import { asText, forDisplay, REFUSAL_MARKER } from "@/lib/plugins/tool-result";
+import { readToolName } from "@/lib/plugins/tool-name";
 import type { QueuedMessage } from "./composer";
 import { ToolLine } from "./tool-line";
 import { ToolRenderBoundary } from "./tool-boundary";
@@ -467,20 +469,59 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
     <Arriving delay={delay}>
       <ToolRenderBoundary name={name}>
         {/*
-         * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED. `renderToolCall` draws whatever was
-         * registered for the name and nothing at all for anything else, which left a Bot that called
-         * something the app does not know about looking like a Bot that did nothing — the same
-         * failure `ToolRenderBoundary` exists to prevent, arriving by a different route.
+         * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED, and since tools moved to the server
+         * that is now the ordinary case rather than the exception: MCP tools execute in the runtime
+         * and register no renderer here at all. `renderToolCall` still draws the components the app
+         * registers, and everything else lands below.
          *
-         * The fallback is a plain tool line: what was called, shimmering until its result lands. It
-         * is the same line the computer and MCP tools draw, so an unrecognised call reads as an
-         * ordinary event rather than as damage.
+         * What was called, shimmering until its result arrives, and then the server's own words
+         * drawn the way a Bot's prose is drawn.
          */}
-        {drawn ?? <ToolLine label={name} running={result === undefined} />}
+        {drawn ?? <ServerToolLine name={name} result={result} />}
       </ToolRenderBoundary>
     </Arriving>
   );
 });
+
+/**
+ * A tool the runtime executed, drawn for the person watching.
+ *
+ * Named from the reader's side: what was done, against which server, with the server's own words
+ * behind a disclosure. The identifier the model was offered never reaches the screen.
+ */
+function ServerToolLine({ name, result }: { name: string; result?: string }) {
+  const { label, detail } = readToolName(name);
+  /*
+   * A refusal is not a result, and must not read like one.
+   *
+   * The server says which it is rather than the browser inferring it from the wording, because the
+   * wording is a policy message an administrator can rewrite and the first rephrasing would break
+   * any guess made here. See REFUSAL_MARKER in server/src/plugins/tools.ts.
+   */
+  const answer = result === undefined ? undefined : asText(result);
+  const refused = answer?.startsWith(REFUSAL_MARKER) ?? false;
+  /*
+   * The marker is for this component, not for the reader. Left in, a refusal reads "Blocked" in the
+   * label and then "Refused." again in the first two words of the body, which is the same fact three
+   * times over by the end of the sentence. Stripped here rather than on the server, because the
+   * server's copy is what the model is told and "Refused." in front of a reason is right for it.
+   */
+  const body = refused ? answer?.slice(REFUSAL_MARKER.length).trim() : answer;
+  return (
+    <ToolLine
+      {...(detail ? { detail } : {})}
+      label={label}
+      refused={refused}
+      running={result === undefined}
+    >
+      {body ? (
+        <Streamdown components={markdownComponents}>
+          {forDisplay(body)}
+        </Streamdown>
+      ) : null}
+    </ToolLine>
+  );
+}
 
 export function ChatTranscript({
   busy = false,

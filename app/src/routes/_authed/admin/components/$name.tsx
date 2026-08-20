@@ -474,7 +474,8 @@ function ComponentDetail({
           <DialogHeader>
             <DialogTitle>Available to</DialogTitle>
             <DialogDescription>
-              Switch a Bot off and it is never told this component exists. Each
+              Switch a Bot off and it is never told this component exists, so it
+              cannot ask for it and does not apologise for not having it. Each
               change takes effect immediately.
             </DialogDescription>
           </DialogHeader>
@@ -525,9 +526,11 @@ function ComponentDetail({
           <DialogHeader>
             <DialogTitle>May read</DialogTitle>
             <DialogDescription>
-              The deployment data this component may draw, decided before the
-              model is told it is on screen. Each change takes effect
-              immediately.
+              A separate grant from Available to, and not implied by it: that
+              one decides who may draw this, and this decides what it may go and
+              fetch in order to draw itself. Until one of these is on it shows
+              only what the Bot passes it, and every read it does make is a row
+              in Audit. Each change takes effect immediately.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="mt-4">

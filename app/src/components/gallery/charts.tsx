@@ -396,13 +396,6 @@ export function ProgressChartCard({
 }
 
 /** Gallery component registration kept beside the chart implementations. */
-/**
- * Preview data is deliberately plausible rather than pretty: the Admin grid is where somebody
- * decides whether to publish a component, and a shape that only reads well on invented numbers is
- * worth seeing before a Bot draws it in front of a customer.
- */
-const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
-
 export const GALLERY: GalleryComponent[] = [
   {
     name: "showBarChart",
@@ -412,17 +405,16 @@ export const GALLERY: GalleryComponent[] = [
       "Show values as a bar chart. Use when comparing a handful of named things, teams, months, categories. Not for a trend over time, which is showLineChart.",
     parameters: BarChartProps,
     Component: BarChartCard as GalleryComponent["Component"],
-    confirmation: "The bar chart is now on screen for the person.",
     preview: {
-      title: "Spend by team",
-      caption: "The current quarter, in thousands.",
+      title: "Revenue by team",
+      caption: "Sales leads, and Engineering is closing the gap.",
       points: [
-        { label: "Support", value: 128 },
-        { label: "Platform", value: 96 },
-        { label: "Sales", value: 74 },
-        { label: "Research", value: 41 },
+        { label: "Sales", value: 120 },
+        { label: "Engineering", value: 80 },
+        { label: "Support", value: 45 },
       ],
     },
+    confirmation: "The bar chart is now on screen for the person.",
   },
   {
     name: "showPieChart",
@@ -432,17 +424,15 @@ export const GALLERY: GalleryComponent[] = [
       "Show how a whole is divided, as a donut with a legend. Use only when the parts sum to something meaningful, and prefer a bar chart above about six slices.",
     parameters: PieChartProps,
     Component: PieChartCard as GalleryComponent["Component"],
-    confirmation: "The donut chart is now on screen for the person.",
     preview: {
-      title: "Where the budget went",
-      caption: "Every line sums to the whole.",
+      title: "Where the month went",
       points: [
-        { label: "Salaries", value: 62 },
-        { label: "Hosting", value: 21 },
-        { label: "Tooling", value: 11 },
-        { label: "Travel", value: 6 },
+        { label: "Build", value: 48 },
+        { label: "Support", value: 26 },
+        { label: "Meetings", value: 26 },
       ],
     },
+    confirmation: "The donut chart is now on screen for the person.",
   },
   {
     name: "showLineChart",
@@ -452,16 +442,13 @@ export const GALLERY: GalleryComponent[] = [
       "Show one or more series over an ordered axis, usually time. Every series must have one value per label.",
     parameters: LineChartProps,
     Component: LineChartCard as GalleryComponent["Component"],
-    confirmation: "The line chart is now on screen for the person.",
     preview: {
-      title: "Tickets over the year",
-      caption: "Opened against closed.",
-      labels: QUARTERS,
-      series: [
-        { name: "Opened", values: [180, 220, 260, 240] },
-        { name: "Closed", values: [150, 210, 250, 265] },
-      ],
+      title: "Signups",
+      caption: "Six weeks, one release.",
+      labels: ["W1", "W2", "W3", "W4", "W5", "W6"],
+      series: [{ name: "Signups", values: [120, 180, 160, 240, 300, 420] }],
     },
+    confirmation: "The line chart is now on screen for the person.",
   },
   {
     name: "showAreaChart",
@@ -471,13 +458,13 @@ export const GALLERY: GalleryComponent[] = [
       "The same as showLineChart with the area under each line filled. Use for volume or accumulation rather than for a rate.",
     parameters: AreaChartProps,
     Component: AreaChartCard as GalleryComponent["Component"],
-    confirmation: "The area chart is now on screen for the person.",
     preview: {
       title: "Storage used",
-      caption: "Gigabytes, accumulating.",
-      labels: QUARTERS,
-      series: [{ name: "Used", values: [120, 260, 430, 610] }],
+      caption: "Growing steadily since the migration.",
+      labels: ["Jan", "Feb", "Mar", "Apr", "May"],
+      series: [{ name: "TB", values: [12, 19, 26, 31, 44] }],
     },
+    confirmation: "The area chart is now on screen for the person.",
   },
   {
     name: "showProgress",
@@ -487,15 +474,14 @@ export const GALLERY: GalleryComponent[] = [
       "Show values against their targets as progress bars. Use for 'are we there yet' questions, budget spent against budget, done against planned.",
     parameters: ProgressChartProps,
     Component: ProgressChartCard as GalleryComponent["Component"],
-    confirmation: "The progress chart is now on screen for the person.",
     preview: {
-      title: "Migration progress",
-      caption: "Services moved, against the plan.",
+      title: "Migration to the new runtime",
+      caption: "Two services left.",
       points: [
-        { label: "Billing", value: 18, target: 18 },
-        { label: "Identity", value: 11, target: 14 },
-        { label: "Reporting", value: 4, target: 12 },
+        { label: "Services moved", value: 18, target: 20 },
+        { label: "Tests ported", value: 240, target: 240 },
       ],
     },
+    confirmation: "The progress chart is now on screen for the person.",
   },
 ];

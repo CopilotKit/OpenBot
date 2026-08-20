@@ -143,6 +143,24 @@ describe("OpenBot database schema", () => {
         hasDefault: false,
         primary: false,
       },
+      /*
+       * Nullable, and that is the security property.
+       *
+       * Null means this agent holds no credential and may not call a tool back, which is what a URL
+       * somebody pasted gets until an administrator hands it one.
+       */
+      {
+        name: "callback_token_hash",
+        notNull: false,
+        hasDefault: false,
+        primary: false,
+      },
+      {
+        name: "callback_token_issued_at",
+        notNull: false,
+        hasDefault: false,
+        primary: false,
+      },
       {
         name: "deleted_at",
         notNull: false,
@@ -270,6 +288,27 @@ describe("OpenBot database schema", () => {
         method: "btree",
       },
     ]);
+  });
+
+  /*
+   * The callback columns arrive as an alteration, not in the base schema.
+   *
+   * Every deployment of this has already applied 0000, so editing it in place changes a file the
+   * database has recorded as run and the columns never appear. They are added by 0001, and this
+   * says so, because the alternative failure is silent: the code reads a column the deployment
+   * does not have.
+   */
+  test("adds the callback token columns in their own migration", async () => {
+    const migration = await readFile(
+      new URL("../drizzle/0001_swift_morph.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain(
+      `ALTER TABLE "agent_profiles" ADD COLUMN "callback_token_hash" text;`,
+    );
+    expect(migration).toContain(
+      `ALTER TABLE "agent_profiles" ADD COLUMN "callback_token_issued_at" timestamp with time zone;`,
+    );
   });
 
   test("keeps the agent profile migration aligned with the schema", async () => {

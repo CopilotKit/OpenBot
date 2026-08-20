@@ -190,8 +190,14 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
-      BOT_MODEL: ${BOT_MODEL:-}
+      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
       BOT_RESPONSES_API: ${BOT_RESPONSES_API:-false}
+      # Where this Bot runs a tool: back through the deployment that granted it, never at the vendor.
+      # `host.docker.internal` because the API server runs on the host, not in this network.
+      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
+      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4201/health')\""]
       interval: 10s

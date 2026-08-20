@@ -446,6 +446,20 @@ function Yours({
 
   return (
     <div className="space-y-6">
+      {/*
+       * The two words beside each tool decide how it is judged, and neither said so anywhere.
+       * "changes things" is not a description of the tool, it is the effect the boundary evaluates,
+       * and somebody writing a rule about writes has no way to know that from the badge alone.
+       */}
+      <p className="max-w-prose text-muted-foreground text-sm leading-relaxed">
+        A Bot with a grant may call that tool; a Bot without one is never told
+        it exists. Beside each tool is what it does to the far end, which is
+        what a boundary rule means by <code>mcp.effect</code>. Anything not
+        positively known to be read-only counts as <span>changes things</span>,
+        so every tool on a server somebody added by URL is treated as a write
+        until it is reviewed. Every call is checked against the boundary and
+        written to Audit whichever way it goes.
+      </p>
       {servers.map((server) => (
         <div
           className="rounded-lg border border-border bg-card"
