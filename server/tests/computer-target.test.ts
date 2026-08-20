@@ -98,7 +98,7 @@ describe("checkComputerAddress", () => {
   });
 
   test("allows a hosted provider's public address", () => {
-    const verdict = checkComputerAddress("https://sandbox-abc123.daytona.app");
+    const verdict = checkComputerAddress("https://sandbox-abc123.example.net");
     expect(verdict.allowed).toBe(true);
   });
 
