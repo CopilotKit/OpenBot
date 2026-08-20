@@ -187,3 +187,36 @@ describe("deployment configuration", () => {
     },
   );
 });
+
+describe("accessibility", () => {
+  test("is on when nothing is set", () => {
+    expect(loadConfig(baseEnvironment).accessibility).toBe(true);
+  });
+
+  test.each(["true", "1"])(
+    "is off on OPENBOT_ACCESSIBILITY_DISABLED=%p",
+    (value) => {
+      expect(
+        loadConfig({
+          ...baseEnvironment,
+          OPENBOT_ACCESSIBILITY_DISABLED: value,
+        }).accessibility,
+      ).toBe(false);
+    },
+  );
+
+  // Anything else is not a way of saying off. A deployment that typed something
+  // else has not opted out, and silently treating it as opt-out would be a
+  // setting that appears to work and does not.
+  test.each(["false", "no", "", "yes"])(
+    "stays on for OPENBOT_ACCESSIBILITY_DISABLED=%p",
+    (value) => {
+      expect(
+        loadConfig({
+          ...baseEnvironment,
+          OPENBOT_ACCESSIBILITY_DISABLED: value,
+        }).accessibility,
+      ).toBe(true);
+    },
+  );
+});

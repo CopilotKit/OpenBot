@@ -58,6 +58,8 @@ export type DeploymentConfig = {
    * See auth/dev-actor.ts for the two locks that stop this reaching a deployment.
    */
   devNoAuth: boolean;
+  /** Names OpenBot on the analytics the runtime already sends. Off with OPENBOT_ACCESSIBILITY_DISABLED. */
+  accessibility: boolean;
   /**
    * The Bot computer. Absent means the feature is off and its routes are not mounted, rather than
    * mounted and failing: a capability that is not configured should be missing, not broken.
@@ -345,6 +347,11 @@ function actionPolicy(environment: Environment): ActionPolicy | undefined {
  *
  * Zero is a legitimate value and means off. It is not the same as a malformed one.
  */
+function accessibilityEnabled(environment: Environment): boolean {
+  const off = optional(environment, "OPENBOT_ACCESSIBILITY_DISABLED");
+  return off !== "true" && off !== "1";
+}
+
 function agentStallTimeoutMs(environment: Environment): number {
   const raw = optional(environment, "AGENT_STALL_TIMEOUT_MS");
   if (!raw) {
@@ -380,6 +387,7 @@ export function loadConfig(
     oauth: { google },
     auth: authConfig(environment, google),
     devNoAuth: devAuthEnabled(environment),
+    accessibility: accessibilityEnabled(environment),
     computer: computerConfig(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
