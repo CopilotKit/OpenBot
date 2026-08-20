@@ -686,7 +686,7 @@ describe("Daytona computer supervisor", () => {
     sdk.list = (query?: { labels?: Record<string, string> }) => {
       if (existing.deleteCalls > 0) {
         postDeleteListCalls++;
-        if (postDeleteListCalls === 2) {
+        if (postDeleteListCalls === 1) {
           async function* staleGenerator() {
             yield {
               id: existing.id,
@@ -728,7 +728,62 @@ describe("Daytona computer supervisor", () => {
     expect(
       later.find((bot) => bot.botId === "reset-convergence-bot"),
     ).toBeUndefined();
+  });
 
-    expect(postDeleteListCalls).toBeGreaterThanOrEqual(3);
+  test("failed reset deletion does not tombstone sandbox so retry deletes it and removes it from list", async () => {
+    let deleteAttempts = 0;
+    const existing: FakeSandbox = {
+      id: "sb-failed-delete-1",
+      state: "started",
+      labels: {
+        "openbot/computer": "true",
+        "openbot/bot-id": "retry-delete-bot",
+      },
+      envVars: {},
+      public: true,
+      autoStopInterval: 15,
+      createdAt: "2026-08-20T10:00:00Z",
+      previewUrl: "https://sb-failed-delete-1.preview.daytona.app",
+      startCalls: 0,
+      stopCalls: 0,
+      deleteCalls: 0,
+      deleteHandler: (_timeout, _wait) => {
+        deleteAttempts++;
+        if (deleteAttempts === 1) {
+          throw new Error("transient deletion error");
+        }
+        existing.state = "destroyed";
+      },
+    };
+
+    const sdk = createFakeSdk([existing]);
+    const client = createDaytonaSupervisorClient({
+      apiKey: "test-api-key",
+      computerToken: "tok",
+      snapshot: "prebuilt",
+      pollIntervalMs: 1,
+      healthTimeoutMs: 200,
+      sdk: sdk as never,
+      fetchImpl: fakeFetch(),
+    });
+
+    let resetError: unknown;
+    try {
+      await client.reset("retry-delete-bot");
+    } catch (err) {
+      resetError = err;
+    }
+
+    expect(resetError).toBeInstanceOf(SupervisorError);
+    expect((resetError as Error)?.message).toContain("retry-delete-bot");
+    expect(existing.deleteCalls).toBe(1);
+
+    await client.reset("retry-delete-bot");
+
+    expect(existing.deleteCalls).toBe(2);
+    const remaining = await client.list();
+    expect(
+      remaining.find((bot) => bot.botId === "retry-delete-bot"),
+    ).toBeUndefined();
   });
 });

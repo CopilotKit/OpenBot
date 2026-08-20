@@ -534,49 +534,12 @@ export function createDaytonaSupervisorClient(
       if (!sandboxHandle) {
         return;
       }
-      resetSandboxes.set(botId, sandboxHandle.id);
       try {
         await sandboxHandle.delete(60, true);
       } catch (err) {
         throw wrapBotError(botId, "reset", err);
       }
-
-      const pollInterval = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-      const maxWaitMs = 300 * 1000;
-      const startTime = Date.now();
-
-      while (true) {
-        let stillPresent = false;
-        try {
-          for await (const sb of sdk.list({
-            labels: {
-              [BOT_ID_LABEL_KEY]: botId,
-            },
-          })) {
-            if (sb.id === sandboxHandle.id) {
-              const state = sb.state?.toLowerCase();
-              if (state !== "destroyed" && state !== "destroying") {
-                stillPresent = true;
-                break;
-              }
-            }
-          }
-        } catch (err) {
-          throw wrapBotError(botId, "reset", err);
-        }
-
-        if (!stillPresent) {
-          break;
-        }
-
-        if (Date.now() - startTime >= maxWaitMs) {
-          throw new SupervisorError(
-            `Timed out waiting for deleted computer sandbox ${sandboxHandle.id} for ${botId} to be removed.`,
-          );
-        }
-
-        await sleep(pollInterval);
-      }
+      resetSandboxes.set(botId, sandboxHandle.id);
     },
 
     async list(): Promise<ComputerLocation[]> {
