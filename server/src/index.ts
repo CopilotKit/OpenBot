@@ -12,10 +12,12 @@ import {
   startChannelActivityListener,
 } from "./channels/events";
 import { createChannelStore } from "./channels/routes";
+import { createStallGuard } from "./channels/stall-guard";
 import { createThreadIdentity } from "./channels/thread-identity";
 import { websocket as channelSocket } from "./channels/socket";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
+import { createApprovalRegistry } from "./computer/approvals";
 import { createComputerClient } from "./computer/client";
 import { createComputerGateway } from "./computer/gateway";
 import {
@@ -201,12 +203,23 @@ const bootAuditStore = createAuditStore(database);
  */
 const sandboxedStore = createSandboxedStore(database, bootAuditStore);
 
+/**
+ * The one place a Bot's unanswered questions live.
+ *
+ * Built here rather than inside either thing that raises them, because a deployment has one of
+ * these and two things that ask: a Bot meeting an `ask` rule on a button and the same Bot meeting
+ * one on a tool call are the same interruption to the same person, and a registry per subsystem
+ * would mean the surface somebody happens to be looking at decides which of them they can answer.
+ */
+const approvals = createApprovalRegistry();
+
 const pluginStore = createPluginStore({
   database,
   auditStore: bootAuditStore,
   credentials: credentialStore,
   encryptionKey: config.keyEncryptionKey,
   policy: () => policyStore.get(),
+  approvals,
 });
 
 void recordAuditEvent(bootAuditStore, {
@@ -402,6 +415,20 @@ const webhookReceiver = runningScheduler
     })
   : undefined;
 
+/**
+ * The watch on Bot streams, built once and shared by every run.
+ *
+ * It has to outlive the request that opens a stream: the sweep that notices a silent one is still
+ * running long after the run request has been answered, because in Intelligence mode that request is
+ * answered in about a second and the Bot keeps writing for as long as it has something to say.
+ *
+ * The same audit store as everything else, so a Bot that hangs is recorded beside what Bots do.
+ */
+const stallGuard = createStallGuard({
+  stallMs: config.agentStallTimeoutMs,
+  auditStore: bootAuditStore,
+});
+
 const app = createApp(
   config,
   auth,
@@ -438,6 +465,7 @@ const app = createApp(
       }),
     identifyUser,
     identifyActor,
+    stallGuard,
   ),
   computerClient,
   // The only path to an acting call, shared with the unattended runner above.
@@ -464,6 +492,8 @@ const app = createApp(
   // Passed only when this deployment runs routines at all, so Run now refuses in words rather than
   // reporting success and doing nothing.
   runningScheduler,
+  // Where a person answers what the boundary stopped to ask, whichever half of the product asked.
+  approvals,
 );
 
 /**

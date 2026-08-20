@@ -163,6 +163,81 @@ describe("registered Copilot agents", () => {
     expect(agents.risk).toBeInstanceOf(HttpAgent);
   });
 
+  /*
+   * The watch goes on the fetch of a remote Bot and nowhere else.
+   *
+   * A built-in agent talks to a model provider through the AI SDK rather than over an AG-UI stream,
+   * so there is no response body here to watch and nothing for the guard to be given. Asserting the
+   * Bot's own name reaches it matters because that name is what the person is shown when its stream
+   * goes quiet, and a guard handed the wrong one would say so convincingly.
+   */
+  test("hands a remote Bot's fetch to the stall guard, and a built-in Bot none", () => {
+    const watched: { id: string; name: string }[] = [];
+    const stallGuard = {
+      watch: (bot: { id: string; name: string }) => {
+        watched.push(bot);
+        return async () => new Response(null);
+      },
+      stop: () => undefined,
+    };
+
+    const agents = buildAgents(
+      [
+        {
+          id: "general-assistant",
+          name: "General Assistant",
+          type: "built_in",
+          systemPrompt: "Be helpful.",
+        },
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui",
+          endpoint: "http://risk.internal/ag-ui",
+        },
+      ],
+      { provider: "openai", defaultModel: "gpt-4.1" },
+      "openai-secret",
+      stallGuard,
+    );
+
+    expect(watched).toEqual([{ id: "risk", name: "Risk" }]);
+    expect(agents.risk).toBeInstanceOf(HttpAgent);
+  });
+
+  /*
+   * Told apart by a sentinel, because nothing else tells them apart.
+   *
+   * @ag-ui/client fills `fetch` in with a wrapper of its own whenever the config does not carry one,
+   * so a remote Bot always has a function there and asserting that it does asserts nothing at all.
+   * The same registration is built twice, with a guard whose watch returns a fetch nothing else
+   * could have produced and then without one, and the two are compared.
+   */
+  test("leaves a remote Bot's fetch alone when no timeout is configured", () => {
+    const sentinel = async () => new Response(null);
+    const registered = [
+      {
+        id: "risk",
+        name: "Risk",
+        type: "remote_ag_ui" as const,
+        endpoint: "http://risk.internal/ag-ui",
+      },
+    ];
+    const model = { provider: "openai" as const, defaultModel: "gpt-4.1" };
+
+    const guarded = buildAgents(registered, model, null, {
+      watch: () => sentinel,
+      stop: () => undefined,
+    }).risk;
+    const unguarded = buildAgents(registered, model, null).risk;
+    if (!(guarded instanceof HttpAgent) || !(unguarded instanceof HttpAgent)) {
+      throw new Error("Expected the remote agent");
+    }
+
+    expect(guarded.fetch).toBe(sentinel);
+    expect(unguarded.fetch).not.toBe(sentinel);
+  });
+
   test("resolves fresh built-in agents and credentials for every request", async () => {
     const registered = [
       {

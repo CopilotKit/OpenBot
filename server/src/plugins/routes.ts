@@ -6,6 +6,7 @@ import { CATALOGUE } from "./catalogue";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
+  PluginNeedsApprovalError,
   PluginRefusedError,
   type PluginStore,
 } from "./store";
@@ -348,6 +349,7 @@ export function createPluginRoutes(
       ref?: string;
       args?: Record<string, unknown>;
       agentId?: string;
+      approvalId?: unknown;
     } | null;
     if (!body?.ref || !body.agentId) {
       return context.json({ error: "A tool and a Bot are required." }, 400);
@@ -359,9 +361,36 @@ export function createPluginRoutes(
         args: body.args ?? {},
         botId: body.agentId,
         actorId: actorEmail(context),
+        // Passed through without being looked at. An approval means something only against the call
+        // the store is about to make, and a route that judged it would be a second place deciding.
+        ...(typeof body.approvalId === "string" && body.approvalId
+          ? { approvalId: body.approvalId }
+          : {}),
       });
       return context.json(result);
     } catch (error) {
+      /**
+       * A boundary that wants a person, reported as 409 rather than 403.
+       *
+       * 403 already means one thing to everything downstream: a boundary refused you, and that is
+       * final. The surface renders it as a refusal and the model is told to stop and say so. This is
+       * the opposite condition, so reusing 403 would make every ask rule about a tool call read to a
+       * Bot as a deny rule, and the turn would be thrown away on work the deployment was willing to
+       * permit. The same status and the same body shape the computer's acting routes use, because
+       * the surface waits for both in the same way.
+       */
+      if (error instanceof PluginNeedsApprovalError) {
+        return context.json(
+          {
+            error: error.message,
+            awaitingApproval: true,
+            approvalId: error.approvalId,
+            question: error.question,
+            rule: error.rule,
+          },
+          409,
+        );
+      }
       if (error instanceof PluginRefusedError) {
         return context.json({ error: error.message, rule: error.rule }, 403);
       }

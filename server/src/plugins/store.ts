@@ -1,6 +1,11 @@
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import {
+  type ApprovalRegistry,
+  fingerprintOf,
+  type PendingApproval,
+} from "../computer/approvals";
+import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
@@ -117,6 +122,33 @@ export class PluginRefusedError extends Error {
   }
 }
 
+/**
+ * The boundary wants a person's answer before this call is made.
+ *
+ * Emphatically not a {@link PluginRefusedError}, for the same reason the computer keeps the two
+ * apart. A refusal is final and a model told it was refused should say so and stop; this is a pause,
+ * and the identical call arriving again with an approval on it is the intended next step rather than
+ * an attempt to get around anything. Collapsing them teaches a model to abandon exactly the work a
+ * deployment was willing to permit, which is what makes an ask list that degrades to a deny list
+ * worse than having no ask list at all.
+ */
+export class PluginNeedsApprovalError extends Error {
+  /** What the caller presents once somebody has answered. */
+  readonly approvalId: string;
+  /** The question in the words a person is being shown, so the Bot can say what it is waiting for. */
+  readonly question: string;
+  /** The rule that asked, so the surface can name the boundary the way a refusal does. */
+  readonly rule: string;
+
+  constructor(approval: PendingApproval) {
+    super(approval.question);
+    this.name = "PluginNeedsApprovalError";
+    this.approvalId = approval.id;
+    this.question = approval.question;
+    this.rule = approval.rule;
+  }
+}
+
 export class CatalogueEntryUnknownError extends Error {
   constructor(key: string) {
     super(`${key} is not a server this deployment will connect to.`);
@@ -159,6 +191,15 @@ export type PluginStoreOptions = {
   encryptionKey: string;
   /** Read at call time, never captured, so a policy changed a moment ago applies to this call. */
   policy: () => ActionPolicy;
+  /**
+   * Where a question raised by the `ask` list waits for an answer.
+   *
+   * Required rather than optional, and the same registry the computer uses. Optional would mean a
+   * store built without one, which is easily done, quietly turning every ask rule about a tool call
+   * into a refusal: the failure this whole path exists to avoid, arriving through a field somebody
+   * forgot to pass.
+   */
+  approvals: ApprovalRegistry;
 };
 
 export function createPluginStore(options: PluginStoreOptions) {
@@ -210,6 +251,74 @@ export function createPluginStore(options: PluginStoreOptions) {
     }
     // Null for a custom server, and every caller handles that by assuming the worst about it.
     return { row, entry };
+  }
+
+  /**
+   * Spend a person's answer on this call, or stop and ask them.
+   *
+   * The fingerprint covers the arguments as well as the tool, which is the difference between this
+   * and the browser actions. A click is identified by the thing it lands on; a call to somebody
+   * else's server is identified by what it says, and an approval for "post the release note in the
+   * team channel" that could be spent on any other message to any other channel would be a
+   * confirmation prompt wearing a governance feature's clothes.
+   *
+   * Returns who allowed it. Throws when nobody has, which every unsuccessful presentation counts as:
+   * an expired id, one already spent, a No being replayed and an approval given for a different call
+   * all mean that nobody has agreed to THIS, and asking again is both the safe answer and the one a
+   * person can act on.
+   */
+  async function askAbout(question: {
+    approvalId: string | undefined;
+    botId: string;
+    actorId: string;
+    ref: string;
+    serverId: string;
+    toolName: string;
+    effect: "read" | "write";
+    args: Record<string, unknown>;
+    rule: string;
+    question: string;
+  }): Promise<string> {
+    const fingerprint = fingerprintOf({
+      botId: question.botId,
+      toolName: toolNameFor(question.ref),
+      arguments: question.args,
+    });
+    const presented = question.approvalId
+      ? options.approvals.consume(question.approvalId, fingerprint)
+      : undefined;
+    // An approval with nobody's name on it asks again rather than being credited to whoever was
+    // driving the Bot, which is the one attribution this record must never make.
+    if (presented?.ok && presented.approval.answeredBy) {
+      return presented.approval.answeredBy;
+    }
+
+    const pending = options.approvals.request({
+      botId: question.botId,
+      actor: question.actorId,
+      rule: question.rule,
+      question: question.question,
+      fingerprint,
+      // Filed against the tool, so the answer's row lands beside the call's own row rather than
+      // under whichever surface the person happened to press the button on.
+      target: { type: "mcp_tool", id: question.ref },
+    });
+    await recordAuditEvent(auditStore, {
+      eventType: "approval.requested",
+      targetType: "mcp_tool",
+      targetId: question.ref,
+      payload: {
+        bot: question.botId,
+        actor: question.actorId,
+        approval: pending.id,
+        rule: pending.rule,
+        reason: pending.question,
+        server: question.serverId,
+        tool: question.toolName,
+        effect: question.effect,
+      },
+    });
+    throw new PluginNeedsApprovalError(pending);
   }
 
   return {
@@ -736,6 +845,14 @@ export function createPluginStore(options: PluginStoreOptions) {
       args: Record<string, unknown>;
       botId: string;
       actorId: string;
+      /**
+       * An answer a person already gave, presented for the call it was given for.
+       *
+       * The same contract the acting routes on the computer have, and for the same reason: the id
+       * alone proves nothing, it is the id together with the fingerprint of the call actually being
+       * made that means anything.
+       */
+      approvalId?: string | undefined;
     }): Promise<{ text: string; isError: boolean }> {
       const [serverId, ...rest] = input.ref.split("/");
       const toolName = rest.join("/");
@@ -789,10 +906,14 @@ export function createPluginStore(options: PluginStoreOptions) {
        * that rule is unevaluable, so it would match, so every deployment using the shipped preset
        * would refuse every MCP call for a reason mentioning a submit button.
        *
-       * Neutral values instead. Empty strings match no substring, no key and no extension, so a rule
-       * written about the browser evaluates to false against a tool call, which is the honest answer:
-       * a tool call did not click anything. A rule meant to catch tool calls says so, with `mcp` or
-       * with `intent`.
+       * Neutral values instead. Empty strings match no substring, no key and no extension, and
+       * `submit` is false because a tool call submits no form, so a rule written about the browser
+       * evaluates to false against a tool call, which is the honest answer: a tool call did not click
+       * anything. A rule meant to catch tool calls says so, with `mcp` or with `intent`.
+       *
+       * The blanks are for the policy engine and never for a person: the sentence a question is
+       * phrased in reads them as absent rather than as an empty file path, or somebody would be
+       * asked to approve "The Bot wants to call ."
        */
       const context: PolicyContext = {
         tool: { name: toolNameFor(input.ref) },
@@ -811,6 +932,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         repeat: { count: 1 },
         element: { ref: "", role: "", name: "", type: "" },
         key: "",
+        submit: false,
         file: { path: "", name: "", extension: "" },
         intent: effect === "write" ? "write_tool" : "read_tool",
         mcp: { server: serverId, tool: toolName, effect },
@@ -818,8 +940,43 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       const verdict = evaluateActionPolicy(options.policy(), context);
 
+      /**
+       * The third answer, handled here as well as on the computer.
+       *
+       * An `ask` verdict is `forward: false` in enforce mode, so a call site that knows only about
+       * yes and no reads it as a refusal, and the list an operator wrote to be asked about silently
+       * becomes a list of things their Bots may never do. That is the exact failure the ask list
+       * exists to prevent, and it is worse here than it looks: the boundary editor and the shipped
+       * configuration both offer `ask` as a general third list, and "ask me before anything changes
+       * anything in Jira" is the first rule most deployments reach for.
+       *
+       * So the same shape as the gateway: spend an approval that fits this exact call, or open the
+       * question and stop. Nothing is recorded as succeeded or rejected in the second case, because
+       * neither happened yet.
+       */
+      const approved =
+        verdict.source === "ask" && !verdict.forward
+          ? await askAbout({
+              approvalId: input.approvalId,
+              botId: input.botId,
+              actorId: input.actorId,
+              ref: input.ref,
+              serverId,
+              toolName,
+              effect,
+              args,
+              rule: verdict.matched ?? "",
+              question: verdict.reason,
+            })
+          : undefined;
+
+      // What the boundary settled on once a person's answer is folded in. The source stays `ask`, so
+      // the row reads as "allowed, because somebody was asked and said yes" rather than as an
+      // ordinary permission nobody ever questioned.
+      const carriedOut = verdict.forward || approved !== undefined;
+
       await recordAuditEvent(auditStore, {
-        eventType: verdict.forward ? "mcp.call_succeeded" : "mcp.call_rejected",
+        eventType: carriedOut ? "mcp.call_succeeded" : "mcp.call_rejected",
         targetType: "mcp_tool",
         targetId: input.ref,
         payload: {
@@ -829,16 +986,17 @@ export function createPluginStore(options: PluginStoreOptions) {
           tool: toolName,
           effect,
           decision: {
-            allowed: verdict.allowed,
+            allowed: verdict.allowed || approved !== undefined,
             mode: verdict.mode,
             rule: verdict.matched,
             source: verdict.source,
-            carriedOut: verdict.forward,
+            carriedOut,
+            ...(approved ? { approvedBy: approved } : {}),
           },
         },
       });
 
-      if (!verdict.forward) {
+      if (!carriedOut) {
         throw new PluginRefusedError(verdict.reason, verdict.matched);
       }
 

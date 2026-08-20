@@ -154,6 +154,39 @@ describe("deployment configuration", () => {
     ).toThrow("Google authentication requires BETTER_AUTH_SECRET");
   });
 
+  // A turn that is ended is a turn somebody loses, so an unset variable leaves every stream alone
+  // rather than acquiring a timeout the deployment never asked for. `.env.example` ships a value.
+  test("leaves the stall watchdog off when nothing is configured", () => {
+    expect(loadConfig(baseEnvironment).agentStallTimeoutMs).toBe(0);
+  });
+
+  test("takes a timeout in milliseconds, and zero as switching it off", () => {
+    expect(
+      loadConfig({ ...baseEnvironment, AGENT_STALL_TIMEOUT_MS: "120000" })
+        .agentStallTimeoutMs,
+    ).toBe(120_000);
+    expect(
+      loadConfig({ ...baseEnvironment, AGENT_STALL_TIMEOUT_MS: "0" })
+        .agentStallTimeoutMs,
+    ).toBe(0);
+  });
+
+  // Refused rather than defaulted, for the same reason a malformed policy is: an operator who meant
+  // to write a boundary and mistyped it would otherwise get a deployment enforcing something else.
+  test.each(["two minutes", "-1", "1.5", ""])(
+    "refuses to start on AGENT_STALL_TIMEOUT_MS=%p",
+    (value) => {
+      const attempt = () =>
+        loadConfig({ ...baseEnvironment, AGENT_STALL_TIMEOUT_MS: value });
+      if (value === "") {
+        // An empty value is an absent one, which is the off case rather than a malformed one.
+        expect(attempt().agentStallTimeoutMs).toBe(0);
+        return;
+      }
+      expect(attempt).toThrow("AGENT_STALL_TIMEOUT_MS");
+    },
+  );
+
   test("takes a widened repetition window, and leaves it absent when nobody set one", () => {
     expect(
       loadConfig({

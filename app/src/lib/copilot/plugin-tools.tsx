@@ -2,6 +2,7 @@ import { useFrontendTool } from "@copilotkit/react-core/v2";
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Streamdown } from "streamdown";
+import { ApprovalRequest } from "@/components/channels/approval-request";
 import { ToolLine } from "@/components/channels/tool-line";
 import { markdownComponents } from "@/lib/markdown";
 import * as z from "zod";
@@ -152,6 +153,8 @@ function PluginTool({
         args ?? {},
         botId,
         context.signal,
+        // So a question the boundary raises about this call is drawn on this call's own line.
+        id,
       );
 
       if (result.ok) {
@@ -188,19 +191,26 @@ function PluginTool({
       }
 
       return (
-        <ToolLine
-          detail={serverId}
-          failed={result?.isError}
-          label={bareName}
-          running={status !== "complete"}
-        >
-          {result ? (
-            /* The server's own words, drawn the way a Bot's prose is drawn. */
-            <Streamdown components={markdownComponents}>
-              {forDisplay(result.text)}
-            </Streamdown>
-          ) : null}
-        </ToolLine>
+        <>
+          {/*
+           * A boundary can stop a tool call the same way it stops a click, so the question belongs
+           * on this line rather than only on the lines about a browser.
+           */}
+          <ApprovalRequest toolCallId={toolCallId} />
+          <ToolLine
+            detail={serverId}
+            failed={result?.isError}
+            label={bareName}
+            running={status !== "complete"}
+          >
+            {result ? (
+              /* The server's own words, drawn the way a Bot's prose is drawn. */
+              <Streamdown components={markdownComponents}>
+                {forDisplay(result.text)}
+              </Streamdown>
+            ) : null}
+          </ToolLine>
+        </>
       );
     },
   });
