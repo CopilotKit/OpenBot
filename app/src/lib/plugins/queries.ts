@@ -1,5 +1,4 @@
 import { queryOptions } from "@tanstack/react-query";
-import { closeQuestion, openQuestion, waitForApproval } from "@/lib/approvals";
 
 /** A tool one server offers, as the Plugins page sees it. */
 export type PluginTool = {
@@ -122,100 +121,18 @@ export type PluginCallOutcome =
 
 /**
  * Call a tool as a Bot, with server-side grant and policy rechecks for mid-run revocations.
- *
- * A call the boundary wants a person's answer to comes back here as a pause rather than a failure,
- * and this holds it open, puts the question on the tool call's own line, and sends the identical
- * call again with the answer attached. A tool call that reported "not allowed" to the model instead
- * would throw away the turn on work the deployment was willing to permit, which is the whole
- * difference between an ask rule and a deny rule.
  */
 export async function callPluginTool(
   ref: string,
   args: Record<string, unknown>,
   agentId: string,
   signal?: AbortSignal,
-  toolCallId?: string,
 ): Promise<PluginCallOutcome> {
-  const outcome = await sendCall(ref, args, agentId, signal);
-  if (!("awaitingApproval" in outcome)) return outcome;
-
-  openQuestion(toolCallId ?? "", {
-    approvalId: outcome.approvalId,
-    botId: agentId,
-    question: outcome.question,
-    rule: outcome.rule,
-  });
-  try {
-    const answer = await waitForApproval(agentId, outcome.approvalId, signal);
-    if (answer === "granted") {
-      // Sent once, not through this function again. A second ask on the retry would mean the answer
-      // did not fit the call, and looping on that would hold the turn open until the deadline
-      // instead of telling the model something it can act on, so a question raised on the retry is
-      // reported rather than waited on.
-      const retried = await sendCall(
-        ref,
-        args,
-        agentId,
-        signal,
-        outcome.approvalId,
-      );
-      return "awaitingApproval" in retried
-        ? {
-            ok: false,
-            refused: false,
-            reason:
-              "That was allowed, but the answer did not fit the call being made, so it did not happen.",
-          }
-        : retried;
-    }
-    return answer === "declined"
-      ? {
-          ok: false,
-          refused: true,
-          reason: "A person declined that.",
-          rule: outcome.rule,
-        }
-      : {
-          ok: false,
-          refused: false,
-          reason:
-            answer === "cancelled"
-              ? "Stopped."
-              : "Nobody answered the request to allow that, so it did not happen. Say what you " +
-                "were waiting for rather than trying another way round it.",
-        };
-  } finally {
-    closeQuestion(toolCallId ?? "");
-  }
-}
-
-/** A question the server raised about this call, as the reply that paused it carried it. */
-type AwaitingApproval = {
-  awaitingApproval: true;
-  approvalId: string;
-  question: string;
-  rule: string | null;
-};
-
-async function sendCall(
-  ref: string,
-  args: Record<string, unknown>,
-  agentId: string,
-  signal?: AbortSignal,
-  approvalId?: string,
-): Promise<PluginCallOutcome | AwaitingApproval> {
   const response = await fetch("/api/plugins/call", {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ref,
-      args,
-      agentId,
-      // Sent identically to the call that was asked about, because the server binds an answer to a
-      // fingerprint of the call, arguments included: anything else comes back as a different action.
-      ...(approvalId ? { approvalId } : {}),
-    }),
+    body: JSON.stringify({ ref, args, agentId }),
     ...(signal ? { signal } : {}),
   });
 
@@ -224,9 +141,6 @@ async function sendCall(
     isError?: boolean;
     error?: string;
     rule?: string | null;
-    awaitingApproval?: boolean;
-    approvalId?: string;
-    question?: string;
   } | null;
 
   if (response.ok) {
@@ -234,16 +148,6 @@ async function sendCall(
       ok: true,
       text: body?.text ?? "",
       isError: body?.isError === true,
-    };
-  }
-  // Read before anything else a 409 can mean, and never shown to the model: the caller above is
-  // going to wait and then send the very same call again.
-  if (response.status === 409 && body?.awaitingApproval === true) {
-    return {
-      awaitingApproval: true,
-      approvalId: body.approvalId ?? "",
-      question: body.question ?? body.error ?? "",
-      rule: body.rule ?? null,
     };
   }
   if (response.status === 403) {

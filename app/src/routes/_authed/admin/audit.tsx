@@ -35,32 +35,15 @@ const FILTERS = [
   { label: "Computer actions", search: "?eventType=computer.action_allowed" },
   {
     label: "Blocked",
-    // Include every refusal family, not only browser policy refusals. A person declining a request
-    // stopped an action just as surely as a deny rule did, and it leaves no action row of its own,
-    // so without it here the trail's answer to "was anything blocked" is missing a whole family.
+    // Include every refusal family, not only browser policy refusals.
     search:
-      "?eventType=computer.action_refused,approval.denied,mcp.call_rejected,component.refused,component.function_refused",
+      "?eventType=computer.action_refused,mcp.call_rejected,component.refused,component.function_refused",
   },
   {
     label: "Did not happen",
     // A stalled stream belongs here. It is the same complaint as an action that was allowed and then
     // did not take: nothing was refused, and nothing came of it either.
     search: "?eventType=computer.action_failed,agent.stream_stalled",
-  },
-  {
-    /*
-     * The questions, so the one a person never answered can be found rather than looked for by eye.
-     * A request with no answer beside it is the Bot having sat waiting while nobody was watching the
-     * screen, which is the case this trail records that nothing else in the product would show.
-     */
-    label: "Asked a person",
-    search: "?eventType=approval.requested,approval.granted,approval.denied",
-  },
-  {
-    // Its own filter rather than a place in "Blocked". A Bot repeating itself has not been stopped by
-    // anything, and putting it beside the refusals would make the refusals look less real.
-    label: "Going in circles",
-    search: "?eventType=computer.action_repeated",
   },
 ] as const;
 
@@ -149,7 +132,6 @@ function Row({
     allowed?: boolean;
     mode?: string;
     rule?: string | null;
-    approvedBy?: string;
     carriedOut?: boolean;
   };
   const element = payload.element as
@@ -158,13 +140,9 @@ function Row({
     | undefined;
   const refused =
     event.eventType === "computer.action_refused" ||
-    event.eventType === "approval.denied" ||
     event.eventType === "component.refused" ||
     event.eventType === "component.function_refused" ||
     event.eventType === "mcp.call_rejected";
-  // The three rows a question leaves behind carry their rule at the top level rather than under a
-  // decision, because no decision was reached: the policy stopped and waited for a person.
-  const approval = event.eventType.startsWith("approval.");
   const stalled = event.eventType === "agent.stream_stalled";
   // Allowed by policy but not carried out. A stalled turn belongs in the same family: the Bot was
   // asked and the answer never arrived. Colour is how this table is read, and a row left in the
@@ -195,10 +173,6 @@ function Row({
               </span>
             ) : null}
           </span>
-        ) : typeof payload.fingerprint === "string" ? (
-          // A repeat row has no element and no file of its own: what it is about is the call, which
-          // the fingerprint names in full.
-          <span className="font-mono text-xs">{payload.fingerprint}</span>
         ) : typeof payload.file === "string" ? (
           <span className="font-mono text-xs">{payload.file}</span>
         ) : typeof element === "object" && element?.name ? (
@@ -259,20 +233,9 @@ function Row({
             <span className="italic">, reported by the Bot itself</span>
           </div>
         ) : null}
-        {event.eventType === "computer.action_repeated" &&
-        typeof payload.count === "number" ? (
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {payload.count} times within a few minutes
-          </div>
-        ) : null}
         {failed && typeof payload.failure === "string" ? (
           <div className="mt-0.5 text-xs text-muted-foreground">
             {payload.failure}
-          </div>
-        ) : null}
-        {approval && typeof payload.reason === "string" ? (
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {payload.reason}
           </div>
         ) : null}
         {/*
@@ -287,17 +250,6 @@ function Row({
         {decision.rule && decision.rule !== "true" ? (
           <div className="mt-0.5 font-mono text-xs text-muted-foreground">
             {decision.rule}
-          </div>
-        ) : null}
-        {approval && typeof payload.rule === "string" && payload.rule ? (
-          <div className="mt-0.5 font-mono text-xs text-muted-foreground">
-            {payload.rule}
-          </div>
-        ) : null}
-        {/* Who stood behind an action, when the boundary asked and somebody said yes. */}
-        {typeof decision.approvedBy === "string" ? (
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            allowed by {decision.approvedBy}
           </div>
         ) : null}
         {decision.mode === "dry-run" && decision.carriedOut ? (
@@ -337,11 +289,6 @@ const DECISIONS: Record<string, string> = {
   "computer.secret_supplied": "A person supplied a secret",
   "computer.reset": "The computer was reset",
   "computer.stopped": "A person pressed stop",
-  // Not "Blocked". Nothing refused this; the Bot did the same thing again and the trail is saying so.
-  "computer.action_repeated": "The Bot repeated itself",
-  "approval.requested": "The boundary asked a person",
-  "approval.granted": "A person allowed it",
-  "approval.denied": "A person declined it",
 
   "component.granted": "Granted to this Bot",
   "component.revoked": "Taken away from this Bot",

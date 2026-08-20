@@ -11,15 +11,8 @@
  * thought of; an expression language can express the one they thought of. This is also the language
  * the enterprise gateway already speaks, so a rule written here means the same thing there.
  *
- * Precedence: deny, then ask, then allow. A rule that removes permission must never be
+ * Precedence: deny beats allow. A rule that removes permission must never be
  * defeated by a broader rule that grants it, or a company cannot reason about what it has forbidden.
- *
- * `ask` sits between the two, and both halves of that position are deliberate. It must not soften a
- * `deny`, because a thing a deployment has forbidden is not up for renegotiation at a prompt, and an
- * approval box in front of a tired person at the end of a task is not the review anybody signed off
- * when they wrote the deny rule. And it must beat `allow`, because the policy this product ships with
- * is `allow: ["true"]`: an ask evaluated after the allow list would be unreachable in the default
- * configuration, so the first rule anybody ever wrote here would silently do nothing.
  */
 import { evaluate } from "cel-js";
 
@@ -34,18 +27,8 @@ export type ActionPolicy = {
    * governance feature.
    */
   mode: PolicyMode;
-  /** Evaluated first. Any expression true means refused, whatever `ask` or `allow` says. */
+  /** Evaluated first. Any expression true means refused, whatever `allow` says. */
   deny: string[];
-  /**
-   * Any expression true means a person is asked before the action runs.
-   *
-   * The middle answer a boundary with two lists cannot give. "It may spend money, but not more than
-   * fifty pounds without me" and "it may do this, but I want to see the first one" are the shapes
-   * every deployment reaches for once it trusts a Bot enough to let it act at all, and until this
-   * list existed the only way to express either was to forbid the action and have a person take the
-   * wheel, which throws away the Bot's turn and everything it had worked out to get there.
-   */
-  ask: string[];
   /** Any expression true means permitted. Empty means nothing is permitted. */
   allow: string[];
 };
@@ -63,34 +46,6 @@ export type PolicyContext = {
   bot: { id: string };
   page: { url: string; host: string };
   actor: { id: string };
-  /**
-   * How many times this Bot has just made this exact call, counting the one being decided.
-   *
-   * A stuck model retries, and every retry is a real action on somebody's live website. Each one is
-   * permitted on its own terms, because each one is: the rule that would refuse the thirtieth click
-   * on a button would refuse the first, and refusing the first is refusing the product. Only the
-   * count separates them, so the count is here, and a deployment that wants to stop a Bot going in
-   * circles writes `repeat.count >= 10` and nothing else changes.
-   *
-   * Always present, at one on a call the Bot has not made before, so that a rule mentioning it is
-   * evaluable on every action. An absent field would throw inside CEL, and a deny rule that throws
-   * denies, so an optional `repeat` would turn one rule about repetition into a deployment that
-   * refuses everything.
-   *
-   * It is wrong in both directions, and a rule written against it has to be worth both. Under, three
-   * ways: the window is time-based, so a Bot slow enough to spread its attempts wider than the window
-   * never trips this, and one that varies a single argument each time round is thirty calls; the
-   * count is held by the process that served the call, so a deployment behind two API replicas
-   * splits every count and a rule about ten attempts fires at twenty or never; and a call to another
-   * server's tools over MCP is not counted at all, because only the computer gateway counts.
-   *
-   * Over, once, and that one costs somebody their Bot rather than their evidence. Two calls are the
-   * same call when the thing acted on is the same, whatever was typed into it, so ten searches typed
-   * into one box and one file read ten times while a Bot works through it are both ten repeats, and
-   * `repeat.count >= 10` refuses the tenth. It is a backstop against the loop that actually happens,
-   * not a guarantee, which is the argument for trying a rule about it in `dry-run` first.
-   */
-  repeat: { count: number };
   element?: {
     ref: string;
     role: string;
@@ -111,22 +66,6 @@ export type PolicyContext = {
    */
   key?: string;
   /**
-   * Whether a `computer_type` call will press Enter when it has finished typing.
-   *
-   * The third door into a form, and the one a rule about clicking and a rule about `key` both miss.
-   * The type tool takes a flag meaning "and submit", the computer presses Enter itself, and no
-   * keypress ever reaches the gateway as its own action, so a boundary written against Enter watched
-   * the Bot walk past it: a preset named "never submit a form" left the one call that submits a
-   * single-field form untouched.
-   *
-   * Present on every action rather than only on the calls that can set it, and false is doing work
-   * there. `key` is absent unless a key was pressed, which is why the presets that mention it have
-   * to be guarded by tool name to stay evaluable; a rule saying `submit` should not need that
-   * ceremony, because the whole point of the field is that an operator writes one short sentence
-   * about form submission and it holds everywhere.
-   */
-  submit?: boolean;
-  /**
    * What the action does, rather than which tool was called.
    *
    * `tool.name` describes mechanism. An operator thinks in effects, "do not activate anything called
@@ -143,8 +82,7 @@ export type PolicyContext = {
    * from Enter in any field of it, and the element a keypress names is the field, not the form. The
    * gateway would need to know the page's structure at decision time, which it does not, refs are
    * held off-DOM by Playwright and the policy runs before the action reaches the browser. So a rule
-   * that must stop a submission still has to refuse Enter outright, and the preset says so. `submit`
-   * above covers the one case where the intention is not a guess, because the Bot asked for it.
+   * that must stop a submission still has to refuse Enter outright, and the preset says so.
    */
   intent?:
     | "activate"
@@ -200,15 +138,8 @@ export type PolicyDecision = {
   mode: PolicyMode;
   /** Which expression decided it, so the audit row can say why and an operator can find the rule. */
   matched: string | null;
-  /**
-   * Which list that expression came from. `default` means nothing matched and the floor applied.
-   *
-   * `ask` is not a verdict on its own: it says the boundary wants a person's answer, and the caller
-   * decides what to do about that. The gateway either finds an approval already granted for this
-   * exact action or stops and asks; both outcomes are recorded with this source, so the trail can
-   * tell an action a person consented to from one nothing ever questioned.
-   */
-  source: "deny" | "ask" | "allow" | "default";
+  /** Which list that expression came from. `default` means nothing matched and the floor applied. */
+  source: "deny" | "allow" | "default";
   /** True when the action should actually be carried out. False for a refusal in `enforce`. */
   forward: boolean;
   /** Why, in words that go in front of a person. */
@@ -288,7 +219,6 @@ export function evaluateActionPolicy(
 ): PolicyDecision {
   const mode: PolicyMode = policy?.mode ?? "enforce";
   const deny = policy?.deny ?? [];
-  const ask = policy?.ask ?? [];
   const allow = policy?.allow ?? [];
 
   // Deny first, and a broken deny expression still denies. One typo in a rule therefore blocks the
@@ -305,27 +235,6 @@ export function evaluateActionPolicy(
         // switch on against live traffic.
         forward: mode === "dry-run",
         reason: describeRefusal(context, expression),
-      };
-    }
-  }
-
-  // Ask second, and a broken ask expression asks. The same reasoning as the deny loop, with a gentler
-  // cost: a typo here interrupts somebody who was not expecting to be interrupted, which is a
-  // nuisance, whereas the alternative is a rule that quietly permits exactly the thing it was written
-  // to hold back. A boundary whose failures land on the permissive side is not a boundary.
-  for (const expression of ask) {
-    if (matches(expression, context, true)) {
-      return {
-        allowed: false,
-        mode,
-        matched: expression,
-        source: "ask",
-        // Nothing happens until somebody says so, except in dry-run, where the whole promise is that
-        // switching the policy on changes nothing. A dry-run ask is a note in the trail saying "here
-        // is where you would have been interrupted", which is precisely what an operator trying a
-        // rule out against real traffic wants to find out before it starts stopping anybody.
-        forward: mode === "dry-run",
-        reason: describeAsk(context),
       };
     }
   }
@@ -355,47 +264,11 @@ export function evaluateActionPolicy(
   };
 }
 
-/**
- * The verb a person reads, chosen from what the action does rather than which tool ran.
- *
- * A question phrased as "allow computer_write_file?" asks somebody to translate an implementation
- * detail before they can decide, and a question nobody understands gets answered yes.
- */
-const ASK_VERBS: Record<string, string> = {
-  activate: "press",
-  type: "type into",
-  navigate: "open",
-  read: "look at",
-  read_file: "read",
-  write_file: "write to",
-  list_files: "list",
-  read_tool: "call",
-  write_tool: "call",
-};
-
-/**
- * The question itself: what is about to happen, in one sentence.
- *
- * The rule that asked is deliberately not in here. It travels beside the question as its own field,
- * so the surface can show it as a rule and the trail can record it as one, and a person reading the
- * prompt is not made to parse CEL before they can answer a question about a button.
- */
-function describeAsk(context: PolicyContext): string {
-  return `The Bot wants to ${ASK_VERBS[context.intent ?? ""] ?? "act on"} ${subjectOf(context)}.`;
-}
-
 /** A refusal a person can act on: what was refused, and on what. */
 function describeRefusal(context: PolicyContext, expression: string): string {
-  // A file or tool refusal must not be phrased as happening "on <host>": neither the workspace nor
-  // somebody else's server has anything to do with whatever page the browser happens to be showing,
-  // and saying so sends somebody to the wrong place.
-  if (context.mcp) {
-    return (
-      `This deployment's policy does not allow that: ${subjectOf(context)} ` +
-      `is blocked by the rule \`${expression}\`.`
-    );
-  }
-  if (context.file?.path) {
+  // A file refusal must not be phrased as happening "on <host>": the workspace has nothing to do with
+  // whatever page the browser happens to be showing, and saying so sends somebody to the wrong place.
+  if (context.file) {
     return (
       `This deployment's policy does not allow that: the file ${context.file.path} ` +
       `is blocked by the rule \`${expression}\`.`
@@ -408,23 +281,4 @@ function describeRefusal(context: PolicyContext, expression: string): string {
     `This deployment's policy does not allow that: ${what} on ${context.page.host} ` +
     `is blocked by the rule \`${expression}\`.`
   );
-}
-
-/**
- * The thing an action is aimed at, named the way the person who has to decide would name it.
- *
- * Every branch is checked for content rather than presence, because a caller judging something that
- * is not a browser action fills the browser fields in with empty strings on purpose: a rule about
- * element names must evaluate to false against a tool call rather than becoming unevaluable and
- * therefore matching. Reading those blanks as "a file" produced a question with a hole in it, "The
- * Bot wants to call .", which is a sentence nobody can answer and which arrived attached to two
- * buttons.
- */
-function subjectOf(context: PolicyContext): string {
-  if (context.mcp) return `${context.mcp.tool} on ${context.mcp.server}`;
-  if (context.file?.path) return context.file.path;
-  if (context.element?.name) {
-    return `“${context.element.name}” on ${context.page.host}`;
-  }
-  return context.page.host || "this page";
 }

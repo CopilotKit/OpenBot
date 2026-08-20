@@ -54,47 +54,16 @@ Policy rules can inspect:
 - `page.url`, `page.host`
 - `element.ref`, `element.role`, `element.name`, `element.type`
 - `key`
-- `submit`, true when a type call will press Enter when it has finished
 - `file.path`, `file.name`, `file.extension`
 - `mcp.server`, `mcp.tool`, `mcp.effect`
-- `repeat.count`
-
-`repeat.count` is how many times that Bot has just made that exact call, counting the one being
-decided. The gateway keys it on the tool plus the ref, key, file path, or target URL, over a sliding
-window that defaults to three minutes and is set by `COMPUTER_REPEAT_WINDOW_MS`. Crossing 3, 10, or
-25 writes one `computer.action_repeated` row each; the detector itself never refuses anything, so
-`repeat.count >= 10` in `deny` is what stops a Bot going in circles. The count is held in memory by
-the process that served the call, so two API replicas split it, and it covers the browser and the
-workspace only: a call to another server's tools over MCP always reports one.
 
 Rules use CEL expressions plus case-insensitive `contains()` and `matches()`.
-Rules are evaluated in three lists, in order: `deny`, then `ask`, then `allow`.
-The policy engine fails closed: a missing or empty policy permits nothing, a
-broken deny rule denies, a broken ask rule asks, and a broken allow rule does not
-permit. OpenBot's shipped startup default is explicit: `deny: []`, `ask: []` and
-`allow: ["true"]`, unless `AGENT_COMPUTER_POLICY` or a saved administrator policy
-replaces it. A malformed configured policy stops server startup.
-
-An `ask` match stops the action and puts it in front of a person in the
-conversation, then carries on with the same call if they allow it. The pending
-question lives in the server process, is bound to a fingerprint of the exact
-action it was raised for, and is single use, so an approval cannot be replayed
-against a different one. Answering writes `approval.granted` or `approval.denied`
-under the answering person's own actor, separately from the action row, and the
-question itself writes `approval.requested` when it is raised. In `dry-run` an
-ask is recorded and interrupts nobody.
-
-The same three lists judge a Bot's MCP tool calls, `ask` included: a rule such as
-`intent == "write_tool" && mcp.server == "jira"` stops the call and asks rather
-than refusing it, and the question is answered on the same surface, `POST
-/api/approvals/:botId/:approvalId`, as one raised by a click. That surface is
-mounted whether or not a computer is configured, because a question nobody can be
-shown is worse than a rule that never fired.
-
-Pending questions are held in the server process, like the snapshot cache, so a
-deployment running more than one server replica can raise a question on one and
-poll for it on another, where it does not exist. Both features assume a single
-process today.
+Deny rules are evaluated before allow rules. The policy engine fails closed: a
+missing or empty policy permits nothing, a broken deny rule denies, and a broken
+allow rule does not permit. OpenBot's shipped startup default is explicit:
+`deny: []` and `allow: ["true"]`, unless `AGENT_COMPUTER_POLICY` or a saved
+administrator policy replaces it. A malformed configured policy stops server
+startup.
 
 ## Computers
 

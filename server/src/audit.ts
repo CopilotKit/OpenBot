@@ -64,22 +64,6 @@ export const auditEventTypes = [
   // Permitted by policy, attempted, and did not succeed. Its own type because "allowed" reads as
   // "happened", and a trail that cannot tell those apart misleads exactly when it matters most.
   "computer.action_failed",
-  /**
-   * The same call, again, and again.
-   *
-   * The rows above record actions one at a time, which is the only way to record them and the reason
-   * a Bot stuck in a retry loop is invisible here: thirty identical rows look like thirty rows. This
-   * one says the thing the sequence cannot, that these are the same call, and how many times.
-   *
-   * It is not a refusal. Nothing was forbidden and nothing was stopped; a Bot did the same thing
-   * again, which is often merely a retry that is about to work. Filing it as a refusal would teach a
-   * reader to skim past the refusals that are real, so it is its own type and the audit page gives it
-   * its own words.
-   *
-   * Written when a count crosses a threshold rather than on every repeat, because a row per attempt
-   * would bury the attempts themselves under the observation that they kept happening.
-   */
-  "computer.action_repeated",
   // A person taking the wheel and giving it back. Recorded as a period rather than as keystrokes: the
   // useful fact for an investigator is that a human drove this browser between these two times, and
   // logging every click a person made would bury it while telling nobody anything.
@@ -90,29 +74,6 @@ export const auditEventTypes = [
   // which field it went in; the value is on a path this trail is not on.
   "computer.secret_requested",
   "computer.secret_supplied",
-  /**
-   * The boundary stopping to ask a person, and what they said.
-   *
-   * Three rows rather than a flag on the action, because the three facts are separable and the gaps
-   * between them are where the interesting failures live. A question that was asked and never
-   * answered leaves only the first row, and that is the shape of "the Bot sat waiting while nobody
-   * was watching the screen", which nothing else in this trail would show. An answer that was given
-   * and never spent leaves the first two, which is what a stopped run looks like from here.
-   *
-   * `approval.granted` and `approval.denied` are written by the person answering, under their own
-   * actor, minutes after the Bot's turn raised the question and often by somebody else entirely.
-   * Folding consent into the action row would credit it to whoever was driving the Bot, which is the
-   * one thing an approval trail must never do.
-   *
-   * Not named for the computer, unlike the rows above, because the same boundary judges a Bot's
-   * calls to somebody else's servers and stops to ask about those too. Each row is filed against the
-   * thing the question was about, a computer or a tool, so a reader filtering by either sees the
-   * question, the answer and the action together rather than a grant filed under a browser for
-   * something that happened in Jira.
-   */
-  "approval.requested",
-  "approval.granted",
-  "approval.denied",
   // The computer itself being stopped or wiped. `reset` destroys every login the Bot had, which is
   // both the recovery path and the most consequential button on the admin page, so who pressed it and
   // when is exactly the sort of thing an investigator needs and nothing else records.

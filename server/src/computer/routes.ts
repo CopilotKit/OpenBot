@@ -13,7 +13,6 @@ import {
 } from "./client";
 import {
   type ActionActor,
-  ActionNeedsApprovalError,
   ActionRefusedError,
   type ComputerGateway,
 } from "./gateway";
@@ -63,7 +62,6 @@ export function createComputerRoutes(
   routes.post("/:botId/navigate", requireUser, async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
       url?: unknown;
-      approvalId?: unknown;
     } | null;
     if (typeof body?.url !== "string" || !body.url.trim()) {
       return context.json({ error: "A web address is required." }, 400);
@@ -81,13 +79,9 @@ export function createComputerRoutes(
               : { userId: context.var.actor.id }),
           },
           body.url.trim(),
-          asApprovalId(body),
         ),
       );
     } catch (error) {
-      if (error instanceof ActionNeedsApprovalError) {
-        return awaitingApproval(context, error);
-      }
       if (error instanceof ActionRefusedError) {
         return context.json({ error: error.message, rule: error.rule }, 403);
       }
@@ -114,23 +108,12 @@ export function createComputerRoutes(
    *
    * Each one hands the gateway the computer id, the Bot, the actor and the input, and does no checking
    * of its own beyond the shape of the request. Where a decision gets made is a single place.
-   *
-   * Each also passes through whatever `approvalId` the body carried. The route does not look at it
-   * or judge it: an approval means something only against the action the gateway is about to take,
-   * and a route that decided anything about it would be a second place deciding.
    */
   routes.post("/:botId/click", requireUser, (context) =>
     act(context, (botId, actor, body, signal) => {
       const ref = asRef(body);
       if (!ref) return badRef;
-      return gateway.click(
-        botId,
-        botId,
-        actor,
-        ref,
-        signal,
-        asApprovalId(body),
-      );
+      return gateway.click(botId, botId, actor, ref, signal);
     }),
   );
 
@@ -151,7 +134,6 @@ export function createComputerRoutes(
           submit: body?.submit === true,
         },
         signal,
-        asApprovalId(body),
       );
     }),
   );
@@ -171,22 +153,15 @@ export function createComputerRoutes(
           ...(ref ?? {}),
         },
         signal,
-        asApprovalId(body),
       );
     }),
   );
 
   routes.post("/:botId/scroll", requireUser, (context) =>
     act(context, (botId, actor, body) =>
-      gateway.scroll(
-        botId,
-        botId,
-        actor,
-        {
-          ...(typeof body?.deltaY === "number" ? { deltaY: body.deltaY } : {}),
-        },
-        asApprovalId(body),
-      ),
+      gateway.scroll(botId, botId, actor, {
+        ...(typeof body?.deltaY === "number" ? { deltaY: body.deltaY } : {}),
+      }),
     ),
   );
 
@@ -324,17 +299,11 @@ export function createComputerRoutes(
   /** The Bot's files. Through the gateway, like every other acting call. */
   routes.post("/:botId/files/list", requireUser, (context) =>
     act(context, (botId, actor, body) =>
-      gateway.listFiles(
-        botId,
-        botId,
-        actor,
-        {
-          ...(typeof body?.path === "string" && body.path.trim()
-            ? { path: body.path.trim() }
-            : {}),
-        },
-        asApprovalId(body),
-      ),
+      gateway.listFiles(botId, botId, actor, {
+        ...(typeof body?.path === "string" && body.path.trim()
+          ? { path: body.path.trim() }
+          : {}),
+      }),
     ),
   );
 
@@ -343,13 +312,7 @@ export function createComputerRoutes(
       if (typeof body?.path !== "string" || !body.path.trim()) {
         return { error: "A file path is required." };
       }
-      return gateway.readFile(
-        botId,
-        botId,
-        actor,
-        { path: body.path.trim() },
-        asApprovalId(body),
-      );
+      return gateway.readFile(botId, botId, actor, { path: body.path.trim() });
     }),
   );
 
@@ -361,17 +324,11 @@ export function createComputerRoutes(
       if (typeof body?.contents !== "string") {
         return { error: "The contents to write are required." };
       }
-      return gateway.writeFile(
-        botId,
-        botId,
-        actor,
-        {
-          path: body.path.trim(),
-          contents: body.contents,
-          append: body.append === true,
-        },
-        asApprovalId(body),
-      );
+      return gateway.writeFile(botId, botId, actor, {
+        path: body.path.trim(),
+        contents: body.contents,
+        append: body.append === true,
+      });
     }),
   );
 
@@ -483,9 +440,6 @@ async function act(
     }
     return context.json(result as Record<string, unknown>);
   } catch (error) {
-    if (error instanceof ActionNeedsApprovalError) {
-      return awaitingApproval(context, error);
-    }
     // A policy refusal is the product working. 403 with the rule that refused it, so the surface can
     // tell the person which boundary they met rather than reporting a malfunction.
     if (error instanceof ActionRefusedError) {
@@ -521,44 +475,6 @@ function isBadRequest(value: unknown): value is BadRequest {
     "error" in value &&
     !("action" in value)
   );
-}
-
-/**
- * A boundary that wants a person, reported as 409 rather than 403.
- *
- * 403 already means one thing to everything downstream of here: a boundary refused you and that is
- * final. The surface renders it as Blocked and the model is told to stop and say so. This is the
- * opposite condition, nothing has been refused and somebody is being asked, so reusing 403 would
- * make every ask rule read to a Bot as a deny rule and produce exactly the outcome the ask list
- * exists to avoid: a turn thrown away on an action the deployment was willing to permit.
- *
- * 409 because the existing 409s on these routes already mean "not now, and here is what to do about
- * it", which a stale snapshot and a person holding the wheel both are. `awaitingApproval` is what
- * separates this from those, and the surface checks for it before it reads a 409 as anything else.
- */
-function awaitingApproval(
-  context: ComputerContext,
-  error: ActionNeedsApprovalError,
-) {
-  return context.json(
-    {
-      error: error.message,
-      awaitingApproval: true,
-      approvalId: error.approvalId,
-      question: error.question,
-      rule: error.rule,
-    },
-    409,
-  );
-}
-
-/** An answer being presented, if the caller carried one. Its meaning is decided at the gateway. */
-function asApprovalId(
-  body: Record<string, unknown> | null,
-): string | undefined {
-  return typeof body?.approvalId === "string" && body.approvalId
-    ? body.approvalId
-    : undefined;
 }
 
 function asRef(

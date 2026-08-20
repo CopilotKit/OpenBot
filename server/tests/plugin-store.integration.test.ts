@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
-import { createApprovalRegistry } from "../src/computer/approvals";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
 import { TEST_POOL } from "./support/database";
@@ -13,11 +12,7 @@ import {
   mcpTools,
   pluginGrants,
 } from "../src/db/schema";
-import {
-  createPluginStore,
-  PluginNeedsApprovalError,
-  PluginRefusedError,
-} from "../src/plugins/store";
+import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
 
 /**
  * The two questions a tool call has to pass, and the row each answer leaves behind.
@@ -52,9 +47,6 @@ let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
  */
 let serverWasAlreadyConfigured = false;
 
-/** The deployment's one registry, shared with the computer in a real deployment. */
-const approvals = createApprovalRegistry();
-
 const store = createPluginStore({
   database,
   auditStore: createAuditStore(database),
@@ -64,7 +56,6 @@ const store = createPluginStore({
   },
   encryptionKey: "x".repeat(44),
   policy: () => policy,
-  approvals,
 });
 
 async function auditRowsFor(targetId: string) {
@@ -285,131 +276,6 @@ describe("a boundary written about the browser does not refuse tool calls", () =
 
     // Not a refusal. It gets as far as the network, which is where this test stops caring.
     expect(thrown).not.toBeInstanceOf(PluginRefusedError);
-  });
-});
-
-/**
- * The third answer, which the tool-call path has to give as well as the computer.
- *
- * An ask verdict does not forward, so a call site that only knows yes and no reads it as a refusal
- * and the list an operator wrote to be asked about silently becomes a list of things their Bots may
- * never do. That is the failure the ask list exists to prevent, and it is invisible from a green
- * typecheck: everything still compiles, the audit trail still fills up, and the rows say refused.
- */
-describe("a boundary can ask a person about a tool call", () => {
-  test("stops the call and asks, rather than refusing it", async () => {
-    await store.grant("mcp", ref, holderId, "admin@openbot.local");
-    policy = {
-      mode: "enforce",
-      deny: [],
-      ask: ['mcp.server == "atlassian"'],
-      allow: ["true"],
-    };
-
-    let thrown: unknown;
-    try {
-      await store.callTool({
-        ref,
-        args: { query: "open bugs" },
-        botId: holderId,
-        actorId: "someone@openbot.local",
-      });
-    } catch (error) {
-      thrown = error;
-    } finally {
-      policy = { mode: "enforce", deny: [], allow: ["true"] };
-    }
-
-    expect(thrown).toBeInstanceOf(PluginNeedsApprovalError);
-    // A refusal is final and a model told it was refused gives up; this one is meant to come back.
-    expect(thrown).not.toBeInstanceOf(PluginRefusedError);
-    const asked = thrown as PluginNeedsApprovalError;
-    // The question names the tool and the server. It used to read "The Bot wants to call ." here,
-    // because the neutral file path this context carries was mistaken for a real one.
-    expect(asked.question).toBe(
-      "The Bot wants to call searchJiraIssues on atlassian.",
-    );
-    expect(asked.rule).toBe('mcp.server == "atlassian"');
-
-    const rows = await auditRowsFor(ref);
-    const question = rows.filter(
-      (row) =>
-        row.eventType === "approval.requested" &&
-        (row.payload as { approval?: string }).approval === asked.approvalId,
-    );
-    expect(question).toHaveLength(1);
-    // Nothing is recorded as rejected, because nothing was: the turn stopped at the question. A
-    // deny rule earlier in this file leaves rejections behind, so what is asserted is that none of
-    // them came from the ask list.
-    expect(
-      rows.some(
-        (row) =>
-          row.eventType === "mcp.call_rejected" &&
-          (row.payload as { decision?: { source?: string } }).decision
-            ?.source === "ask",
-      ),
-    ).toBe(false);
-  });
-
-  test("an answer is good for the call it was given for, and not for another", async () => {
-    await store.grant("mcp", ref, holderId, "admin@openbot.local");
-    policy = {
-      mode: "enforce",
-      deny: [],
-      ask: ['mcp.server == "atlassian"'],
-      allow: ["true"],
-    };
-    const call = {
-      ref,
-      args: { query: "open bugs" },
-      botId: holderId,
-      actorId: "someone@openbot.local",
-    };
-
-    try {
-      const asked = (await store
-        .callTool(call)
-        .catch((error: unknown) => error)) as PluginNeedsApprovalError;
-      approvals.answer(
-        asked.approvalId,
-        holderId,
-        "manager@openbot.local",
-        true,
-      );
-
-      // The arguments are inside the binding, so a person who allowed one message to one channel has
-      // not allowed a different one. This asks again rather than going through.
-      const elsewhere = await store
-        .callTool({
-          ...call,
-          args: { query: "everything" },
-          approvalId: asked.approvalId,
-        })
-        .catch((error: unknown) => error);
-      expect(elsewhere).toBeInstanceOf(PluginNeedsApprovalError);
-
-      // The call it was actually given for gets past the boundary, which it proves by failing at the
-      // network instead of as a question or a refusal.
-      const allowed = await store
-        .callTool({ ...call, approvalId: asked.approvalId })
-        .catch((error: unknown) => error);
-      expect(allowed).not.toBeInstanceOf(PluginNeedsApprovalError);
-      expect(allowed).not.toBeInstanceOf(PluginRefusedError);
-
-      const rows = await auditRowsFor(ref);
-      // The row for the allowed call names who stood behind it, so the trail reads as "somebody was
-      // asked and said yes" rather than as an ordinary permission nobody ever questioned.
-      expect(
-        rows.some(
-          (row) =>
-            row.eventType === "mcp.call_succeeded" &&
-            (row.payload as { decision?: { approvedBy?: string } }).decision
-              ?.approvedBy === "manager@openbot.local",
-        ),
-      ).toBe(true);
-    } finally {
-      policy = { mode: "enforce", deny: [], allow: ["true"] };
-    }
   });
 });
 
