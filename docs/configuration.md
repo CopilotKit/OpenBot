@@ -86,7 +86,7 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
 | `BETTER_AUTH_SECRET`         | At least 32 characters. Required with Google OAuth.                                    |
 | `BETTER_AUTH_URL`            | Public API server base URL. Required with Google OAuth.                                |
-| `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API.                                       |
+| `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API. Unset, `http://localhost:3010`.       |
 | `INITIAL_ADMIN_EMAILS`       | Comma-separated users seeded as administrators.                                        |
 
 Google OAuth client id and secret must be configured together. If Google OAuth is configured, `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are also required.

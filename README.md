@@ -221,7 +221,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 
 Then set the two that decide who gets in and from where:
 
-- `TRUSTED_ORIGINS` — where the app is served from, `http://localhost:3010` locally. It defaults to `http://localhost:3000`, which is not where `start.sh` serves the app.
+- `TRUSTED_ORIGINS` — where the app is served from. Unset, that is `http://localhost:3010`, which is where `start.sh` serves the app.
 - `INITIAL_ADMIN_EMAILS` — comma separated. An address listed here becomes an administrator the first time it signs in; everybody else becomes a user.
 
 Remove `OPENBOT_DEV_NO_AUTH`, then restart: the sign-in button is written into the app's generated config at startup, so it appears only once all four settings are present. Accounts, sessions and roles are stored in the same PostgreSQL database as everything else.

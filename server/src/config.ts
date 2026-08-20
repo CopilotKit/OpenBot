@@ -218,9 +218,11 @@ function authConfig(
     baseUrl,
     secret,
     google,
+    // start.sh serves the app on 3010. A clone that enables Google sign-in without
+    // setting TRUSTED_ORIGINS must still accept the origin the app actually answers on.
     trustedOrigins: commaSeparated(environment, "TRUSTED_ORIGINS").length
       ? commaSeparated(environment, "TRUSTED_ORIGINS")
-      : ["http://localhost:3000"],
+      : ["http://localhost:3010"],
     initialAdminEmails: commaSeparated(environment, "INITIAL_ADMIN_EMAILS"),
   };
 }
