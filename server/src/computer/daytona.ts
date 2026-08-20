@@ -25,7 +25,7 @@ export type SandboxHandle = {
   createdAt?: string;
   start(timeout?: number): Promise<void>;
   stop(): Promise<void>;
-  delete(): Promise<void>;
+  delete(timeout?: number, wait?: boolean): Promise<void>;
   getPreviewLink(port: number): Promise<{ url: string }>;
 };
 
@@ -78,28 +78,33 @@ const DEFAULT_AGENT_COMPUTER_DIR = join(
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const HEALTH_POLL_INTERVAL_MS = 500;
 const DEFAULT_HEALTH_TIMEOUT_MS = 120_000;
-const RECIPE_VERSION = "1";
+const RECIPE_VERSION = "2";
 
 // The Playwright image tag and dependency must stay aligned with
 // agent-computer/package.json and agent-computer/Dockerfile. Bump both or neither.
 function buildRecipe(dir: string): unknown {
-  return Image.base("mcr.microsoft.com/playwright:v1.62.1-noble")
-    .runCommands(
-      "apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*",
-      "curl -fsSL https://bun.sh/install | bash",
-    )
-    .env({ PATH: "/root/.bun/bin:${PATH}" })
-    .workdir("/app")
-    .addLocalFile(join(dir, "package.json"), "/app/package.json")
-    .runCommands("bun install")
-    .addLocalDir(join(dir, "src"), "/app/src")
-    .runCommands("mkdir -p /workspace /profiles")
-    .env({
-      WORKSPACE_DIR: "/workspace",
-      PROFILES_DIR: "/profiles",
-      PORT: "4100",
-    })
-    .entrypoint(["bun", "src/index.ts"]);
+  return (
+    Image.base("mcr.microsoft.com/playwright:v1.62.1-noble")
+      .runCommands(
+        "apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*",
+        "curl -fsSL https://bun.sh/install | bash",
+      )
+      // Image.env shell-quotes variable references so ${PATH} cannot be used.
+      .env({
+        PATH: "/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      })
+      .workdir("/app")
+      .addLocalFile(join(dir, "package.json"), "/app/package.json")
+      .runCommands("bun install")
+      .addLocalDir(join(dir, "src"), "/app/src")
+      .runCommands("mkdir -p /workspace /profiles")
+      .env({
+        WORKSPACE_DIR: "/workspace",
+        PROFILES_DIR: "/profiles",
+        PORT: "4100",
+      })
+      .entrypoint(["bun", "src/index.ts"])
+  );
 }
 
 function getAllFiles(dir: string): string[] {
@@ -216,6 +221,7 @@ export function createDaytonaSupervisorClient(
   const doFetch = options.fetchImpl ?? fetch;
   const known = new Map<string, { sandboxId: string; url: string }>();
   const locating = new Map<string, Promise<string>>();
+  const resetSandboxes = new Map<string, string>();
 
   let snapshotPromise: Promise<string> | undefined;
 
@@ -313,15 +319,20 @@ export function createDaytonaSupervisorClient(
     botId: string,
     action: string,
   ): Promise<SandboxHandle | undefined> {
+    const deletedSandboxId = resetSandboxes.get(botId);
     const knownEntry = known.get(botId);
     if (knownEntry) {
-      try {
-        return await sdk.get(knownEntry.sandboxId);
-      } catch (err) {
-        if (isNotFoundError(err)) {
-          known.delete(botId);
-        } else {
-          throw wrapBotError(botId, action, err);
+      if (deletedSandboxId && knownEntry.sandboxId === deletedSandboxId) {
+        known.delete(botId);
+      } else {
+        try {
+          return await sdk.get(knownEntry.sandboxId);
+        } catch (err) {
+          if (isNotFoundError(err)) {
+            known.delete(botId);
+          } else {
+            throw wrapBotError(botId, action, err);
+          }
         }
       }
     }
@@ -332,6 +343,9 @@ export function createDaytonaSupervisorClient(
           [BOT_ID_LABEL_KEY]: botId,
         },
       })) {
+        if (deletedSandboxId && sb.id === deletedSandboxId) {
+          continue;
+        }
         const state = sb.state?.toLowerCase();
         if (state !== "destroyed" && state !== "destroying") {
           return sb;
@@ -403,6 +417,7 @@ export function createDaytonaSupervisorClient(
               },
               { timeout: 300 },
             );
+            resetSandboxes.delete(botId);
           } catch (err) {
             throw wrapBotError(botId, "create", err);
           }
@@ -519,10 +534,48 @@ export function createDaytonaSupervisorClient(
       if (!sandboxHandle) {
         return;
       }
+      resetSandboxes.set(botId, sandboxHandle.id);
       try {
-        await sandboxHandle.delete();
+        await sandboxHandle.delete(60, true);
       } catch (err) {
         throw wrapBotError(botId, "reset", err);
+      }
+
+      const pollInterval = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+      const maxWaitMs = 300 * 1000;
+      const startTime = Date.now();
+
+      while (true) {
+        let stillPresent = false;
+        try {
+          for await (const sb of sdk.list({
+            labels: {
+              [BOT_ID_LABEL_KEY]: botId,
+            },
+          })) {
+            if (sb.id === sandboxHandle.id) {
+              const state = sb.state?.toLowerCase();
+              if (state !== "destroyed" && state !== "destroying") {
+                stillPresent = true;
+                break;
+              }
+            }
+          }
+        } catch (err) {
+          throw wrapBotError(botId, "reset", err);
+        }
+
+        if (!stillPresent) {
+          break;
+        }
+
+        if (Date.now() - startTime >= maxWaitMs) {
+          throw new SupervisorError(
+            `Timed out waiting for deleted computer sandbox ${sandboxHandle.id} for ${botId} to be removed.`,
+          );
+        }
+
+        await sleep(pollInterval);
       }
     },
 
@@ -540,6 +593,9 @@ export function createDaytonaSupervisorClient(
           }
           const botId = sb.labels?.[BOT_ID_LABEL_KEY];
           if (!botId) {
+            continue;
+          }
+          if (resetSandboxes.get(botId) === sb.id) {
             continue;
           }
           result.push({

@@ -33,6 +33,7 @@ type FakeSandbox = {
   startCalls: number;
   stopCalls: number;
   deleteCalls: number;
+  deleteHandler?: (timeout?: number, wait?: boolean) => void | Promise<void>;
 };
 
 type CreateParams = {
@@ -58,9 +59,13 @@ function makeSandboxHandle(sb: FakeSandbox) {
       sb.stopCalls++;
       sb.state = "stopped";
     },
-    delete: async () => {
+    delete: async (timeout?: number, wait?: boolean) => {
       sb.deleteCalls++;
-      sb.state = "destroyed";
+      if (sb.deleteHandler) {
+        await sb.deleteHandler(timeout, wait);
+      } else {
+        sb.state = "destroyed";
+      }
     },
     getPreviewLink: async (_port: number) => ({ url: sb.previewUrl }),
   };
@@ -561,5 +566,169 @@ describe("Daytona computer supervisor", () => {
     const snapshotName3 = sdk3.creates[0].snapshot;
     expect(snapshotName3).toMatch(/^openbot-agent-computer-[a-f0-9]{12}$/);
     expect(snapshotName3).not.toBe(snapshotName1);
+  });
+
+  test("snapshot image recipe configures PATH with bun and standard system binaries without literal variable substitution", async () => {
+    const fixtureDir = mkdtempSync(
+      join(tmpdir(), "openbot-agent-computer-test-"),
+    );
+    tempDirs.push(fixtureDir);
+
+    writeFileSync(
+      join(fixtureDir, "package.json"),
+      JSON.stringify({ name: "agent-computer", version: "1.0.0" }),
+    );
+    mkdirSync(join(fixtureDir, "src"), { recursive: true });
+    writeFileSync(
+      join(fixtureDir, "src", "index.ts"),
+      'console.log("hello world");\n',
+    );
+
+    let capturedImage: { dockerfile: string } | undefined;
+    const sdk = createFakeSdk();
+    const originalSnapshotCreate = sdk.snapshot.create;
+    sdk.snapshot.create = async (params, options) => {
+      capturedImage = params.image as { dockerfile: string };
+      return originalSnapshotCreate(params, options);
+    };
+
+    const client = createDaytonaSupervisorClient({
+      apiKey: "test-api-key",
+      computerToken: "tok",
+      agentComputerDir: fixtureDir,
+      pollIntervalMs: 1,
+      healthTimeoutMs: 200,
+      sdk: sdk as never,
+      fetchImpl: fakeFetch(),
+    });
+
+    await client.locate("recipe-test-bot");
+
+    expect(capturedImage).toBeDefined();
+    const dockerfile = capturedImage!.dockerfile;
+
+    const envPathLine = dockerfile
+      .split("\n")
+      .find((line) => line.startsWith("ENV PATH="));
+
+    expect(envPathLine).toBeDefined();
+    expect(envPathLine).toContain("/root/.bun/bin");
+    expect(envPathLine).toContain("/usr/bin");
+    expect(envPathLine).toContain("/bin");
+    expect(envPathLine).not.toContain("${PATH}");
+    expect(dockerfile).not.toContain("${PATH}");
+  });
+
+  test("reset waits for sandbox deletion so list does not return the reset bot", async () => {
+    const existing: FakeSandbox = {
+      id: "sb-reset-wait-1",
+      state: "started",
+      labels: {
+        "openbot/computer": "true",
+        "openbot/bot-id": "reset-wait-bot",
+      },
+      envVars: {},
+      public: true,
+      autoStopInterval: 15,
+      createdAt: "2026-08-20T10:00:00Z",
+      previewUrl: "https://sb-reset-wait-1.preview.daytona.app",
+      startCalls: 0,
+      stopCalls: 0,
+      deleteCalls: 0,
+      deleteHandler: (_timeout, wait) => {
+        if (wait) {
+          existing.state = "destroyed";
+        }
+      },
+    };
+
+    const sdk = createFakeSdk([existing]);
+    const client = createDaytonaSupervisorClient({
+      apiKey: "test-api-key",
+      computerToken: "tok",
+      snapshot: "prebuilt",
+      pollIntervalMs: 1,
+      healthTimeoutMs: 200,
+      sdk: sdk as never,
+      fetchImpl: fakeFetch(),
+    });
+
+    await client.reset("reset-wait-bot");
+
+    const remaining = await client.list();
+    expect(
+      remaining.find((bot) => bot.botId === "reset-wait-bot"),
+    ).toBeUndefined();
+  });
+
+  test("reset waits for Daytona list convergence across eventual consistency stale started responses", async () => {
+    const existing: FakeSandbox = {
+      id: "sb-reset-convergence-1",
+      state: "started",
+      labels: {
+        "openbot/computer": "true",
+        "openbot/bot-id": "reset-convergence-bot",
+      },
+      envVars: {},
+      public: true,
+      autoStopInterval: 15,
+      createdAt: "2026-08-20T10:00:00Z",
+      previewUrl: "https://sb-reset-convergence-1.preview.daytona.app",
+      startCalls: 0,
+      stopCalls: 0,
+      deleteCalls: 0,
+    };
+
+    const sdk = createFakeSdk([existing]);
+    let postDeleteListCalls = 0;
+    const origList = sdk.list;
+
+    sdk.list = (query?: { labels?: Record<string, string> }) => {
+      if (existing.deleteCalls > 0) {
+        postDeleteListCalls++;
+        if (postDeleteListCalls === 2) {
+          async function* staleGenerator() {
+            yield {
+              id: existing.id,
+              state: "started",
+              labels: existing.labels,
+              createdAt: existing.createdAt,
+              start: async () => {},
+              stop: async () => {},
+              delete: async () => {},
+              getPreviewLink: async () => ({ url: existing.previewUrl }),
+            };
+          }
+          return staleGenerator();
+        }
+        async function* emptyGenerator() {}
+        return emptyGenerator();
+      }
+      return origList(query);
+    };
+
+    const client = createDaytonaSupervisorClient({
+      apiKey: "test-api-key",
+      computerToken: "tok",
+      snapshot: "prebuilt",
+      pollIntervalMs: 1,
+      healthTimeoutMs: 200,
+      sdk: sdk as never,
+      fetchImpl: fakeFetch(),
+    });
+
+    await client.reset("reset-convergence-bot");
+
+    const immediate = await client.list();
+    expect(
+      immediate.find((bot) => bot.botId === "reset-convergence-bot"),
+    ).toBeUndefined();
+
+    const later = await client.list();
+    expect(
+      later.find((bot) => bot.botId === "reset-convergence-bot"),
+    ).toBeUndefined();
+
+    expect(postDeleteListCalls).toBeGreaterThanOrEqual(3);
   });
 });
