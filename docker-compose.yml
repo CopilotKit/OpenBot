@@ -163,6 +163,8 @@ services:
       - "${BOT_PORT:-4200}:4200"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Server sends this on every call to the managed Bot. It refuses to start without it.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
       # to it verbatim.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
@@ -184,6 +186,8 @@ services:
       # The selected provider reads its own key. Models requiring the Responses API use
       # BOT_RESPONSES_API instead of changing the streaming loop here.
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
+      # Same server-to-Bot request boundary as agent-bot above.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

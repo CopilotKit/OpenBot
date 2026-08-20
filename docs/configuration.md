@@ -21,6 +21,7 @@ bash scripts/start.sh
 | `DATABASE_URL`                | PostgreSQL connection string.                                                                         |
 | `KEY_ENCRYPTION_KEY`          | Base64-encoded 32-byte key for encrypted stored credentials. Generate with `openssl rand -base64 32`. |
 | `MANAGED_AGENT_AG_UI_URL`     | Default AG-UI endpoint for coworkers created in the product. Must be HTTP(S).                         |
+| `MANAGED_AGENT_TOKEN`          | Secret sent only to the managed AG-UI endpoint. Generate with `openssl rand -base64 32`.               |
 | `INTELLIGENCE_API_URL`        | CopilotKit Intelligence API URL.                                                                      |
 | `INTELLIGENCE_GATEWAY_WS_URL` | CopilotKit Intelligence realtime gateway URL.                                                         |
 | `INTELLIGENCE_API_KEY`        | Runtime key for the Intelligence project.                                                             |

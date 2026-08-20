@@ -151,7 +151,10 @@ const channelActivityListener = await startChannelActivityListener(
   channelEvents,
 );
 const roleRepository = createRoleRepository(database);
-const loadAgentsForActor = createRuntimeAgentLoader(database, agentVault);
+const loadAgentsForActor = createRuntimeAgentLoader(database, agentVault, {
+  endpoint: config.managedAgentAgUiUrl,
+  token: config.managedAgentToken,
+});
 await synchronizeTenantPackage(database, tenantPackage);
 const auth = config.auth ? createAuth(config, database) : undefined;
 const computerProvider = config.computer

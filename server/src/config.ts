@@ -44,6 +44,8 @@ export type DeploymentConfig = {
   databaseUrl: string;
   keyEncryptionKey: string;
   managedAgentAgUiUrl: URL;
+  /** Secret sent only to the managed Bot endpoint. Never stored in an agent row. */
+  managedAgentToken: string;
   /**
    * What this deployment calls itself, when more than one shares an Intelligence project.
    *
@@ -397,6 +399,7 @@ export function loadConfig(
       environment,
       "MANAGED_AGENT_AG_UI_URL",
     ),
+    managedAgentToken: required(environment, "MANAGED_AGENT_TOKEN"),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",

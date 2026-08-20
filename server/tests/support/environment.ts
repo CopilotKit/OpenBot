@@ -23,6 +23,7 @@ export function testEnvironment(
     INTELLIGENCE_API_KEY: "tenant-api-key",
     COPILOTKIT_LICENSE_TOKEN: "license-token",
     MANAGED_AGENT_AG_UI_URL: "http://localhost:4200/ag-ui",
+    MANAGED_AGENT_TOKEN: "managed-agent-token",
     ...overrides,
   };
 }

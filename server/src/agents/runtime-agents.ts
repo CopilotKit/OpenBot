@@ -22,6 +22,8 @@ export function createRuntimeAgentLoader(
   database: Database,
   /** Resolves a customer agent's key at load time. Absent means no agent can carry one. */
   vault?: { reader: CredentialSecretReader; encryptionKey: string },
+  /** Secret for the deployment-managed Bot. Never sent to customer-owned endpoints. */
+  managedAgent?: { endpoint: URL; token: string },
 ) {
   return async (actor: AgentActor): Promise<RegisteredAgent[]> => {
     const [active, tombstones] = await Promise.all([
@@ -44,6 +46,16 @@ export function createRuntimeAgentLoader(
           auth: authFromConfiguration(row.configuration),
         });
         if (headers) agent.headers = headers;
+      }
+      if (
+        agent.type === "remote_ag_ui" &&
+        managedAgent &&
+        agent.endpoint === managedAgent.endpoint.toString()
+      ) {
+        agent.headers = {
+          ...agent.headers,
+          "x-openbot-agent-token": managedAgent.token,
+        };
       }
       registered.set(agent.id, agent);
     }

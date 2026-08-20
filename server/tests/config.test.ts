@@ -16,6 +16,7 @@ const baseEnvironment = {
   INTELLIGENCE_API_KEY: "tenant-api-key",
   COPILOTKIT_LICENSE_TOKEN: "license-token",
   MANAGED_AGENT_AG_UI_URL: " http://localhost:4200/ag-ui ",
+  MANAGED_AGENT_TOKEN: "managed-agent-token",
 };
 
 describe("deployment configuration", () => {
@@ -47,6 +48,7 @@ describe("deployment configuration", () => {
       INTELLIGENCE_API_KEY: baseEnvironment.INTELLIGENCE_API_KEY,
       COPILOTKIT_LICENSE_TOKEN: baseEnvironment.COPILOTKIT_LICENSE_TOKEN,
       MANAGED_AGENT_AG_UI_URL: baseEnvironment.MANAGED_AGENT_AG_UI_URL,
+      MANAGED_AGENT_TOKEN: baseEnvironment.MANAGED_AGENT_TOKEN,
     });
 
     expect(config.auth).toBeUndefined();
@@ -77,6 +79,7 @@ describe("deployment configuration", () => {
         DATABASE_URL: baseEnvironment.DATABASE_URL,
         KEY_ENCRYPTION_KEY: baseEnvironment.KEY_ENCRYPTION_KEY,
         MANAGED_AGENT_AG_UI_URL: baseEnvironment.MANAGED_AGENT_AG_UI_URL,
+        MANAGED_AGENT_TOKEN: baseEnvironment.MANAGED_AGENT_TOKEN,
       }),
     ).toThrow("CopilotKit Intelligence is required and is not configured");
   });
@@ -100,6 +103,15 @@ describe("deployment configuration", () => {
     delete environment.MANAGED_AGENT_AG_UI_URL;
 
     expect(() => loadConfig(environment)).toThrow("MANAGED_AGENT_AG_UI_URL");
+  });
+
+  test("refuses to start when MANAGED_AGENT_TOKEN is missing", () => {
+    const environment: Record<string, string | undefined> = {
+      ...baseEnvironment,
+    };
+    delete environment.MANAGED_AGENT_TOKEN;
+
+    expect(() => loadConfig(environment)).toThrow("MANAGED_AGENT_TOKEN");
   });
 
   test("refuses a non-HTTP MANAGED_AGENT_AG_UI_URL", () => {

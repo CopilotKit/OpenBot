@@ -181,6 +181,7 @@ See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/
 - `DATABASE_URL`
 - `KEY_ENCRYPTION_KEY`
 - `MANAGED_AGENT_AG_UI_URL`
+- `MANAGED_AGENT_TOKEN`
 - `INTELLIGENCE_API_URL`
 - `INTELLIGENCE_GATEWAY_WS_URL`
 - `INTELLIGENCE_API_KEY`
