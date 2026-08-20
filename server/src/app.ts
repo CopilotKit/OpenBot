@@ -19,13 +19,13 @@ import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
-import type { ComputerClient } from "./computer/client";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import { authoriseAgentCall } from "./agents/callback-token";
 import type { DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
+import { serveStatic } from "hono/bun";
 import { createPluginRoutes } from "./plugins/routes";
 import { REFUSAL_MARKER } from "./plugins/tools";
 import type { PluginStore } from "./plugins/store";
@@ -46,9 +46,7 @@ export function createApp(
    * scope broke every server test that touches createApp even though none of them use CopilotKit.
    */
   copilotHandler?: HonoApp,
-  /** Absent when no computer is configured, and the routes are then not mounted at all. */
-  computerClient?: ComputerClient,
-  /** The only path to an acting call: policy decision, then audit row, then the action. */
+  /** The single governed computer module: policy, audit trail, transport, and provider lifecycle. */
   computerGateway?: ComputerGateway,
   /** What the gateway enforces, and what an administrator can change while running. */
   computerPolicy?: PolicyStore,
@@ -254,24 +252,19 @@ export function createApp(
   if (copilotHandler) {
     // Mounted at the ROOT with the handler carrying its own basePath. Mounting it at
     // "/api/copilotkit" as well double-prefixes it: Hono strips the prefix before the handler sees
-    // the path, so every route lands at /api/copilotkit/api/copilotkit/* and /info 404s. The client
+    // the path, so every route lands at /api/copilotkit/api/copilotkit/* and /info 404s. The browser
     // reports that as "Runtime info request failed with status 404" and every run fails before it
     // starts, with nothing at all in the server log.
     app.route("/", copilotHandler);
   }
 
-  // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so all
-  // three arrive together or the routes are not mounted: a computer whose actions were ungoverned is
-  // not a reduced feature, it is the one shape of this feature that must not exist.
-  if (computerClient && computerGateway && computerPolicy) {
+  // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
+  // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is
+  // the one shape of this feature that must not exist.
+  if (computerGateway && computerPolicy) {
     app.route(
       "/api/computers",
-      createComputerRoutes(
-        computerClient,
-        computerGateway,
-        computerPolicy,
-        requireUser,
-      ),
+      createComputerRoutes(computerGateway, computerPolicy, requireUser),
     );
   }
 
@@ -394,6 +387,45 @@ export function createApp(
 
   if (threadIdentity) {
     app.route("/api/threads", createThreadRoutes(threadIdentity, requireUser));
+  }
+
+  /*
+   * The built app, served by the API that serves it.
+   *
+   * WHY THE SAME PROCESS. There is no CORS anywhere in this server, deliberately, so the app has to
+   * reach `/api` on its own origin. Two containers behind one ingress does that too, and costs a
+   * path rule on every deployment plus a way for the two to disagree about which host they are on.
+   * One process cannot disagree with itself.
+   *
+   * MOUNTED LAST, so every `/api` route above already claimed its path. The catch-all below would
+   * otherwise answer an unmatched `/api` call with the app's HTML, which is the failure that reads
+   * as "the API returned HTML" and takes an hour to place.
+   *
+   * Absent in development: Vite serves the app and proxies `/api` here, so `APP_DIST_DIR` is unset
+   * and none of this mounts.
+   */
+  if (config.appDistDir) {
+    const root = config.appDistDir;
+    app.use("/*", serveStatic({ root }));
+    /*
+     * A single-page app owns its routing, so a path with no file behind it is not missing: it is a
+     * route the browser resolves once index.html has loaded. Without this, every deep link and every
+     * refresh away from `/` is a 404, which is the classic way this deployment shape breaks.
+     *
+     * Written out rather than a second `serveStatic`, whose `path` option is resolved relative to the
+     * working directory and silently matches nothing when handed the absolute root used above.
+     *
+     * `/api` is excluded so an unmatched API route still answers as one. Returning the app's HTML to
+     * a fetch that expected JSON is the failure that gets read as "the API returned HTML".
+     */
+    app.get("*", async (context) => {
+      if (context.req.path.startsWith("/api")) return context.notFound();
+      const index = Bun.file(`${root}/index.html`);
+      if (!(await index.exists())) return context.notFound();
+      return new Response(index, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    });
   }
 
   return app;

@@ -551,9 +551,17 @@ describe("agent route composition", () => {
         api: { getSession: async () => session },
       },
       { rolesForUser: async () => ["user"] },
-      // Positions 4-10: auditReader, credentialService, packageStatusReader, copilotHandler,
-      // computerClient, computerGateway, computerPolicy.
-      undefined,
+      /*
+       * Positions 4-9: auditReader, credentialService, packageStatusReader, copilotHandler,
+       * computerGateway, computerPolicy. `store` is position 10, agentProfileStore.
+       *
+       * Six placeholders, down from seven on both sides of the merge that produced this. Each side
+       * had removed one parameter — `connectorService` here, `computerClient` on main — so both runs
+       * were seven long and textually identical, and only the comment conflicted. Taking either
+       * side's run would have left `store` one slot too far along, in `channelEvents`, where nothing
+       * would have complained: every parameter from 4 on is optional, so a misplaced argument is a
+       * silent pass and the assertions below would fail for no visible reason.
+       */
       undefined,
       undefined,
       undefined,

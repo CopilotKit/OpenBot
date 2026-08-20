@@ -209,6 +209,35 @@ export type ReadFileResult = {
   bytes: number;
 };
 
+/**
+ * A command for the Bot's computer to run.
+ *
+ * The whole command as one string, because a shell's usefulness is pipes, redirection and `&&`, and
+ * a shape that took a binary plus arguments would be a worse shell wearing the name.
+ */
+export type RunCommandInput = {
+  command: string;
+  /** Capped by the computer. Absent takes its default. */
+  timeoutMs?: number;
+};
+
+/**
+ * What running one reports back.
+ *
+ * `truncated` and `timedOut` are separate from the exit code because they are different facts about
+ * the same run: a command can succeed and still have had its output cut, and one that was killed on
+ * the clock never produced an exit code of its own.
+ */
+export type RunCommandResult = {
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  timedOut: boolean;
+  elapsedMs: number;
+};
+
 export type WriteFileInput = {
   path: string;
   contents: string;

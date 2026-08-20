@@ -6,7 +6,8 @@ export type ComputerProfile = {
   botId: string;
   running: boolean;
   startedAt: string | null;
-  egress: string | null;
+  /** Absent when the provider does not report egress at all, which is not the same as none. */
+  egress?: string | null;
 };
 
 /** Whether each Bot has a browser profile of its own, or they share one. */

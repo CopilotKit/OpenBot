@@ -186,4 +186,87 @@ describe("deployment configuration", () => {
       expect(attempt).toThrow("AGENT_STALL_TIMEOUT_MS");
     },
   );
+
+  test("configures Docker as the per-Bot computer provider", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      COMPUTER_SUPERVISOR_URL: "http://localhost:4000",
+      SUPERVISOR_TOKEN: "supervisor-token",
+      COMPUTER_TOKEN: "computer-token",
+    });
+
+    expect(config.computer?.provider).toBe("docker");
+    expect(config.computer).toEqual({
+      provider: "docker",
+      baseUrl: "http://localhost:4000",
+      supervisorToken: "supervisor-token",
+      token: "computer-token",
+      allowPrivateHosts: false,
+    });
+  });
+
+  test("configures one shared computer", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      AGENT_COMPUTER_URL: "http://localhost:4100",
+      COMPUTER_TOKEN: "computer-token",
+    });
+
+    expect(config.computer?.provider).toBe("shared");
+    expect(config.computer).toEqual({
+      provider: "shared",
+      baseUrl: "http://localhost:4100",
+      token: "computer-token",
+      allowPrivateHosts: false,
+    });
+  });
+
+  test("leaves computers off when no provider address is configured", () => {
+    expect(loadConfig(baseEnvironment).computer).toBeUndefined();
+  });
+
+  test.each([
+    ["Docker", "COMPUTER_SUPERVISOR_URL"],
+    ["shared", "AGENT_COMPUTER_URL"],
+  ] as const)("refuses an invalid %s computer provider URL", (_, urlName) => {
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        [urlName]: "not a URL",
+      }),
+    ).toThrow(`${urlName} must be a valid URL`);
+  });
+});
+
+describe("accessibility", () => {
+  test("is on when nothing is set", () => {
+    expect(loadConfig(baseEnvironment).accessibility).toBe(true);
+  });
+
+  test.each(["true", "1"])(
+    "is off on OPENBOT_ACCESSIBILITY_DISABLED=%p",
+    (value) => {
+      expect(
+        loadConfig({
+          ...baseEnvironment,
+          OPENBOT_ACCESSIBILITY_DISABLED: value,
+        }).accessibility,
+      ).toBe(false);
+    },
+  );
+
+  // Anything else is not a way of saying off. A deployment that typed something
+  // else has not opted out, and silently treating it as opt-out would be a
+  // setting that appears to work and does not.
+  test.each(["false", "no", "", "yes"])(
+    "stays on for OPENBOT_ACCESSIBILITY_DISABLED=%p",
+    (value) => {
+      expect(
+        loadConfig({
+          ...baseEnvironment,
+          OPENBOT_ACCESSIBILITY_DISABLED: value,
+        }).accessibility,
+      ).toBe(true);
+    },
+  );
 });

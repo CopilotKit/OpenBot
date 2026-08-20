@@ -139,11 +139,12 @@ function BoundariesPage() {
             about <code>tool.name</code>, <code>intent</code>,{" "}
             <code>bot.id</code>, <code>actor.id</code>, <code>page.url</code>{" "}
             and <code>page.host</code>, the element being acted on, the{" "}
-            <code>key</code> being pressed, the file being touched, and{" "}
-            <code>mcp.server</code>, <code>mcp.tool</code> and{" "}
-            <code>mcp.effect</code> for a call to somebody else&rsquo;s tools. A
-            rule that cannot be evaluated counts as a match, so a mistyped deny
-            refuses rather than quietly permitting what it was meant to forbid.
+            <code>key</code> being pressed, the file being touched, the{" "}
+            <code>command</code> being run, and <code>mcp.server</code>,{" "}
+            <code>mcp.tool</code> and <code>mcp.effect</code> for a call to
+            somebody else&rsquo;s tools. A rule that cannot be evaluated counts
+            as a match, so a mistyped deny refuses rather than quietly
+            permitting what it was meant to forbid.
           </>
         }
         title="It may never"

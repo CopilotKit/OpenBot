@@ -33,6 +33,11 @@ conditional update, `LISTEN`/`NOTIFY` for fan-out.
 - [ ] New refusals and new failures each write a row.
 - [ ] Nothing new is trusted from the client that the server can resolve itself.
 
+## Changelog
+
+- [ ] A line in `CHANGELOG.md` under `Unreleased`, or a sentence on why a deployment behaves no
+      differently afterwards.
+
 ## Proof
 
 <!-- What you ran, and what you saw. Screenshots or a recording for anything with a surface. -->

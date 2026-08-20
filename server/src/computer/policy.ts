@@ -96,7 +96,8 @@ export type PolicyContext = {
     // intents: an operator thinks "nothing may change anything in Jira", not "nothing may call
     // editJiraIssue, transitionJiraIssue, addCommentToJiraIssue and the six others".
     | "read_tool"
-    | "write_tool";
+    | "write_tool"
+    | "run_command";
   /**
    * The file a `computer_read_file` or `computer_write_file` call is aimed at.
    *
@@ -131,6 +132,17 @@ export type PolicyContext = {
     tool: string;
     effect: "read" | "write";
   };
+  /**
+   * The command a Bot is about to run on its computer, verbatim.
+   *
+   * Verbatim because a rule about a shell can only be written against what was actually typed. This
+   * is the field for `deny: contains(command, "rm -rf")`, and for the blunter and more useful
+   * `deny: intent == "run_command"`, which is how a deployment says its Bots do not get a shell.
+   *
+   * Matching on command text is a filter, not a boundary: a command can be written a hundred ways
+   * and no list catches them all. The boundary is the container the command runs in.
+   */
+  command?: string;
 };
 
 export type PolicyDecision = {
@@ -272,6 +284,15 @@ function describeRefusal(context: PolicyContext, expression: string): string {
   // tests below true of a tool call and all of them wrong about it: without this branch a refused
   // Jira call reads "the file  is blocked", naming a workspace it never touched and a path that is
   // not there. Checked first because it is the only one of these that is ever certain.
+  // A command is described by the command. Falling through to the page branch below would produce
+  // "a run_command action on " with an empty host, because a shell call has no page.
+  if (context.command) {
+    return (
+      `This deployment's policy does not allow that: the command \`${context.command}\` ` +
+      `is blocked by the rule \`${expression}\`.`
+    );
+  }
+
   if (context.mcp) {
     return (
       `This deployment's policy does not allow that: ${context.mcp.tool} on ` +

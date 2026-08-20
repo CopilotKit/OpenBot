@@ -21,6 +21,25 @@ export type IntelligenceSettings = {
   licenseToken: string;
 };
 
+export type DockerComputerConfig = {
+  provider: "docker";
+  baseUrl: string;
+  supervisorToken?: string;
+  token?: string;
+  allowPrivateHosts: boolean;
+  policy?: ActionPolicy;
+};
+
+export type SharedComputerConfig = {
+  provider: "shared";
+  baseUrl: string;
+  token?: string;
+  allowPrivateHosts: boolean;
+  policy?: ActionPolicy;
+};
+
+export type ComputerConfig = DockerComputerConfig | SharedComputerConfig;
+
 export type DeploymentConfig = {
   databaseUrl: string;
   keyEncryptionKey: string;
@@ -84,31 +103,20 @@ export type DeploymentConfig = {
    * See auth/dev-actor.ts for the two locks that stop this reaching a deployment.
    */
   devNoAuth: boolean;
+  /** Names OpenBot on the analytics the runtime already sends. Off with OPENBOT_ACCESSIBILITY_DISABLED. */
+  accessibility: boolean;
+  /**
+   * Where the built app is, when this process serves it.
+   *
+   * Set in a container image that carries both. Unset in development, where Vite serves the app and
+   * proxies the API here, so the server stays an API and nothing shadows a route.
+   */
+  appDistDir?: string;
   /**
    * The Bot computer. Absent means the feature is off and its routes are not mounted, rather than
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
-  computer?: {
-    baseUrl: string;
-    /** The secret every computer requires of its caller. */
-    token?: string;
-    /**
-     * The container supervisor, when each Bot is to get a computer of its own. Absent means one
-     * shared computer at `baseUrl`, which is what a laptop wants and is honest about being one
-     * machine.
-     */
-    supervisor?: { baseUrl: string; token?: string };
-    /** True on a laptop, where browsing the deployment's own services is the point. */
-    allowPrivateHosts: boolean;
-    /**
-     * What Bots may do on their computers. Absent means the built-in default applies.
-     *
-     * A whole policy in one variable rather than a variable per rule, because the rules are an
-     * ordered pair of lists and splitting them across `AGENT_COMPUTER_DENY_1`-style names makes their
-     * precedence, which is the only subtle thing about them, impossible to see.
-     */
-    policy?: ActionPolicy;
-  };
+  computer?: ComputerConfig;
   /**
    * The secret a Bot presents when it calls a tool back through this server.
    *
@@ -300,36 +308,48 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   };
 }
 
-function computerConfig(
-  environment: Environment,
-): DeploymentConfig["computer"] {
-  const baseUrl = url(environment, "AGENT_COMPUTER_URL");
-  if (!baseUrl) {
+function computerConfig(environment: Environment): ComputerConfig | undefined {
+  const supervisorAddress = optional(environment, "COMPUTER_SUPERVISOR_URL");
+  const sharedAddress = optional(environment, "AGENT_COMPUTER_URL");
+  if (!supervisorAddress && !sharedAddress) {
     return undefined;
   }
-  const policy = actionPolicy(environment);
+
   /*
    * The secret the computers require. Without it every call to a computer is refused, and that is the
    * intended failure: `agent-computer` drives a browser holding real logins and must not answer
    * unauthenticated callers that can reach its port.
    */
   const computerToken = optional(environment, "COMPUTER_TOKEN");
+
+  const allowPrivateHosts =
+    optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true";
+  const policy = actionPolicy(environment);
+
   const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
-  const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+  if (supervisorUrl) {
+    const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+    return {
+      provider: "docker",
+      baseUrl: supervisorUrl,
+      allowPrivateHosts,
+      ...(supervisorToken ? { supervisorToken } : {}),
+      ...(computerToken ? { token: computerToken } : {}),
+      ...(policy ? { policy } : {}),
+    };
+  }
+
+  const baseUrl = url(environment, "AGENT_COMPUTER_URL");
+  if (!baseUrl) {
+    return undefined;
+  }
+
   return {
+    provider: "shared",
     baseUrl,
-    allowPrivateHosts:
-      optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true",
-    ...(policy ? { policy } : {}),
+    allowPrivateHosts,
     ...(computerToken ? { token: computerToken } : {}),
-    ...(supervisorUrl
-      ? {
-          supervisor: {
-            baseUrl: supervisorUrl,
-            ...(supervisorToken ? { token: supervisorToken } : {}),
-          },
-        }
-      : {}),
+    ...(policy ? { policy } : {}),
   };
 }
 
@@ -371,6 +391,11 @@ function actionPolicy(environment: Environment): ActionPolicy | undefined {
  *
  * Zero is a legitimate value and means off. It is not the same as a malformed one.
  */
+function accessibilityEnabled(environment: Environment): boolean {
+  const off = optional(environment, "OPENBOT_ACCESSIBILITY_DISABLED");
+  return off !== "true" && off !== "1";
+}
+
 function agentStallTimeoutMs(environment: Environment): number {
   const raw = optional(environment, "AGENT_STALL_TIMEOUT_MS");
   if (!raw) {
@@ -416,6 +441,10 @@ export function loadConfig(
     oauth: { google },
     auth,
     devNoAuth: devAuthEnabled(environment),
+    accessibility: accessibilityEnabled(environment),
+    ...(optional(environment, "APP_DIST_DIR")
+      ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
+      : {}),
     computer: computerConfig(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }

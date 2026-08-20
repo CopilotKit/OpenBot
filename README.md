@@ -50,7 +50,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 ## Requirements
 
-- Docker, for PostgreSQL, browser computers, the supervisor, and the shipped Bots.
+- Docker, for PostgreSQL and the shipped Bots.
 - [Bun](https://bun.sh) 1.3+, for the app and API server.
 - A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
 - A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
@@ -96,6 +96,21 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 `scripts/start.sh` starts Docker services, applies migrations, starts the API server on port 3001, starts the app on port 3010, and checks that the services answer their own health routes before printing next steps.
 
+## Deploy it
+
+One image carries the app, the API, the browser the Bots drive, and optionally PostgreSQL. Same
+`.env`, no Kubernetes.
+
+```sh
+docker build -t openbot .
+docker run -p 3001:3001 --env-file .env \
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql/data openbot
+```
+
+Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
+[docs/deployment.md](docs/deployment.md) has the minimum sizes, the platform notes, and why this runs
+as one replica for now.
+
 ## Try it
 
 - Open `/bot` and ask: `Open news.ycombinator.com and tell me the top story.`
@@ -125,6 +140,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 ## Features
 
 - **A computer per Bot**: the supervisor gives each Bot its own container, its own `/workspace` volume and its own browser profile. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
+- **A shell, not just a browser**: a Bot can run a command in its workspace, install what it needs, and process a file it saved. Through the same gate as everything else, so a rule can refuse a shell outright or refuse particular commands, and the command is on the record either way.
 - **The gateway is the only way in**: it resolves the target from a server-held snapshot, evaluates the policy, writes the audit row, and only then calls the computer. There is no path that acts without the record existing first.
 - **CEL policy, fail closed**: rules can inspect `tool.name`, `intent`, `bot.id`, `actor.id`, `page.url`, `page.host`, `element.*`, `key`, `file.*` and `mcp.*`. Deny is evaluated before allow, a missing policy permits nothing, and a broken rule refuses rather than opens.
 - **Take the wheel**: a Bot that hits a login wall or a 2FA prompt asks for help. Control is handed over in the same panel and recorded as `computer.help_requested`, `computer.control_taken` and `computer.control_released`. While a person is driving, Bot actions are refused rather than queued.
@@ -181,6 +197,8 @@ Settings worth knowing:
 | `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` sets one.                      |
 | `COMPUTER_SUPERVISOR_URL`            | Gives each Bot a computer of its own instead of one shared computer.      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run computers under gVisor, where the host has it.      |
+| `COMPUTER_SANDBOX`                   | Set to `on` for Chromium's own sandbox, where the host permits it.        |
+| `EMBEDDED_POSTGRES`                  | Set to `on` for a database inside the deployment container.               |
 | `AGENT_COMPUTER_POLICY`              | JSON action policy. Malformed JSON stops server startup.                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Lets a Bot reach this machine's own services.                             |
 | `TENANT_PACKAGE_DIR`                 | Directory containing tenant YAML. Defaults to `../examples/fintech`.      |

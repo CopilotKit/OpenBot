@@ -18,13 +18,15 @@ import { createThreadIdentity } from "./channels/thread-identity";
 import { websocket as channelSocket } from "./channels/socket";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
-import { createComputerClient } from "./computer/client";
 import { createComputerGateway } from "./computer/gateway";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
 } from "./computer/policy-store";
-import { createSupervisorClient } from "./computer/supervisor";
+import {
+  createComputerProvider,
+  describeComputerIsolation,
+} from "./computer/provider";
 import { loadConfig } from "./config";
 import {
   type IdentifyActor,
@@ -151,21 +153,13 @@ const roleRepository = createRoleRepository(database);
 const loadAgentsForActor = createRuntimeAgentLoader(database, agentVault);
 await synchronizeTenantPackage(database, tenantPackage);
 const auth = config.auth ? createAuth(config, database) : undefined;
-// One computer each, when a supervisor is configured to give them out. Without one every Bot shares
-// the computer at `baseUrl`, which is what a laptop wants and is honest about being one machine.
-const supervisor = config.computer?.supervisor
-  ? createSupervisorClient(config.computer.supervisor)
+const computerProvider = config.computer
+  ? createComputerProvider(config.computer)
   : undefined;
-const computerClient = config.computer
-  ? createComputerClient({
-      baseUrl: config.computer.baseUrl,
-      allowPrivateHosts: config.computer.allowPrivateHosts,
-      ...(config.computer.token ? { token: config.computer.token } : {}),
-      ...(supervisor
-        ? { resolveBaseUrl: (botId: string) => supervisor.locate(botId) }
-        : {}),
-    })
-  : undefined;
+
+if (computerProvider?.warm) {
+  void computerProvider.warm();
+}
 // What Bots may do on their computers. Configuration supplies the deployment's default; an
 // administrator can change it while running, and a restart returns to the configured one.
 const policyStore = createPolicyStore(
@@ -186,6 +180,15 @@ const policySource = await policyStore.load();
  * unavailable, and the row is a note for a reader rather than something the server depends on.
  */
 const bootAuditStore = createAuditStore(database);
+const computerGateway = computerProvider
+  ? createComputerGateway({
+      provider: computerProvider,
+      auditStore: bootAuditStore,
+      policy: () => policyStore.get(),
+      allowPrivateHosts: config.computer?.allowPrivateHosts,
+      token: config.computer?.token,
+    })
+  : undefined;
 
 /**
  * What a Bot can reach beyond its own computer.
@@ -226,33 +229,26 @@ void recordAuditEvent(bootAuditStore, {
 /*
  * Record whether each Bot has a computer of its own.
  *
- * Without a supervisor every Bot shares the browser at `AGENT_COMPUTER_URL`. That is a fine way to
- * run on a laptop, but the shared isolation state must be visible rather than inferred.
+ * A shared provider is a fine way to run on a laptop, but the shared isolation state must be visible
+ * rather than inferred.
  */
+const isolation = describeComputerIsolation(computerProvider);
+
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.isolation_loaded",
   targetType: "computer",
-  payload: supervisor
-    ? {
-        isolation: "one computer per Bot",
-        note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
-      }
-    : {
-        isolation: "one shared computer",
-        note: "No supervisor is configured, so every Bot uses the same browser. Sessions, files and logins are shared between them. Set COMPUTER_SUPERVISOR_URL to give each Bot its own.",
-      },
+  payload: {
+    isolation: isolation.isolation,
+    note: isolation.note,
+  },
 }).catch(() => undefined);
 
 console.info(
   JSON.stringify({
     type: "computer-isolation",
-    isolation: supervisor ? "one computer per Bot" : "one shared computer",
-    ...(supervisor
-      ? {}
-      : {
-          warning:
-            "Every Bot shares one browser. Set COMPUTER_SUPERVISOR_URL for a computer each.",
-        }),
+    provider: computerProvider ? computerProvider.name : "none",
+    isolation: isolation.isolation,
+    ...(isolation.warning ? { warning: isolation.warning } : {}),
   }),
 );
 /**
@@ -340,19 +336,8 @@ const app = createApp(
     (actorId) => (botId, runId) =>
       mintRunAssertion({ botId, actorId, runId }, config.keyEncryptionKey),
   ),
-  computerClient,
   // The only path to an acting call.
-  computerClient
-    ? createComputerGateway({
-        client: computerClient,
-        auditStore: bootAuditStore,
-        // Read on every decision rather than captured once, so a rule an administrator adds while the
-        // server is running applies to the very next action instead of after a restart.
-        policy: () => policyStore.get(),
-        // Stop, reset and the listing act on containers when there are containers to act on.
-        ...(supervisor ? { supervisor } : {}),
-      })
-    : undefined,
+  computerGateway,
   policyStore,
   // Bots as durable objects, and the channels they run in.
   agentProfileStore,
@@ -435,15 +420,18 @@ serve<SocketData>({
       if (!actor) {
         return new Response("Sign in first.", { status: 401 });
       }
-      // Located per Bot when there is a supervisor, and the one shared computer when there is not.
+      // Located through the configured provider so every stream follows the same isolation rules.
       let upstream: string;
       try {
-        upstream = toStreamUrl(
-          supervisor
-            ? await supervisor.locate(streamBotId)
-            : config.computer.baseUrl,
-          streamBotId,
-        );
+        const streamBase = computerProvider
+          ? await computerProvider.locate(streamBotId)
+          : undefined;
+        if (!streamBase) {
+          return new Response("No computer address is configured.", {
+            status: 503,
+          });
+        }
+        upstream = toStreamUrl(streamBase, streamBotId);
       } catch (error) {
         // Said out loud rather than falling back to another Bot's computer, which is the failure this
         // whole path exists to prevent.

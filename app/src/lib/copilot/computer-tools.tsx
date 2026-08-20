@@ -613,6 +613,58 @@ export function ComputerTools() {
   });
 
   useFrontendTool({
+    name: "computer_run_command",
+    description:
+      "Run a shell command on your own computer. Use this for anything the browser cannot do: " +
+      "installing a tool you need, processing a file you saved, running a script. The working " +
+      "directory is your workspace, so paths are relative to it and files you write here are the " +
+      "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
+      "truncated from the start, and a command that runs too long is stopped. " +
+      "You are not the root user, so anything that writes outside your workspace needs sudo, " +
+      "which asks for no password: installing a package is " +
+      "`sudo apt-get update && sudo apt-get install -y <package>`. If sudo is refused, this " +
+      "computer does not grant it, so say so rather than retrying.",
+    parameters: z.object({
+      command: z
+        .string()
+        .describe("The command to run, such as: sudo apt-get install -y jq"),
+    }),
+    handler: async (
+      input: { command: string },
+      { signal }: { signal?: AbortSignal } = {},
+    ) =>
+      callComputer(
+        bot.current,
+        "/exec",
+        { method: "POST", body: input },
+        signal,
+      ),
+    render: ({ args, result, status }) => {
+      const outcome = outcomeOf(result);
+      /*
+       * The command, not its output. A person watching wants to know what their Bot just ran on a
+       * machine holding their logins, and that is the command; the output belongs in the answer the
+       * Bot gives, where the model has already decided which part of it mattered.
+       */
+      return (
+        <ActionLine
+          running={status !== "complete"}
+          label="Ran a command"
+          detail={
+            outcome.refused === true
+              ? String(outcome.reason ?? "")
+              : typeof args?.command === "string"
+                ? args.command
+                : undefined
+          }
+          refused={outcome.refused === true}
+          failed={didNotWork(outcome)}
+        />
+      );
+    },
+  });
+
+  useFrontendTool({
     name: "computer_write_file",
     description:
       "Save a file in your own workspace so you still have it later. Paths are relative to your " +

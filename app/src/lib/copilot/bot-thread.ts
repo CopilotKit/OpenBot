@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { tryClient } from "@/lib/client";
+import { newId } from "../new-id";
 
 /**
  * The thread the direct Bot chat talks in.
@@ -63,7 +64,7 @@ export function useBotThread(agentId: string): string | undefined {
       if (!current) return;
       // Falling back to one made here keeps the chat working when the deployment cannot be asked;
       // it is simply a thread nothing can later attribute.
-      const next = minted ?? crypto.randomUUID();
+      const next = minted ?? newId();
       if (minted) remember(agentId, minted);
       setThreadId(next);
     });

@@ -407,3 +407,73 @@ describe("describing a refusal", () => {
     expect(decision.reason).toContain("the file /workspace/secrets.env");
   });
 });
+
+/**
+ * A shell command, judged like any other action.
+ *
+ * The blunt rule matters more than the clever one here. A deployment that does not want its Bots
+ * running commands says so once with `intent`, and does not have to imagine every command it would
+ * have wanted to refuse.
+ */
+describe("commands", () => {
+  const runCommand = (command: string): PolicyContext => ({
+    tool: { name: "computer_run_command" },
+    bot: { id: "general-assistant" },
+    actor: { id: "dev-local-user" },
+    page: { url: "", host: "" },
+    intent: "run_command",
+    command,
+  });
+
+  test("a deployment can refuse the shell outright", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: ['intent == "run_command"'], allow: ["true"] },
+      runCommand("apt-get install -y jq"),
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.matched).toBe('intent == "run_command"');
+  });
+
+  test("a rule can name what the command says", () => {
+    const policy = {
+      mode: "enforce" as const,
+      deny: ['contains(command, "rm -rf")'],
+      allow: ["true"],
+    };
+    expect(evaluateActionPolicy(policy, runCommand("rm -rf /")).allowed).toBe(
+      false,
+    );
+    expect(evaluateActionPolicy(policy, runCommand("ls -la")).allowed).toBe(
+      true,
+    );
+  });
+
+  test("commands are allowed when nothing refuses them", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: [], allow: ["true"] },
+      runCommand("echo hello"),
+    );
+    expect(decision.allowed).toBe(true);
+  });
+
+  /*
+   * A rule written about the browser must not catch a command. The neutral empty fields make
+   * `page.host` and the element fields evaluate to false rather than being unevaluable, which is
+   * what keeps the shipped deny preset from refusing every command a Bot ever runs.
+   */
+  test("a browser rule does not refuse a command", () => {
+    const decision = evaluateActionPolicy(
+      {
+        mode: "enforce",
+        deny: ['contains(element.name, "submit") || key == "Enter"'],
+        allow: ["true"],
+      },
+      {
+        ...runCommand("echo hello"),
+        element: { ref: "", role: "", name: "", type: "" },
+        key: "",
+      },
+    );
+    expect(decision.allowed).toBe(true);
+  });
+});
