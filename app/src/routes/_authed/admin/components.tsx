@@ -6,6 +6,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { PreviewOf } from "@/components/gallery/preview";
 import { StaggerItem } from "@/components/layout/stagger";
 import { Button } from "@/components/ui/button";
 import {
@@ -255,6 +256,23 @@ function ComponentRow({
             Last changed {new Date(component.updatedAt).toLocaleString()}
             {component.updatedBy ? ` by ${component.updatedBy}` : null}
           </p>
+          {/*
+           * What granting this actually puts in front of somebody.
+           *
+           * Closed by default: this page is a list an administrator scans, and thirteen components
+           * drawn at once is a page nobody reads. Open, it is the real component, which is the only
+           * thing that answers "should this Bot have it".
+           */}
+          {RENDERABLE_NAMES.has(component.name) ? (
+            <details className="mt-3 max-w-3xl">
+              <summary className="cursor-pointer text-muted-foreground text-xs underline underline-offset-4 hover:text-foreground">
+                See it
+              </summary>
+              <div className="mt-3">
+                <PreviewOf name={component.name} />
+              </div>
+            </details>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
