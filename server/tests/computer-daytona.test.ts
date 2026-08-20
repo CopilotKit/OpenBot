@@ -3,20 +3,20 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createDaytonaComputerProvider,
   createDaytonaSupervisorClient,
   type DaytonaSdk,
   type DaytonaSupervisorOptions,
   type SandboxHandle,
 } from "../src/computer/daytona";
-import { SupervisorError } from "../src/computer/supervisor";
+import { ProviderError } from "../src/computer/provider";
 
 /**
  * Daytona computer provider test suite.
  *
- * OpenBot gives each Bot its own computer in a remote Daytona sandbox when configured with
- * DAYTONA_API_KEY. The supervisor client is responsible for creating, locating, stopping,
- * resetting, and listing these sandboxes via the Daytona SDK and validating readiness
- * over the sandbox preview URL before returning it to the caller.
+ * OpenBot gives each Bot a remote Daytona sandbox when DAYTONA_API_KEY is set.
+ * The provider creates, locates, stops, resets, and lists these sandboxes through
+ * the Daytona SDK. It checks the preview URL before it returns a computer address.
  */
 
 class DaytonaNotFoundError extends Error {
@@ -246,6 +246,113 @@ function makeClient(
 describe("Daytona computer supervisor", () => {
   const tempDirs: string[] = [];
 
+  test("exposes the Daytona per-Bot provider contract", () => {
+    const provider = createDaytonaComputerProvider({
+      apiKey: "test-api-key",
+      computerToken: "tok",
+      snapshot: "prebuilt",
+      sdk: createFakeSdk(),
+      fetchImpl: fakeFetch(),
+    });
+
+    expect(provider.name).toBe("Daytona");
+    expect(provider.isolation).toBe("per-bot");
+    expect(provider.describeIsolation()).toEqual({
+      isolation: "one computer per Bot",
+      note: "Each Bot gets a remote Daytona sandbox with its own /workspace and its own browser profile.",
+    });
+  });
+
+  test("status maps Daytona lifecycle states without starting or creating a sandbox", async () => {
+    const states = {
+      readyStarted: "started",
+      readyRunning: "running",
+      startingCreated: "created",
+      startingRestarting: "restarting",
+      startingCreating: "creating",
+      startingStarting: "starting",
+      startingRestoring: "restoring",
+      startingPulling: "pulling_snapshot",
+      startingResuming: "resuming",
+      absentStopped: "stopped",
+      absentPaused: "paused",
+      absentArchived: "archived",
+      absentExited: "exited",
+      absentDestroyed: "destroyed",
+      absentRemoving: "removing",
+      absentArchiving: "archiving",
+      absentPausing: "pausing",
+      absentStopping: "stopping",
+      unreachableError: "error",
+      unreachableBuildFailed: "build_failed",
+      unreachableUnknown: "new_state",
+    } as const;
+    const sandboxes = Object.entries(states).map(([botId, state], index) =>
+      makeSandbox({ id: `status-${index}`, botId, state }),
+    );
+    const sdk = createFakeSdk(sandboxes);
+    const provider = makeClient(sdk);
+
+    for (const [botId, state] of Object.entries(states)) {
+      const status = await provider.status(botId);
+      if (state === "started" || state === "running") {
+        expect(status).toEqual({ botId, state: "ready" });
+      } else if (
+        [
+          "created",
+          "restarting",
+          "creating",
+          "starting",
+          "restoring",
+          "pulling_snapshot",
+          "resuming",
+        ].includes(state)
+      ) {
+        expect(status).toEqual({ botId, state: "starting" });
+      } else if (
+        [
+          "stopped",
+          "paused",
+          "archived",
+          "exited",
+          "destroyed",
+          "removing",
+          "archiving",
+          "pausing",
+          "stopping",
+        ].includes(state)
+      ) {
+        expect(status).toEqual({ botId, state: "absent" });
+      } else {
+        expect(status).toMatchObject({
+          botId,
+          state: "unreachable",
+          reason: expect.any(String),
+        });
+      }
+    }
+    expect(sdk.creates).toHaveLength(0);
+    expect(sandboxes.every((sandbox) => sandbox.startCalls === 0)).toBe(true);
+  });
+
+  test("status reports an unknown Bot as absent without preparing the snapshot", async () => {
+    const sdk = createFakeSdk();
+    sdk.snapshot.get = async () => {
+      throw new Error("status must not inspect the snapshot");
+    };
+    const provider = createDaytonaComputerProvider({
+      apiKey: "test-api-key",
+      computerToken: "tok",
+      sdk,
+      fetchImpl: fakeFetch(),
+    });
+
+    await expect(provider.status("missing-bot")).resolves.toEqual({
+      botId: "missing-bot",
+      state: "absent",
+    });
+    expect(sdk.creates).toHaveLength(0);
+  });
   afterEach(() => {
     for (const dir of tempDirs) {
       try {
@@ -363,7 +470,7 @@ describe("Daytona computer supervisor", () => {
     expect(sdk.creates).toHaveLength(0);
   });
 
-  test("SDK failure throws SupervisorError naming the Bot", async () => {
+  test("SDK failure throws ProviderError naming the Bot", async () => {
     const sdk = createFakeSdk();
     sdk.create = async () => {
       throw new Error("quota exceeded");
@@ -371,7 +478,7 @@ describe("Daytona computer supervisor", () => {
 
     const client = makeClient(sdk);
 
-    await expect(client.locate("analytics")).rejects.toThrow(SupervisorError);
+    await expect(client.locate("analytics")).rejects.toThrow(ProviderError);
     await expect(client.locate("analytics")).rejects.toThrow(/analytics/);
   });
 
@@ -420,21 +527,21 @@ describe("Daytona computer supervisor", () => {
       expect.arrayContaining([
         {
           botId: "bot-active",
-          container: "sb-active",
           status: "running",
+          url: "https://sb-active.preview.daytona.app",
           startedAt: "2026-08-20T10:00:00Z",
         },
         {
           botId: "bot-stopped",
-          container: "sb-stopped",
           status: "exited",
+          url: "https://sb-stopped.preview.daytona.app",
           startedAt: "2026-08-20T11:00:00Z",
         },
       ]),
     );
   });
 
-  test("health timeout throws SupervisorError", async () => {
+  test("health timeout throws ProviderError", async () => {
     const sdk = createFakeSdk();
     const failingFetch = fakeFetch(
       () => new Response("service unavailable", { status: 503 }),
@@ -446,14 +553,14 @@ describe("Daytona computer supervisor", () => {
     });
 
     await expect(client.locate("unhealthy-bot")).rejects.toThrow(
-      SupervisorError,
+      ProviderError,
     );
     await expect(client.locate("unhealthy-bot")).rejects.toThrow(
       /The computer for unhealthy-bot started but never answered \/health/,
     );
   });
 
-  test("health fetch that never resolves is bounded by healthTimeoutMs and locate rejects with SupervisorError", async () => {
+  test("health fetch that never resolves is bounded by healthTimeoutMs and locate rejects with ProviderError", async () => {
     const sdk = createFakeSdk();
     const hangingFetch = fakeFetch(() => {
       const { promise } = Promise.withResolvers<Response>();
@@ -472,13 +579,13 @@ describe("Daytona computer supervisor", () => {
       locateError = err;
     }
 
-    expect(locateError).toBeInstanceOf(SupervisorError);
+    expect(locateError).toBeInstanceOf(ProviderError);
     expect((locateError as Error)?.message).toContain(
       "The computer for hanging-health-bot started but never answered /health at its preview URL.",
     );
   });
 
-  test("snapshot.create that never resolves is bounded by snapshotTimeoutMs and locate rejects with SupervisorError", async () => {
+  test("snapshot.create that never resolves is bounded by snapshotTimeoutMs and locate rejects with ProviderError", async () => {
     const fixtureDir = mkdtempSync(
       join(tmpdir(), "openbot-agent-computer-test-"),
     );
@@ -512,10 +619,10 @@ describe("Daytona computer supervisor", () => {
       locateError = err;
     }
 
-    expect(locateError).toBeInstanceOf(SupervisorError);
+    expect(locateError).toBeInstanceOf(ProviderError);
   });
 
-  test("missing agentComputerDir package.json or src directory rejects locate with SupervisorError naming the directory and advising DAYTONA_SNAPSHOT", async () => {
+  test("missing agentComputerDir package.json or src directory rejects locate with ProviderError naming the directory and advising DAYTONA_SNAPSHOT", async () => {
     const missingPkgDir = mkdtempSync(
       join(tmpdir(), "openbot-missing-pkg-test-"),
     );
@@ -538,7 +645,7 @@ describe("Daytona computer supervisor", () => {
       pkgError = err;
     }
 
-    expect(pkgError).toBeInstanceOf(SupervisorError);
+    expect(pkgError).toBeInstanceOf(ProviderError);
     expect((pkgError as Error)?.message).toContain(missingPkgDir);
     expect((pkgError as Error)?.message).toContain("DAYTONA_SNAPSHOT");
 
@@ -563,7 +670,7 @@ describe("Daytona computer supervisor", () => {
       srcError = err;
     }
 
-    expect(srcError).toBeInstanceOf(SupervisorError);
+    expect(srcError).toBeInstanceOf(ProviderError);
     expect((srcError as Error)?.message).toContain(missingSrcDir);
     expect((srcError as Error)?.message).toContain("DAYTONA_SNAPSHOT");
   });
@@ -755,7 +862,7 @@ describe("Daytona computer supervisor", () => {
       resetError = err;
     }
 
-    expect(resetError).toBeInstanceOf(SupervisorError);
+    expect(resetError).toBeInstanceOf(ProviderError);
     expect((resetError as Error)?.message).toContain("retry-delete-bot");
     expect(existing.deleteCalls).toBe(1);
 
@@ -850,14 +957,14 @@ describe("Daytona computer supervisor", () => {
       expect.arrayContaining([
         {
           botId: "started-voc-bot",
-          container: "sb-started-voc",
           status: "running",
+          url: "https://sb-started-voc.preview.daytona.app",
           startedAt: "2026-08-20T10:00:00Z",
         },
         {
           botId: "stopped-voc-bot",
-          container: "sb-stopped-voc",
           status: "exited",
+          url: "https://sb-stopped-voc.preview.daytona.app",
           startedAt: "2026-08-20T11:00:00Z",
         },
       ]),

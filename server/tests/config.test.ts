@@ -187,16 +187,65 @@ describe("deployment configuration", () => {
     },
   );
 
-  test("enables Daytona remote computers without a shared base address", () => {
+  test("configures Daytona as the remote computer provider", () => {
     const config = loadConfig({
       ...baseEnvironment,
       DAYTONA_API_KEY: "dtn_test_key",
+      DAYTONA_API_URL: "https://daytona.example.com",
+      DAYTONA_TARGET: "us",
+      DAYTONA_SNAPSHOT: "agent-computer",
       COMPUTER_TOKEN: "secret-token",
+      AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS: "true",
     });
 
-    expect(config.computer?.daytona?.apiKey).toBe("dtn_test_key");
-    expect(config.computer?.baseUrl).toBeUndefined();
-    expect(config.computer?.token).toBe("secret-token");
+    expect(config.computer?.provider).toBe("daytona");
+    expect(config.computer).toEqual({
+      provider: "daytona",
+      apiKey: "dtn_test_key",
+      apiUrl: "https://daytona.example.com",
+      target: "us",
+      snapshot: "agent-computer",
+      token: "secret-token",
+      allowPrivateHosts: true,
+    });
+  });
+
+  test("configures Docker as the per-Bot computer provider", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      COMPUTER_SUPERVISOR_URL: "http://localhost:4000",
+      SUPERVISOR_TOKEN: "supervisor-token",
+      COMPUTER_TOKEN: "computer-token",
+    });
+
+    expect(config.computer?.provider).toBe("docker");
+    expect(config.computer).toEqual({
+      provider: "docker",
+      baseUrl: "http://localhost:4000",
+      supervisorToken: "supervisor-token",
+      token: "computer-token",
+      allowPrivateHosts: false,
+    });
+  });
+
+  test("configures one shared computer", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      AGENT_COMPUTER_URL: "http://localhost:4100",
+      COMPUTER_TOKEN: "computer-token",
+    });
+
+    expect(config.computer?.provider).toBe("shared");
+    expect(config.computer).toEqual({
+      provider: "shared",
+      baseUrl: "http://localhost:4100",
+      token: "computer-token",
+      allowPrivateHosts: false,
+    });
+  });
+
+  test("leaves computers off when no provider address is configured", () => {
+    expect(loadConfig(baseEnvironment).computer).toBeUndefined();
   });
 
   test("refuses to configure Daytona computers without COMPUTER_TOKEN", () => {
@@ -210,7 +259,7 @@ describe("deployment configuration", () => {
     );
   });
 
-  test("refuses to configure both Daytona and a container supervisor", () => {
+  test("refuses to configure both Daytona and Docker computer providers", () => {
     expect(() =>
       loadConfig({
         ...baseEnvironment,
@@ -222,4 +271,22 @@ describe("deployment configuration", () => {
       "Set either DAYTONA_API_KEY or COMPUTER_SUPERVISOR_URL, not both. They are two ways of giving each Bot its own computer.",
     );
   });
+
+  test.each([
+    ["Daytona", "DAYTONA_API_URL", "DAYTONA_API_KEY"],
+    ["Docker", "COMPUTER_SUPERVISOR_URL", undefined],
+    ["shared", "AGENT_COMPUTER_URL", undefined],
+  ] as const)(
+    "refuses an invalid %s computer provider URL",
+    (_, urlName, daytonaKeyName) => {
+      expect(() =>
+        loadConfig({
+          ...baseEnvironment,
+          ...(daytonaKeyName ? { [daytonaKeyName]: "dtn_test_key" } : {}),
+          ...(daytonaKeyName ? { COMPUTER_TOKEN: "secret-token" } : {}),
+          [urlName]: "not a URL",
+        }),
+      ).toThrow(`${urlName} must be a valid URL`);
+    },
+  );
 });

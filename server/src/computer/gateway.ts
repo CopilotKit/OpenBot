@@ -18,26 +18,45 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
-import type { ComputerClient } from "./client";
+import { createComputerTransport } from "./client";
+export {
+  ComputerUnavailableError,
+  ElementNotFoundError,
+  NavigationRefusedError,
+  StaleSnapshotError,
+  WorkspaceRefusedError,
+  WorkspaceRequestError,
+} from "./client";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
   type PolicyDecision,
 } from "./policy";
+import type { ComputerProvider } from "./provider";
 import type {
+  ActionResult,
   ClickInput,
   ComputerStatus,
+  ControlState,
+  HumanInput,
+  HumanInputResult,
   KeyInput,
   ListFilesInput,
+  ListFilesResult,
+  NavigateResult,
   ReadFileInput,
+  ReadFileResult,
   ReadResult,
+  ScreenshotResult,
   ScrollInput,
   SecretRequest,
+  SecretResult,
   SnapshotElement,
   SnapshotResult,
   TypeInput,
   WriteFileInput,
+  WriteFileResult,
 } from "./schema";
 
 export class ActionRefusedError extends Error {
@@ -60,24 +79,126 @@ export type ActionActor = {
 };
 
 export type ComputerGatewayOptions = {
-  /**
-   * The container supervisor, when each Bot has a computer of its own.
-   *
-   * Stop and reset prefer it: a computer that is wedged cannot be asked to stop itself, and that is
-   * exactly the state where a person reaches for the button. Without a supervisor these stay profile
-   * operations performed by the computer itself, which fits the single-computer deployment where
-   * nothing else holds the Docker socket.
-   */
-  supervisor?: {
-    stop(botId: string): Promise<void>;
-    reset(botId: string): Promise<void>;
-    list?(): Promise<{ botId: string; status: string; startedAt?: string }[]>;
-  };
-  client: ComputerClient;
+  provider: ComputerProvider;
   auditStore: AuditStore;
   /** Absent denies everything. See evaluateActionPolicy. */
   policy: () => ActionPolicy | undefined;
+  /** True on a laptop, where browsing private network addresses is required. */
+  allowPrivateHosts?: boolean;
+  /** The secret that agent-computer requires on each request. */
+  token?: string;
+  /** An injectable fetch implementation for focused gateway tests. */
+  fetchImpl?: typeof fetch;
 };
+
+export interface ComputerGateway {
+  readonly provider: ComputerProvider;
+  locate(botId: string): Promise<string>;
+  status(botId: string): Promise<ComputerStatus>;
+  screenshot(botId: string): Promise<ScreenshotResult>;
+  snapshot(botId: string): Promise<SnapshotResult>;
+  read(botId: string): Promise<ReadResult>;
+  navigate(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    url: string,
+  ): Promise<NavigateResult>;
+  click(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    input: ClickInput,
+    signal?: AbortSignal,
+  ): Promise<ActionResult>;
+  type(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    input: TypeInput,
+    signal?: AbortSignal,
+  ): Promise<ActionResult>;
+  key(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    input: KeyInput,
+    signal?: AbortSignal,
+  ): Promise<ActionResult>;
+  scroll(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    input: ScrollInput,
+  ): Promise<ActionResult>;
+  readFile(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    input: ReadFileInput,
+  ): Promise<ReadFileResult>;
+  listFiles(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    input: ListFilesInput,
+  ): Promise<ListFilesResult>;
+  writeFile(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    input: WriteFileInput,
+  ): Promise<WriteFileResult>;
+  control(botId: string): Promise<ControlState>;
+  requestHelp(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    reason: string,
+  ): Promise<ControlState>;
+  takeControl(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+  ): Promise<ControlState>;
+  releaseControl(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+  ): Promise<ControlState>;
+  requestSecret(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    input: SecretRequest,
+  ): Promise<ControlState>;
+  supplySecret(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+    text: string,
+  ): Promise<SecretResult>;
+  humanInput(botId: string, input: HumanInput): Promise<HumanInputResult>;
+  computers(): Promise<{
+    isolation: "per-bot" | "shared";
+    computers: {
+      botId: string;
+      running: boolean;
+      startedAt: string | null;
+      egress: null;
+    }[];
+  }>;
+  stopComputer(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+  ): Promise<{ wasRunning: boolean }>;
+  resetComputer(
+    computerId: string,
+    botId: string,
+    actor: ActionActor,
+  ): Promise<{ cleared: boolean }>;
+}
 
 /**
  * The last snapshot the server took, per computer.
@@ -93,23 +214,65 @@ type CachedSnapshot = {
   url: string;
 };
 
-export function createComputerGateway(options: ComputerGatewayOptions) {
-  const { client, auditStore, supervisor } = options;
+export function createComputerGateway(
+  options: ComputerGatewayOptions,
+): ComputerGateway {
+  const { provider, auditStore } = options;
+  const transport = createComputerTransport({
+    ...(options.token ? { token: options.token } : {}),
+    ...(options.allowPrivateHosts !== undefined
+      ? { allowPrivateHosts: options.allowPrivateHosts }
+      : {}),
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
   const snapshots = new Map<string, CachedSnapshot>();
 
-  /**
-   * The computer, addressed as the Bot that is asking.
-   *
-   * Every call goes through this. The Bot's browser, its logins and the proxy its traffic leaves
-   * through are all keyed on this id at the far end, so a call that forgets it lands on the wrong
-   * computer, because there is always a computer to answer.
-   */
-  const as = (botId: string) => client.forBot(botId);
+  function locate(botId: string): Promise<string> {
+    return provider.locate(botId);
+  }
+
+  async function get<T>(
+    botId: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return transport.call<T>(
+      await locate(botId),
+      botId,
+      path,
+      undefined,
+      signal,
+    );
+  }
+
+  async function post<T>(
+    botId: string,
+    path: string,
+    payload: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return transport.post<T>(
+      await locate(botId),
+      botId,
+      path,
+      payload,
+      signal,
+    );
+  }
 
   /** Read-only, so it passes straight through. Nothing has changed and there is nothing to decide. */
-  async function snapshot(computerId: string): Promise<SnapshotResult> {
-    const result = await as(computerId).snapshot();
-    snapshots.set(computerId, {
+  async function screenshot(botId: string): Promise<ScreenshotResult> {
+    return get<ScreenshotResult>(botId, "/screenshot");
+  }
+
+  async function snapshot(botId: string): Promise<SnapshotResult> {
+    const result = await transport.call<SnapshotResult>(
+      await locate(botId),
+      botId,
+      "/snapshot",
+      { method: "POST" },
+    );
+    snapshots.set(botId, {
       snapshotId: result.snapshotId,
       url: result.url,
       elements: new Map(
@@ -120,7 +283,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
   }
 
   async function read(botId: string): Promise<ReadResult> {
-    return as(botId).read();
+    return get<ReadResult>(botId, "/read");
   }
 
   /**
@@ -131,11 +294,11 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
    * A deny rule written against a page a Bot has not snapshotted should still refuse it.
    */
   function resolve(
-    computerId: string,
+    botId: string,
     ref: string | undefined,
   ): SnapshotElement | undefined {
     if (!ref) return undefined;
-    return snapshots.get(computerId)?.elements.get(ref);
+    return snapshots.get(botId)?.elements.get(ref);
   }
 
   /**
@@ -161,8 +324,8 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
     run: () => Promise<T>,
   ): Promise<T> {
     const { ref, filePath } = subject;
-    const element = resolve(computerId, ref);
-    const cached = snapshots.get(computerId);
+    const element = resolve(botId, ref);
+    const cached = snapshots.get(botId);
     // For a navigation the relevant page is the one being opened, not the one already loaded. Using
     // the cached URL would mean `page.host == "..."` could never match the destination, which is the
     // only thing a rule about navigation would ever want to say.
@@ -245,73 +408,14 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
   }
 
   return {
+    provider,
+    locate,
+    screenshot,
     snapshot,
     read,
 
-    /**
-     * Inspect a Bot's computer status without provisioning or waking it.
-     *
-     * With a supervisor, this reads current inventory from list() and maps the container/sandbox
-     * state to a ComputerStatus. Without a supervisor, it delegates to client.status(botId).
-     */
-    async status(botId: string): Promise<ComputerStatus> {
-      if (supervisor?.list) {
-        try {
-          const list = await supervisor.list();
-          const entry = list.find((item) => item.botId === botId);
-          if (!entry) {
-            return { botId, state: "absent" };
-          }
-          const rawStatus = entry.status ?? "";
-          const status = rawStatus.toLowerCase();
-          switch (status) {
-            case "running":
-            case "started":
-              return { botId, state: "ready" };
-            case "created":
-            case "restarting":
-            case "creating":
-            case "starting":
-            case "restoring":
-            case "pulling_snapshot":
-            case "resuming":
-              return { botId, state: "starting" };
-            case "stopped":
-            case "paused":
-            case "archived":
-            case "exited":
-            case "destroyed":
-            case "removing":
-            case "archiving":
-            case "pausing":
-            case "stopping":
-              return { botId, state: "absent" };
-            case "error":
-            case "build_failed":
-              return {
-                botId,
-                state: "unreachable",
-                reason: `The computer reported state "${rawStatus}".`,
-              };
-            default:
-              return {
-                botId,
-                state: "unreachable",
-                reason: `The computer reported unknown state "${rawStatus}".`,
-              };
-          }
-        } catch (error) {
-          return {
-            botId,
-            state: "unreachable",
-            reason:
-              error instanceof Error && error.message.length > 0
-                ? error.message
-                : "Unknown failure.",
-          };
-        }
-      }
-      return as(botId).status(botId);
+    status(botId: string): Promise<ComputerStatus> {
+      return provider.status(botId);
     },
 
     /**
@@ -329,7 +433,11 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       actor: ActionActor,
       reason: string,
     ) {
-      const state = await as(botId).requestControl(reason);
+      const state = await post<ControlState>(
+        botId,
+        "/control/request",
+        { reason },
+      );
       await writeControlEvent(auditStore, "computer.help_requested", {
         botId,
         actor,
@@ -340,7 +448,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
     },
 
     async takeControl(computerId: string, botId: string, actor: ActionActor) {
-      const state = await as(botId).takeControl();
+      const state = await post<ControlState>(botId, "/control/take", {});
       await writeControlEvent(auditStore, "computer.control_taken", {
         botId,
         actor,
@@ -357,7 +465,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       botId: string,
       actor: ActionActor,
     ) {
-      const state = await as(botId).releaseControl();
+      const state = await post<ControlState>(botId, "/control/release", {});
       await writeControlEvent(auditStore, "computer.control_released", {
         botId,
         actor,
@@ -366,35 +474,24 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       return state;
     },
 
-    control(botId: string) {
-      return as(botId).control();
+    control(botId: string): Promise<ControlState> {
+      return get<ControlState>(botId, "/control");
     },
 
-    /**
-     * The computers, for the admin surface. A read, so no audit row.
-     *
-     * With a supervisor the list is the containers, because that is what a computer is: one per
-     * Bot, each with its own storage, and the page's Stop and Reset act on those. Asking a single
-     * computer for its profiles would answer for the one shared browser instead, which is the older
-     * arrangement and no longer what an administrator is looking at.
-     */
+    /** Return every computer that the configured provider owns. */
     async computers() {
-      if (supervisor?.list) {
-        const running = await supervisor.list();
-        return {
-          // Said, not inferred. Without a supervisor every Bot shares one browser, which looks
-          // identical on every screen to each having its own, same cards, same trail, same
-          // screenshots. A reader has to be told which deployment they are looking at.
-          isolation: "per-bot" as const,
-          computers: running.map((computer) => ({
-            botId: computer.botId,
-            running: computer.status === "running",
-            startedAt: computer.startedAt ?? null,
-            egress: null,
-          })),
-        };
-      }
-      return { isolation: "shared" as const, ...(await client.computers()) };
+      const computers = await provider.list();
+      return {
+        isolation: provider.isolation,
+        computers: computers.map((computer) => ({
+          botId: computer.botId,
+          running: ["running", "started"].includes(
+            computer.status.toLowerCase(),
+          ),
+          startedAt: computer.startedAt ?? null,
+          egress: null,
+        })),
+      };
     },
 
     /**
@@ -406,26 +503,14 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * tried.
      */
     async stopComputer(computerId: string, botId: string, actor: ActionActor) {
-      if (supervisor) {
-        await supervisor.stop(botId);
-        await writeControlEvent(auditStore, "computer.stopped", {
-          botId,
-          actor,
-          computerId,
-          reason: "the container was stopped",
-        });
-        return { wasRunning: true };
-      }
-      const result = await as(botId).stopComputer();
+      await provider.stop(botId);
       await writeControlEvent(auditStore, "computer.stopped", {
         botId,
         actor,
         computerId,
-        reason: result.wasRunning
-          ? "browser was running"
-          : "no browser was running",
+        reason: "the computer was stopped",
       });
-      return result;
+      return { wasRunning: true };
     },
 
     /**
@@ -435,24 +520,15 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
      * row is written whatever happens next.
      */
     async resetComputer(computerId: string, botId: string, actor: ActionActor) {
-      if (supervisor) {
-        await supervisor.reset(botId);
-        await writeControlEvent(auditStore, "computer.reset", {
-          botId,
-          actor,
-          computerId,
-          reason: "the container and its profile were deleted",
-        });
-        return { cleared: true };
-      }
-      const result = await as(botId).resetComputer();
+      await provider.reset(botId);
+      snapshots.delete(botId);
       await writeControlEvent(auditStore, "computer.reset", {
         botId,
         actor,
         computerId,
-        reason: "every saved login on this computer was deleted",
+        reason: "the computer and its saved state were deleted",
       });
-      return result;
+      return { cleared: true };
     },
 
     /**
@@ -469,7 +545,11 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       actor: ActionActor,
       input: SecretRequest,
     ) {
-      const state = await as(botId).requestSecret(input);
+      const state = await post<ControlState>(
+        botId,
+        "/control/secret",
+        input,
+      );
       await writeControlEvent(auditStore, "computer.secret_requested", {
         botId,
         actor,
@@ -485,7 +565,11 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       actor: ActionActor,
       text: string,
     ) {
-      const result = await as(botId).supplySecret(text);
+      const result = await post<SecretResult>(
+        botId,
+        "/human/secret",
+        { text },
+      );
       await writeControlEvent(auditStore, "computer.secret_supplied", {
         botId,
         actor,
@@ -496,19 +580,19 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       return result;
     },
 
-    humanInput(
+    async humanInput(
       botId: string,
-      input: Parameters<ComputerClient["humanInput"]>[0],
-    ) {
-      return as(botId).humanInput(input);
+      input: HumanInput,
+    ): Promise<HumanInputResult> {
+      const { kind, ...payload } = input;
+      return post<HumanInputResult>(botId, `/human/${kind}`, payload);
     },
 
     /**
      * Opening a page, through the gateway so it lands in the audit trail.
      *
-     * The client still applies its target guard, which is the floor that holds under every policy,
-     * including one that permits everything. This adds the record and the per-Bot decision on top: a
-     * refusal by either produces a row, so navigation denials are visible in the audit trail.
+     * The transport applies its target guard before it sends a request. This is
+     * the minimum rule that applies even when the action policy permits the URL.
      */
     navigate(
       computerId: string,
@@ -522,7 +606,8 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         botId,
         actor,
         { targetUrl: url },
-        () => as(botId).navigate(url),
+        async () =>
+          transport.navigate(await locate(botId), botId, url),
       );
     },
 
@@ -539,7 +624,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         botId,
         actor,
         { ref: input.ref, ...(signal ? { signal } : {}) },
-        () => as(botId).click(input, signal),
+        () => post<ActionResult>(botId, "/click", input, signal),
       );
     },
 
@@ -556,7 +641,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         botId,
         actor,
         { ref: input.ref, ...(signal ? { signal } : {}) },
-        () => as(botId).type(input, signal),
+        () => post<ActionResult>(botId, "/type", input, signal),
       );
     },
 
@@ -575,7 +660,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         // The key is part of the subject, so a rule can tell Enter from a letter. Form submission can
         // happen through a keypress as well as a click, so the policy context carries the key.
         { ref: input.ref, key: input.key, ...(signal ? { signal } : {}) },
-        () => as(botId).key(input, signal),
+        () => post<ActionResult>(botId, "/key", input, signal),
       );
     },
 
@@ -586,7 +671,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       input: ScrollInput,
     ) {
       return govern(computerId, "computer_scroll", botId, actor, {}, () =>
-        as(botId).scroll(input),
+        post<ActionResult>(botId, "/scroll", input),
       );
     },
 
@@ -609,7 +694,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         botId,
         actor,
         { filePath: input.path },
-        () => as(botId).readFile(input),
+        () => post<ReadFileResult>(botId, "/files/read", input),
       );
     },
 
@@ -630,7 +715,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         botId,
         actor,
         { filePath: input.path ?? "." },
-        () => as(botId).listFiles(input),
+        () => post<ListFilesResult>(botId, "/files/list", input),
       );
     },
 
@@ -646,7 +731,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         botId,
         actor,
         { filePath: input.path },
-        () => as(botId).writeFile(input),
+        () => post<WriteFileResult>(botId, "/files/write", input),
       );
     },
   };
@@ -674,7 +759,6 @@ function describeFile(path: string): {
   };
 }
 
-export type ComputerGateway = ReturnType<typeof createComputerGateway>;
 
 /**
  * One audit row for one decision.

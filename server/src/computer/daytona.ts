@@ -7,15 +7,21 @@ import {
   DaytonaNotFoundError,
   Image,
 } from "@daytona/sdk";
-import { type ComputerLocation, SupervisorError } from "./supervisor";
+import {
+  type ComputerLocation,
+  type ComputerProvider,
+  type IsolationDescription,
+  ProviderError,
+} from "./provider";
+import type { ComputerStatus } from "./schema";
 
 /**
  * Remote computers on Daytona for OpenBot.
  *
- * When configured with DAYTONA_API_KEY, each Bot gets its own cloud sandbox managed
- * by Daytona rather than a local Docker container. The supervisor client is responsible
- * for building and reusing an image snapshot, provisioning sandboxes on demand,
- * checking health over Daytona's preview URLs, and mapping Bot IDs to active sandboxes.
+ * When DAYTONA_API_KEY is configured, each Bot gets a Daytona cloud sandbox
+ * instead of a local Docker container. The provider builds and reuses an image
+ * snapshot, provisions sandboxes on demand, checks health over Daytona preview
+ * URLs, and maps Bot IDs to active sandboxes.
  */
 
 export type SandboxHandle = {
@@ -188,23 +194,50 @@ function wrapBotError(
   botId: string,
   action: string,
   err: unknown,
-): SupervisorError {
-  if (err instanceof SupervisorError) {
+): ProviderError {
+  if (err instanceof ProviderError) {
     return err;
   }
-  return new SupervisorError(
+  return new ProviderError(
     `Daytona could not ${action} the computer for ${botId}: ${toErrorMessage(err)}`,
   );
 }
-function toSupervisorStatus(state?: string): string {
-  if (!state) return "unknown";
-  const lower = state.toLowerCase();
-  if (lower === "started") return "running";
-  if (lower === "stopped" || lower === "archived" || lower === "paused") {
-    return "exited";
+
+function toComputerStatus(botId: string, state?: string): ComputerStatus {
+  const normalized = state?.toLowerCase();
+  if (normalized === "started" || normalized === "running") {
+    return { botId, state: "ready" };
   }
-  return state;
+  if (
+    normalized === "created" ||
+    normalized === "restarting" ||
+    normalized === "creating" ||
+    normalized === "starting" ||
+    normalized === "restoring" ||
+    normalized === "pulling_snapshot" ||
+    normalized === "resuming"
+  ) {
+    return { botId, state: "starting" };
+  }
+  if (
+    normalized === "stopped" ||
+    normalized === "paused" ||
+    normalized === "archived" ||
+    normalized === "exited" ||
+    normalized === "destroyed" ||
+    normalized === "removing" ||
+    normalized === "archiving" ||
+    normalized === "pausing" ||
+    normalized === "stopping"
+  ) {
+    return { botId, state: "absent" };
+  }
+  const reason = normalized
+    ? `Daytona reported the computer state "${normalized}".`
+    : "Daytona did not report a state for this computer.";
+  return { botId, state: "unreachable", reason };
 }
+
 
 function sleep(ms: number): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>();
@@ -255,9 +288,9 @@ async function pollUntil<T>(
   throw options.timeoutError();
 }
 
-export function createDaytonaSupervisorClient(
+export function createDaytonaComputerProvider(
   options: DaytonaSupervisorOptions,
-) {
+): ComputerProvider {
   const sdk: DaytonaSdk =
     options.sdk ??
     new Daytona({
@@ -295,8 +328,8 @@ export function createDaytonaSupervisorClient(
         try {
           snapshotName = computeSnapshotName(agentComputerDir);
         } catch (err) {
-          if (err instanceof SupervisorError) throw err;
-          throw new SupervisorError(
+          if (err instanceof ProviderError) throw err;
+          throw new ProviderError(
             `Failed to prepare agent-computer sources from "${agentComputerDir}": ${toErrorMessage(err)}. Set DAYTONA_SNAPSHOT to use a prebuilt snapshot.`,
           );
         }
@@ -312,7 +345,7 @@ export function createDaytonaSupervisorClient(
               try {
                 snap = await sdk.snapshot.get(name);
               } catch (err) {
-                throw new SupervisorError(
+                throw new ProviderError(
                   `Failed to inspect Daytona snapshot ${name} while waiting for active state: ${toErrorMessage(err)}`,
                 );
               }
@@ -320,7 +353,7 @@ export function createDaytonaSupervisorClient(
                 return { done: true, value: name };
               }
               if (snap.state === "error" || snap.state === "build_failed") {
-                throw new SupervisorError(
+                throw new ProviderError(
                   `Daytona snapshot ${name} failed with state "${snap.state}". Delete it in the Daytona dashboard or set DAYTONA_SNAPSHOT to override.`,
                 );
               }
@@ -330,7 +363,7 @@ export function createDaytonaSupervisorClient(
               timeoutMs: snapshotTimeout,
               intervalMs: pollInterval,
               timeoutError: () =>
-                new SupervisorError(
+                new ProviderError(
                   `Timed out waiting for Daytona snapshot ${name} to become active.`,
                 ),
             },
@@ -343,7 +376,7 @@ export function createDaytonaSupervisorClient(
             return snapshotName;
           }
           if (existing.state === "error" || existing.state === "build_failed") {
-            throw new SupervisorError(
+            throw new ProviderError(
               `Daytona snapshot ${snapshotName} failed with state "${existing.state}". Delete it in the Daytona dashboard or set DAYTONA_SNAPSHOT to override.`,
             );
           }
@@ -354,8 +387,8 @@ export function createDaytonaSupervisorClient(
             try {
               recipe = buildRecipe(agentComputerDir);
             } catch (recipeErr) {
-              if (recipeErr instanceof SupervisorError) throw recipeErr;
-              throw new SupervisorError(
+              if (recipeErr instanceof ProviderError) throw recipeErr;
+              throw new ProviderError(
                 `Failed to build agent-computer recipe from "${agentComputerDir}": ${toErrorMessage(recipeErr)}. Set DAYTONA_SNAPSHOT to use a prebuilt snapshot.`,
               );
             }
@@ -377,18 +410,18 @@ export function createDaytonaSupervisorClient(
               if (isConflictError(createErr)) {
                 return await pollUntilActive(snapshotName);
               }
-              if (createErr instanceof SupervisorError) {
+              if (createErr instanceof ProviderError) {
                 throw createErr;
               }
-              throw new SupervisorError(
+              throw new ProviderError(
                 `Failed to create Daytona snapshot ${snapshotName}: ${toErrorMessage(createErr)}`,
               );
             }
           }
-          if (err instanceof SupervisorError) {
+          if (err instanceof ProviderError) {
             throw err;
           }
-          throw new SupervisorError(
+          throw new ProviderError(
             `Failed to inspect Daytona snapshot ${snapshotName}: ${toErrorMessage(err)}`,
           );
         }
@@ -404,6 +437,7 @@ export function createDaytonaSupervisorClient(
   async function resolveSandbox(
     botId: string,
     action: string,
+    includeTerminal = false,
   ): Promise<SandboxHandle | undefined> {
     const deletedSandboxId = resetSandboxes.get(botId);
     const knownEntry = known.get(botId);
@@ -414,7 +448,10 @@ export function createDaytonaSupervisorClient(
         try {
           const sb = await sdk.get(knownEntry.sandboxId);
           const state = sb.state?.toLowerCase();
-          if (state === "destroyed" || state === "destroying") {
+          if (
+            !includeTerminal &&
+            (state === "destroyed" || state === "destroying")
+          ) {
             known.delete(botId);
             return undefined;
           }
@@ -439,7 +476,10 @@ export function createDaytonaSupervisorClient(
           continue;
         }
         const state = sb.state?.toLowerCase();
-        if (state !== "destroyed" && state !== "destroying") {
+        if (
+          includeTerminal ||
+          (state !== "destroyed" && state !== "destroying")
+        ) {
           return sb;
         }
       }
@@ -451,6 +491,16 @@ export function createDaytonaSupervisorClient(
   }
 
   return {
+    name: "Daytona",
+    isolation: "per-bot",
+
+    describeIsolation(): IsolationDescription {
+      return {
+        isolation: "one computer per Bot",
+        note: "Each Bot gets a remote Daytona sandbox with its own /workspace and its own browser profile.",
+      };
+    },
+
     async locate(botId: string): Promise<string> {
       const existing = locating.get(botId);
       if (existing) {
@@ -578,7 +628,7 @@ export function createDaytonaSupervisorClient(
                 return { done: false };
               }
               if (cur === "error" || cur === "build_failed") {
-                throw new SupervisorError(
+                throw new ProviderError(
                   `Daytona sandbox for ${botId} failed with state "${cur}".`,
                 );
               }
@@ -588,7 +638,7 @@ export function createDaytonaSupervisorClient(
               timeoutMs: maxWaitMs,
               intervalMs: pollInterval,
               timeoutError: () =>
-                new SupervisorError(
+                new ProviderError(
                   `Timed out waiting for computer sandbox for ${botId} to start.`,
                 ),
             },
@@ -643,7 +693,7 @@ export function createDaytonaSupervisorClient(
         }
 
         if (!healthy) {
-          throw new SupervisorError(
+          throw new ProviderError(
             `The computer for ${botId} started but never answered /health at its preview URL.`,
           );
         }
@@ -657,6 +707,14 @@ export function createDaytonaSupervisorClient(
       } finally {
         locating.delete(botId);
       }
+    },
+
+    async status(botId: string): Promise<ComputerStatus> {
+      const sandboxHandle = await resolveSandbox(botId, "inspect", true);
+      if (!sandboxHandle) {
+        return { botId, state: "absent" };
+      }
+      return toComputerStatus(botId, sandboxHandle.state);
     },
 
     async stop(botId: string): Promise<void> {
@@ -702,21 +760,22 @@ export function createDaytonaSupervisorClient(
             continue;
           }
           const botId = sb.labels?.[BOT_ID_LABEL_KEY];
-          if (!botId) {
+          if (!botId || resetSandboxes.get(botId) === sb.id) {
             continue;
           }
-          if (resetSandboxes.get(botId) === sb.id) {
-            continue;
-          }
+          const preview = await sb.getPreviewLink(COMPUTER_PORT);
           result.push({
             botId,
-            container: sb.id,
-            status: toSupervisorStatus(sb.state),
+            status:
+              state === "started" || state === "running"
+                ? "running"
+                : "exited",
+            url: preview.url,
             startedAt: sb.createdAt,
           });
         }
       } catch (err) {
-        throw new SupervisorError(
+        throw new ProviderError(
           `Daytona failed to list computers: ${toErrorMessage(err)}`,
         );
       }
@@ -734,3 +793,5 @@ export function createDaytonaSupervisorClient(
     },
   };
 }
+
+export const createDaytonaSupervisorClient = createDaytonaComputerProvider;

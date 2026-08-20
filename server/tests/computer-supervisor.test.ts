@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  createDockerSupervisorProvider,
   createSupervisorClient,
   SupervisorError,
 } from "../src/computer/supervisor";
@@ -96,5 +97,96 @@ describe("locating a Bot's computer", () => {
     });
     await client.locate("a/b");
     expect(seen).toBe("/computers/a%2Fb/ensure");
+  });
+});
+
+describe("Docker supervisor provider", () => {
+  test("describes one container and browser profile for each Bot", () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({ computers: [] })) as unknown as typeof fetch,
+    });
+
+    expect(provider.name).toBe("Docker supervisor");
+    expect(provider.isolation).toBe("per-bot");
+    expect(provider.describeIsolation()).toEqual({
+      isolation: "one computer per Bot",
+      note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
+    });
+  });
+
+  test("maps supervisor lifecycle states without starting the computer", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({
+          computers: [
+            {
+              botId: "ready-bot",
+              container: "computer-ready",
+              status: "running",
+              url: "http://computer-ready:4100",
+              startedAt: "2026-08-20T12:00:00.000Z",
+            },
+            {
+              botId: "starting-bot",
+              container: "computer-starting",
+              status: "creating",
+            },
+            {
+              botId: "broken-bot",
+              container: "computer-broken",
+              status: "error",
+            },
+          ],
+        })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.status("ready-bot")).toEqual({
+      botId: "ready-bot",
+      state: "ready",
+    });
+    expect(await provider.status("starting-bot")).toEqual({
+      botId: "starting-bot",
+      state: "starting",
+    });
+    expect(await provider.status("missing-bot")).toEqual({
+      botId: "missing-bot",
+      state: "absent",
+    });
+    expect(await provider.status("broken-bot")).toEqual({
+      botId: "broken-bot",
+      state: "unreachable",
+      reason: 'The computer reported state "error".',
+    });
+  });
+
+  test("lists only the provider location fields", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({
+          computers: [
+            {
+              botId: "sales",
+              container: "computer-sales",
+              status: "running",
+              port: 49152,
+              url: "http://computer-sales:4100",
+              startedAt: "2026-08-20T12:00:00.000Z",
+            },
+          ],
+        })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.list()).toEqual([
+      {
+        botId: "sales",
+        status: "running",
+        url: "http://computer-sales:4100",
+        startedAt: "2026-08-20T12:00:00.000Z",
+      },
+    ]);
   });
 });

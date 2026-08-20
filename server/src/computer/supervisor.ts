@@ -13,9 +13,16 @@
  * honest about being one shared computer.
  */
 
-export type ComputerLocation = {
+import type { ComputerStatus } from "./schema";
+import type {
+  ComputerLocation,
+  ComputerProvider,
+  IsolationDescription,
+} from "./provider";
+
+type SupervisorComputerLocation = {
   botId: string;
-  container: string;
+  container?: string;
   status: string;
   port?: number;
   /** Where to reach it, decided by the supervisor rather than assembled here. */
@@ -39,7 +46,9 @@ export class SupervisorError extends Error {
   }
 }
 
-export function createSupervisorClient(options: SupervisorOptions) {
+export function createDockerSupervisorProvider(
+  options: SupervisorOptions,
+): ComputerProvider {
   const doFetch = options.fetchImpl ?? fetch;
   const base = options.baseUrl.replace(/\/$/, "");
   const timeoutMs = options.timeoutMs ?? 120_000;
@@ -73,7 +82,77 @@ export function createSupervisorClient(options: SupervisorOptions) {
     return body;
   }
 
+  async function list(): Promise<ComputerLocation[]> {
+    const body = (await call("/computers", "GET")) as {
+      computers?: SupervisorComputerLocation[];
+    };
+    return (body?.computers ?? []).map((computer) => ({
+      botId: computer.botId,
+      status: computer.status,
+      ...(computer.url
+        ? { url: computer.url }
+        : computer.port
+          ? { url: hostForPort(computer.port) }
+          : {}),
+      ...(computer.startedAt ? { startedAt: computer.startedAt } : {}),
+    }));
+  }
+
+  function statusFromLocation(
+    botId: string,
+    location: ComputerLocation | undefined,
+  ): ComputerStatus {
+    if (!location) return { botId, state: "absent" };
+
+    const rawStatus = location.status;
+    switch (rawStatus.toLowerCase()) {
+      case "running":
+      case "started":
+        return { botId, state: "ready" };
+      case "created":
+      case "restarting":
+      case "creating":
+      case "starting":
+      case "restoring":
+      case "pulling_snapshot":
+      case "resuming":
+        return { botId, state: "starting" };
+      case "stopped":
+      case "paused":
+      case "archived":
+      case "exited":
+      case "destroyed":
+      case "removing":
+      case "archiving":
+      case "pausing":
+      case "stopping":
+        return { botId, state: "absent" };
+      case "error":
+      case "build_failed":
+        return {
+          botId,
+          state: "unreachable",
+          reason: `The computer reported state "${rawStatus}".`,
+        };
+      default:
+        return {
+          botId,
+          state: "unreachable",
+          reason: `The computer reported unknown state "${rawStatus}".`,
+        };
+    }
+  }
+
+  const isolation: IsolationDescription = {
+    isolation: "one computer per Bot",
+    note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
+  };
+
   return {
+    name: "Docker supervisor",
+    isolation: "per-bot",
+    describeIsolation: () => isolation,
+
     /**
      * The URL of this Bot's computer, starting it if it is not already up.
      *
@@ -84,7 +163,7 @@ export function createSupervisorClient(options: SupervisorOptions) {
     async locate(botId: string): Promise<string> {
       const state = (await call(
         `/computers/${encodeURIComponent(botId)}/ensure`,
-      )) as ComputerLocation;
+      )) as SupervisorComputerLocation;
       // The supervisor says where it is, because only it knows whether these computers sit on a
       // shared network or answer on a published port.
       if (state?.url) return state.url;
@@ -92,6 +171,25 @@ export function createSupervisorClient(options: SupervisorOptions) {
       throw new SupervisorError(
         `The computer for ${botId} started but reported no address, so it cannot be reached.`,
       );
+    },
+
+    async status(botId: string): Promise<ComputerStatus> {
+      try {
+        const computers = await list();
+        return statusFromLocation(
+          botId,
+          computers.find((computer) => computer.botId === botId),
+        );
+      } catch (error) {
+        return {
+          botId,
+          state: "unreachable",
+          reason:
+            error instanceof Error && error.message.length > 0
+              ? error.message
+              : "Unknown failure.",
+        };
+      }
     },
 
     async stop(botId: string): Promise<void> {
@@ -102,13 +200,10 @@ export function createSupervisorClient(options: SupervisorOptions) {
       await call(`/computers/${encodeURIComponent(botId)}/reset`);
     },
 
-    async list(): Promise<ComputerLocation[]> {
-      const body = (await call("/computers", "GET")) as {
-        computers?: ComputerLocation[];
-      };
-      return body?.computers ?? [];
-    },
+    list,
   };
 }
 
-export type SupervisorClient = ReturnType<typeof createSupervisorClient>;
+export const createSupervisorClient = createDockerSupervisorProvider;
+
+export type SupervisorClient = ComputerProvider;

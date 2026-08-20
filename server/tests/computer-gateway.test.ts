@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
-import type { ComputerClient } from "../src/computer/client";
 import {
   ActionRefusedError,
   createComputerGateway,
 } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
-import type { ComputerStatus, SnapshotResult } from "../src/computer/schema";
+import type { SnapshotResult } from "../src/computer/schema";
+import type { ComputerProvider } from "../src/computer/provider";
 
 /**
  * What the gateway must guarantee, tested as properties rather than as call sequences.
@@ -29,72 +29,73 @@ const SNAPSHOT: SnapshotResult = {
   ],
 };
 
-/** A client that records what reached it, so "did not reach the computer" is checkable. */
-function fakeClient() {
+/** A computer that records which HTTP actions reached it. */
+function fakeComputer() {
   const calls: string[] = [];
-  /** Which Bot the gateway addressed the computer as, per call. */
   const addressedAs: string[] = [];
   const result = (action: string) => ({
     action,
     url: SNAPSHOT.url,
     elapsedMs: 1,
   });
-  const client = {
-    snapshot: async () => SNAPSHOT,
-    read: async () => ({
-      url: SNAPSHOT.url,
-      title: "Order",
-      text: "",
-      truncated: false,
+  const provider: ComputerProvider = {
+    name: "test",
+    isolation: "per-bot",
+    describeIsolation: () => ({
+      isolation: "one computer per Bot",
+      note: "Test provider.",
     }),
-    click: async () => {
-      calls.push("click");
-      return result("click") as never;
-    },
-    type: async () => {
-      calls.push("type");
-      return result("type") as never;
-    },
-    key: async () => {
-      calls.push("key");
-      return result("key") as never;
-    },
-    scroll: async () => {
-      calls.push("scroll");
-      return result("scroll") as never;
-    },
-    readFile: async () => {
-      calls.push("readFile");
-      return {
-        path: "notes.md",
-        text: "kept",
-        truncated: false,
-        bytes: 4,
-      } as never;
-    },
-    writeFile: async () => {
-      calls.push("writeFile");
-      return { path: "notes.md", bytes: 4, appended: false } as never;
-    },
-    status: async (botId?: string) => {
-      calls.push("status");
-      return { botId: botId ?? "b", state: "ready" as const };
-    },
-    navigate: async () => {
-      calls.push("navigate");
-      return { url: "https://example.com/", title: "Example" } as never;
-    },
-    screenshot: async () => ({}) as never,
-    /**
-     * The per-Bot view. Recorded rather than ignored, so a test can prove the gateway told the
-     * computer which Bot is asking, the thing every per-Bot behaviour on the far side keys off.
-     */
-    forBot(botId: string) {
+    locate: async (botId) => {
       addressedAs.push(botId);
-      return client;
+      return "http://agent-computer:4100";
     },
-  } as unknown as ComputerClient;
-  return { client, calls, addressedAs };
+    status: async (botId) => ({ botId, state: "ready" }),
+    stop: async () => {},
+    reset: async () => {},
+    list: async () => [],
+  };
+  const fetchImpl = (async (url: string) => {
+    const path = new URL(url).pathname;
+    switch (path) {
+      case "/snapshot":
+        return Response.json(SNAPSHOT);
+      case "/read":
+        return Response.json({
+          url: SNAPSHOT.url,
+          title: "Order",
+          text: "",
+          truncated: false,
+        });
+      case "/files/read":
+        calls.push("readFile");
+        return Response.json({
+          path: "notes.md",
+          text: "kept",
+          truncated: false,
+          bytes: 4,
+        });
+      case "/files/write":
+        calls.push("writeFile");
+        return Response.json({
+          path: "notes.md",
+          bytes: 4,
+          appended: false,
+        });
+      case "/navigate":
+        calls.push("navigate");
+        return Response.json({
+          url: "https://example.com/",
+          title: "Example",
+          elapsedMs: 1,
+        });
+      default: {
+        const action = path.slice(1);
+        calls.push(action);
+        return Response.json(result(action));
+      }
+    }
+  }) as unknown as typeof fetch;
+  return { provider, fetchImpl, calls, addressedAs };
 }
 
 function fakeAudit() {
@@ -107,15 +108,16 @@ const ACTOR = { id: "dev-local-user" };
 const PERMISSIVE: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
 async function gatewayWith(policy: ActionPolicy | undefined) {
-  const { client, calls } = fakeClient();
+  const { provider, fetchImpl, calls } = fakeComputer();
   const { store, rows } = fakeAudit();
   const gateway = createComputerGateway({
-    client,
+    provider,
+    fetchImpl,
     auditStore: store,
     policy: () => policy,
   });
   // Every test acts on refs, so the server must hold a snapshot first, exactly as the real flow does.
-  await gateway.snapshot("default");
+  await gateway.snapshot("bot-1");
   return { gateway, calls, rows };
 }
 
@@ -303,16 +305,20 @@ describe("the computer gateway", () => {
   test("the computer is told WHICH Bot is asking", async () => {
     // Every per-Bot behaviour on the computer keys off this id: the profile it opens, the logins it
     // has, the proxy its traffic leaves through, and who holds its wheel.
-    const { client, addressedAs } = fakeClient();
+    const { provider, fetchImpl, addressedAs } = fakeComputer();
     const { store } = fakeAudit();
     const gateway = createComputerGateway({
-      client,
+      provider,
+      fetchImpl,
       auditStore: store,
       policy: () => PERMISSIVE,
     });
 
     await gateway.snapshot("sales-bot");
-    await gateway.click("sales-bot", "sales-bot", ACTOR, "e1");
+    await gateway.click("sales-bot", "sales-bot", ACTOR, {
+      ref: "e1",
+      snapshotId: 7,
+    });
     await gateway.read("research-bot");
 
     expect(addressedAs).toContain("sales-bot");
@@ -326,18 +332,21 @@ describe("the computer gateway", () => {
   test("a permitted action that FAILS gets its own row, not an allowed one", async () => {
     // A permitted read that later fails path confinement records both the decision and the failed
     // outcome, so the trail does not imply the Bot received the file.
-    const { client, calls } = fakeClient();
+    const { provider, fetchImpl, calls } = fakeComputer();
     const { store, rows } = fakeAudit();
-    const failing: ComputerClient = {
-      ...client,
-      readFile: async () => {
+    const failingFetch = (async (url: string, init?: RequestInit) => {
+      if (new URL(url).pathname === "/files/read") {
         calls.push("readFile");
-        throw new Error("that path is outside your workspace");
-      },
-      forBot: () => failing,
-    } as unknown as ComputerClient;
+        return Response.json(
+          { error: "that path is outside your workspace" },
+          { status: 403 },
+        );
+      }
+      return fetchImpl(url, init);
+    }) as typeof fetch;
     const gateway = createComputerGateway({
-      client: failing,
+      provider,
+      fetchImpl: failingFetch,
       auditStore: store,
       policy: () => PERMISSIVE,
     });
@@ -355,9 +364,7 @@ describe("the computer gateway", () => {
   });
 
   test("opening a page is recorded, with the address it was opening", async () => {
-    // The target guard refuses a forbidden address inside the
-    // client and nothing was written, so an attempt on the cloud metadata endpoint left no row while
-    // ticking a radio button left one.
+    // The target guard refuses forbidden addresses before the request leaves.
     const { gateway, calls, rows } = await gatewayWith(PERMISSIVE);
     await gateway.navigate("default", "bot-1", ACTOR, "https://example.com/");
 
@@ -400,229 +407,26 @@ describe("the computer gateway", () => {
     expect(rows[0]?.payload.element).toBe("not in the current snapshot");
   });
 
-  describe("status", () => {
-    test("with supervisor.list returning no Bot it returns absent without locating or checking health", async () => {
-      // Checking status is an inspection, not an action: it must not create or wake a container.
-      // An absent Bot is simply absent, determined from the supervisor's current inventory.
-      const { client, calls } = fakeClient();
-      const { store } = fakeAudit();
-      const locateCalls: string[] = [];
-      const supervisor = {
-        locate: async (botId: string) => {
-          locateCalls.push(botId);
-          return "http://localhost:4100";
-        },
-        list: async () => [{ botId: "other-bot", status: "running" }],
-        stop: async () => {},
-        reset: async () => {},
-      };
-      const gateway = createComputerGateway({
-        client,
-        supervisor,
-        auditStore: store,
-        policy: () => PERMISSIVE,
-      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
+  test("resolves an element from the Bot snapshot when the audit computer id differs", async () => {
+    const { provider, fetchImpl } = fakeComputer();
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+    });
+    await gateway.snapshot("bot-1");
 
-      const status = await gateway.status("sales-bot");
-
-      expect(status).toEqual({ botId: "sales-bot", state: "absent" });
-      expect(calls).toEqual([]);
-      expect(locateCalls).toEqual([]);
+    await gateway.click("audit-computer-7", "bot-1", ACTOR, {
+      ref: "e9",
+      snapshotId: 7,
     });
 
-    test("maps started and running supervisor statuses to ready", async () => {
-      const { client, calls } = fakeClient();
-      const { store } = fakeAudit();
-      const locateCalls: string[] = [];
-      const supervisor = {
-        locate: async (botId: string) => {
-          locateCalls.push(botId);
-          return "http://localhost:4100";
-        },
-        list: async () => [
-          { botId: "started-bot", status: "started" },
-          { botId: "running-bot", status: "running" },
-        ],
-        stop: async () => {},
-        reset: async () => {},
-      };
-      const gateway = createComputerGateway({
-        client,
-        supervisor,
-        auditStore: store,
-        policy: () => PERMISSIVE,
-      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
-
-      expect(await gateway.status("started-bot")).toEqual({
-        botId: "started-bot",
-        state: "ready",
-      });
-      expect(await gateway.status("running-bot")).toEqual({
-        botId: "running-bot",
-        state: "ready",
-      });
-      expect(calls).toEqual([]);
-      expect(locateCalls).toEqual([]);
-    });
-
-    test("maps creating, starting, created, and restarting supervisor statuses to starting", async () => {
-      const { client, calls } = fakeClient();
-      const { store } = fakeAudit();
-      const supervisor = {
-        list: async () => [
-          { botId: "creating-bot", status: "creating" },
-          { botId: "starting-bot", status: "starting" },
-          { botId: "created-bot", status: "created" },
-          { botId: "restarting-bot", status: "restarting" },
-        ],
-        stop: async () => {},
-        reset: async () => {},
-      };
-      const gateway = createComputerGateway({
-        client,
-        supervisor,
-        auditStore: store,
-        policy: () => PERMISSIVE,
-      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
-
-      expect(await gateway.status("creating-bot")).toEqual({
-        botId: "creating-bot",
-        state: "starting",
-      });
-      expect(await gateway.status("starting-bot")).toEqual({
-        botId: "starting-bot",
-        state: "starting",
-      });
-      expect(await gateway.status("created-bot")).toEqual({
-        botId: "created-bot",
-        state: "starting",
-      });
-      expect(await gateway.status("restarting-bot")).toEqual({
-        botId: "restarting-bot",
-        state: "starting",
-      });
-      expect(calls).toEqual([]);
-    });
-
-    test("maps stopped, removing, archiving, pausing, and stopping supervisor statuses to absent", async () => {
-      const { client, calls } = fakeClient();
-      const { store } = fakeAudit();
-      const supervisor = {
-        list: async () => [
-          { botId: "stopped-bot", status: "stopped" },
-          { botId: "removing-bot", status: "removing" },
-          { botId: "archiving-bot", status: "archiving" },
-          { botId: "pausing-bot", status: "pausing" },
-          { botId: "stopping-bot", status: "stopping" },
-        ],
-        stop: async () => {},
-        reset: async () => {},
-      };
-      const gateway = createComputerGateway({
-        client,
-        supervisor,
-        auditStore: store,
-        policy: () => PERMISSIVE,
-      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
-
-      expect(await gateway.status("stopped-bot")).toEqual({
-        botId: "stopped-bot",
-        state: "absent",
-      });
-      expect(await gateway.status("removing-bot")).toEqual({
-        botId: "removing-bot",
-        state: "absent",
-      });
-      expect(await gateway.status("archiving-bot")).toEqual({
-        botId: "archiving-bot",
-        state: "absent",
-      });
-      expect(await gateway.status("pausing-bot")).toEqual({
-        botId: "pausing-bot",
-        state: "absent",
-      });
-      expect(await gateway.status("stopping-bot")).toEqual({
-        botId: "stopping-bot",
-        state: "absent",
-      });
-      expect(calls).toEqual([]);
-    });
-
-    test("when supervisor.list throws, returns unreachable with the error message in reason", async () => {
-      const { client, calls } = fakeClient();
-      const { store } = fakeAudit();
-      const supervisor = {
-        list: async () => {
-          throw new Error("supervisor unavailable");
-        },
-        stop: async () => {},
-        reset: async () => {},
-      };
-      const gateway = createComputerGateway({
-        client,
-        supervisor,
-        auditStore: store,
-        policy: () => PERMISSIVE,
-      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
-
-      const status = await gateway.status("sales-bot");
-
-      expect(status.botId).toBe("sales-bot");
-      expect(status.state).toBe("unreachable");
-      expect(status.reason).toBeDefined();
-      expect(status.reason).toContain("supervisor unavailable");
-      expect(calls).toEqual([]);
-    });
-
-    test("maps error and build_failed supervisor statuses to unreachable with a useful reason", async () => {
-      const { client, calls } = fakeClient();
-      const { store } = fakeAudit();
-      const supervisor = {
-        list: async () => [
-          { botId: "error-bot", status: "error" },
-          { botId: "failed-bot", status: "build_failed" },
-        ],
-        stop: async () => {},
-        reset: async () => {},
-      };
-      const gateway = createComputerGateway({
-        client,
-        supervisor,
-        auditStore: store,
-        policy: () => PERMISSIVE,
-      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
-
-      const errorStatus = await gateway.status("error-bot");
-      expect(errorStatus.botId).toBe("error-bot");
-      expect(errorStatus.state).toBe("unreachable");
-      expect(errorStatus.reason).toBeDefined();
-      expect(typeof errorStatus.reason).toBe("string");
-      expect(errorStatus.reason!.length).toBeGreaterThan(0);
-
-      const failedStatus = await gateway.status("failed-bot");
-      expect(failedStatus.botId).toBe("failed-bot");
-      expect(failedStatus.state).toBe("unreachable");
-      expect(failedStatus.reason).toBeDefined();
-      expect(typeof failedStatus.reason).toBe("string");
-      expect(failedStatus.reason!.length).toBeGreaterThan(0);
-
-      expect(calls).toEqual([]);
-    });
-
-    test("without a supervisor, delegates once to client.status(botId)", async () => {
-      const { client, calls, addressedAs } = fakeClient();
-      const { store } = fakeAudit();
-      const gateway = createComputerGateway({
-        client,
-        auditStore: store,
-        policy: () => PERMISSIVE,
-      }) as unknown as { status(botId: string): Promise<ComputerStatus> };
-
-      const status = await gateway.status("sales-bot");
-
-      expect(status).toEqual({ botId: "sales-bot", state: "ready" });
-      expect(calls).toEqual(["status"]);
-      expect(addressedAs).toContain("sales-bot");
+    expect(rows[0]?.payload.element).toEqual({
+      role: "button",
+      name: "Submit order",
     });
   });
+
 });

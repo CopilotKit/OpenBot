@@ -21,6 +21,39 @@ export type IntelligenceSettings = {
   licenseToken: string;
 };
 
+export type DaytonaComputerConfig = {
+  provider: "daytona";
+  apiKey: string;
+  apiUrl?: string;
+  target?: string;
+  snapshot?: string;
+  token: string;
+  allowPrivateHosts: boolean;
+  policy?: ActionPolicy;
+};
+
+export type DockerComputerConfig = {
+  provider: "docker";
+  baseUrl: string;
+  supervisorToken?: string;
+  token?: string;
+  allowPrivateHosts: boolean;
+  policy?: ActionPolicy;
+};
+
+export type SharedComputerConfig = {
+  provider: "shared";
+  baseUrl: string;
+  token?: string;
+  allowPrivateHosts: boolean;
+  policy?: ActionPolicy;
+};
+
+export type ComputerConfig =
+  | DaytonaComputerConfig
+  | DockerComputerConfig
+  | SharedComputerConfig;
+
 export type DeploymentConfig = {
   databaseUrl: string;
   keyEncryptionKey: string;
@@ -62,34 +95,7 @@ export type DeploymentConfig = {
    * The Bot computer. Absent means the feature is off and its routes are not mounted, rather than
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
-  computer?: {
-    baseUrl?: string;
-    /** The secret every computer requires of its caller. */
-    token?: string;
-    /**
-     * The container supervisor, when each Bot is to get a computer of its own. Absent means one
-     * shared computer at `baseUrl`, which is what a laptop wants and is honest about being one
-     * machine.
-     */
-    supervisor?: { baseUrl: string; token?: string };
-    /** Remote computers on Daytona, when an API key is configured. Mutually exclusive with supervisor. */
-    daytona?: {
-      apiKey: string;
-      apiUrl?: string;
-      target?: string;
-      snapshot?: string;
-    };
-    /** True on a laptop, where browsing the deployment's own services is the point. */
-    allowPrivateHosts: boolean;
-    /**
-     * What Bots may do on their computers. Absent means the built-in default applies.
-     *
-     * A whole policy in one variable rather than a variable per rule, because the rules are an
-     * ordered pair of lists and splitting them across `AGENT_COMPUTER_DENY_1`-style names makes their
-     * precedence, which is the only subtle thing about them, impossible to see.
-     */
-    policy?: ActionPolicy;
-  };
+  computer?: ComputerConfig;
 };
 
 type Environment = Record<string, string | undefined>;
@@ -269,20 +275,20 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   };
 }
 
-function computerConfig(
-  environment: Environment,
-): DeploymentConfig["computer"] {
-  const baseUrl = url(environment, "AGENT_COMPUTER_URL");
+function computerConfig(environment: Environment): ComputerConfig | undefined {
   const daytonaKey = optional(environment, "DAYTONA_API_KEY");
-  const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
-  if (!baseUrl && !daytonaKey) {
+  const supervisorAddress = optional(environment, "COMPUTER_SUPERVISOR_URL");
+  const sharedAddress = optional(environment, "AGENT_COMPUTER_URL");
+  if (!daytonaKey && !supervisorAddress && !sharedAddress) {
     return undefined;
   }
-  if (daytonaKey && supervisorUrl) {
+
+  if (daytonaKey && supervisorAddress) {
     throw new Error(
       "Set either DAYTONA_API_KEY or COMPUTER_SUPERVISOR_URL, not both. They are two ways of giving each Bot its own computer.",
     );
   }
+
   /*
    * The secret the computers require. Without it every call to a computer is refused, and that is the
    * intended failure: `agent-computer` drives a browser holding real logins and must not answer
@@ -294,35 +300,51 @@ function computerConfig(
       "DAYTONA_API_KEY is set but COMPUTER_TOKEN is not. Daytona computers are reached over a public preview URL, and the token is the only thing that refuses strangers. Generate one: openssl rand -base64 32",
     );
   }
+
+  const allowPrivateHosts =
+    optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true";
   const policy = actionPolicy(environment);
-  const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
-  const daytonaUrl = url(environment, "DAYTONA_API_URL");
-  const daytonaTarget = optional(environment, "DAYTONA_TARGET");
-  const daytonaSnapshot = optional(environment, "DAYTONA_SNAPSHOT");
+
+  if (daytonaKey && computerToken) {
+    const apiUrl = url(environment, "DAYTONA_API_URL");
+    const target = optional(environment, "DAYTONA_TARGET");
+    const snapshot = optional(environment, "DAYTONA_SNAPSHOT");
+    return {
+      provider: "daytona",
+      apiKey: daytonaKey,
+      token: computerToken,
+      allowPrivateHosts,
+      ...(apiUrl ? { apiUrl } : {}),
+      ...(target ? { target } : {}),
+      ...(snapshot ? { snapshot } : {}),
+      ...(policy ? { policy } : {}),
+    };
+  }
+
+  const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
+  if (supervisorUrl) {
+    const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+    return {
+      provider: "docker",
+      baseUrl: supervisorUrl,
+      allowPrivateHosts,
+      ...(supervisorToken ? { supervisorToken } : {}),
+      ...(computerToken ? { token: computerToken } : {}),
+      ...(policy ? { policy } : {}),
+    };
+  }
+
+  const baseUrl = url(environment, "AGENT_COMPUTER_URL");
+  if (!baseUrl) {
+    return undefined;
+  }
+
   return {
-    allowPrivateHosts:
-      optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true",
-    ...(baseUrl ? { baseUrl } : {}),
-    ...(policy ? { policy } : {}),
+    provider: "shared",
+    baseUrl,
+    allowPrivateHosts,
     ...(computerToken ? { token: computerToken } : {}),
-    ...(supervisorUrl
-      ? {
-          supervisor: {
-            baseUrl: supervisorUrl,
-            ...(supervisorToken ? { token: supervisorToken } : {}),
-          },
-        }
-      : {}),
-    ...(daytonaKey
-      ? {
-          daytona: {
-            apiKey: daytonaKey,
-            ...(daytonaUrl ? { apiUrl: daytonaUrl } : {}),
-            ...(daytonaTarget ? { target: daytonaTarget } : {}),
-            ...(daytonaSnapshot ? { snapshot: daytonaSnapshot } : {}),
-          },
-        }
-      : {}),
+    ...(policy ? { policy } : {}),
   };
 }
 

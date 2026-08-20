@@ -3,18 +3,15 @@ import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import {
-  type ComputerClient,
+  type ActionActor,
+  ActionRefusedError,
+  type ComputerGateway,
   ComputerUnavailableError,
   ElementNotFoundError,
   NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
-} from "./client";
-import {
-  type ActionActor,
-  ActionRefusedError,
-  type ComputerGateway,
 } from "./gateway";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
 
@@ -25,12 +22,10 @@ import { type PolicyStore, parseActionPolicy } from "./policy-store";
  * session guard because `COMPUTER_TOKEN` proves the caller is an internal service, not which user is
  * asking to drive the browser.
  *
- * Read-only calls go to the client; acting calls go to the gateway. That split is the governance
- * boundary: every acting route in this file passes through a policy decision and audit row before it
- * reaches the computer.
+ * Every computer call goes through the gateway. That is the governance seam: each acting route in
+ * this file passes through a policy decision and audit row before it reaches the computer.
  */
 export function createComputerRoutes(
-  client: ComputerClient,
   gateway: ComputerGateway,
   policyStore: PolicyStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
@@ -45,7 +40,7 @@ export function createComputerRoutes(
   routes.get("/:botId/screenshot", requireUser, async (context) => {
     try {
       return context.json(
-        await client.forBot(context.req.param("botId")).screenshot(),
+        await gateway.screenshot(context.req.param("botId")),
       );
     } catch (error) {
       return context.json({ error: describe(error) }, statusFor(error));
@@ -266,10 +261,9 @@ export function createComputerRoutes(
   /**
    * A person's own mouse and keyboard.
    *
-   * Not through the policy gateway, and not audited per keystroke, see the note on `humanInput` in
-   * client.ts. The takeover is the audited event; what the person typed during it is deliberately
-   * unrecorded, because the reason a takeover exists is to let them enter the thing nothing else
-   * should keep.
+   * Not through the policy decision, and not audited per keystroke. See `ComputerGateway.humanInput`.
+   * The takeover is the audited event; what the person typed during it is deliberately unrecorded,
+   * because the reason a takeover exists is to let them enter the thing nothing else should keep.
    */
   routes.post("/:botId/human/:kind", requireUser, async (context) => {
     const kind = context.req.param("kind");
