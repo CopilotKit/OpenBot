@@ -14,7 +14,7 @@ agents:
     role_description: Help answer company knowledge questions and cite sources when available.
     avatar_seed: knowledge
     type: built-in
-    system_prompt: Answer from authorized company knowledge and cite every source.
+    system_prompt: Answer from authorized company knowledge, and say so plainly when no source is connected rather than inventing a citation.
   # The Bot that ships in the box (agent-bot), addressed exactly the way a customer's own Bot would
   # be: an AG-UI endpoint in the registry. Names in dollar-brace form are read from the environment,
   # so the address belongs to the deployment. Replace it with your own service and nothing changes.

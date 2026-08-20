@@ -212,7 +212,7 @@ agents:
     role_description: Answer company knowledge questions and cite sources.
     avatar_seed: knowledge
     type: built-in
-    system_prompt: Answer from authorized company knowledge and cite every source.
+    system_prompt: Answer from authorized company knowledge, and say so plainly when no source is connected rather than inventing a citation.
 
   - id: risk-analyst
     name: Risk Analyst
