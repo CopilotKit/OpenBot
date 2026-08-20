@@ -6,11 +6,15 @@ import {
   WorkspaceRefusedError,
 } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
-import type { SnapshotResult } from "../src/computer/schema";
 import type {
   ComputerLocation,
   ComputerProvider,
 } from "../src/computer/provider";
+import type { SnapshotResult } from "../src/computer/schema";
+import {
+  createInMemorySnapshotStore,
+  type SnapshotStore,
+} from "../src/computer/snapshot-store";
 
 /**
  * What the gateway must guarantee, tested as properties rather than as call sequences.
@@ -774,4 +778,110 @@ describe("resolving a computer's address", () => {
 
     await expect(gateway.locate("bot-1")).resolves.toContain("http");
   });
+});
+
+/**
+ * The snapshot a ref resolves against is shared between servers, not held in one process.
+ *
+ * OpenBot runs several server processes behind a load balancer, and the process that answers a
+ * snapshot is rarely the one that answers the click that uses its refs. If the mapping from ref to
+ * element lives in a `Map`, it is missing on every replica but the one that snapshotted: the policy
+ * decides with no element in front of it, and the deny rule the deployment is relying on does not
+ * fire. These prove the resolution survives the hop to another replica, which is the whole point of
+ * moving it to a store.
+ *
+ * Two gateways sharing one store stand in for two replicas sharing one database. The store is the
+ * only thing they have in common, exactly as Postgres is the only thing two real replicas share.
+ */
+describe("resolving a ref across replicas", () => {
+  function replica(policy: ActionPolicy, snapshots: SnapshotStore) {
+    const { provider, fetchImpl, calls } = fakeComputer();
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => policy,
+      snapshots,
+    });
+    return { gateway, calls, rows };
+  }
+
+  const DENY_SUBMIT: ActionPolicy = {
+    ...PERMISSIVE,
+    deny: ['contains(element.name, "submit")'],
+  };
+
+  test("a click is resolved and refused on a replica that never took the snapshot", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const tookSnapshot = replica(DENY_SUBMIT, snapshots);
+    const handlesClick = replica(DENY_SUBMIT, snapshots);
+
+    await tookSnapshot.gateway.snapshot("bot-1");
+
+    // e9 is the Submit button. The replica that never snapshotted still resolves it from the store and
+    // refuses it. Held in a Map, this gateway's snapshot would be empty, the rule would have no element
+    // to match, and the Submit click would go straight through: the boundary silently off on every
+    // server but the one that happened to snapshot.
+    await expect(
+      handlesClick.gateway.click("bot-1", ACTOR, {
+        ref: "e9",
+        snapshotId: 7,
+      }),
+    ).rejects.toThrow(ActionRefusedError);
+    expect(handlesClick.calls).toEqual([]);
+    expect(handlesClick.rows[0]?.eventType).toBe("computer.action_refused");
+  });
+
+  test("the resolved element label comes from the store, so any replica can name it", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const tookSnapshot = replica(PERMISSIVE, snapshots);
+    const handlesClick = replica(PERMISSIVE, snapshots);
+
+    await tookSnapshot.gateway.snapshot("bot-1");
+    const result = await handlesClick.gateway.type("bot-1", ACTOR, {
+      ref: "e1",
+      snapshotId: 7,
+      text: "Grace Hopper",
+    });
+
+    // The label is resolved on the replica that never saw the page, so the transcript and the trail
+    // say what was acted on instead of quoting a ref.
+    expect(result.element?.name).toBe("Customer name:");
+    expect(handlesClick.rows[0]?.payload.element).toEqual({
+      role: "input",
+      name: "Customer name:",
+      type: "text",
+    });
+  });
+
+  test("a ref only resolves against the generation it came from", async () => {
+    // The store holds snapshot 7, where e9 is Submit. The same ref cited against snapshot 7 resolves;
+    // cited against an older snapshot 6 it does not, because the caller is looking at a page that has
+    // since moved on and its e9 may be a different control now. Resolving it anyway is the "decide on
+    // fiction" a persisted snapshot is rightly warned about; matching the generation is the answer.
+    // The computer makes the same check when the action reaches it and refuses a superseded ref there.
+    const snapshots = createInMemorySnapshotStore();
+    const tookSnapshot = replica(PERMISSIVE, snapshots);
+    const handlesClick = replica(PERMISSIVE, snapshots);
+
+    await tookSnapshot.gateway.snapshot("bot-1");
+
+    const current = await handlesClick.gateway.click("bot-1", ACTOR, {
+      ref: "e9",
+      snapshotId: 7,
+    });
+    expect(current.element?.name).toBe("Submit order");
+
+    const superseded = await handlesClick.gateway.click("bot-1", ACTOR, {
+      ref: "e9",
+      snapshotId: 6,
+    });
+    // Not resolved to snapshot 7's Submit button: the ref carried an older generation.
+    expect(superseded.element).toBeUndefined();
+    expect(handlesClick.rows[1]?.payload.element).toBe(
+      "not in the current snapshot",
+    );
+  });
+
 });

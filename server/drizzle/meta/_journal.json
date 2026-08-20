@@ -36,6 +36,13 @@
       "when": 1787275307878,
       "tag": "0004_account_issuer_required",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787322944029,
+      "tag": "0005_computer_snapshot",
+      "breakpoints": true
     }
   ]
 }

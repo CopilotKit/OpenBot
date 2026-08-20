@@ -28,6 +28,7 @@ import {
   createComputerProvider,
   describeComputerIsolation,
 } from "./computer/provider";
+import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
 import { createConnectorAdminService } from "./connectors";
 import {
@@ -203,6 +204,10 @@ const computerGateway = computerProvider
       provider: computerProvider,
       auditStore: bootAuditStore,
       policy: () => policyStore.get(),
+      // In Postgres, so the ref a click carries resolves against the snapshot that produced it even
+      // when the snapshot was taken by another server. A Map here would be blank on every replica
+      // but the one that snapshotted, and the boundary would decide with no element to look at.
+      snapshots: createSnapshotStore(database),
       allowPrivateHosts: config.computer?.allowPrivateHosts,
       token: config.computer?.token,
     })
