@@ -198,7 +198,7 @@ export function AgentProfile({ agentId }: { agentId: string }) {
 
           {profile.hidden ? (
             <p className="-mt-1 text-xs text-muted-foreground">
-              Hidden from your agents list. This changes nothing for anyone
+              Hidden from your coworkers list. This changes nothing for anyone
               else.
             </p>
           ) : null}
