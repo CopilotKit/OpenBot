@@ -21,6 +21,7 @@ import {
 } from "@/lib/agents/queries";
 import { useStartChannel } from "@/lib/channels/start";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import { newId } from "../../../../lib/new-id";
 
 /**
  * Creates the channel on first send. The selected coworker stays in the URL so profile links and
@@ -122,7 +123,7 @@ function RouteComponent() {
           if (!recipient || !canSend(recipients, draft.text)) return;
 
           setError(null);
-          setSent(seedMessage(draft.text, crypto.randomUUID()));
+          setSent(seedMessage(draft.text, newId()));
 
           try {
             await start(recipient.id, draft.text);
