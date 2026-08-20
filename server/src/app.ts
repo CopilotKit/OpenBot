@@ -19,6 +19,8 @@ import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
+import { createApprovalRoutes } from "./computer/approval-routes";
+import type { ApprovalRegistry } from "./computer/approvals";
 import type { ComputerClient } from "./computer/client";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
@@ -95,6 +97,15 @@ export function createApp(
    * says nothing about which deployment the conversation belongs to.
    */
   threadIdentity?: ThreadIdentity,
+  /**
+   * Where the questions an `ask` rule raised wait for a person.
+   *
+   * Deliberately not tied to the computer being configured. The same policy judges a Bot's calls to
+   * somebody else's servers, so a deployment with plugins and no browser can still stop and ask, and
+   * a question nobody can be shown is worse than a rule that never fired: the Bot waits out the full
+   * ten minutes and then reports that nobody answered.
+   */
+  approvals?: ApprovalRegistry,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -307,6 +318,14 @@ export function createApp(
         computerPolicy,
         requireUser,
       ),
+    );
+  }
+
+  // Answering is its own surface because asking is not only the computer's. See approval-routes.ts.
+  if (approvals && auditStore) {
+    app.route(
+      "/api/approvals",
+      createApprovalRoutes(approvals, auditStore, requireUser),
     );
   }
 

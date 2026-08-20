@@ -12,8 +12,15 @@
     {
       "idx": 1,
       "version": "7",
-      "when": 1787171166283,
-      "tag": "0001_clammy_crystal",
+      "when": 1787171220703,
+      "tag": "0001_gigantic_sumo",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787191010234,
+      "tag": "0002_steep_nighthawk",
       "breakpoints": true
     }
   ]

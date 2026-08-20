@@ -41,6 +41,20 @@ export const auditEventTypes = [
   "connector.sync_failed",
   "knowledge.searched",
   "agent.invoked",
+  /**
+   * A Bot's stream stopped producing anything and the turn was ended for it.
+   *
+   * Recorded because a Bot is somebody else's infrastructure and this is the failure it has that
+   * nothing else in the trail can show. Every other row here is something that happened; this one is
+   * the absence of anything happening, which leaves no trace of its own.
+   *
+   * It is also the sort of thing nobody notices is happening repeatedly. One hung turn reads as a
+   * bad afternoon and gets a shrug; the same Bot hanging twice a day for a month is a fact about an
+   * endpoint, and it only becomes visible when somebody can count it. The row names the Bot, how
+   * long its stream was silent, and how many chunks it managed first, so a reader can tell an
+   * endpoint that dies mid-answer from one that never answers at all.
+   */
+  "agent.stream_stalled",
   "mcp.call_succeeded",
   "mcp.call_rejected",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
@@ -76,6 +90,29 @@ export const auditEventTypes = [
   // which field it went in; the value is on a path this trail is not on.
   "computer.secret_requested",
   "computer.secret_supplied",
+  /**
+   * The boundary stopping to ask a person, and what they said.
+   *
+   * Three rows rather than a flag on the action, because the three facts are separable and the gaps
+   * between them are where the interesting failures live. A question that was asked and never
+   * answered leaves only the first row, and that is the shape of "the Bot sat waiting while nobody
+   * was watching the screen", which nothing else in this trail would show. An answer that was given
+   * and never spent leaves the first two, which is what a stopped run looks like from here.
+   *
+   * `approval.granted` and `approval.denied` are written by the person answering, under their own
+   * actor, minutes after the Bot's turn raised the question and often by somebody else entirely.
+   * Folding consent into the action row would credit it to whoever was driving the Bot, which is the
+   * one thing an approval trail must never do.
+   *
+   * Not named for the computer, unlike the rows above, because the same boundary judges a Bot's
+   * calls to somebody else's servers and stops to ask about those too. Each row is filed against the
+   * thing the question was about, a computer or a tool, so a reader filtering by either sees the
+   * question, the answer and the action together rather than a grant filed under a browser for
+   * something that happened in Jira.
+   */
+  "approval.requested",
+  "approval.granted",
+  "approval.denied",
   // The computer itself being stopped or wiped. `reset` destroys every login the Bot had, which is
   // both the recovery path and the most consequential button on the admin page, so who pressed it and
   // when is exactly the sort of thing an investigator needs and nothing else records.

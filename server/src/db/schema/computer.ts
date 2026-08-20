@@ -26,6 +26,15 @@ export const actionPolicy = pgTable("action_policy", {
   /** `enforce` or `dry-run`. Not an enum: the policy module owns that vocabulary. */
   mode: text("mode").notNull(),
   deny: text("deny").array().notNull(),
+  /**
+   * The rules that stop and ask a person, rather than deciding on their own.
+   *
+   * Defaulted to empty rather than left nullable, so a deployment whose row was written before this
+   * list existed comes back up meaning what it meant: no questions, same two answers. A nullable
+   * column would put the same reasoning in every reader instead, and one of them would eventually
+   * read null as something other than "asks nobody anything".
+   */
+  ask: text("ask").array().notNull().default([]),
   allow: text("allow").array().notNull(),
   /** Who last changed it, for the Admin page and the trail. */
   updatedBy: text("updated_by"),

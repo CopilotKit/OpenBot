@@ -25,6 +25,7 @@ export function ConversationView({
   commands,
   disabled = false,
   pending = false,
+  stopped,
   stoppable,
   queueWhileBusy = false,
   onSubmit,
@@ -50,6 +51,8 @@ export function ConversationView({
    * drains on this falling.
    */
   pending?: boolean;
+  /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
+  stopped?: string;
   /**
    * There is a run for Stop to abort, which is a narrower fact than `pending` and is the honest one
    * to draw a Stop button from. Defaults to `pending` for a caller with no gap between the two.
@@ -209,6 +212,7 @@ export function ConversationView({
             apply({ id, type: "remove" });
           }}
           queued={queued}
+          {...(stopped ? { stopped } : {})}
         />
       </div>
       <div className="max-w-2xl mx-auto w-full px-0 pb-4 shrink-0">

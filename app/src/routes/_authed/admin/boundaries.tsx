@@ -14,17 +14,21 @@ type PolicyMode = "dry-run" | "enforce";
 type ActionPolicy = {
   mode: PolicyMode;
   deny: string[];
+  ask: string[];
   allow: string[];
 };
+
+type Preset = { label: string; rule: string; cost?: string };
 
 /**
  * Presets are concrete CEL rules, not a separate policy language.
  */
-const PRESETS: { label: string; rule: string; cost?: string }[] = [
+const PRESETS: Preset[] = [
   {
     label: "Never submit a form",
-    // `key` exists only on keypress actions; guard it by tool name to keep other actions evaluable.
-    rule: '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter")',
+    // Three doors, not two. `key` exists only on keypress actions, so it is guarded by tool name to
+    // keep the rule evaluable elsewhere; `submit` is on every action and needs no guard.
+    rule: '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter") || submit',
     cost: "Also stops the Bot pressing Enter for anything else, because a form submits from Enter in any of its fields.",
   },
   {
@@ -45,6 +49,26 @@ const PRESETS: { label: string; rule: string; cost?: string }[] = [
   },
 ];
 
+/**
+ * The same rules a deployment might otherwise have had to forbid outright.
+ *
+ * Both of these are things a Bot is genuinely useful for and that nobody wants it doing unwatched
+ * the first few times, which is the whole shape of this list: the boundary an operator actually
+ * wants is rarely "never", it is "not without me".
+ */
+const ASK_PRESETS: Preset[] = [
+  {
+    label: "Ask before submitting a form",
+    rule: '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter") || submit',
+    cost: "Asks about every Enter the Bot presses, because a form submits from Enter in any of its fields. Expect to be asked while it is filling one in, not only at the end.",
+  },
+  {
+    label: "Ask before writing a file outside notes/",
+    rule: 'intent == "write_file" && !matches(file.path, "^notes/")',
+    cost: "Matches on the path the Bot asked for, so a folder it has not used before is a question rather than a refusal.",
+  },
+];
+
 export const Route = createFileRoute("/_authed/admin/boundaries")({
   component: BoundariesPage,
 });
@@ -55,6 +79,7 @@ function BoundariesPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [draft, setDraft] = useState("");
+  const [askDraft, setAskDraft] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -131,6 +156,20 @@ function BoundariesPage() {
     if (!trimmed || policy.deny.includes(trimmed)) return;
     void save({ ...policy, deny: [...policy.deny, trimmed] });
     setDraft("");
+  };
+
+  /**
+   * The same rule can sit in both lists, and the deny wins.
+   *
+   * Not prevented, because an operator moving a rule from one list to the other will pass through
+   * that state, and refusing to save it would look like a bug. What it means is stated under the
+   * list instead, since the gateway decides deny first and an ask alongside it never fires.
+   */
+  const addAskRule = (rule: string) => {
+    const trimmed = rule.trim();
+    if (!trimmed || policy.ask.includes(trimmed)) return;
+    void save({ ...policy, ask: [...policy.ask, trimmed] });
+    setAskDraft("");
   };
 
   return (
@@ -248,6 +287,93 @@ function BoundariesPage() {
             </li>
           ))}
         </ul>
+      </PageSection>
+
+      <PageSection title="Ask me first">
+        {policy.ask.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            No rules. Nothing stops to ask.
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y divide-border rounded-md border border-border">
+            {policy.ask.map((rule) => (
+              <li
+                className="flex items-center justify-between gap-4 px-3 py-2"
+                key={rule}
+              >
+                <code className="min-w-0 break-all font-mono text-xs">
+                  {rule}
+                </code>
+                <Button
+                  disabled={saving}
+                  onClick={() =>
+                    void save({
+                      ...policy,
+                      ask: policy.ask.filter((one) => one !== rule),
+                    })
+                  }
+                  size="sm"
+                  variant="ghost"
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-3 flex gap-2">
+          <Input
+            aria-label="A rule that asks a person first, written in CEL"
+            className="min-w-0 flex-1 font-mono text-xs"
+            onChange={(event) => {
+              setAskDraft(event.target.value);
+              setSaved(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") addAskRule(askDraft);
+            }}
+            placeholder='intent == "write_file" && !matches(file.path, "^notes/")'
+            value={askDraft}
+          />
+          <Button
+            disabled={saving || askDraft.trim().length === 0}
+            onClick={() => addAskRule(askDraft)}
+            size="sm"
+          >
+            Add rule
+          </Button>
+        </div>
+
+        <ul className="mt-3 space-y-2">
+          {ASK_PRESETS.map((preset) => (
+            <li className="flex items-start gap-3" key={preset.rule}>
+              <Button
+                className="shrink-0"
+                disabled={saving || policy.ask.includes(preset.rule)}
+                onClick={() => addAskRule(preset.rule)}
+                size="sm"
+                variant="outline"
+              >
+                {preset.label}
+              </Button>
+              {preset.cost ? (
+                <span className="pt-1 text-xs text-muted-foreground">
+                  {preset.cost}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+
+        <p className="mt-3 text-xs text-muted-foreground">
+          The Bot stops and waits where one of these matches, and carries on
+          with the same action if somebody allows it. Checked after the rules
+          above and before the ones below, so something you have forbidden stays
+          forbidden and is never offered as a question. In{" "}
+          <span className="font-medium">Record it and allow it</span> nothing
+          stops: a match is recorded as a question that would have been asked.
+        </p>
       </PageSection>
 
       <PageSection title="Otherwise it may">

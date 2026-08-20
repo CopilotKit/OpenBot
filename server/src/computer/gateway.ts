@@ -19,6 +19,12 @@
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { NotificationRaiser } from "../notifications";
+import {
+  type ApprovalRegistry,
+  createApprovalRegistry,
+  fingerprintOf,
+  type PendingApproval,
+} from "./approvals";
 import type { ComputerClient } from "./client";
 import {
   type ActionPolicy,
@@ -52,6 +58,32 @@ export class ActionRefusedError extends Error {
   }
 }
 
+/**
+ * The boundary wants a person's answer before this happens.
+ *
+ * Emphatically not an {@link ActionRefusedError}. A refusal is final and the Bot should say so and
+ * move on; this one is a pause, and the same Bot presenting the same request again with an approval
+ * on it is the intended next step rather than an attempt to get around anything. Collapsing the two
+ * would teach a model to give up on exactly the actions a deployment was willing to permit, which is
+ * the failure that makes an ask list worse than useless.
+ */
+export class ActionNeedsApprovalError extends Error {
+  /** What the caller presents once somebody has answered. */
+  readonly approvalId: string;
+  /** The question in the words a person is being shown, so the Bot can say what it is waiting for. */
+  readonly question: string;
+  /** The rule that asked, so the surface can name the boundary the way a refusal does. */
+  readonly rule: string;
+
+  constructor(approval: PendingApproval) {
+    super(approval.question);
+    this.name = "ActionNeedsApprovalError";
+    this.approvalId = approval.id;
+    this.question = approval.question;
+    this.rule = approval.rule;
+  }
+}
+
 /** Who is asking. The gateway records this; it does not decide it. */
 export type ActionActor = {
   /** The signed-in person, or the local actor when authentication is not configured. */
@@ -78,6 +110,16 @@ export type ComputerGatewayOptions = {
   auditStore: AuditStore;
   /** Absent denies everything. See evaluateActionPolicy. */
   policy: () => ActionPolicy | undefined;
+  /**
+   * Where questions raised by the `ask` list wait for an answer.
+   *
+   * Handed in rather than owned, because the deployment has exactly one of these and the gateway is
+   * not the only thing that asks: the same policy judges a Bot's calls to somebody else's servers,
+   * and a person answering should see everything their Bot is waiting on rather than whichever half
+   * belongs to the subsystem that happened to serve the page. A gateway built without one keeps its
+   * own, which is what the tests do so they can control the clock.
+   */
+  approvals?: ApprovalRegistry;
   /**
    * Counts a Bot repeating itself, so that the policy can be told how many times.
    *
@@ -117,6 +159,7 @@ type CachedSnapshot = {
 export function createComputerGateway(options: ComputerGatewayOptions) {
   const { client, auditStore, supervisor, notify } = options;
   const snapshots = new Map<string, CachedSnapshot>();
+  const approvals = options.approvals ?? createApprovalRegistry();
   const repeat = options.repeat ?? createRepeatDetector();
 
   /**
@@ -177,8 +220,19 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       filePath?: string;
       targetUrl?: string;
       key?: string;
+      /** Whether this call ends by pressing Enter. Only the type tool can, and it says so. */
+      submit?: boolean;
       /** The person's Stop, on its way to the browser. See the acting methods below. */
       signal?: AbortSignal;
+      /**
+       * An answer a person already gave, being presented for the action it was given for.
+       *
+       * Carried on the request rather than held against the conversation, because the thing being
+       * checked is not "has somebody approved something recently" but "was this exact action the one
+       * they were shown". The id alone proves nothing; it is the id plus the fingerprint of the call
+       * being made that means anything.
+       */
+      approvalId?: string;
     },
     run: () => Promise<T>,
   ): Promise<T> {
@@ -215,6 +269,9 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       actor: { id: actor.id },
       page: { url: pageUrl, host: hostOf(pageUrl) },
       repeat: { count: repetition.count },
+      // Always a boolean, unlike `key`, so a rule about form submission needs no guard to stay
+      // evaluable on the actions that cannot submit anything. See PolicyContext.submit.
+      submit: subject.submit === true,
       ...(intent ? { intent } : {}),
       ...(subject.key ? { key: subject.key } : {}),
       ...(element
@@ -269,6 +326,81 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
     }
 
     const decision = evaluateActionPolicy(options.policy(), context);
+
+    /**
+     * A decision that wants a person, resolved before anything is recorded as having happened.
+     *
+     * Two outcomes and no third: either an approval already exists for this exact action, in which
+     * case the row below says so and names who gave it, or the question is opened and the call stops
+     * here. Nothing is written as allowed or refused in the second case, because neither happened:
+     * `approval.requested` is the record of where the turn actually got to.
+     *
+     * Dry-run never reaches this branch, because the policy forwards an ask there for the same
+     * reason it forwards a deny: a mode that promises to change nothing must not start interrupting
+     * people.
+     */
+    let approvedBy: string | undefined;
+    if (decision.source === "ask" && !decision.forward) {
+      const fingerprint = fingerprintOf({
+        botId,
+        toolName,
+        ref,
+        key: subject.key,
+        submit: subject.submit,
+        filePath,
+        pageUrl,
+      });
+      const presented = subject.approvalId
+        ? approvals.consume(subject.approvalId, fingerprint)
+        : undefined;
+
+      if (presented?.ok && presented.approval.answeredBy) {
+        approvedBy = presented.approval.answeredBy;
+      } else {
+        // Every unsuccessful presentation asks again rather than failing: an expired approval, an id
+        // spent already, a person's No being replayed, and an approval granted for a different button
+        // all mean the same thing here, which is that nobody has agreed to THIS. Asking twice is
+        // annoying and safe; guessing which of those deserves an error is neither.
+        //
+        // An approval with nobody's name on it lands here too. Nothing can produce one, because an
+        // answer always records who gave it and an unanswered approval cannot be spent, and it asks
+        // again rather than falling back to the person whose turn raised the question: crediting
+        // consent to whoever was driving the Bot is the one thing this record must never do.
+        const pending = approvals.request({
+          botId,
+          actor: actor.id,
+          rule: decision.matched ?? "",
+          question: decision.reason,
+          fingerprint,
+          // Where the answer's own row will be filed, decided here where what the question is about
+          // is still known. See PendingApproval.target.
+          target: { type: "computer", id: computerId },
+        });
+        await writeApprovalEvent(auditStore, {
+          botId,
+          actor,
+          computerId,
+          approval: pending,
+          toolName,
+          pageUrl,
+          filePath,
+        });
+        throw new ActionNeedsApprovalError(pending);
+      }
+    }
+
+    // What the boundary settled on, once a person's answer is folded in. The source stays `ask`, so
+    // the row reads as "allowed, because somebody was asked and said yes" rather than as an ordinary
+    // permission nobody ever questioned.
+    const settled: PolicyDecision = approvedBy
+      ? {
+          ...decision,
+          allowed: true,
+          forward: true,
+          reason: `Allowed by ${approvedBy}, who was asked because of the rule \`${decision.matched}\`.`,
+        }
+      : decision;
+
     await write(auditStore, {
       toolName,
       botId,
@@ -279,11 +411,12 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       ...(subject.key ? { key: subject.key } : {}),
       filePath,
       pageUrl,
-      decision,
+      decision: settled,
+      ...(approvedBy ? { approvedBy } : {}),
     });
 
-    if (!decision.forward) {
-      throw new ActionRefusedError(decision.reason, decision.matched);
+    if (!settled.forward) {
+      throw new ActionRefusedError(settled.reason, settled.matched);
     }
 
     let result: T;
@@ -309,7 +442,8 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         ref,
         filePath,
         pageUrl,
-        decision,
+        decision: settled,
+        ...(approvedBy ? { approvedBy } : {}),
         failure: error instanceof Error ? error.message : "The action failed.",
       });
       throw error;
@@ -544,13 +678,21 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       botId: string,
       actor: ActionActor,
       url: string,
+      /**
+       * An answer a person gave to this exact call, if one has been given.
+       *
+       * Last and optional on every acting method, so a caller that knows nothing about approvals
+       * behaves exactly as it did and a route that forgets to pass it fails by asking again rather
+       * than by acting unasked.
+       */
+      approvalId?: string,
     ) {
       return govern(
         computerId,
         "computer_navigate",
         botId,
         actor,
-        { targetUrl: url },
+        { targetUrl: url, ...(approvalId ? { approvalId } : {}) },
         () => as(botId).navigate(url),
       );
     },
@@ -561,13 +703,18 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       actor: ActionActor,
       input: ClickInput,
       signal?: AbortSignal,
+      approvalId?: string,
     ) {
       return govern(
         computerId,
         "computer_click",
         botId,
         actor,
-        { ref: input.ref, ...(signal ? { signal } : {}) },
+        {
+          ref: input.ref,
+          ...(signal ? { signal } : {}),
+          ...(approvalId ? { approvalId } : {}),
+        },
         () => as(botId).click(input, signal),
       );
     },
@@ -578,13 +725,22 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       actor: ActionActor,
       input: TypeInput,
       signal?: AbortSignal,
+      approvalId?: string,
     ) {
       return govern(
         computerId,
         "computer_type",
         botId,
         actor,
-        { ref: input.ref, ...(signal ? { signal } : {}) },
+        {
+          ref: input.ref,
+          // Whether this call ends by pressing Enter, which is the third way into a form and the one
+          // a rule about clicking and a rule about `key` both miss. The computer presses it itself,
+          // so it never arrives here as an action of its own to be judged.
+          submit: input.submit === true,
+          ...(signal ? { signal } : {}),
+          ...(approvalId ? { approvalId } : {}),
+        },
         () => as(botId).type(input, signal),
       );
     },
@@ -595,6 +751,7 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       actor: ActionActor,
       input: KeyInput,
       signal?: AbortSignal,
+      approvalId?: string,
     ) {
       return govern(
         computerId,
@@ -603,7 +760,12 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
         actor,
         // The key is part of the subject, so a rule can tell Enter from a letter. Form submission can
         // happen through a keypress as well as a click, so the policy context carries the key.
-        { ref: input.ref, key: input.key, ...(signal ? { signal } : {}) },
+        {
+          ref: input.ref,
+          key: input.key,
+          ...(signal ? { signal } : {}),
+          ...(approvalId ? { approvalId } : {}),
+        },
         () => as(botId).key(input, signal),
       );
     },
@@ -613,9 +775,15 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       botId: string,
       actor: ActionActor,
       input: ScrollInput,
+      approvalId?: string,
     ) {
-      return govern(computerId, "computer_scroll", botId, actor, {}, () =>
-        as(botId).scroll(input),
+      return govern(
+        computerId,
+        "computer_scroll",
+        botId,
+        actor,
+        { ...(approvalId ? { approvalId } : {}) },
+        () => as(botId).scroll(input),
       );
     },
 
@@ -631,13 +799,14 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       botId: string,
       actor: ActionActor,
       input: ReadFileInput,
+      approvalId?: string,
     ) {
       return govern(
         computerId,
         "computer_read_file",
         botId,
         actor,
-        { filePath: input.path },
+        { filePath: input.path, ...(approvalId ? { approvalId } : {}) },
         () => as(botId).readFile(input),
       );
     },
@@ -652,13 +821,17 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       botId: string,
       actor: ActionActor,
       input: ListFilesInput,
+      approvalId?: string,
     ) {
       return govern(
         computerId,
         "computer_list_files",
         botId,
         actor,
-        { filePath: input.path ?? "." },
+        {
+          filePath: input.path ?? ".",
+          ...(approvalId ? { approvalId } : {}),
+        },
         () => as(botId).listFiles(input),
       );
     },
@@ -668,13 +841,14 @@ export function createComputerGateway(options: ComputerGatewayOptions) {
       botId: string,
       actor: ActionActor,
       input: WriteFileInput,
+      approvalId?: string,
     ) {
       return govern(
         computerId,
         "computer_write_file",
         botId,
         actor,
-        { filePath: input.path },
+        { filePath: input.path, ...(approvalId ? { approvalId } : {}) },
         () => as(botId).writeFile(input),
       );
     },
@@ -769,6 +943,14 @@ async function write(
     filePath: string | undefined;
     pageUrl: string;
     decision: PolicyDecision;
+    /**
+     * Who allowed this, when the boundary asked and somebody said yes.
+     *
+     * On the action row as well as on the approval row, because the two are found by different
+     * questions: a reader following one Bot's actions should not have to go and correlate ids to
+     * discover that a person stood behind this particular click.
+     */
+    approvedBy?: string;
     /** Set only when a permitted action was attempted and did not succeed. */
     failure?: string;
   },
@@ -821,6 +1003,7 @@ async function write(
         mode: entry.decision.mode,
         source: entry.decision.source,
         rule: entry.decision.matched,
+        ...(entry.approvedBy ? { approvedBy: entry.approvedBy } : {}),
         /** Present so the trail explains a dry-run row that was recorded as refused but still ran. */
         carriedOut: entry.decision.forward,
       },
@@ -914,6 +1097,55 @@ async function writeControlEvent(
       bot: entry.botId,
       actor: entry.actor.id,
       ...(entry.reason ? { reason: entry.reason } : {}),
+    },
+  });
+}
+
+/**
+ * The row for a question the boundary stopped to ask.
+ *
+ * Its own writer rather than a variant of either of the others, because an approval sits between
+ * them and fits neither shape. It is not `write`: no decision was reached, the policy said it wanted
+ * a person and the turn stopped there, and inventing an allowed-or-refused verdict for that row would
+ * be the comfortable fiction the rest of this file is careful to avoid. It is not
+ * `writeControlEvent`: a handover is a person taking the browser away from the Bot, whereas this is a
+ * question about one specific action, so the row has to name the action or a reader cannot tell what
+ * was being agreed to.
+ *
+ * The answer's row is written where the answer is given, which is not here. All of them carry the
+ * approval id: that is what lets a reader join a request to its answer and to the action that
+ * finally happened, and it is the only way to see the case that matters most, a question that was
+ * asked and never answered.
+ */
+async function writeApprovalEvent(
+  auditStore: AuditStore,
+  entry: {
+    botId: string;
+    actor: ActionActor;
+    computerId: string;
+    approval: PendingApproval;
+    toolName?: string;
+    pageUrl?: string;
+    filePath?: string | undefined;
+  },
+) {
+  await recordAuditEvent(auditStore, {
+    eventType: "approval.requested",
+    targetType: "computer",
+    targetId: entry.computerId,
+    ...(entry.actor.userId ? { actorUserId: entry.actor.userId } : {}),
+    payload: {
+      bot: entry.botId,
+      actor: entry.actor.id,
+      approval: entry.approval.id,
+      rule: entry.approval.rule,
+      // The question as a person read it. Element labels are things a page displays rather than
+      // things anybody typed, which is why the reason text is safe to keep here; see the note on
+      // `write` above.
+      reason: entry.approval.question,
+      ...(entry.toolName ? { action: entry.toolName } : {}),
+      ...(entry.pageUrl ? { page: entry.pageUrl } : {}),
+      ...(entry.filePath ? { file: entry.filePath } : {}),
     },
   });
 }
