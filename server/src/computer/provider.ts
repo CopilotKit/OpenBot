@@ -10,14 +10,15 @@ import type { ComputerStatus } from "./schema";
 /** The address and lifecycle details for one Bot's computer. */
 export type ComputerLocation = {
   botId: string;
-  status: string;
+  status: "running" | "stopped";
   url?: string;
   startedAt?: string;
+  egress?: string | null;
 };
 
 /** A description of how a provider separates one Bot's computer from another. */
 export type IsolationDescription = {
-  isolation: "one computer per Bot" | "one shared computer";
+  isolation: "off" | "one computer per Bot" | "one shared computer";
   note: string;
   warning?: string;
 };
@@ -28,6 +29,32 @@ export class ProviderError extends Error {
     super(message);
     this.name = "ProviderError";
   }
+}
+
+/** Describe the isolation that this provider (or lack of provider) gives to Bots. */
+export function describeComputerIsolation(
+  provider?: ComputerProvider,
+): IsolationDescription {
+  if (!provider) {
+    return {
+      isolation: "off",
+      note: "The computer feature is off. No computer provider is configured.",
+    };
+  }
+
+  if (provider.isolation === "per-bot") {
+    return {
+      isolation: "one computer per Bot",
+      note: "Each Bot gets its own isolated computer with its own /workspace and browser profile.",
+    };
+  }
+
+  return {
+    isolation: "one shared computer",
+    note: "No supervisor is configured, so every Bot uses the same browser. Sessions, files and logins are shared between them. Set COMPUTER_SUPERVISOR_URL or DAYTONA_API_KEY to give each Bot its own.",
+    warning:
+      "Every Bot shares one browser. Set COMPUTER_SUPERVISOR_URL or DAYTONA_API_KEY for a computer each.",
+  };
 }
 
 /**
@@ -41,35 +68,34 @@ export interface ComputerProvider {
   readonly name: string;
   /** How the provider separates computers between Bots. */
   readonly isolation: "per-bot" | "shared";
-  /** Describe the isolation that this provider gives to Bots. */
-  describeIsolation(): IsolationDescription;
   /** Return the base address of the computer for this Bot. */
   locate(botId: string): Promise<string>;
   /** Return the lifecycle state of the computer for this Bot. */
   status(botId: string): Promise<ComputerStatus>;
   /** Stop the computer for this Bot if it exists. */
-  stop(botId: string): Promise<void>;
+  stop(botId: string): Promise<{ wasRunning: boolean }>;
   /** Remove the computer state for this Bot if it exists. */
-  reset(botId: string): Promise<void>;
+  reset(botId: string): Promise<{ cleared: boolean }>;
   /** List the computers that this provider owns. */
   list(): Promise<ComputerLocation[]>;
   /** Prepare provider resources before the first computer request. */
   warm?(): Promise<void>;
 }
 
-type SharedComputerProviderOptions = {
+export type SharedComputerProviderOptions = {
   baseUrl: string;
   token?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 };
-
 type SharedComputerEntry = {
   botId: string;
   running?: boolean;
   status?: string;
   url?: string;
   startedAt?: string | null;
+  egress?: string | null;
 };
-
 /**
  * Give every Bot the same computer.
  *
@@ -80,13 +106,13 @@ export function createSharedComputerProvider(
   options: SharedComputerProviderOptions,
 ): ComputerProvider {
   const base = options.baseUrl.replace(/\/$/, "");
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 45_000;
 
   function headers(botId?: string): Record<string, string> {
     return {
       ...(botId ? { "x-openbot-bot-id": botId } : {}),
-      ...(options.token
-        ? { "x-openbot-computer-token": options.token }
-        : {}),
+      ...(options.token ? { "x-openbot-computer-token": options.token } : {}),
     };
   }
 
@@ -97,9 +123,10 @@ export function createSharedComputerProvider(
   ): Promise<unknown> {
     let response: Response;
     try {
-      response = await fetch(`${base}${path}`, {
+      response = await fetchImpl(`${base}${path}`, {
         method,
         headers: headers(botId),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       throw new ProviderError(
@@ -121,14 +148,6 @@ export function createSharedComputerProvider(
   return {
     name: "shared",
     isolation: "shared",
-    describeIsolation(): IsolationDescription {
-      return {
-        isolation: "one shared computer",
-        note: "No supervisor is configured, so every Bot uses the same browser. Sessions, files and logins are shared between them. Set COMPUTER_SUPERVISOR_URL or DAYTONA_API_KEY to give each Bot its own.",
-        warning:
-          "Every Bot shares one browser. Set COMPUTER_SUPERVISOR_URL or DAYTONA_API_KEY for a computer each.",
-      };
-    },
 
     async locate(_botId: string): Promise<string> {
       return options.baseUrl;
@@ -150,12 +169,24 @@ export function createSharedComputerProvider(
       }
     },
 
-    async stop(botId: string): Promise<void> {
-      await call("/stop", "POST", botId);
+    async stop(botId: string): Promise<{ wasRunning: boolean }> {
+      const body = (await call("/computers/stop", "POST", botId)) as {
+        wasRunning?: boolean;
+        stopped?: boolean;
+      } | null;
+      return {
+        wasRunning: body?.wasRunning ?? body?.stopped ?? false,
+      };
     },
 
-    async reset(botId: string): Promise<void> {
-      await call("/reset", "POST", botId);
+    async reset(botId: string): Promise<{ cleared: boolean }> {
+      const body = (await call("/computers/reset", "POST", botId)) as {
+        cleared?: boolean;
+        reset?: boolean;
+      } | null;
+      return {
+        cleared: body?.cleared ?? body?.reset ?? false,
+      };
     },
 
     async list(): Promise<ComputerLocation[]> {
@@ -165,16 +196,21 @@ export function createSharedComputerProvider(
       return (body?.computers ?? []).map((computer) => ({
         botId: computer.botId,
         status:
-          computer.status ?? (computer.running === true ? "running" : "stopped"),
+          computer.status === "running" || computer.running === true
+            ? "running"
+            : "stopped",
         url: computer.url ?? base,
         ...(computer.startedAt ? { startedAt: computer.startedAt } : {}),
+        ...(computer.egress !== undefined ? { egress: computer.egress } : {}),
       }));
     },
   };
 }
 
 /** Build the one computer provider selected by deployment configuration. */
-export function createComputerProvider(config: ComputerConfig): ComputerProvider {
+export function createComputerProvider(
+  config: ComputerConfig,
+): ComputerProvider {
   switch (config.provider) {
     case "daytona":
       return createDaytonaComputerProvider({

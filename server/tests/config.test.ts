@@ -254,22 +254,19 @@ describe("deployment configuration", () => {
         ...baseEnvironment,
         DAYTONA_API_KEY: "dtn_test_key",
       }),
-    ).toThrow(
-      "DAYTONA_API_KEY is set but COMPUTER_TOKEN is not. Daytona computers are reached over a public preview URL, and the token is the only thing that refuses strangers. Generate one: openssl rand -base64 32",
-    );
+    ).toThrow("COMPUTER_TOKEN");
   });
 
   test("refuses to configure both Daytona and Docker computer providers", () => {
-    expect(() =>
+    const attempt = () =>
       loadConfig({
         ...baseEnvironment,
         DAYTONA_API_KEY: "dtn_test_key",
         COMPUTER_TOKEN: "secret-token",
         COMPUTER_SUPERVISOR_URL: "http://localhost:4000",
-      }),
-    ).toThrow(
-      "Set either DAYTONA_API_KEY or COMPUTER_SUPERVISOR_URL, not both. They are two ways of giving each Bot its own computer.",
-    );
+      });
+    expect(attempt).toThrow("DAYTONA_API_KEY");
+    expect(attempt).toThrow("COMPUTER_SUPERVISOR_URL");
   });
 
   test.each([

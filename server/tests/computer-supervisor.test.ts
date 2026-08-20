@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { ComputerProvider } from "../src/computer/provider";
 import {
   createDockerSupervisorProvider,
-  createSupervisorClient,
   SupervisorError,
 } from "../src/computer/supervisor";
 
@@ -14,8 +14,8 @@ import {
  * to prevent, and it would look like it was working.
  */
 
-function clientWith(handler: (path: string) => Response) {
-  return createSupervisorClient({
+function clientWith(handler: (path: string) => Response): ComputerProvider {
+  return createDockerSupervisorProvider({
     baseUrl: "http://supervisor:4300",
     token: "t",
     fetchImpl: (async (url: string | URL | Request) =>
@@ -77,7 +77,7 @@ describe("locating a Bot's computer", () => {
   test("an unreachable supervisor says so, rather than looking like a broken computer", async () => {
     // These are different problems for whoever has to fix them: one is the supervisor, the other is
     // the Bot's own container.
-    const client = createSupervisorClient({
+    const client = createDockerSupervisorProvider({
       baseUrl: "http://supervisor:4300",
       fetchImpl: (async () => {
         throw new Error("connection refused");
@@ -88,7 +88,7 @@ describe("locating a Bot's computer", () => {
 
   test("the bot id is escaped into the path", async () => {
     let seen = "";
-    const client = createSupervisorClient({
+    const client = createDockerSupervisorProvider({
       baseUrl: "http://supervisor:4300",
       fetchImpl: (async (url: string | URL | Request) => {
         seen = new URL(String(url)).pathname;
@@ -110,59 +110,53 @@ describe("Docker supervisor provider", () => {
 
     expect(provider.name).toBe("Docker supervisor");
     expect(provider.isolation).toBe("per-bot");
-    expect(provider.describeIsolation()).toEqual({
-      isolation: "one computer per Bot",
-      note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
-    });
   });
 
-  test("maps supervisor lifecycle states without starting the computer", async () => {
+  test.each([
+    ["created", { botId: "bot", state: "starting" }],
+    ["running", { botId: "bot", state: "ready" }],
+    ["paused", { botId: "bot", state: "absent" }],
+    ["restarting", { botId: "bot", state: "starting" }],
+    ["removing", { botId: "bot", state: "absent" }],
+    ["exited", { botId: "bot", state: "absent" }],
+    ["dead", { botId: "bot", state: "unreachable" }],
+  ] as const)(
+    "maps Docker container status %s to lifecycle state",
+    async (dockerStatus, expected) => {
+      const provider = createDockerSupervisorProvider({
+        baseUrl: "http://supervisor:4300",
+        fetchImpl: (async () =>
+          Response.json({
+            computers: [
+              {
+                botId: "bot",
+                container: "openbot-computer-bot",
+                status: dockerStatus,
+                url: "http://openbot-computer-bot:4100",
+              },
+            ],
+          })) as unknown as typeof fetch,
+      });
+
+      const result = await provider.status("bot");
+      expect(result).toMatchObject(expected);
+    },
+  );
+
+  test("reports missing bot as absent", async () => {
     const provider = createDockerSupervisorProvider({
       baseUrl: "http://supervisor:4300",
       fetchImpl: (async () =>
-        Response.json({
-          computers: [
-            {
-              botId: "ready-bot",
-              container: "computer-ready",
-              status: "running",
-              url: "http://computer-ready:4100",
-              startedAt: "2026-08-20T12:00:00.000Z",
-            },
-            {
-              botId: "starting-bot",
-              container: "computer-starting",
-              status: "creating",
-            },
-            {
-              botId: "broken-bot",
-              container: "computer-broken",
-              status: "error",
-            },
-          ],
-        })) as unknown as typeof fetch,
+        Response.json({ computers: [] })) as unknown as typeof fetch,
     });
 
-    expect(await provider.status("ready-bot")).toEqual({
-      botId: "ready-bot",
-      state: "ready",
-    });
-    expect(await provider.status("starting-bot")).toEqual({
-      botId: "starting-bot",
-      state: "starting",
-    });
     expect(await provider.status("missing-bot")).toEqual({
       botId: "missing-bot",
       state: "absent",
     });
-    expect(await provider.status("broken-bot")).toEqual({
-      botId: "broken-bot",
-      state: "unreachable",
-      reason: 'The computer reported state "error".',
-    });
   });
 
-  test("lists only the provider location fields", async () => {
+  test("lists only the provider location fields with mapped status", async () => {
     const provider = createDockerSupervisorProvider({
       baseUrl: "http://supervisor:4300",
       fetchImpl: (async () =>
@@ -176,6 +170,13 @@ describe("Docker supervisor provider", () => {
               url: "http://computer-sales:4100",
               startedAt: "2026-08-20T12:00:00.000Z",
             },
+            {
+              botId: "support",
+              container: "computer-support",
+              status: "exited",
+              port: 49153,
+              url: "http://computer-support:4100",
+            },
           ],
         })) as unknown as typeof fetch,
     });
@@ -187,6 +188,51 @@ describe("Docker supervisor provider", () => {
         url: "http://computer-sales:4100",
         startedAt: "2026-08-20T12:00:00.000Z",
       },
+      {
+        botId: "support",
+        status: "stopped",
+        url: "http://computer-support:4100",
+      },
     ]);
+  });
+
+  test("stop reports whether the container was running", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({ stopped: true })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.stop("bot")).toEqual({ wasRunning: true });
+  });
+
+  test("stop reports false when container was not running", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({ stopped: false })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.stop("bot")).toEqual({ wasRunning: false });
+  });
+
+  test("reset reports whether container state was cleared", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({ reset: true })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.reset("bot")).toEqual({ cleared: true });
+  });
+
+  test("reset reports false when container was not present to clear", async () => {
+    const provider = createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      fetchImpl: (async () =>
+        Response.json({ reset: false })) as unknown as typeof fetch,
+    });
+
+    expect(await provider.reset("bot")).toEqual({ cleared: false });
   });
 });

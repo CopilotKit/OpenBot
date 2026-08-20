@@ -22,7 +22,10 @@ import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
 } from "./computer/policy-store";
-import { createComputerProvider } from "./computer/provider";
+import {
+  createComputerProvider,
+  describeComputerIsolation,
+} from "./computer/provider";
 import { loadConfig } from "./config";
 import { createConnectorAdminService } from "./connectors";
 import {
@@ -186,7 +189,6 @@ const computerGateway = computerProvider
     })
   : undefined;
 
-
 /**
  * What a Bot can reach beyond its own computer.
  *
@@ -229,14 +231,7 @@ void recordAuditEvent(bootAuditStore, {
  * A shared provider is a fine way to run on a laptop, but the shared isolation state must be visible
  * rather than inferred.
  */
-const isolation = computerProvider
-  ? computerProvider.describeIsolation()
-  : {
-      isolation: "one shared computer" as const,
-      note: "No supervisor is configured, so every Bot uses the same browser. Sessions, files and logins are shared between them. Set COMPUTER_SUPERVISOR_URL or DAYTONA_API_KEY to give each Bot its own.",
-      warning:
-        "Every Bot shares one browser. Set COMPUTER_SUPERVISOR_URL or DAYTONA_API_KEY for a computer each.",
-    };
+const isolation = describeComputerIsolation(computerProvider);
 
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.isolation_loaded",
@@ -250,7 +245,7 @@ void recordAuditEvent(bootAuditStore, {
 console.info(
   JSON.stringify({
     type: "computer-isolation",
-    provider: computerProvider ? computerProvider.name : "shared",
+    provider: computerProvider ? computerProvider.name : "none",
     isolation: isolation.isolation,
     ...(isolation.warning ? { warning: isolation.warning } : {}),
   }),

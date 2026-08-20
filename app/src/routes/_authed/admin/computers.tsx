@@ -30,7 +30,7 @@ type ComputerProfile = {
   botId: string;
   running: boolean;
   startedAt: string | null;
-  egress: string | null;
+  egress?: string | null;
 };
 
 /** API placeholder id; the list endpoint returns all computers. */
@@ -159,9 +159,11 @@ function ComputersPage() {
                         ? `Browser running since ${new Date(computer.startedAt ?? "").toLocaleTimeString()}`
                         : "No browser running. It starts when the Bot next needs it."}
                       {" · "}
-                      {computer.egress
-                        ? `Leaves through ${computer.egress}`
-                        : "Leaves directly"}
+                      {computer.egress === undefined
+                        ? "Egress not reported"
+                        : computer.egress === null
+                          ? "Leaves directly"
+                          : `Leaves through ${computer.egress}`}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>

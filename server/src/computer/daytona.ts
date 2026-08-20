@@ -6,11 +6,11 @@ import {
   DaytonaConflictError,
   DaytonaNotFoundError,
   Image,
+  SandboxState,
 } from "@daytona/sdk";
 import {
   type ComputerLocation,
   type ComputerProvider,
-  type IsolationDescription,
   ProviderError,
 } from "./provider";
 import type { ComputerStatus } from "./schema";
@@ -26,12 +26,13 @@ import type { ComputerStatus } from "./schema";
 
 export type SandboxHandle = {
   id: string;
-  state?: string;
+  state?: SandboxState;
   labels?: Record<string, string>;
   createdAt?: string;
   start(timeout?: number): Promise<void>;
   stop(): Promise<void>;
   delete(timeout?: number, wait?: boolean): Promise<void>;
+  refreshActivity(): Promise<void>;
   getPreviewLink(port: number): Promise<{ url: string }>;
 };
 
@@ -59,7 +60,7 @@ export type DaytonaSdk = {
   };
 };
 
-export type DaytonaSupervisorOptions = {
+export type DaytonaProviderOptions = {
   apiKey: string;
   apiUrl?: string;
   target?: string;
@@ -78,6 +79,7 @@ const COMPUTER_PORT = 4100;
 const OWNERSHIP_LABEL_KEY = "openbot/computer";
 const OWNERSHIP_LABEL_VALUE = "true";
 const BOT_ID_LABEL_KEY = "openbot/bot-id";
+const TOKEN_HASH_LABEL_KEY = "openbot/computer-token-hash";
 const DEFAULT_AGENT_COMPUTER_DIR = join(
   import.meta.dir,
   "../../../agent-computer",
@@ -159,13 +161,14 @@ function computeSnapshotName(agentComputerDir: string): string {
   return `openbot-agent-computer-${hex}`;
 }
 
+function computeTokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 function isNotFoundError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   if (err instanceof DaytonaNotFoundError) return true;
-  if (
-    "name" in err &&
-    (err as { name: string }).name === "DaytonaNotFoundError"
-  ) {
+  if ("name" in err && err.name === "DaytonaNotFoundError") {
     return true;
   }
   return false;
@@ -174,10 +177,7 @@ function isNotFoundError(err: unknown): boolean {
 function isConflictError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   if (err instanceof DaytonaConflictError) return true;
-  if (
-    "name" in err &&
-    (err as { name: string }).name === "DaytonaConflictError"
-  ) {
+  if ("name" in err && err.name === "DaytonaConflictError") {
     return true;
   }
   return false;
@@ -203,41 +203,56 @@ function wrapBotError(
   );
 }
 
-function toComputerStatus(botId: string, state?: string): ComputerStatus {
-  const normalized = state?.toLowerCase();
-  if (normalized === "started" || normalized === "running") {
-    return { botId, state: "ready" };
+function toComputerStatus(botId: string, state?: SandboxState): ComputerStatus {
+  if (!state) {
+    return {
+      botId,
+      state: "unreachable",
+      reason: "Daytona did not report a state for this computer.",
+    };
   }
-  if (
-    normalized === "created" ||
-    normalized === "restarting" ||
-    normalized === "creating" ||
-    normalized === "starting" ||
-    normalized === "restoring" ||
-    normalized === "pulling_snapshot" ||
-    normalized === "resuming"
-  ) {
-    return { botId, state: "starting" };
+  switch (state) {
+    case SandboxState.STARTED:
+      return { botId, state: "ready" };
+    case SandboxState.CREATING:
+    case SandboxState.RESTORING:
+    case SandboxState.STARTING:
+    case SandboxState.PULLING_SNAPSHOT:
+    case SandboxState.RESUMING:
+    case SandboxState.PENDING_BUILD:
+    case SandboxState.BUILDING_SNAPSHOT:
+    case SandboxState.RESIZING:
+    case SandboxState.SNAPSHOTTING:
+    case SandboxState.FORKING:
+      return { botId, state: "starting" };
+    case SandboxState.STOPPED:
+    case SandboxState.PAUSED:
+    case SandboxState.ARCHIVED:
+    case SandboxState.STOPPING:
+    case SandboxState.PAUSING:
+    case SandboxState.ARCHIVING:
+    case SandboxState.DESTROYED:
+    case SandboxState.DESTROYING:
+      return { botId, state: "absent" };
+    case SandboxState.ERROR:
+    case SandboxState.BUILD_FAILED:
+    case SandboxState.UNKNOWN:
+    case SandboxState.UNKNOWN_DEFAULT_OPEN_API:
+      return {
+        botId,
+        state: "unreachable",
+        reason: `Daytona reported the computer state "${state}".`,
+      };
+    default: {
+      const exhaustiveCheck: never = state;
+      return {
+        botId,
+        state: "unreachable",
+        reason: `Daytona reported the computer state "${String(exhaustiveCheck)}".`,
+      };
+    }
   }
-  if (
-    normalized === "stopped" ||
-    normalized === "paused" ||
-    normalized === "archived" ||
-    normalized === "exited" ||
-    normalized === "destroyed" ||
-    normalized === "removing" ||
-    normalized === "archiving" ||
-    normalized === "pausing" ||
-    normalized === "stopping"
-  ) {
-    return { botId, state: "absent" };
-  }
-  const reason = normalized
-    ? `Daytona reported the computer state "${normalized}".`
-    : "Daytona did not report a state for this computer.";
-  return { botId, state: "unreachable", reason };
 }
-
 
 function sleep(ms: number): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>();
@@ -253,7 +268,7 @@ function withTimeout<T>(
   if (timeoutMs <= 0) {
     return Promise.reject(new Error(errorMessage));
   }
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: Timer | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
   });
@@ -289,7 +304,7 @@ async function pollUntil<T>(
 }
 
 export function createDaytonaComputerProvider(
-  options: DaytonaSupervisorOptions,
+  options: DaytonaProviderOptions,
 ): ComputerProvider {
   const sdk: DaytonaSdk =
     options.sdk ??
@@ -300,18 +315,30 @@ export function createDaytonaComputerProvider(
     });
 
   const doFetch = options.fetchImpl ?? fetch;
+
   /**
-   * In-memory supervisor state:
-   * - `known`: maps botId to { sandboxId, url } for fast locate cache hits. Entries are removed
-   *   on reset, deletion, terminal states (destroyed/destroying/error/build_failed), or 404s.
-   * - `locating`: maps botId to active locate promises to deduplicate concurrent calls. Note:
-   *   this deduplication is local to this single process only (no cross-instance synchronization).
+   * In-memory provider state:
+   * - `known`: maps botId to sandboxId for fast locate lookups. Preview URLs are never cached.
+   *   Entries are cleared on reset, deletion, terminal states, stale token hashes, or 404s.
    * - `resetSandboxes`: maps botId to the deleted sandboxId to mask Daytona list eventual-consistency
    *   staleness where a deleted sandbox temporarily reappears in list() queries. Cleared on fresh creation.
+   * - `queues`: serializes lifecycle operations (locate, stop, reset) per Bot to prevent race conditions.
+   *   Note: synchronization is process-local only (no cross-instance synchronization).
    */
-  const known = new Map<string, { sandboxId: string; url: string }>();
-  const locating = new Map<string, Promise<string>>();
+  const known = new Map<string, string>();
   const resetSandboxes = new Map<string, string>();
+  const queues = new Map<string, Promise<unknown>>();
+
+  function runLifecycle<T>(botId: string, op: () => Promise<T>): Promise<T> {
+    const prev = queues.get(botId) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(op);
+    queues.set(botId, next);
+    return next.finally(() => {
+      if (queues.get(botId) === next) {
+        queues.delete(botId);
+      }
+    });
+  }
 
   let snapshotPromise: Promise<string> | undefined;
 
@@ -440,17 +467,17 @@ export function createDaytonaComputerProvider(
     includeTerminal = false,
   ): Promise<SandboxHandle | undefined> {
     const deletedSandboxId = resetSandboxes.get(botId);
-    const knownEntry = known.get(botId);
-    if (knownEntry) {
-      if (deletedSandboxId && knownEntry.sandboxId === deletedSandboxId) {
+    const knownSandboxId = known.get(botId);
+    if (knownSandboxId) {
+      if (deletedSandboxId && knownSandboxId === deletedSandboxId) {
         known.delete(botId);
       } else {
         try {
-          const sb = await sdk.get(knownEntry.sandboxId);
-          const state = sb.state?.toLowerCase();
+          const sb = await sdk.get(knownSandboxId);
           if (
             !includeTerminal &&
-            (state === "destroyed" || state === "destroying")
+            (sb.state === SandboxState.DESTROYED ||
+              sb.state === SandboxState.DESTROYING)
           ) {
             known.delete(botId);
             return undefined;
@@ -475,10 +502,10 @@ export function createDaytonaComputerProvider(
         if (deletedSandboxId && sb.id === deletedSandboxId) {
           continue;
         }
-        const state = sb.state?.toLowerCase();
         if (
           includeTerminal ||
-          (state !== "destroyed" && state !== "destroying")
+          (sb.state !== SandboxState.DESTROYED &&
+            sb.state !== SandboxState.DESTROYING)
         ) {
           return sb;
         }
@@ -490,160 +517,216 @@ export function createDaytonaComputerProvider(
     return undefined;
   }
 
+  async function createFreshSandbox(
+    snapshot: string,
+    botId: string,
+  ): Promise<SandboxHandle> {
+    const passthroughEnv: Record<string, string> = {};
+    if (options.environment) {
+      for (const [key, value] of Object.entries(options.environment)) {
+        if (
+          typeof value === "string" &&
+          (key.startsWith("EGRESS_PROXY") || key === "ACTION_TIMEOUT_MS")
+        ) {
+          passthroughEnv[key] = value;
+        }
+      }
+    }
+
+    const envVars: Record<string, string> = {
+      COMPUTER_BOT_ID: botId,
+      COMPUTER_TOKEN: options.computerToken,
+      ...passthroughEnv,
+    };
+
+    const labels: Record<string, string> = {
+      [OWNERSHIP_LABEL_KEY]: OWNERSHIP_LABEL_VALUE,
+      [BOT_ID_LABEL_KEY]: botId,
+      [TOKEN_HASH_LABEL_KEY]: computeTokenHash(options.computerToken),
+    };
+
+    try {
+      const handle = await sdk.create(
+        {
+          snapshot,
+          envVars,
+          labels,
+          public: true,
+          autoStopInterval: 15,
+        },
+        { timeout: 300 },
+      );
+      resetSandboxes.delete(botId);
+      known.set(botId, handle.id);
+      return handle;
+    } catch (err) {
+      throw wrapBotError(botId, "create", err);
+    }
+  }
+
+  async function ensureSandboxStarted(
+    initialHandle: SandboxHandle,
+    botId: string,
+    snapshot: string,
+  ): Promise<SandboxHandle> {
+    let handle = initialHandle;
+    if (handle.state === SandboxState.STARTED) {
+      return handle;
+    }
+
+    if (
+      handle.state === SandboxState.STOPPED ||
+      handle.state === SandboxState.PAUSED ||
+      handle.state === SandboxState.ARCHIVED
+    ) {
+      try {
+        await handle.start(300);
+        return handle;
+      } catch (err) {
+        throw wrapBotError(botId, "start", err);
+      }
+    }
+
+    const pollInterval = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    const maxWaitMs = 300 * 1000;
+
+    return await pollUntil<SandboxHandle>(
+      async () => {
+        try {
+          handle = await sdk.get(handle.id);
+        } catch (err) {
+          if (isNotFoundError(err)) {
+            known.delete(botId);
+            const fresh = await createFreshSandbox(snapshot, botId);
+            return { done: true, value: fresh };
+          }
+          throw wrapBotError(botId, "locate", err);
+        }
+
+        if (handle.state === SandboxState.STARTED) {
+          return { done: true, value: handle };
+        }
+        if (
+          handle.state === SandboxState.STOPPED ||
+          handle.state === SandboxState.PAUSED ||
+          handle.state === SandboxState.ARCHIVED
+        ) {
+          try {
+            await handle.start(300);
+          } catch (err) {
+            throw wrapBotError(botId, "start", err);
+          }
+          return { done: true, value: handle };
+        }
+        if (
+          handle.state === SandboxState.DESTROYED ||
+          handle.state === SandboxState.DESTROYING
+        ) {
+          known.delete(botId);
+          const fresh = await createFreshSandbox(snapshot, botId);
+          return { done: true, value: fresh };
+        }
+        if (
+          handle.state === SandboxState.ERROR ||
+          handle.state === SandboxState.BUILD_FAILED
+        ) {
+          throw new ProviderError(
+            `Daytona sandbox for ${botId} failed with state "${handle.state}".`,
+          );
+        }
+        return { done: false };
+      },
+      {
+        timeoutMs: maxWaitMs,
+        intervalMs: pollInterval,
+        timeoutError: () =>
+          new ProviderError(
+            `Timed out waiting for computer sandbox for ${botId} to start.`,
+          ),
+      },
+    );
+  }
+
+  async function pollHealth(previewUrl: string, botId: string): Promise<void> {
+    const healthPollInterval =
+      options.pollIntervalMs ?? HEALTH_POLL_INTERVAL_MS;
+    const healthTimeout = options.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
+    const healthDeadline = Date.now() + healthTimeout;
+    const healthUrl = `${previewUrl.replace(/\/$/, "")}/health`;
+
+    while (Date.now() < healthDeadline) {
+      const remainingMs = Math.max(1, healthDeadline - Date.now());
+      try {
+        const res = await withTimeout(
+          doFetch(healthUrl, {
+            headers: {
+              "X-Daytona-Skip-Preview-Warning": "true",
+            },
+            signal: AbortSignal.timeout(remainingMs),
+          }),
+          remainingMs,
+        );
+        if (res.ok) {
+          return;
+        }
+      } catch {
+        // Health endpoint not reachable yet or timed out; retry
+      }
+      const sleepMs = Math.min(
+        healthPollInterval,
+        Math.max(0, healthDeadline - Date.now()),
+      );
+      if (sleepMs > 0) {
+        await sleep(sleepMs);
+      }
+    }
+
+    throw new ProviderError(
+      `The computer for ${botId} started but never answered /health at its preview URL.`,
+    );
+  }
+
   return {
     name: "Daytona",
     isolation: "per-bot",
 
-    describeIsolation(): IsolationDescription {
-      return {
-        isolation: "one computer per Bot",
-        note: "Each Bot gets a remote Daytona sandbox with its own /workspace and its own browser profile.",
-      };
-    },
-
     async locate(botId: string): Promise<string> {
-      const existing = locating.get(botId);
-      if (existing) {
-        return existing;
-      }
-
-      const promise = (async () => {
+      return runLifecycle(botId, async () => {
         const snapshot = await ensureSnapshot();
 
         let sandboxHandle = await resolveSandbox(botId, "locate");
+        const expectedTokenHash = computeTokenHash(options.computerToken);
+
         if (sandboxHandle) {
-          const state = sandboxHandle.state?.toLowerCase();
-          if (state === "error" || state === "build_failed") {
+          const tokenHash = sandboxHandle.labels?.[TOKEN_HASH_LABEL_KEY];
+
+          if (
+            tokenHash !== expectedTokenHash ||
+            sandboxHandle.state === SandboxState.ERROR ||
+            sandboxHandle.state === SandboxState.BUILD_FAILED
+          ) {
             try {
-              await sandboxHandle.delete();
+              await sandboxHandle.delete(60, true);
             } catch {
-              // Best-effort cleanup of broken sandboxes
+              // Best-effort cleanup of stale or broken sandboxes
             }
             known.delete(botId);
+            resetSandboxes.set(botId, sandboxHandle.id);
             sandboxHandle = undefined;
           }
         }
 
-        async function createFreshSandbox(): Promise<SandboxHandle> {
-          const passthroughEnv: Record<string, string> = {};
-          if (options.environment) {
-            for (const [key, value] of Object.entries(options.environment)) {
-              if (
-                typeof value === "string" &&
-                (key.startsWith("EGRESS_PROXY") || key === "ACTION_TIMEOUT_MS")
-              ) {
-                passthroughEnv[key] = value;
-              }
-            }
-          }
-
-          const envVars: Record<string, string> = {
-            COMPUTER_BOT_ID: botId,
-            COMPUTER_TOKEN: options.computerToken,
-            ...passthroughEnv,
-          };
-
-          const labels: Record<string, string> = {
-            [OWNERSHIP_LABEL_KEY]: OWNERSHIP_LABEL_VALUE,
-            [BOT_ID_LABEL_KEY]: botId,
-          };
-
-          try {
-            const handle = await sdk.create(
-              {
-                snapshot,
-                envVars,
-                labels,
-                public: true,
-                autoStopInterval: 15,
-              },
-              { timeout: 300 },
-            );
-            resetSandboxes.delete(botId);
-            return handle;
-          } catch (err) {
-            throw wrapBotError(botId, "create", err);
-          }
-        }
-
         if (!sandboxHandle) {
-          sandboxHandle = await createFreshSandbox();
+          sandboxHandle = await createFreshSandbox(snapshot, botId);
         } else {
-          const state = sandboxHandle.state?.toLowerCase();
-          if (
-            state === "stopped" ||
-            state === "archived" ||
-            state === "paused"
-          ) {
-            try {
-              await sandboxHandle.start(300);
-            } catch (err) {
-              throw wrapBotError(botId, "start", err);
-            }
-          }
-        }
-
-        if (sandboxHandle.state?.toLowerCase() !== "started") {
-          const pollInterval =
-            options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-          const maxWaitMs = 300 * 1000;
-
-          sandboxHandle = await pollUntil<SandboxHandle>(
-            async () => {
-              try {
-                sandboxHandle = await sdk.get(sandboxHandle!.id);
-              } catch (err) {
-                if (isNotFoundError(err)) {
-                  known.delete(botId);
-                  sandboxHandle = await createFreshSandbox();
-                  if (sandboxHandle.state?.toLowerCase() === "started") {
-                    return { done: true, value: sandboxHandle };
-                  }
-                  return { done: false };
-                }
-                throw wrapBotError(botId, "locate", err);
-              }
-
-              const cur = sandboxHandle.state?.toLowerCase();
-              if (cur === "started") {
-                return { done: true, value: sandboxHandle };
-              }
-              if (cur === "stopped" || cur === "archived" || cur === "paused") {
-                try {
-                  await sandboxHandle.start(300);
-                } catch (err) {
-                  throw wrapBotError(botId, "start", err);
-                }
-                if (sandboxHandle.state?.toLowerCase() === "started") {
-                  return { done: true, value: sandboxHandle };
-                }
-                return { done: false };
-              }
-              if (cur === "destroyed" || cur === "destroying") {
-                known.delete(botId);
-                sandboxHandle = await createFreshSandbox();
-                if (sandboxHandle.state?.toLowerCase() === "started") {
-                  return { done: true, value: sandboxHandle };
-                }
-                return { done: false };
-              }
-              if (cur === "error" || cur === "build_failed") {
-                throw new ProviderError(
-                  `Daytona sandbox for ${botId} failed with state "${cur}".`,
-                );
-              }
-              return { done: false };
-            },
-            {
-              timeoutMs: maxWaitMs,
-              intervalMs: pollInterval,
-              timeoutError: () =>
-                new ProviderError(
-                  `Timed out waiting for computer sandbox for ${botId} to start.`,
-                ),
-            },
+          sandboxHandle = await ensureSandboxStarted(
+            sandboxHandle,
+            botId,
+            snapshot,
           );
         }
+
+        known.set(botId, sandboxHandle.id);
 
         let previewUrl: string;
         try {
@@ -653,60 +736,16 @@ export function createDaytonaComputerProvider(
           throw wrapBotError(botId, "locate", err);
         }
 
-        known.set(botId, { sandboxId: sandboxHandle.id, url: previewUrl });
+        await pollHealth(previewUrl, botId);
 
-        const healthPollInterval =
-          options.pollIntervalMs ?? HEALTH_POLL_INTERVAL_MS;
-        const healthTimeout =
-          options.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
-        const healthStart = Date.now();
-        const healthDeadline = healthStart + healthTimeout;
-        const healthUrl = `${previewUrl.replace(/\/$/, "")}/health`;
-
-        let healthy = false;
-        while (Date.now() < healthDeadline) {
-          const remainingMs = Math.max(1, healthDeadline - Date.now());
-          try {
-            const res = await withTimeout(
-              doFetch(healthUrl, {
-                headers: {
-                  "X-Daytona-Skip-Preview-Warning": "true",
-                },
-                signal: AbortSignal.timeout(remainingMs),
-              }),
-              remainingMs,
-            );
-            if (res.ok) {
-              healthy = true;
-              break;
-            }
-          } catch {
-            // Health endpoint not reachable yet or timed out; retry
-          }
-          const sleepMs = Math.min(
-            healthPollInterval,
-            Math.max(0, healthDeadline - Date.now()),
-          );
-          if (sleepMs > 0) {
-            await sleep(sleepMs);
-          }
-        }
-
-        if (!healthy) {
-          throw new ProviderError(
-            `The computer for ${botId} started but never answered /health at its preview URL.`,
-          );
+        try {
+          await sandboxHandle.refreshActivity();
+        } catch (err) {
+          throw wrapBotError(botId, "refresh activity on", err);
         }
 
         return previewUrl;
-      })();
-
-      locating.set(botId, promise);
-      try {
-        return await promise;
-      } finally {
-        locating.delete(botId);
-      }
+      });
     },
 
     async status(botId: string): Promise<ComputerStatus> {
@@ -717,69 +756,82 @@ export function createDaytonaComputerProvider(
       return toComputerStatus(botId, sandboxHandle.state);
     },
 
-    async stop(botId: string): Promise<void> {
-      const sandboxHandle = await resolveSandbox(botId, "stop");
-      if (!sandboxHandle) {
-        return;
-      }
-      const state = sandboxHandle.state?.toLowerCase();
-      if (state !== "started" && state !== "paused") {
-        return;
-      }
-      try {
-        await sandboxHandle.stop();
-      } catch (err) {
-        throw wrapBotError(botId, "stop", err);
-      }
+    async stop(botId: string): Promise<{ wasRunning: boolean }> {
+      return runLifecycle(botId, async () => {
+        const sandboxHandle = await resolveSandbox(botId, "stop");
+        if (!sandboxHandle) {
+          return { wasRunning: false };
+        }
+        if (sandboxHandle.state !== SandboxState.STARTED) {
+          return { wasRunning: false };
+        }
+        try {
+          await sandboxHandle.stop();
+          return { wasRunning: true };
+        } catch (err) {
+          throw wrapBotError(botId, "stop", err);
+        }
+      });
     },
 
-    async reset(botId: string): Promise<void> {
-      const sandboxHandle = await resolveSandbox(botId, "reset");
-      known.delete(botId);
-      if (!sandboxHandle) {
-        return;
-      }
-      try {
-        await sandboxHandle.delete(60, true);
-      } catch (err) {
-        throw wrapBotError(botId, "reset", err);
-      }
-      resetSandboxes.set(botId, sandboxHandle.id);
+    async reset(botId: string): Promise<{ cleared: boolean }> {
+      return runLifecycle(botId, async () => {
+        const sandboxHandle = await resolveSandbox(botId, "reset");
+        known.delete(botId);
+        if (!sandboxHandle) {
+          return { cleared: false };
+        }
+        try {
+          await sandboxHandle.delete(60, true);
+        } catch (err) {
+          throw wrapBotError(botId, "reset", err);
+        }
+        resetSandboxes.set(botId, sandboxHandle.id);
+        return { cleared: true };
+      });
     },
 
     async list(): Promise<ComputerLocation[]> {
-      const result: ComputerLocation[] = [];
       try {
+        const matching: { botId: string; sb: SandboxHandle }[] = [];
         for await (const sb of sdk.list({
           labels: {
             [OWNERSHIP_LABEL_KEY]: OWNERSHIP_LABEL_VALUE,
           },
         })) {
-          const state = sb.state?.toLowerCase();
-          if (state === "destroyed" || state === "destroying") {
+          if (
+            sb.state === SandboxState.DESTROYED ||
+            sb.state === SandboxState.DESTROYING
+          ) {
             continue;
           }
           const botId = sb.labels?.[BOT_ID_LABEL_KEY];
           if (!botId || resetSandboxes.get(botId) === sb.id) {
             continue;
           }
-          const preview = await sb.getPreviewLink(COMPUTER_PORT);
-          result.push({
-            botId,
-            status:
-              state === "started" || state === "running"
-                ? "running"
-                : "exited",
-            url: preview.url,
-            startedAt: sb.createdAt,
-          });
+          matching.push({ botId, sb });
         }
+
+        const result = await Promise.all(
+          matching.map(async ({ botId, sb }) => {
+            const preview = await sb.getPreviewLink(COMPUTER_PORT);
+            const status: "running" | "stopped" =
+              sb.state === SandboxState.STARTED ? "running" : "stopped";
+            return {
+              botId,
+              status,
+              url: preview.url,
+              startedAt: sb.createdAt,
+            };
+          }),
+        );
+
+        return result;
       } catch (err) {
         throw new ProviderError(
           `Daytona failed to list computers: ${toErrorMessage(err)}`,
         );
       }
-      return result;
     },
 
     async warm(): Promise<void> {
@@ -793,5 +845,3 @@ export function createDaytonaComputerProvider(
     },
   };
 }
-
-export const createDaytonaSupervisorClient = createDaytonaComputerProvider;

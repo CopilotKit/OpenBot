@@ -18,18 +18,6 @@ function clientWith(
   const botId = "bot-1";
   return {
     navigate: (url: string) => transport.navigate(baseUrl, botId, url),
-    async status(requestedBotId: string) {
-      try {
-        await transport.call(baseUrl, requestedBotId, "/health");
-        return { botId: requestedBotId, state: "ready" as const };
-      } catch (error) {
-        return {
-          botId: requestedBotId,
-          state: "unreachable" as const,
-          reason: error instanceof Error ? error.message : "Unknown failure.",
-        };
-      }
-    },
     screenshot: () => transport.call(baseUrl, botId, "/screenshot"),
     click: (input: unknown, signal?: AbortSignal) =>
       transport.post(baseUrl, botId, "/click", input, signal),
@@ -121,6 +109,15 @@ describe("computer client", () => {
       "The assistant's computer is not running.",
     );
 
+    const timedOut = clientWith(() => {
+      const error = new Error("timed out");
+      error.name = "TimeoutError";
+      throw error;
+    });
+    await expect(timedOut.navigate("https://example.com")).rejects.toThrow(
+      "The assistant's computer did not respond in time.",
+    );
+
     const badPage = clientWith(
       () =>
         new Response(JSON.stringify({ error: "net::ERR_NAME_NOT_RESOLVED" }), {
@@ -131,18 +128,6 @@ describe("computer client", () => {
     await expect(badPage.navigate("https://nope.example")).rejects.toThrow(
       "net::ERR_NAME_NOT_RESOLVED",
     );
-  });
-
-  test("status reports unreachable rather than throwing", async () => {
-    const client = clientWith(() => {
-      throw new Error("down");
-    });
-
-    await expect(client.status("bot-1")).resolves.toEqual({
-      botId: "bot-1",
-      state: "unreachable",
-      reason: "The assistant's computer is not running.",
-    });
   });
 
   test("screenshot returns the png a transcript can render", async () => {
@@ -160,20 +145,6 @@ describe("computer client", () => {
       width: 1280,
     });
   });
-
-  test("surfaces a timeout as the computer not responding", async () => {
-    const client = clientWith(() => {
-      const error = new Error("timed out");
-      error.name = "TimeoutError";
-      throw error;
-    });
-
-    await expect(client.status("bot-1")).resolves.toMatchObject({
-      state: "unreachable",
-      reason: "The assistant's computer did not respond in time.",
-    });
-  });
-
 });
 
 /**

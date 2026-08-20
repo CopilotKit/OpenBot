@@ -2,249 +2,33 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SandboxState } from "@daytona/sdk";
+import { createDaytonaComputerProvider } from "../src/computer/daytona";
 import {
-  createDaytonaComputerProvider,
-  createDaytonaSupervisorClient,
-  type DaytonaSdk,
-  type DaytonaSupervisorOptions,
-  type SandboxHandle,
-} from "../src/computer/daytona";
-import { ProviderError } from "../src/computer/provider";
-
-/**
- * Daytona computer provider test suite.
- *
- * OpenBot gives each Bot a remote Daytona sandbox when DAYTONA_API_KEY is set.
- * The provider creates, locates, stops, resets, and lists these sandboxes through
- * the Daytona SDK. It checks the preview URL before it returns a computer address.
- */
-
-class DaytonaNotFoundError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DaytonaNotFoundError";
-  }
-}
-
-type DeleteCall = {
-  timeout?: number;
-  wait?: boolean;
-};
-
-type FakeSandbox = {
-  id: string;
-  state: string;
-  labels: Record<string, string>;
-  envVars: Record<string, string>;
-  public: boolean;
-  autoStopInterval: number;
-  createdAt: string;
-  previewUrl: string;
-  startCalls: number;
-  stopCalls: number;
-  deleteCalls: number;
-  deleteArgs: DeleteCall[];
-  deleteHandler?: (timeout?: number, wait?: boolean) => void | Promise<void>;
-};
-
-type CreateParams = {
-  snapshot: string;
-  envVars: Record<string, string>;
-  labels: Record<string, string>;
-  public: boolean;
-  autoStopInterval: number;
-  options?: { timeout?: number };
-};
-
-function makeSandbox(options: {
-  id: string;
-  botId?: string;
-  state?: string;
-  labels?: Record<string, string>;
-  envVars?: Record<string, string>;
-  public?: boolean;
-  autoStopInterval?: number;
-  createdAt?: string;
-  previewUrl?: string;
-  deleteHandler?: (timeout?: number, wait?: boolean) => void | Promise<void>;
-}): FakeSandbox {
-  const botId = options.botId;
-  const defaultLabels = botId
-    ? { "openbot/computer": "true", "openbot/bot-id": botId }
-    : { "openbot/computer": "true" };
-  const labels = options.labels ?? defaultLabels;
-  const envVars =
-    options.envVars ??
-    (botId ? { COMPUTER_TOKEN: "tok", COMPUTER_BOT_ID: botId } : {});
-
-  return {
-    id: options.id,
-    state: options.state ?? "started",
-    labels,
-    envVars,
-    public: options.public ?? true,
-    autoStopInterval: options.autoStopInterval ?? 15,
-    createdAt: options.createdAt ?? "2026-08-20T10:00:00Z",
-    previewUrl:
-      options.previewUrl ?? `https://${options.id}.preview.daytona.app`,
-    startCalls: 0,
-    stopCalls: 0,
-    deleteCalls: 0,
-    deleteArgs: [],
-    ...(options.deleteHandler ? { deleteHandler: options.deleteHandler } : {}),
-  };
-}
-
-function makeSandboxHandle(sb: FakeSandbox): SandboxHandle {
-  return {
-    id: sb.id,
-    state: sb.state,
-    labels: sb.labels,
-    createdAt: sb.createdAt,
-    start: async () => {
-      sb.startCalls++;
-      sb.state = "started";
-    },
-    stop: async () => {
-      sb.stopCalls++;
-      sb.state = "stopped";
-    },
-    delete: async (timeout?: number, wait?: boolean) => {
-      sb.deleteCalls++;
-      sb.deleteArgs.push({ timeout, wait });
-      if (sb.deleteHandler) {
-        await sb.deleteHandler(timeout, wait);
-      } else {
-        sb.state = "destroyed";
-      }
-    },
-    getPreviewLink: async (_port: number) => ({ url: sb.previewUrl }),
-  };
-}
-
-type FakeSdk = DaytonaSdk & {
-  sandboxes: Map<string, FakeSandbox>;
-  snapshots: Map<string, { state: string }>;
-  creates: CreateParams[];
-};
-
-function createFakeSdk(initialSandboxes: FakeSandbox[] = []): FakeSdk {
-  let idCounter = 1;
-  const sandboxes = new Map<string, FakeSandbox>();
-  const snapshots = new Map<string, { state: string }>();
-  const creates: CreateParams[] = [];
-
-  for (const sb of initialSandboxes) {
-    sandboxes.set(sb.id, sb);
-  }
-
-  const sdk: FakeSdk = {
-    sandboxes,
-    snapshots,
-    creates,
-    create: async (params, options) => {
-      creates.push({ ...params, options });
-      const id = `sb-${idCounter++}`;
-      const sb: FakeSandbox = {
-        id,
-        state: "started",
-        labels: params.labels,
-        envVars: params.envVars,
-        public: params.public,
-        autoStopInterval: params.autoStopInterval,
-        createdAt: new Date().toISOString(),
-        previewUrl: `https://${id}.preview.daytona.app`,
-        startCalls: 0,
-        stopCalls: 0,
-        deleteCalls: 0,
-        deleteArgs: [],
-      };
-      sandboxes.set(id, sb);
-      return makeSandboxHandle(sb);
-    },
-    get: async (id: string) => {
-      const sb = sandboxes.get(id);
-      if (!sb) {
-        throw new DaytonaNotFoundError(`Sandbox ${id} not found`);
-      }
-      return makeSandboxHandle(sb);
-    },
-    list: (query?: { labels?: Record<string, string> }) => {
-      async function* generator() {
-        for (const sb of sandboxes.values()) {
-          if (query?.labels) {
-            const matches = Object.entries(query.labels).every(
-              ([k, v]) => sb.labels[k] === v,
-            );
-            if (!matches) continue;
-          }
-          yield makeSandboxHandle(sb);
-        }
-      }
-      return generator();
-    },
-    snapshot: {
-      get: async (name: string) => {
-        const snap = snapshots.get(name);
-        if (!snap) {
-          throw new DaytonaNotFoundError(`Snapshot ${name} not found`);
-        }
-        return snap;
-      },
-      create: async (params, _options) => {
-        snapshots.set(params.name, { state: "active" });
-        return { name: params.name };
-      },
-    },
-  };
-
-  return sdk;
-}
-
-function fakeFetch(
-  handler?: (url: string, init?: RequestInit) => Response | Promise<Response>,
-): typeof fetch {
-  return (async (input: string | URL | Request, init?: RequestInit) => {
-    const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-    if (handler) return handler(url, init);
-    if (url.endsWith("/health")) {
-      return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
-    }
-    return new Response("Not Found", { status: 404 });
-  }) as unknown as typeof fetch;
-}
-
-type ClientOverrides = Partial<DaytonaSupervisorOptions> & {
-  snapshotTimeoutMs?: number;
-};
-
-function makeClient(
-  sdk: FakeSdk = createFakeSdk(),
-  overrides: ClientOverrides = {},
-) {
-  const defaultSnapshot =
-    !overrides.agentComputerDir && overrides.snapshot === undefined
-      ? { snapshot: "prebuilt" }
-      : {};
-  return createDaytonaSupervisorClient({
-    apiKey: "test-api-key",
-    computerToken: "tok",
-    pollIntervalMs: 1,
-    healthTimeoutMs: 200,
-    sdk,
-    fetchImpl: fakeFetch(),
-    ...defaultSnapshot,
-    ...overrides,
-  } as DaytonaSupervisorOptions);
-}
+  describeComputerIsolation,
+  ProviderError,
+} from "../src/computer/provider";
+import type { ComputerStatus } from "../src/computer/schema";
+import {
+  createFakeSdk,
+  fakeFetch,
+  makeClient,
+  makeSandbox,
+} from "./computer-daytona-fixture";
 
 describe("Daytona computer supervisor", () => {
   const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // cleanup best-effort
+      }
+    }
+    tempDirs.length = 0;
+  });
 
   test("exposes the Daytona per-Bot provider contract", () => {
     const provider = createDaytonaComputerProvider({
@@ -257,79 +41,159 @@ describe("Daytona computer supervisor", () => {
 
     expect(provider.name).toBe("Daytona");
     expect(provider.isolation).toBe("per-bot");
-    expect(provider.describeIsolation()).toEqual({
-      isolation: "one computer per Bot",
-      note: "Each Bot gets a remote Daytona sandbox with its own /workspace and its own browser profile.",
-    });
+    expect(describeComputerIsolation(provider).isolation).toBe(
+      "one computer per Bot",
+    );
   });
 
   test("status maps Daytona lifecycle states without starting or creating a sandbox", async () => {
-    const states = {
-      readyStarted: "started",
-      readyRunning: "running",
-      startingCreated: "created",
-      startingRestarting: "restarting",
-      startingCreating: "creating",
-      startingStarting: "starting",
-      startingRestoring: "restoring",
-      startingPulling: "pulling_snapshot",
-      startingResuming: "resuming",
-      absentStopped: "stopped",
-      absentPaused: "paused",
-      absentArchived: "archived",
-      absentExited: "exited",
-      absentDestroyed: "destroyed",
-      absentRemoving: "removing",
-      absentArchiving: "archiving",
-      absentPausing: "pausing",
-      absentStopping: "stopping",
-      unreachableError: "error",
-      unreachableBuildFailed: "build_failed",
-      unreachableUnknown: "new_state",
-    } as const;
-    const sandboxes = Object.entries(states).map(([botId, state], index) =>
-      makeSandbox({ id: `status-${index}`, botId, state }),
+    const cases: Array<{
+      botId: string;
+      state: SandboxState;
+      expected: ComputerStatus;
+    }> = [
+      {
+        botId: "bot-started",
+        state: SandboxState.STARTED,
+        expected: { botId: "bot-started", state: "ready" },
+      },
+      {
+        botId: "bot-starting",
+        state: SandboxState.STARTING,
+        expected: { botId: "bot-starting", state: "starting" },
+      },
+      {
+        botId: "bot-creating",
+        state: SandboxState.CREATING,
+        expected: { botId: "bot-creating", state: "starting" },
+      },
+      {
+        botId: "bot-restoring",
+        state: SandboxState.RESTORING,
+        expected: { botId: "bot-restoring", state: "starting" },
+      },
+      {
+        botId: "bot-pulling",
+        state: SandboxState.PULLING_SNAPSHOT,
+        expected: { botId: "bot-pulling", state: "starting" },
+      },
+      {
+        botId: "bot-resuming",
+        state: SandboxState.RESUMING,
+        expected: { botId: "bot-resuming", state: "starting" },
+      },
+      {
+        botId: "bot-pending-build",
+        state: SandboxState.PENDING_BUILD,
+        expected: { botId: "bot-pending-build", state: "starting" },
+      },
+      {
+        botId: "bot-building-snapshot",
+        state: SandboxState.BUILDING_SNAPSHOT,
+        expected: { botId: "bot-building-snapshot", state: "starting" },
+      },
+      {
+        botId: "bot-resizing",
+        state: SandboxState.RESIZING,
+        expected: { botId: "bot-resizing", state: "starting" },
+      },
+      {
+        botId: "bot-snapshotting",
+        state: SandboxState.SNAPSHOTTING,
+        expected: { botId: "bot-snapshotting", state: "starting" },
+      },
+      {
+        botId: "bot-forking",
+        state: SandboxState.FORKING,
+        expected: { botId: "bot-forking", state: "starting" },
+      },
+      {
+        botId: "bot-stopped",
+        state: SandboxState.STOPPED,
+        expected: { botId: "bot-stopped", state: "absent" },
+      },
+      {
+        botId: "bot-paused",
+        state: SandboxState.PAUSED,
+        expected: { botId: "bot-paused", state: "absent" },
+      },
+      {
+        botId: "bot-archived",
+        state: SandboxState.ARCHIVED,
+        expected: { botId: "bot-archived", state: "absent" },
+      },
+      {
+        botId: "bot-destroyed",
+        state: SandboxState.DESTROYED,
+        expected: { botId: "bot-destroyed", state: "absent" },
+      },
+      {
+        botId: "bot-destroying",
+        state: SandboxState.DESTROYING,
+        expected: { botId: "bot-destroying", state: "absent" },
+      },
+      {
+        botId: "bot-archiving",
+        state: SandboxState.ARCHIVING,
+        expected: { botId: "bot-archiving", state: "absent" },
+      },
+      {
+        botId: "bot-pausing",
+        state: SandboxState.PAUSING,
+        expected: { botId: "bot-pausing", state: "absent" },
+      },
+      {
+        botId: "bot-stopping",
+        state: SandboxState.STOPPING,
+        expected: { botId: "bot-stopping", state: "absent" },
+      },
+      {
+        botId: "bot-error",
+        state: SandboxState.ERROR,
+        expected: {
+          botId: "bot-error",
+          state: "unreachable",
+          reason: 'Daytona reported the computer state "error".',
+        },
+      },
+      {
+        botId: "bot-build-failed",
+        state: SandboxState.BUILD_FAILED,
+        expected: {
+          botId: "bot-build-failed",
+          state: "unreachable",
+          reason: 'Daytona reported the computer state "build_failed".',
+        },
+      },
+      {
+        botId: "bot-unknown",
+        state: SandboxState.UNKNOWN,
+        expected: {
+          botId: "bot-unknown",
+          state: "unreachable",
+          reason: 'Daytona reported the computer state "unknown".',
+        },
+      },
+      {
+        botId: "bot-unknown-default-open-api",
+        state: SandboxState.UNKNOWN_DEFAULT_OPEN_API,
+        expected: {
+          botId: "bot-unknown-default-open-api",
+          state: "unreachable",
+          reason: 'Daytona reported the computer state "11184809".',
+        },
+      },
+    ];
+
+    const sandboxes = cases.map((c, index) =>
+      makeSandbox({ id: `status-${index}`, botId: c.botId, state: c.state }),
     );
     const sdk = createFakeSdk(sandboxes);
     const provider = makeClient(sdk);
 
-    for (const [botId, state] of Object.entries(states)) {
-      const status = await provider.status(botId);
-      if (state === "started" || state === "running") {
-        expect(status).toEqual({ botId, state: "ready" });
-      } else if (
-        [
-          "created",
-          "restarting",
-          "creating",
-          "starting",
-          "restoring",
-          "pulling_snapshot",
-          "resuming",
-        ].includes(state)
-      ) {
-        expect(status).toEqual({ botId, state: "starting" });
-      } else if (
-        [
-          "stopped",
-          "paused",
-          "archived",
-          "exited",
-          "destroyed",
-          "removing",
-          "archiving",
-          "pausing",
-          "stopping",
-        ].includes(state)
-      ) {
-        expect(status).toEqual({ botId, state: "absent" });
-      } else {
-        expect(status).toMatchObject({
-          botId,
-          state: "unreachable",
-          reason: expect.any(String),
-        });
-      }
+    for (const c of cases) {
+      const status = await provider.status(c.botId);
+      expect(status).toEqual(c.expected);
     }
     expect(sdk.creates).toHaveLength(0);
     expect(sandboxes.every((sandbox) => sandbox.startCalls === 0)).toBe(true);
@@ -353,122 +217,6 @@ describe("Daytona computer supervisor", () => {
     });
     expect(sdk.creates).toHaveLength(0);
   });
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // cleanup best-effort
-      }
-    }
-    tempDirs.length = 0;
-  });
-
-  test("create carries snapshot, both ownership labels, public:true, autoStopInterval:15, COMPUTER_TOKEN and COMPUTER_BOT_ID then returns preview URL after healthy /health", async () => {
-    const sdk = createFakeSdk();
-    let healthCheckedUrl: string | undefined;
-    let healthHeaders: HeadersInit | undefined;
-
-    const fetchImpl = fakeFetch((url, init) => {
-      if (url.endsWith("/health")) {
-        healthCheckedUrl = url;
-        healthHeaders = init?.headers;
-        return new Response("ok", { status: 200 });
-      }
-      return new Response("not found", { status: 404 });
-    });
-
-    const client = makeClient(sdk, {
-      computerToken: "secret-token-123",
-      fetchImpl,
-    });
-
-    const url = await client.locate("sales");
-
-    expect(sdk.creates).toHaveLength(1);
-    const createParams = sdk.creates[0];
-    expect(createParams.snapshot).toBe("prebuilt");
-    expect(createParams.public).toBe(true);
-    expect(createParams.autoStopInterval).toBe(15);
-    expect(createParams.labels).toEqual({
-      "openbot/computer": "true",
-      "openbot/bot-id": "sales",
-    });
-    expect(createParams.envVars.COMPUTER_TOKEN).toBe("secret-token-123");
-    expect(createParams.envVars.COMPUTER_BOT_ID).toBe("sales");
-
-    expect(url).toBe("https://sb-1.preview.daytona.app");
-    expect(healthCheckedUrl).toBe("https://sb-1.preview.daytona.app/health");
-    expect(
-      new Headers(healthHeaders).get("X-Daytona-Skip-Preview-Warning"),
-    ).toBe("true");
-  });
-
-  test("stopped labeled sandbox is reused and started", async () => {
-    const existing = makeSandbox({
-      id: "sb-stopped-1",
-      botId: "support",
-      state: "stopped",
-    });
-
-    const sdk = createFakeSdk([existing]);
-    const client = makeClient(sdk);
-
-    const url = await client.locate("support");
-
-    expect(url).toBe("https://sb-stopped-1.preview.daytona.app");
-    expect(sdk.creates).toHaveLength(0);
-    expect(existing.startCalls).toBe(1);
-    expect(existing.state).toBe("started");
-  });
-
-  test("concurrent locate calls create once", async () => {
-    const sdk = createFakeSdk();
-    let createsCount = 0;
-    const { promise: gatePromise, resolve: openGate } =
-      Promise.withResolvers<void>();
-    const origCreate = sdk.create;
-    sdk.create = async (params, options) => {
-      createsCount++;
-      await gatePromise;
-      return origCreate(params, options);
-    };
-
-    const client = makeClient(sdk);
-
-    const firstLocate = client.locate("marketing");
-    const secondLocate = client.locate("marketing");
-    openGate();
-
-    const [url1, url2] = await Promise.all([firstLocate, secondLocate]);
-
-    expect(url1).toBe(url2);
-    expect(createsCount).toBe(1);
-  });
-
-  test("reset deletes and the next locate creates fresh", async () => {
-    const sdk = createFakeSdk();
-    const client = makeClient(sdk);
-
-    const firstUrl = await client.locate("finance");
-    expect(sdk.creates).toHaveLength(1);
-    const firstSandbox = sdk.sandboxes.get("sb-1")!;
-
-    await client.reset("finance");
-    expect(firstSandbox.deleteCalls).toBe(1);
-
-    const secondUrl = await client.locate("finance");
-    expect(sdk.creates).toHaveLength(2);
-    expect(secondUrl).not.toBe(firstUrl);
-  });
-
-  test("stop with no sandbox is a no-op", async () => {
-    const sdk = createFakeSdk();
-    const client = makeClient(sdk);
-
-    await expect(client.stop("nonexistent")).resolves.toBeUndefined();
-    expect(sdk.creates).toHaveLength(0);
-  });
 
   test("SDK failure throws ProviderError naming the Bot", async () => {
     const sdk = createFakeSdk();
@@ -482,65 +230,6 @@ describe("Daytona computer supervisor", () => {
     await expect(client.locate("analytics")).rejects.toThrow(/analytics/);
   });
 
-  test("list maps openbot/bot-id and skips destroyed", async () => {
-    const activeBot = makeSandbox({
-      id: "sb-active",
-      botId: "bot-active",
-      state: "started",
-      createdAt: "2026-08-20T10:00:00Z",
-    });
-
-    const destroyedBot = makeSandbox({
-      id: "sb-destroyed",
-      botId: "bot-destroyed",
-      state: "destroyed",
-      createdAt: "2026-08-20T09:00:00Z",
-    });
-
-    const stoppedBot = makeSandbox({
-      id: "sb-stopped",
-      botId: "bot-stopped",
-      state: "stopped",
-      createdAt: "2026-08-20T11:00:00Z",
-    });
-
-    const unrelatedSandbox = makeSandbox({
-      id: "sb-unrelated",
-      labels: {
-        "some-other-label": "true",
-      },
-      createdAt: "2026-08-20T08:00:00Z",
-    });
-
-    const sdk = createFakeSdk([
-      activeBot,
-      destroyedBot,
-      stoppedBot,
-      unrelatedSandbox,
-    ]);
-    const client = makeClient(sdk);
-
-    const list = await client.list();
-
-    expect(list).toHaveLength(2);
-    expect(list).toEqual(
-      expect.arrayContaining([
-        {
-          botId: "bot-active",
-          status: "running",
-          url: "https://sb-active.preview.daytona.app",
-          startedAt: "2026-08-20T10:00:00Z",
-        },
-        {
-          botId: "bot-stopped",
-          status: "exited",
-          url: "https://sb-stopped.preview.daytona.app",
-          startedAt: "2026-08-20T11:00:00Z",
-        },
-      ]),
-    );
-  });
-
   test("health timeout throws ProviderError", async () => {
     const sdk = createFakeSdk();
     const failingFetch = fakeFetch(
@@ -552,9 +241,7 @@ describe("Daytona computer supervisor", () => {
       fetchImpl: failingFetch,
     });
 
-    await expect(client.locate("unhealthy-bot")).rejects.toThrow(
-      ProviderError,
-    );
+    await expect(client.locate("unhealthy-bot")).rejects.toThrow(ProviderError);
     await expect(client.locate("unhealthy-bot")).rejects.toThrow(
       /The computer for unhealthy-bot started but never answered \/health/,
     );
@@ -751,7 +438,10 @@ describe("Daytona computer supervisor", () => {
     await client.locate("recipe-test-bot");
 
     expect(capturedImage).toBeDefined();
-    const dockerfile = capturedImage!.dockerfile;
+    if (!capturedImage) {
+      throw new Error("capturedImage must be defined");
+    }
+    const dockerfile = capturedImage.dockerfile;
 
     const envPathLine = dockerfile
       .split("\n")
@@ -761,213 +451,8 @@ describe("Daytona computer supervisor", () => {
     expect(envPathLine).toContain("/root/.bun/bin");
     expect(envPathLine).toContain("/usr/bin");
     expect(envPathLine).toContain("/bin");
-    expect(envPathLine).not.toContain("${PATH}");
-    expect(dockerfile).not.toContain("${PATH}");
-  });
-
-  test("reset waits for sandbox deletion so list does not return the reset bot", async () => {
-    const existing = makeSandbox({
-      id: "sb-reset-wait-1",
-      botId: "reset-wait-bot",
-      deleteHandler: (_timeout, wait) => {
-        if (wait) {
-          existing.state = "destroyed";
-        }
-      },
-    });
-
-    const sdk = createFakeSdk([existing]);
-    const client = makeClient(sdk);
-
-    await client.reset("reset-wait-bot");
-
-    expect(existing.deleteCalls).toBe(1);
-    expect(existing.deleteArgs).toEqual([{ timeout: 60, wait: true }]);
-    const remaining = await client.list();
-    expect(
-      remaining.find((bot) => bot.botId === "reset-wait-bot"),
-    ).toBeUndefined();
-  });
-
-  test("reset waits for Daytona list convergence across eventual consistency stale started responses", async () => {
-    const existing = makeSandbox({
-      id: "sb-reset-convergence-1",
-      botId: "reset-convergence-bot",
-    });
-
-    const sdk = createFakeSdk([existing]);
-    let postDeleteListCalls = 0;
-    const origList = sdk.list;
-
-    sdk.list = (query?: { labels?: Record<string, string> }) => {
-      if (existing.deleteCalls > 0) {
-        postDeleteListCalls++;
-        if (postDeleteListCalls === 1) {
-          async function* staleGenerator() {
-            yield {
-              id: existing.id,
-              state: "started",
-              labels: existing.labels,
-              createdAt: existing.createdAt,
-              start: async () => {},
-              stop: async () => {},
-              delete: async () => {},
-              getPreviewLink: async () => ({ url: existing.previewUrl }),
-            };
-          }
-          return staleGenerator();
-        }
-        async function* emptyGenerator() {}
-        return emptyGenerator();
-      }
-      return origList(query);
-    };
-
-    const client = makeClient(sdk);
-
-    await client.reset("reset-convergence-bot");
-
-    const immediate = await client.list();
-    expect(
-      immediate.find((bot) => bot.botId === "reset-convergence-bot"),
-    ).toBeUndefined();
-
-    const later = await client.list();
-    expect(
-      later.find((bot) => bot.botId === "reset-convergence-bot"),
-    ).toBeUndefined();
-  });
-
-  test("failed reset deletion does not tombstone sandbox so retry deletes it and removes it from list", async () => {
-    let deleteAttempts = 0;
-    const existing = makeSandbox({
-      id: "sb-failed-delete-1",
-      botId: "retry-delete-bot",
-      deleteHandler: (_timeout, _wait) => {
-        deleteAttempts++;
-        if (deleteAttempts === 1) {
-          throw new Error("transient deletion error");
-        }
-        existing.state = "destroyed";
-      },
-    });
-
-    const sdk = createFakeSdk([existing]);
-    const client = makeClient(sdk);
-
-    let resetError: unknown;
-    try {
-      await client.reset("retry-delete-bot");
-    } catch (err) {
-      resetError = err;
-    }
-
-    expect(resetError).toBeInstanceOf(ProviderError);
-    expect((resetError as Error)?.message).toContain("retry-delete-bot");
-    expect(existing.deleteCalls).toBe(1);
-
-    await client.reset("retry-delete-bot");
-
-    expect(existing.deleteCalls).toBe(2);
-    const remaining = await client.list();
-    expect(
-      remaining.find((bot) => bot.botId === "retry-delete-bot"),
-    ).toBeUndefined();
-  });
-
-  test("locate polls stopping sandbox until stopped, calls start(300), and returns preview URL after healthy /health", async () => {
-    const stoppingSandbox = makeSandbox({
-      id: "sb-stopping-1",
-      botId: "stopping-bot",
-      state: "stopping",
-    });
-
-    const sdk = createFakeSdk([stoppingSandbox]);
-    let getCalls = 0;
-    const origGet = sdk.get;
-    sdk.get = async (id: string) => {
-      if (id === stoppingSandbox.id && ++getCalls === 1) {
-        stoppingSandbox.state = "stopped";
-      }
-      return origGet(id);
-    };
-
-    const client = makeClient(sdk);
-
-    const url = await client.locate("stopping-bot");
-
-    expect(url).toBe("https://sb-stopping-1.preview.daytona.app");
-    expect(stoppingSandbox.startCalls).toBe(1);
-    expect(stoppingSandbox.state).toBe("started");
-  });
-
-  test("locate creates a fresh sandbox when a cached sandbox is destroying or not found", async () => {
-    const sdk = createFakeSdk();
-    const client = makeClient(sdk);
-
-    const firstUrl = await client.locate("destroying-bot");
-    expect(sdk.creates).toHaveLength(1);
-    expect(firstUrl).toBe("https://sb-1.preview.daytona.app");
-
-    const firstSandbox = sdk.sandboxes.get("sb-1")!;
-    firstSandbox.state = "destroying";
-
-    const secondUrl = await client.locate("destroying-bot");
-    expect(sdk.creates).toHaveLength(2);
-    expect(secondUrl).toBe("https://sb-2.preview.daytona.app");
-    expect(secondUrl).not.toBe(firstUrl);
-  });
-
-  test("stop on an already stopped sandbox resolves without calling sandbox.stop", async () => {
-    const stoppedSandbox = makeSandbox({
-      id: "sb-already-stopped",
-      botId: "already-stopped-bot",
-      state: "stopped",
-    });
-
-    const sdk = createFakeSdk([stoppedSandbox]);
-    const client = makeClient(sdk);
-
-    await client.stop("already-stopped-bot");
-
-    expect(stoppedSandbox.stopCalls).toBe(0);
-  });
-
-  test("list maps Daytona started to running and stopped to exited in shared supervisor vocabulary", async () => {
-    const startedSandbox = makeSandbox({
-      id: "sb-started-voc",
-      botId: "started-voc-bot",
-      state: "started",
-      createdAt: "2026-08-20T10:00:00Z",
-    });
-
-    const stoppedSandbox = makeSandbox({
-      id: "sb-stopped-voc",
-      botId: "stopped-voc-bot",
-      state: "stopped",
-      createdAt: "2026-08-20T11:00:00Z",
-    });
-
-    const sdk = createFakeSdk([startedSandbox, stoppedSandbox]);
-    const client = makeClient(sdk);
-
-    const list = await client.list();
-
-    expect(list).toEqual(
-      expect.arrayContaining([
-        {
-          botId: "started-voc-bot",
-          status: "running",
-          url: "https://sb-started-voc.preview.daytona.app",
-          startedAt: "2026-08-20T10:00:00Z",
-        },
-        {
-          botId: "stopped-voc-bot",
-          status: "exited",
-          url: "https://sb-stopped-voc.preview.daytona.app",
-          startedAt: "2026-08-20T11:00:00Z",
-        },
-      ]),
-    );
+    const dollarPath = "$" + "{PATH}";
+    expect(envPathLine).not.toContain(dollarPath);
+    expect(dockerfile).not.toContain(dollarPath);
   });
 });

@@ -14,11 +14,7 @@
  */
 
 import type { ComputerStatus } from "./schema";
-import type {
-  ComputerLocation,
-  ComputerProvider,
-  IsolationDescription,
-} from "./provider";
+import type { ComputerLocation, ComputerProvider } from "./provider";
 
 type SupervisorComputerLocation = {
   botId: string;
@@ -73,6 +69,9 @@ export function createDockerSupervisorProvider(
 
     const body = (await response.json().catch(() => null)) as {
       error?: string;
+      stopped?: boolean;
+      reset?: boolean;
+      computers?: SupervisorComputerLocation[];
     } | null;
     if (!response.ok) {
       throw new SupervisorError(
@@ -82,13 +81,19 @@ export function createDockerSupervisorProvider(
     return body;
   }
 
-  async function list(): Promise<ComputerLocation[]> {
+  async function listRaw(): Promise<SupervisorComputerLocation[]> {
     const body = (await call("/computers", "GET")) as {
       computers?: SupervisorComputerLocation[];
-    };
-    return (body?.computers ?? []).map((computer) => ({
+    } | null;
+    return body?.computers ?? [];
+  }
+
+  async function list(): Promise<ComputerLocation[]> {
+    const computers = await listRaw();
+    return computers.map((computer) => ({
       botId: computer.botId,
-      status: computer.status,
+      status:
+        computer.status.toLowerCase() === "running" ? "running" : "stopped",
       ...(computer.url
         ? { url: computer.url }
         : computer.port
@@ -100,58 +105,39 @@ export function createDockerSupervisorProvider(
 
   function statusFromLocation(
     botId: string,
-    location: ComputerLocation | undefined,
+    location: SupervisorComputerLocation | undefined,
   ): ComputerStatus {
     if (!location) return { botId, state: "absent" };
 
-    const rawStatus = location.status;
-    switch (rawStatus.toLowerCase()) {
+    const rawStatus = location.status.toLowerCase();
+    switch (rawStatus) {
       case "running":
-      case "started":
         return { botId, state: "ready" };
       case "created":
       case "restarting":
-      case "creating":
-      case "starting":
-      case "restoring":
-      case "pulling_snapshot":
-      case "resuming":
         return { botId, state: "starting" };
-      case "stopped":
       case "paused":
-      case "archived":
-      case "exited":
-      case "destroyed":
       case "removing":
-      case "archiving":
-      case "pausing":
-      case "stopping":
+      case "exited":
         return { botId, state: "absent" };
-      case "error":
-      case "build_failed":
+      case "dead":
         return {
           botId,
           state: "unreachable",
-          reason: `The computer reported state "${rawStatus}".`,
+          reason: `The computer reported state "${location.status}".`,
         };
       default:
         return {
           botId,
           state: "unreachable",
-          reason: `The computer reported unknown state "${rawStatus}".`,
+          reason: `The computer reported unknown state "${location.status}".`,
         };
     }
   }
 
-  const isolation: IsolationDescription = {
-    isolation: "one computer per Bot",
-    note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
-  };
-
   return {
     name: "Docker supervisor",
     isolation: "per-bot",
-    describeIsolation: () => isolation,
 
     /**
      * The URL of this Bot's computer, starting it if it is not already up.
@@ -175,7 +161,7 @@ export function createDockerSupervisorProvider(
 
     async status(botId: string): Promise<ComputerStatus> {
       try {
-        const computers = await list();
+        const computers = await listRaw();
         return statusFromLocation(
           botId,
           computers.find((computer) => computer.botId === botId),
@@ -192,18 +178,20 @@ export function createDockerSupervisorProvider(
       }
     },
 
-    async stop(botId: string): Promise<void> {
-      await call(`/computers/${encodeURIComponent(botId)}/stop`);
+    async stop(botId: string): Promise<{ wasRunning: boolean }> {
+      const result = (await call(
+        `/computers/${encodeURIComponent(botId)}/stop`,
+      )) as { stopped?: boolean } | null;
+      return { wasRunning: result?.stopped === true };
     },
 
-    async reset(botId: string): Promise<void> {
-      await call(`/computers/${encodeURIComponent(botId)}/reset`);
+    async reset(botId: string): Promise<{ cleared: boolean }> {
+      const result = (await call(
+        `/computers/${encodeURIComponent(botId)}/reset`,
+      )) as { reset?: boolean } | null;
+      return { cleared: result?.reset === true };
     },
 
     list,
   };
 }
-
-export const createSupervisorClient = createDockerSupervisorProvider;
-
-export type SupervisorClient = ComputerProvider;

@@ -205,4 +205,3 @@ function throwMappedError(
   }
   throw new ComputerUnavailableError(detail);
 }
-
