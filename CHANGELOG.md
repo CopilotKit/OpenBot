@@ -20,6 +20,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   driving a browser. Governed like every other action: the policy decides, the audit row is written
   first, and a rule can refuse a shell outright with `intent == "run_command"` or refuse particular
   commands. The command is recorded; its output is not.
+- **The audit trail shows the command.** A command row names what ran, the way a file row names the
+  path, rather than reporting an element it was never about.
 - **`COMPUTER_SANDBOX=on`** turns on Chromium's own sandbox where the host permits user namespaces.
   Which way it went is printed at start-up either way.
 

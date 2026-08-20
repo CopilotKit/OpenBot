@@ -1,11 +1,17 @@
 # Deployment
 
 OpenBot ships as one container. It carries the app, the API that serves it, and the browser the Bots
-drive. Point it at a PostgreSQL database and it does what it does on a laptop.
+drive, and it can carry its own PostgreSQL as well. It does what it does on a laptop.
 
 ```sh
 docker build -t openbot .
+
+# A database you already run.
 docker run -p 3001:3001 --env-file .env openbot
+
+# Or one inside the container. Nothing else to provision.
+docker run -p 3001:3001 --env-file .env \
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql/data openbot
 ```
 
 ## What is in the image, and what is not
@@ -14,11 +20,17 @@ docker run -p 3001:3001 --env-file .env openbot
 the container and is deliberately not published: it holds real logins and its only caller is the
 process beside it.
 
-**Not in it:**
+**PostgreSQL, if you ask for it.** `EMBEDDED_POSTGRES=on` starts one inside the container, creates
+the database and the `vector` extension the first time, and runs the migrations on every start. It
+listens on loopback only and is never published, so there is no password to manage.
 
-**PostgreSQL.** A container filesystem does not survive a redeploy and the audit trail is the
-product. Point `DATABASE_URL` at a managed instance. The `vector` extension must be enabled; RDS,
-Cloud SQL and Azure Database all support it, none enable it for you.
+Give it a volume at `/var/lib/postgresql/data`. Without one, a redeploy takes the audit trail with
+it, and the audit trail is the product. Platforms that offer no persistent volume are the ones to
+point at a managed database instead: set `DATABASE_URL` and leave `EMBEDDED_POSTGRES` off. The
+`vector` extension must be enabled there; RDS, Cloud SQL and Azure Database all support it, none
+enable it for you.
+
+**Not in it:**
 
 **The supervisor.** It gives each Bot its own container, which needs a Docker socket, which no
 serverless container platform permits. Without it every Bot shares the one browser, exactly as they
@@ -50,7 +62,8 @@ and the fix would not be available.
 
 | Variable | |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL with the `vector` extension |
+| `DATABASE_URL` | PostgreSQL with the `vector` extension. Not needed with `EMBEDDED_POSTGRES=on` |
+| `EMBEDDED_POSTGRES` | `on` to run the database inside the container. Off by default |
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted |
 | `COPILOTKIT_LICENSE_TOKEN` | from `npx copilotkit@latest license --write` |
@@ -66,8 +79,12 @@ an administrator.
 
 ## Migrations
 
-A release step, not a start step. Two replicas starting together would race, and a failed migration
-should stop a deploy rather than leave a half-migrated database serving traffic.
+With `EMBEDDED_POSTGRES=on` they run at start and there is nothing to do. There is exactly one
+process and no deploy pipeline, so the alternative would be a runbook.
+
+With an external database they are a release step, not a start step. Two replicas starting together
+would race, and a failed migration should stop a deploy rather than leave a half-migrated database
+serving traffic.
 
 ```sh
 docker run --rm --env-file .env openbot \

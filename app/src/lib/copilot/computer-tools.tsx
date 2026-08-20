@@ -631,11 +631,15 @@ export function ComputerTools() {
       "installing a tool you need, processing a file you saved, running a script. The working " +
       "directory is your workspace, so paths are relative to it and files you write here are the " +
       "same ones the file tools see. Commands run in bash, so pipes and && work. Long output is " +
-      "truncated from the start, and a command that runs too long is stopped.",
+      "truncated from the start, and a command that runs too long is stopped. " +
+      "You are not the root user, so anything that writes outside your workspace needs sudo, " +
+      "which asks for no password: installing a package is " +
+      "`sudo apt-get update && sudo apt-get install -y <package>`. If sudo is refused, this " +
+      "computer does not grant it, so say so rather than retrying.",
     parameters: z.object({
       command: z
         .string()
-        .describe("The command to run, such as: apt-get install -y jq"),
+        .describe("The command to run, such as: sudo apt-get install -y jq"),
     }),
     handler: async (input: { command: string }) =>
       callComputer(bot.current, "/exec", {

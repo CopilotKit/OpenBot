@@ -112,6 +112,15 @@ function fakeComputer(options?: {
           path: "notes",
           entries: [],
         });
+      case "/exec":
+        calls.push("runCommand");
+        return Response.json({
+          command: "cat secrets.txt",
+          exitCode: 0,
+          output: "the customer's card number is 4111-1111-1111-1111",
+          truncated: false,
+          timedOut: false,
+        });
       case "/navigate":
         calls.push("navigate");
         return Response.json({
@@ -379,6 +388,34 @@ describe("the computer gateway", () => {
     // The same guarantee as typed text: a Bot writes down what it was told, so a file body is exactly
     // as sensitive and is never put in the row.
     expect(JSON.stringify(rows[0]?.payload)).not.toContain("4111");
+  });
+
+  test("a permitted command runs and is recorded by command, never by output", async () => {
+    const { gateway, calls, rows } = await gatewayWith(PERMISSIVE);
+    await gateway.runCommand("bot-1", ACTOR, { command: "cat secrets.txt" });
+
+    expect(calls).toEqual(["runCommand"]);
+    expect(rows[0]?.eventType).toBe("computer.action_allowed");
+    expect(rows[0]?.payload.command).toBe("cat secrets.txt");
+    // The command IS the action, so it is recorded in full. Its output is the file body of this
+    // pair: whatever the command read off a page or out of a file, and never in the row.
+    expect(JSON.stringify(rows[0]?.payload)).not.toContain("4111");
+    // A command has no page element, so the row says nothing about a snapshot it was never part of.
+    expect(rows[0]?.payload.element).toBeUndefined();
+  });
+
+  test("a command the policy refuses is recorded and never reaches the computer", async () => {
+    const { gateway, calls, rows } = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ['intent == "run_command"'],
+    });
+
+    await expect(
+      gateway.runCommand("bot-1", ACTOR, { command: "cat secrets.txt" }),
+    ).rejects.toThrow(ActionRefusedError);
+    expect(calls).toEqual([]);
+    expect(rows[0]?.eventType).toBe("computer.action_refused");
+    expect(rows[0]?.payload.command).toBe("cat secrets.txt");
   });
 
   test("the computer is told WHICH Bot is asking", async () => {

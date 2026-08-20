@@ -827,9 +827,9 @@ async function write(
             name: entry.element.name,
             ...(entry.element.type ? { type: entry.element.type } : {}),
           }
-        : entry.filePath
-          ? // A file action has no element and never will. File rows leave the element field absent
-            // rather than describing a browser snapshot.
+        : entry.filePath || entry.command
+          ? // A file or command action has no element and never will. Those rows leave the element
+            // field absent rather than describing a browser snapshot.
             undefined
           : // An action on an element the server cannot identify is worth recording plainly, rather
             // than as an absent field that reads like a logging gap.
