@@ -38,6 +38,14 @@ type ChatTranscriptProps = {
   queued?: readonly QueuedMessage[];
   /** Take one back before it runs. Without it a queued line is shown but cannot be undone. */
   onRemoveQueued?: (id: string) => void;
+  /**
+   * Why the last turn ended without an answer, if it did.
+   *
+   * A sentence rather than a flag, because the reasons are not interchangeable: a Bot that refused,
+   * a Bot whose endpoint is down and a Bot that simply stopped talking are three different things to
+   * be told, and only the thing that ended the turn knows which one happened.
+   */
+  stopped?: string;
 };
 
 /** One shared empty array, so a screen without a queue does not hand down a new one per render. */
@@ -87,6 +95,31 @@ function Thinking() {
       role="status"
     >
       Thinking
+    </p>
+  );
+}
+
+/**
+ * The turn ended and no answer came.
+ *
+ * In the same slot as `Thinking`, and for the same reason it is there: the person is looking at the
+ * bottom of the transcript, immediately under their own message, because that is where the answer
+ * was going to appear. Saying so above the composer put the explanation in a different part of the
+ * screen from the gap it explains, and left the last thing in the conversation looking unfinished.
+ *
+ * NOT A MESSAGE, deliberately. It has no id, is never anchored, and is gone the moment the next turn
+ * starts. Making it a transcript row would put a sentence into the conversation that nobody said,
+ * and the conversation is sent back to the model on the next turn, so the Bot would then read its
+ * own obituary as something it had written.
+ */
+function Stopped({ reason }: { reason: string }) {
+  return (
+    <p
+      className="text-destructive text-sm"
+      data-testid="transcript-stopped"
+      role="alert"
+    >
+      {reason}
     </p>
   );
 }
@@ -455,6 +488,7 @@ export function ChatTranscript({
   messages,
   onRemoveQueued,
   queued = EMPTY_QUEUE,
+  stopped,
 }: ChatTranscriptProps) {
   /*
    * NOT MEMOISED, AND THAT IS DELIBERATE. `useMemo` keyed on `messages` looks obviously right and
@@ -545,11 +579,18 @@ export function ChatTranscript({
               ),
             )}
             {/*
-             * Outside the item list, so it is not a message. It has no id, is never anchored, and
-             * disappears the moment the answer starts — giving it a `MessageScrollerItem` would ask
+             * Outside the item list, so neither of these is a message. Each has no id, is never
+             * anchored, and is gone by the next turn — giving one a `MessageScrollerItem` would ask
              * the scroller to measure and anchor something that exists for a second and a half.
+             *
+             * One or the other, never both: a turn that ended has stopped being in flight, and a
+             * shimmering "Thinking" under a line saying the Bot stopped would contradict it.
              */}
-            {waitingOnFirstToken ? <Thinking /> : null}
+            {stopped ? (
+              <Stopped reason={stopped} />
+            ) : waitingOnFirstToken ? (
+              <Thinking />
+            ) : null}
             {/*
              * Below the thinking line, and outside the item list for the same reason it is: these
              * are not yet turns. They have ids of their own, but they are this tab's ids and not the

@@ -12,6 +12,7 @@ import {
   startChannelActivityListener,
 } from "./channels/events";
 import { createChannelStore } from "./channels/routes";
+import { createStallGuard } from "./channels/stall-guard";
 import { createThreadIdentity } from "./channels/thread-identity";
 import { websocket as channelSocket } from "./channels/socket";
 import { createSandboxedStore } from "./components/sandboxed";
@@ -294,6 +295,20 @@ process.on("unhandledRejection", (reason) => {
   );
 });
 
+/**
+ * The watch on Bot streams, built once and shared by every run.
+ *
+ * It has to outlive the request that opens a stream: the sweep that notices a silent one is still
+ * running long after the run request has been answered, because in Intelligence mode that request is
+ * answered in about a second and the Bot keeps writing for as long as it has something to say.
+ *
+ * The same audit store as everything else, so a Bot that hangs is recorded beside what Bots do.
+ */
+const stallGuard = createStallGuard({
+  stallMs: config.agentStallTimeoutMs,
+  auditStore: bootAuditStore,
+});
+
 const app = createApp(
   config,
   auth,
@@ -330,6 +345,7 @@ const app = createApp(
       }),
     identifyUser,
     identifyActor,
+    stallGuard,
   ),
   computerClient,
   // The only path to an acting call.

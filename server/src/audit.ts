@@ -41,6 +41,20 @@ export const auditEventTypes = [
   "connector.sync_failed",
   "knowledge.searched",
   "agent.invoked",
+  /**
+   * A Bot's stream stopped producing anything and the turn was ended for it.
+   *
+   * Recorded because a Bot is somebody else's infrastructure and this is the failure it has that
+   * nothing else in the trail can show. Every other row here is something that happened; this one is
+   * the absence of anything happening, which leaves no trace of its own.
+   *
+   * It is also the sort of thing nobody notices is happening repeatedly. One hung turn reads as a
+   * bad afternoon and gets a shrug; the same Bot hanging twice a day for a month is a fact about an
+   * endpoint, and it only becomes visible when somebody can count it. The row names the Bot, how
+   * long its stream was silent, and how many chunks it managed first, so a reader can tell an
+   * endpoint that dies mid-answer from one that never answers at all.
+   */
+  "agent.stream_stalled",
   "mcp.call_succeeded",
   "mcp.call_rejected",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
