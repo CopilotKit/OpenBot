@@ -344,34 +344,63 @@ function ComponentRow({
         </DialogContent>
       </Dialog>
 
-      <div className="flex flex-wrap gap-2 px-4 py-3">
-        {bots.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            There are no Bots yet.
-          </p>
-        ) : null}
-        {bots.map((bot) => {
-          const has = !withheld.has(bot.id);
-          return (
-            <Button
-              data-testid={`grant-${component.name}-${bot.id}`}
-              key={bot.id}
-              onClick={() => onSetGrant(bot.id, !has)}
-              size="sm"
-              type="button"
-              /* The fill is the state, as on the skills grants: a glance has to answer which are on. */
-              variant={has ? "default" : "outline"}
-            >
-              {bot.name}
-            </Button>
-          );
-        })}
+      <div className="px-4 py-3">
+        {/*
+         * The row of Bots was unlabelled, so a filled name and a hollow one were a state nobody
+         * could read: it was not said anywhere that these are the Bots allowed to answer with this,
+         * nor that clicking one takes it away.
+         */}
+        <p className="font-medium text-muted-foreground text-xs">
+          Bots that may answer with it
+        </p>
+        <p className="mt-1 text-muted-foreground text-xs">
+          Filled means yes. Switch one off and that Bot is never told the
+          component exists, so it cannot ask for it and does not apologise for
+          not having it.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {bots.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              There are no Bots yet.
+            </p>
+          ) : null}
+          {bots.map((bot) => {
+            const has = !withheld.has(bot.id);
+            return (
+              <Button
+                data-testid={`grant-${component.name}-${bot.id}`}
+                key={bot.id}
+                onClick={() => onSetGrant(bot.id, !has)}
+                size="sm"
+                type="button"
+                /* The fill is the state, as on the skills grants: a glance has to answer which are on. */
+                variant={has ? "default" : "outline"}
+              >
+                {bot.name}
+              </Button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Data-function grants are separate from Bot component grants. */}
       {dataFunctions.length > 0 ? (
         <div className="border-t border-border px-4 py-3">
-          <p className="text-xs font-medium text-muted-foreground">May read</p>
+          {/*
+           * "May read" on its own said nothing. It is a different kind of grant from the row above,
+           * and the difference is the whole point: the row above decides who may draw this, and this
+           * decides what it is allowed to go and fetch in order to draw it. Somebody who reads the
+           * two as one switch will grant a component to every Bot believing that is all they did.
+           */}
+          <p className="font-medium text-muted-foreground text-xs">
+            What it may go and read
+          </p>
+          <p className="mt-1 text-muted-foreground text-xs">
+            A separate grant, and not implied by the one above. This component
+            can ask the server for data to fill itself with; until one of these
+            is on it draws only what the Bot passes it. Each one names what it
+            reads, and every read is a row in Audit.
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {dataFunctions.map((fn) => {
               const has = heldFunctions.has(fn.name);

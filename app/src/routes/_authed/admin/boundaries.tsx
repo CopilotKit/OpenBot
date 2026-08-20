@@ -141,7 +141,10 @@ function BoundariesPage() {
       }
       title="Boundaries"
     >
-      <PageSection title="When a rule matches">
+      <PageSection
+        description="Enforce stops the action. Record it and allow it writes the same row and lets the action through, which is how a rule is tried on real traffic before it starts refusing anybody."
+        title="When a rule matches"
+      >
         <div className="mt-2 flex gap-2">
           {(["enforce", "dry-run"] as PolicyMode[]).map((mode) => (
             <Button
@@ -166,7 +169,23 @@ function BoundariesPage() {
         </p>
       </PageSection>
 
-      <PageSection title="It may never">
+      <PageSection
+        description={
+          <>
+            Checked first, and a match ends it: nothing below is consulted and
+            the Bot is told which rule refused it. Rules are CEL, and can ask
+            about <code>tool.name</code>, <code>intent</code>,{" "}
+            <code>bot.id</code>, <code>actor.id</code>, <code>page.url</code>{" "}
+            and <code>page.host</code>, the element being acted on, the{" "}
+            <code>key</code> being pressed, the file being touched, and{" "}
+            <code>mcp.server</code>, <code>mcp.tool</code> and{" "}
+            <code>mcp.effect</code> for a call to somebody else&rsquo;s tools. A
+            rule that cannot be evaluated counts as a match, so a mistyped deny
+            refuses rather than quietly permitting what it was meant to forbid.
+          </>
+        }
+        title="It may never"
+      >
         {policy.deny.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">
             No rules. Every action is allowed and recorded.
@@ -244,7 +263,10 @@ function BoundariesPage() {
         </ul>
       </PageSection>
 
-      <PageSection title="Otherwise it may">
+      <PageSection
+        description="The floor, applied to anything the deny list did not catch. It is not a formality: an empty list here permits nothing, so a deployment that clears this refuses every action rather than allowing every action."
+        title="Otherwise it may"
+      >
         <ul className="mt-2 space-y-1">
           {policy.allow.map((rule) => (
             <li className="font-mono text-xs text-muted-foreground" key={rule}>
