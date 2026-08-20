@@ -26,7 +26,57 @@ const CALL_TIMEOUT_MS = 60_000;
  * deciding how much of our context window to spend, and a truncation the model can see is far better
  * than a run that fails or a bill nobody expected. Truncated visibly, never silently.
  */
-const MAX_RESULT_CHARS = 20_000;
+export const MAX_RESULT_CHARS = 20_000;
+
+/**
+ * What a vendor said, as the string a model will read.
+ *
+ * Its own function, and exported, because this is a decision rather than plumbing: it settles what a
+ * model is told when a vendor answers with nothing, with something enormous, or with a part we
+ * cannot render. Keeping it out of {@link callTool} means it can be asserted without a server to
+ * talk to.
+ *
+ * The empty case is the one that earns the separation. A tool that matched nothing used to produce
+ * an empty string, and an empty string is the worst thing to put in front of a model: it reads as
+ * "the tool had nothing to say" rather than "there is nothing there", and the model closes the gap
+ * from memory. For a knowledge connector that is precisely the failure the whole slice exists to
+ * prevent — an answer with nothing behind it. So nothing is stated, in words.
+ */
+export function resultText(content: unknown): {
+  text: string;
+  truncated: boolean;
+} {
+  const parts = Array.isArray(content) ? content : [];
+  const joined = parts
+    .map((part) => {
+      const item = part as { type?: string; text?: string };
+      if (item.type === "text" && typeof item.text === "string") {
+        return item.text;
+      }
+      // A non-text part is named rather than dropped. A model told "[image]" can say the tool
+      // returned an image; a model handed nothing concludes the tool returned nothing.
+      return `[${item.type ?? "unknown"}]`;
+    })
+    .join("\n");
+
+  // Trimmed only to decide emptiness, never to alter a result that has something in it. A vendor
+  // that sent one newline has said nothing, and which shape of nothing arrived should not change
+  // what the model is told.
+  if (joined.trim() === "") {
+    return {
+      text: "The tool returned no content. Nothing was found, so there is nothing here to answer from.",
+      truncated: false,
+    };
+  }
+
+  if (joined.length <= MAX_RESULT_CHARS) {
+    return { text: joined, truncated: false };
+  }
+  return {
+    text: `${joined.slice(0, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${joined.length} characters]`,
+    truncated: true,
+  };
+}
 
 export type McpTool = {
   name: string;
@@ -123,26 +173,7 @@ export async function callTool(
       { timeout: CALL_TIMEOUT_MS },
     );
 
-    const parts = Array.isArray(result.content) ? result.content : [];
-    const text = parts
-      .map((part) => {
-        const item = part as { type?: string; text?: string };
-        if (item.type === "text" && typeof item.text === "string") {
-          return item.text;
-        }
-        // A non-text part is named rather than dropped. A model told "[image]" can say the tool
-        // returned an image; a model handed nothing concludes the tool returned nothing.
-        return `[${item.type ?? "unknown"}]`;
-      })
-      .join("\n");
-
-    const truncated = text.length > MAX_RESULT_CHARS;
-    return {
-      text: truncated
-        ? `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${text.length} characters]`
-        : text,
-      isError: result.isError === true,
-      truncated,
-    };
+    const { text, truncated } = resultText(result.content);
+    return { text, isError: result.isError === true, truncated };
   });
 }
