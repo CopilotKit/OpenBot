@@ -88,8 +88,11 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `BETTER_AUTH_URL`            | Public API server base URL. Required with Google OAuth.                                |
 | `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API.                                       |
 | `INITIAL_ADMIN_EMAILS`       | Comma-separated users seeded as administrators.                                        |
+| `OPENBOT_PUBLIC_URL`         | Public address of this deployment. Defaults to `BETTER_AUTH_URL`.                       |
 
 Google OAuth client id and secret must be configured together. If Google OAuth is configured, `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are also required.
+
+`OPENBOT_PUBLIC_URL` matters only for a connector each person connects their own account to, such as Google Drive. It builds the redirect URI the vendor sends somebody back to after they consent, which has to match what an administrator registered with that vendor character for character — so it comes from configuration rather than from the incoming request. Most deployments never set it, because `BETTER_AUTH_URL` is already the same public address. Set it where the API is reached at a different one. With neither, the Plugins page says the deployment cannot complete a consent flow, and no account can be connected.
 
 ## Computer and supervisor
 
