@@ -208,10 +208,16 @@ export function createComputerRoutes(
    * The computers, for the admin surface.
    *
    * Not per-Bot in the path the way the acting routes are: this asks the computer what it holds, and
-   * it holds a list. `:botId` is still there because every route under this router has it and the
-   * gateway wants somebody to attribute the call to.
+   * it holds a list. `:botId` is still there because every route under this router has it. The
+   * list itself is every computer, so a signed-in user is not enough; an administrator has to ask.
    */
   routes.get("/:botId/computers", async (context) => {
+    // The session guard and the question of whether this person may act as the Bot in the path are
+    // both applied by the middleware above. Neither is the question here: the answer is the whole
+    // fleet whatever `:botId` says, so it takes administering the deployment.
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
     try {
       return context.json(await gateway.computers());
     } catch (error) {
