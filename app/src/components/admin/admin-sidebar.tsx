@@ -75,7 +75,7 @@ const GROUPS: {
         linkOptions: { to: "/admin/plugins" },
       },
       {
-        title: "Components",
+        title: "UI Components",
         icon: IconLayoutGrid,
         linkOptions: { to: "/admin/components" },
       },
