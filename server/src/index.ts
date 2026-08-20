@@ -452,9 +452,18 @@ serve<SocketData>({
       }
       // The session guard, applied by hand because middleware does not run on an upgrade. An
       // unauthenticated socket here would be the whole point of the proxy defeated.
-      const actor = await identifyUser(request).catch(() => null);
+      const actor = await resolveRequestActor(request).catch(() => null);
       if (!actor) {
         return new Response("Sign in first.", { status: 401 });
+      }
+      // And which Bot, which the guard above does not answer. This socket carries that Bot's screen,
+      // so signing in is not enough: without this, anybody signed in watches anybody's Bot work.
+      if (
+        !(await agentProfileStore
+          .get({ id: actor.id, role: actor.role }, streamBotId)
+          .catch(() => null))
+      ) {
+        return new Response("There is no such Bot.", { status: 404 });
       }
       /*
        * Through the gateway, not the provider.

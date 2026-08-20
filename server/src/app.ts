@@ -2,6 +2,7 @@ import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { authoriseAgentCall } from "./agents/callback-token";
+import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import {
@@ -539,13 +540,33 @@ export function createApp(
     app.route("/", copilotHandler);
   }
 
+  /**
+   * May this person act as this Bot?
+   *
+   * The store's own read path already applies `canAccessAgent`, so asking it for the Bot is the same
+   * question the roster and the runtime ask, rather than a second copy of the rule.
+   *
+   * A deployment with no profile store has no agents table and therefore no private Bot to protect:
+   * its Bots come from the tenant package and are public to everybody who can sign in. Answering yes
+   * there keeps that deployment working without weakening one that has owners.
+   */
+  const canUseBot: BotAccessCheck = agentProfileStore
+    ? async (actor, botId) =>
+        (await agentProfileStore.get(actor, botId)) !== null
+    : async () => true;
+
   // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
   // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is
   // the one shape of this feature that must not exist.
   if (computerGateway && computerPolicy) {
     app.route(
       "/api/computers",
-      createComputerRoutes(computerGateway, computerPolicy, requireUser),
+      createComputerRoutes(
+        computerGateway,
+        computerPolicy,
+        requireUser,
+        canUseBot,
+      ),
     );
   }
 
@@ -580,7 +601,10 @@ export function createApp(
   }
 
   if (pluginStore) {
-    app.route("/api/plugins", createPluginRoutes(pluginStore, requireUser));
+    app.route(
+      "/api/plugins",
+      createPluginRoutes(pluginStore, requireUser, canUseBot),
+    );
   }
 
   /*
