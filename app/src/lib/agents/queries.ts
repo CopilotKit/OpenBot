@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client } from "@/lib/client";
+import { client, tryClient } from "@/lib/client";
 
 export type AgentVisibility = "public" | "private";
 
@@ -56,4 +56,46 @@ export function agentQueryOptions(agentId: string) {
         fallback: "Could not load this coworker",
       }),
   });
+}
+
+/** What the server said when it tried the endpoint. */
+export type ConnectionVerdict =
+  | { ok: true; events: string[] }
+  | { ok: false; reason: string };
+
+/**
+ * Ask the server to reach a coworker's endpoint, from where a run will reach it.
+ *
+ * A plain function rather than a factory: the answer is about this moment, nothing caches it, and
+ * there is no key for anything to invalidate. Fails closed, like the other verdicts here — an
+ * endpoint that cannot be tested is reported as unreachable rather than thrown at the form.
+ *
+ * The unsaved key is sent so the test matches the form as it stands, not as it was last saved.
+ */
+export async function testAgentConnection(
+  endpoint: string,
+  key: string,
+): Promise<ConnectionVerdict> {
+  try {
+    const response = await tryClient("/api/agents/test-connection", {
+      method: "POST",
+      body: {
+        endpoint,
+        ...(key.trim() ? { headers: { Authorization: key.trim() } } : {}),
+      },
+    });
+    const body = (await response.json().catch(() => null)) as
+      | ConnectionVerdict
+      | { error?: string }
+      | null;
+    if (body && "ok" in body) return body;
+    return {
+      ok: false,
+      reason:
+        (body as { error?: string } | null)?.error ??
+        "The connection could not be tested.",
+    };
+  } catch {
+    return { ok: false, reason: "The connection could not be tested." };
+  }
 }
