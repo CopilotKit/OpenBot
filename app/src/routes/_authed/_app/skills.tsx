@@ -13,6 +13,7 @@ import { StaggerItem } from "@/components/layout/stagger";
 import { EditSkill } from "@/components/skills/edit-skill";
 import { NewSkill } from "@/components/skills/new-skill";
 import { Button } from "@/components/ui/button";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { pluginKeys, pluginsPageQueryOptions } from "@/lib/plugins/queries";
 import {
@@ -61,8 +62,17 @@ function SkillsPage() {
   // roster uses when `new` and `agent` arrive together.
   const showCreate = isCreating === true;
   const showEdit = !showCreate && editingSlug !== undefined;
-  const { data } = useQuery(pluginsPageQueryOptions());
-  const { data: me } = useQuery(currentUserQueryOptions());
+  const { data, isPending: skillsPending } = useQuery(
+    pluginsPageQueryOptions(),
+  );
+  const { data: me, isPending: mePending } = useQuery(
+    currentUserQueryOptions(),
+  );
+  /*
+   * Both, because `mine` is the intersection of the two: until the person is known, nothing matches
+   * them and the list is empty for a reason that is not "you have no skills".
+   */
+  const loading = skillsPending || mePending;
   const [error, setError] = useState<string | null>(null);
 
   const mutate = useMutation({
@@ -137,7 +147,20 @@ function SkillsPage() {
           }
           title="Your skills"
         >
-          {!!mine?.length && (
+          {/*
+           * Nothing while the two queries are still in flight. The alternative is the empty state
+           * standing there saying this person has written no skills, which is a claim the page has
+           * not yet earned.
+           */}
+          {loading ? null : mine.length === 0 ? (
+            <Empty className="mt-4 h-[180px] border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle className="text-muted-foreground">
+                  You don't have any skills yet.
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
+          ) : (
             <PageRows>
               {mine.map((skill, index) => (
                 <StaggerItem index={index} key={skill.id}>
