@@ -123,3 +123,39 @@ describe("repairing a history before it is sent", () => {
     expect(repairUnansweredToolCalls(messages, ids)).toBe(messages);
   });
 });
+
+/**
+ * The default id source, which every test above replaces with its own.
+ *
+ * That is the reason a self-recursive default survived review: the parameter exists so a test can
+ * make ids predictable, so no test ever ran the default, and the default only runs on the repair
+ * branch. This one calls it the way the only real caller does, with the argument omitted.
+ */
+describe("repairUnansweredToolCalls without an id source", () => {
+  test("repairs using its own ids rather than recursing", () => {
+    const messages: Message[] = [
+      { id: "a", role: "user", content: "go" },
+      {
+        id: "b",
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "call-1",
+            type: "function",
+            function: { name: "act", arguments: "{}" },
+          },
+        ],
+      },
+    ];
+
+    const repaired = repairUnansweredToolCalls(messages);
+
+    expect(repaired).toHaveLength(3);
+    const result = repaired[2] as Message & { toolCallId: string };
+    expect(result.role).toBe("tool");
+    expect(result.toolCallId).toBe("call-1");
+    // A real id, not an empty string and not the call's own id.
+    expect(result.id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
