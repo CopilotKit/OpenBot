@@ -64,6 +64,14 @@ export type PluginsPage = {
   catalogue: CatalogueItem[];
   servers: PluginServer[];
   skills: PluginSkill[];
+  /**
+   * The redirect URI to register with a `user-oauth` vendor, exactly as this deployment will send it.
+   *
+   * From the server rather than assembled here, because it has to match what was registered
+   * character for character. Null when the deployment has no public URL and so cannot complete a
+   * consent flow at all.
+   */
+  redirectUri: string | null;
 };
 
 /** What one Bot holds, which is all the runtime needs to offer it. */
@@ -86,7 +94,42 @@ export const pluginKeys = {
   all: ["plugins"] as const,
   page: () => ["plugins", "page"] as const,
   forAgent: (agentId: string) => ["plugins", "for-agent", agentId] as const,
+  connections: () => ["plugins", "connections"] as const,
 };
+
+/** One account this person has connected, from their own point of view. */
+export type PluginConnection = {
+  serverId: string;
+  /** What the vendor actually granted, which is not always what was asked for. */
+  scope: string;
+  connectedAt: string;
+};
+
+export type PluginConnections = {
+  connections: PluginConnection[];
+  redirectUri: string | null;
+};
+
+/**
+ * The signed-in person's own connections.
+ *
+ * There is no version of this scoped to anybody else: the endpoint answers for whoever is asking,
+ * so a page cannot accidentally render somebody else's.
+ */
+export function connectionsQueryOptions() {
+  return queryOptions({
+    queryKey: pluginKeys.connections(),
+    queryFn: async (): Promise<PluginConnections> => {
+      const response = await fetch("/api/plugins/connections", {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error("Your connected accounts could not be loaded.");
+      }
+      return response.json();
+    },
+  });
+}
 
 export function pluginsPageQueryOptions() {
   return queryOptions({

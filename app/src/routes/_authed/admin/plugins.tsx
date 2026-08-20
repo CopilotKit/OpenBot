@@ -146,12 +146,26 @@ function PluginsPage() {
             <Catalogue
               added={new Set(data.servers.map((server) => server.id))}
               items={data.catalogue}
-              onAdd={(key, instanceHost, token) =>
+              onAdd={(key, instanceHost, token, oauthClient) =>
                 mutate.mutate(async () => {
                   const credentialId = await storeToken(key, token);
-                  return post("/servers", { key, instanceHost, credentialId });
+                  const server = await post("/servers", {
+                    key,
+                    instanceHost,
+                    credentialId,
+                  });
+                  /*
+                   * The client is registered after the server exists, because it is recorded against
+                   * that row. Two calls rather than one field on the first, matching the server: a
+                   * client is rotated without the server being re-added.
+                   */
+                  if (oauthClient) {
+                    await post(`/servers/${key}/oauth-client`, oauthClient);
+                  }
+                  return server;
                 })
               }
+              redirectUri={data.redirectUri}
               onAddCustom={(input) =>
                 mutate.mutate(async () => {
                   const credentialId = await storeToken(input.id, input.token);
@@ -224,6 +238,7 @@ function Catalogue({
   added,
   onAdd,
   onAddCustom,
+  redirectUri,
 }: {
   items: {
     key: string;
@@ -241,7 +256,14 @@ function Catalogue({
     perInstance: boolean;
   }[];
   added: Set<string>;
-  onAdd: (key: string, instanceHost?: string, token?: string) => void;
+  onAdd: (
+    key: string,
+    instanceHost?: string,
+    token?: string,
+    oauthClient?: { clientId: string; clientSecret: string },
+  ) => void;
+  /** What to register with a user-oauth vendor. Null when this deployment has no public URL. */
+  redirectUri: string | null;
   onAddCustom: (input: {
     id: string;
     title: string;
@@ -251,6 +273,9 @@ function Catalogue({
 }) {
   const [instanceHost, setInstanceHost] = useState<Record<string, string>>({});
   const [token, setToken] = useState<Record<string, string>>({});
+  const [client, setClient] = useState<
+    Record<string, { clientId: string; clientSecret: string }>
+  >({});
   const [addingCustom, setAddingCustom] = useState(false);
   const [custom, setCustom] = useState({
     id: "",
@@ -285,6 +310,11 @@ function Catalogue({
                     item.key,
                     instanceHost[item.key] || undefined,
                     token[item.key] || undefined,
+                    item.auth === "user-oauth" &&
+                      client[item.key]?.clientId &&
+                      client[item.key]?.clientSecret
+                      ? client[item.key]
+                      : undefined,
                   )
                 }
                 size="sm"
@@ -307,6 +337,72 @@ function Catalogue({
                 placeholder="https://your-instance.service-now.com"
                 value={instanceHost[item.key] ?? ""}
               />
+            ) : null}
+            {item.auth === "user-oauth" ? (
+              /*
+               * A client, not a token. Nobody's documents are reachable with what is typed here: it
+               * identifies this deployment to the vendor, and each person then consents for
+               * themselves in their own settings. Worth saying on the screen, because "client
+               * secret" in a box on an admin page looks exactly like the credential above it and is
+               * a very different thing.
+               */
+              <div className="mt-3 space-y-2 rounded-md bg-muted/40 p-3">
+                <p className="text-muted-foreground text-xs">
+                  {item.title} answers as whoever is asking. Register this
+                  deployment's OAuth client here; everybody then connects their
+                  own account from Preferences.
+                </p>
+                <Input
+                  aria-label={`OAuth client ID for ${item.title}`}
+                  onChange={(event) =>
+                    setClient((current) => ({
+                      ...current,
+                      [item.key]: {
+                        clientId: event.target.value,
+                        clientSecret: current[item.key]?.clientSecret ?? "",
+                      },
+                    }))
+                  }
+                  placeholder="OAuth client ID"
+                  value={client[item.key]?.clientId ?? ""}
+                />
+                <Input
+                  aria-label={`OAuth client secret for ${item.title}`}
+                  onChange={(event) =>
+                    setClient((current) => ({
+                      ...current,
+                      [item.key]: {
+                        clientId: current[item.key]?.clientId ?? "",
+                        clientSecret: event.target.value,
+                      },
+                    }))
+                  }
+                  placeholder="OAuth client secret"
+                  type="password"
+                  value={client[item.key]?.clientSecret ?? ""}
+                />
+                {redirectUri ? (
+                  <div>
+                    <p className="text-muted-foreground text-xs">
+                      Add this to the client's authorised redirect URIs, exactly
+                      as written:
+                    </p>
+                    {/*
+                     * Selectable and monospaced, because it is copied by hand into somebody else's
+                     * console and a single wrong character fails at the vendor with a message that
+                     * does not mention us.
+                     */}
+                    <code className="mt-1 block select-all break-all rounded bg-background px-2 py-1 font-mono text-xs">
+                      {redirectUri}
+                    </code>
+                  </div>
+                ) : (
+                  <p className="text-destructive text-xs" role="alert">
+                    This deployment has no public URL, so nobody can complete a
+                    consent flow. Set OPENBOT_PUBLIC_URL and restart.
+                  </p>
+                )}
+              </div>
             ) : null}
             {item.auth === "deployment-bearer" ? (
               /* Mask tokens before they are stored in the credential vault. */

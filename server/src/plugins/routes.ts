@@ -99,6 +99,18 @@ export function createPluginRoutes(
       servers: await store.listServers(),
       // Scoped: the deployment's skills plus this person's own. An administrator sees them all.
       skills: await store.listSkills(skillActor(context)),
+      /*
+       * What an administrator has to register with the vendor, character for character.
+       *
+       * Served rather than assembled in the browser, so what is displayed is exactly what the
+       * callback will present. A mismatch here fails at the vendor with a message that does not name
+       * us, which is a bad afternoon for whoever is setting it up.
+       *
+       * Null means this deployment has no public URL, so it cannot complete a consent flow at all.
+       */
+      redirectUri: connect?.publicUrl
+        ? redirectUriFor(connect.publicUrl)
+        : null,
     }),
   );
 
