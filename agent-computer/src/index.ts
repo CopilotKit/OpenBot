@@ -1,7 +1,12 @@
 import { serve } from "bun";
-import type { Page } from "playwright";
-import { parseAriaSnapshot, type SnapshotElement } from "./aria-snapshot";
+import { join } from "node:path";
 import { isOpenPath, matchesToken, offeredToken } from "./authorisation";
+import {
+  type BrowserComputer,
+  type BrowserManager,
+  type BrowserStream,
+  StaleSnapshotError,
+} from "./browser";
 import {
   type Control,
   ControlError,
@@ -10,13 +15,10 @@ import {
   NO_SECRET_PENDING,
   TAKE_CONTROL_FIRST,
 } from "./control";
+import { createCuaBrowserManager, type CuaDriver } from "./cua-browser";
 import { identity } from "./identity";
-import { createProfiles, VIEWPORT } from "./profiles";
-import {
-  type InputMessage,
-  type Screencast,
-  startScreencast,
-} from "./screencast";
+import { createPlaywrightBrowserManager } from "./playwright-browser";
+import type { InputMessage } from "./screencast";
 import {
   createWorkspace,
   WorkspaceFileError,
@@ -87,36 +89,13 @@ const ACTION_TIMEOUT_MS = Number.parseInt(
   10,
 );
 
-/**
- * How much page text a navigation hands back.
- *
- * Bounded because a page can be megabytes and the text goes into a model's context, where a single
- * unbounded page can push the rest of the conversation out. Generous enough that the visible part of
- * an ordinary page arrives whole, which is what the answer is usually made of.
- */
-const TEXT_EXTRACT_LIMIT = 6000;
-
-/**
- * Which snapshot the caller's refs came from.
- *
- * Kept as a caller-facing guard even though Playwright enforces the real thing underneath. The
- * published tool contract says an action carries the `snapshotId` it got, and a mismatch is answered
- * with "take a new snapshot", which is a clearer message for a model than an element that merely fails
- * to resolve. Playwright's `aria-ref` engine is the runtime enforcement: it resolves a ref only against
- * the most recent snapshot, only while the element is still connected to the document, and it mints a
- * new ref if an element's role or accessible name changed, so a recycled node cannot inherit an old one.
- */
 /** Per-Bot browser-control state. Profiles are isolated, but this process is not a security boundary. */
 type BotSession = {
   control: Control;
-  /** This Bot's snapshot generation. See the note above on staleness. */
-  snapshotId: number;
   /** The one live screen viewer for this Bot, if a person is watching. */
   viewer?: {
     socket: unknown;
-    cast: Screencast;
-    /** Stops the loop that keeps the cast pointed at whatever page the Bot is actually on. */
-    follow?: ReturnType<typeof setInterval>;
+    cast: BrowserStream;
   };
 };
 
@@ -125,7 +104,7 @@ const sessions = new Map<string, BotSession>();
 function sessionFor(botId: string): BotSession {
   const existing = sessions.get(botId);
   if (existing) return existing;
-  const created: BotSession = { control: createControl(), snapshotId: 0 };
+  const created: BotSession = { control: createControl() };
   sessions.set(botId, created);
   return created;
 }
@@ -159,13 +138,6 @@ const workspace = createWorkspace(process.env.WORKSPACE_DIR ?? "/workspace");
  * The state machine lives in `control.ts` so it can be tested without importing Playwright.
  */
 
-/**
- * The Bot's browser and the profile that outlives it. See profiles.ts.
- *
- * `chromium.launch()` gives a fresh anonymous profile every time. Persistent profiles live on a
- * mounted volume so sign-in state survives the container.
- */
-const profiles = createProfiles(process.env.PROFILES_DIR ?? "/profiles");
 // Rooted in the same workspace the file tools use, so a command and a written file see one
 // directory rather than two.
 const shell = createShell(process.env.WORKSPACE_DIR ?? "/workspace");
@@ -177,118 +149,35 @@ const shell = createShell(process.env.WORKSPACE_DIR ?? "/workspace");
  */
 const DEFAULT_BOT_ID = process.env.COMPUTER_BOT_ID ?? "shared";
 
-async function currentPage(botId: string): Promise<Page> {
-  return profiles.page(botId);
-}
-
-/**
- * The page as text, the way a reader sees it.
- *
- * Script and style bodies are dropped rather than included: they are the bulk of a modern page and
- * none of it is what anybody asked about, so leaving them in spends the extract on noise and pushes
- * the actual article past the limit.
- */
-async function readablePageText(
-  target: Page,
-): Promise<{ text: string; truncated: boolean }> {
-  const raw = await target.evaluate(() => {
-    const clone = document.body?.cloneNode(true) as HTMLElement | undefined;
-    if (!clone) return "";
-    for (const node of clone.querySelectorAll("script, style, noscript, svg")) {
-      node.remove();
-    }
-    return clone.innerText ?? "";
+const profileRoot = process.env.PROFILES_DIR ?? "/profiles";
+const requestedBackend = process.env.COMPUTER_BACKEND?.trim() || "playwright";
+let browsers: BrowserManager;
+if (requestedBackend === "cua-driver") {
+  const cuaProfileRoot =
+    process.env.CUA_DRIVER_BROWSER_PROFILE_ROOT?.trim() ||
+    join(profileRoot, "cua-driver");
+  // The native library reads this variable directly. The package scripts and Docker entrypoint set
+  // it before Bun starts; assigning it here also keeps Node-compatible hosts and injected SDKs
+  // aligned with the directory used for list/reset operations.
+  process.env.CUA_DRIVER_BROWSER_PROFILE_ROOT = cuaProfileRoot;
+  const [{ CuaDriver: NativeCuaDriver }, { chromium }] = await Promise.all([
+    import("@trycua/cua-driver"),
+    import("playwright"),
+  ]);
+  browsers = createCuaBrowserManager(
+    cuaProfileRoot,
+    NativeCuaDriver.create(undefined) as CuaDriver,
+    chromium.executablePath(),
+  );
+} else if (requestedBackend === "playwright") {
+  browsers = createPlaywrightBrowserManager(profileRoot, {
+    actionTimeoutMs: ACTION_TIMEOUT_MS,
+    navigationTimeoutMs: NAVIGATION_TIMEOUT_MS,
   });
-
-  const collapsed = raw.replace(/\n{3,}/g, "\n\n").trim();
-  return {
-    text: collapsed.slice(0, TEXT_EXTRACT_LIMIT),
-    truncated: collapsed.length > TEXT_EXTRACT_LIMIT,
-  };
-}
-
-/**
- * Describe everything on the page a Bot can act on.
- *
- * Uses Playwright's AI snapshot rather than stamping attributes into the DOM. `ariaSnapshot` keeps
- * refs outside the page, survives framework re-renders, resolves accessible names, reports current
- * values and checked state, filters to actionable elements and descends into iframes.
- */
-async function snapshotPage(
-  session: BotSession,
-  target: Page,
-): Promise<{
-  snapshotId: number;
-  url: string;
-  title: string;
-  elements: SnapshotElement[];
-  truncated: boolean;
-}> {
-  session.snapshotId += 1;
-  const yaml = await target.ariaSnapshot({ mode: "ai" });
-  return {
-    snapshotId: session.snapshotId,
-    url: target.url(),
-    title: await target.title(),
-    ...parseAriaSnapshot(yaml),
-  };
-}
-
-/**
- * Resolve a ref to a locator, refusing anything from a superseded snapshot.
- *
- * `aria-ref=` is a first-party Playwright selector engine, and it is the same one its MCP server uses.
- * The generation check here is the caller-facing half; see the note on `snapshotId` for why both exist.
- */
-function locateRef(
-  session: BotSession,
-  target: Page,
-  ref: string,
-  expectedSnapshotId: number | undefined,
-) {
-  if (
-    expectedSnapshotId !== undefined &&
-    expectedSnapshotId !== session.snapshotId
-  ) {
-    throw new StaleSnapshotError(
-      `That list of elements is out of date: it was taken for snapshot ${expectedSnapshotId} and the page is now at ${session.snapshotId}. Take a new snapshot and use the refs from it.`,
-    );
-  }
-  return target.locator(`aria-ref=${ref}`);
-}
-
-/**
- * The element, or a refusal that says what to do about it.
- *
- * A generation check is not an existence check. A ref from
- * the current snapshot that names nothing on the page, because a model invented it or because the
- * page moved on without a new snapshot being taken, passes `locateRef` and then simply waits. The
- * action times out, and the caller gets a generic failure carrying Playwright's internal call log
- * instead of the actionable answer: take a fresh snapshot.
- *
- * `count()` resolves immediately rather than waiting, so a ref that names nothing is refused in
- * milliseconds instead of holding the action open for the full timeout.
- */
-async function resolveRef(
-  session: BotSession,
-  target: Page,
-  ref: string,
-  expectedSnapshotId: number | undefined,
-) {
-  const locator = locateRef(session, target, ref, expectedSnapshotId);
-  if ((await locator.count()) === 0) {
-    throw new StaleSnapshotError(
-      `Nothing on this page has the ref ${ref}. Take a new snapshot and use the refs it returns.`,
-    );
-  }
-  return locator;
-}
-
-class StaleSnapshotError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "StaleSnapshotError";
-  }
+} else {
+  throw new Error(
+    `COMPUTER_BACKEND must be "playwright" or "cua-driver", got ${JSON.stringify(requestedBackend)}.`,
+  );
 }
 
 function json(body: unknown, status = 200): Response {
@@ -308,12 +197,8 @@ function json(body: unknown, status = 200): Response {
 async function stopViewer(session: BotSession): Promise<void> {
   const current = session.viewer;
   session.viewer = undefined;
-  if (current?.follow) clearInterval(current.follow);
   await current?.cast.stop();
 }
-
-/** How often the cast checks that it is still showing the page the Bot is on. */
-const FOLLOW_INTERVAL_MS = 1_000;
 
 /** What a live-screen socket carries: the Bot whose screen it is showing. */
 type StreamData = { botId: string };
@@ -339,31 +224,12 @@ serve<StreamData>({
           try {
             ws.send(JSON.stringify(frame));
           } catch {
-            void stopViewer(session);
+            if (session.viewer?.socket === ws) void stopViewer(session);
           }
         };
 
-        /*
-         * The cast follows the Bot's current page. Re-checking also handles a page being closed
-         * underneath us without a listener per page.
-         */
-        let casting: Page | undefined;
-        const attach = async () => {
-          const target = await currentPage(ws.data.botId);
-          if (target === casting) return;
-          const previous = session.viewer;
-          const cast = await startScreencast(target, send);
-          casting = target;
-          session.viewer = { socket: ws, cast, follow: previous?.follow };
-          // The old cast stops after the replacement is running, so the screen does not go blank.
-          await previous?.cast.stop().catch(() => undefined);
-        };
-
-        await attach();
-        const follow = setInterval(() => {
-          void attach().catch(() => undefined);
-        }, FOLLOW_INTERVAL_MS);
-        if (session.viewer) session.viewer.follow = follow;
+        const cast = await browsers.computer(ws.data.botId).startStream(send);
+        session.viewer = { socket: ws, cast };
       } catch (error) {
         ws.send(
           JSON.stringify({
@@ -377,7 +243,7 @@ serve<StreamData>({
 
     async message(ws, raw) {
       const session = sessionFor(ws.data.botId);
-      if (!session.viewer) return;
+      if (!session.viewer || session.viewer.socket !== ws) return;
       let message: InputMessage;
       try {
         message = JSON.parse(String(raw)) as InputMessage;
@@ -415,7 +281,8 @@ serve<StreamData>({
     },
 
     async close(ws) {
-      await stopViewer(sessionFor(ws.data.botId));
+      const session = sessionFor(ws.data.botId);
+      if (session.viewer?.socket === ws) await stopViewer(session);
     },
   },
   async fetch(request, server) {
@@ -523,26 +390,16 @@ serve<StreamData>({
         return json({ error: "A value is required." }, 400);
       }
       try {
-        const target = await currentPage(botId);
-        // Focus the field the Bot named, and let this throw if it cannot be found. A secret must not
-        // be reported as delivered unless a field receives it.
-        //
-        // No generation check here: a Bot may take another snapshot after asking for a secret, while
-        // the ref remains protected by Playwright's `aria-ref` rules.
-        //
-        // `aria-ref` resolves a ref only against the most recent snapshot, only while the element is
-        // still connected, and mints a
-        // new ref when an element's role or accessible name changes, so a recycled node cannot
-        // inherit an old one. If the ref resolves, it is the field the Bot meant. If it does not,
-        // nothing is typed, which is the outcome the generation check existed to guarantee.
-        const field = locateRef(session, target, pending.ref, undefined);
-        await field.click({ timeout: ACTION_TIMEOUT_MS });
-        await field.fill(body.text, { timeout: ACTION_TIMEOUT_MS });
-        const characters = body.text.length;
+        // No generation check here: a Bot may take another snapshot after asking for a secret. Both
+        // backends still resolve the ref against the current page and fail without typing if the
+        // target is gone.
+        const result = await browsers
+          .computer(botId)
+          .enterSecret(pending.ref, body.text);
         // Cleared only after it actually landed, so a failure leaves the request open and the person
         // can try again rather than being told to start over.
         session.control.secretSupplied();
-        return json({ supplied: true, characters, url: target.url() });
+        return json({ supplied: true, ...result });
       } catch (error) {
         if (error instanceof StaleSnapshotError) {
           return json({ error: error.message, stale: true }, 409);
@@ -586,19 +443,25 @@ serve<StreamData>({
         unknown
       > | null;
       try {
-        const target = await currentPage(botId);
-        return json(await performHumanInput(target, url.pathname, body ?? {}));
+        return json(
+          await performHumanInput(
+            browsers.computer(botId),
+            url.pathname,
+            body ?? {},
+          ),
+        );
       } catch (error) {
         return json({ error: describe(error, "That did not work.") }, 502);
       }
     }
 
     if (url.pathname === "/health") {
-      const [profile] = profiles.summary([botId]);
+      const [profile] = browsers.summary([botId]);
       return json({
         status: "ok",
         // `browser` kept as it was: it is in the published contract and start.sh reads it.
         browser: profile?.running ?? false,
+        backend: browsers.backend,
         profile,
         // Which Bot this computer can prove it is, when the deployment runs SPIRE. Null is a
         // deployment without it, not a failure, and it is reported rather than omitted so the
@@ -613,7 +476,7 @@ serve<StreamData>({
      * for it this second.
      */
     if (url.pathname === "/computers" && request.method === "GET") {
-      return json({ computers: profiles.summary(await profiles.known()) });
+      return json({ computers: browsers.summary(await browsers.known()) });
     }
 
     /**
@@ -624,7 +487,7 @@ serve<StreamData>({
      * start, so there is no second way for a browser to come into existence.
      */
     if (url.pathname === "/computers/stop" && request.method === "POST") {
-      const wasRunning = await profiles.stop(botId);
+      const wasRunning = await browsers.stop(botId);
       // The wheel goes back to the Bot because the controlled browser no longer exists.
       session.control.release();
       return json({ stopped: true, wasRunning });
@@ -638,7 +501,7 @@ serve<StreamData>({
      * to discard a login by mistyping a parameter.
      */
     if (url.pathname === "/computers/reset" && request.method === "POST") {
-      await profiles.reset(botId);
+      await browsers.reset(botId);
       // Reset releases control because any previous browser session and pending secret request are gone.
       session.control.release();
       return json({ reset: true, botId });
@@ -655,21 +518,11 @@ serve<StreamData>({
       const startedAt = Date.now();
       try {
         session.control.assertBotMayAct();
-        const target = await currentPage(botId);
-        await target.goto(body.url, {
-          waitUntil: "domcontentloaded",
-          timeout: NAVIGATION_TIMEOUT_MS,
-        });
-        // A new document wipes every stamp, so every ref handed out before now is meaningless.
-        // Bumping the generation makes an action carrying one fail with "take a new snapshot" rather
-        // than fall through to a selector that matches nothing and read as a missing element.
-        session.snapshotId += 1;
-        const extract = await readablePageText(target);
+        const result = await browsers
+          .computer(botId)
+          .navigate(body.url, request.signal);
         return json({
-          url: target.url(),
-          title: await target.title(),
-          text: extract.text,
-          truncated: extract.truncated,
+          ...result,
           elapsedMs: Date.now() - startedAt,
         });
       } catch (error) {
@@ -691,20 +544,7 @@ serve<StreamData>({
 
     if (url.pathname === "/screenshot" && request.method === "GET") {
       try {
-        const target = await currentPage(botId);
-        const buffer = await target.screenshot({ type: "png" });
-        const size = target.viewportSize() ?? { width: 1280, height: 800 };
-        return json({
-          base64: buffer.toString("base64"),
-          width: size.width,
-          height: size.height,
-          capturedAt: new Date().toISOString(),
-          // Which page this is a picture of. A browser that has not been sent anywhere sits on
-          // `about:blank`, and a screenshot of that is a valid, entirely white PNG, indistinguishable
-          // from a real page to anything looking only at the bytes. The transcript needs to tell
-          // those apart to avoid presenting a blank browser as though it were a loaded page.
-          url: target.url(),
-        });
+        return json(await browsers.computer(botId).screenshot());
       } catch (error) {
         return json(
           {
@@ -814,14 +654,7 @@ serve<StreamData>({
     // confirmation said. "I clicked the button" is not an answer to what happened.
     if (url.pathname === "/read" && request.method === "GET") {
       try {
-        const target = await currentPage(botId);
-        const extract = await readablePageText(target);
-        return json({
-          url: target.url(),
-          title: await target.title(),
-          text: extract.text,
-          truncated: extract.truncated,
-        });
+        return json(await browsers.computer(botId).read());
       } catch (error) {
         return json(
           { error: describe(error, "Reading the page failed.") },
@@ -835,7 +668,7 @@ serve<StreamData>({
     // caches and prefetchers eventually punish.
     if (url.pathname === "/snapshot" && request.method === "POST") {
       try {
-        return json(await snapshotPage(session, await currentPage(botId)));
+        return json(await browsers.computer(botId).snapshot());
       } catch (error) {
         return json({ error: describe(error, "Snapshot failed.") }, 502);
       }
@@ -852,10 +685,8 @@ serve<StreamData>({
       const startedAt = Date.now();
       try {
         session.control.assertBotMayAct();
-        const target = await currentPage(botId);
         const detail = await performAction(
-          session,
-          target,
+          browsers.computer(botId),
           url.pathname,
           body,
           // The caller going away is the stop signal: the surface aborts its request, the server
@@ -934,7 +765,7 @@ const HUMAN_INPUT = new Set([
  * never returned and never logged below.
  */
 async function performHumanInput(
-  target: Page,
+  computer: BrowserComputer,
   action: string,
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
@@ -944,18 +775,12 @@ async function performHumanInput(
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       throw new Error("A click needs an x and a y inside the page.");
     }
-    // Clamped rather than rejected. A click a pixel outside the viewport is a rounding artefact of
-    // scaling the screenshot, not a mistake worth refusing.
-    return {
-      x: Math.min(Math.max(x, 0), VIEWPORT.width - 1),
-      y: Math.min(Math.max(y, 0), VIEWPORT.height - 1),
-    };
+    return { x, y };
   };
 
   if (action === "/human/click") {
     const { x, y } = at();
-    await target.mouse.click(x, y);
-    return { action: "human_click", url: target.url() };
+    return computer.humanClick(x, y);
   }
 
   if (action === "/human/type") {
@@ -964,34 +789,26 @@ async function performHumanInput(
     }
     // `insertText` rather than per-key typing: a person pasting a one-time code should not have it
     // arrive one character at a time into a field that reformats as you go.
-    await target.keyboard.insertText(body.text);
-    // Length only, never the value. See the note above about the model not being on this path.
-    return {
-      action: "human_type",
-      characters: body.text.length,
-      url: target.url(),
-    };
+    return computer.humanType(body.text);
   }
 
   if (action === "/human/key") {
     if (typeof body.key !== "string" || !body.key) {
       throw new Error("A key press needs a key name.");
     }
-    await target.keyboard.press(body.key);
-    return { action: "human_key", key: body.key, url: target.url() };
+    return computer.humanKey(body.key);
   }
 
   const deltaY = typeof body.deltaY === "number" ? body.deltaY : 400;
-  await target.mouse.wheel(0, deltaY);
-  return { action: "human_scroll", deltaY, url: target.url() };
+  return computer.humanScroll(deltaY);
 }
 
 /**
  * Carry out one action on the page.
  *
- * Every action that addresses an element goes through {@link locateRef}, so the staleness check
- * cannot be forgotten at a call site. `/key` and `/scroll` may omit a ref and act on the page itself,
- * which is how a Bot presses Enter to submit or scrolls to bring more of a long form into view.
+ * Every action that addresses an element goes through the selected backend's ref resolver, so the
+ * staleness check cannot be forgotten at a call site. `/key` and `/scroll` may omit a ref and act on
+ * the page itself, which is how a Bot presses Enter or scrolls through a long form.
  *
  * Stop has to reach the browser. `signal` is the caller's request going away, the person pressed
  * Stop, and the abort travels from the surface, through the server, to here. Without passing it on,
@@ -999,22 +816,18 @@ async function performHumanInput(
  * landing on a live page. Stop must reach the browser before a high-impact click lands.
  */
 async function performAction(
-  session: BotSession,
-  target: Page,
+  computer: BrowserComputer,
   action: string,
   body: ActionBody,
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  // Passed to every Playwright call below. It does not disable the timeout, which still applies.
-  const acting = { timeout: ACTION_TIMEOUT_MS, ...(signal ? { signal } : {}) };
   const expected =
     typeof body.snapshotId === "number" ? body.snapshotId : undefined;
   const ref = typeof body.ref === "string" && body.ref ? body.ref : undefined;
 
   if (action === "/click") {
     if (!ref) throw new Error("A click needs the ref of an element to click.");
-    await (await resolveRef(session, target, ref, expected)).click(acting);
-    return { action: "click", ref, url: target.url() };
+    return computer.click(ref, expected, signal);
   }
 
   if (action === "/type") {
@@ -1022,46 +835,26 @@ async function performAction(
     if (typeof body.text !== "string") {
       throw new Error("Typing needs the text to enter.");
     }
-    const field = await resolveRef(session, target, ref, expected);
-    // `fill` rather than keystrokes: it clears the field first, which is what "put this value in
-    // this box" means. Typing into a field a previous attempt half-filled otherwise appends, and the
-    // form ends up with "AlicAlice" in it.
-    await field.fill(body.text, acting);
-    if (body.submit === true) {
-      await field.press("Enter", acting);
-    }
-    // The text itself is deliberately NOT returned. It is echoed nowhere: this response is read by
-    // the model and logged by the server, and a value typed into a form is exactly where a password
-    // or a card number lives. The caller already knows what it sent.
-    return {
-      action: "type",
+    return computer.type(
       ref,
-      characters: body.text.length,
-      submitted: body.submit === true,
-      url: target.url(),
-    };
+      body.text,
+      body.submit === true,
+      expected,
+      signal,
+    );
   }
 
   if (action === "/key") {
     if (typeof body.key !== "string" || !body.key) {
       throw new Error("A key press needs a key name, such as Enter or Tab.");
     }
-    if (ref) {
-      await (await resolveRef(session, target, ref, expected)).press(
-        body.key,
-        acting,
-      );
-    } else {
-      await target.keyboard.press(body.key);
-    }
-    return { action: "key", key: body.key, ref, url: target.url() };
+    return computer.key(body.key, ref, expected, signal);
   }
 
   // Scroll. A plain wheel event on the page, which is what moves a long form, rather than scrolling a
   // specific element into view: the Bot asked to see further down, not to hunt for one control.
   const deltaY = typeof body.deltaY === "number" ? body.deltaY : 600;
-  await target.mouse.wheel(0, deltaY);
-  return { action: "scroll", deltaY, url: target.url() };
+  return computer.scroll(deltaY, signal);
 }
 
 function describe(error: unknown, fallback: string): string {
@@ -1082,7 +875,9 @@ function fileStatus(error: unknown): 400 | 403 | 500 {
   return 500;
 }
 
-console.info(`agent-computer listening on http://localhost:${PORT}`);
+console.info(
+  `agent-computer listening on http://localhost:${PORT} with ${browsers.backend}`,
+);
 
 /**
  * Hand the profile back before dying.
@@ -1097,7 +892,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     void (async () => {
       console.info(`${signal}: closing the browser so its profile is flushed`);
-      await profiles.closeAll();
+      await browsers.closeAll();
       process.exit(0);
     })();
   });

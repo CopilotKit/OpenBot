@@ -69,6 +69,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
         data?: string;
         width?: number;
         height?: number;
+        mimeType?: string;
         error?: string;
       };
       try {
@@ -102,7 +103,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
           c.charCodeAt(0),
         );
         const bitmap = await createImageBitmap(
-          new Blob([binary], { type: "image/jpeg" }),
+          new Blob([binary], { type: message.mimeType ?? "image/jpeg" }),
         );
         if (closed) {
           bitmap.close();

@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --watch src/index.ts",
-    "start": "bun src/index.ts",
+    "dev": "CUA_DRIVER_BROWSER_PROFILE_ROOT=${CUA_DRIVER_BROWSER_PROFILE_ROOT:-${PROFILES_DIR:-/profiles}/cua-driver} bun --watch src/index.ts",
+    "start": "CUA_DRIVER_BROWSER_PROFILE_ROOT=${CUA_DRIVER_BROWSER_PROFILE_ROOT:-${PROFILES_DIR:-/profiles}/cua-driver} bun src/index.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@trycua/cua-driver": "0.20.0",
     "playwright": "1.62.1",
     "spiffe": "^0.5.1",
     "yaml": "^2.9.0"

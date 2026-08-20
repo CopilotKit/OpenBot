@@ -42,6 +42,7 @@ services:
     environment:
       # The secret every caller must present. The container refuses to start without it.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-}
+      COMPUTER_BACKEND: ${COMPUTER_BACKEND:-playwright}
     volumes:
       - agent-workspace:/workspace
       # Chromium's user-data directory is volume-backed so logins survive container restarts.
@@ -122,6 +123,7 @@ services:
       SUPERVISOR_TOKEN: ${SUPERVISOR_TOKEN:-}
       # Handed to every computer this creates, so the server and the computers share one secret.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-}
+      COMPUTER_BACKEND: ${COMPUTER_BACKEND:-playwright}
       COMPUTER_IMAGE: ${COMPUTER_IMAGE:-openbot-agent-computer:latest}
       # Which deployment the computers it creates belong to, so two stacks on one Docker host never
       # derive the same container and volume names for the same Bot.

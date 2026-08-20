@@ -97,6 +97,7 @@ Google OAuth client id and secret must be configured together. If Google OAuth i
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
+| `COMPUTER_BACKEND`                   | Browser backend: `playwright` (default) or `cua-driver`.                                  |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. Cloud metadata addresses are still refused. |
@@ -112,6 +113,15 @@ Google OAuth client id and secret must be configured together. If Google OAuth i
 - `COMPUTER_BOT_ID`
 - `EGRESS_PROXY_DEFAULT`
 - `EGRESS_PROXY_<BOT_ID>`
+
+The Cua Driver backend stores reusable isolated profiles under `PROFILES_DIR/cua-driver`, separate
+from existing Playwright profiles, and preserves the same HTTP, policy, audit, takeover, and per-Bot
+container boundaries. Its Linux click route is an explicit synthetic DOM event so it can remain
+background-safe; controls that require a trusted browser gesture may refuse it. Per-Bot egress proxy
+variables currently apply only to Playwright. Native takeover input briefly foregrounds the browser
+inside its private computer container, where no other Bot or desktop session shares the display.
+Ref-scoped Cua key actions support Enter and printable characters; arrows and editing keys use the
+native page-level route without a ref.
 
 The supervisor also reads:
 

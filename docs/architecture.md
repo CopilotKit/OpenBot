@@ -69,6 +69,13 @@ startup.
 
 `agent-computer` requires `COMPUTER_TOKEN` and permits only `/health` without it. Docker Compose binds it to `127.0.0.1:4100`.
 
+The computer exposes one backend-neutral HTTP and WebSocket contract. Playwright remains the
+default. With `COMPUTER_BACKEND=cua-driver`, the same gateway uses Cua Driver's in-process native SDK
+for isolated persistent browser profiles, semantic page refs, browser actions, screenshots, and
+human takeover. Its profiles live in a separate `cua-driver` subdirectory, so changing backends does
+not reinterpret or overwrite an existing Playwright profile. Policy and audit stay in the server in
+front of either backend.
+
 With `COMPUTER_SUPERVISOR_URL`, each Bot gets its own computer container, workspace volume, and browser profile. Without it, all Bots share `AGENT_COMPUTER_URL`.
 
 The supervisor exposes only ensure, stop, reset, and list operations. It holds the Docker socket, so do not expose it outside the deployment network. Set `COMPUTER_RUNTIME=runsc` to run computers under gVisor on hosts that support it.
