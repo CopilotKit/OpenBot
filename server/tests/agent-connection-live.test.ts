@@ -60,6 +60,78 @@ describe("registering an agent that really answers", () => {
     expect(result.ok).toBe(false);
   });
 
+  test("a redirect cannot carry the request somewhere the check refuses", async () => {
+    // The check only ever sees the URL a person typed. Following a redirect blindly makes that check
+    // decorative: anything registrable can bounce the server at the metadata endpoint.
+    const bounced: string[] = [];
+    const redirector = Bun.serve({
+      port: 0,
+      fetch: (request) => {
+        bounced.push(request.url);
+        return new Response(null, {
+          status: 307,
+          headers: { location: "http://169.254.169.254/latest/meta-data/" },
+        });
+      },
+    });
+
+    try {
+      const result = await testAgentConnection(
+        `http://127.0.0.1:${redirector.port}/ag-ui`,
+        { allowPrivateHosts: true, timeoutMs: 4_000 },
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toMatch(/redirect/i);
+      // The first hop is the registered address and is expected. Nothing beyond it should have been
+      // dialled, which is what the refusal is for.
+      expect(bounced.length).toBe(1);
+    } finally {
+      redirector.stop(true);
+    }
+  });
+
+  test("a redirect to an address the check permits is still followed", async () => {
+    // A deployment that puts its agent behind a redirect, http to https being the ordinary case, has
+    // done nothing wrong. Refusing every redirect would break it, so the destination is checked
+    // rather than the hop count.
+    const redirector = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(null, { status: 307, headers: { location: url } }),
+    });
+
+    try {
+      const result = await testAgentConnection(
+        `http://127.0.0.1:${redirector.port}/ag-ui`,
+        { allowPrivateHosts: true, timeoutMs: 8_000 },
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.events).toContain("RUN_STARTED");
+    } finally {
+      redirector.stop(true);
+    }
+  });
+
+  test("a redirect that never arrives anywhere gives up rather than looping", async () => {
+    const looper = Bun.serve({
+      port: 0,
+      fetch: (request) =>
+        new Response(null, { status: 307, headers: { location: request.url } }),
+    });
+
+    try {
+      const result = await testAgentConnection(
+        `http://127.0.0.1:${looper.port}/ag-ui`,
+        { allowPrivateHosts: true, timeoutMs: 8_000 },
+      );
+      expect(result.ok).toBe(false);
+    } finally {
+      looper.stop(true);
+    }
+  });
+
   test("a port with nothing on it reports the direction of the connection", async () => {
     // The server dials the agent, so localhost must be tested from the server side.
     const dead = await testAgentConnection("http://127.0.0.1:9/", {

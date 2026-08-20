@@ -1,4 +1,8 @@
-import { checkAgentEndpoint } from "./endpoint";
+import {
+  checkAgentEndpoint,
+  createAgentFetch,
+  EndpointRedirectError,
+} from "./endpoint";
 
 /**
  * Ask an endpoint whether it is really an agent before it is stored.
@@ -97,7 +101,14 @@ export async function testAgentConnection(
   });
   if (!verdict.allowed) return { ok: false, reason: verdict.reason };
 
-  const doFetch = options.fetchImpl ?? fetch;
+  // Wrapped rather than called directly, so the address the request finally lands on is checked too.
+  // Checking only what the person typed leaves the redirect as the way around it.
+  const doFetch = createAgentFetch({
+    ...(options.allowPrivateHosts !== undefined
+      ? { allowPrivateHosts: options.allowPrivateHosts }
+      : {}),
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+  });
   let response: Response;
   try {
     response = await doFetch(verdict.url, {
@@ -111,6 +122,11 @@ export async function testAgentConnection(
       signal: AbortSignal.timeout(options.timeoutMs ?? TEST_TIMEOUT_MS),
     });
   } catch (error) {
+    // A refused redirect is a specific thing that happened, and the person registering can act on it:
+    // it names where their address sent us.
+    if (error instanceof EndpointRedirectError) {
+      return { ok: false, reason: error.message };
+    }
     const timedOut = error instanceof Error && error.name === "TimeoutError";
     return {
       ok: false,
