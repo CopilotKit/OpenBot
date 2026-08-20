@@ -12,4 +12,5 @@ COPY agent-bot/src ./agent-bot/src
 
 ENV PORT=4200
 EXPOSE 4200
+USER bun
 CMD ["bun", "agent-bot/src/index.ts"]
