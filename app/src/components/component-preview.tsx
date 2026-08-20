@@ -91,7 +91,13 @@ export function ComponentPreview({
   if (!entry?.preview) {
     return (
       <div className="flex h-full w-full items-center justify-center p-4">
-        <p className="text-center text-xs text-muted-foreground">
+        {/*
+         * A fixed dark grey rather than `text-muted-foreground`. That token lightens in the dark
+         * theme — 0.5 to 0.708 — while the artwork behind this text does not: it is the same pale
+         * gradient either way, with no dark variant. Following the theme therefore moved the text
+         * towards its background exactly when it needed to move away from it.
+         */}
+        <p className="text-center text-neutral-700 text-xs">
           {entry
             ? "This one is only drawn in a conversation."
             : "This build cannot draw this."}

@@ -12,7 +12,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
-import { ComponentPreview } from "@/components/admin/component-preview";
+import { ComponentPreview } from "@/components/component-preview";
 import {
   PageRows,
   PageSection,

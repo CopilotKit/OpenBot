@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ComponentPreview } from "@/components/admin/component-preview";
+import { ComponentPreview } from "@/components/component-preview";
 import { PageShell } from "@/components/layout/page-shell";
 import { SettingsItemBackground } from "@/components/settings/background";
 import {

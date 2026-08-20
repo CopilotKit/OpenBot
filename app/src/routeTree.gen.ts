@@ -32,6 +32,8 @@ import { Route as AuthedAppChannelNewRouteImport } from './routes/_authed/_app/c
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
 import { Route as AuthedAdminComponentsNameRouteImport } from './routes/_authed/admin/components/$name'
 import { Route as AuthedAdminConnectorsGoogleDriveRouteImport } from './routes/_authed/admin/connectors/google-drive'
+import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
+import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
@@ -150,6 +152,18 @@ const AuthedAdminConnectorsGoogleDriveRoute =
     path: '/google-drive',
     getParentRoute: () => AuthedAdminConnectorsRoute,
   } as any)
+const AuthedSettingsComponentsGalleryIndexRoute =
+  AuthedSettingsComponentsGalleryIndexRouteImport.update({
+    id: '/components-gallery/',
+    path: '/components-gallery/',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
+const AuthedSettingsComponentsGalleryNameRoute =
+  AuthedSettingsComponentsGalleryNameRouteImport.update({
+    id: '/components-gallery/$name',
+    path: '/components-gallery/$name',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedAppIndexRoute
@@ -171,8 +185,10 @@ export interface FileRoutesByFullPath {
   '/channel/new': typeof AuthedAppChannelNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/connectors/google-drive': typeof AuthedAdminConnectorsGoogleDriveRoute
+  '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/agents/': typeof AuthedAppAgentsIndexRoute
   '/admin/components/': typeof AuthedAdminComponentsIndexRoute
+  '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
@@ -192,8 +208,10 @@ export interface FileRoutesByTo {
   '/channel/new': typeof AuthedAppChannelNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/connectors/google-drive': typeof AuthedAdminConnectorsGoogleDriveRoute
+  '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/agents': typeof AuthedAppAgentsIndexRoute
   '/admin/components': typeof AuthedAdminComponentsIndexRoute
+  '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -218,8 +236,10 @@ export interface FileRoutesById {
   '/_authed/_app/channel/new': typeof AuthedAppChannelNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/_authed/admin/connectors/google-drive': typeof AuthedAdminConnectorsGoogleDriveRoute
+  '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/_app/agents/': typeof AuthedAppAgentsIndexRoute
   '/_authed/admin/components/': typeof AuthedAdminComponentsIndexRoute
+  '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -243,8 +263,10 @@ export interface FileRouteTypes {
     | '/channel/new'
     | '/admin/components/$name'
     | '/admin/connectors/google-drive'
+    | '/settings/components-gallery/$name'
     | '/agents/'
     | '/admin/components/'
+    | '/settings/components-gallery/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -264,8 +286,10 @@ export interface FileRouteTypes {
     | '/channel/new'
     | '/admin/components/$name'
     | '/admin/connectors/google-drive'
+    | '/settings/components-gallery/$name'
     | '/agents'
     | '/admin/components'
+    | '/settings/components-gallery'
   id:
     | '__root__'
     | '/_authed'
@@ -289,8 +313,10 @@ export interface FileRouteTypes {
     | '/_authed/_app/channel/new'
     | '/_authed/admin/components/$name'
     | '/_authed/admin/connectors/google-drive'
+    | '/_authed/settings/components-gallery/$name'
     | '/_authed/_app/agents/'
     | '/_authed/admin/components/'
+    | '/_authed/settings/components-gallery/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -461,6 +487,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminConnectorsGoogleDriveRouteImport
       parentRoute: typeof AuthedAdminConnectorsRoute
     }
+    '/_authed/settings/components-gallery/': {
+      id: '/_authed/settings/components-gallery/'
+      path: '/components-gallery'
+      fullPath: '/settings/components-gallery/'
+      preLoaderRoute: typeof AuthedSettingsComponentsGalleryIndexRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/settings/components-gallery/$name': {
+      id: '/_authed/settings/components-gallery/$name'
+      path: '/components-gallery/$name'
+      fullPath: '/settings/components-gallery/$name'
+      preLoaderRoute: typeof AuthedSettingsComponentsGalleryNameRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
   }
 }
 
@@ -508,10 +548,16 @@ const AuthedAdminRouteRouteWithChildren =
 
 interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsIndexRoute: typeof AuthedSettingsIndexRoute
+  AuthedSettingsComponentsGalleryNameRoute: typeof AuthedSettingsComponentsGalleryNameRoute
+  AuthedSettingsComponentsGalleryIndexRoute: typeof AuthedSettingsComponentsGalleryIndexRoute
 }
 
 const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsIndexRoute: AuthedSettingsIndexRoute,
+  AuthedSettingsComponentsGalleryNameRoute:
+    AuthedSettingsComponentsGalleryNameRoute,
+  AuthedSettingsComponentsGalleryIndexRoute:
+    AuthedSettingsComponentsGalleryIndexRoute,
 }
 
 const AuthedSettingsRouteRouteWithChildren =
