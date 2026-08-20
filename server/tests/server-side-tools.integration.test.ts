@@ -12,7 +12,7 @@ import {
   pluginGrants,
 } from "../src/db/schema";
 import { createPluginStore } from "../src/plugins/store";
-import { grantedTools } from "../src/plugins/tools";
+import { grantedTools, REFUSAL_MARKER } from "../src/plugins/tools";
 import type { ActionPolicy } from "../src/policy/engine";
 import { TEST_POOL } from "./support/database";
 
@@ -193,6 +193,9 @@ describe("the tools a Bot is handed on the server", () => {
 
       // Returned, not thrown: the run continues and the person is told what was blocked.
       expect(text).toContain("policy");
+      // And marked, so the transcript can draw it as a refusal rather than as a result. The wording
+      // is an administrator's to change; the marker is not, which is the whole reason it exists.
+      expect(text?.startsWith(REFUSAL_MARKER)).toBe(true);
       const rejected = await database
         .select()
         .from(auditEvents)

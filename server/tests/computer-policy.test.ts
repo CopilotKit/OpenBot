@@ -350,3 +350,60 @@ describe("a rule that names an identifier only some actions carry", () => {
     expect(decision.allowed).toBe(false);
   });
 });
+
+/**
+ * What a refusal says it refused.
+ *
+ * A tool call carries every browser field the engine knows about, all of them empty, so that a rule
+ * written about a page evaluates to false against it rather than being unevaluable. That is correct
+ * for the decision and wrong for the sentence: each of those empty fields is present, so a refusal
+ * described from them names a page nobody visited or a file nobody touched.
+ */
+describe("describing a refusal", () => {
+  const mcpContext: PolicyContext = {
+    tool: { name: "mcp__notes__search_notes" },
+    bot: { id: "knowledge" },
+    actor: { id: "dev-local-user" },
+    page: { url: "", host: "" },
+    element: { ref: "", role: "", name: "", type: "" },
+    key: "",
+    file: { path: "", name: "", extension: "" },
+    mcp: { server: "notes", tool: "search_notes", effect: "read" },
+  };
+
+  test("a refused tool call names the tool and the server it was aimed at", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: ['mcp.server == "notes"'], allow: ["true"] },
+      mcpContext,
+    );
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toBe(
+      'This deployment\'s policy does not allow that: search_notes on notes is blocked by the rule `mcp.server == "notes"`.',
+    );
+    // The neutral file field is present and empty on every tool call. Described from it, the
+    // sentence read "the file  is blocked", naming a workspace the call never went near.
+    expect(decision.reason).not.toContain("the file");
+  });
+
+  test("a refused file action still names the file", () => {
+    const decision = evaluateActionPolicy(
+      {
+        mode: "enforce",
+        deny: ['contains(file.path, "secrets")'],
+        allow: ["true"],
+      },
+      context({
+        tool: { name: "computer_read_file" },
+        file: {
+          path: "/workspace/secrets.env",
+          name: "secrets.env",
+          extension: "env",
+        },
+      }),
+    );
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("the file /workspace/secrets.env");
+  });
+});

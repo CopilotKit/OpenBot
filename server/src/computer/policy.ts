@@ -266,9 +266,21 @@ export function evaluateActionPolicy(
 
 /** A refusal a person can act on: what was refused, and on what. */
 function describeRefusal(context: PolicyContext, expression: string): string {
+  // A tool call is named by its server and its tool, and nothing else here fits it. The browser
+  // fields are all present on an MCP context and all empty, deliberately, so that a rule written
+  // about a page evaluates to false rather than being unevaluable. That makes every one of the
+  // tests below true of a tool call and all of them wrong about it: without this branch a refused
+  // Jira call reads "the file  is blocked", naming a workspace it never touched and a path that is
+  // not there. Checked first because it is the only one of these that is ever certain.
+  if (context.mcp) {
+    return (
+      `This deployment's policy does not allow that: ${context.mcp.tool} on ` +
+      `${context.mcp.server} is blocked by the rule \`${expression}\`.`
+    );
+  }
   // A file refusal must not be phrased as happening "on <host>": the workspace has nothing to do with
   // whatever page the browser happens to be showing, and saying so sends somebody to the wrong place.
-  if (context.file) {
+  if (context.file?.path) {
     return (
       `This deployment's policy does not allow that: the file ${context.file.path} ` +
       `is blocked by the rule \`${expression}\`.`

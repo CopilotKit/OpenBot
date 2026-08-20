@@ -16,6 +16,16 @@ import { PluginRefusedError, type PluginStore } from "./store";
  * Read at run time rather than captured, so a grant an administrator adds or revokes applies to the
  * next run rather than after a restart.
  */
+/**
+ * What a refused call answers with.
+ *
+ * The transcript draws a refusal differently from a result, and it has only the tool's answer to go
+ * on. Guessing from the wording would break the first time an administrator rephrased a policy
+ * message, so the answer says which it is. The model reads this too, and "Refused." in front of a
+ * reason is what it should be told anyway.
+ */
+export const REFUSAL_MARKER = "Refused.";
+
 export type GrantedTool = {
   name: string;
   description: string;
@@ -72,7 +82,9 @@ export async function grantedTools(options: {
         });
         return result.text;
       } catch (error) {
-        if (error instanceof PluginRefusedError) return error.message;
+        if (error instanceof PluginRefusedError) {
+          return `${REFUSAL_MARKER} ${error.message}`;
+        }
         // A vendor that failed is not a refusal, and the difference matters to the person reading
         // the answer: one means "not allowed", the other means "it broke".
         return error instanceof Error
