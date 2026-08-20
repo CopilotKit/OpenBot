@@ -36,6 +36,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
+import { profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 
@@ -189,7 +190,10 @@ export function createProfiles(root: string) {
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
 
-  const directoryFor = (botId: string): string => join(root, botId);
+  // Checked, not joined. `join(root, botId)` normalizes `..` away, so a Bot id of `../workspace`
+  // used to resolve outside the root and `reset` would delete whatever was there.
+  const directoryFor = (botId: string): string =>
+    profileDirectoryFor(root, botId);
 
   /**
    * Close one Bot's browser and forget it.
