@@ -23,6 +23,17 @@ function isToolResult(
   return message.role === "tool" && "toolCallId" in message;
 }
 
+function isTextPart(part: unknown): part is { type: "text"; text: string } {
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    "type" in part &&
+    part.type === "text" &&
+    "text" in part &&
+    typeof part.text === "string"
+  );
+}
+
 export function toVisibleChatItems(
   messages: ReadonlyArray<Readonly<Message>>,
 ): VisibleChatItem[] {
@@ -62,10 +73,13 @@ export function toVisibleChatItems(
     const text =
       typeof message.content === "string"
         ? message.content
-        : message.content
-            .filter((part) => part.type === "text")
-            .map((part) => part.text)
-            .join("\n");
+        : Array.isArray(message.content)
+          ? message.content
+              .filter(isTextPart)
+              .map((part) => part.text)
+              .filter(Boolean)
+              .join("\n")
+          : "";
 
     return text ? [{ kind: "text", id: message.id, role: "user", text }] : [];
   });
