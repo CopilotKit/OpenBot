@@ -14,6 +14,7 @@ import {
   agentProfiles,
   mcpServers,
   mcpTools,
+  mcpUserCredentials,
   pluginGrants,
   skills,
 } from "../db/schema";
@@ -152,6 +153,70 @@ export function refFromToolName(toolName: string): string | null {
 const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
 
+/**
+ * Trade a refresh token for a short-lived access token, at the vendor's own token endpoint.
+ *
+ * `tokenUrl` comes from the catalogue entry and never from a caller, for the same reason the MCP
+ * host does not: this request carries the deployment's client secret and somebody's refresh token,
+ * so where it goes is a reviewed decision rather than a runtime one.
+ *
+ * The vendor's error body is deliberately not passed through. It is written for whoever registered
+ * the client, not for the person who asked a Bot a question, and it can name the client id.
+ */
+async function exchangeRefreshTokenOverHttp(input: {
+  tokenUrl: string;
+  client: OAuthClient;
+  refreshToken: string;
+}): Promise<AccessToken> {
+  const response = await fetch(input.tokenUrl, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: input.refreshToken,
+      client_id: input.client.clientId,
+      client_secret: input.client.clientSecret,
+    }),
+    signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new McpServerError(
+      `The vendor would not renew this access (${response.status}).`,
+    );
+  }
+
+  const body = (await response.json()) as {
+    access_token?: unknown;
+    expires_in?: unknown;
+  };
+  if (typeof body.access_token !== "string" || !body.access_token) {
+    throw new McpServerError("The vendor renewed this access with no token.");
+  }
+  return {
+    accessToken: body.access_token,
+    expiresInSeconds:
+      typeof body.expires_in === "number" ? body.expires_in : undefined,
+  };
+}
+
+/** How long a vendor's token endpoint gets. Shorter than a call: it is one round trip, or nothing. */
+const TOKEN_TIMEOUT_MS = 10_000;
+
+/**
+ * The deployment's OAuth client for one vendor, as it is held in the vault.
+ *
+ * Both halves live in the encrypted value rather than the id sitting in `metadata` and the secret
+ * here. One read gets a usable client, which keeps {@link CredentialSecretReader} the only vault
+ * interface this module needs. The id is also copied into `metadata` for the credentials page to
+ * show — a deliberate duplication of something that is not a secret, so that a screen listing what
+ * the deployment holds does not have to decrypt anything to name it.
+ */
+export type OAuthClient = { clientId: string; clientSecret: string };
+
+/** What a vendor's token endpoint gave back for a refresh token. */
+export type AccessToken = { accessToken: string; expiresInSeconds?: number };
+
 export type PluginStoreOptions = {
   database: Database;
   auditStore: AuditStore;
@@ -159,10 +224,31 @@ export type PluginStoreOptions = {
   encryptionKey: string;
   /** Read at call time, never captured, so a policy changed a moment ago applies to this call. */
   policy: () => ActionPolicy;
+  /**
+   * Speaking MCP to the vendor. Defaults to the real client.
+   *
+   * Injected so a test can assert what a call was about to go out with. Whose credential is chosen
+   * is the security property of this module, and asserting it otherwise needs a vendor to be
+   * reachable, which means the property most worth testing would be the one thing never tested.
+   */
+  callVendor?: (
+    connection: { url: string; token?: string },
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => Promise<{ text: string; isError: boolean }>;
+  /** Trading a refresh token for a short-lived access token. Defaults to a real HTTP exchange. */
+  exchangeRefreshToken?: (input: {
+    tokenUrl: string;
+    client: OAuthClient;
+    refreshToken: string;
+  }) => Promise<AccessToken>;
 };
 
 export function createPluginStore(options: PluginStoreOptions) {
   const { database, auditStore, credentials, encryptionKey } = options;
+  const callVendor = options.callVendor ?? callRemoteTool;
+  const exchangeRefreshToken =
+    options.exchangeRefreshToken ?? exchangeRefreshTokenOverHttp;
 
   async function grantsFor(kind: PluginKind, refs: string[]) {
     if (refs.length === 0) return new Map<string, string[]>();
@@ -184,12 +270,123 @@ export function createPluginStore(options: PluginStoreOptions) {
    * there does not fail loudly: the insert violates the constraint and the entire audit row is lost.
    */
 
-  /** The credential for a server, decrypted for one call and never held. */
-  async function tokenFor(
-    credentialId: string | null,
-  ): Promise<string | undefined> {
-    if (!credentialId) return undefined;
-    return decryptCredentialForUse(encryptionKey, credentials, credentialId);
+  /**
+   * A credential out of the vault, decrypted for one call and never held.
+   *
+   * A revoked credential is turned into a refusal rather than left as the vault's thrown error. The
+   * two reach a person very differently: an error becomes "that tool could not be called", which is
+   * what a vendor being down looks like, while a withdrawn grant is nobody's fault and has an
+   * obvious next step. `reconnect` says which of the two to name.
+   */
+  async function secretFor(
+    credentialId: string,
+    onRevoked: string,
+  ): Promise<string> {
+    try {
+      return await decryptCredentialForUse(
+        encryptionKey,
+        credentials,
+        credentialId,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("revoked") || message.includes("not found")) {
+        throw new PluginRefusedError(onRevoked, null);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * The token one call goes out with, and whose it is.
+   *
+   * For a `deployment-bearer` server this is what it always was: the one credential an administrator
+   * gave the server, used for everybody.
+   *
+   * For a `user-oauth` server it is the asker's own, and every branch that cannot prove it has the
+   * asker's grant refuses. There is deliberately no fallback. A fallback is the one bug this design
+   * exists to make impossible: answering out of whatever the deployment, or the last person to
+   * connect, happened to be able to see — which returns a confident answer assembled from documents
+   * the person asking cannot open, and looks exactly like a correct answer.
+   *
+   * Nothing is cached. The refresh token is exchanged for an access token per call and the access
+   * token is thrown away, so there is no stored copy of anybody's access for a disconnect to have to
+   * find. That costs a round trip to the vendor's token endpoint on every call, which is the price
+   * of revocation being complete by construction rather than by cleanup.
+   */
+  async function connectionTokenFor(
+    row: { id: string; url: string; credentialId: string | null },
+    entry: CatalogueEntry | null,
+    actorId: string,
+  ): Promise<{ token?: string; credentialOwner: string }> {
+    if (entry?.auth.kind !== "user-oauth") {
+      const token = row.credentialId
+        ? await secretFor(
+            row.credentialId,
+            `${row.id} needs a credential this deployment no longer holds. An administrator has to add it again.`,
+          )
+        : undefined;
+      return { token, credentialOwner: "deployment" };
+    }
+
+    /*
+     * The anonymous actor is the empty string, and an empty string must never match a row.
+     *
+     * `identifyActor` answers with `{ id: "" }` when it cannot resolve who is asking. Letting that
+     * reach the lookup would mean a run nobody can be held accountable for picking up whichever
+     * grant sorted first, so it is refused before the query rather than trusted to miss.
+     */
+    if (!actorId) {
+      throw new PluginRefusedError(
+        `${row.id} answers as the person asking, and this run is not attributed to anybody.`,
+        null,
+      );
+    }
+
+    const [held] = await database
+      .select({ credentialId: mcpUserCredentials.credentialId })
+      .from(mcpUserCredentials)
+      .where(
+        and(
+          eq(mcpUserCredentials.serverId, row.id),
+          eq(mcpUserCredentials.userId, actorId),
+        ),
+      )
+      .limit(1);
+
+    if (!held) {
+      throw new PluginRefusedError(
+        `You have not connected your ${entry.title} account. Connect it in Settings and ask again.`,
+        null,
+      );
+    }
+
+    const refreshToken = await secretFor(
+      held.credentialId,
+      `Your ${entry.title} access was withdrawn. Connect it again in Settings.`,
+    );
+
+    if (!row.credentialId) {
+      // The person did their part; the deployment has not. Said plainly, because the person cannot
+      // fix it and should not be told to try.
+      throw new PluginRefusedError(
+        `${entry.title} has no OAuth client registered for this deployment, so this cannot be called. An administrator has to add one.`,
+        null,
+      );
+    }
+    const client = JSON.parse(
+      await secretFor(
+        row.credentialId,
+        `${entry.title} has no usable OAuth client for this deployment. An administrator has to add one again.`,
+      ),
+    ) as OAuthClient;
+
+    const minted = await exchangeRefreshToken({
+      tokenUrl: entry.auth.tokenUrl,
+      client,
+      refreshToken,
+    });
+    return { token: minted.accessToken, credentialOwner: actorId };
   }
 
   async function requireServer(serverId: string) {
@@ -364,12 +561,32 @@ export function createPluginStore(options: PluginStoreOptions) {
      *
      * Replaced wholesale, never merged. A tool a vendor withdrew has to stop being offered, and a
      * merge would leave it in the list forever as a name the model will happily call.
+     *
+     * `actorId` is who is asking, and it matters for a `user-oauth` server: there is no deployment
+     * credential to list with, so the listing runs on the grant of whoever pressed refresh. An
+     * administrator who has not connected their own account gets a refusal, which lands in
+     * `lastError` and is shown on the Plugins page — the honest state, because until somebody has
+     * connected, this deployment genuinely does not know what that server offers.
+     *
+     * Absent for the refresh that happens right after a server is added, where nobody can have
+     * connected yet. It makes no difference to a `deployment-bearer` server, which never consults it.
      */
-    async refreshTools(serverId: string): Promise<{ tools: number }> {
-      const { row } = await requireServer(serverId);
+    async refreshTools(
+      serverId: string,
+      actorId = "",
+    ): Promise<{ tools: number }> {
+      const { row, entry } = await requireServer(serverId);
 
       try {
-        const token = await tokenFor(row.credentialId);
+        /*
+         * Not `row.credentialId` decrypted directly, which is what this used to do.
+         *
+         * For a `user-oauth` server that column holds the OAuth CLIENT, and handing it over as a
+         * bearer token would have sent the deployment's client secret to the vendor as somebody's
+         * access token. Going through the same selection the call path uses means there is one
+         * answer to "what token does this server get", and it cannot be a secret of the wrong kind.
+         */
+        const { token } = await connectionTokenFor(row, entry, actorId);
         const tools = await listTools({ url: row.url, token });
 
         await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
@@ -818,6 +1035,16 @@ export function createPluginStore(options: PluginStoreOptions) {
           server: serverId,
           tool: toolName,
           effect,
+          /*
+           * Whose credential this call would go out with.
+           *
+           * `deployment` for a shared token; a user id for a server reached as the asker. Without it
+           * the trail cannot answer "who did this run reach as", which is the whole question a
+           * per-person connector raises — two rows for the same tool and the same Bot can legitimately
+           * have seen entirely different documents, and nothing else in the row says why.
+           */
+          reachedAs:
+            entry?.auth.kind === "user-oauth" ? input.actorId : "deployment",
           decision: {
             allowed: verdict.allowed,
             mode: verdict.mode,
@@ -832,12 +1059,15 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(verdict.reason, verdict.matched);
       }
 
-      const token = await tokenFor(row.credentialId);
-      const result = await callRemoteTool(
-        { url: row.url, token },
-        toolName,
-        args,
-      );
+      /*
+       * Whose credential, decided after the policy and before the network.
+       *
+       * A refusal here is still a refusal: it means this call was permitted in principle and cannot
+       * be made as this person, which is a different sentence from "not allowed" and a different one
+       * again from "it broke".
+       */
+      const { token } = await connectionTokenFor(row, entry, input.actorId);
+      const result = await callVendor({ url: row.url, token }, toolName, args);
       return { text: result.text, isError: result.isError };
     },
   };

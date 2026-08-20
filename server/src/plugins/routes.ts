@@ -173,7 +173,10 @@ export function createPluginRoutes(
     if (forbidden) return forbidden;
 
     try {
-      const result = await store.refreshTools(context.req.param("id"));
+      const result = await store.refreshTools(
+        context.req.param("id"),
+        context.var.actor.id,
+      );
       const servers = await store.listServers();
       return context.json({
         tools: result.tools,
