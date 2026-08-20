@@ -87,9 +87,7 @@ function AuditPage() {
           ))}
         </div>
 
-        {events.isPending ? (
-          <PageEmpty>Loading the trail…</PageEmpty>
-        ) : events.isError ? (
+        {events.isPending ? null : events.isError ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             The audit trail could not be loaded.
           </p>

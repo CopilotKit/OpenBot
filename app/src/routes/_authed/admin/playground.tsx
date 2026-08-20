@@ -15,8 +15,13 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  deleteSandboxedMutationOptions,
+  publishSandboxedMutationOptions,
+  type SandboxedDraftInput,
+  saveSandboxedDraftMutationOptions,
+} from "@/lib/sandboxed/mutations";
+import {
   type SandboxedRecord,
-  sandboxedKeys,
   sandboxedListQueryOptions,
 } from "@/lib/sandboxed/queries";
 
@@ -65,56 +70,41 @@ function PlaygroundPage() {
   const sample = parsed(draft.sampleArguments);
   const schema = parsed(draft.argumentSchema);
 
-  const mutate = useMutation({
-    mutationFn: async (action: () => Promise<Response>) => {
-      setError(null);
-      const response = await action();
-      if (!response.ok) {
-        const detail = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(detail?.error ?? "That did not work.");
-      }
-      return response.json();
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: sandboxedKeys.all }),
-    onError: (thrown: Error) => setError(thrown.message),
+  /* Every write here reports into the same banner, so they share one failure handler. */
+  const report = { onError: (thrown: Error) => setError(thrown.message) };
+  const saveDraft = useMutation({
+    ...saveSandboxedDraftMutationOptions(queryClient),
+    ...report,
+  });
+  const publishDraft = useMutation({
+    ...publishSandboxedMutationOptions(queryClient),
+    ...report,
+  });
+  const removeComponent = useMutation({
+    ...deleteSandboxedMutationOptions(queryClient),
+    ...report,
+  });
+  /** What the editors currently describe, in the shape the server accepts. */
+  const input = (): SandboxedDraftInput => ({
+    slug: draft.slug,
+    title: draft.title,
+    description: draft.description,
+    html: draft.html,
+    css: draft.css,
+    jsFunctions: draft.jsFunctions,
+    argumentSchema: schema ?? {},
+    sampleArguments: sample ?? {},
   });
 
-  const saveDraft = () =>
-    fetch("/api/sandboxed", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        slug: draft.slug,
-        title: draft.title,
-        description: draft.description,
-        html: draft.html,
-        css: draft.css,
-        jsFunctions: draft.jsFunctions,
-        argumentSchema: schema ?? {},
-        sampleArguments: sample ?? {},
-      }),
-    });
+  const save = () => {
+    setError(null);
+    saveDraft.mutate(input());
+  };
 
-  const save = () => mutate.mutate(saveDraft);
-
-  /**
-   * Publish what is on screen.
-   *
-   * Saved first, because publishing acts on the stored draft rather than on the editors.
-   */
-  const publish = () =>
-    mutate.mutate(async () => {
-      const saved = await saveDraft();
-      if (!saved.ok) return saved;
-      return fetch(
-        `/api/sandboxed/${encodeURIComponent(`custom_${draft.slug}`)}/publish`,
-        { method: "POST", credentials: "include" },
-      );
-    });
+  const publish = () => {
+    setError(null);
+    publishDraft.mutate(input());
+  };
 
   const load = (component: SandboxedRecord) =>
     setDraft({
@@ -330,12 +320,8 @@ function PlaygroundPage() {
                 const name = deleting;
                 setDeleting(null);
                 if (name) {
-                  mutate.mutate(() =>
-                    fetch(`/api/sandboxed/${encodeURIComponent(name)}`, {
-                      method: "DELETE",
-                      credentials: "include",
-                    }),
-                  );
+                  setError(null);
+                  removeComponent.mutate(name);
                 }
               }}
               size="sm"

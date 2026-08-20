@@ -18,11 +18,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { type AgentFormValues, agentFormSchema } from "@/lib/agents/form";
-
-/** What the server said when it tried the endpoint. */
-type ConnectionVerdict =
-  | { ok: true; events: string[] }
-  | { ok: false; reason: string };
+import {
+  type ConnectionVerdict,
+  testAgentConnection,
+} from "@/lib/agents/queries";
 
 export function AgentFields({
   defaultValues,
@@ -56,35 +55,7 @@ export function AgentFields({
     setTesting(true);
     setConnection(null);
     try {
-      const response = await fetch("/api/agents/test-connection", {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        // Include the unsaved key so the test matches the pending form state.
-        body: JSON.stringify({
-          endpoint,
-          ...(key.trim() ? { headers: { Authorization: key.trim() } } : {}),
-        }),
-      });
-      const body = (await response.json().catch(() => null)) as
-        | ConnectionVerdict
-        | { error?: string }
-        | null;
-      if (body && "ok" in body) {
-        setConnection(body);
-      } else {
-        setConnection({
-          ok: false,
-          reason:
-            (body as { error?: string } | null)?.error ??
-            "The connection could not be tested.",
-        });
-      }
-    } catch {
-      setConnection({
-        ok: false,
-        reason: "The connection could not be tested.",
-      });
+      setConnection(await testAgentConnection(endpoint, key));
     } finally {
       setTesting(false);
     }

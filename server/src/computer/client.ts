@@ -22,7 +22,7 @@ import type {
   WriteFileInput,
   WriteFileResult,
 } from "./schema";
-import { checkNavigationTarget } from "./target";
+import { checkComputerAddress, checkNavigationTarget } from "./target";
 
 /**
  * How the server talks to a Bot's computer.
@@ -164,10 +164,24 @@ export function createComputerClient(options: ComputerClientOptions) {
       // Outside the try below on purpose: that catch reports "the computer is not running", which is
       // true of a computer that will not answer and misleading about a supervisor that could not be
       // reached or refused. Those are different operator-facing problems.
-      const target =
-        botId && options.resolveBaseUrl
-          ? (await options.resolveBaseUrl(botId)).replace(/\/$/, "")
-          : base;
+      let target: string;
+      if (botId && options.resolveBaseUrl) {
+        const located = (await options.resolveBaseUrl(botId)).replace(
+          /\/$/,
+          "",
+        );
+        // Checked because this address is not necessarily ours. A hosted provider answers from its
+        // own API, and whatever comes back is about to be called with this deployment's computer
+        // token. Our own supervisor answers with a private address, which is fine and why this is
+        // not the navigation check.
+        const verdict = checkComputerAddress(located);
+        if (!verdict.allowed) {
+          throw new ComputerUnavailableError(verdict.reason);
+        }
+        target = located;
+      } else {
+        target = base;
+      }
 
       // Already stopped before this left: do not dispatch at all. Relying on fetch to reject an
       // aborted signal makes "did the click happen" depend on how quickly the runtime notices, and

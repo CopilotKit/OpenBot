@@ -266,9 +266,7 @@ function CredentialsPage() {
       </Dialog>
 
       <PageSection title="Configured credentials">
-        {credentials.isPending ? (
-          <PageEmpty>Loading credentials…</PageEmpty>
-        ) : credentials.error ? (
+        {credentials.isPending ? null : credentials.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             Could not load credentials.
           </p>

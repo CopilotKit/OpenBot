@@ -57,6 +57,50 @@ function isPrivateIpv4(hostname: string): boolean {
 }
 
 /**
+ * Decide whether an address a supervisor handed back may be called at all.
+ *
+ * Deliberately not {@link checkNavigationTarget}. That one judges where a Bot may browse, and its
+ * private-host rule is exactly wrong here: our own supervisor answers with `http://127.0.0.1:<port>`
+ * for a container on this machine, so applying it would refuse the normal case.
+ *
+ * What survives is what holds however the address was produced. The scheme must be one we speak, and
+ * the cloud metadata addresses are refused whatever anything says, because that is how a container's
+ * credentials leave it and no supervisor has a reason to name one.
+ *
+ * This matters because the address stops being ours. With a hosted provider (A10) it arrives from a
+ * third party's API and goes straight into `fetch` carrying this deployment's computer token, so it
+ * is worth one check that it is an address rather than a surprise.
+ */
+export function checkComputerAddress(raw: string): TargetVerdict {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return {
+      allowed: false,
+      reason: `The computer's address is not a URL: ${raw}`,
+    };
+  }
+
+  if (!ALLOWED_PROTOCOLS.has(url.protocol)) {
+    return {
+      allowed: false,
+      reason: `A computer must be reached over http or https, not ${url.protocol.replace(":", "")}.`,
+    };
+  }
+
+  if (NEVER_ALLOWED_HOSTNAMES.has(url.hostname.toLowerCase())) {
+    return {
+      allowed: false,
+      reason:
+        "That address holds this deployment's own cloud credentials, so it is never called as a computer.",
+    };
+  }
+
+  return { allowed: true, url: url.toString() };
+}
+
+/**
  * Decide whether a Bot may navigate here.
  *
  * Returns a reason rather than throwing, because the caller renders it to a person: "that address is

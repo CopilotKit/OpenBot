@@ -84,7 +84,7 @@ const SECTIONS: {
         linkOptions: { to: "/admin/plugins" },
       },
       {
-        title: "Components",
+        title: "UI Components",
         description: "Custom pieces a Bot can draw in a conversation.",
         icon: IconLayoutGrid,
         linkOptions: { to: "/admin/components" },

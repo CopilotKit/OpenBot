@@ -98,12 +98,21 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-/** Body scrolls, so the header and footer stay put on a short viewport. */
+/**
+ * Body scrolls, so the header and footer stay put on a short viewport.
+ *
+ * `overflow-y-auto` is the half that was missing. `flex-1 min-h-0` lets this shrink, but without an
+ * overflow it shrinks and then paints its content over the footer — which every dialog here was short
+ * enough never to show.
+ */
 function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-body"
-      className={cn("-mx-1 flex min-h-0 flex-1 flex-col gap-4 px-1", className)}
+      className={cn(
+        "-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1",
+        className,
+      )}
       {...props}
     />
   );

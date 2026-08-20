@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 
 /** A component authored in the browser, as the playground edits it. */
 export type SandboxedRecord = {
@@ -41,13 +42,11 @@ export function sandboxedListQueryOptions() {
   return queryOptions({
     queryKey: sandboxedKeys.list(),
     queryFn: async (): Promise<SandboxedRecord[]> => {
-      const response = await fetch("/api/sandboxed", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error("The playground's components could not be loaded.");
-      }
-      return (await response.json()).components ?? [];
+      return (
+        (await client("/api/sandboxed", "components", {
+          fallback: "The playground's components could not be loaded.",
+        })) ?? []
+      );
     },
   });
 }
@@ -64,13 +63,11 @@ export function publishedSandboxedQueryOptions() {
     queryKey: sandboxedKeys.published(),
     refetchInterval: 30_000,
     queryFn: async (): Promise<PublishedSandboxed[]> => {
-      const response = await fetch("/api/sandboxed/published", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error("The published components could not be loaded.");
-      }
-      return (await response.json()).components ?? [];
+      return (
+        (await client("/api/sandboxed/published", "components", {
+          fallback: "The published components could not be loaded.",
+        })) ?? []
+      );
     },
   });
 }

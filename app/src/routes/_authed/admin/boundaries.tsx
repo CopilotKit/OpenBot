@@ -1,6 +1,14 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
+import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
+import {
+  type ActionPolicy,
+  actionPolicyQueryOptions,
+  type PolicyMode,
+} from "@/lib/computers/queries";
+import { queryClient } from "@/query-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -8,14 +16,6 @@ import { Input } from "@/components/ui/input";
  * CEL computer-action boundary editor. Rules are shown as the gateway evaluates them, and denied
  * actions are recorded in Audit with the matching rule.
  */
-
-type PolicyMode = "dry-run" | "enforce";
-
-type ActionPolicy = {
-  mode: PolicyMode;
-  deny: string[];
-  allow: string[];
-};
 
 /**
  * Presets are concrete CEL rules, not a separate policy language.
@@ -44,61 +44,28 @@ export const Route = createFileRoute("/_authed/admin/boundaries")({
 });
 
 function BoundariesPage() {
-  const [policy, setPolicy] = useState<ActionPolicy | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [draft, setDraft] = useState("");
 
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch("/api/computers/policy", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        setProblem("The boundary could not be read.");
-        return;
-      }
-      const body = (await response.json()) as { policy: ActionPolicy };
-      setPolicy(body.policy);
-      setProblem(null);
-    } catch {
-      setProblem("The boundary could not be reached.");
-    }
-  }, []);
+  const stored = useQuery(actionPolicyQueryOptions());
+  const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  /*
+   * The saved policy wins while a save is in flight and after it lands: the server normalises what
+   * it stores, so what came back is the policy, not what was sent.
+   */
+  const policy = savePolicy.data ?? stored.data ?? null;
+  const saving = savePolicy.isPending;
 
-  const save = useCallback(async (next: ActionPolicy) => {
-    setSaving(true);
+  const save = (next: ActionPolicy) => {
     setSaved(false);
-    try {
-      const response = await fetch("/api/computers/policy", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(next),
-      });
-      const body = (await response.json().catch(() => null)) as {
-        policy?: ActionPolicy;
-        error?: string;
-      } | null;
-      if (!response.ok) {
-        setProblem(body?.error ?? "The boundary could not be saved.");
-        return;
-      }
-      // Display the persisted policy in case the server normalized it.
-      if (body?.policy) setPolicy(body.policy);
-      setProblem(null);
-      setSaved(true);
-    } catch {
-      setProblem("The boundary could not be reached.");
-    } finally {
-      setSaving(false);
-    }
-  }, []);
+    setProblem(null);
+    savePolicy.mutate(next, {
+      onError: (thrown: Error) => setProblem(thrown.message),
+      onSuccess: () => setSaved(true),
+    });
+  };
 
   if (problem && !policy) {
     return (
@@ -110,14 +77,9 @@ function BoundariesPage() {
     );
   }
 
+  /* Nothing until the policy is known: a rule list that guesses is worse than a blank. */
   if (!policy) {
-    return (
-      <PageShell title="Boundaries">
-        <p className="mt-4 text-muted-foreground text-sm">
-          Loading the boundary…
-        </p>
-      </PageShell>
-    );
+    return <PageShell title="Boundaries">{null}</PageShell>;
   }
 
   const addRule = (rule: string) => {

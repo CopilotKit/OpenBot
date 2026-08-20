@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { pluginKeys } from "@/lib/plugins/queries";
+import { setPluginGrantMutationOptions } from "@/lib/plugins/mutations";
 
 /**
  * Which of your Agents carry this skill.
@@ -28,30 +28,11 @@ export function SkillAgents({
   const mine = (agents ?? []).filter((agent) => agent.mine);
   const held = new Set(grantedTo);
 
-  const toggle = useMutation({
-    mutationFn: async ({ agentId, on }: { agentId: string; on: boolean }) => {
-      const response = on
-        ? await fetch(
-            `/api/plugins/grants?kind=skill&ref=${encodeURIComponent(slug)}&agentId=${encodeURIComponent(agentId)}`,
-            { method: "DELETE", credentials: "include" },
-          )
-        : await fetch("/api/plugins/grants", {
-            method: "POST",
-            credentials: "include",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ kind: "skill", ref: slug, agentId }),
-          });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        // The server's sentence: it knows why it refused and this component does not.
-        throw new Error(body?.error ?? "That Agent could not be changed.");
-      }
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
-  });
+  const grant = useMutation(setPluginGrantMutationOptions(queryClient));
+
+  /* `on` is the current state, so a click asks for its opposite. */
+  const toggle = (agentId: string, on: boolean) =>
+    grant.mutate({ agentId, granted: !on, kind: "skill", ref: slug });
 
   return (
     <div className="flex flex-col gap-2">
@@ -67,9 +48,9 @@ export function SkillAgents({
               const on = held.has(agent.id);
               return (
                 <Button
-                  disabled={toggle.isPending}
+                  disabled={grant.isPending}
                   key={agent.id}
-                  onClick={() => toggle.mutate({ agentId: agent.id, on })}
+                  onClick={() => toggle(agent.id, on)}
                   size="sm"
                   type="button"
                   /*
@@ -89,9 +70,9 @@ export function SkillAgents({
           </p>
         </>
       )}
-      {toggle.error ? (
+      {grant.error ? (
         <p className="text-destructive text-xs" role="alert">
-          {toggle.error.message}
+          {grant.error.message}
         </p>
       ) : null}
     </div>

@@ -3,21 +3,13 @@ import { createPortal } from "react-dom";
 import { LiveScreen } from "./live-screen";
 import { ComputerPlaceholder } from "./placeholder";
 import {
-  type ControlState,
   readControl,
   releaseControl,
   supplySecret,
   takeControl,
-} from "./take-the-wheel";
-
-type Screenshot = {
-  base64: string;
-  width: number;
-  height: number;
-  capturedAt: string;
-  /** `about:blank` when the browser has not been sent anywhere yet. Absent on older computers. */
-  url?: string;
-};
+  type ControlState,
+} from "@/lib/computers/control";
+import { readScreenshot, type Screenshot } from "@/lib/computers/screen";
 
 /** Explicit blank-browser URLs use placeholder artwork; missing URL fields are treated as real pages. */
 function isBlankBrowser(shot: Screenshot): boolean {
@@ -122,33 +114,21 @@ export function ComputerView({
     // Always fetch at least one frame; only repeated refreshes are conditional.
     const tick = async () => {
       try {
-        const response = await fetch(
-          `/api/computers/${computerId}/screenshot`,
-          {
-            credentials: "include",
-          },
-        );
+        const { frame, error } = await readScreenshot(computerId);
         if (generation.current !== mine) return;
 
-        if (!response.ok) {
-          const body = (await response.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          setProblem(body?.error ?? "The screen is not available right now.");
+        if (!frame) {
+          setProblem(error ?? "The screen is not available right now.");
         } else {
-          const next = (await response.json()) as Screenshot;
           // Exact byte comparison is the settling signal.
-          unchanged = next.base64 === lastFrame ? unchanged + 1 : 0;
-          lastFrame = next.base64;
+          unchanged = frame.base64 === lastFrame ? unchanged + 1 : 0;
+          lastFrame = frame.base64;
           // Decode before swapping to avoid blanking the visible image during data URL changes.
-          await preloadFrame(next.base64);
+          await preloadFrame(frame.base64);
           if (generation.current !== mine) return;
-          setShot(next);
+          setShot(frame);
           setProblem(null);
         }
-      } catch {
-        if (generation.current !== mine) return;
-        setProblem("The screen is not available right now.");
       } finally {
         if (generation.current === mine && shouldContinue()) {
           timer = setTimeout(tick, intervalMs);

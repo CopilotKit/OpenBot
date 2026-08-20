@@ -20,7 +20,6 @@ import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skill
 import { Route as AuthedAdminIndexRouteImport } from './routes/_authed/admin/index'
 import { Route as AuthedAdminAuditRouteImport } from './routes/_authed/admin/audit'
 import { Route as AuthedAdminBoundariesRouteImport } from './routes/_authed/admin/boundaries'
-import { Route as AuthedAdminComponentsRouteImport } from './routes/_authed/admin/components'
 import { Route as AuthedAdminComputersRouteImport } from './routes/_authed/admin/computers'
 import { Route as AuthedAdminCredentialsRouteImport } from './routes/_authed/admin/credentials'
 import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admin/playground'
@@ -29,6 +28,10 @@ import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settin
 import { Route as AuthedAppAgentsIndexRouteImport } from './routes/_authed/_app/agents/index'
 import { Route as AuthedAppChannelChannelIdRouteImport } from './routes/_authed/_app/channel/$channelId'
 import { Route as AuthedAppChannelNewRouteImport } from './routes/_authed/_app/channel/new'
+import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
+import { Route as AuthedAdminComponentsNameRouteImport } from './routes/_authed/admin/components/$name'
+import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
+import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
@@ -83,11 +86,6 @@ const AuthedAdminBoundariesRoute = AuthedAdminBoundariesRouteImport.update({
   path: '/boundaries',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
-const AuthedAdminComponentsRoute = AuthedAdminComponentsRouteImport.update({
-  id: '/components',
-  path: '/components',
-  getParentRoute: () => AuthedAdminRouteRoute,
-} as any)
 const AuthedAdminComputersRoute = AuthedAdminComputersRouteImport.update({
   id: '/computers',
   path: '/computers',
@@ -129,6 +127,30 @@ const AuthedAppChannelNewRoute = AuthedAppChannelNewRouteImport.update({
   path: '/channel/new',
   getParentRoute: () => AuthedAppRoute,
 } as any)
+const AuthedAdminComponentsIndexRoute =
+  AuthedAdminComponentsIndexRouteImport.update({
+    id: '/components/',
+    path: '/components/',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
+const AuthedAdminComponentsNameRoute =
+  AuthedAdminComponentsNameRouteImport.update({
+    id: '/components/$name',
+    path: '/components/$name',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
+const AuthedSettingsComponentsGalleryIndexRoute =
+  AuthedSettingsComponentsGalleryIndexRouteImport.update({
+    id: '/components-gallery/',
+    path: '/components-gallery/',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
+const AuthedSettingsComponentsGalleryNameRoute =
+  AuthedSettingsComponentsGalleryNameRouteImport.update({
+    id: '/components-gallery/$name',
+    path: '/components-gallery/$name',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedAppIndexRoute
@@ -139,7 +161,6 @@ export interface FileRoutesByFullPath {
   '/skills': typeof AuthedAppSkillsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
-  '/admin/components': typeof AuthedAdminComponentsRoute
   '/admin/computers': typeof AuthedAdminComputersRoute
   '/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
@@ -148,7 +169,11 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof AuthedSettingsIndexRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/channel/new': typeof AuthedAppChannelNewRoute
+  '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
+  '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/agents/': typeof AuthedAppAgentsIndexRoute
+  '/admin/components/': typeof AuthedAdminComponentsIndexRoute
+  '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
@@ -157,7 +182,6 @@ export interface FileRoutesByTo {
   '/skills': typeof AuthedAppSkillsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
-  '/admin/components': typeof AuthedAdminComponentsRoute
   '/admin/computers': typeof AuthedAdminComputersRoute
   '/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
@@ -166,7 +190,11 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthedSettingsIndexRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/channel/new': typeof AuthedAppChannelNewRoute
+  '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
+  '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/agents': typeof AuthedAppAgentsIndexRoute
+  '/admin/components': typeof AuthedAdminComponentsIndexRoute
+  '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -179,7 +207,6 @@ export interface FileRoutesById {
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
   '/_authed/admin/audit': typeof AuthedAdminAuditRoute
   '/_authed/admin/boundaries': typeof AuthedAdminBoundariesRoute
-  '/_authed/admin/components': typeof AuthedAdminComponentsRoute
   '/_authed/admin/computers': typeof AuthedAdminComputersRoute
   '/_authed/admin/credentials': typeof AuthedAdminCredentialsRoute
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
@@ -189,7 +216,11 @@ export interface FileRoutesById {
   '/_authed/settings/': typeof AuthedSettingsIndexRoute
   '/_authed/_app/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/_authed/_app/channel/new': typeof AuthedAppChannelNewRoute
+  '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
+  '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
   '/_authed/_app/agents/': typeof AuthedAppAgentsIndexRoute
+  '/_authed/admin/components/': typeof AuthedAdminComponentsIndexRoute
+  '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -202,7 +233,6 @@ export interface FileRouteTypes {
     | '/skills'
     | '/admin/audit'
     | '/admin/boundaries'
-    | '/admin/components'
     | '/admin/computers'
     | '/admin/credentials'
     | '/admin/playground'
@@ -211,7 +241,11 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/channel/$channelId'
     | '/channel/new'
+    | '/admin/components/$name'
+    | '/settings/components-gallery/$name'
     | '/agents/'
+    | '/admin/components/'
+    | '/settings/components-gallery/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -220,7 +254,6 @@ export interface FileRouteTypes {
     | '/skills'
     | '/admin/audit'
     | '/admin/boundaries'
-    | '/admin/components'
     | '/admin/computers'
     | '/admin/credentials'
     | '/admin/playground'
@@ -229,7 +262,11 @@ export interface FileRouteTypes {
     | '/settings'
     | '/channel/$channelId'
     | '/channel/new'
+    | '/admin/components/$name'
+    | '/settings/components-gallery/$name'
     | '/agents'
+    | '/admin/components'
+    | '/settings/components-gallery'
   id:
     | '__root__'
     | '/_authed'
@@ -241,7 +278,6 @@ export interface FileRouteTypes {
     | '/_authed/_app/skills'
     | '/_authed/admin/audit'
     | '/_authed/admin/boundaries'
-    | '/_authed/admin/components'
     | '/_authed/admin/computers'
     | '/_authed/admin/credentials'
     | '/_authed/admin/playground'
@@ -251,7 +287,11 @@ export interface FileRouteTypes {
     | '/_authed/settings/'
     | '/_authed/_app/channel/$channelId'
     | '/_authed/_app/channel/new'
+    | '/_authed/admin/components/$name'
+    | '/_authed/settings/components-gallery/$name'
     | '/_authed/_app/agents/'
+    | '/_authed/admin/components/'
+    | '/_authed/settings/components-gallery/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -338,13 +378,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAdminBoundariesRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
     }
-    '/_authed/admin/components': {
-      id: '/_authed/admin/components'
-      path: '/components'
-      fullPath: '/admin/components'
-      preLoaderRoute: typeof AuthedAdminComponentsRouteImport
-      parentRoute: typeof AuthedAdminRouteRoute
-    }
     '/_authed/admin/computers': {
       id: '/_authed/admin/computers'
       path: '/computers'
@@ -401,29 +434,59 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppChannelNewRouteImport
       parentRoute: typeof AuthedAppRoute
     }
+    '/_authed/admin/components/': {
+      id: '/_authed/admin/components/'
+      path: '/components'
+      fullPath: '/admin/components/'
+      preLoaderRoute: typeof AuthedAdminComponentsIndexRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/admin/components/$name': {
+      id: '/_authed/admin/components/$name'
+      path: '/components/$name'
+      fullPath: '/admin/components/$name'
+      preLoaderRoute: typeof AuthedAdminComponentsNameRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/settings/components-gallery/': {
+      id: '/_authed/settings/components-gallery/'
+      path: '/components-gallery'
+      fullPath: '/settings/components-gallery/'
+      preLoaderRoute: typeof AuthedSettingsComponentsGalleryIndexRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/settings/components-gallery/$name': {
+      id: '/_authed/settings/components-gallery/$name'
+      path: '/components-gallery/$name'
+      fullPath: '/settings/components-gallery/$name'
+      preLoaderRoute: typeof AuthedSettingsComponentsGalleryNameRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
   }
 }
 
 interface AuthedAdminRouteRouteChildren {
   AuthedAdminAuditRoute: typeof AuthedAdminAuditRoute
   AuthedAdminBoundariesRoute: typeof AuthedAdminBoundariesRoute
-  AuthedAdminComponentsRoute: typeof AuthedAdminComponentsRoute
   AuthedAdminComputersRoute: typeof AuthedAdminComputersRoute
   AuthedAdminCredentialsRoute: typeof AuthedAdminCredentialsRoute
   AuthedAdminPlaygroundRoute: typeof AuthedAdminPlaygroundRoute
   AuthedAdminPluginsRoute: typeof AuthedAdminPluginsRoute
   AuthedAdminIndexRoute: typeof AuthedAdminIndexRoute
+  AuthedAdminComponentsNameRoute: typeof AuthedAdminComponentsNameRoute
+  AuthedAdminComponentsIndexRoute: typeof AuthedAdminComponentsIndexRoute
 }
 
 const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminAuditRoute: AuthedAdminAuditRoute,
   AuthedAdminBoundariesRoute: AuthedAdminBoundariesRoute,
-  AuthedAdminComponentsRoute: AuthedAdminComponentsRoute,
   AuthedAdminComputersRoute: AuthedAdminComputersRoute,
   AuthedAdminCredentialsRoute: AuthedAdminCredentialsRoute,
   AuthedAdminPlaygroundRoute: AuthedAdminPlaygroundRoute,
   AuthedAdminPluginsRoute: AuthedAdminPluginsRoute,
   AuthedAdminIndexRoute: AuthedAdminIndexRoute,
+  AuthedAdminComponentsNameRoute: AuthedAdminComponentsNameRoute,
+  AuthedAdminComponentsIndexRoute: AuthedAdminComponentsIndexRoute,
 }
 
 const AuthedAdminRouteRouteWithChildren =
@@ -431,10 +494,16 @@ const AuthedAdminRouteRouteWithChildren =
 
 interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsIndexRoute: typeof AuthedSettingsIndexRoute
+  AuthedSettingsComponentsGalleryNameRoute: typeof AuthedSettingsComponentsGalleryNameRoute
+  AuthedSettingsComponentsGalleryIndexRoute: typeof AuthedSettingsComponentsGalleryIndexRoute
 }
 
 const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsIndexRoute: AuthedSettingsIndexRoute,
+  AuthedSettingsComponentsGalleryNameRoute:
+    AuthedSettingsComponentsGalleryNameRoute,
+  AuthedSettingsComponentsGalleryIndexRoute:
+    AuthedSettingsComponentsGalleryIndexRoute,
 }
 
 const AuthedSettingsRouteRouteWithChildren =

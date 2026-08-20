@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { tryClient } from "@/lib/client";
 
 export type AuthenticatedUser = {
   id: string;
@@ -14,7 +15,11 @@ export const authKeys = {
 };
 
 async function currentUser(): Promise<AuthenticatedUser | null> {
-  const response = await fetch("/api/me", { credentials: "include" });
+  /*
+   * `tryClient` rather than `client`: not being signed in is an answer here, not a failure, and it
+   * arrives as a 401 that has to be read before anything decides the request went wrong.
+   */
+  const response = await tryClient("/api/me");
   if (response.status === 401) {
     return null;
   }

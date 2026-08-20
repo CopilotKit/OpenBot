@@ -16,6 +16,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
+import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   connectionsQueryOptions,
   pluginsPageQueryOptions,
@@ -87,21 +88,14 @@ function ConnectedAccounts() {
   const connections = useQuery(connectionsQueryOptions());
 
   const connect = useMutation({
-    mutationFn: async (serverId: string) => {
-      const response = await fetch(`/api/plugins/servers/${serverId}/connect`, {
-        method: "POST",
-        credentials: "include",
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body?.error ?? "This could not be connected.");
-      }
-      /*
-       * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be
-       * shown to the person in their own browser — there is nothing here that could complete it on
-       * their behalf, which is the point.
-       */
-      window.location.href = body.authorizationUrl;
+    ...connectAccountMutationOptions(),
+    /*
+     * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be
+     * shown to the person in their own browser — there is nothing here that could complete it on
+     * their behalf, which is the point.
+     */
+    onSuccess: (authorizationUrl) => {
+      window.location.href = authorizationUrl;
     },
   });
 

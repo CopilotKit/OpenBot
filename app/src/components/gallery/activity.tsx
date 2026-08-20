@@ -267,6 +267,12 @@ function RefusalList({
 
 export const GALLERY: GalleryComponent[] = [
   {
+    /*
+     * NO `preview`, DELIBERATELY. This one reads the deployment through `callComponentFunction` as
+     * soon as it mounts, and needs the Bot and conversation it was called in. Drawing it in Admin
+     * would put a real read, attributed to whichever Bot happened to be active, behind a page that
+     * only means to show what the component looks like. Admin draws it as unpreviewable instead.
+     */
     name: "showActivityReport",
     title: "Activity report",
     kind: "card",

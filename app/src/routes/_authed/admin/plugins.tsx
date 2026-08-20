@@ -3,11 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
-import {
-  PageEmpty,
-  PageSection,
-  PageShell,
-} from "@/components/layout/page-shell";
+import { PageSection, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,10 +20,20 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { storeMcpToken } from "@/lib/credentials/mutations";
+import {
+  addCuratedServerMutationOptions,
+  addCustomServerMutationOptions,
+  refreshPluginServerMutationOptions,
+  registerOAuthClientMutationOptions,
+  removePluginServerMutationOptions,
+  removeSkillMutationOptions,
+  saveSkillMutationOptions,
+  setPluginGrantMutationOptions,
+} from "@/lib/plugins/mutations";
 import {
   type PluginServer,
   type PluginSkill,
-  pluginKeys,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
 
@@ -46,57 +52,68 @@ function PluginsPage() {
   const [tab, setTab] = useState<"catalogue" | "yours" | "skills">("catalogue");
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = () =>
-    queryClient.invalidateQueries({ queryKey: pluginKeys.all });
-
-  const post = async (path: string, body: unknown) => {
-    setError(null);
-    const response = await fetch(`/api/plugins${path}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => null)) as {
-        error?: string;
-      } | null;
-      throw new Error(detail?.error ?? "That did not work.");
-    }
-    return response.json();
-  };
+  /*
+   * Every write on this page reports into the same banner, so they share one failure handler rather
+   * than each growing its own. `refresh` stays because two of them are chains that end in a server
+   * record the catalogue reads back.
+   */
+  const report = { onError: (thrown: Error) => setError(thrown.message) };
+  const setGrant = useMutation({
+    ...setPluginGrantMutationOptions(queryClient),
+    ...report,
+  });
+  const addCurated = useMutation({
+    ...addCuratedServerMutationOptions(queryClient),
+    ...report,
+  });
+  const addCustom = useMutation({
+    ...addCustomServerMutationOptions(queryClient),
+    ...report,
+  });
+  const refreshServer = useMutation({
+    ...refreshPluginServerMutationOptions(queryClient),
+    ...report,
+  });
+  const removeServer = useMutation({
+    ...removePluginServerMutationOptions(queryClient),
+    ...report,
+  });
+  const registerClient = useMutation({
+    ...registerOAuthClientMutationOptions(queryClient),
+    ...report,
+  });
+  const saveSkill = useMutation({
+    ...saveSkillMutationOptions(queryClient),
+    ...report,
+  });
+  const removeSkill = useMutation({
+    ...removeSkillMutationOptions(queryClient),
+    ...report,
+  });
 
   /**
-   * Store the token as a credential first; plugin server records keep only the credential id.
+   * Adding a server is two writes, and three for a vendor reached as the person asking: the token
+   * becomes a credential, the record refers to it, and an OAuth client is registered against the
+   * record that now exists.
+   *
+   * Chained here rather than in a factory because only this page knows what was typed. `after` runs
+   * last because the client is recorded against the server row, so it cannot be sent until that row
+   * is there — and it awaits, so a failure to register lands in the same banner instead of vanishing.
    */
-  const storeToken = async (
+  const addServerWithToken = async (
+    run: (credentialId?: string) => Promise<unknown>,
     serverId: string,
     token?: string,
-  ): Promise<string | undefined> => {
-    if (!token?.trim()) return undefined;
-    const response = await fetch("/api/admin/credentials", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        kind: "mcp",
-        provider: serverId,
-        keyId: `mcp-${serverId}`,
-        plaintext: token.trim(),
-        metadata: { server: serverId },
-      }),
-    });
-    if (!response.ok) {
-      throw new Error("The token could not be stored.");
+    after?: () => Promise<unknown>,
+  ) => {
+    setError(null);
+    try {
+      await run(await storeMcpToken(serverId, token));
+      if (after) await after();
+    } catch (thrown) {
+      setError((thrown as Error).message);
     }
-    return (await response.json())?.credential?.id;
   };
-
-  const mutate = useMutation({
-    mutationFn: async (action: () => Promise<unknown>) => action(),
-    onSuccess: refresh,
-    onError: (thrown: Error) => setError(thrown.message),
-  });
 
   const bots = (agents ?? []).map((agent: { id: string }) => ({
     id: agent.id,
@@ -136,9 +153,7 @@ function PluginsPage() {
         ) : null}
 
         <div className="mt-6">
-          {isPending ? (
-            <PageEmpty>Loading plugins…</PageEmpty>
-          ) : isError || !data ? (
+          {isPending ? null : isError || !data ? (
             <p className="mt-4 text-destructive text-sm" role="alert">
               Plugins could not be loaded.
             </p>
@@ -147,83 +162,61 @@ function PluginsPage() {
               added={new Set(data.servers.map((server) => server.id))}
               items={data.catalogue}
               onAdd={(key, instanceHost, token, oauthClient) =>
-                mutate.mutate(async () => {
-                  const credentialId = await storeToken(key, token);
-                  const server = await post("/servers", {
-                    key,
-                    instanceHost,
-                    credentialId,
-                  });
-                  /*
-                   * The client is registered after the server exists, because it is recorded against
-                   * that row. Two calls rather than one field on the first, matching the server: a
-                   * client is rotated without the server being re-added.
-                   */
-                  if (oauthClient) {
-                    await post(`/servers/${key}/oauth-client`, oauthClient);
-                  }
-                  return server;
-                })
+                void addServerWithToken(
+                  (credentialId) =>
+                    addCurated.mutateAsync({ key, instanceHost, credentialId }),
+                  key,
+                  token,
+                  oauthClient
+                    ? () =>
+                        registerClient.mutateAsync({
+                          serverId: key,
+                          ...oauthClient,
+                        })
+                    : undefined,
+                )
               }
               redirectUri={data.redirectUri}
               onAddCustom={(input) =>
-                mutate.mutate(async () => {
-                  const credentialId = await storeToken(input.id, input.token);
-                  return post("/servers/custom", { ...input, credentialId });
-                })
+                void addServerWithToken(
+                  (credentialId) =>
+                    addCustom.mutateAsync({ ...input, credentialId }),
+                  input.id,
+                  input.token,
+                )
               }
             />
           ) : tab === "yours" ? (
             <Yours
               bots={bots}
               onGrant={(ref, agentId, held) =>
-                mutate.mutate(() =>
-                  held
-                    ? fetch(
-                        `/api/plugins/grants?kind=mcp&ref=${encodeURIComponent(ref)}&agentId=${encodeURIComponent(agentId)}`,
-                        { method: "DELETE", credentials: "include" },
-                      )
-                    : post("/grants", { kind: "mcp", ref, agentId }),
-                )
+                setGrant.mutate({
+                  agentId,
+                  granted: !held,
+                  kind: "mcp",
+                  ref,
+                })
               }
-              onRefresh={(id) =>
-                mutate.mutate(() => post(`/servers/${id}/refresh`, {}))
-              }
-              onRemove={(id) =>
-                mutate.mutate(() =>
-                  fetch(`/api/plugins/servers/${encodeURIComponent(id)}`, {
-                    method: "DELETE",
-                    credentials: "include",
-                  }),
-                )
-              }
+              onRefresh={(id) => refreshServer.mutate(id)}
+              onRemove={(id) => removeServer.mutate(id)}
               servers={data.servers}
             />
           ) : (
             <Skills
               bots={bots}
               onGrant={(slug, agentId, held) =>
-                mutate.mutate(() =>
-                  held
-                    ? fetch(
-                        `/api/plugins/grants?kind=skill&ref=${encodeURIComponent(slug)}&agentId=${encodeURIComponent(agentId)}`,
-                        { method: "DELETE", credentials: "include" },
-                      )
-                    : post("/grants", { kind: "skill", ref: slug, agentId }),
-                )
+                setGrant.mutate({
+                  agentId,
+                  granted: !held,
+                  kind: "skill",
+                  ref: slug,
+                })
               }
               // Admin-authored skills are deployment-global; personal skills are created elsewhere.
               onInstall={(input) =>
-                mutate.mutate(() => post("/skills", { ...input, global: true }))
+                saveSkill.mutate({ ...input, global: true })
               }
-              onUninstall={(slug) =>
-                mutate.mutate(() =>
-                  fetch(`/api/plugins/skills/${encodeURIComponent(slug)}`, {
-                    method: "DELETE",
-                    credentials: "include",
-                  }),
-                )
-              }
+              onUninstall={(slug) => removeSkill.mutate(slug)}
               skills={data.skills}
             />
           )}

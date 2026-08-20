@@ -103,10 +103,10 @@ export function GalleryPreview({
 /**
  * One component, drawn from its own sample props.
  *
- * Separate from the gallery because the two surfaces want different framing: the gallery labels
- * every tile, and an admin page already has the name and the description above it.
+ * Private to this file. Admin and Settings draw components through `ComponentPreview`, which scales
+ * one to fit a tile; this draws at natural size, which is what the per-Bot panel below wants.
  */
-export function PreviewOf({ name }: { name: string }) {
+function PreviewOf({ name }: { name: string }) {
   const component = GALLERY_COMPONENTS.find((entry) => entry.name === name);
   if (!component) return null;
   if (!component.preview) {
