@@ -1,0 +1,1 @@
+/command/with-contenv /etc/s6-overlay/scripts/computer-token.sh

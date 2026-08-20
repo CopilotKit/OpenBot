@@ -1,0 +1,15 @@
+# Build context hygiene. Without this the whole tree ships to the daemon, including every
+# node_modules and every local artifact, which is slow and puts a developer's .env in an image.
+node_modules
+**/node_modules
+.git
+.env
+.env.*
+!.env.example
+dist
+**/dist
+app/dist
+.nx
+*.log
+.DS_Store
+assets/*.svg

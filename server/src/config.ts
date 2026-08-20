@@ -61,6 +61,13 @@ export type DeploymentConfig = {
   /** Names OpenBot on the analytics the runtime already sends. Off with OPENBOT_ACCESSIBILITY_DISABLED. */
   accessibility: boolean;
   /**
+   * Where the built app is, when this process serves it.
+   *
+   * Set in a container image that carries both. Unset in development, where Vite serves the app and
+   * proxies the API here, so the server stays an API and nothing shadows a route.
+   */
+  appDistDir?: string;
+  /**
    * The Bot computer. Absent means the feature is off and its routes are not mounted, rather than
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
@@ -388,6 +395,9 @@ export function loadConfig(
     auth: authConfig(environment, google),
     devNoAuth: devAuthEnabled(environment),
     accessibility: accessibilityEnabled(environment),
+    ...(optional(environment, "APP_DIST_DIR")
+      ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
+      : {}),
     computer: computerConfig(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }

@@ -1,0 +1,9 @@
+#!/command/with-contenv sh
+# The Bot's browser. Bound to loopback: its only caller is the API beside it.
+#
+# `with-contenv` is not decoration. Without it s6 starts a service with none of the container's
+# environment, and the failure is a config error naming a variable that is plainly set.
+cd /app/agent-computer
+export PORT=4100
+export WORKSPACE_DIR=/workspace
+exec s6-setuidgid pwuser /usr/local/bin/bun src/index.ts
