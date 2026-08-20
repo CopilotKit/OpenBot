@@ -95,9 +95,7 @@ function ComputersPage() {
       <PageSection title="Computers in this deployment">
         {computers === null && problem ? (
           <PageEmpty>The list could not be loaded.</PageEmpty>
-        ) : computers === null ? (
-          <PageEmpty>Loading…</PageEmpty>
-        ) : computers.length === 0 ? (
+        ) : computers === null ? null : computers.length === 0 ? (
           <PageEmpty>
             No computers yet. One appears the first time a Bot opens a page.
           </PageEmpty>

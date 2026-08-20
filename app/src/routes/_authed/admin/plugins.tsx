@@ -3,11 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
-import {
-  PageEmpty,
-  PageSection,
-  PageShell,
-} from "@/components/layout/page-shell";
+import { PageSection, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -145,9 +141,7 @@ function PluginsPage() {
         ) : null}
 
         <div className="mt-6">
-          {isPending ? (
-            <PageEmpty>Loading plugins…</PageEmpty>
-          ) : isError || !data ? (
+          {isPending ? null : isError || !data ? (
             <p className="mt-4 text-destructive text-sm" role="alert">
               Plugins could not be loaded.
             </p>

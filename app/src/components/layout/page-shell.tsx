@@ -148,8 +148,17 @@ export function PageRows({
   className?: string;
 }) {
   return (
+    /*
+     * The rows are squared off and the card clips them. `Item` carries `rounded-lg` of its own, which
+     * inside a card of divided rows painted a hover as a floating pill: a middle row has no corners,
+     * and the first and last cannot be concentric with the card while sitting a border inside it.
+     */
     <div
-      className={cn("mt-4 rounded-lg border border-border bg-card", className)}
+      className={cn(
+        "mt-4 overflow-hidden rounded-lg border border-border bg-card",
+        "[&_[data-slot=item]]:rounded-none",
+        className,
+      )}
     >
       {children}
     </div>

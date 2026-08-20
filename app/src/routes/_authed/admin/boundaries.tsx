@@ -77,14 +77,9 @@ function BoundariesPage() {
     );
   }
 
+  /* Nothing until the policy is known: a rule list that guesses is worse than a blank. */
   if (!policy) {
-    return (
-      <PageShell title="Boundaries">
-        <p className="mt-4 text-muted-foreground text-sm">
-          Loading the boundary…
-        </p>
-      </PageShell>
-    );
+    return <PageShell title="Boundaries">{null}</PageShell>;
   }
 
   const addRule = (rule: string) => {

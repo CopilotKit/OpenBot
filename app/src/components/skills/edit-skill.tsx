@@ -27,19 +27,20 @@ export function EditSkill({ slug }: { slug: string }) {
 
   const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
 
+  /* Nothing while it loads. "Missing" and "not yet arrived" must not read the same. */
+  if (isPending) return null;
+
   if (!skill) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
+        {/*
+         * Said plainly rather than shown as an empty form. A skill can be missing because it was
+         * deleted in another tab, or because the link names one that is somebody else's — and an
+         * empty form here would invite them to write it back into existence under a slug they may
+         * not own.
+         */}
         <p className="text-muted-foreground text-sm">
-          {isPending
-            ? "Loading…"
-            : /*
-               * Said plainly rather than shown as an empty form. A skill can be missing because it
-               * was deleted in another tab, or because the link names one that is somebody else's —
-               * and an empty form here would invite them to write it back into existence under a
-               * slug they may not own.
-               */
-              "That skill no longer exists, or it is not yours to edit."}
+          That skill no longer exists, or it is not yours to edit.
         </p>
       </div>
     );

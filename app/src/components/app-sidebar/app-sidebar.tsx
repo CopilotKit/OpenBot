@@ -34,6 +34,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
@@ -73,9 +74,6 @@ function UserAvatar() {
  * Cap layout animation because `layout` measures every animated row on each reorder.
  */
 const MAX_ANIMATED_ROWS = 60;
-
-const ENTRANCE_SECONDS = 0.2;
-const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 /**
  * The roster, narrowed to what the person typed.
