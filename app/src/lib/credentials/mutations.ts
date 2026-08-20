@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 import { credentialKeys } from "./queries";
 
 export type CredentialInput = {
@@ -9,20 +10,14 @@ export type CredentialInput = {
   plaintext: string;
 };
 
-async function credentialRequest(path: string, body?: CredentialInput) {
-  const response = await fetch(path, {
-    method: "POST",
-    credentials: "include",
-    headers: body ? { "content-type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!response.ok) throw new Error("Credential operation failed");
-}
-
 export function createCredentialMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (input: CredentialInput) =>
-      credentialRequest("/api/admin/credentials", input),
+      client("/api/admin/credentials", {
+        method: "POST",
+        body: input,
+        fallback: "Credential operation failed",
+      }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: credentialKeys.all }),
   });
@@ -31,8 +26,44 @@ export function createCredentialMutationOptions(queryClient: QueryClient) {
 export function revokeCredentialMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: (credentialId: string) =>
-      credentialRequest(`/api/admin/credentials/${credentialId}/revoke`),
+      client(`/api/admin/credentials/${credentialId}/revoke`, {
+        method: "POST",
+        fallback: "Credential operation failed",
+      }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: credentialKeys.all }),
   });
+}
+
+/**
+ * Store an MCP server's token and hand back the credential id.
+ *
+ * A plain function rather than a factory, because it is a step inside another write rather than a
+ * write somebody asked for: a plugin server record keeps only the credential id, so the token has to
+ * become a credential before the server can be created. Returns `undefined` for an empty token,
+ * which is how a server with no auth is added.
+ *
+ * The token goes one way. What a later read returns is that a credential exists, never its value.
+ */
+export async function storeMcpToken(
+  serverId: string,
+  token?: string,
+): Promise<string | undefined> {
+  if (!token?.trim()) return undefined;
+  const credential = await client<{ id: string }>(
+    "/api/admin/credentials",
+    "credential",
+    {
+      method: "POST",
+      body: {
+        kind: "mcp",
+        provider: serverId,
+        keyId: `mcp-${serverId}`,
+        plaintext: token.trim(),
+        metadata: { server: serverId },
+      },
+      fallback: "The token could not be stored.",
+    },
+  );
+  return credential?.id;
 }

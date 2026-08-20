@@ -32,9 +32,7 @@ function ConnectorsPage() {
       title="Connectors"
     >
       <PageSection title="Available">
-        {connectors.isPending ? (
-          <PageEmpty>Loading connectors…</PageEmpty>
-        ) : connectors.error ? (
+        {connectors.isPending ? null : connectors.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             Could not load connectors.
           </p>

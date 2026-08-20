@@ -1,6 +1,9 @@
 import type * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { Link, type LinkProps } from "@tanstack/react-router";
+import { Button } from "../ui/button";
+import { IconChevronLeft } from "@tabler/icons-react";
 
 /**
  * The frame every configuration screen sits in.
@@ -40,6 +43,7 @@ export function PageShell({
   description,
   title,
   width = "prose",
+  backButton,
 }: {
   /** Sits on the title's baseline. For the page's one primary verb, if it has one. */
   action?: React.ReactNode;
@@ -48,28 +52,46 @@ export function PageShell({
   description?: React.ReactNode;
   title: string;
   width?: ShellWidth;
+  backButton?: {
+    linkProps: LinkProps;
+    label: string;
+  };
 }) {
   return (
-    <div
-      className={cn(
-        "mx-auto flex w-full flex-col px-4 py-12",
-        WIDTHS[width],
-        className,
-      )}
-    >
-      <header className="flex flex-col gap-2">
-        <div className="flex flex-row items-center justify-between gap-4">
-          <h1 className="font-bold text-2xl">{title}</h1>
-          {action}
+    <>
+      {!!backButton && (
+        <div className="max-w-7xl w-full h-14 flex items-center px-3">
+          <Button
+            variant="ghost"
+            render={(props) => <Link {...backButton.linkProps} {...props} />}
+          >
+            <IconChevronLeft />
+            {backButton.label}
+          </Button>
         </div>
-        {description ? (
-          <p className="max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
-            {description}
-          </p>
-        ) : null}
-      </header>
-      {children}
-    </div>
+      )}
+      <div
+        className={cn(
+          "mx-auto flex w-full flex-col px-4 py-12",
+          { "pt-8": !!backButton },
+          WIDTHS[width],
+          className,
+        )}
+      >
+        <header className="flex flex-col gap-2">
+          <div className="flex flex-row items-center justify-between gap-4">
+            <h1 className="font-bold text-2xl">{title}</h1>
+            {action}
+          </div>
+          {description ? (
+            <p className="max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
+              {description}
+            </p>
+          ) : null}
+        </header>
+        {children}
+      </div>
+    </>
   );
 }
 
@@ -126,8 +148,17 @@ export function PageRows({
   className?: string;
 }) {
   return (
+    /*
+     * The rows are squared off and the card clips them. `Item` carries `rounded-lg` of its own, which
+     * inside a card of divided rows painted a hover as a floating pill: a middle row has no corners,
+     * and the first and last cannot be concentric with the card while sitting a border inside it.
+     */
     <div
-      className={cn("mt-4 rounded-lg border border-border bg-card", className)}
+      className={cn(
+        "mt-4 overflow-hidden rounded-lg border border-border bg-card",
+        "[&_[data-slot=item]]:rounded-none",
+        className,
+      )}
     >
       {children}
     </div>

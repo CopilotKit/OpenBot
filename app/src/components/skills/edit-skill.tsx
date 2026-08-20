@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { SkillAgents } from "@/components/skills/skill-agents";
 import { SkillFields } from "@/components/skills/skill-fields";
-import { pluginKeys, pluginsPageQueryOptions } from "@/lib/plugins/queries";
-import type { SkillFormValues } from "@/lib/skills/form";
+import { saveSkillMutationOptions } from "@/lib/plugins/mutations";
+import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 
 /**
  * Editing a skill, in the same panel that writes one.
@@ -25,39 +25,22 @@ export function EditSkill({ slug }: { slug: string }) {
    */
   const skill = data?.skills.find((candidate) => candidate.slug === slug);
 
-  const saveSkill = useMutation({
-    mutationFn: async (values: SkillFormValues) => {
-      const response = await fetch("/api/plugins/skills", {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(body?.error ?? "The skill could not be saved.");
-      }
-      return response.json();
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
-  });
+  const saveSkill = useMutation(saveSkillMutationOptions(queryClient));
+
+  /* Nothing while it loads. "Missing" and "not yet arrived" must not read the same. */
+  if (isPending) return null;
 
   if (!skill) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6 p-8">
+        {/*
+         * Said plainly rather than shown as an empty form. A skill can be missing because it was
+         * deleted in another tab, or because the link names one that is somebody else's — and an
+         * empty form here would invite them to write it back into existence under a slug they may
+         * not own.
+         */}
         <p className="text-muted-foreground text-sm">
-          {isPending
-            ? "Loading…"
-            : /*
-               * Said plainly rather than shown as an empty form. A skill can be missing because it
-               * was deleted in another tab, or because the link names one that is somebody else's —
-               * and an empty form here would invite them to write it back into existence under a
-               * slug they may not own.
-               */
-              "That skill no longer exists, or it is not yours to edit."}
+          That skill no longer exists, or it is not yours to edit.
         </p>
       </div>
     );

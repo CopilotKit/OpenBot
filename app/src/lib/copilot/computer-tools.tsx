@@ -1,11 +1,9 @@
 import { useFrontendTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
+import { tryClient } from "@/lib/client";
 import { ToolLine } from "@/components/channels/tool-line";
 import { ComputerView } from "@/components/computer/computer-view";
-import {
-  type ControlState,
-  readControl,
-} from "@/components/computer/take-the-wheel";
+import { readControl, type ControlState } from "@/lib/computers/control";
 import { useActiveBotHolder } from "./active-bot";
 import { reportComputerActivity } from "./computer-activity";
 
@@ -45,18 +43,22 @@ async function waitForPerson(
 async function callComputer(
   botId: string,
   path: string,
-  init?: RequestInit,
+  /*
+   * A body, not a `RequestInit`. The client serialises it, so a caller that stringified first would
+   * send a JSON string of a JSON string — which is what happened, briefly, when this moved over.
+   */
+  init?: { method?: string; body?: unknown },
   signal?: AbortSignal,
 ): Promise<ToolOutcome> {
   // Announce before the call so the screen can open while the action is running.
   reportComputerActivity(botId);
   let response: Response;
   try {
-    response = await fetch(`/api/computers/${botId}${path}`, {
-      credentials: "include",
+    response = await tryClient(`/api/computers/${botId}${path}`, {
+      method: init?.method,
+      body: init?.body,
       // Abort cancels the request and prevents later actions, but cannot undo browser work already executing.
-      ...(signal ? { signal } : {}),
-      ...init,
+      signal,
     });
   } catch (error) {
     // An abort is a stopped run, not a computer failure.
@@ -194,8 +196,7 @@ export function ComputerTools() {
         "/navigate",
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ url }),
+          body: { url },
         },
         signal,
       );
@@ -285,8 +286,7 @@ export function ComputerTools() {
         "/type",
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input),
+          body: input,
         },
         signal,
       ),
@@ -327,8 +327,7 @@ export function ComputerTools() {
         "/click",
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input),
+          body: input,
         },
         signal,
       ),
@@ -378,8 +377,7 @@ export function ComputerTools() {
         "/key",
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input),
+          body: input,
         },
         signal,
       ),
@@ -426,8 +424,7 @@ export function ComputerTools() {
         "/control/secret",
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input),
+          body: input,
         },
         signal,
       );
@@ -476,15 +473,9 @@ export function ComputerTools() {
       { signal }: { signal?: AbortSignal } = {},
     ) => {
       try {
-        const response = await fetch(
+        const response = await tryClient(
           `/api/agents/${encodeURIComponent(bot.current)}/declined`,
-          {
-            method: "POST",
-            credentials: "include",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(input),
-            ...(signal ? { signal } : {}),
-          },
+          { method: "POST", body: input, signal },
         );
         return response.ok
           ? "Recorded. Now tell the person what you decided and why."
@@ -521,8 +512,7 @@ export function ComputerTools() {
         "/control/request",
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input),
+          body: input,
         },
         signal,
       );
@@ -563,8 +553,7 @@ export function ComputerTools() {
     handler: async (input: { path?: string }) =>
       callComputer(bot.current, "/files/list", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input ?? {}),
+        body: input ?? {},
       }),
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
@@ -601,8 +590,7 @@ export function ComputerTools() {
     handler: async (input: { path: string }) =>
       callComputer(bot.current, "/files/read", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
+        body: input,
       }),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
@@ -641,12 +629,16 @@ export function ComputerTools() {
         .string()
         .describe("The command to run, such as: sudo apt-get install -y jq"),
     }),
-    handler: async (input: { command: string }) =>
-      callComputer(bot.current, "/exec", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
-      }),
+    handler: async (
+      input: { command: string },
+      { signal }: { signal?: AbortSignal } = {},
+    ) =>
+      callComputer(
+        bot.current,
+        "/exec",
+        { method: "POST", body: input },
+        signal,
+      ),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       /*
@@ -697,8 +689,7 @@ export function ComputerTools() {
     }) =>
       callComputer(bot.current, "/files/write", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
+        body: input,
       }),
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
@@ -740,8 +731,7 @@ export function ComputerTools() {
         "/scroll",
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input),
+          body: input,
         },
         signal,
       ),

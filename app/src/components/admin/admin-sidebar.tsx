@@ -75,7 +75,7 @@ const GROUPS: {
         linkOptions: { to: "/admin/plugins" },
       },
       {
-        title: "Components",
+        title: "UI Components",
         icon: IconLayoutGrid,
         linkOptions: { to: "/admin/components" },
       },
@@ -103,11 +103,19 @@ export function AdminSidebar({
 }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar {...props}>
-      <SidebarHeader>
+      {/*
+       * Pinned to the same height as the app sidebar's header. Left to itself this one is 60px
+       * against the app's 45px — `p-2` around a `size="lg"` button rather than a fixed height — so
+       * the nav list started lower here and the sidebar appeared to shift on the way into Admin.
+       *
+       * The button takes its default height rather than `h-full`. `h-full` resolves against the
+       * parent, which in the app sidebar is a flex row holding a second control and here is not, so
+       * the same class produces two different heights.
+       */}
+      <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              size="lg"
               render={(props) => (
                 <Link {...appLinkOptions} {...props}>
                   <IconArrowLeft className="mr-2 h-4 w-4" />
@@ -144,7 +152,7 @@ export function AdminSidebar({
         {GROUPS.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarMenu>
+            <SidebarMenu className="gap-px">
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton

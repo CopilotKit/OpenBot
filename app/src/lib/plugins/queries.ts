@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { client, tryClient } from "@/lib/client";
 
 /** A tool one server offers, as the Plugins page sees it. */
 export type PluginTool = {
@@ -85,8 +86,9 @@ export function pluginsPageQueryOptions() {
   return queryOptions({
     queryKey: pluginKeys.page(),
     queryFn: async (): Promise<PluginsPage> => {
-      const response = await fetch("/api/plugins", { credentials: "include" });
-      if (!response.ok) throw new Error("Plugins could not be loaded.");
+      const response = await client("/api/plugins", {
+        fallback: "Plugins could not be loaded.",
+      });
       return response.json();
     },
   });
@@ -101,12 +103,10 @@ export function agentPluginsQueryOptions(agentId: string) {
     enabled: agentId.length > 0,
     refetchInterval: 15_000,
     queryFn: async (): Promise<GrantedPlugins> => {
-      const response = await fetch(
+      const response = await client(
         `/api/plugins/for/${encodeURIComponent(agentId)}`,
-        { credentials: "include" },
+        { fallback: "This Bot's plugins could not be read." },
       );
-      if (!response.ok)
-        throw new Error("This Bot's plugins could not be read.");
       return response.json();
     },
   });
@@ -128,12 +128,11 @@ export async function callPluginTool(
   agentId: string,
   signal?: AbortSignal,
 ): Promise<PluginCallOutcome> {
-  const response = await fetch("/api/plugins/call", {
+  /* A refused tool is an outcome this returns, not an error it throws. */
+  const response = await tryClient("/api/plugins/call", {
     method: "POST",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ref, args, agentId }),
-    ...(signal ? { signal } : {}),
+    body: { ref, args, agentId },
+    signal,
   });
 
   const body = (await response.json().catch(() => null)) as {
