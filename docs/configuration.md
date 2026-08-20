@@ -32,7 +32,7 @@ All four Intelligence values are required together. Missing any of them stops se
 
 | Variable             | Default                            | Meaning                                                             |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------- |
-| `PORT`               | `3001`                             | API server port.                                                    |
+| `SERVER_PORT`        | `3001`                             | API server port. `PORT` is the same setting when `SERVER_PORT` is unset. |
 | `NODE_ENV`           | unset                              | `production` enables startup refusals for local-only settings.      |
 | `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project.          |

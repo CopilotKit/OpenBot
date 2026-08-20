@@ -37,6 +37,7 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { resolveListenPort } from "./listen-port";
 import { createPluginStore } from "./plugins/store";
 import {
   createPackageStatusReader,
@@ -103,7 +104,7 @@ const identifyActor: IdentifyActor = async (request) => {
 };
 
 const config = loadConfig();
-const port = Number.parseInt(process.env.PORT ?? "3001", 10);
+const port = resolveListenPort();
 const database = createDatabase(config.databaseUrl);
 await initializeDevActorUser(database, config.devNoAuth);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
