@@ -6,10 +6,11 @@ import {
   CopilotRuntime,
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
+import { z } from "zod";
+import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
-import { z } from "zod";
 import type { GrantedTool } from "./plugins/tools";
 
 /**
@@ -175,6 +176,15 @@ export function builtInAgentConfiguration(
    * let the agent reach a vendor directly and walk around all three.
    */
   tools: GrantedTool[] = [],
+  /**
+   * What this Bot should know about the computer, when this deployment has one.
+   *
+   * Appended to the role rather than replacing it: the package says what the Bot is for, this says
+   * what its hands are. Absent leaves the role alone, which is right for a deployment with no
+   * computer configured, where the browser routes are not mounted and a Bot promised a browser would
+   * be promising something that does not exist.
+   */
+  computerGuidance?: string,
 ): BuiltInAgentConfiguration {
   if (!apiKey) {
     return {
@@ -190,7 +200,9 @@ export function builtInAgentConfiguration(
 
   return {
     model: `${model.provider}/${model.defaultModel}`,
-    prompt: agent.systemPrompt,
+    prompt: computerGuidance
+      ? `${agent.systemPrompt}\n\n${computerGuidance}`
+      : agent.systemPrompt,
     apiKey,
     /*
      * A run stops after one step unless told otherwise, which for a Bot with tools means it calls
@@ -228,12 +240,22 @@ export async function buildAgents(
   /** Absent leaves every Bot with no tools, which is the correct answer when nothing is granted. */
   loadTools: LoadToolsForBot = async () => [],
   signRun?: SignRun,
+  /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
+  computerGuidance?: string,
 ): Promise<Record<string, AbstractAgent>> {
   return Object.fromEntries(
     await Promise.all(
       agents.map(async (agent) => [
         agent.id,
-        await buildAgent(agent, model, apiKey, stallGuard, loadTools, signRun),
+        await buildAgent(
+          agent,
+          model,
+          apiKey,
+          stallGuard,
+          loadTools,
+          signRun,
+          computerGuidance,
+        ),
       ]),
     ),
   );
@@ -246,6 +268,7 @@ async function buildAgent(
   stallGuard: StallGuard | undefined,
   loadTools: LoadToolsForBot,
   signRun?: SignRun,
+  computerGuidance?: string,
 ): Promise<AbstractAgent> {
   if (agent.type === "built_in") {
     return new BuiltInAgent(
@@ -254,6 +277,7 @@ async function buildAgent(
         model,
         apiKey,
         await loadTools(agent.id),
+        computerGuidance,
       ),
     );
   }
@@ -389,6 +413,7 @@ export async function resolveRuntimeAgents(
   stallGuard?: StallGuard,
   loadTools?: LoadToolsForBot,
   signRun?: SignRun,
+  computerGuidance?: string,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -400,7 +425,15 @@ export async function resolveRuntimeAgents(
   const apiKey = registered.some((agent) => agent.type === "built_in")
     ? await resolveModelApiKey()
     : null;
-  return buildAgents(registered, model, apiKey, stallGuard, loadTools, signRun);
+  return buildAgents(
+    registered,
+    model,
+    apiKey,
+    stallGuard,
+    loadTools,
+    signRun,
+    computerGuidance,
+  );
 }
 
 /** What one Bot may call, for the person whose request this is. */
@@ -445,6 +478,8 @@ export function createRequestAgents(
   loadToolsForActor?: (actorId: string) => LoadToolsForBot,
   /** Resolved per request, because what it signs is who this request turned out to be. */
   signRunForActor?: (actorId: string) => SignRun,
+  /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
+  computerGuidance?: string,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -455,6 +490,7 @@ export function createRequestAgents(
       stallGuard,
       loadToolsForActor?.(actor.id),
       signRunForActor?.(actor.id),
+      computerGuidance,
     );
   };
 }
@@ -513,6 +549,13 @@ export function mountCopilotRuntime(
       stallGuard,
       loadToolsForActor,
       signRunForActor,
+      /*
+       * Only when a computer exists. The tools themselves are registered by the surface, so a Bot is
+       * offered them without this and the guidance is what tells it how they go together: snapshot
+       * before acting, and ask a person to take the wheel at a sign-in rather than reporting the task
+       * as impossible. Absent computer, absent guidance: a Bot is not told about hands it has not got.
+       */
+      config.computer ? COMPUTER_GUIDANCE : undefined,
     ) as never,
   });
 

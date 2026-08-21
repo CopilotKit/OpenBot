@@ -18,7 +18,7 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
-import { SYSTEM_PROMPT } from "../../shared/bot-prompt";
+import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
 
 /**
  * The same Bot, on a framework.
@@ -129,7 +129,7 @@ if (!API_KEY) {
 
 /** Translate the conversation AG-UI carries into LangChain's message classes. */
 function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
-  const messages: BaseMessage[] = [new SystemMessage(SYSTEM_PROMPT)];
+  const messages: BaseMessage[] = [new SystemMessage(COMPUTER_GUIDANCE)];
 
   for (const message of input.messages) {
     if (message.role === "user") {
@@ -436,7 +436,6 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
         // Accumulated rather than emitted per chunk, because a tool call's arguments arrive in
         // fragments and AG-UI wants one call. The framework hands back assembled `tool_calls` on the
         // final message, which is precisely the plumbing agent-bot does by hand.
-        let finalMessage: AIMessage | null = null;
         /** Calls seen on the way past, so a result can be paired with the arguments it answered. */
         const pending = new Map<
           string,
@@ -470,7 +469,6 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
           if (event.event === "on_chat_model_end") {
             const output = event.data?.output as AIMessage | undefined;
             if (output) {
-              finalMessage = output;
               for (const call of output.tool_calls ?? []) {
                 pending.set(call.id ?? call.name, {
                   name: call.name,
@@ -519,6 +517,31 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
         }
 
         closeText();
+
+        /*
+         * Calls this process did not run, which is what a tool the surface owns looks like from here.
+         *
+         * The graph ends the run on one of those rather than inventing a result, so the `tools` node
+         * never fires and the loop above never reports the call. Without this the run is a clean
+         * RUN_STARTED/RUN_FINISHED pair carrying nothing at all: the person's message sits there with
+         * no answer under it, the surface never learns there was a browser action to execute, and
+         * because an empty run is not an error by the protocol, nothing says so. No result is sent
+         * with them; producing it is the surface's half, and it begins the next run holding it.
+         */
+        for (const [id, call] of pending) {
+          send({
+            type: "TOOL_CALL_START",
+            toolCallId: id,
+            toolCallName: call.name,
+          } as BaseEvent);
+          send({
+            type: "TOOL_CALL_ARGS",
+            toolCallId: id,
+            delta: JSON.stringify(call.args),
+          } as BaseEvent);
+          send({ type: "TOOL_CALL_END", toolCallId: id } as BaseEvent);
+        }
+        pending.clear();
 
         send({
           type: "RUN_FINISHED",

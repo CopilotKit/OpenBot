@@ -38,11 +38,28 @@ token with no URL is ignored.
 
 A `.env` copied from an older `.env.example` still has `MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui`.
 Unset it before `docker run --env-file .env`, or the coworker comes back.
+The built-in Bot refuses to start without `OPENAI_API_KEY`. It used to start, report healthy, and
+then fail every conversation, so a missing key looked like a working deployment. The LangGraph Bot
+already refused the same way.
 
 Sessions survive and nobody signs in again.
 
 ### Added
 
+- **A Bot can answer from a connected source, as the person asking.** The connectors have been
+  writing `documents`, `chunks` and `document_acls` and nothing ever read them back, so a deployment
+  that connected a source got rows in PostgreSQL and still no citation. A Bot now has a
+  `search_company_knowledge` tool, and it returns only the documents the person asking is allowed to
+  read — filtered in the database against that person's own principals rather than fetched and
+  filtered in the server, so a document they may not read is never handed over. A deny beats an
+  allow, and a document with no ACL rows is readable by nobody rather than by everybody. Each result
+  carries the document's title, the link that opens it, and the passage that matched. A search that
+  finds nothing says so, rather than returning an empty string a model would fill in from memory.
+  Every search is on the audit trail as `knowledge.searched`, naming the query and the documents
+  returned and never quoting their text. The tool is only offered when there is something to search.
+  Matching is PostgreSQL's own full-text search over the stored passages: nothing in the deployment
+  produces embeddings yet, so the vector column is left alone and ranking by meaning follows the
+  first connector that writes one.
 - **Releases are cut by a workflow, not by hand.** `Create release PR` bumps the version and promotes
   `## Unreleased` to a numbered section; merging the pull request it opens is what publishes. Merging
   builds and pushes one image to `ghcr.io/copilotkit/openbot`, signs a build provenance attestation
@@ -87,6 +104,9 @@ Sessions survive and nobody signs in again.
   path, rather than reporting an element it was never about.
 - **`COMPUTER_SANDBOX=on`** turns on Chromium's own sandbox where the host permits user namespaces.
   Which way it went is printed at start-up either way.
+- **New chat.** The direct Bot chat has a button that starts a fresh conversation, which it had no way
+  to do before: the thread was minted once and remembered for that Bot forever, so the only way out
+  of a conversation was to clear the browser's storage by hand.
 - **You can watch what a Bot is doing, not only what it is looking at.** The screen answered half the
   question: a Bot spending two minutes in a terminal showed a blank browser and one grey line per
   command, with the output nowhere. A command line in the transcript now opens to show what it
@@ -172,6 +192,13 @@ Sessions survive and nobody signs in again.
   access and refresh tokens use Better Auth's own encryption, keyed on `BETTER_AUTH_SECRET`.
 - **A failed provider registration looked like a button that did not work.** The error was rendered
   on the page behind the dialog, which was covering it.
+- **A write could follow a symlink out of the Bot's workspace.** The confinement resolved the
+  directory a write would land in but not the name it would land on, so a link left at `notes.txt`
+  pointing outside was followed by the write; a read through the identical link was already refused.
+  The gateway had already decided and written the audit row against the path as it was asked for, so a
+  rule written for `credentials/` never saw the file that was written and the trail named a file
+  nothing had touched. A dangling link escaped the same way, because resolving the path throws where
+  the write would still land. Links pointing back inside the workspace continue to work.
 - **A Bot could become root inside its container.** `sudo` was granted as `NOPASSWD: ALL`, and the
   comment above it named the two conditions that made that acceptable: the container being one Bot's
   alone, and not holding a database. The image meets neither, because the supervisor is deliberately
@@ -223,6 +250,44 @@ Sessions survive and nobody signs in again.
   laptop `http://localhost` counts as one, so this never showed up in development; on a real
   address it does not, and the surface did nothing at all when you pressed send. No message, no
   error. Ids now come from an API with no such restriction.
+- **A Bot asked to be signed in, in words, and nothing happened.** Handing over the browser is a tool
+  call, and a sentence in the transcript is not one: "please sign in and let me know" leaves the
+  person with no wheel to take and the page where it was. Bots wrote that sentence anyway, and one
+  went further and asked for a username and password to be typed into a sign-in page nobody could
+  reach. The guidance now says that calling `computer_request_help` is what asking means, names the
+  sentences that are not it, and says the person cannot see the page at all until control is handed
+  over. Asked to file an issue on a site it was not signed in to, a Bot now offers the wheel on the
+  first attempt instead of the third.
+- **A package Bot did not know it had a computer.** The instructions that make the computer usable —
+  snapshot before acting, and ask a person to take the wheel at a sign-in rather than reporting the
+  task as impossible — were imported by the two shipped Bots and by nothing else, so a built-in agent
+  knew only the role its package gave it. The tools were on offer to it the whole time. Asked to file
+  an issue on a site it was not signed in to, it browsed to the page, said it could not, and never
+  called `computer_request_help`, so nobody was ever offered the wheel. Built-in agents are now told
+  the same thing the shipped Bots are told, wherever a computer is configured.
+- **A chat could quietly forget everything and carry on.** The browser remembers a thread id for each
+  Bot, and nothing ever asked whether Intelligence still had that thread. Where it did not, the
+  transcript loaded empty, every later message silently recreated an empty thread under the same id,
+  and the Bot answered as though the conversation were new — with the reason nowhere but the server
+  log, as a 404 flattened into a 500 by the time it reached the browser. A remembered thread is now
+  checked before it is used: one the platform provably does not have is replaced, because there is no
+  conversation left to lose, and a check that fails for any other reason keeps the thread and says on
+  screen that earlier messages could not be loaded. A person reading a confident answer can now tell
+  whether the Bot has read what came before it.
+- **The first browser action a Bot was ever asked for failed.** Creating a computer and starting it
+  are two calls to Docker, and a name the daemon has not published yet answers the second with a 404.
+  The supervisor treats that as a lost race and rebuilds, which is right, but it went straight back
+  round: the retry landed a millisecond later, saw the same unpublished name, and spent the only
+  other attempt on it. The whole request then failed as Docker being unreachable, the person was told
+  the computer could not be started, and the next message worked. It waits one poll interval before
+  rebuilding now, which is what the health wait already uses for the same question.
+- **A framework Bot asked for a browser action and nothing happened.** `agent-langgraph` ends a run
+  when the model calls a tool the surface owns, which is how a tool that lives in the browser is
+  supposed to work: the run finishes, the surface acts, and the next run carries the result. But the
+  call was only reported to the surface from the node that executes this deployment's own tools, and
+  that node is exactly what an ending run skips. The person saw their own message, no answer under
+  it, and no explanation, because a run that finishes carrying nothing is not an error. Every Bot
+  action in the browser was affected: opening a page, filling a form, asking for help at a sign-in.
 
 ### Changed
 

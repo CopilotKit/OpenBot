@@ -623,6 +623,21 @@ export function createComputerGateway(
       input: HumanInput,
     ): Promise<HumanInputResult> {
       const { kind, ...payload } = input;
+      /*
+       * Checked here as well as at the route, because this is where it becomes a path.
+       *
+       * `kind` is typed as one of four gestures and a type is not a check: the route casts a parsed
+       * body to this shape, so whatever arrived is whatever the caller sent. Interpolated into the
+       * path below, a value like `../exec` reaches a different endpoint of the computer's API
+       * altogether, carrying this deployment's computer token. This method is also the one acting
+       * path that writes no audit row, deliberately, so a call that went somewhere else leaves
+       * nothing behind that would say so.
+       */
+      if (!HUMAN_GESTURES.has(kind)) {
+        throw new Error(
+          `A person's input is one of ${[...HUMAN_GESTURES].join(", ")}, not ${JSON.stringify(kind)}.`,
+        );
+      }
       return post<HumanInputResult>(botId, `/human/${kind}`, payload);
     },
 
@@ -823,6 +838,15 @@ function describeFile(path: string): {
  * cover keypresses as well as clicks.
  */
 const ACTIVATING_KEYS = new Set(["Enter", "NumpadEnter", "Space", " "]);
+
+/**
+ * What a person's mouse and keyboard produce, and the whole of what `/human/<kind>` may name.
+ *
+ * A set rather than the union type alone, because the type is erased before the value gets here: the
+ * route parses a JSON body and casts it to the input shape, so the check has to exist at runtime on
+ * the side that builds the path.
+ */
+const HUMAN_GESTURES = new Set(["click", "type", "key", "scroll"]);
 
 function intentOf(
   toolName: string,

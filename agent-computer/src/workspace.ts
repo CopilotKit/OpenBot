@@ -14,21 +14,32 @@
  *  3. The resolved path must still be inside the root after symlinks are followed. This is the layer
  *     people miss: a symlink placed inside the workspace (by an earlier write, or by a page the Bot
  *     downloaded something from) passes the lexical check and then points anywhere on the filesystem.
- *     For a write, the file may not exist yet, so it is the deepest existing ancestor that gets
- *     resolved, which is the directory the write will actually land in.
+ *     For a write, the file may not exist yet, so the deepest existing ancestor gets resolved, which
+ *     is the directory the write will land in, AND the name itself is resolved when something is
+ *     already there, because `writeFile` follows a link at the last component too.
  *
  * A factory taking its root as an argument rather than reading the environment, so the confinement
  * can be tested against a temporary directory instead of being taken on trust.
  */
 import {
+  lstat,
   mkdir,
   readdir,
   readFile,
+  readlink,
   realpath,
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 export class WorkspacePathError extends Error {
   constructor(message: string) {
@@ -131,10 +142,48 @@ export function createWorkspace(
     }
     assertInside(root, realAnchor, wanted);
 
-    // For a write, return the full lexical target. It is already proven contained lexically, and the
-    // deepest existing directory is proven contained after symlinks, so `mkdir -p` can only create the
-    // rest inside the workspace.
-    return forWrite ? target : realAnchor;
+    if (!forWrite) return realAnchor;
+
+    /*
+     * Layer three again, for the last component rather than the directory holding it.
+     *
+     * Containing `dirname(target)` proves where a NEW file would be created. It proves nothing about
+     * a name that already exists, and `writeFile` follows a symlink at the last component the same
+     * way `readFile` does. A link at `notes.txt` pointing at `/root/.ssh/authorized_keys` passes
+     * every check above, having no `..`, not being absolute, and sitting directly in the workspace,
+     * and the bytes land outside the volume. The read side already refuses the identical link; the
+     * write side was the asymmetry.
+     *
+     * The link has to get there first, which takes a shell or an archive that was unpacked with one,
+     * so this is not a fresh escape for a Bot that already has `run_command`: that Bot can write
+     * outside directly. What it is, is a hole in what the gateway can still see. The decision and the
+     * audit row are both made against the path as the Bot asked for it, so a rule written for
+     * `credentials/` or `*.env` is evaluated against `notes.txt` and never sees the file that gets
+     * written, and the row names a file in the workspace that nothing touched. A deployment that
+     * denies `run_command` and allows writes is relying on exactly that, and so is one reading the
+     * trail afterwards. A permissive workspace is a decision a deployment can make. A trail that
+     * describes a different file from the one on disk is not.
+     */
+    const landing = await writeDestination(target, wanted);
+    if (landing === target) return target;
+
+    // A link was followed, so the destination gets the checks the requested path already passed:
+    // inside lexically, and inside after the directory holding it is resolved.
+    /*
+     * The holder is resolved BEFORE either check. `root` is a real path, so comparing it against a
+     * destination that still runs through a symlinked ancestor refuses a link that points straight
+     * back inside, which is what happens wherever the workspace sits behind one.
+     */
+    const holder = await realpath(dirname(landing)).catch(() => null);
+    if (holder === null) {
+      throw new WorkspacePathError(
+        `${wanted} points at somewhere that does not exist, so where a write would land cannot be established.`,
+      );
+    }
+    assertInside(root, holder, wanted);
+    const resolved = join(holder, basename(landing));
+    assertInside(root, resolved, wanted);
+    return resolved;
   }
 
   return {
@@ -275,6 +324,45 @@ function assertInside(root: string, candidate: string, shown?: string): void {
       `${shown ?? candidate} is outside your workspace, so it cannot be reached.`,
     );
   }
+}
+
+/**
+ * How many links a chain may pass through before it is treated as a cycle rather than a path.
+ *
+ * Linux gives up at 40. Anything approaching this is a loop or a deliberate attempt to make the walk
+ * expensive, and neither is a file a Bot needs to write.
+ */
+const MAX_LINK_HOPS = 32;
+
+/**
+ * Where a write to `target` would actually put the bytes.
+ *
+ * Returns `target` unchanged when nothing is there or what is there is not a link, which is every
+ * ordinary write. Only a name that is already a symlink walks.
+ *
+ * Walked with `lstat` and `readlink` rather than resolved with `realpath`, because `realpath` throws
+ * on a DANGLING link and `writeFile` creates the file at its destination regardless. A link aimed at
+ * a name that does not exist yet would otherwise escape through the failure path rather than the
+ * success one, which is the harder version of the bug to notice.
+ *
+ * Confining rather than forbidding, the same as the read side. A link that points back inside the
+ * workspace keeps working: refusing every link would be easier and would break legitimate use.
+ */
+async function writeDestination(
+  target: string,
+  shown: string,
+): Promise<string> {
+  let current = target;
+  for (let hop = 0; hop <= MAX_LINK_HOPS; hop += 1) {
+    const entry = await lstat(current).catch(() => null);
+    // Nothing there, or something that is not a link. This is where the write lands.
+    if (entry === null || !entry.isSymbolicLink()) return current;
+    // A relative link is relative to the directory the link sits in, not to the workspace root.
+    current = resolve(dirname(current), await readlink(current));
+  }
+  throw new WorkspacePathError(
+    `${shown} is a chain of links that does not settle, so where a write would land cannot be established.`,
+  );
 }
 
 /** The closest ancestor of `target` that exists, never above `root`. */
