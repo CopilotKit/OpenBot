@@ -520,3 +520,102 @@ describe("commands", () => {
     expect(decision.allowed).toBe(true);
   });
 });
+
+/**
+ * A boundary drawn around one acting surface must leave the others alone.
+ *
+ * Each surface builds the context it owns and carries the other surfaces' fields at their neutral,
+ * matches-nothing value — the browser context a neutral `mcp`, the MCP context a neutral `command` —
+ * so a rule naming another surface's field evaluates to false rather than throwing. An unbound field
+ * throws, and a thrown rule fails closed, so without this a `deny: mcp.effect == "write"` would refuse
+ * every browser click and a `deny: contains(command, "rm")` every MCP call: an operator forbidding one
+ * thing would silently forbid another, and could not reason about what they had done.
+ */
+describe("a rule about one surface does not refuse another", () => {
+  // The shapes the gateway and the MCP path actually build, including the neutral cross-surface fields.
+  const browserAction: PolicyContext = {
+    tool: { name: "computer_click" },
+    bot: { id: "b" },
+    actor: { id: "a" },
+    page: { url: "https://example.com", host: "example.com" },
+    intent: "activate",
+    element: { ref: "e1", role: "button", name: "Open", type: "" },
+    key: "",
+    file: { path: "", name: "", extension: "" },
+    command: "",
+    mcp: { server: "", tool: "", effect: "" },
+  };
+  const mcpAction: PolicyContext = {
+    tool: { name: "mcp__jira__getIssue" },
+    bot: { id: "b" },
+    actor: { id: "a" },
+    page: { url: "", host: "" },
+    intent: "read_tool",
+    element: { ref: "", role: "", name: "", type: "" },
+    key: "",
+    file: { path: "", name: "", extension: "" },
+    command: "",
+    mcp: { server: "jira", tool: "getIssue", effect: "read" },
+  };
+
+  test("an MCP deny rule leaves a browser action alone", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: ['mcp.effect == "write"'], allow: ["true"] },
+      browserAction,
+    );
+    expect(decision.allowed).toBe(true);
+  });
+
+  test("neither an MCP read nor an MCP write rule catches a browser action", () => {
+    for (const rule of ['mcp.effect == "read"', 'mcp.effect == "write"']) {
+      const decision = evaluateActionPolicy(
+        { mode: "enforce", deny: [rule], allow: ["true"] },
+        browserAction,
+      );
+      expect(decision.allowed).toBe(true);
+    }
+  });
+
+  test("a shell-command deny rule leaves an MCP call alone", () => {
+    const decision = evaluateActionPolicy(
+      {
+        mode: "enforce",
+        deny: ['contains(command, "rm -rf")'],
+        allow: ["true"],
+      },
+      mcpAction,
+    );
+    expect(decision.allowed).toBe(true);
+  });
+
+  test("the MCP rule still refuses a real MCP write", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: ['mcp.effect == "write"'], allow: ["true"] },
+      {
+        ...mcpAction,
+        intent: "write_tool",
+        mcp: { server: "jira", tool: "editIssue", effect: "write" },
+      },
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.source).toBe("deny");
+  });
+
+  test("the shell rule still refuses a real command", () => {
+    const decision = evaluateActionPolicy(
+      {
+        mode: "enforce",
+        deny: ['contains(command, "rm -rf")'],
+        allow: ["true"],
+      },
+      {
+        ...browserAction,
+        tool: { name: "computer_run_command" },
+        intent: "run_command",
+        command: "rm -rf /",
+      },
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.source).toBe("deny");
+  });
+});
