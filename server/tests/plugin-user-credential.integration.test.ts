@@ -282,16 +282,25 @@ afterAll(async () => {
       ),
     );
   /*
-   * Put the deployment's own client pointer back before deleting anything, so a suite that borrowed
-   * live configuration leaves it as it found it. Ordered first on purpose: the deletes below remove
-   * the credential the row is currently pointing at.
+   * Put the client pointer back before deleting anything, so a suite that borrowed live
+   * configuration leaves it as it found it. Ordered first on purpose: the deletes below remove the
+   * credential the row is currently pointing at.
+   *
+   * UNCONDITIONAL, and it used to be guarded by `serverWasAlreadyConfigured`. On a database that
+   * already had the server the guard was harmless, which is why this passed locally for as long as
+   * it did. On a fresh one — CI — the guard skipped, the column kept pointing at a credential this
+   * suite created, and the delete below was refused by the foreign key.
+   *
+   * The guard was hiding a real leak rather than avoiding one. Before that key existed the delete
+   * SUCCEEDED and left `mcp_servers.credential_id` addressing a row that no longer existed, which is
+   * exactly the dangling pointer that made a configured connector report having no client. Restoring
+   * it is right in both cases: `clientBefore` is null when there was no server to borrow from, which
+   * is what the column should say.
    */
-  if (serverWasAlreadyConfigured) {
-    await database
-      .update(mcpServers)
-      .set({ credentialId: clientBefore })
-      .where(eq(mcpServers.id, serverId));
-  }
+  await database
+    .update(mcpServers)
+    .set({ credentialId: clientBefore })
+    .where(eq(mcpServers.id, serverId));
   for (const id of credentialIds) {
     await database.delete(credentials).where(eq(credentials.id, id));
   }
