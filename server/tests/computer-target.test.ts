@@ -211,4 +211,29 @@ describe("checkComputerAddress", () => {
       expect(verdict.reason).toContain("not a URL");
     }
   });
+  test("refuses 0.0.0.0 written as a mapped IPv6 address", () => {
+    // Only the compatible form keeps 0.0.0.0/8 as IPv6, because :: and ::1 live there.
+    expect(checkNavigationTarget("http://[::ffff:0.0.0.0]:5432/").allowed).toBe(
+      false,
+    );
+    expect(checkNavigationTarget("http://[::ffff:0:0]:5432/").allowed).toBe(
+      false,
+    );
+    expect(checkNavigationTarget("http://[::]/").allowed).toBe(false);
+    expect(checkNavigationTarget("http://[::1]/").allowed).toBe(false);
+  });
+
+  test("refuses the container credential endpoints even with private hosts allowed", () => {
+    // Never allowed means never: the opt-in is the weakest configuration and is when this holds.
+    const allowed = { allowPrivateHosts: true };
+    expect(checkNavigationTarget("http://169.254.170.2/", allowed).allowed).toBe(
+      false,
+    );
+    expect(
+      checkNavigationTarget("http://100.100.100.200/", allowed).allowed,
+    ).toBe(false);
+    expect(checkNavigationTarget("http://10.0.0.5/", allowed).allowed).toBe(
+      true,
+    );
+  });
 });

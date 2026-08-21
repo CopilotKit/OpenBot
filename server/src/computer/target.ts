@@ -28,6 +28,15 @@ const NEVER_ALLOWED_HOSTNAMES = new Set([
   // The same endpoint over IPv6. A container with an IPv6 stack reaches its credentials here and
   // nowhere in the quad-form list above says so.
   "fd00:ec2::254",
+  /*
+   * The ECS and Fargate task-role endpoint. Not the instance metadata address above, and on Fargate
+   * it is the only one there is: a task's IAM credentials are served from it, which is exactly what
+   * this list exists to keep a Bot away from, and docs/deployment.md documents Fargate as a target.
+   */
+  "169.254.170.2",
+  // Alibaba Cloud's equivalent, which also sits outside the usual link-local handling because
+  // 100.64.0.0/10 is carrier-grade NAT rather than private space.
+  "100.100.100.200",
 ]);
 
 /** Hostnames inside the deployment. Reachable only when a deployment opts in. */
@@ -87,7 +96,17 @@ function embeddedIpv4(groups: number[]): string | null {
     a === 0x64 && b === 0xff9b && c === 0 && d === 0 && e === 0 && f === 0;
 
   if (!mapped && !compatible && !nat64) return null;
-  if (high >> 8 === 0) return null; // 0.0.0.0/8: not a destination, so not an embedded address
+  /*
+   * Only the compatible form keeps its 0.0.0.0/8 addresses as IPv6. `::` and `::1` live there and are
+   * what `isPrivateIpv6` below recognises.
+   *
+   * The mapped and NAT64 forms are different: `[::ffff:0.0.0.0]` is what a dual-stack socket calls
+   * 0.0.0.0, and 0.0.0.0 reaches every port bound on this host. Left wrapped it matched neither the
+   * internal hostname list, which holds the bare quad form, nor `isPrivateIpv6`, which sees `ffff` in
+   * the sixth group and moves on. Verified before the change: `[::ffff:0.0.0.0]:5432` was allowed
+   * with the private-host opt-in off.
+   */
+  if (compatible && high >> 8 === 0) return null;
 
   return [high >> 8, high & 255, low >> 8, low & 255].join(".");
 }
