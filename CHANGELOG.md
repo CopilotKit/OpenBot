@@ -30,10 +30,42 @@ digit. The same rule container and volume names have always followed. A deployme
 `AUDIT_RETENTION_DAYS` is new and unset, which keeps the audit trail forever, as before. Set it to a
 whole number of days to have old rows removed.
 
+**The old Google Drive connector is gone, and it is not the new one renamed.** It configured a
+service account with domain impersonation and had the worker sync documents into a local pgvector
+index guarded by our own ACL rows, so every person got the same answer computed from what one
+credential could see, and revoking somebody's access left a cached copy of their documents behind.
+`/admin/connectors` and its two screens, the connector catalogue and admin service, the sync
+persistence and the worker's connector runner have all been removed. A deployment that was syncing
+this way stops syncing and should enable the new connector at `/admin/plugins/google-drive`, where
+each person connects their own account.
+
+`knowledge.yaml` is still parsed and still refused when malformed, because it is part of the
+deployment-package contract. Its `sources:` are now read by nothing.
+
 Sessions survive and nobody signs in again.
 
 ### Added
 
+- **A Bot can answer from Google Drive, as the person asking.** An administrator enables the
+  connector at `/admin/plugins/google-drive` and registers one OAuth client; each person then
+  connects their own Google account, and nobody can do that for them — there is no endpoint for it.
+  A Bot granted these tools reads Drive on the asker's own grant, so two people asking the same
+  question get the answers their own accounts can see, and an answer carries a link that opens the
+  file. Read-only: the scope requested is `drive.readonly`, so a write is refused by Google before
+  this deployment has to. Nothing is cached — the refresh token is stored and an access token is
+  minted for each call, so revoking access at Google takes effect on the next one.
+- **Each tool a connector offers has its own screen**, at `/admin/plugins/<connector>/tools/<tool>`,
+  with a switch per Bot. The connector page previously drew a button per Bot inside every tool row,
+  which is a control per Bot per tool stacked in one list, and grew without bound as Bots were added.
+- **Connected accounts**, at `/settings/connected-accounts`. What a Bot may read as you, and the
+  scope the vendor actually granted rather than the one that was asked for.
+- **A tool result that found nothing says so.** An empty result used to reach the model as an empty
+  string, which reads as "the tool had nothing to say" rather than "there is nothing there" — and a
+  model closes that gap from memory, which for a knowledge connector is the failure worth preventing.
+- **`mcp.call_failed`.** A call this deployment permitted and the vendor did not complete now leaves
+  a row of its own, carrying the vendor's own sentence. `mcp.call_succeeded` was written before the
+  network call rather than after, so a call that died at the vendor recorded success and the Admin
+  page agreed with it.
 - **Releases are cut by a workflow, not by hand.** `Create release PR` bumps the version and promotes
   `## Unreleased` to a numbered section; merging the pull request it opens is what publishes. Merging
   builds and pushes one image to `ghcr.io/copilotkit/openbot`, signs a build provenance attestation
