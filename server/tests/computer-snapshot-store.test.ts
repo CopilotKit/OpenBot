@@ -67,6 +67,39 @@ describe("the in-memory snapshot store", () => {
     expect(loaded?.elements.get("e9")?.name).toBe("Cancel");
   });
 
+  test("clearing forgets the snapshot, so nothing resolves against a wiped computer", async () => {
+    const store = createInMemorySnapshotStore();
+    await store.save(
+      "default",
+      snapshot(7, [{ ref: "e9", role: "button", name: "Submit order" }]),
+    );
+
+    await store.clear("default");
+
+    // A wiped computer starts counting generations from one again, so a row left behind would let a
+    // ref from the previous session match the new one and resolve to a page that is gone.
+    expect(await store.load("default")).toBeUndefined();
+  });
+
+  test("clearing one computer leaves the others alone", async () => {
+    const store = createInMemorySnapshotStore();
+    await store.save(
+      "sales-bot",
+      snapshot(3, [{ ref: "e1", role: "button", name: "Send" }]),
+    );
+    await store.save(
+      "research-bot",
+      snapshot(4, [{ ref: "e1", role: "link", name: "Open" }]),
+    );
+
+    await store.clear("sales-bot");
+
+    expect(await store.load("sales-bot")).toBeUndefined();
+    expect((await store.load("research-bot"))?.elements.get("e1")?.name).toBe(
+      "Open",
+    );
+  });
+
   test("each computer keeps its own snapshot", async () => {
     const store = createInMemorySnapshotStore();
     await store.save(

@@ -27,7 +27,7 @@
  * Without a database it stays in memory. Tests that only exercise decision logic do not need
  * Postgres, exactly as the policy store does not.
  */
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { computerSnapshot } from "../db/schema";
 import type { SnapshotElement } from "./schema";
@@ -100,6 +100,13 @@ export function createSnapshotStore(database?: Database): SnapshotStore {
             elements: values.elements,
             takenAt: values.takenAt,
           },
+          // Only ever forward. The generation is stamped by the computer and increases by one per
+          // snapshot, so a lower number is an older page. Two replicas snapshotting the same computer
+          // at once is the case this exists for: without the guard, whichever write reached Postgres
+          // last would win, so the older snapshot could overwrite the newer one and every ref the
+          // model is holding would stop resolving. Timestamps cannot decide it, because they come
+          // from two machines' clocks; the generation comes from one.
+          setWhere: lt(computerSnapshot.snapshotId, values.snapshotId),
         });
     },
 

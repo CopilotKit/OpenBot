@@ -884,4 +884,21 @@ describe("resolving a ref across replicas", () => {
     );
   });
 
+  test("wiping a computer forgets the snapshot, so a reused generation cannot resolve", async () => {
+    // A fresh computer counts generations from one again. If a reset left the row behind, a ref the
+    // model was still holding from the previous session would match the new session's first
+    // generation and the policy would decide against an element from a page that no longer exists.
+    const snapshots = createInMemorySnapshotStore();
+    const tookSnapshot = replica(PERMISSIVE, snapshots);
+    const handlesClick = replica(PERMISSIVE, snapshots);
+
+    await tookSnapshot.gateway.snapshot("bot-1");
+    await tookSnapshot.gateway.resetComputer("bot-1", ACTOR);
+
+    const afterReset = await handlesClick.gateway.click("bot-1", ACTOR, {
+      ref: "e9",
+      snapshotId: 7,
+    });
+    expect(afterReset.element).toBeUndefined();
+  });
 });

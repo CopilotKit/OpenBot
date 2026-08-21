@@ -95,6 +95,42 @@ describe("a snapshot taken on one server", () => {
     expect(loaded?.elements.get("e9")?.name).toBe("Cancel");
   });
 
+  test("an older snapshot arriving late does not overwrite the newer one", async () => {
+    // Two replicas snapshotting the same computer at once. Generation 8 is written first and
+    // generation 7 arrives after it, which is the ordering a load balancer can produce and Postgres
+    // has no way to prevent. Last-write-wins would put the older page back and every ref the model is
+    // holding would stop resolving; the generation decides instead, because it comes from the
+    // computer rather than from two machines' clocks.
+    const ahead = createSnapshotStore(database);
+    await ahead.save(
+      "default",
+      snapshot(8, [{ ref: "e9", role: "button", name: "Cancel" }]),
+    );
+
+    const behind = createSnapshotStore(database);
+    await behind.save(
+      "default",
+      snapshot(7, [{ ref: "e9", role: "button", name: "Submit order" }]),
+    );
+
+    const loaded = await createSnapshotStore(database).load("default");
+    expect(loaded?.snapshotId).toBe(8);
+    expect(loaded?.elements.get("e9")?.name).toBe("Cancel");
+  });
+
+  test("clearing removes the row, so a wiped computer resolves nothing", async () => {
+    const store = createSnapshotStore(database);
+    await store.save(
+      "default",
+      snapshot(7, [{ ref: "e9", role: "button", name: "Submit order" }]),
+    );
+
+    await store.clear("default");
+
+    expect(await database.select().from(computerSnapshot)).toHaveLength(0);
+    expect(await createSnapshotStore(database).load("default")).toBeUndefined();
+  });
+
   test("two computers keep their snapshots apart", async () => {
     const store = createSnapshotStore(database);
     await store.save(
