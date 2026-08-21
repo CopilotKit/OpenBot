@@ -52,8 +52,9 @@ export type ShellResult = {
  *
  * PATH, locale, terminal and the proxy variables pass because a command that cannot find `apt-get`,
  * cannot speak the operator's language, or cannot reach the network behind a corporate proxy is not
- * a shell. Everything else is named in COMPUTER_SHELL_ENV, read as names, so passing a secret is an
- * operator's decision rather than the default.
+ * a shell. Proxy URLs routinely carry a password; userinfo is stripped before the value is copied, so
+ * `env` cannot print it. Naming the credentialed URL in COMPUTER_SHELL_ENV is an operator's decision
+ * rather than the default. Everything else is named there too, read as names.
  *
  * HOME is the workspace. A command that writes to ~ should write where the Bot's files already are.
  */
@@ -87,13 +88,18 @@ export function environmentForCommand(
     if (value !== undefined) env[name] = value;
   };
 
+  const copyProxy = (name: string) => {
+    const value = source[name];
+    if (value !== undefined) env[name] = withoutUserinfo(value);
+  };
+
   for (const name of PATH_NAMES) copy(name);
   for (const name of LOCALE_NAMES) copy(name);
   for (const name of Object.keys(source)) {
     if (LOCALE_CATEGORY.test(name)) copy(name);
   }
   for (const name of TERMINAL_NAMES) copy(name);
-  for (const name of PROXY_NAMES) copy(name);
+  for (const name of PROXY_NAMES) copyProxy(name);
   for (const name of extraShellEnvNames(source.COMPUTER_SHELL_ENV)) copy(name);
 
   env.HOME = workspaceDir;
@@ -114,6 +120,23 @@ function extraShellEnvNames(raw: string | undefined): readonly string[] {
     .split(",")
     .map((name) => name.trim())
     .filter((name) => ENV_NAME.test(name));
+}
+
+/**
+ * Credentials commonly arrive inside a proxy URL. They are stripped so the shell can still reach
+ * the network without `env` printing a password. Same split `egress.ts` uses for the browser proxy.
+ */
+function withoutUserinfo(raw: string): string {
+  try {
+    const url = new URL(raw.trim());
+    if (url.username === "" && url.password === "") return raw;
+    url.username = "";
+    url.password = "";
+    return url.toString().replace(/\/$/, "");
+  } catch (e) {
+    if (e instanceof TypeError) return raw;
+    throw e;
+  }
 }
 
 function clamp(text: string): { text: string; truncated: boolean } {

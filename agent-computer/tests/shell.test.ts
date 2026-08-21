@@ -110,6 +110,37 @@ describe("what a command inherits", () => {
     );
     expect(env.HOME).toBe(workspaceHome);
   });
+
+  test("a proxy URL's userinfo does not pass", () => {
+    const env = environmentForCommand(
+      source({
+        HTTP_PROXY: "http://bot:s3cret@proxy.internal:8080",
+        HTTPS_PROXY: "https://bot:p%40ss@proxy.internal:8443",
+      }),
+      workspaceHome,
+    );
+    expect(env.HTTP_PROXY).toBe("http://proxy.internal:8080");
+    expect(env.HTTPS_PROXY).toBe("https://proxy.internal:8443");
+    expect(JSON.stringify(env)).not.toContain("s3cret");
+    expect(JSON.stringify(env)).not.toContain("p%40ss");
+    expect(JSON.stringify(env)).not.toContain("p@ss");
+  });
+
+  test("a proxy without userinfo is left alone", () => {
+    const env = environmentForCommand(source(), workspaceHome);
+    expect(env.HTTP_PROXY).toBe(allowed.HTTP_PROXY);
+  });
+
+  test("naming a credentialed proxy in COMPUTER_SHELL_ENV is an operator's decision", () => {
+    const env = environmentForCommand(
+      source({
+        COMPUTER_SHELL_ENV: "HTTP_PROXY",
+        HTTP_PROXY: "http://bot:s3cret@proxy.internal:8080",
+      }),
+      workspaceHome,
+    );
+    expect(env.HTTP_PROXY).toBe("http://bot:s3cret@proxy.internal:8080");
+  });
 });
 
 describe("the command that actually runs", () => {
@@ -152,6 +183,16 @@ describe("the command that actually runs", () => {
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("noninteractive");
+  });
+
+  test("env in the child does not list a proxy password", async () => {
+    const result = await createShell(
+      root,
+      source({ HTTP_PROXY: "http://bot:s3cret@proxy.internal:8080" }),
+    ).run({ command: "printenv HTTP_PROXY" });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("http://proxy.internal:8080");
+    expect(result.stdout).not.toContain("s3cret");
   });
 
   test("an operator can still choose the frontend themselves", async () => {
