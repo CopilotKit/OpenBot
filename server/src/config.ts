@@ -110,6 +110,14 @@ export type DeploymentConfig = {
    * deployment does not acquire it without being asked.
    */
   agentStallTimeoutMs: number;
+  /**
+   * How many days of audit trail this deployment keeps, or undefined to keep everything.
+   *
+   * Undefined by default. Deleting somebody's audit trail because a default said so is the worse of
+   * the two failures, and a deployment that has not thought about retention should keep everything
+   * until it has.
+   */
+  auditRetentionDays: number | undefined;
   oauth: {
     google?: { clientId: string; clientSecret: string };
   };
@@ -494,6 +502,26 @@ function accessibilityEnabled(environment: Environment): boolean {
   return off !== "true" && off !== "1";
 }
 
+/**
+ * How long the audit trail is kept.
+ *
+ * Refused rather than coerced, like everything else here. "We accepted your retention policy but not
+ * the one you wrote" is a bad answer about a control an auditor will ask to see, and a typo that
+ * silently became 0 would delete the trail rather than keep it.
+ */
+function auditRetentionDays(environment: Environment): number | undefined {
+  const raw = optional(environment, "AUDIT_RETENTION_DAYS");
+  if (!raw) return undefined;
+
+  const days = Number(raw);
+  if (!Number.isInteger(days) || days < 1) {
+    throw new Error(
+      "AUDIT_RETENTION_DAYS must be a whole number of days, at least 1. Leave it unset to keep the audit trail forever.",
+    );
+  }
+  return days;
+}
+
 function agentStallTimeoutMs(environment: Environment): number {
   const raw = optional(environment, "AGENT_STALL_TIMEOUT_MS");
   if (!raw) {
@@ -528,6 +556,7 @@ export function loadConfig(
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
+    auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
     auth,
     singleUser: singleUserEnabled(

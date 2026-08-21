@@ -45,8 +45,25 @@ const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
  */
 const BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
 
+/**
+ * The key that model is answered with, checked at startup rather than on the first conversation.
+ *
+ * Without the check the Bot starts, answers the healthcheck, and then fails every run, so the
+ * compose healthcheck reports a Bot that cannot answer as healthy. The LangGraph Bot already
+ * refuses to start without its provider's key, and this file already refuses without its token
+ * above; the model key was the one configuration that escaped the same posture. A missing key
+ * should fail in front of whoever is deploying, not in front of whoever is asking.
+ */
+const API_KEY = process.env.OPENAI_API_KEY?.trim();
+if (!API_KEY) {
+  console.error(
+    "OPENAI_API_KEY is not set. This Bot cannot answer without a model.",
+  );
+  process.exit(1);
+}
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: API_KEY,
   baseURL: BASE_URL,
 });
 

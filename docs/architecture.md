@@ -87,6 +87,12 @@ While a person controls the browser, Bot actions are refused rather than queued.
 
 Secret entry is separate from chat content. The audit trail records that a secret was requested or supplied and the character count, not the secret value.
 
+## Watching a Bot work
+
+Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity tab is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
+
+Activity is held in the browser for the open conversation and is gone on reload. It is a window rather than a record; the record is the audit trail, which is server-side, survives restarts, and is what an investigation reads. A saved file contributes its path and size and never its contents, matching the write route, which declines to echo them because a Bot may be saving something it was told in confidence.
+
 ## Coworkers and channels
 
 A coworker is a durable Bot profile:
@@ -96,6 +102,12 @@ A coworker is a durable Bot profile:
 - `agent_preferences` stores per-user roster state.
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
+
+Who may reach one is decided by membership: every channel route resolves the caller in
+`channel_memberships` and refuses without a row. `channels.allowed_groups` is declared in the
+tenant package and stored, and is not part of that decision — `users.groups` is never populated by
+any sign-in path, so a group-based rule has nothing to evaluate. Treat it as a declaration waiting
+on group membership from the identity provider, not as a control that is running.
 
 See [coworkers.md](coworkers.md).
 
@@ -150,8 +162,11 @@ Connector credentials are stored through the credential vault and referenced by 
 - Sign-in is Google, Microsoft or Okta from the environment, plus SAML and OpenID Connect providers registered at runtime and routed by email domain. One resolver answers both questions a run asks about a person, whose threads these are and which Bots they may run, so the two can never disagree.
 - `INITIAL_ADMIN_EMAILS` is a floor: an address it names is made an administrator at every sign-in and cannot be demoted from the People screen. Everybody else's role is decided there, and every change writes an audit row.
 - Registering, changing or removing an identity provider is administrator-only. Better Auth's SSO plugin guards those routes with a session alone, which would let any signed-in person register a provider for a domain.
+- A registered identity provider belongs to the deployment, not to whoever registered it. Better Auth scopes its own listing and removal to the registering user and cascades the row from that user, so two administrators saw two different deployments and deleting the one who set sign-in up would have deleted the company's sign-in. Reads and removals go through OpenBot's own administrator-only routes against the whole table.
+- A provider's client secret and SAML signing material are encrypted at rest with `KEY_ENCRYPTION_KEY`, through a wrapper on the Better Auth storage adapter, since the plugin stores them as plaintext JSON. OAuth access and refresh tokens use Better Auth's own encryption, keyed on `BETTER_AUTH_SECRET`.
+- Signing in, being refused, and being granted the administrator role by configuration each write an audit row. Without them nothing recorded that somebody who could edit `INITIAL_ADMIN_EMAILS` had promoted themselves, and revoking a person deleted the sessions that were the only evidence they had been here.
 - Removing somebody deletes their sessions and denies their address, because deleting the user row alone is not removal: the next sign-in through the provider recreates it.
-- With no identity provider configured, every request is one fixed administrator. That is refused with `NODE_ENV=production` unless `OPENBOT_SINGLE_USER=true` says it was meant.
+- With no identity provider configured, the deployment refuses to start unless `OPENBOT_SINGLE_USER=true` says every request may be one fixed administrator. That flag is the only thing that permits it; `NODE_ENV` does not.
 - `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`.
 - Credential plaintext is encrypted at rest, never returned by APIs, and redacted from audit events.
 - Browser navigation allows `http` and `https`; cloud metadata addresses are refused under every configuration.

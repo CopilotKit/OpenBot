@@ -64,7 +64,9 @@ function IdentityProvidersPage() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(EMPTY);
 
-  const failure = register.error ?? remove.error;
+  // A removal failure belongs on the page: there is no dialog to put it in. A registration failure
+  // is shown inside the dialog instead, where the person who caused it is looking.
+  const failure = remove.error;
 
   function submit(submission: React.FormEvent) {
     submission.preventDefault();
@@ -286,6 +288,17 @@ function IdentityProvidersPage() {
                   </div>
                 </>
               )}
+
+              {/*
+                Here as well as on the page behind, because while this is open the page behind it is
+                not visible. A registration refused by the identity provider or by Better Auth left
+                the dialog sitting there unchanged, which reads as the button not working.
+              */}
+              {register.error ? (
+                <p className="text-destructive text-sm" role="alert">
+                  {register.error.message}
+                </p>
+              ) : null}
             </DialogBody>
             <DialogFooter className="mt-4">
               <Button
