@@ -1,5 +1,6 @@
 import {
   IconArrowLeft,
+  IconBuildingBank,
   IconCode,
   IconDeviceDesktop,
   IconKey,
@@ -7,6 +8,7 @@ import {
   IconListDetails,
   IconPuzzle,
   IconShieldCheck,
+  IconUsers,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
@@ -77,6 +79,21 @@ const GROUPS: {
         title: "Playground",
         icon: IconCode,
         linkOptions: { to: "/admin/playground" },
+      },
+    ],
+  },
+  {
+    label: "Who can get in",
+    items: [
+      {
+        title: "People",
+        icon: IconUsers,
+        linkOptions: { to: "/admin/people" },
+      },
+      {
+        title: "Identity providers",
+        icon: IconBuildingBank,
+        linkOptions: { to: "/admin/identity-providers" },
       },
     ],
   },

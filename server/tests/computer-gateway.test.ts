@@ -679,4 +679,99 @@ describe("the computer gateway", () => {
       "/human/click",
     ]);
   });
+  /*
+   * Through `gatewayWith`, deliberately, rather than by handing `evaluateActionPolicy` a context
+   * written here. The bug these cover was that the context the gateway builds and the context the
+   * policy tests built were different shapes, so a policy test asserting a browser rule does not
+   * refuse a command passed while production refused every click. A test that builds its own context
+   * can only ever check the context it built.
+   */
+  describe("a deny rule that names a field this action does not have", () => {
+    test("a command rule does not refuse a click", async () => {
+      const { gateway, calls, rows } = await gatewayWith({
+        ...PERMISSIVE,
+        // The rule the documentation gives as the example.
+        deny: ['contains(command, "rm -rf")'],
+      });
+
+      await gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 });
+
+      expect(calls).toEqual(["click"]);
+      expect(rows[0]?.eventType).toBe("computer.action_allowed");
+    });
+
+    test("a key rule does not refuse a click", async () => {
+      const { gateway, calls } = await gatewayWith({
+        ...PERMISSIVE,
+        deny: ['key == "Enter"'],
+      });
+
+      await gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 });
+
+      expect(calls).toEqual(["click"]);
+    });
+
+    test("a file rule does not refuse a click", async () => {
+      const { gateway, calls } = await gatewayWith({
+        ...PERMISSIVE,
+        deny: ['contains(file.path, "secret")'],
+      });
+
+      await gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 });
+
+      expect(calls).toEqual(["click"]);
+    });
+
+    test("but the rule still refuses the action it is about", async () => {
+      // The point is not that these rules stop working. A neutral value answers honestly; it does
+      // not answer no.
+      const { gateway, calls, rows } = await gatewayWith({
+        ...PERMISSIVE,
+        deny: ['key == "Enter"'],
+      });
+
+      await expect(
+        gateway.key("bot-1", ACTOR, { ref: "e9", snapshotId: 7, key: "Enter" }),
+      ).rejects.toThrow();
+      expect(calls).toEqual([]);
+      expect(rows[0]?.eventType).toBe("computer.action_refused");
+    });
+  });
+});
+
+describe("resolving a computer's address", () => {
+  test("a foreign address is refused, so nothing is sent to it", async () => {
+    /*
+     * The guard exists because the address decides where the deployment's computer token goes. Every
+     * acting path resolved through here already; the live-screen socket resolved through the provider
+     * directly and skipped it, while putting the token in a query string.
+     */
+    const { provider, fetchImpl, requests } = fakeComputer();
+    const { store } = fakeAudit();
+    const gateway = createComputerGateway({
+      // The cloud metadata address, which is the answer this guard was written for.
+      provider: { ...provider, locate: async () => "http://169.254.169.254" },
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      token: "deployment-token",
+    });
+
+    await expect(gateway.locate("bot-1")).rejects.toThrow();
+    // Refused before anything was sent, so the token never left.
+    expect(requests).toEqual([]);
+  });
+
+  test("an address the guard allows is returned", async () => {
+    const { provider, fetchImpl } = fakeComputer();
+    const { store } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+    });
+
+    await expect(gateway.locate("bot-1")).resolves.toContain("http");
+  });
 });

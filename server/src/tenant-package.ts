@@ -151,19 +151,24 @@ export type ApplicationConfiguration = {
     tenantId: string;
     productName: string;
   };
-  auth: { providers: string[] };
 };
 
+/**
+ * What the browser is told about this deployment at build time.
+ *
+ * Brand only. Which identity providers are configured used to live here too, and could not: the
+ * image is built once, without any deployment's environment, so a deployment that configured Entra
+ * got a sign-in screen built on a machine that had never heard of it. That answer now comes from
+ * `/api/capabilities` at runtime, where the process that knows can answer.
+ */
 export function createApplicationConfiguration(
   tenantPackage: TenantPackage,
-  providers: string[],
 ): ApplicationConfiguration {
   return {
     brand: {
       tenantId: tenantPackage.tenantId,
       productName: tenantPackage.productName,
     },
-    auth: { providers },
   };
 }
 

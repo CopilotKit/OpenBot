@@ -21,6 +21,7 @@ bash scripts/start.sh
 | `DATABASE_URL`                | PostgreSQL connection string.                                                                         |
 | `KEY_ENCRYPTION_KEY`          | Base64-encoded 32-byte key for encrypted stored credentials. Generate with `openssl rand -base64 32`. |
 | `MANAGED_AGENT_AG_UI_URL`     | Default AG-UI endpoint for coworkers created in the product. Must be HTTP(S).                         |
+| `MANAGED_AGENT_TOKEN`          | Secret sent only to the managed AG-UI endpoint. Generate with `openssl rand -base64 32`.               |
 | `INTELLIGENCE_API_URL`        | CopilotKit Intelligence API URL.                                                                      |
 | `INTELLIGENCE_GATEWAY_WS_URL` | CopilotKit Intelligence realtime gateway URL.                                                         |
 | `INTELLIGENCE_API_KEY`        | Runtime key for the Intelligence project.                                                             |
@@ -45,6 +46,20 @@ All four Intelligence values are required together. Missing any of them stops se
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
 | `BOT_MODEL`          | provider default from Bot code/env | Model used by the shipped Bots.                                     |
 | `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
+| `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it. |
+| `AGENT_TOOL_TOKEN`   | unset                              | The secret a framework Bot presents when it calls a granted tool back through this server. |
+| `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
+
+**`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
+show: a stream that stops producing anything. Every other audit row is something that happened, and
+this one is the absence of anything happening, which leaves no trace of its own. Ending the turn
+writes `agent.stream_stalled`. Unset or `0` switches it off and nothing is watched. `.env.example`
+ships `60000`, so a new clone has it on and an upgraded deployment does not acquire it unasked.
+
+**`AGENT_TOOL_TOKEN`** exists because a framework Bot runs its own loop in its own process and still
+may not reach a vendor directly. It calls the deployment that granted the tool, which is where the
+grant, the policy and the audit row live. Absent, no Bot may call tools back, and it is told so
+rather than quietly allowed.
 
 ## OpenAI-compatible endpoints
 
@@ -81,17 +96,36 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 
 | Variable                     | Meaning                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
-| `OPENBOT_DEV_NO_AUTH`        | Local-only fixed administrator when set to `true`. Refused with `NODE_ENV=production`. |
+| `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. Only read when no identity provider is configured, and only needed where `NODE_ENV=production` would otherwise refuse to start. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
-| `BETTER_AUTH_SECRET`         | At least 32 characters. Required with Google OAuth.                                    |
-| `BETTER_AUTH_URL`            | Public API server base URL. Required with Google OAuth.                                |
+| `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
+| `MICROSOFT_OAUTH_CLIENT_SECRET` | Microsoft Entra ID client secret.                                                   |
+| `MICROSOFT_OAUTH_TENANT_ID`  | Directory to admit. `common` by default, which admits personal accounts too; a GUID admits one directory. |
+| `OKTA_OAUTH_CLIENT_ID`       | Okta client id.                                                                        |
+| `OKTA_OAUTH_CLIENT_SECRET`   | Okta client secret.                                                                    |
+| `OKTA_OAUTH_ISSUER`          | Which Okta, for example `https://example.okta.com/oauth2/default`.                     |
+| `BETTER_AUTH_SECRET`         | At least 32 characters. Required with any provider.                                    |
+| `BETTER_AUTH_URL`            | Public API server base URL, where OAuth callbacks return. Required with any provider.  |
 | `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API.                                       |
-| `INITIAL_ADMIN_EMAILS`       | Comma-separated users seeded as administrators.                                        |
+| `INITIAL_ADMIN_EMAILS`       | Comma-separated administrators. **Required** with any provider.                        |
 | `OPENBOT_PUBLIC_URL`         | Public address of this API. Defaults to `BETTER_AUTH_URL`.                              |
 | `OPENBOT_APP_URL`            | Where the browser app is served. Defaults to the first `TRUSTED_ORIGINS` entry.          |
 
-Google OAuth client id and secret must be configured together. If Google OAuth is configured, `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are also required.
+**Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
+secret must be set together, Okta additionally needs its issuer, and any of them requires
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` and `INITIAL_ADMIN_EMAILS`. Every incomplete combination is
+refused at start-up rather than at somebody's first attempt to sign in.
+
+`INITIAL_ADMIN_EMAILS` is required because nothing else grants the administrator role at first: an
+address it names becomes an administrator at every sign-in and cannot be demoted from the People
+screen, which is what guarantees a way back in. Everybody else's role is decided there instead.
+
+SAML and OpenID Connect providers are not configured here. They are registered while the deployment
+runs, under Admin → Identity providers, and routed by email domain.
+
+The redirect URI to register with each provider is `<BETTER_AUTH_URL>/api/auth/callback/<provider>`,
+where `<provider>` is `google`, `microsoft` or `okta`.
 
 `OPENBOT_PUBLIC_URL` and `OPENBOT_APP_URL` matter only for a connector each person connects their own account to, such as Google Drive.
 
@@ -120,6 +154,12 @@ Google OAuth client id and secret must be configured together. If Google OAuth i
 - `COMPUTER_BOT_ID`
 - `EGRESS_PROXY_DEFAULT`
 - `EGRESS_PROXY_<BOT_ID>`
+- `COMPUTER_SHELL_ENV`
+
+A command on the computer inherits PATH, locale and terminal names, and the proxy variables, not
+the rest of the process environment. Userinfo is stripped from a proxy URL, so a password in
+`HTTP_PROXY` is not in `env`. `COMPUTER_SHELL_ENV` is a comma-separated list of extra names to
+pass. Naming a secret or a credentialed proxy there is an operator's decision; the default does not.
 
 The supervisor also reads:
 

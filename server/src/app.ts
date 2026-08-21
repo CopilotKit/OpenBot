@@ -1,8 +1,15 @@
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { serveStatic } from "hono/bun";
+import { authoriseAgentCall } from "./agents/callback-token";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
-import { type AuditReader, type AuditStore, auditQueryFromUrl } from "./audit";
+import {
+  type AuditReader,
+  type AuditStore,
+  auditQueryFromUrl,
+  recordAuditEvent,
+} from "./audit";
 import { createDevRequireUser } from "./auth/dev-actor";
 import {
   type AppVariables,
@@ -22,14 +29,39 @@ import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
-import { authoriseAgentCall } from "./agents/callback-token";
-import type { DeploymentConfig } from "./config";
+import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
-import { serveStatic } from "hono/bun";
+import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
-import { REFUSAL_MARKER } from "./plugins/tools";
 import type { PluginStore } from "./plugins/store";
+import { REFUSAL_MARKER } from "./plugins/tools";
 import type { PackageStatusReader } from "./tenant-package";
+
+/**
+ * One row for something an administrator did to somebody's access.
+ *
+ * The address is on the row rather than only the user id, because the id means nothing to a person
+ * reading the trail a year later and the user row may be gone by then.
+ */
+async function recordPersonEvent(
+  auditStore: AuditStore | undefined,
+  context: { var: AppVariables },
+  eventType:
+    | "person.role_changed"
+    | "person.access_revoked"
+    | "person.access_restored",
+  person: { id: string; email: string },
+  payload: Record<string, unknown>,
+) {
+  if (!auditStore) return;
+  await recordAuditEvent(auditStore, {
+    eventType,
+    targetType: "person",
+    targetId: person.id,
+    actorUserId: context.var.actor.id,
+    payload: { email: person.email, ...payload },
+  });
+}
 
 export function createApp(
   config: DeploymentConfig,
@@ -93,6 +125,21 @@ export function createApp(
    * says nothing about which deployment the conversation belongs to.
    */
   threadIdentity?: ThreadIdentity,
+  /**
+   * Who has signed in, and what an administrator may do about them.
+   *
+   * Absent leaves the people screen answering 503 rather than an empty list, which is the honest
+   * degraded behaviour: "nobody has signed in" and "this deployment cannot tell you" are different
+   * answers and an administrator deciding who has access needs to know which one they are reading.
+   */
+  peopleStore?: PeopleStore,
+  /**
+   * How many enterprise identity providers are registered.
+   *
+   * A count rather than the store, because the only question anybody outside Better Auth asks is
+   * whether the sign-in screen should offer the email box at all.
+   */
+  ssoProviderCount?: () => Promise<number>,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -100,18 +147,68 @@ export function createApp(
   // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including
   // INTELLIGENCE_API_KEY and the licence token, and this endpoint is reachable by anyone. Returning
   // the object wholesale would serve deployment secrets to the browser. Add fields here explicitly.
-  app.get("/api/capabilities", (context) =>
+  app.get("/api/capabilities", async (context) =>
     context.json({
       mode: config.runtime.mode,
       durableHistory: config.runtime.durableHistory,
+      /*
+       * Which identity providers this deployment can sign somebody in with.
+       *
+       * Ids only, never the credentials: `configuredAuthProviders` returns names, and the clients
+       * and secrets behind them stay in `config.auth`, which is not projected here.
+       *
+       * Answered at runtime rather than baked into the build, because the container image is built
+       * once and knows nothing about the deployment that will run it. A sign-in screen compiled on a
+       * build machine cannot offer a provider that machine had never heard of.
+       */
+      authProviders: configuredAuthProviders(config.auth),
+      /*
+       * Whether any enterprise identity provider has been registered.
+       *
+       * A count, not a list. The sign-in screen only needs to know whether to offer the email box
+       * that routes by domain; naming the providers would tell anybody who loads the page which
+       * companies use this deployment, which is not theirs to have before they sign in.
+       */
+      ssoConfigured: (await ssoProviderCount?.()) ? true : false,
     }),
   );
-  app.on(["GET", "POST"], "/api/auth/*", (context) => {
+  /*
+   * Registering an identity provider is an administrator's decision, not a signed-in one.
+   *
+   * Better Auth's SSO plugin guards these with `sessionMiddleware`, which asks only that somebody is
+   * signed in. That is the wrong bar here: registering an IdP for a domain means anybody it vouches
+   * for can sign in, so a plain user reaching this could mint themselves colleagues. The routes are
+   * mounted through this handler, so the check goes in front of it.
+   */
+  const ADMIN_ONLY_AUTH_ROUTES = new Set([
+    "/api/auth/sso/register",
+    "/api/auth/sso/update-provider",
+    "/api/auth/sso/delete-provider",
+  ]);
+
+  app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     if (!auth) {
       return context.json(
-        { error: "Google authentication is not configured." },
+        { error: "No identity provider is configured." },
         503,
       );
+    }
+
+    if (ADMIN_ONLY_AUTH_ROUTES.has(new URL(context.req.url).pathname)) {
+      const session = await auth.api.getSession({
+        headers: context.req.raw.headers,
+        // Fresh, not the cookie cache: a role changed a moment ago has to apply to this request.
+        query: { disableCookieCache: true },
+      });
+      const roles = session?.user
+        ? ((await roleRepository?.rolesForUser(session.user.id)) ?? [])
+        : [];
+      if (!roles.includes("admin")) {
+        return context.json(
+          { error: "Only an administrator may change identity providers." },
+          403,
+        );
+      }
     }
 
     return auth.handler(context.req.raw);
@@ -120,11 +217,10 @@ export function createApp(
   const authenticationUnavailable: MiddlewareHandler<{
     Variables: AppVariables;
   }> = async (context) =>
-    context.json({ error: "Google authentication is not configured." }, 503);
-  // Local development can stand in a fixed administrator so the product is reachable before the
-  // authentication slice is built. It is checked first so a machine with the flag set does not also
-  // need Google credentials configured just to boot.
-  const requireUser = config.devNoAuth
+    context.json({ error: "No identity provider is configured." }, 503);
+  // One administrator, when nothing is configured to sign anybody in. Checked first, and only ever
+  // true when there is no provider, so a configured deployment cannot fall back to it.
+  const requireUser = config.singleUser
     ? createDevRequireUser()
     : auth && roleRepository
       ? createRequireUser(auth, roleRepository)
@@ -150,6 +246,154 @@ export function createApp(
       await auditReader.list(auditQueryFromUrl(new URL(context.req.url))),
     );
   });
+  /*
+   * Who is here, and what they may do.
+   *
+   * Administrator-only, like every other route in this group. A plain user reading the list would
+   * learn every colleague's address and when they last signed in, which is not theirs to have.
+   */
+  app.get("/api/admin/people", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) {
+      return denied;
+    }
+    if (!peopleStore) {
+      return context.json({ error: "People are not available." }, 503);
+    }
+
+    return context.json({ people: await peopleStore.list() });
+  });
+
+  app.post("/api/admin/people/:userId/role", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) {
+      return denied;
+    }
+    if (!peopleStore) {
+      return context.json({ error: "People are not available." }, 503);
+    }
+
+    const body = await context.req.json().catch(() => null);
+    const role = (body as { role?: unknown } | null)?.role;
+    if (role !== "admin" && role !== "user") {
+      return context.json(
+        { error: "A role of admin or user is required." },
+        400,
+      );
+    }
+
+    const userId = context.req.param("userId");
+    const person = await peopleStore.find(userId);
+    if (!person) {
+      return context.json({ error: "That person is not here." }, 404);
+    }
+
+    /*
+     * The configured floor wins over the screen.
+     *
+     * Somebody named in INITIAL_ADMIN_EMAILS is promoted again at their next sign-in whatever this
+     * route writes, so allowing the demotion would produce a screen that lies until they come back.
+     * Refusing says the real thing: change the deployment's configuration.
+     */
+    if (person.configuredAdmin && role !== "admin") {
+      return context.json(
+        {
+          error:
+            "This deployment names that address in INITIAL_ADMIN_EMAILS, so they stay an administrator. Change the configuration instead.",
+        },
+        409,
+      );
+    }
+
+    /*
+     * Nobody demotes themselves.
+     *
+     * An administrator who does has just locked themselves out of the screen that would undo it,
+     * and on a deployment with one administrator that is the whole deployment. Somebody else with
+     * the role can do it, which is the check that makes handover possible without making lockout
+     * a slip of the finger.
+     */
+    if (context.var.actor.id === userId && role !== "admin") {
+      return context.json(
+        { error: "You cannot remove your own administrator role." },
+        409,
+      );
+    }
+
+    if (person.role !== role) {
+      await peopleStore.setRole(userId, role);
+      await recordPersonEvent(
+        auditStore,
+        context,
+        "person.role_changed",
+        person,
+        {
+          from: person.role,
+          to: role,
+        },
+      );
+    }
+
+    return context.json({ person: await peopleStore.find(userId) });
+  });
+
+  app.post("/api/admin/people/:userId/access", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) {
+      return denied;
+    }
+    if (!peopleStore) {
+      return context.json({ error: "People are not available." }, 503);
+    }
+
+    const body = await context.req.json().catch(() => null);
+    const revoked = (body as { revoked?: unknown } | null)?.revoked;
+    if (typeof revoked !== "boolean") {
+      return context.json({ error: "revoked must be true or false." }, 400);
+    }
+
+    const userId = context.req.param("userId");
+    const person = await peopleStore.find(userId);
+    if (!person) {
+      return context.json({ error: "That person is not here." }, 404);
+    }
+
+    // The same floor, for the same reason: removing somebody the configuration names would last
+    // until their next sign-in and no longer.
+    if (person.configuredAdmin && revoked) {
+      return context.json(
+        {
+          error:
+            "This deployment names that address in INITIAL_ADMIN_EMAILS, so they cannot be removed here. Change the configuration instead.",
+        },
+        409,
+      );
+    }
+
+    // Nobody can remove themselves. An administrator who does has locked themselves out of the
+    // screen that would undo it.
+    if (revoked && context.var.actor.id === userId) {
+      return context.json({ error: "You cannot remove your own access." }, 409);
+    }
+
+    if (person.revoked !== revoked) {
+      if (revoked) {
+        await peopleStore.revoke(userId, context.var.actor.id);
+      } else {
+        await peopleStore.restore(userId);
+      }
+      await recordPersonEvent(
+        auditStore,
+        context,
+        revoked ? "person.access_revoked" : "person.access_restored",
+        person,
+        {},
+      );
+    }
+
+    return context.json({ person: await peopleStore.find(userId) });
+  });
+
   app.get("/api/admin/credentials", requireUser, async (context) => {
     const denied = requireAdmin(context);
     if (denied) {

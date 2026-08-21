@@ -91,6 +91,16 @@ export const accounts = pgTable(
     id: text("id").primaryKey(),
     accountId: text("account_id").notNull(),
     providerId: text("provider_id").notNull(),
+    /*
+     * Who vouched for this account, as the identity provider names itself.
+     *
+     * Required by Better Auth from 1.7. A real OIDC provider supplies its own
+     * (`https://accounts.google.com`), and one without gets a synthetic
+     * `local:oauth:<providerId>`, so the column is never empty. It exists because `providerId`
+     * alone stopped being enough once a deployment can register more than one OIDC provider: two
+     * companies' Okta tenants are both "okta" and are not the same directory.
+     */
+    issuer: text("issuer").notNull(),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -136,6 +146,50 @@ export const userRoles = pgTable(
   },
   (table) => [primaryKey({ columns: [table.userId, table.role] })],
 );
+
+/**
+ * An enterprise identity provider this deployment has been told about.
+ *
+ * The other three providers are configuration: one Google, one Entra, one Okta, named in the
+ * environment. These are not, because a company's own IdP is not something a deployment can be
+ * built knowing. It is registered while running, by an administrator holding the metadata their
+ * identity team gave them, and there can be several.
+ *
+ * `oidcConfig` and `samlConfig` are JSON held as text because Better Auth writes them that way. They
+ * carry a client secret or a signing certificate, so nothing here is ever projected to a browser.
+ *
+ * `domain` is what routes somebody to the right one: they type an email address, and the part after
+ * the @ decides which identity provider is asked about them.
+ */
+export const ssoProviders = pgTable("sso_providers", {
+  id: text("id").primaryKey(),
+  issuer: text("issuer").notNull(),
+  oidcConfig: text("oidc_config"),
+  samlConfig: text("saml_config"),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  providerId: text("provider_id").notNull().unique(),
+  organizationId: text("organization_id"),
+  domain: text("domain").notNull(),
+});
+
+/**
+ * People an administrator has removed, by email address.
+ *
+ * Keyed on the address rather than the user id, because deleting the user row is not removal: the
+ * next sign-in through the identity provider creates it again, with a fresh id and no memory of
+ * having been removed. The address is the only thing that survives that.
+ *
+ * Lower-cased on the way in, since a provider is free to return whatever case it likes and two rows
+ * differing only in case would be one person with one of them enforced.
+ */
+export const revokedAccess = pgTable("revoked_access", {
+  email: text("email").primaryKey(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  /** Who did it, for the trail. Not a foreign key: an administrator may later be removed too. */
+  revokedBy: text("revoked_by").notNull(),
+});
 
 export const deploymentPackages = pgTable("deployment_packages", {
   id: uuid("id").primaryKey().defaultRandom(),

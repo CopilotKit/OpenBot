@@ -28,7 +28,11 @@ const channelStore = createChannelStore(
   profileStore,
   createThreadIdentity("test-deployment"),
 );
-const loadAgents = createRuntimeAgentLoader(database);
+const managedAgentToken = "managed-agent-token";
+const loadAgents = createRuntimeAgentLoader(database, undefined, {
+  endpoint: managedEndpoint,
+  token: managedAgentToken,
+});
 
 const testPrefix = `runtime-agents-${randomUUID()}`;
 const createdUserIds: string[] = [];
@@ -104,6 +108,7 @@ describe("runtime agent loading", () => {
       name: "Expense Manager",
       type: "remote_ag_ui",
       endpoint: managedEndpoint.toString(),
+      headers: { "x-openbot-agent-token": managedAgentToken },
       standingMessage: standingRoleMessage({
         id: profile.id,
         name: "Expense Manager",

@@ -63,6 +63,7 @@ and the fix would not be available.
 | Variable | |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL with the `vector` extension. Not needed with `EMBEDDED_POSTGRES=on` |
+| an identity provider | `GOOGLE_OAUTH_*`, `MICROSOFT_OAUTH_*` or `OKTA_OAUTH_*`, with `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET` and `INITIAL_ADMIN_EMAILS`. See the README |
 | `EMBEDDED_POSTGRES` | `on` to run the database inside the container. Off by default |
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted |
@@ -73,9 +74,10 @@ and the fix would not be available.
 `COMPUTER_TOKEN` is generated at start if you do not set one. Both processes that need it are inside
 the container, so there is nothing to share it with.
 
-**Authentication is required.** `OPENBOT_DEV_NO_AUTH` is refused when `NODE_ENV=production`, which
-the image sets. A deployment anybody can reach needs Google sign-in configured, or every visitor is
-an administrator.
+**Authentication is required.** With no identity provider configured the image refuses to start,
+because `NODE_ENV=production` is set and a public URL where every visitor is an administrator fails
+silently. Configure Google, Microsoft or Okta, or set `OPENBOT_SINGLE_USER=true` to say you meant an
+open deployment.
 
 **Put TLS in front of it.** Not only for the cookies. A page served from `http://<address>` is not a
 secure context, which removes a set of browser APIs that are present on `http://localhost` and so

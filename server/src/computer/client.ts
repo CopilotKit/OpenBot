@@ -70,6 +70,8 @@ export interface ComputerTransport {
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
+    /** Overrides the transport's own deadline for this one call. */
+    timeoutMs?: number,
   ): Promise<T>;
   post<T>(
     baseUrl: string,
@@ -77,6 +79,8 @@ export interface ComputerTransport {
     path: string,
     payload: unknown,
     caller?: AbortSignal,
+    /** Overrides the transport's own deadline for this one call. */
+    timeoutMs?: number,
   ): Promise<T>;
   navigate(
     baseUrl: string,
@@ -95,7 +99,7 @@ export function createComputerTransport(
   options: ComputerTransportOptions,
 ): ComputerTransport {
   const doFetch = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 45_000;
+  const defaultTimeoutMs = options.timeoutMs ?? 45_000;
 
   async function call<T>(
     baseUrl: string,
@@ -103,10 +107,21 @@ export function createComputerTransport(
     path: string,
     init?: RequestInit,
     caller?: AbortSignal,
+    timeoutMsOverride?: number,
   ): Promise<T> {
     if (caller?.aborted) {
       throw new ComputerUnavailableError("The action was stopped.");
     }
+
+    /*
+     * A browser action either happens in seconds or has gone wrong, so 45s is the right deadline for
+     * it. A command is not that: the shell's own budget is 120s by default and up to 600s, and the
+     * tool description tells the model to install packages. Giving up here first reported failure to
+     * the person while the command carried on running to completion inside the container, and made
+     * the shell's own limit unreachable. A caller with a longer limit of its own passes it in, and
+     * this becomes the backstop rather than the limit.
+     */
+    const timeoutMs = timeoutMsOverride ?? defaultTimeoutMs;
 
     const target = baseUrl.replace(/\/$/, "");
     let response: Response;
@@ -148,6 +163,7 @@ export function createComputerTransport(
     path: string,
     payload: unknown,
     caller?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<T> {
     return call<T>(
       baseUrl,
@@ -159,6 +175,7 @@ export function createComputerTransport(
         body: JSON.stringify(payload),
       },
       caller,
+      timeoutMs,
     );
   }
 

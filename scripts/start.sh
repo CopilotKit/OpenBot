@@ -36,6 +36,31 @@ export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
 
+# The secret the server sends to a managed Bot, generated and written back on first run.
+#
+# Not a fixed default like the two above. Those reach services bound to loopback; a Bot publishes a
+# port, so a well-known token from a public repository would be no boundary at all. Generated once
+# per machine and persisted, because the server and the Bot are separate processes that have to
+# agree on it across restarts.
+#
+# Written into .env rather than exported for this run alone, so `docker compose up` by hand later
+# sees the same value the script used.
+MANAGED_AGENT_TOKEN="$(setting MANAGED_AGENT_TOKEN "")"
+if [ -z "$MANAGED_AGENT_TOKEN" ]; then
+  MANAGED_AGENT_TOKEN="$(openssl rand -base64 32)"
+  if grep -qE '^MANAGED_AGENT_TOKEN=' "$ROOT/.env"; then
+    # A present but empty line, which is what .env.example ships.
+    tmp="$(mktemp)"
+    grep -vE '^MANAGED_AGENT_TOKEN=' "$ROOT/.env" > "$tmp"
+    printf 'MANAGED_AGENT_TOKEN=%s\n' "$MANAGED_AGENT_TOKEN" >> "$tmp"
+    mv "$tmp" "$ROOT/.env"
+  else
+    printf '\nMANAGED_AGENT_TOKEN=%s\n' "$MANAGED_AGENT_TOKEN" >> "$ROOT/.env"
+  fi
+  printf '\033[2m%s\033[0m\n' "Generated MANAGED_AGENT_TOKEN and wrote it to .env."
+fi
+export MANAGED_AGENT_TOKEN
+
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
 info()  { printf '\033[2m%s\033[0m\n' "$1"; }

@@ -54,8 +54,12 @@ Hiding is personal roster state. It removes the coworker from one user's list wi
 Product-created coworkers use:
 
 ```dotenv
-MANAGED_AGENT_AG_UI_URL=http://localhost:4200/ag-ui
+MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui
 ```
+
+That is `agent-langgraph`, which runs a real framework and its own tool loop. The proof-of-concept on
+`4200` hand-writes the protocol and leaves the loop to whatever is watching, so it is a reference
+rather than something to build a deployment on.
 
 The server requires this setting at startup. Package-provided agents use their own `agents.yaml` configuration.
 

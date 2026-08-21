@@ -19,8 +19,29 @@
     {
       "idx": 2,
       "version": "7",
-      "when": 1787250609174,
-      "tag": "0002_numerous_leech",
+      "when": 1787275307382,
+      "tag": "0002_sign_in",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787275307621,
+      "tag": "0003_backfill_account_issuer",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787275307878,
+      "tag": "0004_account_issuer_required",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787318085085,
+      "tag": "0005_slimy_mad_thinker",
       "breakpoints": true
     }
   ]

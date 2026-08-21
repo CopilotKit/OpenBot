@@ -313,16 +313,24 @@ export function createComputerRoutes(
    * owns the limit.
    */
   routes.post("/:botId/exec", requireUser, (context) =>
-    act(context, (botId, actor, body) => {
+    act(context, (botId, actor, body, signal) => {
       if (typeof body?.command !== "string" || !body.command.trim()) {
         return { error: "A command is required." };
       }
-      return gateway.runCommand(botId, actor, {
-        command: body.command,
-        ...(typeof body.timeoutMs === "number"
-          ? { timeoutMs: body.timeoutMs }
-          : {}),
-      });
+      // The fourth argument, like every other acting route. Without it the plumbing through
+      // gateway.runCommand and into the shell's own abort listener was dead code, and Stop ended the
+      // run in the transcript while the command carried on to completion inside the container.
+      return gateway.runCommand(
+        botId,
+        actor,
+        {
+          command: body.command,
+          ...(typeof body.timeoutMs === "number"
+            ? { timeoutMs: body.timeoutMs }
+            : {}),
+        },
+        signal,
+      );
     }),
   );
 

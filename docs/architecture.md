@@ -71,6 +71,8 @@ startup.
 
 With `COMPUTER_SUPERVISOR_URL`, each Bot gets its own computer container, workspace volume, and browser profile. Without it, all Bots share `AGENT_COMPUTER_URL`.
 
+A command on the computer inherits PATH, locale and terminal names, and the proxy variables, not the rest of the process environment. Userinfo is stripped from a proxy URL. `COMPUTER_SHELL_ENV` names anything else a deployment wants passed.
+
 The supervisor exposes only ensure, stop, reset, and list operations. It holds the Docker socket, so do not expose it outside the deployment network. Set `COMPUTER_RUNTIME=runsc` to run computers under gVisor on hosts that support it.
 
 ## Human control and secrets
@@ -145,7 +147,11 @@ Connector credentials are stored through the credential vault and referenced by 
 ## Security boundaries
 
 - Server routes enforce auth and roles; admin pages are backed by server-side administrator checks.
-- `OPENBOT_DEV_NO_AUTH=true` is local-only and is refused with `NODE_ENV=production`.
+- Sign-in is Google, Microsoft or Okta from the environment, plus SAML and OpenID Connect providers registered at runtime and routed by email domain. One resolver answers both questions a run asks about a person, whose threads these are and which Bots they may run, so the two can never disagree.
+- `INITIAL_ADMIN_EMAILS` is a floor: an address it names is made an administrator at every sign-in and cannot be demoted from the People screen. Everybody else's role is decided there, and every change writes an audit row.
+- Registering, changing or removing an identity provider is administrator-only. Better Auth's SSO plugin guards those routes with a session alone, which would let any signed-in person register a provider for a domain.
+- Removing somebody deletes their sessions and denies their address, because deleting the user row alone is not removal: the next sign-in through the provider recreates it.
+- With no identity provider configured, every request is one fixed administrator. That is refused with `NODE_ENV=production` unless `OPENBOT_SINGLE_USER=true` says it was meant.
 - `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`.
 - Credential plaintext is encrypted at rest, never returned by APIs, and redacted from audit events.
 - Browser navigation allows `http` and `https`; cloud metadata addresses are refused under every configuration.

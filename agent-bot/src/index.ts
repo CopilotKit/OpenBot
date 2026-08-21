@@ -2,6 +2,7 @@ import type { BaseEvent, RunAgentInput } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 import { serve } from "bun";
 import OpenAI from "openai";
+import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { SYSTEM_PROMPT } from "../../shared/bot-prompt";
 
 /**
@@ -16,6 +17,13 @@ import { SYSTEM_PROMPT } from "../../shared/bot-prompt";
  */
 
 const PORT = Number.parseInt(process.env.PORT ?? "4200", 10);
+const MANAGED_AGENT_TOKEN = process.env.MANAGED_AGENT_TOKEN?.trim();
+if (!MANAGED_AGENT_TOKEN) {
+  console.error(
+    "MANAGED_AGENT_TOKEN is not set. This process holds a model credential and will not start without a token for OpenBot's server.",
+  );
+  process.exit(1);
+}
 /**
  * Which model drives the Bot.
  *
@@ -224,6 +232,9 @@ serve({
     }
 
     if (url.pathname === "/ag-ui" && request.method === "POST") {
+      if (!hasManagedAgentToken(request, MANAGED_AGENT_TOKEN)) {
+        return Response.json({ error: "Unauthorized." }, { status: 401 });
+      }
       const input = (await request.json()) as RunAgentInput;
       return runAgent(input);
     }

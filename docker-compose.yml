@@ -160,9 +160,14 @@ services:
       context: .
       dockerfile: agent-bot/Dockerfile
     ports:
-      - "${BOT_PORT:-4200}:4200"
+      # Loopback, not every interface. The token is the boundary; this means an attacker needs to be
+      # on the machine before they can even try it. Nothing legitimate reaches a Bot from another
+      # host: the server calls it over localhost, and other containers use the compose network.
+      - "127.0.0.1:${BOT_PORT:-4200}:4200"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Server sends this on every call to the managed Bot. It refuses to start without it.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
       # to it verbatim.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
@@ -179,11 +184,14 @@ services:
       context: .
       dockerfile: agent-langgraph/Dockerfile
     ports:
-      - "${LANGGRAPH_PORT:-4201}:4201"
+      # Loopback, for the same reason as agent-bot above.
+      - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4201"
     environment:
       # The selected provider reads its own key. Models requiring the Responses API use
       # BOT_RESPONSES_API instead of changing the streaming loop here.
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
+      # Same server-to-Bot request boundary as agent-bot above.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
