@@ -24,6 +24,7 @@ import { createComputerGateway } from "./computer/gateway";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
+  startActionPolicyListener,
 } from "./computer/policy-store";
 import {
   createComputerProvider,
@@ -199,6 +200,13 @@ const policyStore = createPolicyStore(
 // A boundary an administrator set is read back before the first action is decided, so a restart no
 // longer silently returns to the configured default.
 const policySource = await policyStore.load();
+// And read back again whenever any replica changes it. Without this the rule an administrator adds
+// is enforced by the one process that answered them, and every other process behind the load
+// balancer keeps deciding with the list it read at boot, saying nothing.
+const actionPolicyListener = await startActionPolicyListener(
+  config.databaseUrl,
+  policyStore,
+);
 
 /*
  * Record which boundary this process started with.
@@ -559,11 +567,15 @@ if (config.singleUser) {
   );
 }
 
-// The activity listener holds a connection of its own for the life of the process. Released on the
-// way out, so a watch-mode restart does not leave one behind on every reload.
+// The activity and policy listeners each hold a connection of their own for the life of the
+// process. Released on the way out, so a watch-mode restart does not leave two behind on every
+// reload.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void channelActivityListener.stop().finally(() => process.exit(0));
+    void Promise.allSettled([
+      channelActivityListener.stop(),
+      actionPolicyListener.stop(),
+    ]).finally(() => process.exit(0));
   });
 }
 

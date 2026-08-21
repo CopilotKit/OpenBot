@@ -86,6 +86,15 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **A boundary rule only applied on the server that received it.** The action policy was read from
+  the database once at boot and then kept in the process that held it, so a deny rule an
+  administrator added was enforced by whichever of the server processes answered them, and every
+  other one went on deciding with the list it read at boot. Behind a load balancer that meant the
+  rule applied to roughly one action in however many processes are running, while the screen and the
+  audit row both reported it saved. A change is now announced through Postgres and every process
+  re-reads the row, including after its connection drops, so a rule added or reset a moment ago
+  applies to the next action wherever it lands. Nothing to configure; a single-process deployment
+  behaves as before.
 - **A deployment with no identity provider came up open by default.** Covered under Changed above,
   and listed here too because it is the one on this list that was reachable from the internet.
 - **Registering a company's identity provider was owned by whoever registered it.** Better Auth

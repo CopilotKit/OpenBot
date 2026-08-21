@@ -11,16 +11,34 @@
  * and the memory copy is only updated once it has. A store that answered from the database on every
  * click would put a query on the path of every keystroke a Bot makes.
  *
+ * That cache is per process, and OpenBot runs as several. A rule saved by the process that answered
+ * the administrator would otherwise be enforced by that process alone, while every other replica went
+ * on deciding with the list it read at boot: the screen reports success, the trail reports success,
+ * and the boundary applies to roughly one action in N. So a change is announced through Postgres and
+ * every replica re-reads the row. See `startActionPolicyListener` below.
+ *
  * Without a database it still works in memory. Tests that only care about decision logic do not need
  * Postgres.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import postgres from "postgres";
 import type { Database } from "../db/client";
 import { actionPolicy } from "../db/schema";
 import type { ActionPolicy } from "./policy";
 
 /** There is one boundary per deployment, so there is one row. */
 const CURRENT = "current";
+
+/**
+ * How a replica hears that the boundary changed under it.
+ *
+ * The announcement carries no policy. It is a nudge to re-read the row, so two changes that overtake
+ * each other still converge on what the table says rather than on whichever payload landed last, and
+ * a replica that was disconnected recovers by reading the same row when it subscribes again. The
+ * table is the record; this is only how a process learns it is out of date sooner than its next
+ * restart.
+ */
+export const ACTION_POLICY_TOPIC = "action_policy_changed";
 
 /**
  * What a deployment allows when it has not said otherwise.
@@ -67,26 +85,34 @@ export function createPolicyStore(
         // Written before it is enforced. If the write fails this throws and the caller reports a
         // failure, which is the honest outcome: an administrator who is told a rule was saved must
         // not be enforcing a rule that will disappear at the next restart.
-        await database
-          .insert(actionPolicy)
-          .values({
-            id: CURRENT,
-            mode: next.mode,
-            deny: next.deny,
-            allow: next.allow,
-            updatedBy: by ?? null,
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: actionPolicy.id,
-            set: {
+        //
+        // One transaction with the announcement, so the announcement is delivered on commit and a
+        // write that rolled back is never announced. A single upsert of a single row is also what
+        // keeps two administrators saving at once from producing two boundaries: the row is the one
+        // decision, the last commit wins it, and every replica re-reads that same row.
+        await database.transaction(async (transaction) => {
+          await transaction
+            .insert(actionPolicy)
+            .values({
+              id: CURRENT,
               mode: next.mode,
               deny: next.deny,
               allow: next.allow,
               updatedBy: by ?? null,
               updatedAt: new Date(),
-            },
-          });
+            })
+            .onConflictDoUpdate({
+              target: actionPolicy.id,
+              set: {
+                mode: next.mode,
+                deny: next.deny,
+                allow: next.allow,
+                updatedBy: by ?? null,
+                updatedAt: new Date(),
+              },
+            });
+          await announce(transaction);
+        });
       }
       current = next;
     },
@@ -96,7 +122,15 @@ export function createPolicyStore(
       // this deployment has no boundary of its own again, and changing what configuration says then
       // changes what it enforces, which is what an operator expects of a reset.
       if (database) {
-        await database.delete(actionPolicy).where(eq(actionPolicy.id, CURRENT));
+        // Announced like a set is, and for the same reason: a rule that cannot be lifted everywhere
+        // is no better than one that cannot be added everywhere. A replica that kept the old list
+        // would go on refusing an action an administrator has been told is allowed again.
+        await database.transaction(async (transaction) => {
+          await transaction
+            .delete(actionPolicy)
+            .where(eq(actionPolicy.id, CURRENT));
+          await announce(transaction);
+        });
       }
       current = clone(configured);
     },
@@ -108,7 +142,14 @@ export function createPolicyStore(
         .from(actionPolicy)
         .where(eq(actionPolicy.id, CURRENT))
         .limit(1);
-      if (!row) return "configuration";
+      if (!row) {
+        // No row means this deployment has no boundary of its own, which is a state a running
+        // process can arrive at: another replica reset it a moment ago. Falling back to the
+        // configured default here is what makes a reset reach a process that was already running,
+        // rather than leaving it enforcing a rule that no longer exists anywhere.
+        current = clone(configured);
+        return "configuration";
+      }
 
       current = {
         mode: row.mode as ActionPolicy["mode"],
@@ -116,6 +157,74 @@ export function createPolicyStore(
         allow: [...row.allow],
       };
       return "the database";
+    },
+  };
+}
+
+/** Tell every replica, including this one, that the row it caches is stale. */
+async function announce(executor: {
+  execute: (query: ReturnType<typeof sql>) => Promise<unknown>;
+}): Promise<void> {
+  await executor.execute(sql`select pg_notify(${ACTION_POLICY_TOPIC}, '')`);
+}
+
+export type ActionPolicyListener = { stop: () => Promise<void> };
+
+/**
+ * The subscription this needs, which is all of a driver connection it uses.
+ *
+ * Narrow because a test then stands in for the connection without standing in for Postgres, and the
+ * subscription logic under test stays the one that runs in production.
+ */
+export type PolicyNotifications = {
+  listen: (
+    topic: string,
+    onNotify: (payload: string) => void,
+    onListen?: () => void,
+  ) => Promise<unknown>;
+  end: () => Promise<unknown>;
+};
+
+/**
+ * Keep this replica's cached policy in step with the row every replica shares.
+ *
+ * On its own connection, because `LISTEN` holds one for the life of the subscription: taken from the
+ * pool, it would be a connection the rest of the server never gets back.
+ *
+ * Every notification re-reads the row rather than trusting a payload, and the same re-read happens
+ * whenever the subscription is established. That second part is what keeps a missed notification
+ * from being permanent: the driver says `LISTEN` again after a dropped connection, and anything
+ * announced while it was down is picked up from the table then, instead of at the next restart.
+ */
+export async function startActionPolicyListener(
+  databaseUrl: string,
+  store: PolicyStore,
+  connect: (databaseUrl: string) => PolicyNotifications = (url) =>
+    postgres(url, { max: 1 }),
+): Promise<ActionPolicyListener> {
+  const connection = connect(databaseUrl);
+
+  const reread = () => {
+    void store.load().catch((error: unknown) => {
+      // Said out loud rather than swallowed. Unlike a missed channel event, which the next refetch
+      // corrects, a policy this process failed to re-read means it is deciding actions against a
+      // boundary that is no longer the deployment's. It will be corrected by the next announcement
+      // or the next reconnect, and until then somebody should be able to see why it was not.
+      console.error(
+        JSON.stringify({
+          type: "action-policy-reload-failed",
+          message: error instanceof Error ? error.message : String(error),
+          note: "This process is still enforcing the policy it last read. The next announcement or reconnect re-reads it.",
+        }),
+      );
+    });
+  };
+
+  await connection.listen(ACTION_POLICY_TOPIC, reread, reread);
+
+  return {
+    stop: async () => {
+      await connection.end();
     },
   };
 }
