@@ -148,6 +148,13 @@ Required package files:
 
 The server validates the package at startup. Channel agent IDs must match declared agents. Knowledge sources currently support Google Drive and Microsoft OneDrive declarations.
 
+A declaration is not a connection. Google Drive can be configured from `/admin/connectors`, which
+stores the credential and writes the connector instance; OneDrive has no setup screen yet. No
+connector adapter or sync schedule exists yet either, so the `documents`, `chunks` and
+`document_acls` tables stay empty and a built-in coworker has nothing of its own to search. The
+retrieval path that works today is an MCP tool granted to a Bot: it is handed to the model as a
+server-executed tool and every call goes through the grant, the policy engine and the audit trail.
+
 Connector credentials are stored through the credential vault and referenced by id, not stored inline in YAML.
 
 ## Security boundaries

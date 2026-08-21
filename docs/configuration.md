@@ -267,7 +267,7 @@ agents:
   - id: knowledge
     name: Knowledge
     title: Company Knowledge
-    role_description: Answer company knowledge questions and cite sources.
+    role_description: Help answer company knowledge questions and cite sources when available.
     avatar_seed: knowledge
     type: built-in
     system_prompt: Answer from authorized company knowledge and cite your sources. When none is connected, say so plainly rather than inventing a citation.
@@ -327,7 +327,13 @@ sources:
     roots: [Risk, Operations]
 ```
 
-Supported source types are `google-drive` and `microsoft-onedrive`.
+Supported source types are `google-drive` and `microsoft-onedrive`. This file declares what a
+deployment is allowed to connect, not what it has connected. Google Drive can be configured from
+`/admin/connectors`, which stores the service-account credential and creates the connector
+instance; Microsoft OneDrive has no setup screen yet and that page says so rather than showing a
+dead control. Neither type has a sync running behind it yet, so a declared source contributes no
+documents. A coworker that has to search and cite today does it through an MCP tool granted from
+`/admin/plugins`, which executes here through the grant, the policy and the audit row.
 
 ## Change workflow
 
