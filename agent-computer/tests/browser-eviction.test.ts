@@ -105,3 +105,25 @@ describe("closing browsers nothing has touched", () => {
     expect(chooseEvictions(running(), 8)).toEqual([]);
   });
 });
+
+/**
+ * An unset variable in a compose file arrives as an empty string, not as absent.
+ *
+ * `Number("")` is zero, so read with `??` alone the cap became zero for any operator who had not
+ * set it, and every browser would be closed the moment it opened. Found by declaring the setting in
+ * `docker-compose.yml` and watching the container come up with `COMPUTER_MAX_BROWSERS=`.
+ */
+describe("reading the limits an operator set", () => {
+  test("a cap of zero closes everything, which is why empty must not read as zero", () => {
+    // The failure being guarded against, stated as the behaviour it would cause.
+    const now = Date.now();
+    expect(chooseEvictions(running(now, now - 1000), 0)).toHaveLength(2);
+  });
+
+  test("the default keeps several browsers, which is what an unset variable must produce", () => {
+    const now = Date.now();
+    expect(chooseEvictions(running(now, now - 1000, now - 2000), 8)).toEqual(
+      [],
+    );
+  });
+});

@@ -145,6 +145,21 @@ async function closeAndWait(context: BrowserContext): Promise<void> {
 }
 
 /**
+ * A number an operator set, or the default.
+ *
+ * `Number("")` is zero, and an unset variable in a compose file arrives as an empty string rather
+ * than as absent. Read with `??` alone, an operator who had not set the cap would get a cap of zero
+ * and every browser would be closed the moment it opened. Anything that is not a positive number
+ * falls back, because "I typed this wrong" and "I did not set it" both mean the default.
+ */
+function numberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
  * How many browsers one computer holds at once.
  *
  * There was no cap. A context was started the first time each Bot was used and kept, and the only
@@ -160,7 +175,7 @@ async function closeAndWait(context: BrowserContext): Promise<void> {
  * Closing is not losing anything. The profile is on disk, so a Bot whose browser was closed starts
  * again where it left off, which is what `stop` already means here.
  */
-const MAX_LIVE_BROWSERS = Number(process.env.COMPUTER_MAX_BROWSERS ?? 8);
+const MAX_LIVE_BROWSERS = numberFromEnv("COMPUTER_MAX_BROWSERS", 8);
 
 /**
  * How long a browser may sit untouched before it is closed.
@@ -168,9 +183,7 @@ const MAX_LIVE_BROWSERS = Number(process.env.COMPUTER_MAX_BROWSERS ?? 8);
  * The other half. A deployment under the cap still holds a browser per Bot that was used once last
  * Tuesday, and that memory is doing nothing for anybody.
  */
-const IDLE_TIMEOUT_MS = Number(
-  process.env.COMPUTER_BROWSER_IDLE_MS ?? 30 * 60_000,
-);
+const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000);
 
 /** How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`. */
 const IDLE_SWEEP_MS = 60_000;
