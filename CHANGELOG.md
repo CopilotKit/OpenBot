@@ -30,6 +30,10 @@ digit. The same rule container and volume names have always followed. A deployme
 `AUDIT_RETENTION_DAYS` is new and unset, which keeps the audit trail forever, as before. Set it to a
 whole number of days to have old rows removed.
 
+The built-in Bot refuses to start without `OPENAI_API_KEY`. It used to start, report healthy, and
+then fail every conversation, so a missing key looked like a working deployment. The LangGraph Bot
+already refused the same way.
+
 Sessions survive and nobody signs in again.
 
 ### Added
