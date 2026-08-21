@@ -72,3 +72,107 @@ describe("registering an agent that really answers", () => {
     }
   });
 });
+
+/**
+ * The shapes a real agent turns up in, beyond the happy one.
+ *
+ * The connection test is what somebody sees when they register a colleague's agent, and the verdict
+ * decides whether they go looking at their own service or at ours. A stubbed SSE body proves we parse
+ * the string we wrote; these put a real AG-UI implementation on the other end and make it misbehave
+ * in the ways a real one does.
+ */
+describe("registering an agent that answers badly", () => {
+  test("an agent that starts a run and never finishes is still reported as working", async () => {
+    /*
+     * A run that produces events is a working endpoint. Whether the agent finishes its work is the
+     * agent's business and not something a registration check should refuse over: the alternative is
+     * a person unable to register a slow agent, told their perfectly good service is broken.
+     */
+    const partial = new AGUIMock();
+    partial.onRun(/.*/, [
+      { type: "RUN_STARTED", threadId: "t", runId: "r" },
+      { type: "TEXT_MESSAGE_START", messageId: "m", role: "assistant" },
+    ] as never);
+    const partialUrl = await partial.start();
+
+    try {
+      const result = await testAgentConnection(partialUrl, {
+        allowPrivateHosts: true,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.events).toContain("RUN_STARTED");
+    } finally {
+      await partial.stop?.();
+    }
+  });
+
+  test("an agent that reports its own error still counts as speaking the protocol", async () => {
+    // `RUN_ERROR` is the agent telling us something went wrong, which means it is there and it
+    // speaks AG-UI. Refusing registration here would send somebody to debug the wrong end.
+    const failing = new AGUIMock();
+    failing.onRun(/.*/, [
+      { type: "RUN_STARTED", threadId: "t", runId: "r" },
+      { type: "RUN_ERROR", message: "the model is unavailable" },
+    ] as never);
+    const failingUrl = await failing.start();
+
+    try {
+      const result = await testAgentConnection(failingUrl, {
+        allowPrivateHosts: true,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.events).toContain("RUN_ERROR");
+    } finally {
+      await failing.stop?.();
+    }
+  });
+
+  test("a tool call in the stream is reported, because that is what a governed Bot does", async () => {
+    /*
+     * The event that matters most for this product. A remote Bot yields a tool call and OpenBot
+     * decides it, so an endpoint that emits one is exactly the shape the gateway is built for, and
+     * somebody registering it should see that it did.
+     */
+    const calling = new AGUIMock();
+    calling.onRun(/.*/, [
+      { type: "RUN_STARTED", threadId: "t", runId: "r" },
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: "call_1",
+        toolCallName: "search_issues",
+      },
+      { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: '{"q":"x"}' },
+      { type: "TOOL_CALL_END", toolCallId: "call_1" },
+      { type: "RUN_FINISHED", threadId: "t", runId: "r" },
+    ] as never);
+    const callingUrl = await calling.start();
+
+    try {
+      const result = await testAgentConnection(callingUrl, {
+        allowPrivateHosts: true,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.events).toContain("TOOL_CALL_START");
+    } finally {
+      await calling.stop?.();
+    }
+  });
+
+  test("nothing listening is a refusal a person can act on", async () => {
+    // The commonest registration mistake: a typo, or a service that is not up yet. It has to read as
+    // "we could not reach it" rather than as a protocol complaint.
+    const result = await testAgentConnection("http://127.0.0.1:9/ag-ui", {
+      allowPrivateHosts: true,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason.length).toBeGreaterThan(0);
+  });
+});
