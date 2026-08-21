@@ -135,7 +135,8 @@ Sessions survive and nobody signs in again.
   and reading one person ran the whole people aggregate over the deployment twice per role change.
   Both are paged now, and the people screen searches on the server so somebody can be found without
   walking pages.
-- **A computer accumulated one browser per Bot, forever.** Nothing closed an idle one, so a deployment
+- **A computer accumulated one browser per Bot, forever.** `COMPUTER_MAX_BROWSERS` and
+  `COMPUTER_BROWSER_IDLE_MS` set the two limits. Nothing closed an idle one, so a deployment
   where every employee has a Bot trends toward a resident Chromium per employee in one container until
   it is killed for memory. There is a cap and an idle timeout, and closing one costs only a relaunch
   because the profile is on disk.

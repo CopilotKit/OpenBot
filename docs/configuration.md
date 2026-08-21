@@ -149,6 +149,8 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
+| `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. |
+| `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. Cloud metadata addresses are still refused. |
