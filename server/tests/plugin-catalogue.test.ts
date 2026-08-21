@@ -21,18 +21,19 @@ describe("which servers this deployment will talk to", () => {
   test("a pinned host matches only itself", () => {
     const drive = catalogueEntry("google-drive");
     expect(drive).not.toBeNull();
-    expect(hostAdmissible(drive!, "https://drivemcp.googleapis.com")).toBe(
-      true,
-    );
+    expect(hostAdmissible(drive!, "https://www.googleapis.com")).toBe(true);
     // A prefix, a suffix and a lookalike are each refused. The suffix case is the one that matters:
     // a check written with endsWith rather than equality would accept it.
-    expect(
-      hostAdmissible(drive!, "https://drivemcp.googleapis.com.evil.test"),
-    ).toBe(false);
-    expect(
-      hostAdmissible(drive!, "https://evil.test/drivemcp.googleapis.com"),
-    ).toBe(false);
-    expect(hostAdmissible(drive!, "http://drivemcp.googleapis.com")).toBe(
+    expect(hostAdmissible(drive!, "https://www.googleapis.com.evil.test")).toBe(
+      false,
+    );
+    expect(hostAdmissible(drive!, "https://evil.test/www.googleapis.com")).toBe(
+      false,
+    );
+    expect(hostAdmissible(drive!, "http://www.googleapis.com")).toBe(false);
+    // The MCP host this entry used to name. Now inadmissible, which is the point of pinning: moving
+    // the entry to the GA API is also a decision to stop talking to the preview endpoint.
+    expect(hostAdmissible(drive!, "https://drivemcp.googleapis.com")).toBe(
       false,
     );
   });
@@ -78,7 +79,7 @@ describe("which servers this deployment will talk to", () => {
     // An instance host offered for a vendor with a pinned host is ignored, not honoured: the host and
     // the path both come from the entry, so nothing a caller sends can reach another endpoint.
     expect(resolveServerUrl("google-drive", "https://evil.test").url).toBe(
-      "https://drivemcp.googleapis.com/mcp/v1",
+      "https://www.googleapis.com/drive/v3",
     );
   });
 
@@ -143,9 +144,16 @@ describe("Google Drive", () => {
 
   test("resolves to the one address Google publishes for it", () => {
     expect(drive).not.toBeNull();
+    /*
+     * The GA REST API, not the MCP server. Google publishes both; the MCP one is gated behind the
+     * Workspace Developer Preview Program and refuses an unenrolled project with a message about
+     * permission that describes the project rather than the credential. Swapping back is `transport`
+     * plus these two fields, which is why the transport is asserted alongside the address.
+     */
     expect(resolveServerUrl("google-drive")?.url).toBe(
-      "https://drivemcp.googleapis.com/mcp/v1",
+      "https://www.googleapis.com/drive/v3",
     );
+    expect(drive?.transport).toBe("google-drive-rest");
   });
 
   test("is reached as the person asking, not as the deployment", () => {

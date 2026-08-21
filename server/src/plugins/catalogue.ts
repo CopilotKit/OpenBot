@@ -26,6 +26,9 @@
  * These are where this deployment sends a person's authorization code and receives the refresh
  * token that stands in for their access, so they are a reviewed source contract too.
  */
+// Type-only, so naming the transport here creates no import cycle with the registry that resolves it.
+import type { TransportKind } from "./transport";
+
 export type CatalogueAuth =
   /** Answers without any credential at all. */
   | { kind: "none" }
@@ -89,6 +92,15 @@ export type CatalogueEntry = {
    * than a write classified as a read.
    */
   writeTools: readonly string[];
+  /**
+   * Which protocol reaches this vendor. Absent means MCP, which is what every entry was.
+   *
+   * A field rather than an inference, because the answer is not derivable from the host: Google
+   * serves Drive over both an MCP endpoint and an ordinary REST API, and which one this deployment
+   * uses is a decision about availability and risk rather than a property of the vendor. Naming it
+   * here keeps that decision beside the host it applies to, and makes reversing it a one-line diff.
+   */
+  transport?: TransportKind;
   docsUrl: string;
 };
 
@@ -116,8 +128,22 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
      * a question about a document needs. Each of the others is a further entry, not a flag on this
      * one, so adding Gmail stays a reviewed decision about Gmail.
      */
-    host: "https://drivemcp.googleapis.com",
-    path: "/mcp/v1",
+    /*
+     * The GA REST API, not `drivemcp.googleapis.com`.
+     *
+     * The MCP server was the original choice and is the better one on paper: vendor-maintained, no
+     * Drive-specific code here at all. It is gated behind the Google Workspace Developer Preview
+     * Program, and an unenrolled project is refused with `The caller does not have permission` —
+     * which describes the project, not the credential, so every check available locally reports a
+     * correct setup. Enrolment is a Workspace-account application with a stated turnaround of days.
+     *
+     * This host has been generally available since 2015. The MCP entry is one line away: set
+     * `transport` back to `mcp` and restore the host and path above. Tool names match Google's MCP
+     * server exactly, so grants survive the swap in either direction.
+     */
+    host: "https://www.googleapis.com",
+    path: "/drive/v3",
+    transport: "google-drive-rest",
     /*
      * The first vendor here that cannot be reached with a token an administrator pastes. Google
      * issues no such token: access is an authorization-code grant belonging to a person. That is

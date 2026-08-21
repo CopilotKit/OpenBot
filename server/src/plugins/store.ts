@@ -27,7 +27,8 @@ import {
   customUrlRefusal,
   resolveServerUrl,
 } from "./catalogue";
-import { callTool as callRemoteTool, listTools, McpServerError } from "./mcp";
+import { McpServerError } from "./mcp";
+import { transportFor } from "./transport";
 
 /**
  * Plugins: what this deployment has added, which Bots may use it, and the one path a call takes.
@@ -156,6 +157,31 @@ const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
 
 /**
+ * Where this server actually is, when the stored row and the catalogue disagree.
+ *
+ * `mcp_servers.url` is written once, when a server is added, by copying what the catalogue said at
+ * the time. That makes it a cache of a reviewed decision — and a cache nothing invalidates. Moving
+ * Google Drive from its preview MCP host to its GA REST host changed the catalogue and left every
+ * deployment that had already added Drive calling the old address, with no way to tell from any
+ * screen: the row looks exactly as intentional as it did the day it was written.
+ *
+ * So for an entry with a PINNED host, the catalogue wins. It is the reviewed source contract, and a
+ * host it no longer names is a host this deployment has decided not to talk to. Editing the
+ * catalogue is the act of changing where a first-party server is, and it should take effect.
+ *
+ * The stored value still wins for the two cases where it is the only truth: a custom server an
+ * administrator added by URL, which has no entry at all, and a per-instance vendor whose `host` is
+ * null because the customer's own hostname is the answer.
+ */
+function effectiveUrl(
+  row: { id: string; url: string },
+  entry: CatalogueEntry | null,
+): string {
+  if (!entry || entry.host === null) return row.url;
+  return resolveServerUrl(row.id)?.url ?? row.url;
+}
+
+/**
  * Trade a refresh token for a short-lived access token, at the vendor's own token endpoint.
  *
  * `tokenUrl` comes from the catalogue entry and never from a caller, for the same reason the MCP
@@ -256,7 +282,12 @@ export type PluginStoreOptions = {
 
 export function createPluginStore(options: PluginStoreOptions) {
   const { database, auditStore, credentials, encryptionKey } = options;
-  const callVendor = options.callVendor ?? callRemoteTool;
+  /*
+   * Held rather than resolved, because the transport is a property of the entry and is not known
+   * until a call names one. An injected vendor still wins over both, which is what keeps a test able
+   * to assert what a call was about to go out with.
+   */
+  const injectedVendor = options.callVendor;
   const exchangeRefreshToken =
     options.exchangeRefreshToken ?? exchangeRefreshTokenOverHttp;
 
@@ -597,7 +628,11 @@ export function createPluginStore(options: PluginStoreOptions) {
          * answer to "what token does this server get", and it cannot be a secret of the wrong kind.
          */
         const { token } = await connectionTokenFor(row, entry, actorId);
-        const tools = await listTools({ url: row.url, token });
+        // The entry decides the protocol. For a custom server there is no entry, and MCP is right.
+        const tools = await transportFor(entry).listTools({
+          url: effectiveUrl(row, entry),
+          token,
+        });
 
         await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
         if (tools.length > 0) {
@@ -667,7 +702,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           id: row.id,
           title: row.title,
           vendor: row.vendor,
-          url: row.url,
+          url: effectiveUrl(row, entry),
           summary: entry?.summary ?? "",
           docsUrl: entry?.docsUrl ?? "",
           provenance: row.provenance,
@@ -1281,8 +1316,9 @@ export function createPluginStore(options: PluginStoreOptions) {
        */
       try {
         const { token } = await connectionTokenFor(row, entry, input.actorId);
-        const result = await callVendor(
-          { url: row.url, token },
+        const vendor = injectedVendor ?? transportFor(entry).callTool;
+        const result = await vendor(
+          { url: effectiveUrl(row, entry), token },
           toolName,
           args,
         );

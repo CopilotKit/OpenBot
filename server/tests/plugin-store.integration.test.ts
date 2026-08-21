@@ -128,7 +128,7 @@ beforeAll(async () => {
       id: serverId,
       title: "Google Drive",
       vendor: "Google",
-      url: "https://drivemcp.googleapis.com/mcp/v1",
+      url: "https://www.googleapis.com/drive/v3",
       provenance: "first-party",
     })
     .onConflictDoNothing();
