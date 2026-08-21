@@ -74,7 +74,13 @@ export function settingsUrlFor(
   appUrl: string | undefined,
   outcome?: string,
 ): string {
-  const base = `${appUrl?.replace(/\/+$/, "") ?? ""}/settings`;
+  /*
+   * The screen that started the flow, which is a person's own connected accounts rather than their
+   * preferences. It moved there when a connector became more than one switch's worth of decision, and
+   * this had to move with it: landing somebody back on a page that no longer mentions what they just
+   * did is its own kind of failure, and a silent one.
+   */
+  const base = `${appUrl?.replace(/\/+$/, "") ?? ""}/settings/connected-accounts`;
   return outcome ? `${base}?connected=${outcome}` : base;
 }
 

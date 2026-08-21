@@ -36,6 +36,8 @@ import { Route as AuthedAdminPluginsIndexRouteImport } from './routes/_authed/ad
 import { Route as AuthedAdminPluginsKeyRouteImport } from './routes/_authed/admin/plugins/$key'
 import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './routes/_authed/settings/components-gallery/index'
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
+import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
+import { Route as AuthedSettingsConnectedAccountsKeyRouteImport } from './routes/_authed/settings/connected-accounts/$key'
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
@@ -176,6 +178,18 @@ const AuthedSettingsComponentsGalleryNameRoute =
     path: '/components-gallery/$name',
     getParentRoute: () => AuthedSettingsRouteRoute,
   } as any)
+const AuthedSettingsConnectedAccountsIndexRoute =
+  AuthedSettingsConnectedAccountsIndexRouteImport.update({
+    id: '/connected-accounts/',
+    path: '/connected-accounts/',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
+const AuthedSettingsConnectedAccountsKeyRoute =
+  AuthedSettingsConnectedAccountsKeyRouteImport.update({
+    id: '/connected-accounts/$key',
+    path: '/connected-accounts/$key',
+    getParentRoute: () => AuthedSettingsRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedAppIndexRoute
@@ -199,10 +213,12 @@ export interface FileRoutesByFullPath {
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
+  '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/agents/': typeof AuthedAppAgentsIndexRoute
   '/admin/components/': typeof AuthedAdminComponentsIndexRoute
   '/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
+  '/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
@@ -224,10 +240,12 @@ export interface FileRoutesByTo {
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
+  '/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/agents': typeof AuthedAppAgentsIndexRoute
   '/admin/components': typeof AuthedAdminComponentsIndexRoute
   '/admin/plugins': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
+  '/settings/connected-accounts': typeof AuthedSettingsConnectedAccountsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -254,10 +272,12 @@ export interface FileRoutesById {
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
   '/_authed/admin/plugins/$key': typeof AuthedAdminPluginsKeyRoute
   '/_authed/settings/components-gallery/$name': typeof AuthedSettingsComponentsGalleryNameRoute
+  '/_authed/settings/connected-accounts/$key': typeof AuthedSettingsConnectedAccountsKeyRoute
   '/_authed/_app/agents/': typeof AuthedAppAgentsIndexRoute
   '/_authed/admin/components/': typeof AuthedAdminComponentsIndexRoute
   '/_authed/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
+  '/_authed/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -283,10 +303,12 @@ export interface FileRouteTypes {
     | '/admin/components/$name'
     | '/admin/plugins/$key'
     | '/settings/components-gallery/$name'
+    | '/settings/connected-accounts/$key'
     | '/agents/'
     | '/admin/components/'
     | '/admin/plugins/'
     | '/settings/components-gallery/'
+    | '/settings/connected-accounts/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -308,10 +330,12 @@ export interface FileRouteTypes {
     | '/admin/components/$name'
     | '/admin/plugins/$key'
     | '/settings/components-gallery/$name'
+    | '/settings/connected-accounts/$key'
     | '/agents'
     | '/admin/components'
     | '/admin/plugins'
     | '/settings/components-gallery'
+    | '/settings/connected-accounts'
   id:
     | '__root__'
     | '/_authed'
@@ -337,10 +361,12 @@ export interface FileRouteTypes {
     | '/_authed/admin/components/$name'
     | '/_authed/admin/plugins/$key'
     | '/_authed/settings/components-gallery/$name'
+    | '/_authed/settings/connected-accounts/$key'
     | '/_authed/_app/agents/'
     | '/_authed/admin/components/'
     | '/_authed/admin/plugins/'
     | '/_authed/settings/components-gallery/'
+    | '/_authed/settings/connected-accounts/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -539,6 +565,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsComponentsGalleryNameRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/settings/connected-accounts/': {
+      id: '/_authed/settings/connected-accounts/'
+      path: '/connected-accounts'
+      fullPath: '/settings/connected-accounts/'
+      preLoaderRoute: typeof AuthedSettingsConnectedAccountsIndexRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/settings/connected-accounts/$key': {
+      id: '/_authed/settings/connected-accounts/$key'
+      path: '/connected-accounts/$key'
+      fullPath: '/settings/connected-accounts/$key'
+      preLoaderRoute: typeof AuthedSettingsConnectedAccountsKeyRouteImport
+      parentRoute: typeof AuthedSettingsRouteRoute
+    }
   }
 }
 
@@ -580,15 +620,21 @@ const AuthedAdminRouteRouteWithChildren =
 interface AuthedSettingsRouteRouteChildren {
   AuthedSettingsIndexRoute: typeof AuthedSettingsIndexRoute
   AuthedSettingsComponentsGalleryNameRoute: typeof AuthedSettingsComponentsGalleryNameRoute
+  AuthedSettingsConnectedAccountsKeyRoute: typeof AuthedSettingsConnectedAccountsKeyRoute
   AuthedSettingsComponentsGalleryIndexRoute: typeof AuthedSettingsComponentsGalleryIndexRoute
+  AuthedSettingsConnectedAccountsIndexRoute: typeof AuthedSettingsConnectedAccountsIndexRoute
 }
 
 const AuthedSettingsRouteRouteChildren: AuthedSettingsRouteRouteChildren = {
   AuthedSettingsIndexRoute: AuthedSettingsIndexRoute,
   AuthedSettingsComponentsGalleryNameRoute:
     AuthedSettingsComponentsGalleryNameRoute,
+  AuthedSettingsConnectedAccountsKeyRoute:
+    AuthedSettingsConnectedAccountsKeyRoute,
   AuthedSettingsComponentsGalleryIndexRoute:
     AuthedSettingsComponentsGalleryIndexRoute,
+  AuthedSettingsConnectedAccountsIndexRoute:
+    AuthedSettingsConnectedAccountsIndexRoute,
 }
 
 const AuthedSettingsRouteRouteWithChildren =

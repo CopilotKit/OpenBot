@@ -1,6 +1,7 @@
 import {
   IconArrowLeft,
   IconLayoutGrid,
+  IconPlug,
   IconSettings,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
@@ -36,6 +37,15 @@ const ITEMS: {
     /* `/settings` prefixes every other route here, and would otherwise light up on all of them. */
     exact: true,
     linkOptions: { to: "/settings" },
+  },
+  {
+    /*
+     * The same subject as Admin's Plugins, from the other side: there an administrator decides what
+     * this deployment may reach at all, here you decide what it may reach as you.
+     */
+    title: "Connected accounts",
+    icon: IconPlug,
+    linkOptions: { to: "/settings/connected-accounts" },
   },
   {
     /* The same mark Admin gives UI Components. It is the same subject seen from the other side. */

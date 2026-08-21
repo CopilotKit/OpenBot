@@ -182,7 +182,7 @@ describe("where the callback sends somebody afterwards", () => {
    */
   test("is the app's origin, not the API's", () => {
     expect(settingsUrlFor("http://localhost:3010")).toBe(
-      "http://localhost:3010/settings",
+      "http://localhost:3010/settings/connected-accounts",
     );
   });
 
@@ -190,19 +190,19 @@ describe("where the callback sends somebody afterwards", () => {
     // One outcome for a forged state and for an expired one. Telling them apart tells anybody
     // probing the endpoint how far they got.
     expect(settingsUrlFor("http://localhost:3010", "failed")).toBe(
-      "http://localhost:3010/settings?connected=failed",
+      "http://localhost:3010/settings/connected-accounts?connected=failed",
     );
   });
 
   test("names the server it connected, so the page can confirm which", () => {
     expect(settingsUrlFor("http://localhost:3010", "google-drive")).toBe(
-      "http://localhost:3010/settings?connected=google-drive",
+      "http://localhost:3010/settings/connected-accounts?connected=google-drive",
     );
   });
 
   test("still points somewhere when no app URL is configured", () => {
     // Relative is wrong on a split-port deployment and right on a single-origin one, which is the
     // only case where `appUrl` can be absent and the deployment still works.
-    expect(settingsUrlFor(undefined)).toBe("/settings");
+    expect(settingsUrlFor(undefined)).toBe("/settings/connected-accounts");
   });
 });
