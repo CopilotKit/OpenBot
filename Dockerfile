@@ -126,19 +126,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && mkdir -p /var/lib/postgresql/data /var/run/postgresql \
   && chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql
 
-# A Bot can install what a task needs.
+# A Bot can install what a task needs, and nothing else as root.
 #
-# `sudo` for one user, no password, because a package manager that cannot install is not one, and
-# "install a tool then use it" is the whole point of giving a Bot a shell.
+# `sudo` without a password, because a package manager that cannot install is not one, and "install a
+# tool then use it" is the whole point of giving a Bot a shell.
 #
-# BE CLEAR WHAT THIS COSTS. It means a Bot can become root inside its container. That is acceptable
-# when the container is the Bot's alone and is contained from below, which is why per-Bot computers
-# and gVisor are not optional extras next to this feature; they are what makes it sane. In a
-# container shared between Bots, or one holding a database, a Bot with sudo can reach all of it.
+# THE PACKAGE MANAGERS, NOT ALL. This was `NOPASSWD: ALL`, and the comment below it explained what
+# that cost: a Bot could become root inside its container. It then named the two conditions that make
+# that acceptable — the container being one Bot's alone, and not holding a database — and this image
+# meets neither. The supervisor is deliberately not in it, so every Bot shares one computer, and
+# `EMBEDDED_POSTGRES=on` is a documented way to run it. So root here read another Bot's workspace, the
+# API's environment, and the audit database that records what it did.
+#
+# Naming the commands keeps the feature and removes that. `apt-get install` still works, which is what
+# the tool description tells a model to run. `sudo cat /proc/1/environ` does not.
+#
+# WHAT THIS IS NOT. It is a floor, not a boundary. Root is one CVE away and a shared container is not
+# an isolation story for code a model wrote: that needs a computer per Bot and a sandbox under it,
+# which is why per-Bot computers and gVisor are not optional extras next to this feature. Run the
+# image with `--security-opt no-new-privileges` where the platform allows, which turns setuid off
+# entirely for anything not named here.
 RUN apt-get update && apt-get install -y --no-install-recommends sudo \
   && rm -rf /var/lib/apt/lists/* \
-  && echo 'pwuser ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/pwuser \
-  && chmod 0440 /etc/sudoers.d/pwuser
+  && printf '%s\n' \
+    'pwuser ALL=(root) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt, /usr/bin/dpkg, /usr/bin/apt-key, /usr/bin/apt-cache' \
+    'Defaults!/usr/bin/apt-get env_keep += "DEBIAN_FRONTEND"' \
+    > /etc/sudoers.d/pwuser \
+  && chmod 0440 /etc/sudoers.d/pwuser \
+  && visudo -cf /etc/sudoers.d/pwuser
 
 # THE PACKAGE MANAGER AND THE SHELL STAY. Both were removed here once as hardening, which was
 # backwards: a Bot being able to open a shell and install what a task needs is a requested feature,

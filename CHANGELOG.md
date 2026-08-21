@@ -26,6 +26,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Which way it went is printed at start-up either way.
 
 ### Fixed
+- **A Bot could become root inside its container.** `sudo` was granted as `NOPASSWD: ALL`, and the
+  comment above it named the two conditions that made that acceptable: the container being one Bot's
+  alone, and not holding a database. The image meets neither, because the supervisor is deliberately
+  not in it and `EMBEDDED_POSTGRES=on` is a documented way to run it. So root read another Bot's
+  workspace, the API's environment, and the audit database recording what it did. The grant now names
+  the package managers, so `apt-get install` still works and `sudo cat /proc/1/environ` does not. It
+  is a floor rather than a boundary: code a model wrote needs a computer per Bot with
+  `COMPUTER_SUPERVISOR_URL` and a sandbox under it with `COMPUTER_RUNTIME=runsc`, both of which this
+  already supports and neither of which the single-container image can reach.
 - **A command could take the computer down, or outlive being stopped.** Output was accumulated in
   full and only trimmed at the end, so `cat` of a large file allocated until the process that owns
   the browser died; it is now bounded as it arrives, and still reports that it was truncated rather
