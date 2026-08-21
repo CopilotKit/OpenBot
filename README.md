@@ -27,7 +27,7 @@ your own machine.
 
 > **Alpha, and under active development.** OpenBot is early. Expect rough edges and bugs, and expect things to move. Issues and pull requests are welcome.
 
-> **Runs on your machine.** Everything below is written for a laptop. With no identity provider configured OpenBot admits every request as one administrator, so a fresh clone reaches the product without registering an OAuth client. [Sign-in](#sign-in) turns that off.
+> **Runs on your machine.** Everything below is written for a laptop. `.env.example` carries `OPENBOT_SINGLE_USER=true`, which admits every request as one administrator, so a fresh clone reaches the product without registering an OAuth client first. [Sign-in](#sign-in) turns that off, and is required before anybody else can reach the deployment.
 
 ## What it is
 
@@ -124,7 +124,7 @@ as one replica for now.
 | -------------------- | ------------------------------------------------------------------ |
 | `/`                  | Start and browse channels.                                         |
 | `/agents`            | Create, edit, duplicate, hide, delete, and launch coworkers.       |
-| `/channel/:id`       | Converse with one coworker and view its live screen/profile panel. |
+| `/channel/:id`       | Converse with one coworker, watch its screen, and see what it ran. |
 | `/bot`               | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/skills`            | Create and enable personal skills.                                 |
 | `/settings`          | User preferences.                                                  |
@@ -143,6 +143,7 @@ as one replica for now.
 - **A shell, not just a browser**: a Bot can run a command in its workspace, install what it needs, and process a file it saved. Through the same gate as everything else, so a rule can refuse a shell outright or refuse particular commands, and the command is on the record either way. The command inherits PATH, locale, terminal and proxy variables, not the rest of the deployment's environment.
 - **The gateway is the only way in**: it resolves the target from a server-held snapshot, evaluates the policy, writes the audit row, and only then calls the computer. There is no path that acts without the record existing first.
 - **CEL policy, fail closed**: rules can inspect `tool.name`, `intent`, `bot.id`, `actor.id`, `page.url`, `page.host`, `element.*`, `key`, `file.*` and `mcp.*`. Deny is evaluated before allow, a missing policy permits nothing, and a broken rule refuses rather than opens.
+- **Watch what it is doing**: the screen shows what a Bot is looking at, and the Activity tab beside it shows what it ran, read and saved, with the output. A command line in the transcript opens to the same thing. A saved file shows its path and size, never its contents.
 - **Take the wheel**: a Bot that hits a login wall or a 2FA prompt asks for help. Control is handed over in the same panel and recorded as `computer.help_requested`, `computer.control_taken` and `computer.control_released`. While a person is driving, Bot actions are refused rather than queued.
 - **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
@@ -193,7 +194,7 @@ Settings worth knowing:
 
 | Variable                             | Use                                                                       |
 | ------------------------------------ | ------------------------------------------------------------------------- |
-| `OPENBOT_SINGLE_USER`                | Admits every request as one administrator where an unconfigured deployment would otherwise refuse to start. |
+| `OPENBOT_SINGLE_USER`                | Admits every request as one administrator. Required when no identity provider is configured; `.env.example` ships it on. |
 | `OPENAI_BASE_URL`                    | Answers the OpenAI-shaped calls from somewhere else: a gateway, a proxy.  |
 | `ANTHROPIC_BASE_URL`, `GOOGLE_GENERATIVE_AI_BASE_URL` | The same, for those two APIs.            |
 | `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` sets one.      |
@@ -231,9 +232,11 @@ More detail: [docs/architecture.md](docs/architecture.md).
 
 ## Sign in
 
-Nothing configured means one administrator and no sign-in, which is how a fresh clone reaches the
-product. Configure **any one** of Google, Microsoft or Okta to turn sign-in on. Configure more than
-one and the sign-in screen offers each of them.
+`.env.example` ships `OPENBOT_SINGLE_USER=true`, which is one administrator and no sign-in: how a
+fresh clone reaches the product without registering an OAuth client first. Delete that line and
+configure **any one** of Google, Microsoft or Okta before anybody else can reach the deployment.
+With neither, it refuses to start rather than admitting everybody as an administrator. Configure
+more than one provider and the sign-in screen offers each of them.
 
 These four are needed whichever you pick:
 
@@ -263,6 +266,10 @@ OKTA_OAUTH_ISSUER=https://example.okta.com/oauth2/default
 ```
 
 Restart. Accounts, sessions and roles are stored in the same PostgreSQL database as everything else.
+
+A company's own SAML or OpenID Connect provider is registered while the deployment runs, under
+Admin → Identity providers, and routed by email domain. An OIDC registration needs every host in the
+provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
 
 - `INITIAL_ADMIN_EMAILS` is required, because nothing else grants the administrator role and no
   screen can promote somebody afterwards. It is re-read on every sign-in, so editing it takes effect

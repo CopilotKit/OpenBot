@@ -13,7 +13,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 Two configurations now refuse to start:
 
 - A provider configured with no `INITIAL_ADMIN_EMAILS`. Set it to at least one address.
-- No provider at all with `NODE_ENV=production`. Configure one, or set `OPENBOT_SINGLE_USER=true`.
+- No provider at all and no `OPENBOT_SINGLE_USER=true`. Configure a provider, or set that to say you
+  meant a deployment where every visitor is one administrator. This no longer depends on `NODE_ENV`,
+  which is unset by default and so let exactly the dangerous case through. A deployment already
+  running open needs the line added before it will start again.
+
+Registering an OpenID Connect provider needs every host in its discovery document in
+`TRUSTED_ORIGINS`, not only the issuer. Better Auth 1.7 checks each endpoint it finds, so a Google
+issuer also needs `oauth2.googleapis.com` and `openidconnect.googleapis.com`. Registration is
+refused with the untrusted host named.
 
 Sessions survive and nobody signs in again.
 
@@ -63,8 +71,37 @@ Sessions survive and nobody signs in again.
   path, rather than reporting an element it was never about.
 - **`COMPUTER_SANDBOX=on`** turns on Chromium's own sandbox where the host permits user namespaces.
   Which way it went is printed at start-up either way.
+- **You can watch what a Bot is doing, not only what it is looking at.** The screen answered half the
+  question: a Bot spending two minutes in a terminal showed a blank browser and one grey line per
+  command, with the output nowhere. A command line in the transcript now opens to show what it
+  printed, its exit code, and whether it was cut short or stopped. Beside the screen there is an
+  Activity tab carrying every command, file read, file write and listing as they happen, newest
+  first, with a count on the tab so a Bot working away from the browser is visible without switching
+  to it. A saved file shows its path and size, never its contents. This is a live view of the open
+  conversation; the record is still the audit trail.
+- **Sign-in is on the audit trail.** Rows for signing in, for being refused, and for the configured
+  administrator list granting somebody the role. Two questions had no answer before: who granted
+  themselves administrator by editing `INITIAL_ADMIN_EMAILS`, and whether somebody just removed had
+  ever been here, since removing them deletes the sessions that were the only evidence. A trail that
+  is unavailable never blocks a sign-in.
 
 ### Fixed
+- **A deployment with no identity provider came up open by default.** Covered under Changed above,
+  and listed here too because it is the one on this list that was reachable from the internet.
+- **Registering a company's identity provider was owned by whoever registered it.** Better Auth
+  answers its own listing route with only the providers the person asking registered, and refuses a
+  removal from anybody else, so a second administrator opened the Identity providers screen, found
+  it empty, and registered one that already existed. Worse, the row cascaded from that person's user
+  row: deleting the administrator who set sign-in up deleted the company's sign-in with them. What is
+  registered is a fact about the deployment, so reads and removals go through OpenBot's own
+  administrator-only routes against the whole table, and a provider outlives the person who added it.
+- **A customer's client secret was in the clear.** The SSO plugin writes `oidc_config` and
+  `saml_config` as plaintext JSON, with the OAuth client secret for that company's directory inside
+  them: the one secret here not going through `KEY_ENCRYPTION_KEY`. Both are now encrypted at rest.
+  Rows written before this still read, and are re-encrypted the next time they are written. OAuth
+  access and refresh tokens use Better Auth's own encryption, keyed on `BETTER_AUTH_SECRET`.
+- **A failed provider registration looked like a button that did not work.** The error was rendered
+  on the page behind the dialog, which was covering it.
 - **A Bot could become root inside its container.** `sudo` was granted as `NOPASSWD: ALL`, and the
   comment above it named the two conditions that made that acceptable: the container being one Bot's
   alone, and not holding a database. The image meets neither, because the supervisor is deliberately
@@ -119,14 +156,20 @@ Sessions survive and nobody signs in again.
 
 ### Changed
 
-- **A deployment with no identity provider is one administrator, without a flag.** That is how a
-  fresh clone reaches the product. Where `NODE_ENV=production`, an unconfigured deployment now
-  refuses to start instead, because a public URL where every visitor is an administrator is silent
-  and looks like it works. `OPENBOT_SINGLE_USER=true` replaces `OPENBOT_DEV_NO_AUTH`, which is still
-  honoured, and is how somebody says they meant an open deployment.
-- **Requires Better Auth 1.7**, which adds an `issuer` to every account. Migrations `0002` to `0004`
-  add the column, backfill existing rows with their provider's real issuer, and then make it
-  required, so nobody is asked to sign in again.
+- **Running with no sign-in takes a flag and nothing else.** It used to be locked with
+  `NODE_ENV=production`, which is exactly backwards: `NODE_ENV` is unset unless somebody sets it, so
+  a container on a VM with a hand-written env file and no identity provider served every visitor on
+  the internet as an administrator, silently, because nothing looked wrong from the outside. A
+  deployment with no provider now refuses to start unless `OPENBOT_SINGLE_USER=true` says it was
+  meant. `.env.example` ships that line switched on, so a clone still runs with no configuration at
+  all, and the line is greppable in a way a default never was. `OPENBOT_DEV_NO_AUTH` is still
+  honoured.
+- **Requires Better Auth 1.7**, which adds an `issuer` to every account. Migrations `0002` and `0003`
+  add the column and backfill existing rows with their provider's real issuer, so nobody is asked to
+  sign in again. The column stays nullable on purpose: a rolling deploy runs migrations and then
+  serves from old and new replicas at once, and an old replica writes an account without it, so
+  making it required in the same release would break the first sign-in of everybody who landed on a
+  replica that had not been replaced yet. The constraint belongs to a later release.
 - **Where a Bot's computer runs is now a plug.** One `ComputerProvider` interface sits under the
   gateway, with the Docker supervisor as one implementation and a shared computer as another. A
   computer somewhere else is an adapter rather than a change to the governed path. Thanks to
