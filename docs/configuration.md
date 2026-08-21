@@ -112,6 +112,11 @@ Google OAuth client id and secret must be configured together. If Google OAuth i
 - `COMPUTER_BOT_ID`
 - `EGRESS_PROXY_DEFAULT`
 - `EGRESS_PROXY_<BOT_ID>`
+- `COMPUTER_SHELL_ENV`
+
+A command on the computer inherits PATH, locale and terminal names, and the proxy variables, not
+the rest of the process environment. `COMPUTER_SHELL_ENV` is a comma-separated list of extra names
+to pass. Naming a secret there is an operator's decision; the default does not.
 
 The supervisor also reads:
 
