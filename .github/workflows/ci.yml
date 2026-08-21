@@ -161,10 +161,8 @@ jobs:
             -e EMBEDDED_POSTGRES=on \
             -e KEY_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
             -e TRUSTED_ORIGINS=http://localhost:3001 \
-            -e OPENBOT_SINGLE_USER=true \
-            -e MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/ag-ui \
-            -e MANAGED_AGENT_TOKEN=ci-not-a-real-token \
-            -e INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai \
+             -e OPENBOT_SINGLE_USER=true \
+             -e INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai \
             -e INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai \
             -e INTELLIGENCE_API_KEY=ci-not-a-real-key \
             -e COPILOTKIT_LICENSE_TOKEN=ci-not-a-real-licence \
