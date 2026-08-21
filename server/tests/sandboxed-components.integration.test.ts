@@ -1,11 +1,20 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
-import { createSandboxedStore } from "../src/components/sandboxed";
+import {
+  createSandboxedStore,
+  SandboxedNotFoundError,
+} from "../src/components/sandboxed";
 import { createDatabase } from "../src/db/client";
 import { TEST_POOL } from "./support/database";
-import { components, sandboxedComponents } from "../src/db/schema";
+import {
+  agents,
+  componentExclusions,
+  componentFunctions,
+  components,
+  sandboxedComponents,
+} from "../src/db/schema";
 
 /**
  * A component authored in a browser can be edited freely and still reach nobody until it is
@@ -144,5 +153,123 @@ describe("authoring a component without a rebuild", () => {
     // A governance row pointing at a component with no source is the "catalogue disagrees with the
     // build" state the components table exists to make visible.
     expect(governance).toBeUndefined();
+  });
+});
+
+/**
+ * What this surface may delete.
+ *
+ * `components` is shared with the compiled catalogue, so a delete by name on this endpoint could
+ * reach a row the playground never authored. `save` refuses a name that is not a slug and `publish`
+ * refuses a name with no draft behind it; `remove` did neither, which is the asymmetry these pin.
+ */
+describe("deleting a name this surface does not own", () => {
+  const compiled = `chart_test_${suite}`;
+  const bot = `agent_test_${suite}`;
+
+  beforeAll(async () => {
+    await database
+      .insert(agents)
+      .values({ id: bot, name: bot, type: "remote_ag_ui", configuration: {} })
+      .onConflictDoNothing();
+    // A component the build ships, as `syncCatalogue` would have written it.
+    await database.insert(components).values({
+      name: compiled,
+      title: "A compiled chart",
+      kind: "chart",
+      draftDescription: "Drawn by the build.",
+      publishedDescription: "Drawn by the build.",
+      published: true,
+      publishedAt: new Date(),
+      updatedBy: "the build",
+    });
+    // One Bot held back from it. This row is the whole of the decision: a published component is
+    // available to every Bot unless it exists.
+    await database.insert(componentExclusions).values({
+      componentName: compiled,
+      agentId: bot,
+      withheldBy: "admin@openbot.local",
+    });
+    await database.insert(componentFunctions).values({
+      componentName: compiled,
+      functionName: "listRecentOrders",
+      grantedBy: "admin@openbot.local",
+    });
+  });
+
+  afterAll(async () => {
+    await database.delete(components).where(eq(components.name, compiled));
+    await database.delete(agents).where(eq(agents.id, bot));
+  });
+
+  test("refuses a compiled component's name instead of deleting its governance", async () => {
+    await expect(store.remove(compiled, "admin@openbot.local")).rejects.toThrow(
+      SandboxedNotFoundError,
+    );
+
+    const [governance] = await database
+      .select()
+      .from(components)
+      .where(eq(components.name, compiled));
+    expect(governance).toBeDefined();
+    expect(governance?.published).toBe(true);
+  });
+
+  test("leaves the withholding that would otherwise have been released", async () => {
+    // The half that fails OPEN, and the reason this is worth a guard rather than a tidy-up. Losing
+    // this row does not hide the component from the Bot, it releases it to the Bot — and the next
+    // catalogue announcement rewrites the component as published, because that is how one the build
+    // ships arrives. A deliberate "not this Bot" would come back as "every Bot".
+    const withheld = await database
+      .select()
+      .from(componentExclusions)
+      .where(eq(componentExclusions.componentName, compiled));
+    expect(withheld).toHaveLength(1);
+  });
+
+  test("leaves the function grants, which the cascade would also have taken", async () => {
+    // This half fails closed, so it is a capability lost rather than one gained. Asserted anyway:
+    // a component that silently stops being able to read is still a component that stopped working.
+    const granted = await database
+      .select()
+      .from(componentFunctions)
+      .where(eq(componentFunctions.componentName, compiled));
+    expect(granted).toHaveLength(1);
+  });
+
+  test("refuses a name nothing was ever authored under", async () => {
+    // Answered rather than reported as success. `{ ok: true }` for a name that was never there reads
+    // as "the thing you named is gone", which is the one thing it does not establish.
+    await expect(
+      store.remove(`custom_never_${suite}`, "admin@openbot.local"),
+    ).rejects.toThrow(SandboxedNotFoundError);
+  });
+
+  test("still deletes a governance row whose source is already gone", async () => {
+    /*
+     * The orphan, and the reason the guard asks about `kind` rather than about the source row.
+     *
+     * `remove` deletes from two tables and not in one transaction, so a failure between them leaves
+     * exactly this: a governance row of this surface's own kind with nothing behind it. It is the
+     * "catalogue disagrees with the build" state, it belongs to this surface, and gating on the
+     * source row instead would have left it with no way to be cleared.
+     */
+    const orphan = `custom_orphan_${suite}`;
+    await database.insert(components).values({
+      name: orphan,
+      title: "A draft whose source went",
+      kind: "sandboxed",
+      draftDescription: "Authored here.",
+      published: false,
+      updatedBy: "admin@openbot.local",
+    });
+
+    await store.remove(orphan, "admin@openbot.local");
+
+    const [gone] = await database
+      .select()
+      .from(components)
+      .where(eq(components.name, orphan));
+    expect(gone).toBeUndefined();
   });
 });

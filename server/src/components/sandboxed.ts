@@ -277,6 +277,38 @@ export function createSandboxedStore(
     },
 
     async remove(name: string, by: string): Promise<void> {
+      /*
+       * Refuse a name this surface does not own.
+       *
+       * `components` is shared with the compiled catalogue and the delete below is by name, with
+       * nothing checking which kind of component the name belonged to. So a compiled component's
+       * governance row could be deleted through the playground's endpoint, and the foreign keys took
+       * its per-Bot withholdings and its function grants with it.
+       *
+       * The withholdings are the half that fails open. A published component is available to every
+       * Bot unless a `component_exclusions` row says otherwise, so losing that row does not hide the
+       * component, it releases it — and the next catalogue announcement rewrites the component with
+       * `published: true`, because that is how one the build ships arrives. A deliberate "not this
+       * Bot" comes back as "every Bot", under an audit row saying `kind: "sandboxed"`, which is the
+       * one thing it was not.
+       *
+       * Asked of the governance row's `kind` rather than of `sandboxed_components`, because ownership
+       * is the actual question and the two answers differ in one case worth keeping: these deletes
+       * are not in a transaction, so a failure between them leaves a governance row with no source.
+       * That orphan is the "catalogue disagrees with the build" state named below, it is this
+       * surface's to clean up, and requiring the source row would have made it undeletable here.
+       */
+      const [governance] = await database
+        .select({ kind: components.kind })
+        .from(components)
+        .where(eq(components.name, name))
+        .limit(1);
+      // "sandboxed" is the kind `save` writes above. A name with no row at all is refused for the
+      // same reason `publish` refuses one: this surface has nothing by that name to act on.
+      if (governance?.kind !== "sandboxed") {
+        throw new SandboxedNotFoundError(name);
+      }
+
       // Delete both rows; a governance row pointing at a component with no source is the visible
       // "catalogue disagrees with the build" state.
       await database

@@ -110,8 +110,19 @@ export function createSandboxedRoutes(
     const forbidden = requireAdmin(context);
     if (forbidden) return forbidden;
 
-    await store.remove(context.req.param("name"), actorEmail(context));
-    return context.json({ ok: true });
+    // Answered like `publish`, because it is the same question: this surface owns the components it
+    // authored, and a name with no draft behind it is not one of them. Reporting that as "not found"
+    // rather than as success also stops a caller reading `{ ok: true }` as "the thing you named is
+    // gone", which it was not.
+    try {
+      await store.remove(context.req.param("name"), actorEmail(context));
+      return context.json({ ok: true });
+    } catch (error) {
+      if (error instanceof SandboxedNotFoundError) {
+        return context.json({ error: error.message }, 404);
+      }
+      throw error;
+    }
   });
 
   return routes;
