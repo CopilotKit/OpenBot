@@ -4,7 +4,7 @@ import {
   IconExternalLink,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useParams } from "@tanstack/react-router";
+import { createFileRoute, Link, useParams } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
 import {
@@ -30,7 +30,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemFooter,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -44,13 +43,11 @@ import {
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
-  setPluginGrantMutationOptions,
 } from "@/lib/plugins/mutations";
 import {
   connectionsQueryOptions,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
-import { cn } from "@/lib/utils";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -66,6 +63,19 @@ export const Route = createFileRoute("/_authed/admin/plugins/$key")({
 
 /** Which of the three shapes of edit a row opens, or none. */
 type OpenDialog = "token" | "client" | "instance" | null;
+
+/**
+ * How widely a tool is granted, in words rather than a fraction.
+ *
+ * "0/3" needs decoding and reads as a score. The two ends are the ones worth recognising without
+ * reading — nothing holds this, or everything does — so they are named, and the middle is the only
+ * case that gets a number.
+ */
+function grantSummary(held: number, total: number): string {
+  if (held === 0) return "No Bots";
+  if (held === total) return total === 1 ? "1 Bot" : "All Bots";
+  return `${held} of ${total} Bots`;
+}
 
 function RouteComponent() {
   const { key } = useParams({ from: "/_authed/admin/plugins/$key" });
@@ -123,11 +133,6 @@ function RouteComponent() {
       window.location.href = authorizationUrl;
     },
   });
-  const setGrant = useMutation({
-    ...setPluginGrantMutationOptions(queryClient),
-    ...report,
-  });
-
   const entry = plugins.data?.catalogue.find((item) => item.key === key);
   const server = plugins.data?.servers.find((item) => item.id === key);
   const bots = (agents ?? []).map((agent: { id: string }) => ({
@@ -462,44 +467,34 @@ function RouteComponent() {
             <PageRows>
               {server.tools.map((tool, index) => (
                 <React.Fragment key={tool.ref}>
-                  <Item size="sm">
+                  {/* A real link with no children: children passed to `render` replace the row's own. */}
+                  <Item
+                    render={
+                      <Link
+                        params={{ key, tool: tool.name }}
+                        to="/admin/plugins/$key/tools/$tool"
+                      />
+                    }
+                    size="sm"
+                  >
                     <ItemContent>
                       <ItemTitle className="font-mono text-xs">
                         {tool.name}
                       </ItemTitle>
                       <ItemDescription>{tool.description}</ItemDescription>
-                      {/*
-                       * The grants wrap onto their own line rather than sitting in ItemActions,
-                       * which is where the layout skill puts a set: a chip per Bot would otherwise
-                       * fight the tool name for horizontal space and start scrolling sideways.
-                       */}
-                      <ItemFooter>
-                        <div className="flex flex-wrap gap-2">
-                          {bots.map((bot) => {
-                            const held = tool.grantedTo.includes(bot.id);
-                            return (
-                              <Button
-                                key={bot.id}
-                                onClick={() =>
-                                  setGrant.mutate({
-                                    agentId: bot.id,
-                                    granted: !held,
-                                    kind: "mcp",
-                                    ref: tool.ref,
-                                  })
-                                }
-                                size="sm"
-                                type="button"
-                                variant={held ? "default" : "outline"}
-                              >
-                                {bot.name}
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      </ItemFooter>
                     </ItemContent>
                     <ItemActions>
+                      {/*
+                       * How many Bots hold it, not which. The names were here as a chip each and
+                       * turned every row into a wrapping cluster of controls — twenty-four of them
+                       * across this list — with the tool's own name losing the fight for attention.
+                       * A count is what a reader scanning for "what is exposed, and how widely" is
+                       * actually asking, and the names are one click away where they can be switched
+                       * one at a time.
+                       */}
+                      <span className="text-muted-foreground text-xs">
+                        {grantSummary(tool.grantedTo.length, bots.length)}
+                      </span>
                       {/*
                        * The effect, not a description. It is what a boundary written about writes
                        * evaluates, and an operator writing that rule has no other way to know.
@@ -513,6 +508,7 @@ function RouteComponent() {
                       >
                         {tool.effect === "write" ? "changes things" : "reads"}
                       </span>
+                      <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                     </ItemActions>
                   </Item>
                   {index !== server.tools.length - 1 && <Separator />}

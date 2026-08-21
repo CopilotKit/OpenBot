@@ -38,6 +38,7 @@ import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './rout
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
 import { Route as AuthedSettingsConnectedAccountsKeyRouteImport } from './routes/_authed/settings/connected-accounts/$key'
+import { Route as AuthedAdminPluginsKeyToolsToolRouteImport } from './routes/_authed/admin/plugins/$key_.tools.$tool'
 
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
@@ -190,6 +191,12 @@ const AuthedSettingsConnectedAccountsKeyRoute =
     path: '/connected-accounts/$key',
     getParentRoute: () => AuthedSettingsRouteRoute,
   } as any)
+const AuthedAdminPluginsKeyToolsToolRoute =
+  AuthedAdminPluginsKeyToolsToolRouteImport.update({
+    id: '/plugins/$key_/tools/$tool',
+    path: '/plugins/$key/tools/$tool',
+    getParentRoute: () => AuthedAdminRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedAppIndexRoute
@@ -219,6 +226,7 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
@@ -246,6 +254,7 @@ export interface FileRoutesByTo {
   '/admin/plugins': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -278,6 +287,7 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/_authed/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/_authed/admin/plugins/$key_/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -309,6 +319,7 @@ export interface FileRouteTypes {
     | '/admin/plugins/'
     | '/settings/components-gallery/'
     | '/settings/connected-accounts/'
+    | '/admin/plugins/$key/tools/$tool'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -336,6 +347,7 @@ export interface FileRouteTypes {
     | '/admin/plugins'
     | '/settings/components-gallery'
     | '/settings/connected-accounts'
+    | '/admin/plugins/$key/tools/$tool'
   id:
     | '__root__'
     | '/_authed'
@@ -367,6 +379,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/'
     | '/_authed/settings/components-gallery/'
     | '/_authed/settings/connected-accounts/'
+    | '/_authed/admin/plugins/$key_/tools/$tool'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -579,6 +592,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsConnectedAccountsKeyRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
+    '/_authed/admin/plugins/$key_/tools/$tool': {
+      id: '/_authed/admin/plugins/$key_/tools/$tool'
+      path: '/plugins/$key/tools/$tool'
+      fullPath: '/admin/plugins/$key/tools/$tool'
+      preLoaderRoute: typeof AuthedAdminPluginsKeyToolsToolRouteImport
+      parentRoute: typeof AuthedAdminRouteRoute
+    }
   }
 }
 
@@ -596,6 +616,7 @@ interface AuthedAdminRouteRouteChildren {
   AuthedAdminPluginsKeyRoute: typeof AuthedAdminPluginsKeyRoute
   AuthedAdminComponentsIndexRoute: typeof AuthedAdminComponentsIndexRoute
   AuthedAdminPluginsIndexRoute: typeof AuthedAdminPluginsIndexRoute
+  AuthedAdminPluginsKeyToolsToolRoute: typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 
 const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
@@ -612,6 +633,7 @@ const AuthedAdminRouteRouteChildren: AuthedAdminRouteRouteChildren = {
   AuthedAdminPluginsKeyRoute: AuthedAdminPluginsKeyRoute,
   AuthedAdminComponentsIndexRoute: AuthedAdminComponentsIndexRoute,
   AuthedAdminPluginsIndexRoute: AuthedAdminPluginsIndexRoute,
+  AuthedAdminPluginsKeyToolsToolRoute: AuthedAdminPluginsKeyToolsToolRoute,
 }
 
 const AuthedAdminRouteRouteWithChildren =
