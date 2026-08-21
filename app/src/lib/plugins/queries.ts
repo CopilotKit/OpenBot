@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { client, tryClient } from "@/lib/client";
+import { client } from "@/lib/client";
 
 /** A tool one server offers, as the Plugins page sees it. */
 export type PluginTool = {
@@ -157,56 +157,4 @@ export function agentPluginsQueryOptions(agentId: string) {
       return response.json();
     },
   });
-}
-
-export type PluginCallOutcome =
-  | { ok: true; text: string; isError: boolean }
-  /** The deployment decided against it. `rule` names the expression, when one decided. */
-  | { ok: false; refused: true; reason: string; rule: string | null }
-  /** Remote server failure; distinct from a policy refusal. */
-  | { ok: false; refused: false; reason: string };
-
-/**
- * Call a tool as a Bot, with server-side grant and policy rechecks for mid-run revocations.
- */
-export async function callPluginTool(
-  ref: string,
-  args: Record<string, unknown>,
-  agentId: string,
-  signal?: AbortSignal,
-): Promise<PluginCallOutcome> {
-  /* A refused tool is an outcome this returns, not an error it throws. */
-  const response = await tryClient("/api/plugins/call", {
-    method: "POST",
-    body: { ref, args, agentId },
-    signal,
-  });
-
-  const body = (await response.json().catch(() => null)) as {
-    text?: string;
-    isError?: boolean;
-    error?: string;
-    rule?: string | null;
-  } | null;
-
-  if (response.ok) {
-    return {
-      ok: true,
-      text: body?.text ?? "",
-      isError: body?.isError === true,
-    };
-  }
-  if (response.status === 403) {
-    return {
-      ok: false,
-      refused: true,
-      reason: body?.error ?? "That tool is not allowed here.",
-      rule: body?.rule ?? null,
-    };
-  }
-  return {
-    ok: false,
-    refused: false,
-    reason: body?.error ?? "The server did not answer.",
-  };
 }

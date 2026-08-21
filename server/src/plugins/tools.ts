@@ -80,7 +80,22 @@ export async function grantedTools(options: {
           botId,
           actorId,
         });
-        return result.text;
+        /*
+         * A vendor's error is named as one, not handed over as content.
+         *
+         * `isError` used to be dropped here, and it cost a diagnosis. Google refused the Drive MCP
+         * server with `isError: true` and the text "The caller does not have permission"; the model
+         * received that as an ordinary result, believed it, and told the person it had no access to
+         * their Drive — which read as the Bot being confused rather than as the vendor refusing.
+         *
+         * The prefix is the vendor's, and says so. It is deliberately NOT `REFUSAL_MARKER`: that one
+         * means this deployment declined, and the transcript draws it as a boundary holding. A vendor
+         * saying no is a different fact with a different fix, and collapsing the two would make a
+         * misconfigured connector look like a policy working correctly.
+         */
+        return result.isError
+          ? `The vendor reported an error: ${result.text}`
+          : result.text;
       } catch (error) {
         if (error instanceof PluginRefusedError) {
           return `${REFUSAL_MARKER} ${error.message}`;

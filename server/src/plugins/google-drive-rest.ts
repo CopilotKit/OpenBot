@@ -191,6 +191,31 @@ async function request(
   return { ok: true, response };
 }
 
+/**
+ * Whether this type's bytes can be read as text at all.
+ *
+ * An allow list, not a deny list. New binary formats appear constantly and each one added to a deny
+ * list is a format that reached a model as mojibake first; the textual families are few and stable.
+ * `application/*` is deliberately not included wholesale — it holds JSON and XML, and also PDFs,
+ * archives and every office format.
+ */
+function isTextual(mimeType: string | undefined): boolean {
+  if (!mimeType) return false;
+  const type = mimeType.split(";")[0].trim().toLowerCase();
+  if (type.startsWith("text/")) return true;
+  return [
+    "application/json",
+    "application/xml",
+    "application/xhtml+xml",
+    "application/javascript",
+    "application/x-ndjson",
+    "application/yaml",
+    "application/x-yaml",
+    "application/sql",
+    "application/toml",
+  ].includes(type);
+}
+
 type DriveFile = {
   id?: string;
   name?: string;
@@ -208,11 +233,28 @@ type DriveFile = {
  * file it cannot then read is a dead end it will try to talk its way out of.
  */
 function fileLine(file: DriveFile): string {
-  const parts = [file.name ?? "(untitled)"];
+  const name = file.name ?? "(untitled)";
+  /*
+   * A markdown link, not a bare URL beside a name.
+   *
+   * This is K1's acceptance criterion rather than decoration: "the answer carries a link that opens
+   * the actual file". Tool results are drawn through a markdown renderer, so a link is a link a
+   * reader can click, and one the model can carry into its own prose when it cites the file. A bare
+   * URL depends on the renderer choosing to autolink, and reads as noise when it does not.
+   *
+   * The brackets in the name are escaped because a `]` in a file name would otherwise close the link
+   * text early and leave the rest of the name and the URL as literal characters on screen.
+   */
+  const parts = [
+    file.webViewLink
+      ? `[${name.replace(/\[/g, "\\[").replace(/\]/g, "\\]")}](${file.webViewLink})`
+      : name,
+  ];
   if (file.mimeType) parts.push(file.mimeType);
   if (file.modifiedTime) parts.push(`modified ${file.modifiedTime}`);
+  // Kept even though the link carries it: every other tool here takes an id, and a model that has
+  // to parse one out of a URL will sometimes get it wrong.
   if (file.id) parts.push(`id: ${file.id}`);
-  if (file.webViewLink) parts.push(file.webViewLink);
   return `- ${parts.join(" · ")}`;
 }
 
@@ -341,6 +383,26 @@ export async function callTool(
     const file = (await metadata.response.json()) as DriveFile;
 
     const exportAs = file.mimeType ? EXPORTABLE[file.mimeType] : undefined;
+
+    /*
+     * A file whose bytes are not text is declined by name, not decoded and hoped for.
+     *
+     * `response.text()` on a PDF, an image or a zip produces thousands of replacement characters and
+     * mojibake, and that goes straight into a model's context: it costs the tokens of the real
+     * document, tells the model nothing, and looks enough like content that the model will try to
+     * summarise it. Saying which type it is instead lets the model do the one useful thing available
+     * — name the file and its type, and stop — and keeps a link the person can open themselves.
+     *
+     * Only positively-known-textual types are read. Anything unrecognised is declined, for the same
+     * reason an unknown tool counts as a write: guessing permissively here is not recoverable, since
+     * nothing downstream can tell garbage from content.
+     */
+    if (!exportAs && !isTextual(file.mimeType)) {
+      return failure(
+        `${file.name ?? fileId} is a ${file.mimeType ?? "binary"} file, which this connector cannot read as text. Its metadata and link are available, and somebody can open it themselves.`,
+      );
+    }
+
     const content = exportAs
       ? await request(
           connection,

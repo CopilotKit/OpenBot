@@ -567,52 +567,22 @@ export function createPluginRoutes(
     context.json(await store.listForAgent(context.req.param("agentId"))),
   );
 
-  /**
-   * Call a tool, as a Bot.
+  /*
+   * THERE IS NO BROWSER TOOL-CALL ENDPOINT ANY MORE.
    *
-   * The grant, the policy and the audit row all happen inside the store, so this endpoint cannot
-   * accidentally satisfy one of them and skip another. A refusal comes back as 403 with the reason
-   * the model and the person are both shown, which is the same sentence written to the trail.
+   * `POST /call` was how the browser ran a Bot's tool loop: every MCP tool was registered as a
+   * frontend tool and its handler posted back here. That loop moved to the server, and the client
+   * helper that called this was already dead code — so what was left was an authenticated endpoint
+   * nobody used, which could take a tool name and call a vendor.
+   *
+   * It also could not work for the connectors this deployment now has. It passed `actorEmail`, and
+   * a per-person connection is keyed by `users.id`, so every call through it would have been told
+   * the asker had not connected their account. Deleted rather than corrected: an endpoint with no
+   * caller is not something to keep working.
+   *
+   * A framework Bot calling a granted tool back still has its own path, in `app.ts`, behind
+   * `AGENT_TOOL_TOKEN` and a signed run assertion.
    */
-  routes.post("/call", requireUser, async (context) => {
-    const body = (await context.req.json().catch(() => null)) as {
-      ref?: string;
-      args?: Record<string, unknown>;
-      agentId?: string;
-    } | null;
-    if (!body?.ref || !body.agentId) {
-      return context.json({ error: "A tool and a Bot are required." }, 400);
-    }
-
-    try {
-      const result = await store.callTool({
-        ref: body.ref,
-        args: body.args ?? {},
-        botId: body.agentId,
-        actorId: actorEmail(context),
-      });
-      return context.json(result);
-    } catch (error) {
-      if (error instanceof PluginRefusedError) {
-        return context.json({ error: error.message, rule: error.rule }, 403);
-      }
-      if (error instanceof CatalogueEntryUnknownError) {
-        return context.json({ error: error.message }, 404);
-      }
-      // A server that failed is not a refusal, and saying so matters: one means the deployment
-      // decided against it, the other means somebody else's software did not answer.
-      return context.json(
-        {
-          error:
-            error instanceof Error
-              ? error.message
-              : "The server did not answer.",
-          failed: true,
-        },
-        502,
-      );
-    }
-  });
 
   return routes;
 }
