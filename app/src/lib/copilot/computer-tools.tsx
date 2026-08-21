@@ -1,9 +1,11 @@
 import { useFrontendTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
-import { tryClient } from "@/lib/client";
 import { ToolLine } from "@/components/channels/tool-line";
+import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
-import { readControl, type ControlState } from "@/lib/computers/control";
+import { tryClient } from "@/lib/client";
+import { recordActivity } from "@/lib/computers/activity";
+import { type ControlState, readControl } from "@/lib/computers/control";
 import { useActiveBotHolder } from "./active-bot";
 import { reportComputerActivity } from "./computer-activity";
 
@@ -12,7 +14,7 @@ import { reportComputerActivity } from "./computer-activity";
  */
 
 /** What every computer call returns to the model: either the result, or a reason it did not happen. */
-type ToolOutcome = Record<string, unknown> & { ok: boolean };
+export type ToolOutcome = Record<string, unknown> & { ok: boolean };
 
 /**
  * Human-assistance wait window. Long enough for a user to return, finite so the run can unblock.
@@ -106,7 +108,58 @@ type ComputerOutcome = {
   staleRefs?: boolean;
   elements?: unknown[];
   element?: { role?: string; name?: string };
+  /** What a shell call reports back, so the line can show the output rather than only the command. */
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  /** The far side cut the output short, or stopped the command. */
+  truncated?: boolean;
+  timedOut?: boolean;
+  /** A file write. The size, never what was written. */
+  bytes?: number;
+  /** A file read. Named `text` on the way back and `contents` on the way in. */
+  text?: string;
 };
+
+/**
+ * What a call printed, as text a person can read.
+ *
+ * One helper because the three surfaces this feeds all want the same thing and shape it differently:
+ * a command has `stdout` and `stderr`, a file read has `contents`, a listing has `entries`. A refusal
+ * carries only its reason, and that is the most useful thing on the line.
+ *
+ * Never guesses. Something with none of those fields gives an empty string, and the pane says the
+ * call printed nothing rather than inventing a summary.
+ */
+export function outputOf(result: ToolOutcome): string {
+  if (result.refused === true || result.ok === false) {
+    return typeof result.reason === "string" ? result.reason : "";
+  }
+
+  // `text`, which is what the read route answers with. Not `contents`: that is the name on the way
+  // in, and reading it back gave an empty pane for a file the Bot had just read out loud.
+  if (typeof result.text === "string") return result.text;
+
+  if (Array.isArray(result.entries)) {
+    return result.entries
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return String(entry);
+        const { path, kind, bytes } = entry as Record<string, unknown>;
+        const label = String(path ?? "");
+        // A trailing slash for a folder, the way a terminal marks one, so a listing of a workspace
+        // full of folders does not read as a list of extensionless files.
+        if (kind === "folder") return `${label}/`;
+        return typeof bytes === "number" ? `${label}  ${bytes} bytes` : label;
+      })
+      .join("\n");
+  }
+
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr : "";
+  // Both, in the order a terminal shows them, and labelled only when there is something on stderr:
+  // most commands write nothing there and a permanent empty heading is noise.
+  return stderr ? `${stdout}${stdout ? "\n" : ""}${stderr}` : stdout;
+}
 
 /**
  * Parse the SDK-render result string so the transcript can distinguish success, refusal, and failure.
@@ -550,11 +603,20 @@ export function ComputerTools() {
         .optional()
         .describe("Optional folder to list. Omit for the whole workspace."),
     }),
-    handler: async (input: { path?: string }) =>
-      callComputer(bot.current, "/files/list", {
+    handler: async (input: { path?: string }) => {
+      const computerId = bot.current;
+      const result = await callComputer(computerId, "/files/list", {
         method: "POST",
         body: input ?? {},
-      }),
+      });
+      recordActivity(computerId, {
+        kind: "list_files",
+        subject: input?.path ?? "the workspace",
+        output: outputOf(result),
+        ...(result.refused === true ? { refused: true } : {}),
+      });
+      return result;
+    },
     render: ({ result, status }) => {
       const outcome = outcomeOf(result);
       const entries = Array.isArray(outcome.entries) ? outcome.entries : [];
@@ -587,11 +649,20 @@ export function ComputerTools() {
         .string()
         .describe("Path relative to your workspace, such as notes.md"),
     }),
-    handler: async (input: { path: string }) =>
-      callComputer(bot.current, "/files/read", {
+    handler: async (input: { path: string }) => {
+      const computerId = bot.current;
+      const result = await callComputer(computerId, "/files/read", {
         method: "POST",
         body: input,
-      }),
+      });
+      recordActivity(computerId, {
+        kind: "read_file",
+        subject: input.path,
+        output: outputOf(result),
+        ...(result.refused === true ? { refused: true } : {}),
+      });
+      return result;
+    },
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       return (
@@ -632,22 +703,46 @@ export function ComputerTools() {
     handler: async (
       input: { command: string },
       { signal }: { signal?: AbortSignal } = {},
-    ) =>
-      callComputer(
-        bot.current,
+    ) => {
+      const computerId = bot.current;
+      const result = await callComputer(
+        computerId,
         "/exec",
         { method: "POST", body: input },
         signal,
-      ),
+      );
+      /*
+       * Recorded here rather than in `render`, which runs again on every re-render and would append
+       * the same command each time. This is the only place that runs once per call and has both the
+       * command and what it printed.
+       */
+      recordActivity(computerId, {
+        kind: "command",
+        subject: input.command,
+        output: outputOf(result),
+        ...(typeof result.exitCode === "number"
+          ? { exitCode: result.exitCode }
+          : {}),
+        ...(result.refused === true ? { refused: true } : {}),
+        ...(result.truncated === true ? { truncated: true } : {}),
+        ...(result.timedOut === true ? { timedOut: true } : {}),
+      });
+      return result;
+    },
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       /*
-       * The command, not its output. A person watching wants to know what their Bot just ran on a
-       * machine holding their logins, and that is the command; the output belongs in the answer the
-       * Bot gives, where the model has already decided which part of it mattered.
+       * The command on the line, its output behind the chevron.
+       *
+       * The line stays one line, because a transcript of a Bot working through twenty commands is
+       * unreadable if each one dumps a screenful. But the output has to be reachable: this ran on a
+       * machine holding somebody's logins, and "take the model's word for what it printed" is not an
+       * answer. The pane beside the screen shows the same thing without expanding anything.
        */
+      const printed = outputOf(outcome as ToolOutcome);
+      const exit = typeof outcome.exitCode === "number" ? outcome.exitCode : 0;
       return (
-        <ActionLine
+        <ToolLine
           running={status !== "complete"}
           label="Ran a command"
           detail={
@@ -658,8 +753,17 @@ export function ComputerTools() {
                 : undefined
           }
           refused={outcome.refused === true}
-          failed={didNotWork(outcome)}
-        />
+          failed={didNotWork(outcome) || exit !== 0}
+        >
+          {status === "complete" ? (
+            <CommandOutput
+              output={printed}
+              exitCode={exit}
+              truncated={outcome.truncated === true}
+              timedOut={outcome.timedOut === true}
+            />
+          ) : null}
+        </ToolLine>
       );
     },
   });
@@ -686,11 +790,30 @@ export function ComputerTools() {
       path: string;
       contents: string;
       append?: boolean;
-    }) =>
-      callComputer(bot.current, "/files/write", {
+    }) => {
+      const computerId = bot.current;
+      const result = await callComputer(computerId, "/files/write", {
         method: "POST",
         body: input,
-      }),
+      });
+      /*
+       * The path and the size, never the contents. A Bot may well be saving something it was told in
+       * confidence, and the write route declines to echo it back for exactly that reason; putting it
+       * in a pane would undo that.
+       */
+      recordActivity(computerId, {
+        kind: "write_file",
+        subject: input.path,
+        output:
+          result.refused === true
+            ? outputOf(result)
+            : typeof result.bytes === "number"
+              ? `${result.bytes} bytes${input.append === true ? ", appended" : ""}`
+              : "",
+        ...(result.refused === true ? { refused: true } : {}),
+      });
+      return result;
+    },
     render: ({ args, result, status }) => {
       const outcome = outcomeOf(result);
       return (

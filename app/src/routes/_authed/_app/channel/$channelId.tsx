@@ -2,16 +2,18 @@ import { IconDeviceDesktop, IconSettings } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
+import { ActivityLog } from "@/components/computer/activity-log";
 import { ComputerView } from "@/components/computer/computer-view";
 import { useNeedsYou } from "@/components/computer/needs-you";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { Button } from "@/components/ui/button";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
+import { activityFor, subscribeToActivity } from "@/lib/computers/activity";
 import { onComputerActivity } from "@/lib/copilot/computer-activity";
 
 const chatSearchSchema = z.object({
@@ -33,6 +35,17 @@ export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
   component: RouteComponent,
 });
 
+/**
+ * What the Bot is looking at, and what it is doing.
+ *
+ * Two surfaces rather than one. The screen was the only window into a Bot's computer, so a Bot that
+ * spent two minutes in a terminal showed a blank browser and nothing else: the honest answer to
+ * "what is it doing" was "something, on a machine holding your logins". The second tab is the shell
+ * and the workspace, and it fills up while the screen sits still.
+ *
+ * The screen stays the default, because most work is browsing and it is the surface somebody has to
+ * take the wheel on. The count on the other tab is what says the Bot is busy somewhere else.
+ */
 function ComputerViewPanel({
   agentId,
   name,
@@ -40,13 +53,53 @@ function ComputerViewPanel({
   agentId: string;
   name?: string;
 }) {
+  const [showing, setShowing] = useState<"screen" | "activity">("screen");
+  const activity = useSyncExternalStore(
+    subscribeToActivity,
+    () => activityFor(agentId),
+    () => activityFor(agentId),
+  );
+
   return (
-    <div className="px-4 mt-4">
+    <div className="mt-4 px-4">
       <div className="p-4">
-        <ComputerView active computerId={agentId} />
-        <span className="flex items-center justify-center w-full text-center text-muted-foreground mt-4 text-sm">
-          {name || "Agent"}'s screen
-        </span>
+        <div className="mb-3 flex gap-2">
+          <Button
+            onClick={() => setShowing("screen")}
+            size="sm"
+            variant={showing === "screen" ? "default" : "outline"}
+          >
+            Screen
+          </Button>
+          <Button
+            onClick={() => setShowing("activity")}
+            size="sm"
+            variant={showing === "activity" ? "default" : "outline"}
+          >
+            Activity
+            {activity.length > 0 ? (
+              <span className="ml-1.5 tabular-nums opacity-70">
+                {activity.length}
+              </span>
+            ) : null}
+          </Button>
+        </div>
+
+        {/*
+          Both mounted, one hidden. Unmounting the screen would drop its socket and its polling, so
+          looking at the terminal for a moment would cost the live view and the take-the-wheel prompt
+          that rides on it.
+        */}
+        <div className={showing === "screen" ? undefined : "hidden"}>
+          <ComputerView active computerId={agentId} />
+          <span className="mt-4 flex w-full items-center justify-center text-center text-muted-foreground text-sm">
+            {name || "Agent"}'s screen
+          </span>
+        </div>
+
+        <div className={showing === "activity" ? undefined : "hidden"}>
+          <ActivityLog computerId={agentId} />
+        </div>
       </div>
     </div>
   );
