@@ -116,6 +116,13 @@ Sessions survive and nobody signs in again.
   laptop `http://localhost` counts as one, so this never showed up in development; on a real
   address it does not, and the surface did nothing at all when you pressed send. No message, no
   error. Ids now come from an API with no such restriction.
+- **A framework Bot asked for a browser action and nothing happened.** `agent-langgraph` ends a run
+  when the model calls a tool the surface owns, which is how a tool that lives in the browser is
+  supposed to work: the run finishes, the surface acts, and the next run carries the result. But the
+  call was only reported to the surface from the node that executes this deployment's own tools, and
+  that node is exactly what an ending run skips. The person saw their own message, no answer under
+  it, and no explanation, because a run that finishes carrying nothing is not an error. Every Bot
+  action in the browser was affected: opening a page, filling a form, asking for help at a sign-in.
 
 ### Changed
 
