@@ -10,6 +10,7 @@ import {
   AgentNotFoundError,
   AgentNotManageableError,
   type AgentProfileStore,
+  ManagedAgentUnavailableError,
   ProtectedAgentError,
 } from "./profile-store";
 import type {
@@ -475,6 +476,9 @@ function mapStoreError(context: Context, error: unknown): Response {
   }
   if (error instanceof ProtectedAgentError) {
     return context.json({ error: "System-owned agents are protected." }, 403);
+  }
+  if (error instanceof ManagedAgentUnavailableError) {
+    return context.json({ error: error.message }, 400);
   }
   throw error;
 }
