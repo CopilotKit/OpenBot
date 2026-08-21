@@ -30,6 +30,14 @@ digit. The same rule container and volume names have always followed. A deployme
 `AUDIT_RETENTION_DAYS` is new and unset, which keeps the audit trail forever, as before. Set it to a
 whole number of days to have old rows removed.
 
+**An MCP server pointed at a credential that no longer exists loses the pointer.** `mcp_servers`
+now names its credential with a real foreign key, where the column was `text` against a `uuid`
+primary key with nothing checking it — so a deployment is allowed to be holding a pointer to a vault
+row that was deleted underneath it, and the screens read as though the server were still configured.
+The migration clears those before adding the key, because it cannot add it otherwise. If this
+happens, that connector correctly reports having no credential and an administrator registers it
+again; nothing else is affected, and a deployment with no such pointer sees nothing.
+
 **The old Google Drive connector is gone, and it is not the new one renamed.** It configured a
 service account with domain impersonation and had the worker sync documents into a local pgvector
 index guarded by our own ACL rows, so every person got the same answer computed from what one
@@ -125,6 +133,16 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **Removing somebody left the credentials they had granted this deployment sitting in the vault.**
+  Removing them from the People screen ended their sessions and stopped the next sign-in, and left the
+  refresh token behind, unrevoked. They could not use it — the account comes from a session they no
+  longer get — but "we removed their access" was not true of the token, which for a connector read as
+  the person asking is the part that matters. Removing somebody now retires it, and each retirement is
+  on the audit trail as `mcp.account_disconnected`. Deleting a person's row used to be worse, because
+  it took the connection record with it and left the credential reachable by nothing at all; those are
+  found and retired too. This stops the deployment holding a usable secret. It does **not** withdraw
+  the grant at the vendor, which needs revoking there until disconnect ships, and the audit row says
+  which of the two happened rather than implying both.
 - **A boundary rule applied on one server out of N.** The policy is read from memory on every action,
   which is right, but memory was only ever filled at boot. An administrator's new deny rule was
   enforced by whichever process served the request and roughly one action in N went through it, while
