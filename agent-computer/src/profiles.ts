@@ -32,9 +32,11 @@
  * operations this process applies to its own browser, so the same design works under Compose,
  * Kubernetes or ECS, where the orchestrator's own restart policy brings a process back.
  */
+
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
+import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 
 /** The viewport, which is what a person's click coordinates are relative to. */
@@ -171,49 +173,6 @@ const IDLE_TIMEOUT_MS = Number(
 
 /** How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`. */
 const IDLE_SWEEP_MS = 60_000;
-
-/**
- * Which Bots' browsers to close, given what is running.
- *
- * Pure, and exported, because the rest of this module cannot be reached without launching a real
- * Chromium: `createProfiles` owns the launch, so a test of "which one gets closed" would be a test
- * of Playwright. The decision is the part with a wrong answer available, and this is it on its own.
- *
- * Least recently used first. That is the Bot that has been quiet longest, and closing it costs
- * nothing but a relaunch: the profile is on disk, so its logins and its session survive.
- */
-export function chooseEvictions(
-  running: Iterable<[string, { usedAt: number }]>,
-  max: number,
-): string[] {
-  const entries = [...running];
-  if (entries.length <= max) return [];
-
-  return entries
-    .sort(([, a], [, b]) => a.usedAt - b.usedAt)
-    .slice(0, entries.length - max)
-    .map(([botId]) => botId);
-}
-
-/**
- * Which Bots' browsers have been sitting untouched.
- *
- * The other half of the answer. A deployment under the cap still holds a browser for a Bot used once
- * last Tuesday, and that memory is doing nothing for anybody. A timeout of zero or less switches this
- * off, so a deployment can keep browsers resident if it would rather.
- */
-export function chooseIdle(
-  running: Iterable<[string, { usedAt: number }]>,
-  idleTimeoutMs: number,
-  now: number,
-): string[] {
-  if (idleTimeoutMs <= 0) return [];
-  const cutoff = now - idleTimeoutMs;
-
-  return [...running]
-    .filter(([, entry]) => entry.usedAt <= cutoff)
-    .map(([botId]) => botId);
-}
 
 export function createProfiles(root: string) {
   /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */

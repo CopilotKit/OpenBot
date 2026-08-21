@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chooseEvictions, chooseIdle } from "../src/profiles";
+import { chooseEvictions, chooseIdle } from "../src/browser-eviction";
 
 /**
  * How many browsers one computer holds, and for how long.
