@@ -54,14 +54,26 @@ Sessions survive and nobody signs in again.
 
 ### Added
 
-- **A Bot can answer from Google Drive, as the person asking.** An administrator enables the
-  connector at `/admin/plugins/google-drive` and registers one OAuth client; each person then
-  connects their own Google account, and nobody can do that for them — there is no endpoint for it.
-  A Bot granted these tools reads Drive on the asker's own grant, so two people asking the same
-  question get the answers their own accounts can see, and an answer carries a link that opens the
-  file. Read-only: the scope requested is `drive.readonly`, so a write is refused by Google before
-  this deployment has to. Nothing is cached — the refresh token is stored and an access token is
-  minted for each call, so revoking access at Google takes effect on the next one.
+- **A Bot can answer from Google Drive, as the person asking.** Ask a Bot a question whose answer is
+  in a document and it answers from the live file rather than from an index, citing a link that opens
+  it. A Bot granted these tools reads Drive on the asker's own grant, so two people asking the same
+  question get the answers their own accounts can see, and neither sees the other's documents.
+  Read-only: the scope requested is `drive.readonly`, so a write is refused by Google before this
+  deployment has to. Nothing is cached — the refresh token is stored and an access token is minted
+  per call, so revoking access at Google takes effect on the next one rather than when a cache
+  expires.
+
+  Setting it up takes two people and neither can do the other's half. An administrator registers a
+  Google Cloud OAuth client and enables the connector at `/admin/plugins/google-drive`; each person
+  then connects their own account, and there is deliberately no endpoint for an administrator to
+  connect one on somebody's behalf. The redirect URI has to match what is registered character for
+  character, and the connector page states the exact string to paste, because a mismatch fails at
+  Google with a message that never mentions OpenBot. See
+  [docs/plugins/google-drive.md](docs/plugins/google-drive.md) for the whole setup and for what each
+  failure means.
+
+  **Disconnecting is not built yet.** The account page says so and points at Google's own third-party
+  access settings, which is what withdraws it today.
 - **Each tool a connector offers has its own screen**, at `/admin/plugins/<connector>/tools/<tool>`,
   with a switch per Bot. The connector page previously drew a button per Bot inside every tool row,
   which is a control per Bot per tool stacked in one list, and grew without bound as Bots were added.
@@ -70,6 +82,14 @@ Sessions survive and nobody signs in again.
 - **A tool result that found nothing says so.** An empty result used to reach the model as an empty
   string, which reads as "the tool had nothing to say" rather than "there is nothing there" — and a
   model closes that gap from memory, which for a knowledge connector is the failure worth preventing.
+- **The shipped Knowledge Bot answers from the tools it has.** Its instructions in
+  `examples/fintech` told it to say no source was connected, which was honest when none could be:
+  the connector this replaces had been removed and nothing had taken its place. With a connector
+  granted it became the opposite of honest — the Bot called a tool, was handed a file listing, and
+  said it had no access anyway. It now reports what its tools return, says so plainly when it has no
+  tool or a tool reports a problem, and does neither of the two things worth forbidding: answering
+  from its own memory as though it came from a source, or claiming to lack access to something a tool
+  has just returned. A deployment with its own tenant package is unaffected.
 - **`mcp.call_failed`.** A call this deployment permitted and the vendor did not complete now leaves
   a row of its own, carrying the vendor's own sentence. `mcp.call_succeeded` was written before the
   network call rather than after, so a call that died at the vendor recorded success and the Admin
