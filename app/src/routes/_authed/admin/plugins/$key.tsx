@@ -152,18 +152,6 @@ function RouteComponent() {
 
   return (
     <PageShell
-      action={
-        server ? (
-          <Button
-            onClick={() => refresh.mutate(key)}
-            size="lg"
-            type="button"
-            variant="outline"
-          >
-            Refresh tools
-          </Button>
-        ) : undefined
-      }
       backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
       description={entry?.summary ?? server?.summary}
       title={title}
@@ -179,7 +167,7 @@ function RouteComponent() {
        * row's own title tells a reader nothing they cannot already see.
        */}
       <PageSection>
-        <PageRows>
+        <PageRows className="mt-0">
           {/*
            * Binary and immediate, which is what the layout skill reserves a Switch for: it takes
            * effect when switched and there is no save. It replaces an "Add to deployment" button and
@@ -328,7 +316,7 @@ function RouteComponent() {
           </PageRows>
 
           {auth === "user-oauth" ? (
-            <div className="mt-3">
+            <div className="mt-3 p-3">
               <p className="text-muted-foreground text-sm">
                 Add this to the client's authorised redirect URIs at the vendor,
                 exactly as written. A single wrong character fails there, with a
@@ -336,11 +324,11 @@ function RouteComponent() {
               </p>
               {plugins.data?.redirectUri ? (
                 /* Selectable and monospaced: it is copied by hand into somebody else's console. */
-                <code className="mt-1 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
+                <code className="mt-3 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
                   {plugins.data.redirectUri}
                 </code>
               ) : (
-                <p className="mt-1 text-destructive text-sm" role="alert">
+                <p className="mt-3 text-destructive text-sm" role="alert">
                   This deployment has no public URL, so nobody can complete a
                   consent flow. Set OPENBOT_PUBLIC_URL.
                 </p>
@@ -352,6 +340,22 @@ function RouteComponent() {
 
       {server ? (
         <PageSection
+          /*
+           * Beside the heading rather than on the page's own baseline. Refreshing is about this list
+           * and nothing else on the screen — it asks the vendor what it offers now — so it belongs
+           * where the list is named. Ghost, because it is a maintenance action rather than the thing
+           * an administrator came here to do.
+           */
+          action={
+            <Button
+              onClick={() => refresh.mutate(key)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Refresh tools
+            </Button>
+          }
           description="A Bot is told about a tool only when it holds it. Every call is decided again when it happens, so removing a grant takes effect on the next one."
           title="Tools"
         >
