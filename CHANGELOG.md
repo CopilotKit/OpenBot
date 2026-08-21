@@ -39,6 +39,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Fixed
 
+- **A Bot's shell was handed the deployment's secrets.** A command ran with the whole environment of
+  the process that started it, and in the one-container image that environment carries
+  `COMPUTER_TOKEN`, `DATABASE_URL`, `KEY_ENCRYPTION_KEY`, the licence and the model key. The token is
+  the only thing in front of the computer's control surface, and the shell runs inside the process
+  that serves it, so a command could drive the browser over loopback with no policy decision and no
+  audit row: the gateway was optional for the one actor it exists to constrain. The database URL and
+  the encryption key together opened the credential vault and the trail meant to record what
+  happened. A command now receives `HOME`, `PATH`, `DEBIAN_FRONTEND` and the locale, and nothing
+  else. `apt-get` also stops waiting for a prompt nobody can answer.
+
+
 - **A deployment served over plain HTTP could not start a conversation.** The chat surface minted
   identifiers with `crypto.randomUUID`, which browsers withhold outside a secure context. On a
   laptop `http://localhost` counts as one, so this never showed up in development; on a real

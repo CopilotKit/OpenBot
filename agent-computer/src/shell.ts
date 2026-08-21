@@ -19,6 +19,43 @@ import { spawn } from "node:child_process";
  * between Bots, a shell is shared too.
  */
 
+/**
+ * The environment a Bot's command is allowed to see.
+ *
+ * An allow-list rather than a deny-list, because the interesting names are the ones nobody thought
+ * of. This process is started with the container's whole environment on purpose: it needs
+ * `COMPUTER_TOKEN` to authenticate its own callers. In the one-container image that environment also
+ * carries `DATABASE_URL`, `KEY_ENCRYPTION_KEY`, the licence and the model key, because there is one
+ * environment and every service reads it.
+ *
+ * Handing that to a command a Bot wrote would undo the gateway. `COMPUTER_TOKEN` is the only thing in
+ * front of the control surface on port 4100, and this shell runs inside the process that serves it,
+ * so a Bot holding the token could drive the browser over loopback with no policy decision and no
+ * audit row. The rest is worse in a quieter way: the database URL and the encryption key together
+ * open the credential vault and the trail that is supposed to record what happened.
+ *
+ * What is left is what a command needs to run at all. Without `PATH` nothing resolves, and the tool
+ * description tells the model to install packages, which needs one.
+ */
+const INHERITED = ["PATH", "TERM", "LANG", "LC_ALL", "TZ"] as const;
+
+function commandEnvironment(workspaceDir: string): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    // The workspace, so a relative path means the same thing here as it does to the file tools.
+    HOME: workspaceDir,
+    // Fallback for a container that sets no PATH of its own; an inherited one overwrites it below.
+    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    // `apt-get install` without this waits for an answer nobody is there to give, and the command
+    // times out looking like a broken package rather than a prompt.
+    DEBIAN_FRONTEND: "noninteractive",
+  };
+  for (const name of INHERITED) {
+    const value = process.env[name];
+    if (value !== undefined) environment[name] = value;
+  }
+  return environment;
+}
+
 /** Long enough for an install, short enough that a hung command is not a hung Bot. */
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -78,7 +115,9 @@ export function createShell(workspaceDir: string) {
        */
       const child = spawn("/bin/bash", ["-lc", input.command], {
         cwd: workspaceDir,
-        env: { ...process.env, HOME: workspaceDir },
+        // Not `process.env`. See INHERITED above: this process holds the deployment's secrets and a
+        // command a Bot wrote is the last thing that should be able to read them.
+        env: commandEnvironment(workspaceDir),
       });
 
       let stdout = "";
