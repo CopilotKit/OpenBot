@@ -46,6 +46,16 @@ Sessions survive and nobody signs in again.
 
 ### Changed
 
+- **The images are built from the lockfiles that are committed.** Every deployable but the root one
+  installed with a plain `bun install`, and its `bun.lock` was not even in the build context, so the
+  committed file could not have been honoured and each build resolved dependencies afresh. An image
+  built next month was not the image built today, which is the drift the pinned Bun version was
+  already there to prevent, one layer down — and it is also what a build provenance attestation is
+  signing. `agent-computer`, `supervisor`, `agent-bot` and `agent-langgraph` now copy their lockfile
+  and install `--frozen-lockfile`. CI also typechecks `agent-computer` and `supervisor`, which each
+  shipped a `typecheck` script that nothing ran: they are not workspaces, so root `typecheck` never
+  reached the process holding the only `spawn` in the deployment, or the only one holding a Docker
+  socket.
 - **This deployment does not search documents itself.** A Bot answers from a live system by calling
   that system's own search as the person asking, so the vendor decides what they may see and there is
   no second copy of anybody's documents here to keep in step, to secure, or to leave behind when

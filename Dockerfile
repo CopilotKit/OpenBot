@@ -45,8 +45,11 @@ COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 RUN bun install --frozen-lockfile
 
-COPY agent-computer/package.json agent-computer/package.json
-RUN cd agent-computer && bun install
+# Its lockfile too, and installed against it. `agent-computer/bun.lock` is committed but was not in
+# the build context, so it could not have been honoured: this resolved afresh every build, which is
+# the drift the note about pinning Bun above is there to prevent, one layer down.
+COPY agent-computer/package.json agent-computer/bun.lock agent-computer/
+RUN cd agent-computer && bun install --frozen-lockfile
 
 # A second tree with the build-time dependencies left out, for the runtime stage to take. Vite,
 # biome and the test tooling are a gigabyte that nothing in a running container imports.

@@ -10,8 +10,9 @@ FROM ghcr.io/spiffe/spire-server:1.15.1 AS spire
 FROM oven/bun:1.3.14-alpine
 
 WORKDIR /app
-COPY supervisor/package.json ./
-RUN bun install
+COPY supervisor/package.json supervisor/bun.lock ./
+# Installed against the committed lockfile, which was not in the build context before.
+RUN bun install --frozen-lockfile
 
 COPY --from=spire /opt/spire/bin/spire-server /usr/local/bin/spire-server
 

@@ -11,8 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends unzip \
 ENV PATH="/root/.bun/bin:${PATH}"
 
 WORKDIR /app
-COPY agent-computer/package.json ./
-RUN bun install
+COPY agent-computer/package.json agent-computer/bun.lock ./
+# Installed against the committed lockfile. It was not in the build context before, so the file
+# existed and could not have been honoured.
+RUN bun install --frozen-lockfile
 
 COPY agent-computer/src ./src
 
