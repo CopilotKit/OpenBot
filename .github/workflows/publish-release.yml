@@ -1,0 +1,207 @@
+name: Publish release
+
+# Merging a release PR is the trigger. Nothing here is dispatched by hand, so a published release is
+# always a reviewed commit on main, and the tag is created by this workflow rather than by a person
+# with a terminal.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Every push to main runs this, and almost none of them are releases. This job decides which, and
+  # it decides from the merged pull request rather than from the commit message, because a commit
+  # message is something anybody can write.
+  metadata:
+    name: classify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      is_release: ${{ steps.release.outputs.is_release }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: pull-request
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: pulls } =
+              await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner, repo, commit_sha: context.sha,
+              });
+            const pull = pulls.find((candidate) =>
+              candidate.base.ref === "main" &&
+              candidate.merged_at !== null &&
+              candidate.merge_commit_sha === context.sha
+            );
+            if (!pull) {
+              // Not a merge commit of a reviewed PR. That is most pushes; it is not an error.
+              core.setOutput("head_ref", "");
+              core.setOutput("trusted", "false");
+              return;
+            }
+            // A release branch name is not enough on its own: a fork can open a PR from a branch
+            // with any name it likes. The branch must be in this repository and the PR must carry
+            // the label, which only somebody with write access can add.
+            const trusted =
+              /^release\/publish\/v\d+\.\d+\.\d+$/.test(pull.head.ref) &&
+              pull.head.repo?.full_name === `${owner}/${repo}` &&
+              pull.labels.some((label) => label.name === "release");
+            core.setOutput("head_ref", pull.head.ref);
+            core.setOutput("trusted", String(trusted));
+      - id: release
+        name: Decide
+        env:
+          HEAD_REF: ${{ steps.pull-request.outputs.head_ref }}
+          TRUSTED: ${{ steps.pull-request.outputs.trusted }}
+        run: |
+          set -euo pipefail
+          if [ "$TRUSTED" != true ]; then
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "Not a release commit."
+            exit 0
+          fi
+          version="${HEAD_REF#release/publish/}"
+          echo "is_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
+
+  # The version in the tree has to agree with the branch that is publishing it. They are written by
+  # the same workflow, so disagreement means something was edited by hand after review.
+  verify:
+    name: verify
+    needs: metadata
+    if: needs.metadata.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "v$(bun -e 'console.log(require("./package.json").version)')" = "$VERSION"
+          grep -q "^## ${VERSION#v}$" CHANGELOG.md || {
+            echo "::error::CHANGELOG.md has no section for ${VERSION#v}."
+            exit 1
+          }
+
+  # One image, built once. Everything downstream refers to it by digest, so what was tested is what
+  # is deployed and there is no second build to disagree with the first.
+  image:
+    name: image
+    needs: [metadata, verify]
+    if: needs.metadata.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # The attestation is signed with the workflow's own OIDC identity, so there is no key to hold
+      # and the signature says which workflow, repository and commit produced the image.
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          # The version, the commit, and a moving latest. The version tag is the one to deploy; the
+          # commit tag is how you find out what a running image actually contains.
+          tags: |
+            ghcr.io/copilotkit/openbot:${{ needs.metadata.outputs.version }}
+            ghcr.io/copilotkit/openbot:${{ github.sha }}
+            ghcr.io/copilotkit/openbot:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+      # BuildKit's own attestations above travel inside the image. This one is the record GitHub
+      # holds, and it is what `gh attestation verify oci://ghcr.io/copilotkit/openbot:vX.Y.Z
+      # -R CopilotKit/OpenBot` checks before anybody deploys it. Bound to the digest, never a tag,
+      # because a tag can be moved to point at something else afterwards.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/copilotkit/openbot
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  # The tag and the release, last, so nothing is announced that was not built. The manifest is the
+  # useful artefact: it pins the digest, so a deploy or a rollback names an exact image rather than a
+  # tag somebody could move.
+  github-release:
+    name: tag and release
+    needs: [metadata, verify, image]
+    if: needs.metadata.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # No credential is left in the runner: the tag is created through the API below rather than
+      # with `git push`, so nothing here needs one, and no later step or action can read one.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Write the image manifest
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          bun -e '
+            const [version, digest, commit] = process.argv.slice(-3);
+            const repository = "ghcr.io/copilotkit/openbot";
+            console.log(JSON.stringify({
+              version, commit,
+              images: { openbot: { repository, digest, reference: `${repository}@${digest}` } },
+            }, null, 2));
+          ' -- "$VERSION" "$DIGEST" "$COMMIT" > container-images.json
+          cat container-images.json
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The notes are the section a person wrote, not a list of commits.
+          awk -v v="## ${VERSION#v}" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md > notes.md
+          test -s notes.md
+
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" >/dev/null 2>&1; then
+            echo "$VERSION is already tagged; only refreshing the release."
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$VERSION" -f "sha=$GITHUB_SHA" >/dev/null
+          fi
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release edit "$VERSION" --title "$VERSION" --notes-file notes.md
+            gh release upload "$VERSION" container-images.json --clobber
+          else
+            gh release create "$VERSION" container-images.json \
+              --title "$VERSION" --notes-file notes.md
+          fi

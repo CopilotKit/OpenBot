@@ -83,3 +83,197 @@ jobs:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
       - run: bun run build
+
+  # Migration files and the schema they were generated from, checked against each other. A snapshot
+  # that has drifted from the schema produces a migration nobody wrote, applied to somebody's
+  # database on their next deploy. Neither command needs a running database, only the config.
+  migrations:
+    name: migrations
+    runs-on: ubuntu-latest
+    env:
+      # drizzle.config.ts refuses to load without it. Nothing here connects.
+      DATABASE_URL: postgres://openbot:openbot@localhost:5432/openbot
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      # Collisions and gaps between the migration files themselves.
+      - run: bunx drizzle-kit check --config=drizzle.config.ts
+        working-directory: server
+      # And the other direction: a schema change with no migration written for it. `generate` writes a
+      # file when it finds one, so the tree being dirty afterwards is the failure.
+      - name: Schema has no unwritten migration
+        working-directory: server
+        run: |
+          set -euo pipefail
+          bunx drizzle-kit generate --config=drizzle.config.ts --name=ci_drift_probe
+          if [ -n "$(git status --porcelain drizzle)" ]; then
+            echo "::error::The schema has changed without a migration. Run drizzle-kit generate and commit it."
+            git status --porcelain drizzle
+            exit 1
+          fi
+
+  # The image is the artefact people deploy, and almost nothing about whether it works is visible to
+  # the checks above. A dangling symlink, a supervised service that exits, a missing binary: all of
+  # them typecheck, lint and test perfectly.
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # Loaded rather than pushed: this runs on pull requests, including from forks, and it proves
+      # the image builds without granting anything the ability to publish one.
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          load: true
+          tags: openbot:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # Building it says the layers resolve. Running it says the supervision tree comes up and stays
+      # up, which is a different claim and the one that has broken before.
+      - name: The image boots and serves
+        env:
+          KEY_ENCRYPTION_KEY: ${{ secrets.CI_KEY_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+          docker run -d --name openbot-ci -p 3001:3001 \
+            -e EMBEDDED_POSTGRES=on \
+            -e KEY_ENCRYPTION_KEY="${KEY_ENCRYPTION_KEY:-$(openssl rand -base64 32)}" \
+            -e TRUSTED_ORIGINS=http://localhost:3001 \
+            -e OPENBOT_DEV_NO_AUTH=1 \
+            openbot:ci
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:3001/api/capabilities >/dev/null 2>&1; then
+              echo "answered after ${attempt}s"
+              exit 0
+            fi
+            if [ -z "$(docker ps -q -f name=openbot-ci)" ]; then
+              echo "::error::The container exited before it answered."
+              docker logs openbot-ci
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "::error::No answer on /api/capabilities within 60s."
+          docker logs openbot-ci
+          exit 1
+      - name: Supervision tree is stable, not respawning
+        run: |
+          set -euo pipefail
+          # A supervised service that exits is restarted forever. That looks healthy from outside for
+          # as long as something else is answering, so the log is where it shows.
+          sleep 15
+          if docker logs openbot-ci 2>&1 | grep -Eic 'restarting|respawn' | grep -qv '^0$'; then
+            echo "::error::A supervised service is restarting."
+            docker logs openbot-ci 2>&1 | grep -Ei 'restarting|respawn' | head -20
+            exit 1
+          fi
+          test -n "$(docker ps -q -f name=openbot-ci)" || {
+            echo "::error::The container is no longer running after 15s."
+            docker logs openbot-ci
+            exit 1
+          }
+      - if: always()
+        run: docker rm -f openbot-ci >/dev/null 2>&1 || true
+
+  # One journey through a deployment that is actually up. tests/smoke/journey.test.ts has existed and
+  # run nowhere; this is what runs it. It needs a licence, so it is skipped where secrets are not
+  # available rather than failing and teaching everyone to ignore it.
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+          # This job also runs buildx. A restorable cache in a job that produces an image is a way to
+          # influence that image, and caching a pinned binary download saves nothing worth it.
+          no-cache: true
+      - id: secrets
+        name: Check the deployment can be licensed
+        env:
+          LICENCE: ${{ secrets.COPILOTKIT_LICENSE_TOKEN }}
+        run: |
+          if [ -z "$LICENCE" ]; then
+            echo "::warning::COPILOTKIT_LICENSE_TOKEN is not set, so the journey cannot run."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.secrets.outputs.ready == 'true'
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - if: steps.secrets.outputs.ready == 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          load: true
+          tags: openbot:smoke
+          cache-from: type=gha
+      - if: steps.secrets.outputs.ready == 'true'
+        name: Start a deployment
+        env:
+          COPILOTKIT_LICENSE_TOKEN: ${{ secrets.COPILOTKIT_LICENSE_TOKEN }}
+          INTELLIGENCE_API_KEY: ${{ secrets.INTELLIGENCE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          docker run -d --name openbot-smoke -p 3001:3001 \
+            -e EMBEDDED_POSTGRES=on \
+            -e KEY_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+            -e TRUSTED_ORIGINS=http://localhost:3001 \
+            -e OPENBOT_DEV_NO_AUTH=1 \
+            -e COPILOTKIT_LICENSE_TOKEN="$COPILOTKIT_LICENSE_TOKEN" \
+            -e INTELLIGENCE_API_KEY="$INTELLIGENCE_API_KEY" \
+            -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+            openbot:smoke
+          for _ in $(seq 1 90); do
+            curl -fsS http://localhost:3001/api/capabilities >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "::error::The deployment did not come up."
+          docker logs openbot-smoke
+          exit 1
+      - if: steps.secrets.outputs.ready == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.secrets.outputs.ready == 'true'
+        name: Drive the journey
+        env:
+          OPENBOT_API_URL: http://localhost:3001
+        run: bun run test:smoke
+      - if: always()
+        run: |
+          docker logs openbot-smoke 2>&1 | tail -100 || true
+          docker rm -f openbot-smoke >/dev/null 2>&1 || true
+
+  # One check for branch protection to require. A new job above is covered by this without anybody
+  # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [static, test, build, migrations, image, smoke]
+    steps:
+      - name: Require every check
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::A required check reported $result"; exit 1 ;;
+            esac
+          done
