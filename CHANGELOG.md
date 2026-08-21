@@ -44,22 +44,17 @@ already refused the same way.
 
 Sessions survive and nobody signs in again.
 
+### Changed
+
+- **This deployment does not search documents itself.** A Bot answers from a live system by calling
+  that system's own search as the person asking, so the vendor decides what they may see and there is
+  no second copy of anybody's documents here to keep in step, to secure, or to leave behind when
+  somebody is removed. The local index that was being filled — `documents`, `chunks` and
+  `document_acls` — is read by nothing, and the connector that filled it is going away. Retrieval over
+  a copy of a customer's corpus is not a thing OpenBot does.
+
 ### Added
 
-- **A Bot can answer from a connected source, as the person asking.** The connectors have been
-  writing `documents`, `chunks` and `document_acls` and nothing ever read them back, so a deployment
-  that connected a source got rows in PostgreSQL and still no citation. A Bot now has a
-  `search_company_knowledge` tool, and it returns only the documents the person asking is allowed to
-  read — filtered in the database against that person's own principals rather than fetched and
-  filtered in the server, so a document they may not read is never handed over. A deny beats an
-  allow, and a document with no ACL rows is readable by nobody rather than by everybody. Each result
-  carries the document's title, the link that opens it, and the passage that matched. A search that
-  finds nothing says so, rather than returning an empty string a model would fill in from memory.
-  Every search is on the audit trail as `knowledge.searched`, naming the query and the documents
-  returned and never quoting their text. The tool is only offered when there is something to search.
-  Matching is PostgreSQL's own full-text search over the stored passages: nothing in the deployment
-  produces embeddings yet, so the vector column is left alone and ranking by meaning follows the
-  first connector that writes one.
 - **Releases are cut by a workflow, not by hand.** `Create release PR` bumps the version and promotes
   `## Unreleased` to a numbered section; merging the pull request it opens is what publishes. Merging
   builds and pushes one image to `ghcr.io/copilotkit/openbot`, signs a build provenance attestation

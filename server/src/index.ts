@@ -44,8 +44,6 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
-import { askerFor, createKnowledgeSearch } from "./knowledge/search";
-import { knowledgeSearchTool } from "./knowledge/tool";
 import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
 import { grantedTools } from "./plugins/tools";
@@ -267,15 +265,6 @@ const pluginStore = createPluginStore({
   policy: () => policyStore.get(),
 });
 
-/**
- * Reading back what the connectors wrote.
- *
- * `connectors/sync-persistence.ts` has been filling `documents`, `chunks` and `document_acls`, and
- * nothing has ever read them. This is the read half, and it filters on the asker's own principals in
- * SQL rather than here. See server/src/knowledge/search.ts.
- */
-const knowledgeSearch = createKnowledgeSearch(database);
-
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.policy_loaded",
   targetType: "policy",
@@ -400,31 +389,8 @@ const app = createApp(
     stallGuard,
     // Tools run here, not in the browser. Each one still executes through the plugin store, so the
     // grant, the policy and the audit row are exactly where they were.
-    //
-    // The knowledge search is beside them rather than inside the plugin store, because it has no
-    // vendor to reach: it is a query against this deployment's own tables, and it writes its own
-    // `knowledge.searched` row. It is offered without a per-Bot grant because the ACL filter in the
-    // query is the access control — the search runs on the asker's principals, so no Bot can return a
-    // document the person asking could not open themselves. Offered only when there is something to
-    // search, so a deployment that has connected nothing does not describe a tool that can only
-    // answer "nothing found".
-    (actorId) => async (botId) => {
-      const granted = await grantedTools({
-        store: pluginStore,
-        botId,
-        actorId,
-      });
-      if (!(await knowledgeSearch.anyDocuments())) return granted;
-      return [
-        ...granted,
-        knowledgeSearchTool({
-          search: knowledgeSearch,
-          auditStore: bootAuditStore,
-          asker: await askerFor(database, actorId),
-          botId,
-        }),
-      ];
-    },
+    (actorId) => (botId) =>
+      grantedTools({ store: pluginStore, botId, actorId }),
     /*
      * What the deployment tells a remote Bot about the run it is starting.
      *
