@@ -206,4 +206,45 @@ describe("the command that actually runs", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("teletype");
   });
+  test("a file the Bot left behind does not run before its command", async () => {
+    // computer_write_file lets a Bot write anywhere in its workspace, and HOME is the workspace. A
+    // login shell would source this first, so a later command would run Bot-authored code while the
+    // audit row recorded only the command that was asked for.
+    await Bun.write(
+      join(root, ".bash_profile"),
+      'echo "profile ran"\nexport MARKER=hijacked\n',
+    );
+
+    const result = await createShell(root, source()).run({
+      command: 'echo "[${MARKER:-clean}]"',
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("profile ran");
+    expect(result.stdout.trim()).toBe("[clean]");
+  });
+  test("BASH_ENV is not in the map a command receives", () => {
+    /*
+     * The one startup file a non-interactive shell still reads. `bash -c` sources no login files, but
+     * it does expand BASH_ENV and run what it names, on bash 3.2 and 5.2 alike. Nothing else closes
+     * that path: it is closed only by BASH_ENV not being in the map, so it is asserted here rather
+     * than assumed. Same for the option variables bash reads from its environment.
+     */
+    const env = environmentForCommand(
+      source({
+        BASH_ENV: "/workspace/profile.sh",
+        SHELLOPTS: "xtrace",
+        BASHOPTS: "expand_aliases",
+        CDPATH: "/workspace",
+        GLOBIGNORE: "*",
+      }),
+      workspaceHome,
+    );
+
+    expect(env.BASH_ENV).toBeUndefined();
+    expect(env.SHELLOPTS).toBeUndefined();
+    expect(env.BASHOPTS).toBeUndefined();
+    expect(env.CDPATH).toBeUndefined();
+    expect(env.GLOBIGNORE).toBeUndefined();
+  });
 });

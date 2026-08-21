@@ -177,7 +177,15 @@ export function createShell(
        * whether this Bot may run commands at all and what they may say; the container decides what a
        * command can reach.
        */
-      const child = spawn("/bin/bash", ["-lc", input.command], {
+      /*
+       * `-c`, not `-lc`. A login shell sources `$HOME/.bash_profile`, and HOME is the workspace a Bot
+       * writes with `computer_write_file`. That let a Bot leave a file which every later command ran
+       * first: it could put its own `apt-get` earlier on PATH, and the audit row would still read
+       * `apt-get --version`. The allow-list above means such a file can no longer recover a secret,
+       * but it could still change what a command does. A permissive shell is a decision a deployment
+       * can make. A trail that describes something other than what ran is not.
+       */
+      const child = spawn("/bin/bash", ["-c", input.command], {
         cwd: workspaceDir,
         env: environmentForCommand(sourceEnv, workspaceDir),
       });
