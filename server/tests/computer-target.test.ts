@@ -226,9 +226,9 @@ describe("checkComputerAddress", () => {
   test("refuses the container credential endpoints even with private hosts allowed", () => {
     // Never allowed means never: the opt-in is the weakest configuration and is when this holds.
     const allowed = { allowPrivateHosts: true };
-    expect(checkNavigationTarget("http://169.254.170.2/", allowed).allowed).toBe(
-      false,
-    );
+    expect(
+      checkNavigationTarget("http://169.254.170.2/", allowed).allowed,
+    ).toBe(false);
     expect(
       checkNavigationTarget("http://100.100.100.200/", allowed).allowed,
     ).toBe(false);
