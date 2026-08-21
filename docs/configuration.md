@@ -20,14 +20,19 @@ bash scripts/start.sh
 | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`                | PostgreSQL connection string.                                                                         |
 | `KEY_ENCRYPTION_KEY`          | Base64-encoded 32-byte key for encrypted stored credentials. Generate with `openssl rand -base64 32`. |
-| `MANAGED_AGENT_AG_UI_URL`     | Default AG-UI endpoint for coworkers created in the product. Must be HTTP(S).                         |
-| `MANAGED_AGENT_TOKEN`          | Secret sent only to the managed AG-UI endpoint. Generate with `openssl rand -base64 32`.               |
 | `INTELLIGENCE_API_URL`        | CopilotKit Intelligence API URL.                                                                      |
 | `INTELLIGENCE_GATEWAY_WS_URL` | CopilotKit Intelligence realtime gateway URL.                                                         |
 | `INTELLIGENCE_API_KEY`        | Runtime key for the Intelligence project.                                                             |
 | `COPILOTKIT_LICENSE_TOKEN`    | License token for the Intelligence project.                                                           |
 
 All four Intelligence values are required together. Missing any of them stops server startup.
+
+`MANAGED_AGENT_AG_UI_URL` names the Bot in the box: the default endpoint for coworkers created in
+the product. It needs `MANAGED_AGENT_TOKEN` beside it, or the server refuses to start. Unset, the
+server starts without a managed Bot, the shipped Risk Analyst coworker is omitted, and creating a
+coworker without its own endpoint is refused. A leftover token with no URL is ignored. The
+one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
+at `agent-langgraph` on a laptop.
 
 ## General variables
 

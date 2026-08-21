@@ -30,6 +30,15 @@ digit. The same rule container and volume names have always followed. A deployme
 `AUDIT_RETENTION_DAYS` is new and unset, which keeps the audit trail forever, as before. Set it to a
 whole number of days to have old rows removed.
 
+`MANAGED_AGENT_AG_UI_URL` is no longer required to start. The one-container image does not carry a
+Bot, so requiring it registered the shipped Risk Analyst against a host that was not there and every
+conversation with it failed. Leave it unset for that image. A laptop `scripts/start.sh` still points
+it at `agent-langgraph`. A URL with no `MANAGED_AGENT_TOKEN` still refuses to start; a leftover
+token with no URL is ignored.
+
+A `.env` copied from an older `.env.example` still has `MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui`.
+Unset it before `docker run --env-file .env`, or the coworker comes back.
+
 Sessions survive and nobody signs in again.
 
 ### Added
@@ -93,6 +102,10 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **The one-container image registered a coworker it could not run.** `MANAGED_AGENT_AG_UI_URL`
+  defaulted to `localhost:4201` and was required, so Risk Analyst appeared on the roster and every
+  conversation with it failed. The URL is optional; the package omits that coworker when it is
+  unset. `scripts/start.sh` still points it at `agent-langgraph` on a laptop.
 - **A boundary rule applied on one server out of N.** The policy is read from memory on every action,
   which is right, but memory was only ever filled at boot. An administrator's new deny rule was
   enforced by whichever process served the request and roughly one action in N went through it, while
