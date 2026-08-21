@@ -152,7 +152,14 @@ async function closeAndWait(context: BrowserContext): Promise<void> {
  * and every browser would be closed the moment it opened. Anything that is not a positive number
  * falls back, because "I typed this wrong" and "I did not set it" both mean the default.
  */
-function numberFromEnv(name: string, fallback: number): number {
+/**
+ * A positive number from the environment, or the fallback.
+ *
+ * `Number.parseInt(process.env.X ?? "default")` is not enough: an unset variable declared in a
+ * compose file arrives as an empty string rather than as absent, so `??` never fires and the parse
+ * yields `NaN`. Empty, absent, non-numeric and non-positive all mean "not set" and take the fallback.
+ */
+export function numberFromEnv(name: string, fallback: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
   const value = Number(raw);
