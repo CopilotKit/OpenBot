@@ -74,6 +74,18 @@ const CLIENT = { clientId: "client-id", clientSecret: "client-secret" };
 const accessTokenFrom = (refreshToken: string) => `access(${refreshToken})`;
 
 let serverWasAlreadyConfigured = false;
+/**
+ * The OAuth client this deployment had before the suite ran, restored afterwards.
+ *
+ * `mcp_servers.credential_id` is live configuration: on a database somebody uses, it points at the
+ * client an administrator registered. This suite has to repoint it to exercise the selection, and it
+ * used to leave it repointed at a credential the cleanup then deleted — so the connector afterwards
+ * reported "no OAuth client registered yet" and the administrator's own registration was gone.
+ *
+ * There is no foreign key to catch that: `mcp_servers.credential_id` is `text` against a `uuid`
+ * primary key, so the database will hold a pointer to a row that does not exist.
+ */
+let clientBefore: string | null = null;
 const credentialIds: string[] = [];
 
 const store = createPluginStore({
@@ -189,13 +201,12 @@ beforeAll(async () => {
       .onConflictDoNothing();
   }
 
-  serverWasAlreadyConfigured =
-    (
-      await database
-        .select({ id: mcpServers.id })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-    ).length > 0;
+  const [existing] = await database
+    .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
+    .from(mcpServers)
+    .where(eq(mcpServers.id, serverId));
+  serverWasAlreadyConfigured = existing !== undefined;
+  clientBefore = existing?.credentialId ?? null;
 
   // Written directly, so the test needs no vendor to be reachable. What is under test is which
   // credential gets chosen, not the listing.
@@ -225,6 +236,17 @@ afterAll(async () => {
   await database
     .delete(mcpUserCredentials)
     .where(eq(mcpUserCredentials.serverId, serverId));
+  /*
+   * Put the deployment's own client pointer back before deleting anything, so a suite that borrowed
+   * live configuration leaves it as it found it. Ordered first on purpose: the deletes below remove
+   * the credential the row is currently pointing at.
+   */
+  if (serverWasAlreadyConfigured) {
+    await database
+      .update(mcpServers)
+      .set({ credentialId: clientBefore })
+      .where(eq(mcpServers.id, serverId));
+  }
   for (const id of credentialIds) {
     await database.delete(credentials).where(eq(credentials.id, id));
   }
