@@ -726,6 +726,134 @@ describe("the computer gateway", () => {
       expect(calls).toEqual(["click"]);
     });
 
+    test("a submit typed into a field is the same Enter, and the rule catches it", async () => {
+      /*
+       * The second door, reached through the first tool.
+       *
+       * `computer_type` takes `submit`, which presses Enter when the text is in. A rule written
+       * about Enter saw a keypress and a click and not this, so an agent refused at both doors
+       * typed into the field with `submit: true` and the form went through. The preset shipped in
+       * `.env.example` and on the Boundaries page is exactly this rule, so the deployment that
+       * followed the product's own advice was the one with the hole in it.
+       */
+      const { gateway, calls, rows } = await gatewayWith({
+        ...PERMISSIVE,
+        deny: ['key == "Enter"'],
+      });
+
+      await expect(
+        gateway.type("bot-1", ACTOR, {
+          ref: "e1",
+          snapshotId: 7,
+          text: "Ada",
+          submit: true,
+        }),
+      ).rejects.toThrow();
+      expect(calls).toEqual([]);
+      expect(rows[0]?.eventType).toBe("computer.action_refused");
+      // The key belongs in the trail for the same reason it belongs in the decision: without it the
+      // row says somebody filled in a field, and not that they submitted the form.
+      expect((rows[0]?.payload as { key?: string } | undefined)?.key).toBe(
+        "Enter",
+      );
+    });
+
+    test("typing without a submit is still typing", async () => {
+      // The other direction. A rule about Enter must not start refusing ordinary text, which is what
+      // a fix that simply reported every type as a keypress would do.
+      const { gateway, calls } = await gatewayWith({
+        ...PERMISSIVE,
+        deny: ['key == "Enter"'],
+      });
+
+      await gateway.type("bot-1", ACTOR, {
+        ref: "e1",
+        snapshotId: 7,
+        text: "Ada",
+      });
+
+      expect(calls).toEqual(["type"]);
+    });
+
+    test("a submit is an activation, so an intent rule catches it too", async () => {
+      // `intent` is the other way an operator writes this, and it is the one the preset leads with.
+      // Enter pressed in a field presses whatever the form activates, the same as Space or a click.
+      const { gateway, calls } = await gatewayWith({
+        ...PERMISSIVE,
+        deny: ['intent == "activate"'],
+      });
+
+      await expect(
+        gateway.type("bot-1", ACTOR, {
+          ref: "e1",
+          snapshotId: 7,
+          text: "Ada",
+          submit: true,
+        }),
+      ).rejects.toThrow();
+      expect(calls).toEqual([]);
+    });
+
+    /*
+     * The rule the product ships, run against every door it claims to close.
+     *
+     * Written out here rather than imported because the two places it lives, `.env.example` and the
+     * Boundaries preset list, are a string in a comment and a string in the browser bundle. What
+     * this pins is the behaviour an operator gets by taking the product's own advice, so a change to
+     * either copy that reopens a door fails here.
+     */
+    const SHIPPED_NEVER_SUBMIT =
+      '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && key == "Enter")';
+
+    test("the shipped preset closes the button, the keypress and the submit flag", async () => {
+      const shipped = { ...PERMISSIVE, deny: [SHIPPED_NEVER_SUBMIT] };
+
+      const click = await gatewayWith(shipped);
+      await expect(
+        click.gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 }),
+      ).rejects.toThrow();
+      expect(click.calls).toEqual([]);
+
+      const enter = await gatewayWith(shipped);
+      await expect(
+        enter.gateway.key("bot-1", ACTOR, {
+          ref: "e1",
+          snapshotId: 7,
+          key: "Enter",
+        }),
+      ).rejects.toThrow();
+      expect(enter.calls).toEqual([]);
+
+      const submit = await gatewayWith(shipped);
+      await expect(
+        submit.gateway.type("bot-1", ACTOR, {
+          ref: "e1",
+          snapshotId: 7,
+          text: "Ada",
+          submit: true,
+        }),
+      ).rejects.toThrow();
+      expect(submit.calls).toEqual([]);
+    });
+
+    test("the shipped preset still lets the Bot fill the form in", async () => {
+      // A boundary that stopped a Bot typing its way through a form would be refused by the first
+      // deployment to try it, and an operator would take the whole rule off rather than narrow it.
+      const shipped = { ...PERMISSIVE, deny: [SHIPPED_NEVER_SUBMIT] };
+
+      const typing = await gatewayWith(shipped);
+      await typing.gateway.type("bot-1", ACTOR, {
+        ref: "e1",
+        snapshotId: 7,
+        text: "Ada",
+      });
+      expect(typing.calls).toEqual(["type"]);
+
+      const looking = await gatewayWith(shipped);
+      await looking.gateway.screenshot("bot-1", ACTOR, {});
+      expect(looking.calls).toEqual(["screenshot"]);
+    });
+
     test("but the rule still refuses the action it is about", async () => {
       // The point is not that these rules stop working. A neutral value answers honestly; it does
       // not answer no.

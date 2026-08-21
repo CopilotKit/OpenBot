@@ -60,9 +60,10 @@ export type PolicyContext = {
    * click is refused and audited, the keypress is allowed, because nothing in the context could tell
    * one keypress from another.
    *
-   * A form has two doors and the policy could only see one. Now a rule can say
-   * `tool.name == "computer_key" && key == "Enter"`, and an operator blocking a submit button knows
-   * to block both routes, which the deny example in `.env.example` now does.
+   * A form has three doors, and this is set for two of them. `computer_type` takes a `submit` flag
+   * that presses Enter once the text is in, so it carries the key as well; a rule naming only
+   * `computer_key` was refused at the button and at the keypress and let through the third way in.
+   * The deny example in `.env.example` and the Boundaries preset both name both tools.
    */
   key?: string;
   /**
@@ -78,7 +79,8 @@ export type PolicyContext = {
    * `read`, looking at the page or listing what is on it.
    * `write_file` / `read_file` / `list_files`, the workspace.
    *
-   * It still cannot see whether a keypress will submit a form. A browser submits
+   * It still cannot see whether a keypress will submit a form, only that one is coming: a type
+   * carrying `submit` reports `activate` because it ends in Enter, but a browser submits
    * from Enter in any field of it, and the element a keypress names is the field, not the form. The
    * gateway would need to know the page's structure at decision time, which it does not, refs are
    * held off-DOM by Playwright and the policy runs before the action reaches the browser. So a rule

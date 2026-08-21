@@ -674,6 +674,15 @@ export function createComputerGateway(
         {
           ref: input.ref,
           snapshotId: input.snapshotId,
+          /*
+           * `submit` presses Enter once the text is in, so this call is a keypress as well as a
+           * typing one and the policy has to see both halves. Without the key here, an agent refused
+           * on clicking the button and refused on pressing Enter types into the field with
+           * `submit: true` instead, and the form goes through against a rule written to stop exactly
+           * that. It is what the trail is missing too: a row with no key says a field was filled in,
+           * not that the form was sent.
+           */
+          ...(input.submit ? { key: "Enter" } : {}),
           ...(signal ? { signal } : {}),
         },
         () => post<ActionResult>(botId, "/type", input, signal),
@@ -832,9 +841,10 @@ function intentOf(
     case "computer_click":
       return "activate";
     case "computer_key":
-      return key && ACTIVATING_KEYS.has(key) ? "activate" : "type";
+    // A type carrying `submit` ends in Enter, and the same reasoning applies to it: what the
+    // keypress does is press whatever the form activates, whichever tool asked for it.
     case "computer_type":
-      return "type";
+      return key && ACTIVATING_KEYS.has(key) ? "activate" : "type";
     case "computer_navigate":
       return "navigate";
     case "computer_read":

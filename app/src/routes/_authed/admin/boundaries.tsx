@@ -23,8 +23,11 @@ import { Input } from "@/components/ui/input";
 const PRESETS: { label: string; rule: string; cost?: string }[] = [
   {
     label: "Never submit a form",
-    // `key` exists only on keypress actions; guard it by tool name to keep other actions evaluable.
-    rule: '(intent == "activate" && contains(element.name, "submit")) || (tool.name == "computer_key" && key == "Enter")',
+    // `key` is guarded by tool name so the clause short-circuits before it on actions that have no
+    // keypress in them. Both tools that can press Enter are named: `computer_type` takes a `submit`
+    // flag that presses it once the text is in, and a rule naming only `computer_key` left that door
+    // open.
+    rule: '(intent == "activate" && contains(element.name, "submit")) || ((tool.name == "computer_key" || tool.name == "computer_type") && key == "Enter")',
     cost: "Also stops the Bot pressing Enter for anything else, because a form submits from Enter in any of its fields.",
   },
   {
