@@ -247,4 +247,85 @@ describe("the command that actually runs", () => {
     expect(env.CDPATH).toBeUndefined();
     expect(env.GLOBIGNORE).toBeUndefined();
   });
+
+  test("COMPUTER_SHELL_ENV cannot hand back an execution hook", () => {
+    /*
+     * The rest of that setting is an operator's decision to make. This is not: BASH_ENV names a file
+     * bash runs before the command, so passing it would reopen the hole `-c` closed, with the
+     * reasoning for `-c` sitting a few lines above looking satisfied. Refused rather than omitted, so
+     * the boundary does not depend on nobody adding a `BASH_*` convenience later.
+     */
+    const env = environmentForCommand(
+      source({
+        COMPUTER_SHELL_ENV: "BASH_ENV,LD_PRELOAD,ENV,SHELLOPTS,JAVA_HOME",
+        BASH_ENV: "/workspace/hook.sh",
+        LD_PRELOAD: "/workspace/hook.so",
+        ENV: "/workspace/hook.sh",
+        SHELLOPTS: "xtrace",
+        JAVA_HOME: "/opt/java",
+      }),
+      workspaceHome,
+    );
+
+    expect(env.BASH_ENV).toBeUndefined();
+    expect(env.LD_PRELOAD).toBeUndefined();
+    expect(env.ENV).toBeUndefined();
+    expect(env.SHELLOPTS).toBeUndefined();
+    // A name that only carries information still passes, so the refusal is targeted rather than a
+    // second allow list nobody can extend.
+    expect(env.JAVA_HOME).toBe("/opt/java");
+  });
+});
+
+describe("what a command cannot do to the computer", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "openbot-shell-limits-"));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("a command that backgrounds a process is still stopped", async () => {
+    /*
+     * `child.kill` signals bash alone. The sleep and the cat below hold the pipes bash inherited, so
+     * `close` never fires and the awaited promise never settles: the command outlives its own limit
+     * and the caller waits for something else to give up. Killing the process group ends all of it.
+     */
+    const started = Date.now();
+    const result = await createShell(root, source()).run({
+      command: "sleep 30 | cat",
+      timeoutMs: 1_500,
+    });
+
+    expect(result.timedOut).toBe(true);
+    // Settles on its own limit rather than hanging until something upstream times out.
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 20_000);
+
+  test("a noisy command does not grow without limit", async () => {
+    // The clamp ran only after close, so this allocated until the process that owns the browser died.
+    const result = await createShell(root, source()).run({
+      command: "head -c 3000000 /dev/zero | tr '\\0' 'a'",
+      timeoutMs: 20_000,
+    });
+
+    expect(result.truncated).toBe(true);
+    // Held to the kept size and a margin, not to the three megabytes the command produced.
+    expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThan(200 * 1024);
+  }, 30_000);
+
+  test("a timeout of zero is not a command killed before it runs", async () => {
+    // Only Math.min was applied, so this fired setTimeout immediately and reported a timeout for a
+    // command that never had a chance to start.
+    const result = await createShell(root, source()).run({
+      command: 'echo "ran"',
+      timeoutMs: 0,
+    });
+
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout.trim()).toBe("ran");
+  }, 15_000);
 });

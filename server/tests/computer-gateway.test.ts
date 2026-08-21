@@ -738,3 +738,40 @@ describe("the computer gateway", () => {
     });
   });
 });
+
+describe("resolving a computer's address", () => {
+  test("a foreign address is refused, so nothing is sent to it", async () => {
+    /*
+     * The guard exists because the address decides where the deployment's computer token goes. Every
+     * acting path resolved through here already; the live-screen socket resolved through the provider
+     * directly and skipped it, while putting the token in a query string.
+     */
+    const { provider, fetchImpl, requests } = fakeComputer();
+    const { store } = fakeAudit();
+    const gateway = createComputerGateway({
+      // The cloud metadata address, which is the answer this guard was written for.
+      provider: { ...provider, locate: async () => "http://169.254.169.254" },
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      token: "deployment-token",
+    });
+
+    await expect(gateway.locate("bot-1")).rejects.toThrow();
+    // Refused before anything was sent, so the token never left.
+    expect(requests).toEqual([]);
+  });
+
+  test("an address the guard allows is returned", async () => {
+    const { provider, fetchImpl } = fakeComputer();
+    const { store } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+    });
+
+    await expect(gateway.locate("bot-1")).resolves.toContain("http");
+  });
+});

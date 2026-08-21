@@ -22,6 +22,8 @@ import { spawn } from "node:child_process";
 
 /** Long enough for an install, short enough that a hung command is not a hung Bot. */
 const DEFAULT_TIMEOUT_MS = 120_000;
+/** A command has to be given long enough to start. Below this, a caller is asking for nothing. */
+const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 600_000;
 
 /**
@@ -114,12 +116,71 @@ export function environmentForCommand(
   return env;
 }
 
+/**
+ * Names COMPUTER_SHELL_ENV will not pass, whatever an operator writes.
+ *
+ * The rest of that setting is a decision an operator is entitled to make: naming `GITHUB_TOKEN` says
+ * this Bot may use that token, and they meant it. These are different in kind. They do not give a
+ * command information, they give it a hook that runs before every later command, which is the
+ * `.bash_profile` hole arriving through the front door.
+ *
+ * `BASH_ENV` is the one that survives `-c`: bash expands it for a non-interactive shell and sources
+ * the file it names, before the command. `ENV` is its POSIX-mode twin, `BASH_XTRACEFD` writes where
+ * it is told, `LD_PRELOAD` and `LD_LIBRARY_PATH` are the same idea one layer down, and the option
+ * variables change how the shell parses what follows.
+ *
+ * Refused rather than dropped quietly, because an operator who wrote one of these has a reason in
+ * mind and deserves to be told it did not happen.
+ */
+const NEVER_PASSED = new Set([
+  "BASH_ENV",
+  "ENV",
+  "BASH_XTRACEFD",
+  "BASHOPTS",
+  "SHELLOPTS",
+  "CDPATH",
+  "GLOBIGNORE",
+  "IFS",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "LD_AUDIT",
+  "PS4",
+]);
+
 function extraShellEnvNames(raw: string | undefined): readonly string[] {
   if (raw === undefined || raw.trim() === "") return [];
-  return raw
-    .split(",")
-    .map((name) => name.trim())
-    .filter((name) => ENV_NAME.test(name));
+  const named = raw.split(",").map((name) => name.trim());
+
+  /*
+   * A name that is not a name, and a name that is refused, are both worth saying out loud. Silently
+   * skipping either leaves an operator with a command that fails somewhere else for a reason that
+   * never mentions what they wrote.
+   */
+  for (const name of named) {
+    if (name === "") continue;
+    if (!ENV_NAME.test(name)) {
+      console.warn(
+        JSON.stringify({
+          type: "computer-shell-env-ignored",
+          name,
+          reason: "not a variable name",
+        }),
+      );
+      continue;
+    }
+    if (NEVER_PASSED.has(name)) {
+      console.warn(
+        JSON.stringify({
+          type: "computer-shell-env-refused",
+          name,
+          reason:
+            "runs before every command rather than informing one, so it is never passed",
+        }),
+      );
+    }
+  }
+
+  return named.filter((name) => ENV_NAME.test(name) && !NEVER_PASSED.has(name));
 }
 
 /**
@@ -162,8 +223,13 @@ export function createShell(
       signal?: AbortSignal;
     }): Promise<ShellResult> {
       const started = Date.now();
+      /*
+       * Bounded at both ends. Only `Math.min` was applied, so a zero or negative `timeoutMs` from a
+       * caller made `setTimeout` fire immediately: the command was killed before it did anything and
+       * the answer said it had timed out, which is true and useless.
+       */
       const timeoutMs = Math.min(
-        input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        Math.max(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MIN_TIMEOUT_MS),
         MAX_TIMEOUT_MS,
       );
 
@@ -185,29 +251,83 @@ export function createShell(
        * but it could still change what a command does. A permissive shell is a decision a deployment
        * can make. A trail that describes something other than what ran is not.
        */
+      /*
+       * Its own process group, so stopping it stops what it started.
+       *
+       * `child.kill` signals bash alone. `bash -c "sleep 600 | cat"` leaves the sleep and the cat
+       * holding the inherited pipes, so `close` never fires and the await never settles: the command
+       * runs on and the caller waits for the transport to give up instead. Killing the negative pid
+       * signals the whole group.
+       */
       const child = spawn("/bin/bash", ["-c", input.command], {
         cwd: workspaceDir,
         env: environmentForCommand(sourceEnv, workspaceDir),
+        detached: true,
       });
 
-      let stdout = "";
-      let stderr = "";
       let timedOut = false;
 
+      /*
+       * Trimmed while it arrives, not at the end.
+       *
+       * `clamp` ran after `close`, so the string grew without limit until then. `cat` of a large file
+       * or `base64 /dev/urandom` allocated until the process died, and that process owns the browser
+       * every Bot on this computer is using.
+       *
+       * Trimming here has to carry the fact that it happened. Clamping at the end could tell, by
+       * looking at the size; a stream that was already trimmed arrives under the limit and looks
+       * complete. Losing the flag would be worse than the allocation: output that quietly ends is
+       * output a model reads as the whole answer.
+       */
+      const collect = () => {
+        let text = "";
+        let dropped = false;
+        return {
+          add(chunk: unknown) {
+            text += String(chunk);
+            if (Buffer.byteLength(text, "utf8") <= MAX_OUTPUT_BYTES * 2) return;
+            text = Buffer.from(text, "utf8")
+              .subarray(-MAX_OUTPUT_BYTES)
+              .toString("utf8");
+            dropped = true;
+          },
+          get text() {
+            return text;
+          },
+          get dropped() {
+            return dropped;
+          },
+        };
+      };
+
+      const outBuffer = collect();
+      const errBuffer = collect();
+
       child.stdout.on("data", (chunk) => {
-        stdout += String(chunk);
+        outBuffer.add(chunk);
       });
       child.stderr.on("data", (chunk) => {
-        stderr += String(chunk);
+        errBuffer.add(chunk);
       });
+
+      const stop = () => {
+        const { pid } = child;
+        if (pid === undefined) return;
+        try {
+          // The group, so nothing the command backgrounded outlives it.
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          // Already gone, or the group went with it. Either way there is nothing left to stop.
+        }
+      };
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGKILL");
+        stop();
       }, timeoutMs);
 
       // The person's Stop reaches the command, not just the request that started it.
-      const onAbort = () => child.kill("SIGKILL");
+      const onAbort = stop;
       input.signal?.addEventListener("abort", onAbort, { once: true });
 
       const exitCode = await new Promise<number>((resolve) => {
@@ -218,14 +338,19 @@ export function createShell(
       clearTimeout(timer);
       input.signal?.removeEventListener("abort", onAbort);
 
-      const out = clamp(stdout);
-      const err = clamp(stderr);
+      const out = clamp(outBuffer.text);
+      const err = clamp(errBuffer.text);
       return {
         command: input.command,
         exitCode,
         stdout: out.text,
         stderr: err.text,
-        truncated: out.truncated || err.truncated,
+        // Either end of the pipe, and either point it was cut: while arriving, or on the way out.
+        truncated:
+          out.truncated ||
+          err.truncated ||
+          outBuffer.dropped ||
+          errBuffer.dropped,
         timedOut,
         elapsedMs: Date.now() - started,
       };

@@ -430,11 +430,18 @@ serve<SocketData>({
       if (!actor) {
         return new Response("Sign in first.", { status: 401 });
       }
-      // Located through the configured provider so every stream follows the same isolation rules.
+      /*
+       * Through the gateway, not the provider.
+       *
+       * `gateway.locate` runs checkComputerAddress; `provider.locate` does not, and the URL built
+       * below carries COMPUTER_TOKEN in its query string. A provider that answered with a foreign
+       * host was handed the deployment's computer token, which is the case that check was written
+       * for. Every acting path already went through the gateway; this one did not.
+       */
       let upstream: string;
       try {
-        const streamBase = computerProvider
-          ? await computerProvider.locate(streamBotId)
+        const streamBase = computerGateway
+          ? await computerGateway.locate(streamBotId)
           : undefined;
         if (!streamBase) {
           return new Response("No computer address is configured.", {

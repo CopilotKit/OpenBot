@@ -26,6 +26,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Which way it went is printed at start-up either way.
 
 ### Fixed
+- **A command could take the computer down, or outlive being stopped.** Output was accumulated in
+  full and only trimmed at the end, so `cat` of a large file allocated until the process that owns
+  the browser died; it is now bounded as it arrives, and still reports that it was truncated rather
+  than quietly ending. A stop signalled bash alone, so `sleep 30 | cat` left its children holding the
+  pipes and the call never returned; the whole process group is signalled now. A `timeoutMs` of zero
+  or less killed the command before it started and called it a timeout; it has a floor as well as a
+  ceiling.
+- **Stop did not reach a running command.** The `/exec` route never took the person's abort, so the
+  plumbing for it was dead code and a stopped run left the command finishing inside the container.
+- **The live-screen socket did not check the address it was given.** Every acting path resolved
+  through the gateway, which refuses a foreign or cloud-metadata address; this one asked the provider
+  directly and then put `COMPUTER_TOKEN` in the query string of whatever it was told.
+- **`COMPUTER_SHELL_ENV` refuses the names that run before a command.** Naming `GITHUB_TOKEN` is an
+  operator deciding a Bot may use a token. Naming `BASH_ENV`, `ENV`, `LD_PRELOAD` or the shell option
+  variables is handing a Bot a hook into every later command, which is unlikely to be what was meant,
+  so those are refused and said out loud rather than passed. A name that is not a variable name is
+  now reported too, instead of quietly disappearing.
 - **A deny rule naming one field refused every action that did not have it.** `deny:
   contains(command, "rm -rf")`, the example the documentation gives, refused every click, keypress,
   navigation and file read in the deployment. Two correct behaviours combined into a wrong one: the
