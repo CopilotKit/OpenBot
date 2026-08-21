@@ -25,6 +25,7 @@ import {
   connectionsQueryOptions,
   pluginsPageQueryOptions,
 } from "@/lib/plugins/queries";
+import { cn } from "@/lib/utils";
 
 /**
  * The services a Bot reads as you.
@@ -130,6 +131,25 @@ function RouteComponent() {
                         <ItemDescription>{entry.summary}</ItemDescription>
                       </ItemContent>
                       <ItemActions>
+                        {/*
+                         * A dot, so connected is legible without reading. Two states that differ only
+                         * by the word "not" are two states somebody has to read carefully to tell
+                         * apart, which is the wrong amount of effort for the only fact this row
+                         * carries. The same green as the account page's own control, so the list and
+                         * the page it opens agree at a glance.
+                         *
+                         * Decorative: the text beside it already says which, so a screen reader that
+                         * announced the dot as well would say it twice.
+                         */}
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "size-1.5 rounded-full",
+                            connected.has(entry.key)
+                              ? "bg-emerald-500"
+                              : "bg-muted-foreground/40",
+                          )}
+                        />
                         <span className="text-muted-foreground text-xs">
                           {connected.has(entry.key)
                             ? "Connected"

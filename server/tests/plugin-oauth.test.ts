@@ -6,7 +6,7 @@ import {
   createVerifier,
   readConnectState,
   redirectUriFor,
-  settingsUrlFor,
+  connectedAccountsUrlFor,
   signConnectState,
 } from "../src/plugins/oauth";
 
@@ -176,33 +176,54 @@ describe("where the callback sends somebody afterwards", () => {
    * The bug this exists to prevent, found by trying to run the thing rather than by reading it.
    *
    * The app and the API are two processes on two ports: Vite on 3010, this server on 3001. The
-   * callback lands on the API, so `redirect("/settings")` resolved against the API's origin and ended
-   * on a 404 — after the consent had succeeded and the grant was already stored. Nothing about that
+   * callback lands on the API, so a relative redirect resolved against the API's origin and ended on
+   * a 404 — after the consent had succeeded and the grant was already stored. Nothing about that
    * looks like a failure of the connect flow, which is why it needs a test and not a comment.
    */
-  test("is the app's origin, not the API's", () => {
-    expect(settingsUrlFor("http://localhost:3010")).toBe(
-      "http://localhost:3010/settings/connected-accounts",
-    );
+  test("success returns to the account, on the app's origin", () => {
+    expect(
+      connectedAccountsUrlFor("http://localhost:3010", {
+        serverId: "google-drive",
+      }),
+    ).toBe("http://localhost:3010/settings/connected-accounts/google-drive");
   });
 
-  test("says that it failed, without saying which way", () => {
-    // One outcome for a forged state and for an expired one. Telling them apart tells anybody
-    // probing the endpoint how far they got.
-    expect(settingsUrlFor("http://localhost:3010", "failed")).toBe(
+  test("success carries no outcome, because the account already says it", () => {
+    const url = connectedAccountsUrlFor("http://localhost:3010", {
+      serverId: "google-drive",
+    });
+    expect(url).not.toContain("?");
+  });
+
+  test("a server id is escaped rather than trusted into a path", () => {
+    // It comes off a signed state, so it is ours — but it lands in a URL, and a value that reaches a
+    // URL unescaped is one path traversal away from meaning something else.
+    expect(
+      connectedAccountsUrlFor("http://localhost:3010", {
+        serverId: "../../admin",
+      }),
+    ).toBe("http://localhost:3010/settings/connected-accounts/..%2F..%2Fadmin");
+  });
+
+  test("failure goes to the list, which is the screen that says so", () => {
+    /*
+     * The list, not an account page: the notice is drawn there, and on the paths where the state
+     * could not be read there is no server id to return to anyway. One outcome for every failure,
+     * because telling a forged state apart from an expired one only tells somebody probing this
+     * endpoint how far they got.
+     */
+    expect(
+      connectedAccountsUrlFor("http://localhost:3010", { failed: true }),
+    ).toBe(
       "http://localhost:3010/settings/connected-accounts?connected=failed",
-    );
-  });
-
-  test("names the server it connected, so the page can confirm which", () => {
-    expect(settingsUrlFor("http://localhost:3010", "google-drive")).toBe(
-      "http://localhost:3010/settings/connected-accounts?connected=google-drive",
     );
   });
 
   test("still points somewhere when no app URL is configured", () => {
     // Relative is wrong on a split-port deployment and right on a single-origin one, which is the
     // only case where `appUrl` can be absent and the deployment still works.
-    expect(settingsUrlFor(undefined)).toBe("/settings/connected-accounts");
+    expect(
+      connectedAccountsUrlFor(undefined, { serverId: "google-drive" }),
+    ).toBe("/settings/connected-accounts/google-drive");
   });
 });

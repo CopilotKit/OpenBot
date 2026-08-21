@@ -1,8 +1,4 @@
-import {
-  IconArrowUpRight,
-  IconChevronDown,
-  IconExternalLink,
-} from "@tabler/icons-react";
+import { IconArrowUpRight, IconChevronDown } from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -115,7 +111,7 @@ function RouteComponent() {
 
       {/* One decision, so no heading: it would only repeat the row's own title. */}
       <PageSection>
-        <PageRows>
+        <PageRows className="mt-0">
           <Item size="sm">
             <ItemContent>
               {/* Not "Connect your account": the row is also the connected state, and a title has to
@@ -225,29 +221,6 @@ function RouteComponent() {
                 <span className="text-muted-foreground text-xs">
                   {new Date(connection.connectedAt).toLocaleString()}
                 </span>
-              </ItemActions>
-            </Item>
-          </PageRows>
-        </PageSection>
-      ) : null}
-
-      {entry.docsUrl ? (
-        <PageSection>
-          <PageRows>
-            <Item
-              render={
-                <a href={entry.docsUrl} rel="noreferrer" target="_blank" />
-              }
-              size="sm"
-            >
-              <ItemContent>
-                <ItemTitle>Vendor documentation</ItemTitle>
-                <ItemDescription>
-                  What this service offers, from the people who maintain it.
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <IconExternalLink className="size-4 shrink-0 text-muted-foreground" />
               </ItemActions>
             </Item>
           </PageRows>

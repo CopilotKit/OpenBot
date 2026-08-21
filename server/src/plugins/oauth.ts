@@ -70,18 +70,34 @@ export function redirectUriFor(publicUrl: string): string {
  * Relative is still correct for a deployment that serves both from one origin, which is the only
  * case where `appUrl` is absent and the deployment works.
  */
-export function settingsUrlFor(
+export function connectedAccountsUrlFor(
   appUrl: string | undefined,
-  outcome?: string,
+  where: { serverId: string } | { failed: true },
 ): string {
-  /*
-   * The screen that started the flow, which is a person's own connected accounts rather than their
-   * preferences. It moved there when a connector became more than one switch's worth of decision, and
-   * this had to move with it: landing somebody back on a page that no longer mentions what they just
-   * did is its own kind of failure, and a silent one.
-   */
   const base = `${appUrl?.replace(/\/+$/, "") ?? ""}/settings/connected-accounts`;
-  return outcome ? `${base}?connected=${outcome}` : base;
+
+  /*
+   * Success returns to the account, not the list.
+   *
+   * That page is where the flow started and it is the page that can now say something new: the
+   * account reads Connected, with the scope the vendor granted beside it. The list would only report
+   * the same fact one level further away, leaving somebody to find their way back to check.
+   *
+   * No query parameter either. "It worked" is already told by the thing it is news about, and a
+   * banner saying so next to a row that says so is the same sentence twice.
+   */
+  if ("serverId" in where) {
+    return `${base}/${encodeURIComponent(where.serverId)}`;
+  }
+
+  /*
+   * Failure goes to the list, which is the one screen that draws the notice.
+   *
+   * It is also the only honest destination when the state could not be read: with no state there is
+   * no server id, so there is no account page to return to — and picking one would be a guess about
+   * what somebody had been doing.
+   */
+  return `${base}?connected=failed`;
 }
 
 /** A fresh PKCE verifier: unreserved characters only, comfortably over the 43-character floor. */

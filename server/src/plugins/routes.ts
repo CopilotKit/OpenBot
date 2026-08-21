@@ -10,7 +10,7 @@ import {
   readConnectState,
   redeemAuthorizationCode,
   redirectUriFor,
-  settingsUrlFor,
+  connectedAccountsUrlFor,
   signConnectState,
 } from "./oauth";
 import {
@@ -357,7 +357,9 @@ export function createPluginRoutes(
    * one, and spelling out which is which tells anybody probing this endpoint how far they got.
    */
   routes.get("/oauth/callback", async (context) => {
-    const failed = settingsUrlFor(connect?.appUrl, "failed");
+    const failed = connectedAccountsUrlFor(connect?.appUrl, {
+      failed: true,
+    });
     if (!connect?.publicUrl) return context.redirect(failed);
 
     const code = context.req.query("code");
@@ -390,7 +392,9 @@ export function createPluginRoutes(
       scope: grant.scope,
     });
 
-    return context.redirect(settingsUrlFor(connect.appUrl, state.serverId));
+    return context.redirect(
+      connectedAccountsUrlFor(connect.appUrl, { serverId: state.serverId }),
+    );
   });
 
   /**
