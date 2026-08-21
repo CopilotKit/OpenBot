@@ -21,6 +21,7 @@
  * can be tested against a temporary directory instead of being taken on trust.
  */
 import {
+  lstat,
   mkdir,
   readdir,
   readFile,
@@ -131,9 +132,29 @@ export function createWorkspace(
     }
     assertInside(root, realAnchor, wanted);
 
-    // For a write, return the full lexical target. It is already proven contained lexically, and the
-    // deepest existing directory is proven contained after symlinks, so `mkdir -p` can only create the
-    // rest inside the workspace.
+    // The last component, which the anchor above deliberately skipped.
+    //
+    // Resolving the directory proves where the write lands only while the name inside it is a name.
+    // If it is already a symlink, `writeFile` follows it and the bytes go wherever it points, so the
+    // link has to be resolved too. A dangling one is refused rather than resolved: it points at a
+    // file that does not exist yet, so there is nothing to check, and writing through it would
+    // create the file it names.
+    if (forWrite) {
+      const link = await lstat(target).catch(() => null);
+      if (link?.isSymbolicLink()) {
+        const realTarget = await realpath(target).catch(() => null);
+        if (!realTarget) {
+          throw new WorkspacePathError(
+            `${wanted} is a link to somewhere that does not exist, so it cannot be written through.`,
+          );
+        }
+        assertInside(root, realTarget, wanted);
+      }
+    }
+
+    // For a write, return the full lexical target. It is already proven contained lexically, the
+    // deepest existing directory is proven contained after symlinks, and a link at the end is proven
+    // to stay inside, so `mkdir -p` can only create the rest inside the workspace.
     return forWrite ? target : realAnchor;
   }
 

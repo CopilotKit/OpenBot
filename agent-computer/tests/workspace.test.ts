@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -206,6 +213,46 @@ describe("escaping the workspace", () => {
     );
   });
 
+  test("refuses to write THROUGH a symlink at the file itself", async () => {
+    // The directory a write lands in is resolved and the last component is not, so a link left where
+    // the file goes carries the bytes out. Nothing in this API makes one, which is the whole reason
+    // it is easy to miss: a shell session makes one, an archive a Bot unpacked carries one, and in a
+    // container shared between Bots the other Bot makes one.
+    const victim = join(outside, "victim.txt");
+    await writeFile(victim, "original", "utf8");
+    await symlink(victim, join(root, "notes.md"));
+
+    await expect(workspace().write("notes.md", "owned")).rejects.toThrow(
+      WorkspacePathError,
+    );
+    expect(await readFile(victim, "utf8")).toBe("original");
+  });
+
+  test("refuses to append THROUGH a symlink at the file itself", async () => {
+    // Append is the same door. It takes the same resolved path and differs only in the write flag.
+    const victim = join(outside, "victim.txt");
+    await writeFile(victim, "original", "utf8");
+    await symlink(victim, join(root, "log.txt"));
+
+    await expect(
+      workspace().write("log.txt", "owned", { append: true }),
+    ).rejects.toThrow(WorkspacePathError);
+    expect(await readFile(victim, "utf8")).toBe("original");
+  });
+
+  test("refuses to write THROUGH a symlink pointing at a file that does not exist yet", async () => {
+    // A dangling link resolves to nothing, so a check that asks where it points learns nothing and
+    // lets it past. Writing through one CREATES the file it names, which is the same escape with an
+    // extra step.
+    const victim = join(outside, "not-yet.txt");
+    await symlink(victim, join(root, "draft.txt"));
+
+    await expect(workspace().write("draft.txt", "owned")).rejects.toThrow(
+      WorkspacePathError,
+    );
+    expect(await readFile(victim, "utf8").catch(() => null)).toBe(null);
+  });
+
   test("a symlink pointing back INSIDE the workspace still works", async () => {
     // The guard must confine, not merely forbid symlinks: refusing every link would be easier and
     // would break legitimate use.
@@ -213,6 +260,11 @@ describe("escaping the workspace", () => {
     await ws.write("real/data.txt", "inside");
     await symlink(join(root, "real"), join(root, "alias"));
     expect((await ws.read("alias/data.txt")).text).toBe("inside");
+
+    // Writing through it too, because a guard that only forbids would pass the refusal tests above
+    // while breaking the thing links are legitimately for.
+    await ws.write("alias/data.txt", "still inside");
+    expect((await ws.read("real/data.txt")).text).toBe("still inside");
   });
 
   test("a sibling directory sharing the root's name prefix is still outside", async () => {
