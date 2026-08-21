@@ -144,4 +144,25 @@ describe("the command that actually runs", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("/opt/java");
   });
+  test("a package install is not left waiting for a prompt", async () => {
+    // apt-get reads DEBIAN_FRONTEND. Interactive, it stops for an answer nobody is there to give,
+    // and the command reaches its timeout looking like a broken package rather than a question.
+    const result = await createShell(root, source()).run({
+      command: "printenv DEBIAN_FRONTEND",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("noninteractive");
+  });
+
+  test("an operator can still choose the frontend themselves", async () => {
+    const result = await createShell(
+      root,
+      source({
+        COMPUTER_SHELL_ENV: "DEBIAN_FRONTEND",
+        DEBIAN_FRONTEND: "teletype",
+      }),
+    ).run({ command: "printenv DEBIAN_FRONTEND" });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("teletype");
+  });
 });

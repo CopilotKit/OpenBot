@@ -97,6 +97,14 @@ export function environmentForCommand(
   for (const name of extraShellEnvNames(source.COMPUTER_SHELL_ENV)) copy(name);
 
   env.HOME = workspaceDir;
+  /*
+   * Set rather than copied, because the deployment has no opinion about it and the command does. The
+   * tool description tells the model to run `apt-get install`, which without this waits for an answer
+   * to a prompt nobody is there to give: the command reaches its timeout and comes back looking like
+   * a broken package rather than a question. An operator can still override it through
+   * COMPUTER_SHELL_ENV, which is copied above.
+   */
+  if (env.DEBIAN_FRONTEND === undefined) env.DEBIAN_FRONTEND = "noninteractive";
   return env;
 }
 
