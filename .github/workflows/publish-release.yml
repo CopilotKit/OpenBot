@@ -95,11 +95,20 @@ jobs:
             exit 1
           }
 
+  # The same checks CI runs, against the commit being published. This is the gate: nothing is built
+  # or tagged unless they pass here, on this exact tree.
+  checks:
+    needs: [metadata, verify]
+    if: needs.metadata.outputs.is_release == 'true'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   # One image, built once. Everything downstream refers to it by digest, so what was tested is what
   # is deployed and there is no second build to disagree with the first.
   image:
     name: image
-    needs: [metadata, verify]
+    needs: [metadata, verify, checks]
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -152,7 +161,7 @@ jobs:
   # tag somebody could move.
   github-release:
     name: tag and release
-    needs: [metadata, verify, image]
+    needs: [metadata, verify, checks, image]
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:

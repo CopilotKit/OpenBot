@@ -64,17 +64,36 @@ A job added to `ci.yml` is covered by it without anybody updating a list.
 | `build` | the app not compiling |
 | `migrations` | a schema change with no migration, or a snapshot that has drifted |
 | `image` | an image that builds but does not boot, or a supervised service that respawns |
-| `smoke` | the parts not wired to each other: server, supervisor, computer, gateway, audit |
 
-The last two matter more than their position in that list suggests. Everything above them can pass
-on a tree whose image never starts, because nothing else here runs the thing it ships.
+`image` matters more than its position suggests. Everything above it can pass on a tree whose image
+never starts, because nothing else here runs the thing it ships. It builds the container, boots it
+with embedded PostgreSQL, waits for `/api/capabilities`, and fails if a supervised service is
+respawning.
 
-## Secrets it needs
+These checks run again, against the release commit, when the release PR is merged. They gate the
+publish rather than the proposal, which is why the release PR arriving without its own checks does
+not matter: a pull request opened by a workflow does not trigger them.
 
-| | |
-| --- | --- |
-| `DEVOPS_BOT_CLIENT_ID` (variable), `DEVOPS_BOT_PRIVATE_KEY` | opening the release PR as an app rather than with a personal token |
-| `COPILOTKIT_LICENSE_TOKEN`, `INTELLIGENCE_API_KEY`, `OPENAI_API_KEY` | the smoke journey, which needs a deployment a licence accepts |
+**No secrets are required.** Every workflow here uses only the built-in `GITHUB_TOKEN`.
 
-The smoke job skips itself, with a warning, when the licence is absent. That is deliberate: a check
-that fails for a reason nobody can fix is a check people learn to ignore.
+## The one thing CI cannot do
+
+The smoke journey in `tests/smoke` is the only check that proves the parts are wired to each other:
+the server reaches the supervisor, the supervisor builds a computer, the gateway decides before the
+browser acts, and the trail records it. It cannot run in CI, and this is not a gap to be closed
+later.
+
+OpenBot only runs in Intelligence mode. `loadConfig` refuses to start without a licence, and a
+licence is cryptographically signed for the machine it was issued for, so a hosted runner cannot hold
+one. The `image` check gets around this with placeholder values, because nothing is contacted at
+start-up, but the journey asserts `licenseStatus` is `valid` and no placeholder can make that true.
+
+So it is a step a person takes, on a machine with a licence, before merging the release PR:
+
+```sh
+bash scripts/start.sh
+bun run test:smoke
+```
+
+The release PR asks for the result in a comment. That is deliberately a person rather than a robot:
+it is the one gate that cannot be automated, so it is the one gate worth naming.

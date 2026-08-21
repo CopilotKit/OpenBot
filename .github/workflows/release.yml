@@ -31,8 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: read
-      pull-requests: read
+      contents: write
+      pull-requests: write
     steps:
       # Two open release PRs would each carry a version computed before the other existed, and
       # whichever merged second would publish notes that skip a release.
@@ -123,7 +123,12 @@ jobs:
             echo
             echo "Before merging:"
             echo "- [ ] The notes below describe what a deployment does differently"
-            echo "- [ ] CI is green, including the smoke journey"
+            echo "- [ ] The smoke journey passed against a licensed deployment, and the result is"
+            echo "      pasted in a comment: \`bash scripts/start.sh && bun run test:smoke\`"
+            echo
+            echo "Merging runs the full suite against this commit before it builds, so there is"
+            echo "nothing to check about CI here. The journey is the part CI cannot do: it needs a"
+            echo "licence, and a licence belongs to the machine it was issued for."
             echo
             echo '```'
             awk -v v="## $version" '$0==v{f=1;next} /^## /{if(f)exit} f' CHANGELOG.md
@@ -136,22 +141,15 @@ jobs:
           git --no-pager diff -- package.json CHANGELOG.md
           cat /tmp/pr-body.md
 
-      - id: app-token
-        if: '!inputs.dry_run'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.DEVOPS_BOT_CLIENT_ID }}
-          private-key: ${{ secrets.DEVOPS_BOT_PRIVATE_KEY }}
-          owner: CopilotKit
-          repositories: OpenBot
-          permission-contents: write
-          permission-pull-requests: write
-
+      # A pull request opened by a workflow does not trigger the pull_request workflows, so the
+      # release PR arrives without its own checks. That is deliberate rather than tolerated: the
+      # publish path runs the full suite against the release commit before it builds anything, which
+      # gates the release itself instead of the proposal for one.
       - name: Open the release PR
         if: '!inputs.dry_run'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           branch: release/publish/v${{ steps.prepare.outputs.version }}
           delete-branch: true
           labels: release

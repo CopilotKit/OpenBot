@@ -16,11 +16,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   for its digest, tags the commit and creates the GitHub Release with `container-images.json` so a
   deployment can name an exact digest rather than a tag somebody could move. See
   [docs/releasing.md](docs/releasing.md).
-- **CI now runs the thing it ships.** Three checks were added. `migrations` refuses a schema change
+- **CI now runs the thing it ships.** Two checks were added. `migrations` refuses a schema change
   with no migration written for it, and a snapshot that has drifted from the schema. `image` builds
-  the container, boots it, and fails if it does not answer or if a supervised service is respawning.
-  `smoke` runs the journey in `tests/smoke`, which existed and ran nowhere, against a real
-  deployment. A single `verify` check covers all of them, so branch protection needs one entry.
+  the container, boots it with embedded PostgreSQL, and fails if it does not answer or if a
+  supervised service is respawning. A single `verify` check covers every job, so branch protection
+  needs one entry. The same checks run again against the release commit when a release is published,
+  so they gate the release rather than the proposal for one.
 - **One container that runs the whole thing.** The root `Dockerfile` builds an image carrying the
   app, the API, a Bot computer, and optionally PostgreSQL, supervised together. Point `DATABASE_URL`
   at a database you already run and the built-in one never starts; leave it unset and the container
