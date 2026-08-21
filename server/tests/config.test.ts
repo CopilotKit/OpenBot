@@ -50,9 +50,10 @@ describe("deployment configuration", () => {
         licenseToken: "license-token",
       },
     });
-    expect(config.managedAgentAgUiUrl).toEqual(
-      new URL("http://localhost:4200/ag-ui"),
-    );
+    expect(config.managedAgent).toEqual({
+      endpoint: new URL("http://localhost:4200/ag-ui"),
+      token: "managed-agent-token",
+    });
     expect(config.tenantPackageDirectory).toBe("../examples/fintech");
   });
 
@@ -116,22 +117,34 @@ describe("deployment configuration", () => {
     );
   });
 
-  test("refuses to start when MANAGED_AGENT_AG_UI_URL is missing", () => {
+  test("starts without a managed Bot when neither half is set", () => {
     const environment: Record<string, string | undefined> = {
       ...baseEnvironment,
     };
     delete environment.MANAGED_AGENT_AG_UI_URL;
+    delete environment.MANAGED_AGENT_TOKEN;
 
-    expect(() => loadConfig(environment)).toThrow("MANAGED_AGENT_AG_UI_URL");
+    expect(loadConfig(environment).managedAgent).toBeUndefined();
   });
 
-  test("refuses to start when MANAGED_AGENT_TOKEN is missing", () => {
+  test("refuses a URL with no token", () => {
     const environment: Record<string, string | undefined> = {
       ...baseEnvironment,
     };
     delete environment.MANAGED_AGENT_TOKEN;
 
-    expect(() => loadConfig(environment)).toThrow("MANAGED_AGENT_TOKEN");
+    expect(() => loadConfig(environment)).toThrow(
+      "MANAGED_AGENT_TOKEN must be set when MANAGED_AGENT_AG_UI_URL is set",
+    );
+  });
+
+  test("ignores a leftover token when no URL is set", () => {
+    const environment: Record<string, string | undefined> = {
+      ...baseEnvironment,
+    };
+    delete environment.MANAGED_AGENT_AG_UI_URL;
+
+    expect(loadConfig(environment).managedAgent).toBeUndefined();
   });
 
   test("refuses a non-HTTP MANAGED_AGENT_AG_UI_URL", () => {

@@ -125,7 +125,7 @@ const agentVault = {
 };
 const agentProfileStore = createAgentProfileStore(
   database,
-  config.managedAgentAgUiUrl,
+  config.managedAgent?.endpoint,
   agentVault,
 );
 // Read here rather than beside the synchronise below, because the package names the deployment and
@@ -156,10 +156,11 @@ const channelActivityListener = await startChannelActivityListener(
   channelEvents,
 );
 const roleRepository = createRoleRepository(database);
-const loadAgentsForActor = createRuntimeAgentLoader(database, agentVault, {
-  endpoint: config.managedAgentAgUiUrl,
-  token: config.managedAgentToken,
-});
+const loadAgentsForActor = createRuntimeAgentLoader(
+  database,
+  agentVault,
+  config.managedAgent,
+);
 await synchronizeTenantPackage(database, tenantPackage);
 /*
  * Built before `auth`, because the deny list is consulted during sign-in and the store is what

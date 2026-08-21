@@ -86,12 +86,23 @@ export function configuredAuthProviders(
   return providers;
 }
 
+export type ManagedAgentConfig = {
+  endpoint: URL;
+  /** Secret sent only to the managed Bot endpoint. Never stored in an agent row. */
+  token: string;
+};
+
 export type DeploymentConfig = {
   databaseUrl: string;
   keyEncryptionKey: string;
-  managedAgentAgUiUrl: URL;
-  /** Secret sent only to the managed Bot endpoint. Never stored in an agent row. */
-  managedAgentToken: string;
+  /**
+   * The Bot in the box, when this deployment has one.
+   *
+   * Absent is the one-container image: it carries no AG-UI process, and a required URL would
+   * register a coworker against a host that is not there. Set both the URL and the token together
+   * when a remote Bot is actually running.
+   */
+  managedAgent?: ManagedAgentConfig;
   /**
    * What this deployment calls itself, when more than one shares an Intelligence project.
    *
@@ -220,8 +231,14 @@ function url(environment: Environment, name: string): string | undefined {
   return value;
 }
 
-function requiredHttpUrl(environment: Environment, name: string): URL {
-  const value = required(environment, name);
+function optionalHttpUrl(
+  environment: Environment,
+  name: string,
+): URL | undefined {
+  const value = optional(environment, name);
+  if (!value) {
+    return undefined;
+  }
 
   let parsed: URL;
   try {
@@ -235,6 +252,29 @@ function requiredHttpUrl(environment: Environment, name: string): URL {
   }
 
   return parsed;
+}
+
+/**
+ * The Bot in the box, if this deployment has one.
+ *
+ * A URL with no token would send unauthenticated calls to a Bot that refuses them, so that half
+ * alone refuses to start. A token with no URL is the leftover `scripts/start.sh` writes into
+ * `.env`; it names nothing and is ignored, so a one-container image can boot from that file.
+ */
+function managedAgentConfig(
+  environment: Environment,
+): ManagedAgentConfig | undefined {
+  const endpoint = optionalHttpUrl(environment, "MANAGED_AGENT_AG_UI_URL");
+  const token = optional(environment, "MANAGED_AGENT_TOKEN");
+  if (endpoint && !token) {
+    throw new Error(
+      "MANAGED_AGENT_TOKEN must be set when MANAGED_AGENT_AG_UI_URL is set",
+    );
+  }
+  if (!endpoint || !token) {
+    return undefined;
+  }
+  return { endpoint, token };
 }
 
 function oauthClient(
@@ -542,15 +582,12 @@ export function loadConfig(
 ): DeploymentConfig {
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
+  const managedAgent = managedAgentConfig(environment);
 
   return {
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
-    managedAgentAgUiUrl: requiredHttpUrl(
-      environment,
-      "MANAGED_AGENT_AG_UI_URL",
-    ),
-    managedAgentToken: required(environment, "MANAGED_AGENT_TOKEN"),
+    ...(managedAgent ? { managedAgent } : {}),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
