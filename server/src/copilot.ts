@@ -6,10 +6,11 @@ import {
   CopilotRuntime,
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
+import { Hono } from "hono";
+import { z } from "zod";
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
-import { z } from "zod";
 import type { GrantedTool } from "./plugins/tools";
 
 /**
@@ -498,11 +499,6 @@ export function mountCopilotRuntime(
       apiKey: intelligence.apiKey,
     }),
     licenseToken: intelligence.licenseToken,
-    // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
-    // other deployment's. Adds no events of its own.
-    ...(config.accessibility
-      ? { telemetryProperties: { accessibility_title: "OpenBot" } }
-      : {}),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(
@@ -516,5 +512,53 @@ export function mountCopilotRuntime(
     ) as never,
   });
 
-  return createCopilotHonoHandler({ runtime, basePath });
+  const handler = createCopilotHonoHandler({ runtime, basePath });
+
+  /*
+   * A thread id is minted before the thread exists: the platform creates it on the first run, so
+   * reading history on a conversation nobody has spoken in yet is the normal opening move, not an
+   * error. The runtime reports the platform's THREAD_NOT_FOUND as a bare 500, which reads as a
+   * broken server and buries a stack trace in the log every time somebody opens a new chat.
+   *
+   * Only a thread the platform does not list is treated as empty. A 500 for a thread that DOES
+   * exist is a real failure — an outage, a bad key — and must stay a 500, because answering it with
+   * empty history would tell the browser the conversation is gone and invite it to start over.
+   *
+   * Wrapped rather than added with `handler.use`: Hono matches middleware only against routes
+   * declared after it, and the handler arrives with all of its own already registered.
+   */
+  const wrapped = new Hono();
+
+  wrapped.use(
+    `${basePath}/threads/:threadId/messages`,
+    async (context, next) => {
+      await next();
+      if (context.req.method !== "GET" || context.res.status !== 500) return;
+
+      const agentId = context.req.query("agentId");
+      if (!agentId) return;
+      const threadId = context.req.param("threadId");
+
+      const listed = await handler.fetch(
+        new Request(
+          `${new URL(context.req.url).origin}${basePath}/threads?agentId=${encodeURIComponent(agentId)}`,
+          { headers: context.req.raw.headers },
+        ),
+      );
+      // The list itself failing says nothing about the thread; leave the original error alone.
+      if (!listed.ok) return;
+
+      const { threads } = (await listed.json()) as {
+        threads?: { id: string }[];
+      };
+      if (!Array.isArray(threads)) return;
+      if (threads.some((thread) => thread.id === threadId)) return;
+
+      context.res = Response.json({ messages: [] });
+    },
+  );
+
+  wrapped.route("/", handler);
+
+  return wrapped;
 }
