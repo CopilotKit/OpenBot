@@ -13,12 +13,12 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { RowMark } from "@/components/layout/row-mark";
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -148,9 +148,9 @@ function RouteComponent() {
                         }
                         size="sm"
                       >
-                        <ItemMedia variant="icon">
+                        <RowMark>
                           <Mark className="size-4" />
-                        </ItemMedia>
+                        </RowMark>
                         <ItemContent>
                           <ItemTitle>{server.title}</ItemTitle>
                           {/*
@@ -209,9 +209,9 @@ function RouteComponent() {
                         }
                         size="sm"
                       >
-                        <ItemMedia variant="icon">
+                        <RowMark>
                           <Mark className="size-4" />
-                        </ItemMedia>
+                        </RowMark>
                         <ItemContent>
                           <ItemTitle>{entry.title}</ItemTitle>
                           <ItemDescription>{entry.summary}</ItemDescription>

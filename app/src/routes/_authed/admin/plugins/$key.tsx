@@ -18,6 +18,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { RowMark } from "@/components/layout/row-mark";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,7 +37,6 @@ import {
   ItemContent,
   ItemDescription,
   ItemFooter,
-  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -210,9 +210,9 @@ function RouteComponent() {
               }
               size="sm"
             >
-              <ItemMedia variant="icon">
+              <RowMark>
                 <IconKey className="size-4" />
-              </ItemMedia>
+              </RowMark>
               <ItemContent>
                 <ItemTitle>Access token</ItemTitle>
                 <ItemDescription>
@@ -236,9 +236,9 @@ function RouteComponent() {
                 }
                 size="sm"
               >
-                <ItemMedia variant="icon">
+                <RowMark>
                   <IconKey className="size-4" />
-                </ItemMedia>
+                </RowMark>
                 <ItemContent>
                   <ItemTitle>OAuth client</ItemTitle>
                   <ItemDescription>
@@ -256,9 +256,9 @@ function RouteComponent() {
               <Separator />
               {/* Read-only: a value with no chevron, because there is nothing here to change. */}
               <Item size="sm">
-                <ItemMedia variant="icon">
+                <RowMark>
                   <IconServer className="size-4" />
-                </ItemMedia>
+                </RowMark>
                 <ItemContent>
                   <ItemTitle>Redirect URI</ItemTitle>
                   <ItemDescription className="line-clamp-none">
@@ -282,9 +282,9 @@ function RouteComponent() {
               </Item>
               <Separator />
               <Item render={<Link to="/settings" />} size="sm">
-                <ItemMedia variant="icon">
+                <RowMark>
                   <IconUserCheck className="size-4" />
-                </ItemMedia>
+                </RowMark>
                 <ItemContent>
                   <ItemTitle>Your account</ItemTitle>
                   <ItemDescription>
@@ -311,9 +311,9 @@ function RouteComponent() {
                 }
                 size="sm"
               >
-                <ItemMedia variant="icon">
+                <RowMark>
                   <IconServer className="size-4" />
-                </ItemMedia>
+                </RowMark>
                 <ItemContent>
                   <ItemTitle>Instance host</ItemTitle>
                   <ItemDescription>
@@ -340,9 +340,9 @@ function RouteComponent() {
                 }
                 size="sm"
               >
-                <ItemMedia variant="icon">
+                <RowMark>
                   <IconBook className="size-4" />
-                </ItemMedia>
+                </RowMark>
                 <ItemContent>
                   <ItemTitle>Vendor documentation</ItemTitle>
                   <ItemDescription>
@@ -373,9 +373,9 @@ function RouteComponent() {
               {server.tools.map((tool, index) => (
                 <React.Fragment key={tool.ref}>
                   <Item size="sm">
-                    <ItemMedia variant="icon">
+                    <RowMark>
                       <IconTool className="size-4" />
-                    </ItemMedia>
+                    </RowMark>
                     <ItemContent>
                       <ItemTitle className="font-mono text-xs">
                         {tool.name}
@@ -440,9 +440,9 @@ function RouteComponent() {
         <PageSection title="Remove">
           <PageRows>
             <Item size="sm">
-              <ItemMedia variant="icon">
+              <RowMark>
                 <IconTrash className="size-4" />
-              </ItemMedia>
+              </RowMark>
               <ItemContent>
                 <ItemTitle>Remove from this deployment</ItemTitle>
                 <ItemDescription>
