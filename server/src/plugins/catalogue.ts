@@ -92,106 +92,19 @@ export type CatalogueEntry = {
   docsUrl: string;
 };
 
+/**
+ * One entry, deliberately.
+ *
+ * Atlassian, Box, Slack, Salesforce and ServiceNow were here and were removed: each was a reviewed
+ * source contract for a vendor nobody had connected, and a screen offering five untried connectors
+ * asserts more than this deployment can stand behind. They are in the history if they are wanted
+ * back, and re-adding one is a review of that vendor rather than a revert.
+ *
+ * `deployment-bearer` therefore has no entry using it. The shape stays because the call path still
+ * needs it: a server an administrator added by URL has no catalogue entry at all, and that is the
+ * branch it falls into.
+ */
 export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
-  {
-    key: "atlassian",
-    title: "Atlassian",
-    vendor: "Atlassian",
-    summary: "Jira issues and Confluence pages.",
-    host: "https://mcp.atlassian.com",
-    path: "/v1/mcp/authv2",
-    auth: { kind: "deployment-bearer" },
-    writeTools: Object.freeze([
-      "createJiraIssue",
-      "editJiraIssue",
-      "transitionJiraIssue",
-      "addCommentToJiraIssue",
-      "addWorklogToJiraIssue",
-      "createConfluencePage",
-      "updateConfluencePage",
-      "createConfluenceFooterComment",
-      "createConfluenceInlineComment",
-    ]),
-    docsUrl:
-      "https://support.atlassian.com/rovo/docs/getting-started-with-the-atlassian-remote-mcp-server/",
-  },
-  {
-    key: "box",
-    title: "Box",
-    vendor: "Box",
-    summary: "Files and folders in Box.",
-    host: "https://mcp.box.com",
-    path: "/",
-    auth: { kind: "deployment-bearer" },
-    writeTools: Object.freeze([
-      "copy_file",
-      "copy_folder",
-      "create_folder",
-      "create_metadata_template",
-      "get_upload_url",
-      "move_file",
-    ]),
-    docsUrl: "https://developer.box.com/guides/box-mcp/remote/",
-  },
-  {
-    key: "slack",
-    title: "Slack",
-    vendor: "Slack",
-    summary: "Search and post in the channels the credential can reach.",
-    host: "https://mcp.slack.com",
-    path: "/mcp",
-    auth: { kind: "deployment-bearer" },
-    writeTools: Object.freeze([
-      "slack_send_message",
-      "slack_send_message_draft",
-      "slack_schedule_message",
-      "slack_add_reaction",
-      "slack_create_conversation",
-      "slack_create_canvas",
-      "slack_update_canvas",
-    ]),
-    docsUrl: "https://docs.slack.dev/ai/slack-mcp-server/",
-  },
-  {
-    key: "salesforce",
-    title: "Salesforce",
-    vendor: "Salesforce",
-    summary: "Records on the Salesforce platform.",
-    // A shared platform host, which is why the path matters as much as the host here: the frozen
-    // path selects one server and nothing else on that host is reachable through this.
-    host: "https://api.salesforce.com",
-    // Salesforce publishes this server at `/platform/<server>`, with sandbox orgs under
-    // `/sandbox/platform/<server>`. A deployment on a sandbox needs the custom-server form.
-    path: "/platform/mcp/v1/platform/sobject-all",
-    auth: { kind: "deployment-bearer" },
-    writeTools: Object.freeze([
-      "create_record",
-      "update_record",
-      "delete_record",
-    ]),
-    docsUrl:
-      "https://developer.salesforce.com/docs/einstein/genai/guide/mcp.html",
-  },
-  {
-    key: "servicenow",
-    title: "ServiceNow",
-    vendor: "ServiceNow",
-    summary: "Records on your own ServiceNow instance.",
-    // Per-instance: every customer has their own hostname, so there is no single host to pin and
-    // admissibility is an anchored pattern instead. The capture group is the instance label.
-    host: null,
-    hostPattern:
-      "^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)\\.service-now\\.com$",
-    path: "/sncapps/mcp-server",
-    auth: { kind: "deployment-bearer" },
-    writeTools: Object.freeze([
-      "create_record",
-      "update_record",
-      "delete_record",
-    ]),
-    docsUrl:
-      "https://www.servicenow.com/docs/bundle/zurich-api-reference/page/integrate/mcp/concept/mcp-server.html",
-  },
   {
     key: "google-drive",
     title: "Google Drive",

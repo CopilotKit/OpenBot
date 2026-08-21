@@ -1,6 +1,5 @@
 import {
   IconBrandGoogleDrive,
-  IconBrandSlack,
   IconChevronRight,
   IconPlug,
 } from "@tabler/icons-react";
@@ -49,12 +48,12 @@ export const Route = createFileRoute("/_authed/admin/plugins/")({
 /**
  * A vendor's own mark where there is one, and a plug where there is not.
  *
- * Tabler ships brands for some of these and not others, and a half-branded list looks broken rather
- * than partial — so the fallback is a plug for everything unbranded rather than, say, an initial.
+ * The fallback covers a server an administrator added by URL, which has no catalogue entry and so no
+ * mark of its own — and it would cover a catalogue vendor Tabler ships no brand for. Only Drive is in
+ * the catalogue today, and Tabler has it.
  */
 const MARKS: Record<string, React.ComponentType<{ className?: string }>> = {
   "google-drive": IconBrandGoogleDrive,
-  slack: IconBrandSlack,
 };
 
 const markFor = (key: string) => MARKS[key] ?? IconPlug;

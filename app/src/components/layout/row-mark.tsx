@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * its icon, which is what makes a settings list scannable in one pass.
  *
  * One component rather than a class literal at every call site, because the whole value is that the
- * tiles are identical. Eleven copies of `size-9 rounded-lg border bg-muted/60` is eleven chances for
+ * tiles are identical. Eleven copies of `size-9 rounded-lg bg-muted/60` is eleven chances for
  * one of them to drift, and a list with one tile a pixel out looks broken rather than varied.
  */
 export function RowMark({
@@ -24,7 +24,7 @@ export function RowMark({
   return (
     <ItemMedia
       className={cn(
-        "size-9 rounded-lg border border-border bg-muted/60 text-muted-foreground",
+        "size-9 rounded-lg bg-muted/60 text-muted-foreground",
         className,
       )}
       variant="icon"

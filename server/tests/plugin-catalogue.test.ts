@@ -19,38 +19,52 @@ import {
 
 describe("which servers this deployment will talk to", () => {
   test("a pinned host matches only itself", () => {
-    const atlassian = catalogueEntry("atlassian");
-    expect(atlassian).not.toBeNull();
-    expect(hostAdmissible(atlassian!, "https://mcp.atlassian.com")).toBe(true);
+    const drive = catalogueEntry("google-drive");
+    expect(drive).not.toBeNull();
+    expect(hostAdmissible(drive!, "https://drivemcp.googleapis.com")).toBe(
+      true,
+    );
     // A prefix, a suffix and a lookalike are each refused. The suffix case is the one that matters:
     // a check written with endsWith rather than equality would accept it.
     expect(
-      hostAdmissible(atlassian!, "https://mcp.atlassian.com.evil.test"),
+      hostAdmissible(drive!, "https://drivemcp.googleapis.com.evil.test"),
     ).toBe(false);
     expect(
-      hostAdmissible(atlassian!, "https://evil.test/mcp.atlassian.com"),
+      hostAdmissible(drive!, "https://evil.test/drivemcp.googleapis.com"),
     ).toBe(false);
-    expect(hostAdmissible(atlassian!, "http://mcp.atlassian.com")).toBe(false);
+    expect(hostAdmissible(drive!, "http://drivemcp.googleapis.com")).toBe(
+      false,
+    );
   });
 
-  test("a per-instance vendor accepts its own instances and nothing else", () => {
-    const servicenow = catalogueEntry("servicenow");
-    expect(servicenow).not.toBeNull();
-    expect(hostAdmissible(servicenow!, "https://acme.service-now.com")).toBe(
-      true,
-    );
-    expect(
-      hostAdmissible(servicenow!, "https://acme-dev1.service-now.com"),
-    ).toBe(true);
-    // Anchored at both ends, so neither a prefix nor a suffix gets in.
-    expect(
-      hostAdmissible(servicenow!, "https://acme.service-now.com.evil.test"),
-    ).toBe(false);
-    expect(
-      hostAdmissible(servicenow!, "https://evil.test#acme.service-now.com"),
-    ).toBe(false);
-    // A subdomain of an instance is not an instance.
-    expect(hostAdmissible(servicenow!, "https://a.b.service-now.com")).toBe(
+  test("an entry whose pattern this build never compiled is refused", () => {
+    /*
+     * WHAT THIS NO LONGER COVERS. ServiceNow was the only per-instance entry, and removing it took
+     * the anchored-pattern assertions with it — that a prefix, a suffix and a subdomain are each
+     * refused. `PATTERNS` is compiled from the catalogue by key, so a synthetic entry cannot reach a
+     * pattern and there is no way left to exercise the matching itself through the public API.
+     *
+     * What survives is the fail-closed half, which is worth keeping on its own: an entry claiming to
+     * be per-instance that this build has no pattern for is refused rather than admitted. Whoever
+     * adds the next per-instance vendor should restore the anchoring cases with it.
+     */
+    const perInstance = {
+      key: "google-drive",
+      title: "Per-instance vendor",
+      vendor: "Example",
+      summary: "",
+      host: null,
+      hostPattern:
+        "^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)\\.service-now\\.com$",
+      path: "/mcp",
+      auth: { kind: "deployment-bearer" },
+      writeTools: [],
+      docsUrl: "",
+    } as const;
+
+    // `PATTERNS` is compiled from the catalogue by key, so a synthetic entry reaches no pattern and
+    // is refused outright. That is itself the fail-closed property: no pattern means no.
+    expect(hostAdmissible(perInstance, "https://acme.service-now.com")).toBe(
       false,
     );
   });
@@ -61,19 +75,11 @@ describe("which servers this deployment will talk to", () => {
   });
 
   test("the path is the catalogue's, never the caller's", () => {
-    // A per-instance vendor is the only case where a caller supplies any part of the address, and
-    // even then the path is fixed, so an admissible host cannot reach another endpoint.
-    const resolved = resolveServerUrl(
-      "servicenow",
-      "https://acme.service-now.com",
+    // An instance host offered for a vendor with a pinned host is ignored, not honoured: the host and
+    // the path both come from the entry, so nothing a caller sends can reach another endpoint.
+    expect(resolveServerUrl("google-drive", "https://evil.test").url).toBe(
+      "https://drivemcp.googleapis.com/mcp/v1",
     );
-    expect(resolved?.url).toBe(
-      "https://acme.service-now.com/sncapps/mcp-server",
-    );
-  });
-
-  test("a per-instance vendor with no instance supplied resolves to nothing", () => {
-    expect(resolveServerUrl("servicenow")).toBeNull();
   });
 
   test("every catalogue entry pins a host or an anchored pattern", () => {
@@ -116,7 +122,9 @@ describe("whose credential a server uses", () => {
     }
   });
 
-  test("the five token vendors did not quietly become user-oauth", () => {
+  test("a vendor this build has never heard of is not an entry", () => {
+    // The five bearer vendors that used to be asserted here are gone. What matters now is the same
+    // property from the other side: a key with no entry resolves to nothing rather than to a default.
     for (const key of [
       "atlassian",
       "box",
@@ -124,7 +132,8 @@ describe("whose credential a server uses", () => {
       "salesforce",
       "servicenow",
     ]) {
-      expect(catalogueEntry(key)?.auth.kind).toBe("deployment-bearer");
+      expect(catalogueEntry(key)).toBeNull();
+      expect(resolveServerUrl(key)).toBeNull();
     }
   });
 });
@@ -162,32 +171,31 @@ describe("Google Drive", () => {
 });
 
 describe("what a tool does", () => {
-  const atlassian = catalogueEntry("atlassian")!;
+  const drive = catalogueEntry("google-drive")!;
 
   test("a named write is a write", () => {
-    expect(classifyTool(atlassian, "createJiraIssue", true)).toBe("write");
+    expect(classifyTool(drive, "create_file", true)).toBe("write");
   });
 
   test("an advertised tool that is not a named write is a read", () => {
-    expect(classifyTool(atlassian, "searchJiraIssues", true)).toBe("read");
+    expect(classifyTool(drive, "search_files", true)).toBe("read");
   });
 
   test("a tool the server never advertised is a write", () => {
     // The only thing that produced this name was a model, so nothing has vouched for it.
-    expect(classifyTool(atlassian, "searchJiraIssues", false)).toBe("write");
+    expect(classifyTool(drive, "search_files", false)).toBe("write");
   });
 
   test("every tool on a server nobody reviewed is a write", () => {
     expect(classifyTool(null, "anything_at_all", true)).toBe("write");
   });
 
-  test("a tool that edits rather than creates is still a write", () => {
-    // The naming does not carry it: "update" and "create" both change somebody else's system, and a
-    // list built by reading verbs off tool names lets the edits through.
-    const slack = catalogueEntry("slack")!;
-    expect(classifyTool(slack, "slack_update_canvas", true)).toBe("write");
-    expect(classifyTool(slack, "slack_create_canvas", true)).toBe("write");
-    expect(classifyTool(slack, "slack_read_canvas", true)).toBe("read");
+  test("copying is a write, and reading a file's content is not", () => {
+    // `copy_file` is the case a list built by reading verbs off tool names would miss: it creates
+    // nothing named "create" and still puts a new object in somebody's Drive.
+    expect(classifyTool(drive, "copy_file", true)).toBe("write");
+    expect(classifyTool(drive, "read_file_content", true)).toBe("read");
+    expect(classifyTool(drive, "get_file_metadata", true)).toBe("read");
   });
 });
 
