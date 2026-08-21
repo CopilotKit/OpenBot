@@ -27,6 +27,10 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Fixed
 
+- **A Bot's shell no longer inherits the deployment's environment.** Commands ran with the computer
+  process's own environment, so `env` in the one-container image printed `KEY_ENCRYPTION_KEY` and
+  the rest of `.env`. The shell now receives PATH, locale and terminal names, and the proxy
+  variables. Anything else is named in `COMPUTER_SHELL_ENV`.
 - **A deployment served over plain HTTP could not start a conversation.** The chat surface minted
   identifiers with `crypto.randomUUID`, which browsers withhold outside a secure context. On a
   laptop `http://localhost` counts as one, so this never showed up in development; on a real
