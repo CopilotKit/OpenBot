@@ -8,14 +8,18 @@ import { cn } from "@/lib/utils";
  * A DELIBERATE DEVIATION from the default row anatomy, which is `ItemMedia variant="icon"` and
  * nothing else. Stated here because the layout skill asks for a reason when a screen departs from it.
  *
- * The reason is scanning. `variant="icon"` only sizes the svg, so a 15px glyph sits directly against
- * the row's text and the eye has no fixed left edge to run down — a list of ten reads as ten
- * paragraphs. A filled square of a constant size gives every row the same visual anchor whatever
- * its icon, which is what makes a settings list scannable in one pass.
+ * FOR ONE LIST ONLY: the connectors on `admin/plugins`. Every row there is another company, and the
+ * tile carries that vendor's own mark — so it is doing work no other row in the app needs, which is
+ * telling third parties apart at a glance. `variant="icon"` puts a 15px glyph straight against the
+ * text, and a list of vendors read that way has no fixed left edge for the eye to run down.
+ *
+ * Not for a detail page, and not for skills. Those rows are this deployment's own settings and its
+ * own instructions; there is no third party to identify, so they take the standard media and the
+ * screens stay consistent with the other eleven that use it.
  *
  * One component rather than a class literal at every call site, because the whole value is that the
- * tiles are identical. Eleven copies of `size-9 rounded-lg bg-muted/60` is eleven chances for
- * one of them to drift, and a list with one tile a pixel out looks broken rather than varied.
+ * tiles are identical: copies of `size-9 rounded-lg bg-muted/60` are chances for one of them to
+ * drift, and a list with one tile a pixel out looks broken rather than varied.
  */
 export function RowMark({
   className,

@@ -9,7 +9,6 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { RowMark } from "@/components/layout/row-mark";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +27,7 @@ import {
   ItemContent,
   ItemDescription,
   ItemFooter,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -114,9 +114,9 @@ function RouteComponent() {
             {skills.map((skill, index) => (
               <React.Fragment key={skill.slug}>
                 <Item size="sm">
-                  <RowMark>
+                  <ItemMedia variant="icon">
                     <IconFileText className="size-4" />
-                  </RowMark>
+                  </ItemMedia>
                   <ItemContent>
                     <ItemTitle>
                       <code className="font-mono text-foreground/80 text-xs">

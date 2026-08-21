@@ -5,7 +5,6 @@ import {
   IconKey,
   IconServer,
   IconTool,
-  IconTrash,
   IconUserCheck,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,7 +17,6 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import { RowMark } from "@/components/layout/row-mark";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -37,9 +35,11 @@ import {
   ItemContent,
   ItemDescription,
   ItemFooter,
+  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { useBotNames } from "@/lib/agents/bot-names";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { storeMcpToken } from "@/lib/credentials/mutations";
@@ -178,11 +178,7 @@ function RouteComponent() {
           >
             Refresh tools
           </Button>
-        ) : (
-          <Button onClick={() => void add()} size="lg" type="button">
-            Add to deployment
-          </Button>
-        )
+        ) : undefined
       }
       backButton={{ label: "Plugins", linkProps: { to: "/admin/plugins" } }}
       description={entry?.summary ?? server?.summary}
@@ -194,169 +190,211 @@ function RouteComponent() {
         </p>
       ) : null}
 
-      <PageSection
-        description={
-          auth === "user-oauth"
-            ? "This vendor answers as whoever is asking. The deployment registers an OAuth client; everybody then connects their own account, so a Bot only ever sees what that person can see."
-            : "What this deployment presents to the vendor. One credential, used for everybody."
-        }
-        title="Connection"
-      >
+      <PageSection title="Availability">
         <PageRows>
-          {auth === "deployment-bearer" ? (
-            <Item
-              render={
-                <button onClick={() => setDialog("token")} type="button" />
-              }
-              size="sm"
-            >
-              <RowMark>
-                <IconKey className="size-4" />
-              </RowMark>
-              <ItemContent>
-                <ItemTitle>Access token</ItemTitle>
-                <ItemDescription>
-                  Sent as a bearer token on every call to this vendor.
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <span className="text-muted-foreground text-xs">
-                  {server?.hasCredential ? "Held" : "Not set"}
-                </span>
-                <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </ItemActions>
-            </Item>
-          ) : null}
-
-          {auth === "user-oauth" ? (
-            <>
-              <Item
-                render={
-                  <button onClick={() => setDialog("client")} type="button" />
-                }
-                size="sm"
-              >
-                <RowMark>
-                  <IconKey className="size-4" />
-                </RowMark>
-                <ItemContent>
-                  <ItemTitle>OAuth client</ItemTitle>
-                  <ItemDescription>
-                    Identifies this deployment to the vendor. It reaches
-                    nobody's documents on its own.
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <span className="text-muted-foreground text-xs">
-                    {server?.hasCredential ? "Registered" : "Not registered"}
-                  </span>
-                  <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                </ItemActions>
-              </Item>
-              <Separator />
-              {/* Read-only: a value with no chevron, because there is nothing here to change. */}
-              <Item size="sm">
-                <RowMark>
-                  <IconServer className="size-4" />
-                </RowMark>
-                <ItemContent>
-                  <ItemTitle>Redirect URI</ItemTitle>
-                  <ItemDescription className="line-clamp-none">
-                    Add this to the client's authorised redirect URIs at the
-                    vendor, exactly as written. A single wrong character fails
-                    there, with a message that does not mention OpenBot.
-                  </ItemDescription>
-                  <ItemFooter>
-                    {plugins.data?.redirectUri ? (
-                      <code className="block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
-                        {plugins.data.redirectUri}
-                      </code>
-                    ) : (
-                      <span className="text-destructive text-xs">
-                        This deployment has no public URL, so nobody can
-                        complete a consent flow. Set OPENBOT_PUBLIC_URL.
-                      </span>
-                    )}
-                  </ItemFooter>
-                </ItemContent>
-              </Item>
-              <Separator />
-              <Item render={<Link to="/settings" />} size="sm">
-                <RowMark>
-                  <IconUserCheck className="size-4" />
-                </RowMark>
-                <ItemContent>
-                  <ItemTitle>Your account</ItemTitle>
-                  <ItemDescription>
-                    Yours to grant and yours to withdraw, in Preferences. Nobody
-                    can connect it for you.
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <span className="text-muted-foreground text-xs">
-                    {youConnected ? "Connected" : "Not connected"}
-                  </span>
-                  <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                </ItemActions>
-              </Item>
-            </>
-          ) : null}
-
-          {entry?.perInstance ? (
-            <>
-              <Separator />
-              <Item
-                render={
-                  <button onClick={() => setDialog("instance")} type="button" />
-                }
-                size="sm"
-              >
-                <RowMark>
-                  <IconServer className="size-4" />
-                </RowMark>
-                <ItemContent>
-                  <ItemTitle>Instance host</ItemTitle>
-                  <ItemDescription>
-                    This vendor gives every customer their own hostname, checked
-                    against its pattern before anything is stored.
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <span className="text-muted-foreground text-xs">
-                    {server?.url ?? "Not set"}
-                  </span>
-                  <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                </ItemActions>
-              </Item>
-            </>
-          ) : null}
-
-          {entry?.docsUrl ? (
-            <>
-              <Separator />
-              <Item
-                render={
-                  <a href={entry.docsUrl} rel="noreferrer" target="_blank" />
-                }
-                size="sm"
-              >
-                <RowMark>
-                  <IconBook className="size-4" />
-                </RowMark>
-                <ItemContent>
-                  <ItemTitle>Vendor documentation</ItemTitle>
-                  <ItemDescription>
-                    What this server offers, from the people who maintain it.
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <IconExternalLink className="size-4 shrink-0 text-muted-foreground" />
-                </ItemActions>
-              </Item>
-            </>
-          ) : null}
+          {/*
+           * Binary and immediate, which is what the layout skill reserves a Switch for: it takes
+           * effect when switched and there is no save. It replaces an "Add to deployment" button and
+           * a destructive "Remove" row that were the same decision drawn twice, in two places, one of
+           * them looking far more dangerous than the other.
+           *
+           * The description states the consequence in the present tense, in both directions, because
+           * switching this off deletes every grant on the vendor's tools and that is not recoverable
+           * by switching it back on.
+           */}
+          {/* No leading icon: the row is this deployment's own switch, not a thing to identify. */}
+          <Item size="sm">
+            <ItemContent>
+              <ItemTitle>Enable for this deployment</ItemTitle>
+              <ItemDescription>
+                {server
+                  ? "Bots may be granted its tools. Switching this off removes it and every grant on its tools."
+                  : "No Bot can reach this vendor. Switch it on to configure it and grant its tools."}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                aria-label={`Enable ${title} for this deployment`}
+                checked={server !== undefined}
+                onCheckedChange={(next) => {
+                  setError(null);
+                  if (next) void add();
+                  else remove.mutate(key);
+                }}
+              />
+            </ItemActions>
+          </Item>
         </PageRows>
       </PageSection>
+
+      {server ? (
+        <PageSection
+          description={
+            auth === "user-oauth"
+              ? "This vendor answers as whoever is asking. The deployment registers an OAuth client; everybody then connects their own account, so a Bot only ever sees what that person can see."
+              : "What this deployment presents to the vendor. One credential, used for everybody."
+          }
+          title="Connection"
+        >
+          <PageRows>
+            {auth === "deployment-bearer" ? (
+              <Item
+                render={
+                  <button onClick={() => setDialog("token")} type="button" />
+                }
+                size="sm"
+              >
+                <ItemMedia variant="icon">
+                  <IconKey className="size-4" />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>Access token</ItemTitle>
+                  <ItemDescription>
+                    Sent as a bearer token on every call to this vendor.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    {server?.hasCredential ? "Held" : "Not set"}
+                  </span>
+                  <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                </ItemActions>
+              </Item>
+            ) : null}
+
+            {auth === "user-oauth" ? (
+              <>
+                <Item
+                  render={
+                    <button onClick={() => setDialog("client")} type="button" />
+                  }
+                  size="sm"
+                >
+                  <ItemMedia variant="icon">
+                    <IconKey className="size-4" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>OAuth client</ItemTitle>
+                    <ItemDescription>
+                      Identifies this deployment to the vendor. It reaches
+                      nobody's documents on its own.
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <span className="text-muted-foreground text-xs">
+                      {server?.hasCredential ? "Registered" : "Not registered"}
+                    </span>
+                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+                <Separator />
+                {/* Read-only: a value with no chevron, because there is nothing here to change. */}
+                <Item size="sm">
+                  <ItemMedia variant="icon">
+                    <IconServer className="size-4" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Redirect URI</ItemTitle>
+                    <ItemDescription className="line-clamp-none">
+                      Add this to the client's authorised redirect URIs at the
+                      vendor, exactly as written. A single wrong character fails
+                      there, with a message that does not mention OpenBot.
+                    </ItemDescription>
+                    <ItemFooter>
+                      {plugins.data?.redirectUri ? (
+                        <code className="block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
+                          {plugins.data.redirectUri}
+                        </code>
+                      ) : (
+                        <span className="text-destructive text-xs">
+                          This deployment has no public URL, so nobody can
+                          complete a consent flow. Set OPENBOT_PUBLIC_URL.
+                        </span>
+                      )}
+                    </ItemFooter>
+                  </ItemContent>
+                </Item>
+                <Separator />
+                <Item render={<Link to="/settings" />} size="sm">
+                  <ItemMedia variant="icon">
+                    <IconUserCheck className="size-4" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Your account</ItemTitle>
+                    <ItemDescription>
+                      Yours to grant and yours to withdraw, in Preferences.
+                      Nobody can connect it for you.
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <span className="text-muted-foreground text-xs">
+                      {youConnected ? "Connected" : "Not connected"}
+                    </span>
+                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              </>
+            ) : null}
+
+            {entry?.perInstance ? (
+              <>
+                <Separator />
+                <Item
+                  render={
+                    <button
+                      onClick={() => setDialog("instance")}
+                      type="button"
+                    />
+                  }
+                  size="sm"
+                >
+                  <ItemMedia variant="icon">
+                    <IconServer className="size-4" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Instance host</ItemTitle>
+                    <ItemDescription>
+                      This vendor gives every customer their own hostname,
+                      checked against its pattern before anything is stored.
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <span className="text-muted-foreground text-xs">
+                      {server?.url ?? "Not set"}
+                    </span>
+                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              </>
+            ) : null}
+
+            {entry?.docsUrl ? (
+              <>
+                <Separator />
+                <Item
+                  render={
+                    <a href={entry.docsUrl} rel="noreferrer" target="_blank" />
+                  }
+                  size="sm"
+                >
+                  <ItemMedia variant="icon">
+                    <IconBook className="size-4" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Vendor documentation</ItemTitle>
+                    <ItemDescription>
+                      What this server offers, from the people who maintain it.
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <IconExternalLink className="size-4 shrink-0 text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              </>
+            ) : null}
+          </PageRows>
+        </PageSection>
+      ) : null}
 
       {server ? (
         <PageSection
@@ -373,9 +411,9 @@ function RouteComponent() {
               {server.tools.map((tool, index) => (
                 <React.Fragment key={tool.ref}>
                   <Item size="sm">
-                    <RowMark>
+                    <ItemMedia variant="icon">
                       <IconTool className="size-4" />
-                    </RowMark>
+                    </ItemMedia>
                     <ItemContent>
                       <ItemTitle className="font-mono text-xs">
                         {tool.name}
@@ -433,35 +471,6 @@ function RouteComponent() {
               ))}
             </PageRows>
           )}
-        </PageSection>
-      ) : null}
-
-      {server ? (
-        <PageSection title="Remove">
-          <PageRows>
-            <Item size="sm">
-              <RowMark>
-                <IconTrash className="size-4" />
-              </RowMark>
-              <ItemContent>
-                <ItemTitle>Remove from this deployment</ItemTitle>
-                <ItemDescription>
-                  Every grant on its tools goes with it. Credentials stay in the
-                  vault, revoked, so the trail still says what was held.
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <Button
-                  onClick={() => remove.mutate(key)}
-                  size="sm"
-                  type="button"
-                  variant="destructive"
-                >
-                  Remove
-                </Button>
-              </ItemActions>
-            </Item>
-          </PageRows>
         </PageSection>
       ) : null}
 
