@@ -157,6 +157,7 @@ jobs:
             -e TRUSTED_ORIGINS=http://localhost:3001 \
             -e OPENBOT_DEV_NO_AUTH=1 \
             -e MANAGED_AGENT_AG_UI_URL=http://127.0.0.1:4201/ag-ui \
+            -e MANAGED_AGENT_TOKEN=ci-not-a-real-token \
             -e INTELLIGENCE_API_URL=https://api.intelligence.copilotkit.ai \
             -e INTELLIGENCE_GATEWAY_WS_URL=wss://realtime.intelligence.copilotkit.ai \
             -e INTELLIGENCE_API_KEY=ci-not-a-real-key \
