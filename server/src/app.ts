@@ -1,8 +1,15 @@
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { serveStatic } from "hono/bun";
+import { authoriseAgentCall } from "./agents/callback-token";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
-import { type AuditReader, type AuditStore, auditQueryFromUrl } from "./audit";
+import {
+  type AuditReader,
+  type AuditStore,
+  auditQueryFromUrl,
+  recordAuditEvent,
+} from "./audit";
 import { createDevRequireUser } from "./auth/dev-actor";
 import {
   type AppVariables,
@@ -22,15 +29,40 @@ import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
-import { authoriseAgentCall } from "./agents/callback-token";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { ConnectorAdminService } from "./connectors";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
-import { serveStatic } from "hono/bun";
+import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
-import { REFUSAL_MARKER } from "./plugins/tools";
 import type { PluginStore } from "./plugins/store";
+import { REFUSAL_MARKER } from "./plugins/tools";
 import type { PackageStatusReader } from "./tenant-package";
+
+/**
+ * One row for something an administrator did to somebody's access.
+ *
+ * The address is on the row rather than only the user id, because the id means nothing to a person
+ * reading the trail a year later and the user row may be gone by then.
+ */
+async function recordPersonEvent(
+  auditStore: AuditStore | undefined,
+  context: { var: AppVariables },
+  eventType:
+    | "person.role_changed"
+    | "person.access_revoked"
+    | "person.access_restored",
+  person: { id: string; email: string },
+  payload: Record<string, unknown>,
+) {
+  if (!auditStore) return;
+  await recordAuditEvent(auditStore, {
+    eventType,
+    targetType: "person",
+    targetId: person.id,
+    actorUserId: context.var.actor.id,
+    payload: { email: person.email, ...payload },
+  });
+}
 
 export function createApp(
   config: DeploymentConfig,
@@ -95,6 +127,14 @@ export function createApp(
    * says nothing about which deployment the conversation belongs to.
    */
   threadIdentity?: ThreadIdentity,
+  /**
+   * Who has signed in, and what an administrator may do about them.
+   *
+   * Absent leaves the people screen answering 503 rather than an empty list, which is the honest
+   * degraded behaviour: "nobody has signed in" and "this deployment cannot tell you" are different
+   * answers and an administrator deciding who has access needs to know which one they are reading.
+   */
+  peopleStore?: PeopleStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -162,6 +202,154 @@ export function createApp(
       await auditReader.list(auditQueryFromUrl(new URL(context.req.url))),
     );
   });
+  /*
+   * Who is here, and what they may do.
+   *
+   * Administrator-only, like every other route in this group. A plain user reading the list would
+   * learn every colleague's address and when they last signed in, which is not theirs to have.
+   */
+  app.get("/api/admin/people", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) {
+      return denied;
+    }
+    if (!peopleStore) {
+      return context.json({ error: "People are not available." }, 503);
+    }
+
+    return context.json({ people: await peopleStore.list() });
+  });
+
+  app.post("/api/admin/people/:userId/role", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) {
+      return denied;
+    }
+    if (!peopleStore) {
+      return context.json({ error: "People are not available." }, 503);
+    }
+
+    const body = await context.req.json().catch(() => null);
+    const role = (body as { role?: unknown } | null)?.role;
+    if (role !== "admin" && role !== "user") {
+      return context.json(
+        { error: "A role of admin or user is required." },
+        400,
+      );
+    }
+
+    const userId = context.req.param("userId");
+    const person = await peopleStore.find(userId);
+    if (!person) {
+      return context.json({ error: "That person is not here." }, 404);
+    }
+
+    /*
+     * The configured floor wins over the screen.
+     *
+     * Somebody named in INITIAL_ADMIN_EMAILS is promoted again at their next sign-in whatever this
+     * route writes, so allowing the demotion would produce a screen that lies until they come back.
+     * Refusing says the real thing: change the deployment's configuration.
+     */
+    if (person.configuredAdmin && role !== "admin") {
+      return context.json(
+        {
+          error:
+            "This deployment names that address in INITIAL_ADMIN_EMAILS, so they stay an administrator. Change the configuration instead.",
+        },
+        409,
+      );
+    }
+
+    /*
+     * Nobody demotes themselves.
+     *
+     * An administrator who does has just locked themselves out of the screen that would undo it,
+     * and on a deployment with one administrator that is the whole deployment. Somebody else with
+     * the role can do it, which is the check that makes handover possible without making lockout
+     * a slip of the finger.
+     */
+    if (context.var.actor.id === userId && role !== "admin") {
+      return context.json(
+        { error: "You cannot remove your own administrator role." },
+        409,
+      );
+    }
+
+    if (person.role !== role) {
+      await peopleStore.setRole(userId, role);
+      await recordPersonEvent(
+        auditStore,
+        context,
+        "person.role_changed",
+        person,
+        {
+          from: person.role,
+          to: role,
+        },
+      );
+    }
+
+    return context.json({ person: await peopleStore.find(userId) });
+  });
+
+  app.post("/api/admin/people/:userId/access", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) {
+      return denied;
+    }
+    if (!peopleStore) {
+      return context.json({ error: "People are not available." }, 503);
+    }
+
+    const body = await context.req.json().catch(() => null);
+    const revoked = (body as { revoked?: unknown } | null)?.revoked;
+    if (typeof revoked !== "boolean") {
+      return context.json({ error: "revoked must be true or false." }, 400);
+    }
+
+    const userId = context.req.param("userId");
+    const person = await peopleStore.find(userId);
+    if (!person) {
+      return context.json({ error: "That person is not here." }, 404);
+    }
+
+    // The same floor, for the same reason: removing somebody the configuration names would last
+    // until their next sign-in and no longer.
+    if (person.configuredAdmin && revoked) {
+      return context.json(
+        {
+          error:
+            "This deployment names that address in INITIAL_ADMIN_EMAILS, so they cannot be removed here. Change the configuration instead.",
+        },
+        409,
+      );
+    }
+
+    // Nobody can remove themselves. An administrator who does has locked themselves out of the
+    // screen that would undo it.
+    if (revoked && context.var.actor.id === userId) {
+      return context.json({ error: "You cannot remove your own access." }, 409);
+    }
+
+    if (person.revoked !== revoked) {
+      if (revoked) {
+        await peopleStore.revoke(userId, context.var.actor.id);
+      } else {
+        await peopleStore.restore(userId);
+      }
+      await recordPersonEvent(
+        auditStore,
+        context,
+        revoked ? "person.access_revoked" : "person.access_restored",
+        person,
+        {},
+      );
+    }
+
+    return context.json({ person: await peopleStore.find(userId) });
+  });
+
   app.get("/api/admin/credentials", requireUser, async (context) => {
     const denied = requireAdmin(context);
     if (denied) {

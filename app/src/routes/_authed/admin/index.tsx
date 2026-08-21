@@ -8,6 +8,7 @@ import {
   IconPlugConnected,
   IconPuzzle,
   IconShieldCheck,
+  IconUsers,
 } from "@tabler/icons-react";
 import {
   createFileRoute,
@@ -101,6 +102,19 @@ const SECTIONS: {
         description: "Write a component and watch it render as you type.",
         icon: IconCode,
         linkOptions: { to: "/admin/playground" },
+      },
+    ],
+  },
+  {
+    title: "Who can get in",
+    description: "",
+    items: [
+      {
+        title: "People",
+        description:
+          "Everybody who has signed in, who administers this deployment, and whose access has been removed.",
+        icon: IconUsers,
+        linkOptions: { to: "/admin/people" },
       },
     ],
   },

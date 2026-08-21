@@ -130,6 +130,25 @@ export const userRoles = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.role] })],
 );
 
+/**
+ * People an administrator has removed, by email address.
+ *
+ * Keyed on the address rather than the user id, because deleting the user row is not removal: the
+ * next sign-in through the identity provider creates it again, with a fresh id and no memory of
+ * having been removed. The address is the only thing that survives that.
+ *
+ * Lower-cased on the way in, since a provider is free to return whatever case it likes and two rows
+ * differing only in case would be one person with one of them enforced.
+ */
+export const revokedAccess = pgTable("revoked_access", {
+  email: text("email").primaryKey(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  /** Who did it, for the trail. Not a foreign key: an administrator may later be removed too. */
+  revokedBy: text("revoked_by").notNull(),
+});
+
 export const deploymentPackages = pgTable("deployment_packages", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: text("tenant_id").notNull().unique(),

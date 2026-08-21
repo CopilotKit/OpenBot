@@ -1,12 +1,25 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { genericOAuth, okta } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
 import { accounts, sessions, users, verifications } from "../db/schema";
 import { applyConfiguredAdmin, seedRole } from "./roles";
 
-export function createAuth(config: DeploymentConfig, database: Database) {
+export function createAuth(
+  config: DeploymentConfig,
+  database: Database,
+  /**
+   * Whether an administrator has removed this address.
+   *
+   * Checked here rather than only in the request guard, because a removed person whose sign-in
+   * still succeeds gets a session, a user row and a place in the list: the removal would read as
+   * having worked while quietly not having.
+   */
+  isRevoked?: (email: string) => Promise<boolean>,
+) {
   const authConfig = config.auth;
   if (!authConfig) {
     throw new Error("No identity provider is configured.");
@@ -62,6 +75,21 @@ export function createAuth(config: DeploymentConfig, database: Database) {
     databaseHooks: {
       user: {
         create: {
+          /*
+           * Refuse before the account exists.
+           *
+           * Somebody removed and then signing in again would otherwise arrive as a brand-new person
+           * with a fresh id, no role and no memory of having been removed, which is why the deny
+           * list is keyed on the address rather than the id.
+           */
+          before: async (user) => {
+            if (await isRevoked?.(user.email)) {
+              throw new APIError("FORBIDDEN", {
+                message: "Your access to this deployment has been removed.",
+              });
+            }
+            return { data: user };
+          },
           after: async (user) => {
             /*
              * Who is an administrator is decided by email, not by which provider signed them in. A
@@ -79,6 +107,23 @@ export function createAuth(config: DeploymentConfig, database: Database) {
       },
       session: {
         create: {
+          /*
+           * And again for somebody who already has an account. The user hook above only fires for a
+           * new one, so without this a removed person signs straight back in.
+           */
+          before: async (session) => {
+            const [user] = await database
+              .select({ email: users.email })
+              .from(users)
+              .where(eq(users.id, session.userId))
+              .limit(1);
+            if (user && (await isRevoked?.(user.email))) {
+              throw new APIError("FORBIDDEN", {
+                message: "Your access to this deployment has been removed.",
+              });
+            }
+            return { data: session };
+          },
           after: async (session) => {
             /*
              * The configured floor, re-applied on every sign-in. Editing the list has to mean

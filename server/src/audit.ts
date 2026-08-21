@@ -155,6 +155,16 @@ export const auditEventTypes = [
   "component.function_called",
   "component.function_refused",
   "component.function_failed",
+  /*
+   * Who may use this deployment, and at what level.
+   *
+   * On the trail rather than only in the table, because the table holds the current answer and this
+   * is the only place that says who changed it and when. "Why does this person have admin" and "who
+   * removed them" are questions a table of current state cannot answer at all.
+   */
+  "person.role_changed",
+  "person.access_revoked",
+  "person.access_restored",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

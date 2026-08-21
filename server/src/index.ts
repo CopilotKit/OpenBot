@@ -1,6 +1,6 @@
 import { serve } from "bun";
-import { createAgentProfileStore } from "./agents/profile-store";
 import { mintRunAssertion } from "./agents/callback-token";
+import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
@@ -13,9 +13,9 @@ import {
   startChannelActivityListener,
 } from "./channels/events";
 import { createChannelStore } from "./channels/routes";
+import { websocket as channelSocket } from "./channels/socket";
 import { createStallGuard } from "./channels/stall-guard";
 import { createThreadIdentity } from "./channels/thread-identity";
-import { websocket as channelSocket } from "./channels/socket";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
@@ -40,6 +40,7 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
 import { grantedTools } from "./plugins/tools";
 import {
@@ -156,7 +157,18 @@ const loadAgentsForActor = createRuntimeAgentLoader(database, agentVault, {
   token: config.managedAgentToken,
 });
 await synchronizeTenantPackage(database, tenantPackage);
-const auth = config.auth ? createAuth(config, database) : undefined;
+/*
+ * Built before `auth`, because the deny list is consulted during sign-in and the store is what
+ * holds it. It needs the administrator list too, so it can tell the screen which people the
+ * deployment's configuration has already decided about.
+ */
+const peopleStore = createPeopleStore(
+  database,
+  config.auth?.initialAdminEmails ?? [],
+);
+const auth = config.auth
+  ? createAuth(config, database, (email) => peopleStore.isRevoked(email))
+  : undefined;
 const computerProvider = config.computer
   ? createComputerProvider(config.computer)
   : undefined;
@@ -367,6 +379,8 @@ const app = createApp(
   sandboxedStore,
   // How a thread that has no channel is named, so the direct Bot chat is in the same namespace.
   threadIdentity,
+  // Who has signed in, and what an administrator may do about them.
+  peopleStore,
 );
 
 /**

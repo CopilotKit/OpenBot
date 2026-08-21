@@ -8,6 +8,7 @@ import {
   IconPlugConnected,
   IconPuzzle,
   IconShieldCheck,
+  IconUsers,
 } from "@tabler/icons-react";
 import { Link, type LinkOptions } from "@tanstack/react-router";
 import type * as React from "react";
@@ -83,6 +84,16 @@ const GROUPS: {
         title: "Playground",
         icon: IconCode,
         linkOptions: { to: "/admin/playground" },
+      },
+    ],
+  },
+  {
+    label: "Who can get in",
+    items: [
+      {
+        title: "People",
+        icon: IconUsers,
+        linkOptions: { to: "/admin/people" },
       },
     ],
   },

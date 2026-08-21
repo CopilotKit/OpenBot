@@ -28,6 +28,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   configured, because nothing else grants the role, and it is now a floor rather than a one-off:
   an address it names is made an administrator at every sign-in, so adding somebody to the list
   works even after they have already signed in.
+- **A People screen.** `/admin/people` lists everybody who has signed in, with the provider they came
+  through and when they were last here, and lets an administrator promote, demote, or remove
+  somebody. Removing ends the session they are using and stops the next sign-in, keyed on the
+  address so signing in again through the provider does not quietly create a new account. Every
+  change is on the audit trail. Somebody named in `INITIAL_ADMIN_EMAILS` cannot be demoted or
+  removed here, and nobody can do either to themselves.
 - **One container that runs the whole thing.** The root `Dockerfile` builds an image carrying the
   app, the API, a Bot computer, and optionally PostgreSQL, supervised together. Point `DATABASE_URL`
   at a database you already run and the built-in one never starts; leave it unset and the container
