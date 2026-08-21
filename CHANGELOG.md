@@ -116,6 +116,14 @@ Sessions survive and nobody signs in again.
   laptop `http://localhost` counts as one, so this never showed up in development; on a real
   address it does not, and the surface did nothing at all when you pressed send. No message, no
   error. Ids now come from an API with no such restriction.
+- **A Bot asked to be signed in, in words, and nothing happened.** Handing over the browser is a tool
+  call, and a sentence in the transcript is not one: "please sign in and let me know" leaves the
+  person with no wheel to take and the page where it was. Bots wrote that sentence anyway, and one
+  went further and asked for a username and password to be typed into a sign-in page nobody could
+  reach. The guidance now says that calling `computer_request_help` is what asking means, names the
+  sentences that are not it, and says the person cannot see the page at all until control is handed
+  over. Asked to file an issue on a site it was not signed in to, a Bot now offers the wheel on the
+  first attempt instead of the third.
 
 ### Changed
 

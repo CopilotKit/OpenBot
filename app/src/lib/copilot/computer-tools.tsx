@@ -494,7 +494,10 @@ export function ComputerTools() {
       "Ask the person to take control of your computer and do something you cannot: sign in, enter a " +
       "password or a one-time code, or clear a CAPTCHA. Say specifically what you need done. They " +
       "will drive the browser themselves and hand it back, and you carry on in the same session. " +
-      "Use this INSTEAD of giving up, and instead of ever asking them to type a password to you.",
+      "Use this INSTEAD of giving up, and instead of ever asking them to type a password to you. " +
+      "This call is the only thing that reaches them: until you make it they are not looking at the " +
+      "page and have no way to help, so saying you need them to sign in, or asking whether they would " +
+      "like to proceed, hands over nothing and leaves the page where it is.",
     parameters: z.object({
       reason: z
         .string()
