@@ -141,16 +141,146 @@ async function closeAndWait(context: BrowserContext): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, CLOSE_SETTLE_MS));
 }
 
+/**
+ * How many browsers one computer holds at once.
+ *
+ * There was no cap. A context was started the first time each Bot was used and kept, and the only
+ * things that dropped one were an explicit stop, a browser that had already died, and shutdown. A
+ * deployment where every employee has a Bot therefore trends toward one resident Chromium per
+ * employee in a single container, at a few hundred MB each, until the container is killed for memory
+ * and `page()` relaunches its way back to the same state.
+ *
+ * A cap rather than only an idle timeout, because the failure is concurrent breadth rather than age:
+ * fifty people using their Bots inside the same minute are fifty live browsers and none of them are
+ * idle. The least recently used is closed, which is the one whose Bot has been quiet longest.
+ *
+ * Closing is not losing anything. The profile is on disk, so a Bot whose browser was closed starts
+ * again where it left off, which is what `stop` already means here.
+ */
+const MAX_LIVE_BROWSERS = Number(process.env.COMPUTER_MAX_BROWSERS ?? 8);
+
+/**
+ * How long a browser may sit untouched before it is closed.
+ *
+ * The other half. A deployment under the cap still holds a browser per Bot that was used once last
+ * Tuesday, and that memory is doing nothing for anybody.
+ */
+const IDLE_TIMEOUT_MS = Number(
+  process.env.COMPUTER_BROWSER_IDLE_MS ?? 30 * 60_000,
+);
+
+/** How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`. */
+const IDLE_SWEEP_MS = 60_000;
+
+/**
+ * Which Bots' browsers to close, given what is running.
+ *
+ * Pure, and exported, because the rest of this module cannot be reached without launching a real
+ * Chromium: `createProfiles` owns the launch, so a test of "which one gets closed" would be a test
+ * of Playwright. The decision is the part with a wrong answer available, and this is it on its own.
+ *
+ * Least recently used first. That is the Bot that has been quiet longest, and closing it costs
+ * nothing but a relaunch: the profile is on disk, so its logins and its session survive.
+ */
+export function chooseEvictions(
+  running: Iterable<[string, { usedAt: number }]>,
+  max: number,
+): string[] {
+  const entries = [...running];
+  if (entries.length <= max) return [];
+
+  return entries
+    .sort(([, a], [, b]) => a.usedAt - b.usedAt)
+    .slice(0, entries.length - max)
+    .map(([botId]) => botId);
+}
+
+/**
+ * Which Bots' browsers have been sitting untouched.
+ *
+ * The other half of the answer. A deployment under the cap still holds a browser for a Bot used once
+ * last Tuesday, and that memory is doing nothing for anybody. A timeout of zero or less switches this
+ * off, so a deployment can keep browsers resident if it would rather.
+ */
+export function chooseIdle(
+  running: Iterable<[string, { usedAt: number }]>,
+  idleTimeoutMs: number,
+  now: number,
+): string[] {
+  if (idleTimeoutMs <= 0) return [];
+  const cutoff = now - idleTimeoutMs;
+
+  return [...running]
+    .filter(([, entry]) => entry.usedAt <= cutoff)
+    .map(([botId]) => botId);
+}
+
 export function createProfiles(root: string) {
-  /** One running browser per Bot. */
+  /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
   const live = new Map<
     string,
-    { context: BrowserContext; page: Page; startedAt: string }
+    {
+      context: BrowserContext;
+      page: Page;
+      startedAt: string;
+      /** When this Bot last asked for its page. Decides what the cap and the sweep close. */
+      usedAt: number;
+    }
   >();
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
 
   const directoryFor = (botId: string): string => join(root, botId);
+
+  /**
+   * Close one Bot's browser and forget it.
+   *
+   * Gracefully, so Chromium flushes the profile: the whole point of closing one is that the Bot's
+   * logins survive and its next request starts where it left off.
+   */
+  const evict = async (botId: string, reason: string): Promise<void> => {
+    const running = live.get(botId);
+    if (!running) return;
+    live.delete(botId);
+    console.info(
+      JSON.stringify({ type: "computer-browser-closed", botId, reason }),
+    );
+    await closeAndWait(running.context).catch(() => undefined);
+  };
+
+  /**
+   * Keep the number of running browsers under the cap.
+   *
+   * Least recently used first, which is the Bot that has been quiet longest. Called after a launch
+   * rather than before, so the Bot that just asked is never the one closed.
+   */
+  const enforceCap = async (): Promise<void> => {
+    for (const botId of chooseEvictions(live.entries(), MAX_LIVE_BROWSERS)) {
+      await evict(botId, "the cap on running browsers was reached");
+    }
+  };
+
+  /**
+   * Close browsers nothing has touched for a while.
+   *
+   * The cap answers concurrent breadth; this answers a Bot used once last Tuesday whose browser is
+   * still resident and doing nothing for anybody.
+   */
+  const sweepIdle = async (): Promise<void> => {
+    for (const botId of chooseIdle(
+      live.entries(),
+      IDLE_TIMEOUT_MS,
+      Date.now(),
+    )) {
+      await evict(botId, "it had been idle");
+    }
+  };
+
+  const idleSweep = setInterval(() => {
+    void sweepIdle().catch(() => undefined);
+  }, IDLE_SWEEP_MS);
+  // Housekeeping must not hold the process open on the way out.
+  idleSweep.unref?.();
 
   const sweepLocks = async (dir: string): Promise<void> => {
     await Promise.all(
@@ -181,6 +311,8 @@ export function createProfiles(root: string) {
         existing?.context.browser()?.isConnected() &&
         !existing.page.isClosed()
       ) {
+        // Touched on every use, which is what makes "least recently used" mean anything.
+        existing.usedAt = Date.now();
         return existing.page;
       }
       if (existing) {
@@ -210,7 +342,15 @@ export function createProfiles(root: string) {
         });
         // Persistent contexts open with a page already; reuse it rather than leaving an extra blank tab.
         const page = context.pages()[0] ?? (await context.newPage());
-        live.set(botId, { context, page, startedAt: new Date().toISOString() });
+        live.set(botId, {
+          context,
+          page,
+          startedAt: new Date().toISOString(),
+          usedAt: Date.now(),
+        });
+        // After the new one is in the map, so the cap counts what is really running and the Bot that
+        // just asked is the most recently used and therefore never the one closed.
+        await enforceCap();
         return page;
       })();
 
@@ -291,9 +431,25 @@ export function createProfiles(root: string) {
      * here gives Chromium the chance to flush its profile within that grace period.
      */
     async closeAll(): Promise<void> {
+      clearInterval(idleSweep);
       const contexts = [...live.values()];
       live.clear();
       await Promise.all(contexts.map((c) => closeAndWait(c.context)));
+    },
+
+    /** How many browsers are running. For the idle sweep's own tests, and for a status reader. */
+    liveCount(): number {
+      return live.size;
+    },
+
+    /** Whether this Bot has a browser right now, so a caller can drop state that belongs to one. */
+    isLive(botId: string): boolean {
+      return live.has(botId);
+    },
+
+    /** Run the idle sweep now. Exposed so a test does not have to wait a minute for the interval. */
+    sweepIdleNow(): Promise<void> {
+      return sweepIdle();
     },
   };
 }

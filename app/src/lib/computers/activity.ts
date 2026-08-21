@@ -69,6 +69,30 @@ export function activityFor(computerId: string): ComputerActivity[] {
   return byComputer.get(computerId) ?? NONE;
 }
 
+/**
+ * Whether this Bot has opened a page since the surface was loaded.
+ *
+ * The screen is a property of the computer and outlives a conversation: several Bots share one, and
+ * the profile keeps whatever page was last open. So a Bot that spends a whole conversation in a
+ * terminal still has a screen, showing somebody else's order form from an hour ago, and defaulting
+ * the pane to it captions a stale page as what this Bot is doing right now. That is worse than
+ * showing nothing, because it is confidently wrong.
+ *
+ * Recorded rather than inferred from the screenshot: a screenshot always succeeds, and "the browser
+ * has a page loaded" is a different fact from "this Bot opened one".
+ */
+const browsed = new Set<string>();
+
+export function noteBrowsed(computerId: string): void {
+  if (browsed.has(computerId)) return;
+  browsed.add(computerId);
+  for (const listener of listeners) listener();
+}
+
+export function hasBrowsed(computerId: string): boolean {
+  return browsed.has(computerId);
+}
+
 export function subscribeToActivity(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
@@ -84,5 +108,6 @@ export function subscribeToActivity(listener: () => void): () => void {
  */
 export function clearActivity(computerId: string): void {
   byComputer.delete(computerId);
+  browsed.delete(computerId);
   for (const listener of listeners) listener();
 }

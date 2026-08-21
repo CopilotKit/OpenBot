@@ -13,7 +13,11 @@ import { useNeedsYou } from "@/components/computer/needs-you";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { Button } from "@/components/ui/button";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
-import { activityFor, subscribeToActivity } from "@/lib/computers/activity";
+import {
+  activityFor,
+  hasBrowsed,
+  subscribeToActivity,
+} from "@/lib/computers/activity";
 import { onComputerActivity } from "@/lib/copilot/computer-activity";
 
 const chatSearchSchema = z.object({
@@ -53,26 +57,45 @@ function ComputerViewPanel({
   agentId: string;
   name?: string;
 }) {
-  const [showing, setShowing] = useState<"screen" | "activity">("screen");
   const activity = useSyncExternalStore(
     subscribeToActivity,
     () => activityFor(agentId),
     () => activityFor(agentId),
   );
+  const browsed = useSyncExternalStore(
+    subscribeToActivity,
+    () => hasBrowsed(agentId),
+    () => hasBrowsed(agentId),
+  );
+
+  /*
+   * Which surface opens, decided by what the Bot is actually doing.
+   *
+   * The screen belongs to the computer rather than to the conversation: Bots share one and the
+   * profile keeps whatever page was open last. A Bot that spends a whole conversation in a terminal
+   * therefore has a screen showing somebody else's page from an hour ago, and defaulting to it
+   * captions that as what this Bot is doing now.
+   *
+   * So the screen is the default until there is a reason to think otherwise, and work away from the
+   * browser with no page opened is that reason. Once somebody picks a tab, their choice stands.
+   */
+  const [chosen, setChosen] = useState<"screen" | "activity" | null>(null);
+  const showing =
+    chosen ?? (!browsed && activity.length > 0 ? "activity" : "screen");
 
   return (
     <div className="mt-4 px-4">
       <div className="p-4">
         <div className="mb-3 flex gap-2">
           <Button
-            onClick={() => setShowing("screen")}
+            onClick={() => setChosen("screen")}
             size="sm"
             variant={showing === "screen" ? "default" : "outline"}
           >
             Screen
           </Button>
           <Button
-            onClick={() => setShowing("activity")}
+            onClick={() => setChosen("activity")}
             size="sm"
             variant={showing === "activity" ? "default" : "outline"}
           >
@@ -92,8 +115,15 @@ function ComputerViewPanel({
         */}
         <div className={showing === "screen" ? undefined : "hidden"}>
           <ComputerView active computerId={agentId} />
-          <span className="mt-4 flex w-full items-center justify-center text-center text-muted-foreground text-sm">
-            {name || "Agent"}'s screen
+          {/*
+            The caption says whose page this is, and it is only this Bot's once it has opened one.
+            Before that the browser still shows whatever was last open on the shared computer, and
+            calling that "General Assistant's screen" states something untrue with confidence.
+          */}
+          <span className="mt-4 flex w-full items-center justify-center text-balance px-4 text-center text-muted-foreground text-sm">
+            {browsed
+              ? `${name || "Agent"}'s screen`
+              : `${name || "Agent"} has not opened a page in this conversation. This is whatever its computer had open last.`}
           </span>
         </div>
 

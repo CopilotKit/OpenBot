@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -20,8 +20,8 @@ import {
   type ChannelActivityEvent,
   type ChannelEventHub,
 } from "./events";
-import type { ThreadIdentity } from "./thread-identity";
 import { upgradeWebSocket } from "./socket";
+import type { ThreadIdentity } from "./thread-identity";
 
 export type AgentChannel = {
   id: string;
@@ -47,10 +47,56 @@ export type ChannelActivity = {
   at: Date;
 };
 
+/** One page of somebody's channels, newest activity first. */
+export type ChannelPage = {
+  channels: ChannelSummary[];
+  /** Where the next page starts, or null at the end. */
+  nextCursor: string | null;
+};
+
+export type ChannelQuery = { cursor?: string; limit?: number };
+
+/**
+ * How many channels one page holds.
+ *
+ * The sidebar asked for all of them on every render, one row per channel-agent pair, and nothing
+ * removes a channel: somebody who talks to their Bot daily accumulates thousands, so a query that is
+ * instant in a demo returns thousands of rows on every page load for every employee, and grows
+ * monotonically. A page is what a sidebar can show anyway.
+ */
+const DEFAULT_CHANNEL_PAGE = 50;
+
+/** The most a caller may ask for, so the endpoint cannot be talked back into reading everything. */
+const MAX_CHANNEL_PAGE = 200;
+
+/** Where a page stopped: both halves of the sort, since two channels can share a timestamp. */
+type ChannelCursor = { recency: string; id: string };
+
+function encodeChannelCursor(cursor: ChannelCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+/** A malformed cursor reads as the first page, which is the honest answer to a stale link. */
+function decodeChannelCursor(
+  value: string | undefined,
+): ChannelCursor | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as ChannelCursor;
+    return typeof parsed?.id === "string" && typeof parsed?.recency === "string"
+      ? parsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export type ChannelStore = {
   create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
   get(actor: AgentActor, channelId: string): Promise<AgentChannel | null>;
-  list(actor: AgentActor): Promise<ChannelSummary[]>;
+  list(actor: AgentActor, query?: ChannelQuery): Promise<ChannelPage>;
   recordActivity(
     actor: AgentActor,
     channelId: string,
@@ -192,7 +238,57 @@ export function createChannelStore(
       };
     },
 
-    async list(actor) {
+    async list(actor, query = {}) {
+      const limit = Math.min(
+        Math.max(query.limit ?? DEFAULT_CHANNEL_PAGE, 1),
+        MAX_CHANNEL_PAGE,
+      );
+      const cursor = decodeChannelCursor(query.cursor);
+
+      /*
+       * The page of channels is chosen first, and the agents are joined to that page.
+       *
+       * The row set below is one row per channel-agent pair, so a limit on rows would cut a channel
+       * in half: its second Bot would arrive on the next page as a separate entry with the same id.
+       * Limiting the channels and then joining keeps a channel whole whatever it holds.
+       */
+      const page = await database
+        .select({
+          id: channels.id,
+          recency: sql<Date>`coalesce(${channels.lastMessageAt}, ${channels.createdAt})`,
+        })
+        .from(channels)
+        .innerJoin(
+          channelMemberships,
+          and(
+            eq(channelMemberships.channelId, channels.id),
+            eq(channelMemberships.userId, actor.id),
+          ),
+        )
+        .where(
+          cursor
+            ? sql`(coalesce(${channels.lastMessageAt}, ${channels.createdAt}), ${channels.id}) < (${cursor.recency}::timestamptz, ${cursor.id})`
+            : undefined,
+        )
+        .orderBy(
+          sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt}) desc`,
+          desc(channels.id),
+        )
+        // One more than asked for, so "is there another page" needs no second count query.
+        .limit(limit + 1);
+
+      const wanted = page.slice(0, limit);
+      const last = wanted.at(-1);
+      const nextCursor =
+        page.length > limit && last
+          ? encodeChannelCursor({
+              recency: new Date(last.recency).toISOString(),
+              id: last.id,
+            })
+          : null;
+
+      if (wanted.length === 0) return { channels: [], nextCursor: null };
+
       const rows = await database
         .select({
           id: channels.id,
@@ -230,9 +326,15 @@ export function createChannelStore(
         //
         // The browser repeats this when the socket patches a row. Both must agree, or the list
         // reorders itself on the next event; see `byRecency` in use-channel-events.ts.
+        .where(
+          inArray(
+            channels.id,
+            wanted.map((row) => row.id),
+          ),
+        )
         .orderBy(
           sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt}) desc`,
-          asc(channels.id),
+          desc(channels.id),
           asc(channelAgents.agentId),
         );
 
@@ -258,7 +360,7 @@ export function createChannelStore(
           createdAt: row.createdAt,
         });
       }
-      return [...summaries.values()];
+      return { channels: [...summaries.values()], nextCursor };
     },
 
     recordActivity(actor, channelId, activity) {
@@ -469,8 +571,19 @@ export function createChannelRoutes(
 
   routes.get("/", requireUser, async (context) => {
     try {
-      const channels = await store.list(context.var.actor);
-      return context.json({ channels: channels.map(channelSummaryDto) });
+      const url = new URL(context.req.url);
+      const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      const page = await store.list(context.var.actor, {
+        ...(url.searchParams.get("cursor")
+          ? { cursor: url.searchParams.get("cursor") as string }
+          : {}),
+        ...(Number.isFinite(limit) ? { limit } : {}),
+      });
+
+      return context.json({
+        channels: page.channels.map(channelSummaryDto),
+        nextCursor: page.nextCursor,
+      });
     } catch (error) {
       return mapStoreError(context, error);
     }

@@ -17,12 +17,12 @@ import {
   type Screencast,
   startScreencast,
 } from "./screencast";
+import { createShell } from "./shell";
 import {
   createWorkspace,
   WorkspaceFileError,
   WorkspacePathError,
 } from "./workspace";
-import { createShell } from "./shell";
 
 /**
  * The Bot's computer: one long-lived browser, reachable over HTTP.
@@ -122,11 +122,32 @@ type BotSession = {
 
 const sessions = new Map<string, BotSession>();
 
+/**
+ * Forget the sessions of Bots whose browsers are no longer running.
+ *
+ * The map gained an entry per Bot id this process had ever seen and lost none, so a deployment where
+ * every employee has a Bot accumulated one small object per employee for the life of the container.
+ * Small, but unbounded, which is the same shape as the browsers themselves.
+ *
+ * Only entries with no live browser and nobody watching are dropped: the state is the generation
+ * counter and the control handover, and both belong to a running browser. A Bot whose browser has
+ * been closed starts a fresh session next time, which is what starting a fresh browser means.
+ */
+function forgetIdleSessions(): void {
+  for (const [botId, session] of [...sessions.entries()]) {
+    if (session.viewer) continue;
+    if (profiles.isLive(botId)) continue;
+    sessions.delete(botId);
+  }
+}
+
 function sessionFor(botId: string): BotSession {
   const existing = sessions.get(botId);
   if (existing) return existing;
   const created: BotSession = { control: createControl(), snapshotId: 0 };
   sessions.set(botId, created);
+  // Cheap, and only ever on the path that adds one, so the map cannot grow without this running.
+  if (sessions.size > 32) forgetIdleSessions();
   return created;
 }
 

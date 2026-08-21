@@ -4,7 +4,7 @@ import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
 import { tryClient } from "@/lib/client";
-import { recordActivity } from "@/lib/computers/activity";
+import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
 import { type ControlState, readControl } from "@/lib/computers/control";
 import { useActiveBotHolder } from "./active-bot";
 import { reportComputerActivity } from "./computer-activity";
@@ -244,8 +244,9 @@ export function ComputerTools() {
       // Context is optional in the SDK.
       { signal }: { signal?: AbortSignal } = {},
     ) => {
+      const computerId = bot.current;
       const result = await callComputer(
-        bot.current,
+        computerId,
         "/navigate",
         {
           method: "POST",
@@ -253,6 +254,14 @@ export function ComputerTools() {
         },
         signal,
       );
+      /*
+       * This Bot has a page of its own now, so the pane may default to the screen.
+       *
+       * Until it does, the screen shows whatever the shared computer had open last, which may be
+       * another Bot's page from an hour ago. Captioning that as this Bot's screen is confidently
+       * wrong, and worse than showing nothing.
+       */
+      if (result.ok) noteBrowsed(computerId);
       return result.ok
         ? {
             ok: true,
