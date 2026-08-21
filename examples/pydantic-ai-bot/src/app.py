@@ -14,15 +14,11 @@ contract as ``agent-bot``, the LangGraph example, and the Mastra example, in a t
 import os
 
 from pydantic_ai import Agent
+from pydantic_ai.ui.ag_ui import AGUIAdapter
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
-
-try:  # pydantic-ai moved the AG-UI helpers under `ui` in later releases.
-    from pydantic_ai.ui.ag_ui import handle_ag_ui_request
-except ImportError:  # earlier layout
-    from pydantic_ai.ag_ui import handle_ag_ui_request
 
 MODEL = os.environ.get("BOT_MODEL", "gpt-4.1")
 
@@ -46,13 +42,13 @@ agent = Agent(
 async def ag_ui(request: Request) -> Response:
     """One POST carrying a ``RunAgentInput``, a stream of AG-UI events back.
 
-    Pydantic AI reads the run input, exposes ``input.tools`` to the model as external tools, runs the
-    agent, and streams AG-UI events as Server-Sent Events. The tool loop stays on the client, exactly
-    as it does for the Bot in the box: a tool call is emitted, this run ends, and OpenBot executes it
-    through the policy gateway before starting the next run with the result. That is why this file can
-    drive a browser it has no access to.
+    ``AGUIAdapter.dispatch_request`` reads the run input, exposes ``input.tools`` to the model as
+    external (frontend) tools, runs the agent, and returns a streaming AG-UI Server-Sent-Events
+    response. The tool loop stays on the client, exactly as it does for the Bot in the box: a tool
+    call is emitted, this run ends, and OpenBot executes it through the policy gateway before starting
+    the next run with the result. That is why this file can drive a browser it has no access to.
     """
-    return await handle_ag_ui_request(agent, request)
+    return await AGUIAdapter.dispatch_request(request, agent=agent)
 
 
 async def health(_: Request) -> Response:

@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "An example OpenBot Bot written in Pydantic AI, served over AG-UI."
 requires-python = ">=3.10"
 dependencies = [
-    "pydantic-ai[ag-ui]>=0.4",
+    "pydantic-ai[ag-ui]>=2.33",
     "starlette>=0.37",
     "uvicorn>=0.30",
 ]
