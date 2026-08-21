@@ -46,6 +46,20 @@ All four Intelligence values are required together. Missing any of them stops se
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
 | `BOT_MODEL`          | provider default from Bot code/env | Model used by the shipped Bots.                                     |
 | `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
+| `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it. |
+| `AGENT_TOOL_TOKEN`   | unset                              | The secret a framework Bot presents when it calls a granted tool back through this server. |
+| `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
+
+**`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
+show: a stream that stops producing anything. Every other audit row is something that happened, and
+this one is the absence of anything happening, which leaves no trace of its own. Ending the turn
+writes `agent.stream_stalled`. Unset or `0` switches it off and nothing is watched. `.env.example`
+ships `60000`, so a new clone has it on and an upgraded deployment does not acquire it unasked.
+
+**`AGENT_TOOL_TOKEN`** exists because a framework Bot runs its own loop in its own process and still
+may not reach a vendor directly. It calls the deployment that granted the tool, which is where the
+grant, the policy and the audit row live. Absent, no Bot may call tools back, and it is told so
+rather than quietly allowed.
 
 ## OpenAI-compatible endpoints
 

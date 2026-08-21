@@ -315,6 +315,8 @@ Use `bash scripts/start.sh` for the whole stack. Use `bun run dev` only when you
 - [docs/configuration.md](docs/configuration.md)
 - [docs/development.md](docs/development.md)
 - [docs/coworkers.md](docs/coworkers.md)
+- [docs/deployment.md](docs/deployment.md)
+- [docs/releasing.md](docs/releasing.md)
 
 ## Contributing
 
