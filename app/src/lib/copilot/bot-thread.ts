@@ -144,10 +144,16 @@ export function useBotThread(agentId: string): BotThread {
   // Shared between the effect's own resolution mint and `startNew`'s mint so the two can never
   // race each other into two POST /mint calls fighting over the same localStorage slot.
   const mintingRef = useRef(false);
+  // Set once `startNew` has taken over, so the mount-time check that is still in flight does not
+  // then overwrite the fresh thread with the remembered one. `checkKnown` is a read, not a mint, so
+  // `mintingRef` is clear while it runs and would not have stopped `startNew` starting during it.
+  const startedNewRef = useRef(false);
 
   useEffect(() => {
     let current = true;
     mountedRef.current = true;
+    // A new agent resolves from scratch, so any earlier `startNew` no longer speaks for this one.
+    startedNewRef.current = false;
     setThreadId(undefined);
     setHistory("ready");
 
@@ -172,7 +178,10 @@ export function useBotThread(agentId: string): BotThread {
       adoptFresh();
     } else {
       void checkKnown(existing).then((outcome) => {
-        if (!current) return;
+        // `startedNewRef` as well as `current`: the agent may have changed (which `current` catches),
+        // or the person may have pressed New chat while this check was in flight, and a check about
+        // the thread they just left must not put it back.
+        if (!current || startedNewRef.current) return;
         const decision = threadToUse({
           remembered: existing,
           known: outcome.known,
@@ -195,6 +204,8 @@ export function useBotThread(agentId: string): BotThread {
   const startNew = useCallback(() => {
     if (mintingRef.current) return;
     mintingRef.current = true;
+    // From here the mount-time check must not touch the thread: the person has asked for a new one.
+    startedNewRef.current = true;
     void mint().then((minted) => {
       mintingRef.current = false;
       if (!mountedRef.current) return;
