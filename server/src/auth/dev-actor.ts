@@ -6,14 +6,16 @@ import type { AppVariables, AuthenticatedActor } from "./guards";
 /**
  * A signed-in person, without signing in.
  *
- * A clone with no identity provider configured is one administrator, so `bun run dev` reaches the
- * product without registering an OAuth client first. That is the whole point of it: nobody should
- * have to set up Entra to look at a Bot.
+ * A deployment with no identity provider is one administrator and no sign-in, so `bun run dev`
+ * reaches the product without registering an OAuth client first. Nobody should have to set up Entra
+ * to look at a Bot. `.env.example` ships that line switched on, so a clone still runs with no
+ * configuration at all.
  *
- * The lock is `NODE_ENV`, not a flag. Somewhere reachable by other people, an unconfigured
- * deployment refuses to start and names what to configure, because a public URL where every visitor
- * is an administrator is the failure this exists to prevent, and it is silent: it looks like it
- * works. `OPENBOT_SINGLE_USER=true` is how somebody says they meant it anyway.
+ * The lock is the flag and nothing else. It used to be `NODE_ENV`, which is exactly backwards:
+ * `NODE_ENV` is unset by default, so the one case it had to catch was the one it let through. A
+ * container run on a VM with a hand-written env file and no provider served every visitor on the
+ * internet as an administrator, and said nothing, because it looked like it was working. Now the
+ * deployment refuses to start unless somebody wrote down that they meant it.
  *
  * The actor is an administrator so admin surfaces can be reached too, and its id is fixed so
  * Intelligence threads and memory stay attached to the same person across restarts.
@@ -68,20 +70,18 @@ export function singleUserEnabled(
 ): boolean {
   if (hasProvider) return false;
 
-  // Said explicitly, which is the only way to run open where other people can reach it.
+  // Said explicitly, which is the only way to run with no sign-in at all. Not a default, and not
+  // inferred from anything: every signal that could stand in for "this is only my laptop" is absent
+  // by default on a server too, which is what made the previous NODE_ENV check useless.
   const asked =
     environment.OPENBOT_SINGLE_USER?.trim() === "true" ||
     // The name this had before. Still honoured so an existing .env keeps working.
     environment.OPENBOT_DEV_NO_AUTH?.trim() === "true";
   if (asked) return true;
 
-  if (environment.NODE_ENV === "production") {
-    throw new Error(
-      "No identity provider is configured. Set GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or set OPENBOT_SINGLE_USER=true to run with one administrator and no sign-in. Refusing to start rather than serving an open deployment.",
-    );
-  }
-
-  return true;
+  throw new Error(
+    "No identity provider is configured. Set GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or set OPENBOT_SINGLE_USER=true to run with one administrator and no sign-in. Refusing to start rather than serving a deployment where every visitor is an administrator.",
+  );
 }
 
 /** A guard that admits everybody as {@link DEV_ACTOR}. Only ever mounted when singleUserEnabled(). */

@@ -56,7 +56,7 @@ describe("deployment configuration", () => {
     expect(config.tenantPackageDirectory).toBe("../examples/fintech");
   });
 
-  test("allows deployment without an authentication provider", () => {
+  test("allows deployment without an authentication provider, when asked to", () => {
     const config = loadConfig({
       DATABASE_URL: baseEnvironment.DATABASE_URL,
       KEY_ENCRYPTION_KEY: baseEnvironment.KEY_ENCRYPTION_KEY,
@@ -66,6 +66,9 @@ describe("deployment configuration", () => {
       COPILOTKIT_LICENSE_TOKEN: baseEnvironment.COPILOTKIT_LICENSE_TOKEN,
       MANAGED_AGENT_AG_UI_URL: baseEnvironment.MANAGED_AGENT_AG_UI_URL,
       MANAGED_AGENT_TOKEN: baseEnvironment.MANAGED_AGENT_TOKEN,
+      // Explicit, because no provider means every visitor is the administrator and a deployment has
+      // to say it meant that. See single-user.test.ts.
+      OPENBOT_SINGLE_USER: "true",
     });
 
     expect(config.auth).toBeUndefined();
@@ -185,6 +188,9 @@ describe("deployment configuration", () => {
     INITIAL_ADMIN_EMAILS: "admin@openbot.test",
   };
 
+  /** What a deployment with no provider has to say before it is allowed to come up. */
+  const OPEN = { OPENBOT_SINGLE_USER: "true" };
+
   test("enables Microsoft, and admits any account until told a directory", () => {
     const config = loadConfig({
       ...withoutSignIn,
@@ -289,13 +295,22 @@ describe("deployment configuration", () => {
   });
 
   test("asks for no administrator when nothing signs anybody in", () => {
-    // One administrator either way, and no list to write. Requiring one here would mean a fresh
-    // clone could not start.
-    expect(() => loadConfig(withoutSignIn)).not.toThrow();
+    // One administrator either way, and no list to write. Requiring one here as well would mean a
+    // deployment had to name an administrator for a mode that has exactly one.
+    expect(() => loadConfig({ ...withoutSignIn, ...OPEN })).not.toThrow();
+  });
+
+  test("refuses to start with no provider and nothing saying that was meant", () => {
+    // The whole of the sign-in story in one line. This used to come up open, and `NODE_ENV` was the
+    // only thing standing between a bare-VM deployment and serving every visitor as an
+    // administrator, which is unset by default on exactly that deployment.
+    expect(() => loadConfig(withoutSignIn)).toThrow(
+      "No identity provider is configured",
+    );
   });
 
   test("is off, and lists nothing, when no provider is configured", () => {
-    const config = loadConfig(withoutSignIn);
+    const config = loadConfig({ ...withoutSignIn, ...OPEN });
 
     expect(config.auth).toBeUndefined();
     expect(configuredAuthProviders(config.auth)).toEqual([]);

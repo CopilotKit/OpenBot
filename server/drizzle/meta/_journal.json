@@ -33,8 +33,8 @@
     {
       "idx": 4,
       "version": "7",
-      "when": 1787275307878,
-      "tag": "0004_account_issuer_required",
+      "when": 1787324562029,
+      "tag": "0004_identity_provider_outlives_its_registrar",
       "breakpoints": true
     }
   ]

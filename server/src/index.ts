@@ -8,6 +8,7 @@ import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
+import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import type { OpenBotRole } from "./auth/roles";
 import {
   createChannelEventHub,
@@ -41,7 +42,6 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
-import { ssoProviders } from "./db/schema";
 import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
 import { grantedTools } from "./plugins/tools";
@@ -168,8 +168,19 @@ const peopleStore = createPeopleStore(
   database,
   config.auth?.initialAdminEmails ?? [],
 );
+const identityProviderStore = createIdentityProviderStore(database);
+/*
+ * Built before `auth` for the same reason the people store is: sign-in writes to the trail, and the
+ * store that receives those rows has to exist before anything can sign in.
+ */
+const signInAuditStore = createAuditStore(database);
 const auth = config.auth
-  ? createAuth(config, database, (email) => peopleStore.isRevoked(email))
+  ? createAuth(
+      config,
+      database,
+      (email) => peopleStore.isRevoked(email),
+      signInAuditStore,
+    )
   : undefined;
 const computerProvider = config.computer
   ? createComputerProvider(config.computer)
@@ -383,13 +394,9 @@ const app = createApp(
   threadIdentity,
   // Who has signed in, and what an administrator may do about them.
   peopleStore,
-  // Whether the sign-in screen should offer the email box that routes by domain.
-  async () => {
-    const [row] = await database
-      .select({ count: sql<number>`count(*)::int` })
-      .from(ssoProviders);
-    return row?.count ?? 0;
-  },
+  // The enterprise identity providers registered here. Read as facts about the deployment rather
+  // than through Better Auth's own listing, which answers per person. See identity-provider-store.ts.
+  identityProviderStore,
 );
 
 /**

@@ -79,11 +79,17 @@ export const accounts = pgTable(
      *
      * Required by Better Auth from 1.7. A real OIDC provider supplies its own
      * (`https://accounts.google.com`), and one without gets a synthetic
-     * `local:oauth:<providerId>`, so the column is never empty. It exists because `providerId`
-     * alone stopped being enough once a deployment can register more than one OIDC provider: two
-     * companies' Okta tenants are both "okta" and are not the same directory.
+     * `local:oauth:<providerId>`, so nothing this deployment writes leaves it empty. It exists
+     * because `providerId` alone stopped being enough once a deployment can register more than one
+     * OIDC provider: two companies' Okta tenants are both "okta" and are not the same directory.
+     *
+     * Nullable in the database, deliberately, even though every write fills it. A rolling deploy runs
+     * the migrations and then serves from old and new replicas at once, and an old replica inserts an
+     * account without this column. Under `NOT NULL` that insert fails, so the release that adds the
+     * column would break the first sign-in of everybody who landed on a replica that had not been
+     * replaced yet. The constraint belongs to a later release, once no replica predates the column.
      */
-    issuer: text("issuer").notNull(),
+    issuer: text("issuer"),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -149,7 +155,18 @@ export const ssoProviders = pgTable("sso_providers", {
   issuer: text("issuer").notNull(),
   oidcConfig: text("oidc_config"),
   samlConfig: text("saml_config"),
-  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  /**
+   * Who registered it, as a note rather than as an owner.
+   *
+   * Better Auth writes this and then scopes its own listing and delete routes to it, which is the
+   * right model for a personal integration and the wrong one here: a company's Okta tenant does not
+   * belong to whichever administrator pasted the metadata in. Reads and removals go through
+   * identity-provider-store.ts instead, against the whole table.
+   *
+   * `set null` and not `cascade`. Under cascade, removing the person who set sign-in up deleted the
+   * deployment's sign-in with them, which is a bad afternoon for a company whose IT lead has left.
+   */
+  userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
   providerId: text("provider_id").notNull().unique(),
   organizationId: text("organization_id"),
   domain: text("domain").notNull(),

@@ -125,16 +125,33 @@ describe("setRole", () => {
  * to whoever administers the deployment, and a sign-in that rewrote it would make that screen lie
  * the moment they came back.
  */
-function databaseWithUser(email: string | null): {
+function databaseWithUser(
+  email: string | null,
+  /**
+   * Whether this person is already an administrator.
+   *
+   * `applyConfiguredAdmin` reads it so it can answer whether this sign-in is what granted the role.
+   * The caller writes an audit row when it did, and a returning administrator must not produce one
+   * on every sign-in.
+   */
+  alreadyAdmin = false,
+): {
   database: Database;
   written: string[];
 } {
   const written: string[] = [];
   const database = {
-    select: () => ({
+    // Two different reads go through here: the user's address, and whether they already hold the
+    // role. Told apart by the projection, because that is the only thing the double can see.
+    select: (projection?: Record<string, unknown>) => ({
       from: () => ({
         where: () => ({
-          limit: async () => (email === null ? [] : [{ email }]),
+          limit: async () => {
+            if (projection && "role" in projection) {
+              return alreadyAdmin ? [{ role: "admin" }] : [];
+            }
+            return email === null ? [] : [{ email }];
+          },
         }),
       }),
     }),
@@ -163,6 +180,44 @@ describe("applyConfiguredAdmin", () => {
     await applyConfiguredAdmin(database, "u1", ["admin@openbot.test"]);
 
     expect(written).toEqual(["admin"]);
+  });
+
+  /*
+   * Whether this sign-in is what granted the role.
+   *
+   * The floor is re-applied silently on every sign-in, which meant anybody who could edit
+   * `INITIAL_ADMIN_EMAILS` made themselves an administrator with nothing anywhere recording it. The
+   * caller writes the audit row, and it needs to know which sign-in did it, or every sign-in by
+   * every administrator would produce one and the row would say nothing.
+   */
+  test("says so when this sign-in is what granted the role", async () => {
+    const { database } = databaseWithUser("admin@openbot.test");
+
+    expect(
+      await applyConfiguredAdmin(database, "u1", ["admin@openbot.test"]),
+    ).toBe(true);
+  });
+
+  test("says nothing when they were already an administrator", async () => {
+    const { database } = databaseWithUser("admin@openbot.test", true);
+
+    expect(
+      await applyConfiguredAdmin(database, "u1", ["admin@openbot.test"]),
+    ).toBe(false);
+  });
+
+  test("says nothing for somebody the configuration does not name", async () => {
+    const { database } = databaseWithUser("member@openbot.test");
+
+    expect(
+      await applyConfiguredAdmin(database, "u1", ["admin@openbot.test"]),
+    ).toBe(false);
+  });
+
+  test("says nothing when nothing is configured", async () => {
+    const { database } = databaseWithUser("admin@openbot.test");
+
+    expect(await applyConfiguredAdmin(database, "u1", [])).toBe(false);
   });
 
   /**

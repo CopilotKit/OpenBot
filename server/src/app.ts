@@ -18,6 +18,7 @@ import {
   type RoleRepository,
   requireAdmin,
 } from "./auth/guards";
+import type { IdentityProviderStore } from "./auth/identity-provider-store";
 import type { ChannelEventHub } from "./channels/events";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
@@ -136,12 +137,13 @@ export function createApp(
    */
   peopleStore?: PeopleStore,
   /**
-   * How many enterprise identity providers are registered.
+   * The enterprise identity providers this deployment has registered.
    *
-   * A count rather than the store, because the only question anybody outside Better Auth asks is
-   * whether the sign-in screen should offer the email box at all.
+   * Read here rather than through Better Auth's own listing route, which scopes to the person asking:
+   * a company's Okta tenant belongs to the deployment, not to whichever administrator pasted the
+   * metadata in. See identity-provider-store.ts.
    */
-  ssoProviderCount?: () => Promise<number>,
+  identityProviders?: IdentityProviderStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -171,7 +173,7 @@ export function createApp(
        * that routes by domain; naming the providers would tell anybody who loads the page which
        * companies use this deployment, which is not theirs to have before they sign in.
        */
-      ssoConfigured: (await ssoProviderCount?.()) ? true : false,
+      ssoConfigured: ((await identityProviders?.list()) ?? []).length > 0,
     }),
   );
   /*
@@ -395,6 +397,73 @@ export function createApp(
 
     return context.json({ person: await peopleStore.find(userId) });
   });
+
+  /*
+   * The identity providers this deployment has registered.
+   *
+   * Not Better Auth's own `GET /sso/providers`, which answers with the ones the person asking
+   * registered themselves. Two administrators therefore saw two different deployments: the second
+   * one to open this screen found it empty and registered a provider that was already there. What is
+   * registered is a fact about the deployment, so every administrator sees the same list.
+   */
+  app.get("/api/admin/identity-providers", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) {
+      return denied;
+    }
+    if (!identityProviders) {
+      return context.json(
+        { error: "Identity providers are not available." },
+        503,
+      );
+    }
+
+    return context.json({ providers: await identityProviders.list() });
+  });
+
+  /*
+   * Remove one.
+   *
+   * Ours rather than Better Auth's `delete-provider`, which refuses unless the person asking is the
+   * one who registered it. That leaves a provider nobody can remove as soon as the administrator who
+   * set it up has left, which is the same moment somebody most needs to.
+   */
+  app.delete(
+    "/api/admin/identity-providers/:providerId",
+    requireUser,
+    async (context) => {
+      const denied = requireAdmin(context);
+      if (denied) {
+        return denied;
+      }
+      if (!identityProviders) {
+        return context.json(
+          { error: "Identity providers are not available." },
+          503,
+        );
+      }
+
+      const providerId = context.req.param("providerId");
+      const removed = await identityProviders.remove(providerId);
+      if (!removed) {
+        // A screen somebody left open, or two administrators removing the same one. Saying so beats
+        // reporting success for something that was not there.
+        return context.json({ error: "There is no such provider." }, 404);
+      }
+
+      if (auditStore) {
+        await recordAuditEvent(auditStore, {
+          eventType: "identity_provider.removed",
+          targetType: "identity_provider",
+          targetId: providerId,
+          actorUserId: context.var.actor.id,
+          payload: { removedBy: context.var.actor.email },
+        });
+      }
+
+      return context.json({ removed: true });
+    },
+  );
 
   app.get("/api/admin/credentials", requireUser, async (context) => {
     const denied = requireAdmin(context);

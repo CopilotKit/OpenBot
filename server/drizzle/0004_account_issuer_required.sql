@@ -1,1 +1,0 @@
-ALTER TABLE "accounts" ALTER COLUMN "issuer" SET NOT NULL;
