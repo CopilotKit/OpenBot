@@ -61,8 +61,21 @@ export const mcpServers = pgTable("mcp_servers", {
    *
    * A pointer rather than the secret: the vault owns encryption, rotation and revocation, and a
    * second copy of a token here would be a second thing to remember to revoke.
+   *
+   * A REAL foreign key, where this was `text` against a `uuid` primary key with none. That is not a
+   * typing nicety. The database was willing to hold a pointer to a credential row that did not
+   * exist, and it did: a test deleted the credential an administrator had registered and left this
+   * column addressing nothing, so the connector reported "no OAuth client registered yet" while the
+   * row still looked configured. Nothing caught it because nothing was checking.
+   *
+   * `restrict`, not `cascade` or `set null`. A credential this server points at should not be
+   * removable out from under it — the two legitimate ways to change it are replacing it, which
+   * repoints this column first, and removing the server, which takes the row with it. Anything else
+   * is a mistake, and should be refused rather than silently tidied into a working-looking state.
    */
-  credentialId: text("credential_id"),
+  credentialId: uuid("credential_id").references(() => credentials.id, {
+    onDelete: "restrict",
+  }),
   /** What the deployment last heard back from it. `null` until the first successful listing. */
   toolsRefreshedAt: timestamp("tools_refreshed_at", { withTimezone: true }),
   /** The last failure, kept so the Plugins page can say why a server has no tools. */

@@ -130,9 +130,27 @@ function normalize(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * What else has to be retired when somebody is removed.
+ *
+ * A seam rather than an import, because this module has no business knowing what a connector is —
+ * and because the list of things a person owns will grow. It exists at all because removing somebody
+ * used to end their sessions and leave every credential they had granted this deployment sitting in
+ * the vault, usable: true of their access, false of the secret, and only the first of those is what
+ * an administrator was told they did.
+ *
+ * Optional, so a deployment without connectors is unchanged and a test can leave it out. Absent
+ * means nothing extra is retired, which is the behaviour this replaced rather than a new risk.
+ */
+export type OwnedCredentialRetirer = (
+  userId: string,
+  by: string,
+) => Promise<{ retired: number }>;
+
 export function createPeopleStore(
   database: Database,
   initialAdminEmails: readonly string[],
+  retireOwnedCredentials?: OwnedCredentialRetirer,
 ): PeopleStore {
   async function list(query: PeopleQuery = {}): Promise<PeoplePage> {
     const limit = Math.min(Math.max(query.limit ?? DEFAULT_PAGE, 1), MAX_PAGE);
@@ -283,6 +301,21 @@ export function createPeopleStore(
           .onConflictDoNothing();
         await tx.delete(sessions).where(eq(sessions.userId, userId));
       });
+
+      /*
+       * After the transaction, and deliberately not inside it.
+       *
+       * Retiring a credential is a write to the vault plus an audit row, and the vault is reached
+       * through its own interface rather than this transaction's handle. Holding the person's removal
+       * open until that finishes would make an unrelated failure able to undo the deny-list row and
+       * the session deletion, which are the two things that must not fail to stick.
+       *
+       * So the order is: stop them getting in, then stop us holding their secret. If the second half
+       * throws, the first is already done and the audit trail shows a removal with no retirement
+       * beside it — which is the honest record of what happened, and is recoverable by removing them
+       * again.
+       */
+      await retireOwnedCredentials?.(userId, revokedBy);
     },
 
     async restore(userId) {

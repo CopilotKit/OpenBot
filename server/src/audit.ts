@@ -89,6 +89,19 @@ export const auditEventTypes = [
    * thing they are entitled to see a record of. Carries the scope the vendor actually granted.
    */
   "mcp.account_connected",
+  /*
+   * One person's connector access retired, by them or on their behalf.
+   *
+   * The counterpart to the row above, and the one an auditor reaches for when asked "what happened to
+   * their access". `reason` distinguishes somebody disconnecting their own account from an
+   * administrator removing them, because those are the same effect and very different events.
+   *
+   * `vendorRevoked` says whether the grant at the vendor was withdrawn as well, and is currently
+   * false: removing somebody stops this deployment holding a usable secret, and the grant at Google
+   * outlives it until it is revoked there. Recorded rather than glossed, because a row that implied
+   * otherwise would be worse than no row.
+   */
+  "mcp.account_disconnected",
   // Every action a Bot takes on its computer, allowed or refused. Both, always: a trail that records
   // only what was permitted cannot answer whether the Bot tried.
   "computer.action_allowed",

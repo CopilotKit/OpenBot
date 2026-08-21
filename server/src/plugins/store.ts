@@ -14,6 +14,9 @@ import {
 import type { Database } from "../db/client";
 import {
   agentProfiles,
+  // Aliased: `credentials` is already the injected vault interface in this module, and the table and
+  // the interface are two different things to reach for.
+  credentials as credentialRows,
   mcpServers,
   mcpTools,
   mcpUserCredentials,
@@ -155,6 +158,19 @@ export function refFromToolName(toolName: string): string | null {
 
 const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
+
+/**
+ * Whose credential reaches this server, as the trail names it.
+ *
+ * One definition, because this was two: `connectionTokenFor` returned it and the audit payload
+ * recomputed the same condition a few lines later. Two expressions for one fact can disagree, and
+ * the one place that would show is an audit row claiming a call ran as somebody it did not — which is
+ * the row a per-person connector exists to be able to trust.
+ *
+ * `deployment` for a shared token; the asker's own id for a server reached as the person asking.
+ */
+const reachedAsFor = (entry: CatalogueEntry | null, actorId: string): string =>
+  entry?.auth.kind === "user-oauth" ? actorId : "deployment";
 
 /**
  * Where this server actually is, when the stored row and the catalogue disagree.
@@ -359,7 +375,7 @@ export function createPluginStore(options: PluginStoreOptions) {
     row: { id: string; url: string; credentialId: string | null },
     entry: CatalogueEntry | null,
     actorId: string,
-  ): Promise<{ token?: string; credentialOwner: string }> {
+  ): Promise<{ token?: string }> {
     if (entry?.auth.kind !== "user-oauth") {
       const token = row.credentialId
         ? await secretFor(
@@ -367,7 +383,7 @@ export function createPluginStore(options: PluginStoreOptions) {
             `${row.id} needs a credential this deployment no longer holds. An administrator has to add it again.`,
           )
         : undefined;
-      return { token, credentialOwner: "deployment" };
+      return { token };
     }
 
     /*
@@ -427,7 +443,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       client,
       refreshToken,
     });
-    return { token: minted.accessToken, credentialOwner: actorId };
+    return { token: minted.accessToken };
   }
 
   async function requireServer(serverId: string) {
@@ -1150,6 +1166,86 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     /**
+     * Retire every connector credential belonging to one person.
+     *
+     * WHAT THIS IS FOR. "We removed their access" has to be true of the thing that matters, which is
+     * the refresh token sitting at the vendor. Removing somebody from the People screen used to end
+     * their sessions and add them to the deny list, and leave their Google grant entirely intact in
+     * this deployment's vault. They could not exercise it — the actor comes from a session they no
+     * longer get — but the deployment still held a usable secret for a person who had been removed,
+     * which is not what an administrator was told they did, and is the first thing a customer asks
+     * about a per-person connector.
+     *
+     * LOOKED UP IN THE VAULT, NOT THROUGH THE JOIN TABLE. `mcp_user_credentials.user_id` cascades on
+     * a user row being deleted, so by the time somebody is gone the join row can be gone too and the
+     * credential is orphaned: unrevoked, referenced by nothing, reachable from no screen and by no
+     * code path. `credentials.key_id` holds the user id for an `mcp_user_token`, so the vault can
+     * still be asked directly — which makes this work for the person who was removed and for the one
+     * whose row was deleted underneath it.
+     *
+     * The join rows go too, so the account pages stop claiming a connection this deployment can no
+     * longer use.
+     *
+     * NOT vendor-side revocation. That needs the OAuth client and the vendor's revoke endpoint, and
+     * it belongs with disconnect. This is the half that stops us holding the secret; the grant at
+     * Google outlives it until somebody revokes it there. Said plainly rather than implied, because
+     * the difference matters to whoever has to answer for it.
+     */
+    async retireConnectionsFor(
+      userId: string,
+      by: string,
+    ): Promise<{ retired: number }> {
+      if (!userId) return { retired: 0 };
+
+      const owned = await database
+        .select({
+          id: credentialRows.id,
+          provider: credentialRows.provider,
+          revokedAt: credentialRows.revokedAt,
+        })
+        .from(credentialRows)
+        .where(
+          and(
+            eq(credentialRows.kind, "mcp_user_token"),
+            eq(credentialRows.keyId, userId),
+          ),
+        );
+
+      let retired = 0;
+      for (const credential of owned) {
+        // Already revoked is not a failure. Retiring twice is something an administrator can
+        // legitimately do, and the second time should be quiet rather than an error.
+        if (credential.revokedAt) continue;
+        await credentials.revoke(credential.id);
+        retired += 1;
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.account_disconnected",
+          targetType: "mcp_server",
+          targetId: credential.provider,
+          payload: {
+            actor: by,
+            server: credential.provider,
+            owner: userId,
+            /*
+             * Why, because the two reasons are not the same event to a reader. Somebody disconnecting
+             * their own account is a person changing their mind; an administrator removing somebody
+             * is an offboarding, and an auditor asking "what happened to their access" wants to see
+             * which one this was.
+             */
+            reason: "person_removed",
+            vendorRevoked: false,
+          },
+        });
+      }
+
+      await database
+        .delete(mcpUserCredentials)
+        .where(eq(mcpUserCredentials.userId, userId));
+
+      return { retired };
+    },
+
+    /**
      * May this Bot use this plugin?
      *
      * The single question every caller asks, so there is one place the answer is decided and one
@@ -1283,15 +1379,13 @@ export function createPluginStore(options: PluginStoreOptions) {
         tool: toolName,
         effect,
         /*
-         * Whose credential this call would go out with.
+         * Whose credential this call goes out with.
          *
-         * `deployment` for a shared token; a user id for a server reached as the asker. Without it
-         * the trail cannot answer "who did this run reach as", which is the whole question a
-         * per-person connector raises — two rows for the same tool and the same Bot can legitimately
+         * Without it the trail cannot answer "who did this run reach as", which is the whole question
+         * a per-person connector raises — two rows for the same tool and the same Bot can legitimately
          * have seen entirely different documents, and nothing else in the row says why.
          */
-        reachedAs:
-          entry?.auth.kind === "user-oauth" ? input.actorId : "deployment",
+        reachedAs: reachedAsFor(entry, input.actorId),
         decision: {
           allowed: verdict.allowed,
           mode: verdict.mode,

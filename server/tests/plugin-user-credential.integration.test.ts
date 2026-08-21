@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { encryptSecret } from "../src/credentials";
@@ -114,8 +114,24 @@ const store = createPluginStore({
     create: async () => {
       throw new Error("this suite writes credentials directly");
     },
-    revoke: async () => {
-      throw new Error("this suite does not revoke credentials");
+    /*
+     * A real revocation, against this suite's own rows.
+     *
+     * It used to throw, on the same principle as `create` above: nothing in the suite revoked, so a
+     * call here meant the file had quietly started exercising something it did not claim to. That
+     * stopped being true when retirement arrived — revoking IS the thing under test now, and the
+     * assertion is that the vault row comes back revoked, which a stub cannot show.
+     *
+     * `create` still throws, because connections are still written directly.
+     */
+    revoke: async (id) => {
+      const [row] = await database
+        .update(credentials)
+        .set({ revokedAt: new Date() })
+        .where(eq(credentials.id, id))
+        .returning({ revokedAt: credentials.revokedAt });
+      if (!row?.revokedAt) throw new Error("credential was not revoked");
+      return row.revokedAt;
     },
   },
   encryptionKey: ENCRYPTION_KEY,
@@ -314,20 +330,26 @@ describe("a person who has not connected", () => {
   test("is not quietly served the deployment's own credential", async () => {
     // The failure this whole table exists to prevent. A fallback here would answer from whatever the
     // deployment could see and look exactly like a correct answer.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: "a-deployment-credential" })
-      .where(eq(mcpServers.id, serverId));
+    //
+    // A REAL credential row, where this used to write the string "a-deployment-credential". The
+    // column was `text` against a `uuid` primary key with no foreign key, so the database accepted a
+    // pointer to something that could not exist — and the test was therefore asserting against a
+    // state no deployment could reach, which is a weaker claim than it looked. It is now a genuine
+    // deployment credential that a fallback could really have spent.
+    const deploymentCredential = await registerClient();
 
     await expect(
       store.callTool({ ref, args: {}, botId, actorId: askerId }),
     ).rejects.toThrow(PluginRefusedError);
     expect(decrypted).toEqual([]);
 
+    // Repointed away before the credential is left behind, because the foreign key is `restrict`:
+    // the row cannot be deleted while this column addresses it, which is the point of the key.
     await database
       .update(mcpServers)
       .set({ credentialId: null })
       .where(eq(mcpServers.id, serverId));
+    expect(deploymentCredential).toBeTruthy();
   });
 });
 
@@ -429,5 +451,107 @@ describe("a person who has connected", () => {
       store.callTool({ ref, args: {}, botId, actorId: askerId }),
     ).rejects.toThrow(PluginRefusedError);
     expect(decrypted).toEqual([]);
+  });
+});
+
+/*
+ * OFFBOARDING. "We removed their access" has to be true of the refresh token, not only of the
+ * session — the session is the half they cannot use, and the token is the half this deployment is
+ * still holding. For a per-person connector it is the first thing a customer asks about.
+ */
+describe("retiring the credentials a person owns", () => {
+  /*
+   * Counted as a property, not as a number.
+   *
+   * `connect` above writes vault rows directly and leaves earlier ones alone, so how many a person
+   * has accumulated depends on which tests ran first — and asserting an exact `retired` count would
+   * make these pass or fail on suite order rather than on behaviour. What has to be true is that
+   * nothing usable is left, which is the same claim however many there were.
+   *
+   * The product path does not accumulate them: `recordConnection` revokes the previous credential
+   * when it repoints the join row.
+   */
+  const unrevokedTokensFor = async (userId: string) =>
+    (
+      await database
+        .select({ id: credentials.id })
+        .from(credentials)
+        .where(
+          and(
+            eq(credentials.kind, "mcp_user_token"),
+            eq(credentials.keyId, userId),
+            isNull(credentials.revokedAt),
+          ),
+        )
+    ).length;
+
+  test("the vault stops holding a usable secret, and the connection is gone", async () => {
+    await registerClient();
+    const credentialId = await connect(askerId, askerRefreshToken);
+
+    // Reachable first, so what follows is an assertion about the retirement and not about setup.
+    await store.callTool({ ref, args: {}, botId, actorId: askerId });
+    expect(exchanged.at(-1)).toBe(askerRefreshToken);
+
+    await store.retireConnectionsFor(askerId, "admin@openbot.local");
+
+    const [credential] = await database
+      .select({ revokedAt: credentials.revokedAt })
+      .from(credentials)
+      .where(eq(credentials.id, credentialId));
+    expect(credential?.revokedAt).not.toBeNull();
+    expect(await unrevokedTokensFor(askerId)).toBe(0);
+
+    // The join row goes too, so no page claims a connection this deployment can no longer use.
+    expect(await store.connectionsFor(askerId)).toEqual([]);
+
+    // And a call is refused rather than answered from a revoked credential.
+    await expect(
+      store.callTool({ ref, args: {}, botId, actorId: askerId }),
+    ).rejects.toBeInstanceOf(PluginRefusedError);
+  });
+
+  /*
+   * THE ORPHAN. `mcp_user_credentials.user_id` cascades, so deleting a user row takes the join row
+   * with it and leaves the credential behind: unrevoked, referenced by nothing, reachable from no
+   * screen. Looking the owner up in the vault by `key_id` instead of through the join table is what
+   * makes it reachable at all, so that is asserted rather than assumed.
+   */
+  test("a credential orphaned by a deleted user row is still retired", async () => {
+    await registerClient();
+    const credentialId = await connect(otherId, otherRefreshToken);
+
+    // Exactly what the cascade leaves behind.
+    await database
+      .delete(mcpUserCredentials)
+      .where(eq(mcpUserCredentials.userId, otherId));
+
+    await store.retireConnectionsFor(otherId, "admin@openbot.local");
+
+    const [credential] = await database
+      .select({ revokedAt: credentials.revokedAt })
+      .from(credentials)
+      .where(eq(credentials.id, credentialId));
+    expect(credential?.revokedAt).not.toBeNull();
+    expect(await unrevokedTokensFor(otherId)).toBe(0);
+  });
+
+  test("retiring twice is quiet, and nobody owns nothing", async () => {
+    await registerClient();
+    await connect(askerId, askerRefreshToken);
+
+    expect(
+      (await store.retireConnectionsFor(askerId, "admin@openbot.local"))
+        .retired,
+    ).toBeGreaterThan(0);
+    // Already revoked is something an administrator can legitimately do twice.
+    expect(
+      (await store.retireConnectionsFor(askerId, "admin@openbot.local"))
+        .retired,
+    ).toBe(0);
+    // The empty actor is ANONYMOUS_ACTOR. It owns nothing, and must not match rows by being empty.
+    expect(
+      (await store.retireConnectionsFor("", "admin@openbot.local")).retired,
+    ).toBe(0);
   });
 });

@@ -168,6 +168,15 @@ await synchronizeTenantPackage(database, tenantPackage);
 const peopleStore = createPeopleStore(
   database,
   config.auth?.initialAdminEmails ?? [],
+  /*
+   * Removing somebody retires the credentials they granted this deployment.
+   *
+   * A closure rather than the method itself, because the plugin store is built further down: this
+   * has to exist before `auth` does, and that one needs the vault and the policy. Nothing calls this
+   * during module initialisation — it runs when an administrator removes somebody, over HTTP — so by
+   * then the binding is there.
+   */
+  (userId, by) => pluginStore.retireConnectionsFor(userId, by),
 );
 const identityProviderStore = createIdentityProviderStore(database);
 /*

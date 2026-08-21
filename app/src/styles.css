@@ -232,3 +232,18 @@ body {
 .tool-line[open] .tool-line-chevron {
   transform: rotate(90deg);
 }
+
+/*
+ * Row descriptions wrap on sense rather than on width.
+ *
+ * Here rather than on the `ItemDescription` primitive, which is where this started. That file has an
+ * upstream: it is vendored from shadcn and the layout skill says not to edit it, so a class added
+ * inside it is one the next `shadcn add item` silently removes — and the loss would surface as "the
+ * screens look slightly worse" months later, with nothing to attribute it to.
+ *
+ * The primitive already emits the attribute this selects, so nothing has to be edited for it to
+ * apply, and nothing upstream can take it away.
+ */
+[data-slot="item-description"] {
+  text-wrap: pretty;
+}
