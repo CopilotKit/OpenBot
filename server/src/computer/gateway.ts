@@ -254,9 +254,27 @@ export function createComputerGateway(
     path: string,
     payload: unknown,
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<T> {
-    return transport.post<T>(await locate(botId), botId, path, payload, signal);
+    return transport.post<T>(
+      await locate(botId),
+      botId,
+      path,
+      payload,
+      signal,
+      timeoutMs,
+    );
   }
+
+  /*
+   * The transport's deadline for a command, which is a backstop and not the limit.
+   *
+   * The shell enforces the real one: 120s by default, 600s at most, and it answers with `timedOut`
+   * so the person is told the command was stopped rather than that the computer went quiet. This
+   * only has to outlast it. Below the shell's maximum, the transport gave up first and the person was
+   * told the computer did not respond while the command ran on to completion inside the container.
+   */
+  const COMMAND_BACKSTOP_MS = 615_000;
 
   /** Read-only, so it passes straight through. Nothing has changed and there is nothing to decide. */
   async function screenshot(botId: string): Promise<ScreenshotResult> {
@@ -332,25 +350,42 @@ export function createComputerGateway(
 
     const intent = intentOf(toolName, subject.key);
 
+    /*
+     * Every field is bound, present or not.
+     *
+     * A missing one is not an absent field to CEL, it is an unknown identifier, and cel-js throws on
+     * those. A thrown deny rule counts as a match, on purpose, so that a mistyped deny refuses rather
+     * than quietly permitting. Together those two correct behaviours produced a wrong one: a rule
+     * naming a field this action does not have refused the action.
+     *
+     * `deny: contains(command, "rm -rf")` is the example the docs give, and while `command` was
+     * spread in only for a shell call, that rule threw on every click, keypress, navigation and file
+     * read in the deployment and refused all of them. So did any rule naming `key`, `file` or
+     * `element` from an action that has none.
+     *
+     * Neutral rather than absent: `contains("", "rm -rf")` is false, which is the honest answer to
+     * "is this click running rm -rf". The audit row below still omits what did not happen, because a
+     * trail should not claim a click had a command.
+     */
     const context: PolicyContext = {
       tool: { name: toolName },
       bot: { id: botId },
       actor: { id: actor.id },
       page: { url: pageUrl, host: hostOf(pageUrl) },
       ...(intent ? { intent } : {}),
-      ...(subject.key ? { key: subject.key } : {}),
-      ...(element
+      key: subject.key ?? "",
+      element: element
         ? {
-            element: {
-              ref: element.ref,
-              role: element.role,
-              name: element.name,
-              ...(element.type ? { type: element.type } : {}),
-            },
+            ref: element.ref,
+            role: element.role,
+            name: element.name,
+            type: element.type ?? "",
           }
-        : {}),
-      ...(filePath ? { file: describeFile(filePath) } : {}),
-      ...(subject.command ? { command: subject.command } : {}),
+        : { ref: "", role: "", name: "", type: "" },
+      file: filePath
+        ? describeFile(filePath)
+        : { path: "", name: "", extension: "" },
+      command: subject.command ?? "",
     };
 
     const decision = evaluateActionPolicy(options.policy(), context);
@@ -675,7 +710,14 @@ export function createComputerGateway(
         botId,
         actor,
         { command: input.command, ...(caller ? { signal: caller } : {}) },
-        () => post<RunCommandResult>(botId, "/exec", input, caller),
+        () =>
+          post<RunCommandResult>(
+            botId,
+            "/exec",
+            input,
+            caller,
+            COMMAND_BACKSTOP_MS,
+          ),
       );
     },
 

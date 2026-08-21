@@ -26,6 +26,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   Which way it went is printed at start-up either way.
 
 ### Fixed
+- **A deny rule naming one field refused every action that did not have it.** `deny:
+  contains(command, "rm -rf")`, the example the documentation gives, refused every click, keypress,
+  navigation and file read in the deployment. Two correct behaviours combined into a wrong one: the
+  policy context left out fields an action did not have, cel-js treats a missing field as an unknown
+  identifier and throws, and a thrown deny counts as a match so that a mistyped deny refuses rather
+  than quietly permitting. Every field is now bound, with a neutral value where the action has
+  nothing to put there, so a rule about a shell answers honestly about a click instead of refusing
+  it. Rules about the action they are for are unchanged. The audit row still omits what did not
+  happen.
+- **A command longer than 45 seconds reported failure while it carried on running.** The transport
+  gave every call the same deadline, which was shorter than the shell's own 120 second default and
+  600 second maximum, so `apt-get install` told the person the computer had not responded and then
+  finished installing inside the container. A command now gets a deadline that outlasts the shell,
+  which reports a timeout itself and says so.
 
 - **A Bot's shell no longer inherits the deployment's environment.** Commands ran with the computer
   process's own environment, so `env` in the one-container image printed `KEY_ENCRYPTION_KEY` and
