@@ -56,8 +56,9 @@ agents:
 
 ## Notes
 
-- The AG-UI helpers live at `pydantic_ai.ui.ag_ui` in current releases and `pydantic_ai.ag_ui` in
-  earlier ones; `src/app.py` imports whichever is present. If your `pydantic-ai` predates AG-UI
-  support, upgrade it.
+- Serving is done with `AGUIAdapter.dispatch_request` from `pydantic_ai.ui.ag_ui`, which reads the
+  `RunAgentInput`, exposes its `tools` to the model as external (frontend) tools, and returns a
+  streaming AG-UI response. Verified against `pydantic-ai` 2.33.0; if yours predates the
+  `pydantic_ai.ui.ag_ui` module, upgrade it.
 - Only tool-calling models can drive the computer. A model without tool calling will chat but never
   open a page.
