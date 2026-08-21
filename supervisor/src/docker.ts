@@ -45,6 +45,13 @@ function statusOf(error: unknown): number | undefined {
   return (error as { statusCode?: number }).statusCode;
 }
 
+/** One poll interval, used both by the health wait and by the retry that follows a lost race. */
+function pause(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
+
 export type ComputerState = {
   botId: string;
   container: string;
@@ -180,7 +187,7 @@ async function waitUntilAnswering(
     } catch {
       // Mid-creation, or gone. The deadline is what ends this.
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await pause(250);
   }
 }
 
@@ -311,10 +318,22 @@ export async function ensure(
         await docker.getContainer(names.container).start();
       } catch (error) {
         const status = statusOf(error);
-        // Gone between creating it and starting it: a concurrent reset took the container away, or
-        // the create this request lost the race to was itself rolled back. Nothing about the Bot has
-        // changed, so the answer is to build it again rather than to report Docker as unreachable.
-        if (status === 404 && attempt > 1) continue;
+        /*
+         * Gone between creating it and starting it: a concurrent reset took the container away, the
+         * create this request lost the race to was itself rolled back, or the daemon has not yet
+         * published the name this request just created. Nothing about the Bot has changed, so the
+         * answer is to build it again rather than to report Docker as unreachable.
+         *
+         * Paused first, because the retry is the whole budget. Going straight back round arrives
+         * within a millisecond, sees the same not-yet-published name, and spends the second attempt
+         * on the state that failed the first: the first browser action a Bot is ever asked for fails,
+         * and the second one, seconds later, works. One poll interval is what the health wait uses
+         * for the same question.
+         */
+        if (status === 404 && attempt > 1) {
+          await pause(250);
+          continue;
+        }
         // 304 is "already running", which is success for an idempotent verb.
         if (status !== 304) {
           throw new DockerUnavailableError(String(error));

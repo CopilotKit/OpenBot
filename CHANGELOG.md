@@ -233,6 +233,13 @@ Sessions survive and nobody signs in again.
   conversation left to lose, and a check that fails for any other reason keeps the thread and says on
   screen that earlier messages could not be loaded. A person reading a confident answer can now tell
   whether the Bot has read what came before it.
+- **The first browser action a Bot was ever asked for failed.** Creating a computer and starting it
+  are two calls to Docker, and a name the daemon has not published yet answers the second with a 404.
+  The supervisor treats that as a lost race and rebuilds, which is right, but it went straight back
+  round: the retry landed a millisecond later, saw the same unpublished name, and spent the only
+  other attempt on it. The whole request then failed as Docker being unreachable, the person was told
+  the computer could not be started, and the next message worked. It waits one poll interval before
+  rebuilding now, which is what the health wait already uses for the same question.
 - **A framework Bot asked for a browser action and nothing happened.** `agent-langgraph` ends a run
   when the model calls a tool the surface owns, which is how a tool that lives in the browser is
   supposed to work: the run finishes, the surface acts, and the next run carries the result. But the
