@@ -97,6 +97,20 @@ Every message below is what OpenBot actually shows. They are worth reading liter
 distinguishes "the credential was refused" from "the credential was accepted and the request was
 refused", and those have completely different fixes.
 
+**Look at the audit trail first.** Every call leaves one row, written after the attempt, and the
+event type is the answer to "whose problem is this":
+
+| Row                  | Means                                                                  |
+| -------------------- | ---------------------------------------------------------------------- |
+| `mcp.call_rejected`  | This deployment declined. A missing grant, or a policy rule — `decision.rule` names which. |
+| `mcp.call_failed`    | Permitted here, failed at the vendor. `failure` carries the vendor's own sentence. |
+| `mcp.call_succeeded` | The vendor answered.                                                    |
+
+A Bot that appears to have no access and leaves **no rows at all** never called the tool, which is a
+grant problem rather than a connection problem: check that the tool is granted to *that* Bot at
+`/admin/plugins/google-drive`. Enabling the connector and connecting your account both being done
+still leaves each tool ungranted.
+
 ### `redirect_uri_mismatch` on the consent screen
 
 Google is comparing the `redirect_uri` OpenBot sent against the list on the OAuth client, as exact
