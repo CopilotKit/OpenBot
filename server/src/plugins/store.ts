@@ -1217,50 +1217,102 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       const verdict = evaluateActionPolicy(options.policy(), context);
 
-      await recordAuditEvent(auditStore, {
-        eventType: verdict.forward ? "mcp.call_succeeded" : "mcp.call_rejected",
-        targetType: "mcp_tool",
-        targetId: input.ref,
-        payload: {
-          actor: input.actorId,
-          bot: input.botId,
-          server: serverId,
-          tool: toolName,
-          effect,
-          /*
-           * Whose credential this call would go out with.
-           *
-           * `deployment` for a shared token; a user id for a server reached as the asker. Without it
-           * the trail cannot answer "who did this run reach as", which is the whole question a
-           * per-person connector raises — two rows for the same tool and the same Bot can legitimately
-           * have seen entirely different documents, and nothing else in the row says why.
-           */
-          reachedAs:
-            entry?.auth.kind === "user-oauth" ? input.actorId : "deployment",
-          decision: {
-            allowed: verdict.allowed,
-            mode: verdict.mode,
-            rule: verdict.matched,
-            source: verdict.source,
-            carriedOut: verdict.forward,
-          },
+      /*
+       * The parts of the row that are known before the attempt, held rather than written.
+       *
+       * Everything here is a fact about the decision, and the decision is final at this point. What
+       * is NOT yet known is whether the call worked, which is why this is a variable and not a write:
+       * the row goes down once, after the outcome exists.
+       */
+      const decided = {
+        actor: input.actorId,
+        bot: input.botId,
+        server: serverId,
+        tool: toolName,
+        effect,
+        /*
+         * Whose credential this call would go out with.
+         *
+         * `deployment` for a shared token; a user id for a server reached as the asker. Without it
+         * the trail cannot answer "who did this run reach as", which is the whole question a
+         * per-person connector raises — two rows for the same tool and the same Bot can legitimately
+         * have seen entirely different documents, and nothing else in the row says why.
+         */
+        reachedAs:
+          entry?.auth.kind === "user-oauth" ? input.actorId : "deployment",
+        decision: {
+          allowed: verdict.allowed,
+          mode: verdict.mode,
+          rule: verdict.matched,
+          source: verdict.source,
+          carriedOut: verdict.forward,
         },
-      });
+      };
 
+      /*
+       * A refusal is written here, because there is no attempt to wait for.
+       *
+       * This deployment declining is the whole event, and it is recorded before the throw so that a
+       * refusal cannot be lost by the caller's error handling.
+       */
       if (!verdict.forward) {
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.call_rejected",
+          targetType: "mcp_tool",
+          targetId: input.ref,
+          payload: decided,
+        });
         throw new PluginRefusedError(verdict.reason, verdict.matched);
       }
 
       /*
-       * Whose credential, decided after the policy and before the network.
+       * Attempt first, record second.
        *
-       * A refusal here is still a refusal: it means this call was permitted in principle and cannot
-       * be made as this person, which is a different sentence from "not allowed" and a different one
-       * again from "it broke".
+       * The row now says what HAPPENED rather than what was permitted. It used to be written here,
+       * before the two lines below, which meant a call that died at the vendor left `call_succeeded`
+       * behind it — and a per-person connector fails at exactly these two lines: no connection for
+       * the asker, a refresh token the vendor no longer accepts, an API not enabled for the project.
+       * Every one of those was invisible, and worse than invisible, because the trail asserted the
+       * opposite.
+       *
+       * `isError` counts as a failure. A vendor that answers the protocol correctly to say the tool
+       * itself failed has not completed the call, and a reader counting successes should not be told
+       * it did.
        */
-      const { token } = await connectionTokenFor(row, entry, input.actorId);
-      const result = await callVendor({ url: row.url, token }, toolName, args);
-      return { text: result.text, isError: result.isError };
+      try {
+        const { token } = await connectionTokenFor(row, entry, input.actorId);
+        const result = await callVendor(
+          { url: row.url, token },
+          toolName,
+          args,
+        );
+        await recordAuditEvent(auditStore, {
+          eventType: result.isError ? "mcp.call_failed" : "mcp.call_succeeded",
+          targetType: "mcp_tool",
+          targetId: input.ref,
+          payload: result.isError
+            ? { ...decided, failure: "the tool reported an error" }
+            : decided,
+        });
+        return { text: result.text, isError: result.isError };
+      } catch (error) {
+        /*
+         * Recorded, then rethrown unchanged. The caller's behaviour is unaffected — what changes is
+         * that the failure now exists in the trail, which is where somebody asking "is this connector
+         * working" looks. The vendor's own sentence is kept, since for a 403 that is the sentence
+         * naming which API is not enabled.
+         */
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.call_failed",
+          targetType: "mcp_tool",
+          targetId: input.ref,
+          payload: {
+            ...decided,
+            failure: error instanceof Error ? error.message : String(error),
+          },
+        });
+        throw error;
+      }
     },
   };
 }

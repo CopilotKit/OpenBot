@@ -58,6 +58,21 @@ export const auditEventTypes = [
   "mcp.call_succeeded",
   "mcp.call_rejected",
   /*
+   * A call this deployment permitted and the vendor did not complete.
+   *
+   * The third outcome, and the one the trail was missing. `call_rejected` is this deployment
+   * declining; `call_succeeded` is a vendor answering. Between them sits a call that passed every
+   * check here and then failed out there — a credential the vendor would not take, an API not
+   * enabled, a timeout — and without a row of its own it was invisible.
+   *
+   * Worse than invisible. `call_succeeded` used to be written before the network call rather than
+   * after, so a call that died at the vendor left a row saying it had succeeded, and the Admin page
+   * agreed. That is the one shape of audit bug worth going out of the way to avoid: a trail that is
+   * confidently wrong is more dangerous than one that is silent, because it is used to rule things
+   * out.
+   */
+  "mcp.call_failed",
+  /*
    * An administrator registered this deployment's OAuth client with a vendor.
    *
    * Recorded because it decides what every subsequent consent screen belongs to. If a client is

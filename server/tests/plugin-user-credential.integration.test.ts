@@ -279,7 +279,14 @@ afterAll(async () => {
   for (const id of credentialIds) {
     await database.delete(credentials).where(eq(credentials.id, id));
   }
-  await database.delete(pluginGrants).where(eq(pluginGrants.ref, ref));
+  /*
+   * Scoped to this suite's own Bot, never to the ref alone. `ref` is `google-drive/search_files`,
+   * a real server and a real tool, so a delete by ref alone removes an administrator's grants for
+   * Bots people use. See the same note in plugin-store.integration.test.ts, which this shares.
+   */
+  await database
+    .delete(pluginGrants)
+    .where(and(eq(pluginGrants.ref, ref), eq(pluginGrants.agentId, botId)));
   // The fixture tool goes whether or not this suite owns the server, but only if it put it there.
   if (!toolWasAlreadyAdvertised) {
     await database

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
@@ -139,7 +139,24 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database.delete(pluginGrants).where(eq(pluginGrants.ref, ref));
+  /*
+   * Scoped to this suite's own Bots, never to the ref alone.
+   *
+   * `ref` names a REAL server and a real tool — `google-drive/search_files` — so a delete by ref
+   * matches every grant in the deployment, including the ones an administrator made for a Bot people
+   * use. This suite did exactly that once: it ran, and a Bot silently stopped being able to search
+   * Drive, with an audit row showing the grant had been made and nothing showing it removed.
+   *
+   * The primary key is (kind, ref, agent_id). Two of the three are not a row.
+   */
+  await database
+    .delete(pluginGrants)
+    .where(
+      and(
+        eq(pluginGrants.ref, ref),
+        inArray(pluginGrants.agentId, [holderId, strangerId]),
+      ),
+    );
   // A server row is deployment configuration, so it belongs to the deployment rather than here.
   // The fixture tool goes whether or not this suite owns the server, but only if it put it there.
   if (!toolWasAlreadyAdvertised) {
@@ -277,6 +294,46 @@ describe("the policy is asked as well as the grant", () => {
     expect(thrown).toBeInstanceOf(PluginRefusedError);
     expect((thrown as PluginRefusedError).rule).toBeNull();
     expect((thrown as PluginRefusedError).message).toContain("connected");
+  });
+});
+
+describe("the trail says what happened, not what was permitted", () => {
+  /*
+   * THE REGRESSION THIS EXISTS FOR. `mcp.call_succeeded` used to be written before the credential
+   * was selected and before the network call, so a call that passed the grant and the policy and
+   * then failed left a row asserting it had succeeded — and nothing at all saying it had not.
+   *
+   * That is the worst arrangement available. A trail with a gap makes somebody go and look; a trail
+   * that is confidently wrong is used to rule the connector out and send the search elsewhere. It
+   * did exactly that: a Bot that could not read Drive at all had `call_succeeded` rows behind it.
+   *
+   * `search_files` on `google-drive` is reached as the asker, and nobody here has connected, so this
+   * call is permitted and then cannot be made — which is the shape of failure the row must show.
+   */
+  test("a call that is permitted and then fails is recorded as failed, not as succeeded", async () => {
+    await store.grant("mcp", ref, holderId, "admin@openbot.local");
+    const actorId = `trail_${suite}`;
+
+    await expect(
+      store.callTool({ ref, args: {}, botId: holderId, actorId }),
+    ).rejects.toBeInstanceOf(PluginRefusedError);
+
+    const mine = (await auditRowsFor(ref)).filter(
+      (row) => (row.payload as { actor?: string }).actor === actorId,
+    );
+
+    const failed = mine.filter((row) => row.eventType === "mcp.call_failed");
+    expect(failed.length).toBe(1);
+    // The reason travels with the row. For a 403 this is where the vendor names the API that is not
+    // enabled, which is the sentence that turns a guess into a fix.
+    expect((failed[0].payload as { failure?: string }).failure).toContain(
+      "connected",
+    );
+
+    // The point of the whole test: nothing claims this worked.
+    expect(
+      mine.filter((row) => row.eventType === "mcp.call_succeeded"),
+    ).toEqual([]);
   });
 });
 
