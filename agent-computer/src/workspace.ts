@@ -31,7 +31,15 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 export class WorkspacePathError extends Error {
   constructor(message: string) {
@@ -161,7 +169,11 @@ export function createWorkspace(
 
     // A link was followed, so the destination gets the checks the requested path already passed:
     // inside lexically, and inside after the directory holding it is resolved.
-    assertInside(root, landing, wanted);
+    /*
+     * The holder is resolved BEFORE either check. `root` is a real path, so comparing it against a
+     * destination that still runs through a symlinked ancestor refuses a link that points straight
+     * back inside, which is what happens wherever the workspace sits behind one.
+     */
     const holder = await realpath(dirname(landing)).catch(() => null);
     if (holder === null) {
       throw new WorkspacePathError(
@@ -169,7 +181,9 @@ export function createWorkspace(
       );
     }
     assertInside(root, holder, wanted);
-    return landing;
+    const resolved = join(holder, basename(landing));
+    assertInside(root, resolved, wanted);
+    return resolved;
   }
 
   return {
