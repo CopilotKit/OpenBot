@@ -3,6 +3,7 @@ import {
   IconChevronRight,
   IconCode,
   IconDeviceDesktop,
+  IconFileText,
   IconKey,
   IconLayoutGrid,
   IconListDetails,
@@ -81,9 +82,16 @@ const SECTIONS: {
     items: [
       {
         title: "Plugins",
-        description: "Skills and tools installed for the whole workspace.",
+        description:
+          "The services this deployment can reach, and which Bots may.",
         icon: IconPuzzle,
         linkOptions: { to: "/admin/plugins" },
+      },
+      {
+        title: "Skills",
+        description: "Named instructions anybody can invoke with a slash.",
+        icon: IconFileText,
+        linkOptions: { to: "/admin/skills" },
       },
       {
         title: "UI Components",

@@ -3,6 +3,7 @@ import {
   IconBuildingBank,
   IconCode,
   IconDeviceDesktop,
+  IconFileText,
   IconKey,
   IconLayoutGrid,
   IconListDetails,
@@ -28,11 +29,11 @@ const appLinkOptions = { to: "/" } satisfies LinkOptions;
 const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
 
 /**
- * The same three groups, in the same order, as the admin index.
+ * The same four groups, in the same order, as the admin index.
  *
- * A rail that lists seven things flat asks somebody to know which of them is the one they want. The
+ * A rail that lists ten things flat asks somebody to know which of them is the one they want. The
  * grouping is the only navigation help this screen offers, so it has to agree with the page it
- * navigates to — two different orderings of the same seven links is worse than either ordering.
+ * navigates to — two different orderings of the same ten links is worse than either ordering.
  */
 const GROUPS: {
   label: string;
@@ -69,6 +70,11 @@ const GROUPS: {
         title: "Plugins",
         icon: IconPuzzle,
         linkOptions: { to: "/admin/plugins" },
+      },
+      {
+        title: "Skills",
+        icon: IconFileText,
+        linkOptions: { to: "/admin/skills" },
       },
       {
         title: "UI Components",

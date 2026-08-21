@@ -71,8 +71,9 @@ here yet" is a fact, and the section heading already said what the section is fo
 4. Give each section one `PageRows` card. Rows go inside it as `Item size="sm"`, with `<Separator />`
    between them and none after the last. `PageRows` is a card with dividers, not a stack of cards —
    gaps between rows are the wrong shape.
-5. Read `admin/connectors.tsx` for the whole pattern end to end, and
-   `admin/components/$name.tsx` for a screen with two sections and mixed row kinds.
+5. Read `admin/plugins/index.tsx` for the whole pattern end to end, and
+   `admin/plugins/$key.tsx` or `admin/components/$name.tsx` for a screen with several sections and
+   mixed row kinds.
 
 ### Procedure 2: Compose a row
 
@@ -205,7 +206,7 @@ to sit a centred element visibly off centre or clip a card's corners against its
 - **A row's summary does not change after its dialog edits something**: the summary was captured into
   state instead of computed from the query. Derive it on every render.
 - **Two screens that should match do not**: one of them drew its own container. Diff the two against
-  `admin/connectors.tsx` and delete whichever hand-drawn wrapper is not `PageRows`.
+  `admin/plugins/index.tsx` and delete whichever hand-drawn wrapper is not `PageRows`.
 - **The layout genuinely cannot express the screen**: stop and say so rather than bending it
   silently. A deviation with a stated reason and a comment is fine; an undocumented fifth way to draw
   a card is what this skill exists to prevent.
