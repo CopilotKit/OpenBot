@@ -116,6 +116,13 @@ Sessions survive and nobody signs in again.
   laptop `http://localhost` counts as one, so this never showed up in development; on a real
   address it does not, and the surface did nothing at all when you pressed send. No message, no
   error. Ids now come from an API with no such restriction.
+- **The first browser action a Bot was ever asked for failed.** Creating a computer and starting it
+  are two calls to Docker, and a name the daemon has not published yet answers the second with a 404.
+  The supervisor treats that as a lost race and rebuilds, which is right, but it went straight back
+  round: the retry landed a millisecond later, saw the same unpublished name, and spent the only
+  other attempt on it. The whole request then failed as Docker being unreachable, the person was told
+  the computer could not be started, and the next message worked. It waits one poll interval before
+  rebuilding now, which is what the health wait already uses for the same question.
 
 ### Changed
 
