@@ -175,6 +175,28 @@ describe("checkComputerAddress", () => {
     },
   );
 
+  /*
+   * The same address written the other ways, on this side too.
+   *
+   * A computer's address arrives from a provider rather than from a person, but the provider is a
+   * plug and the address goes straight into a fetch carrying this deployment's computer token. The
+   * spellings a browser resolves are the spellings a fetch resolves, so the two gates have to agree
+   * on what a hostname is. `[fd00:ec2::254]` is the one that shows why: it is in the refused set
+   * already and was still allowed, because a URL keeps the brackets and the set does not have them.
+   */
+  test.each([
+    ["http://[::ffff:169.254.169.254]/", "IPv4-mapped"],
+    ["http://[::ffff:a9fe:a9fe]/", "IPv4-mapped in hex"],
+    ["http://[64:ff9b::169.254.169.254]/", "NAT64"],
+    ["http://[fd00:ec2::254]/", "the IPv6 metadata endpoint"],
+  ])("refuses %s (%s) as a computer address", (raw) => {
+    const verdict = checkComputerAddress(raw);
+    expect(verdict.allowed).toBe(false);
+    if (!verdict.allowed) {
+      expect(verdict.reason).toContain("cloud credentials");
+    }
+  });
+
   test.each(["file:///etc/passwd", "ftp://example.com", "gopher://x"])(
     "refuses %s, which is not a scheme a computer speaks",
     (raw) => {

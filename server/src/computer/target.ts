@@ -183,7 +183,11 @@ export function checkComputerAddress(raw: string): TargetVerdict {
     };
   }
 
-  if (NEVER_ALLOWED_HOSTNAMES.has(url.hostname.toLowerCase())) {
+  // Canonicalised for the same reason navigation is: the address reaches a fetch either way, so the
+  // spellings that gate has to see through are the spellings this one has to see through.
+  if (
+    NEVER_ALLOWED_HOSTNAMES.has(canonicalHostname(url.hostname.toLowerCase()))
+  ) {
     return {
       allowed: false,
       reason:
