@@ -1,3 +1,5 @@
+import { createIntentRouter } from "./routing/classify";
+import { createModelCompleter } from "./routing/model";
 import { serve } from "bun";
 import { mintRunAssertion } from "./agents/callback-token";
 import { createAgentProfileStore } from "./agents/profile-store";
@@ -350,6 +352,20 @@ const stallGuard = createStallGuard({
   auditStore: bootAuditStore,
 });
 
+const intentRouter = createIntentRouter({
+  complete: createModelCompleter({
+    model: tenantPackage.model,
+    resolveApiKey: () =>
+      resolveModelApiKey({
+        encryptionKey: config.keyEncryptionKey,
+        reader: credentialStore,
+        provider: tenantPackage.model.provider,
+        keyId: tenantPackage.model.credentialSecretRef,
+        environment: process.env,
+      }),
+  }),
+});
+
 const app = createApp(
   config,
   auth,
@@ -425,6 +441,8 @@ const app = createApp(
   // The enterprise identity providers registered here. Read as facts about the deployment rather
   // than through Better Auth's own listing, which answers per person. See identity-provider-store.ts.
   identityProviderStore,
+  // Chooses the coworker for an untagged message, on the deployment's own model and key.
+  intentRouter,
 );
 
 /**

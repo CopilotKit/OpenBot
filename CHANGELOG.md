@@ -54,6 +54,14 @@ Sessions survive and nobody signs in again.
   a copy of a customer's corpus is not a thing OpenBot does.
 
 ### Added
+- **A message with no `@` goes to the coworker it is for.** Typing without naming anyone used to
+  reach the default coworker; to get a specialist you had to `@` them. Now an untagged message is
+  routed to the coworker whose purpose matches it, chosen against each coworker's own description by
+  the deployment's own model, before the channel is pinned. It is named, not silent: the channel
+  header is the coworker it went to, and a `channel.routed` row records the choice, the reason, and
+  the candidates it chose between (never the message itself). `@` still wins as an explicit override
+  and skips routing entirely. If the router is uncertain or unreachable, it falls back to the same
+  default the composer always used, and says so, rather than misroute or drop.
 
 - **Releases are cut by a workflow, not by hand.** `Create release PR` bumps the version and promotes
   `## Unreleased` to a numbered section; merging the pull request it opens is what publishes. Merging

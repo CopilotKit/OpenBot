@@ -5,6 +5,8 @@ import { authoriseAgentCall } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
+import { createRoutingRoutes } from "./routing/routes";
+import type { IntentRouter } from "./routing/classify";
 import {
   type AuditReader,
   type AuditStore,
@@ -147,6 +149,14 @@ export function createApp(
    * metadata in. See identity-provider-store.ts.
    */
   identityProviders?: IdentityProviderStore,
+  /**
+   * Chooses which coworker an untagged message is for, before a channel is pinned to one.
+   *
+   * Passed in already built, like the copilot handler, so this module never imports the model
+   * client. Absent leaves the composer's existing behaviour untouched: an untagged message goes to
+   * the default coworker, which is exactly the failsafe the router itself falls back to.
+   */
+  intentRouter?: IntentRouter,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -675,6 +685,20 @@ export function createApp(
         auditStore,
       ),
     );
+    // Choosing a coworker for an untagged message needs the same permission-filtered roster the
+    // agents routes read, so it is mounted here where that store is in scope. Only when a router was
+    // configured; without one the composer keeps sending untagged messages to the default.
+    if (intentRouter) {
+      app.route(
+        "/api/route",
+        createRoutingRoutes(
+          agentProfileStore,
+          intentRouter,
+          requireUser,
+          auditStore,
+        ),
+      );
+    }
   }
 
   if (channelStore) {
