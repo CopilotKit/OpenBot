@@ -2,6 +2,7 @@ import { serve } from "bun";
 import type { Page } from "playwright";
 import { parseAriaSnapshot, type SnapshotElement } from "./aria-snapshot";
 import { isOpenPath, matchesToken, offeredToken } from "./authorisation";
+import { isPlainBotId } from "./bot-id";
 import {
   type Control,
   ControlError,
@@ -17,12 +18,12 @@ import {
   type Screencast,
   startScreencast,
 } from "./screencast";
+import { createShell } from "./shell";
 import {
   createWorkspace,
   WorkspaceFileError,
   WorkspacePathError,
 } from "./workspace";
-import { createShell } from "./shell";
 
 /**
  * The Bot's computer: one long-lived browser, reachable over HTTP.
@@ -122,11 +123,32 @@ type BotSession = {
 
 const sessions = new Map<string, BotSession>();
 
+/**
+ * Forget the sessions of Bots whose browsers are no longer running.
+ *
+ * The map gained an entry per Bot id this process had ever seen and lost none, so a deployment where
+ * every employee has a Bot accumulated one small object per employee for the life of the container.
+ * Small, but unbounded, which is the same shape as the browsers themselves.
+ *
+ * Only entries with no live browser and nobody watching are dropped: the state is the generation
+ * counter and the control handover, and both belong to a running browser. A Bot whose browser has
+ * been closed starts a fresh session next time, which is what starting a fresh browser means.
+ */
+function forgetIdleSessions(): void {
+  for (const [botId, session] of [...sessions.entries()]) {
+    if (session.viewer) continue;
+    if (profiles.isLive(botId)) continue;
+    sessions.delete(botId);
+  }
+}
+
 function sessionFor(botId: string): BotSession {
   const existing = sessions.get(botId);
   if (existing) return existing;
   const created: BotSession = { control: createControl(), snapshotId: 0 };
   sessions.set(botId, created);
+  // Cheap, and only ever on the path that adds one, so the map cannot grow without this running.
+  if (sessions.size > 32) forgetIdleSessions();
   return created;
 }
 
@@ -175,7 +197,17 @@ const shell = createShell(process.env.WORKSPACE_DIR ?? "/workspace");
  * Bot to name, such as a health check, so the container stays demonstrable on its own rather than
  * refusing everything that is not the server.
  */
-const DEFAULT_BOT_ID = process.env.COMPUTER_BOT_ID ?? "shared";
+const DEFAULT_BOT_ID = (() => {
+  const configured = process.env.COMPUTER_BOT_ID ?? "shared";
+  // At boot rather than per request. This is the id every unheadered call falls back to, so a value
+  // the path rules refuse would answer 400 to everything and read as a broken computer.
+  if (!isPlainBotId(configured)) {
+    throw new Error(
+      "COMPUTER_BOT_ID may contain only letters, digits, hyphen and underscore, and must start with a letter or digit.",
+    );
+  }
+  return configured;
+})();
 
 async function currentPage(botId: string): Promise<Page> {
   return profiles.page(botId);
@@ -444,6 +476,14 @@ serve<StreamData>({
     // Resolved once per request. Everything below that touches a browser, a takeover or a snapshot
     // goes through this Bot's session, so there is no path where one Bot's call reaches another's.
     const botId = botIdOf(request);
+
+    // Refused here rather than deeper down, because the id names a directory and the API server
+    // forwards whatever URL segment a caller typed. `reset` deletes that directory as root.
+    // `/health` is exempt for the same reason it is exempt from the token: it names no Bot, and an
+    // orchestrator's probe must not fail on a header it never meant to send.
+    if (!isOpenPath(url.pathname) && !isPlainBotId(botId)) {
+      return json({ error: "That is not a usable bot id." }, 400);
+    }
     const session = sessionFor(botId);
 
     if (url.pathname === "/stream") {
@@ -454,6 +494,9 @@ serve<StreamData>({
        * still wins where there is one.
        */
       const streamBotId = botIdOf(request, url.searchParams.get("bot"));
+      if (!isPlainBotId(streamBotId)) {
+        return json({ error: "That is not a usable bot id." }, 400);
+      }
       if (server.upgrade(request, { data: { botId: streamBotId } }))
         return undefined as unknown as Response;
       return json({ error: "Expected a WebSocket upgrade." }, 400);

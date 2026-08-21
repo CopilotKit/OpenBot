@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
@@ -31,7 +32,13 @@ const DEV_ACTOR_EMAIL = "dev@openbot.local";
 export function createComponentRoutes(
   store: ComponentStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
-  auditStore?: AuditStore,
+  auditStore: AuditStore | undefined,
+  /**
+   * Whether the caller may act as the Bot they named. What a Bot may draw, and the data a drawing
+   * reads, are facts about that Bot; an administrator granting one is a separate question and stays
+   * behind `requireAdmin`.
+   */
+  canUseBot: BotAccessCheck,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -116,11 +123,13 @@ export function createComponentRoutes(
    * Deliberately says nothing about the components this Bot does NOT hold. A list of everything it
    * is missing would be a list the surface could accidentally register.
    */
-  routes.get("/for-agent/:agentId", requireUser, async (context) =>
-    context.json({
-      components: await store.listForAgent(context.req.param("agentId")),
-    }),
-  );
+  routes.get("/for-agent/:agentId", requireUser, async (context) => {
+    const agentId = context.req.param("agentId");
+    if (!(await canUseBot(context.var.actor, agentId))) {
+      return context.json({ error: "There is no such Bot." }, 404);
+    }
+    return context.json({ components: await store.listForAgent(agentId) });
+  });
 
   /**
    * May this Bot use this component, right now?
@@ -139,6 +148,11 @@ export function createComponentRoutes(
     const agentId = typeof body?.agentId === "string" ? body.agentId : "";
     if (!agentId) {
       return context.json({ error: "The Bot is required." }, 400);
+    }
+    // Asked before the grant is, because the grant belongs to the Bot and says nothing about who is
+    // asking on its behalf.
+    if (!(await canUseBot(context.var.actor, agentId))) {
+      return context.json({ error: "There is no such Bot." }, 404);
     }
     const functions = Array.isArray(body?.functions)
       ? body.functions.filter(
@@ -212,6 +226,11 @@ export function createComponentRoutes(
         { error: "The function and the Bot are both required." },
         400,
       );
+    }
+    // Before the grant, and before anything runs. This is the route that executes, so borrowing a
+    // Bot here borrows whatever its components were granted.
+    if (!(await canUseBot(context.var.actor, agentId))) {
+      return context.json({ error: "There is no such Bot." }, 404);
     }
 
     const refuse = async (reason: string) => {
@@ -325,7 +344,6 @@ export function createComponentRoutes(
     if (!agentId) {
       return context.json({ error: "The Bot is required." }, 400);
     }
-
     try {
       await store.grant(name, agentId);
     } catch (error) {
