@@ -306,6 +306,18 @@ channels:
 
 Each channel requires `id`, `name`, `description`, `permitted_agents`, and `allowed_groups`. Every `permitted_agents` entry must match an agent id.
 
+`allowed_groups` is validated and stored, and nothing reads it. It decides nothing today, and a
+deployment that writes one must not treat it as an access control. Both halves of that control are
+missing, not one: `users.groups` exists as a column and no sign-in path, claim mapping or admin
+screen ever populates it, so there is nothing for a channel's list to be compared against. Channel
+access is decided by membership alone — every channel route resolves the caller's row in
+`channel_memberships` and refuses without it.
+
+Package-declared channels get no membership rows from `synchronizeTenantPackage`, so today they
+are unreachable rather than open. The field is kept because the enforcement it is named for needs
+the declaration and needs group membership arriving from the identity provider, and neither this
+column nor `users.groups` is the wrong shape for it.
+
 ### `model.yaml`
 
 ```yaml

@@ -50,6 +50,14 @@ export const users = pgTable("users", {
   name: text("name"),
   image: text("image"),
   emailVerified: boolean("email_verified").notNull().default(false),
+  /**
+   * The person's groups, for a group-based rule to be evaluated against.
+   *
+   * Empty on every row: no sign-in path, claim mapping or admin screen writes this, and nothing
+   * reads it. It is the other half of `channels.allowedGroups`, and #82 is about the pair. Anything
+   * that starts deciding access on a group has to populate this first, or it decides on an empty
+   * list for everybody.
+   */
   groups: text("groups").array().notNull().default([]),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -221,6 +229,16 @@ export const channels = pgTable(
     name: text("name").notNull(),
     description: text("description").notNull(),
     suggestedPrompts: text("suggested_prompts").array().notNull().default([]),
+    /**
+     * Which groups the tenant package says this channel is for.
+     *
+     * Written by `synchronizeTenantPackage` and read by nothing. Channel access is membership: every
+     * route resolves the caller in `channelMemberships` and refuses without a row, and this column is
+     * not consulted on the way. It is not currently a hole, because package channels get no
+     * membership rows either and so are unreachable rather than open, but it is a control the name
+     * promises and nothing keeps. See #82, and `users.groups`, which is the half that has to arrive
+     * from the identity provider before this one can decide anything.
+     */
     allowedGroups: text("allowed_groups").array().notNull().default([]),
     packageId: uuid("package_id").references(() => deploymentPackages.id, {
       onDelete: "set null",

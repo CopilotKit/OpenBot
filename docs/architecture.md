@@ -103,6 +103,12 @@ A coworker is a durable Bot profile:
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
 
+Who may reach one is decided by membership: every channel route resolves the caller in
+`channel_memberships` and refuses without a row. `channels.allowed_groups` is declared in the
+tenant package and stored, and is not part of that decision — `users.groups` is never populated by
+any sign-in path, so a group-based rule has nothing to evaluate. Treat it as a declaration waiting
+on group membership from the identity provider, not as a control that is running.
+
 See [coworkers.md](coworkers.md).
 
 ## Components
