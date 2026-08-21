@@ -1,10 +1,10 @@
 import { serve } from "bun";
-import { sql } from "drizzle-orm";
 import { mintRunAssertion } from "./agents/callback-token";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
+import { startAuditRetention } from "./audit-retention";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
@@ -21,6 +21,7 @@ import { createThreadIdentity } from "./channels/thread-identity";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
+import { startPolicyListener } from "./computer/policy-listener";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
@@ -29,7 +30,6 @@ import {
   createComputerProvider,
   describeComputerIsolation,
 } from "./computer/provider";
-import { startPolicyListener } from "./computer/policy-listener";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
 import { createConnectorAdminService } from "./connectors";
@@ -222,6 +222,16 @@ const policyListener = await startPolicyListener(
  * unavailable, and the row is a note for a reader rather than something the server depends on.
  */
 const bootAuditStore = createAuditStore(database);
+/*
+ * Old audit rows removed on a schedule, when a deployment has asked for that.
+ *
+ * One server sweeps rather than all of them, decided by an advisory lock. Off unless
+ * `AUDIT_RETENTION_DAYS` is set. See audit-retention.ts.
+ */
+const auditRetention = startAuditRetention(
+  config.databaseUrl,
+  config.auditRetentionDays,
+);
 const computerGateway = computerProvider
   ? createComputerGateway({
       provider: computerProvider,
@@ -578,6 +588,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     void Promise.allSettled([
       channelActivityListener.stop(),
       policyListener.stop(),
+      Promise.resolve(auditRetention.stop()),
     ]).finally(() => process.exit(0));
   });
 }

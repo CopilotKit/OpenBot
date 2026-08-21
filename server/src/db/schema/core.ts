@@ -445,7 +445,38 @@ export const auditEvents = pgTable(
     payload: jsonb("payload").notNull(),
     createdAt: createdAt(),
   },
-  (table) => [index("audit_events_created_at_idx").on(table.createdAt)],
+  /*
+   * The trail becomes the largest table in the deployment within weeks of real use: every click,
+   * keystroke, scroll, tool call, refusal, command and sign-in is a row.
+   *
+   * One index on `created_at` served the unfiltered screen and nothing else. The audit screen filters
+   * by event type, by who did it, and by what it was done to, and every one of those was a sequential
+   * scan over the biggest table there is. Each filter therefore leads its own index and carries the
+   * sort, so the filtered read is one index scan rather than a scan plus a sort.
+   *
+   * `id` is in each of them because the keyset pages on `(created_at, id)`: two rows written in the
+   * same millisecond are ordered by id, and an index that stopped at the timestamp would leave the
+   * tie to be broken by a sort.
+   */
+  (table) => [
+    index("audit_events_created_at_idx").on(table.createdAt),
+    index("audit_events_type_time_idx").on(
+      table.eventType,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index("audit_events_actor_time_idx").on(
+      table.actorUserId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index("audit_events_target_time_idx").on(
+      table.targetType,
+      table.targetId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+  ],
 );
 
 export const intelligenceChannelMappings = pgTable(
