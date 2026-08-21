@@ -55,6 +55,12 @@ export const GALLERY: GalleryComponent[] = [
       "Show a quotation with its attribution. Use when the exact words matter, something a person said, or a line from a document you were given.",
     parameters: QuoteCardProps,
     Component: QuoteCard as GalleryComponent["Component"],
+    preview: {
+      quote:
+        "Meals under $75 need no receipt. Anything above needs one, and anything above $500 needs your manager before you spend it.",
+      attribution: "the expense policy",
+      context: "Last changed in March.",
+    },
     confirmation: "The quotation is now on screen for the person.",
   },
 ];

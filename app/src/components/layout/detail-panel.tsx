@@ -2,6 +2,7 @@ import { IconX } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { EASE_OUT } from "@/lib/motion";
 
 /**
  * A main pane with a detail pane that slides in beside it.
@@ -15,9 +16,6 @@ import { Button } from "@/components/ui/button";
 
 const ANIMATION_DURATION_SECONDS = 0.3;
 const DEFAULT_DETAIL_WIDTH = 400;
-
-/** Strong ease-out. The browser's built-in curve is too weak to read as deliberate. */
-const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 /**
  * The content overlaps the tail of the pane rather than following it.

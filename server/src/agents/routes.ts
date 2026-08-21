@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import type { AuditStore } from "../audit";
+import type { AuditEventType, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { testAgentConnection } from "./connection-test";
@@ -233,6 +233,45 @@ export function createAgentRoutes(
     return context.json(result);
   });
 
+  /**
+   * Record something that changed a Bot.
+   *
+   * One helper rather than eight copies, because the eight routes below all answer the same question
+   * and the payload has to be the same shape for a reader filtering the trail.
+   *
+   * Never fatal. The change is already made and the caller has been told so; a trail that is briefly
+   * unavailable is not a reason to report a failure that did not happen.
+   */
+  const record = async (
+    context: Context<{ Variables: AppVariables }>,
+    eventType: Extract<AuditEventType, `bot.${string}`>,
+    agentId: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<void> => {
+    if (!auditStore) return;
+    const actor = context.var.actor;
+    try {
+      await recordAuditEvent(auditStore, {
+        eventType,
+        targetType: "agent",
+        targetId: agentId,
+        ...(actor?.id && actor.email !== DEV_ACTOR_EMAIL
+          ? { actorUserId: actor.id }
+          : {}),
+        payload: { bot: agentId, actor: actor?.email ?? "unknown", ...payload },
+      });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "bot-audit-write-failed",
+          eventType,
+          agentId,
+          error: String(error),
+        }),
+      );
+    }
+  };
+
   routes.post("/", requireUser, async (context) => {
     // Malformed JSON is a recoverable client-input error and is validated by the same parser.
     const parsed = parseAgentInput(
@@ -243,6 +282,15 @@ export function createAgentRoutes(
 
     try {
       const agent = await store.create(context.var.actor, parsed.value);
+      /*
+       * The endpoint, because that is where conversation content will be sent, and whether a key was
+       * attached, because "this Bot authenticates" is a fact and the key itself never is.
+       */
+      await record(context, "bot.created", agent.id, {
+        name: parsed.value.name,
+        ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
+        hasKey: Boolean(parsed.value.auth),
+      });
       return context.json({ agent: agentDto(context.var.actor, agent) }, 201);
     } catch (error) {
       return mapStoreError(context, error);
@@ -263,6 +311,13 @@ export function createAgentRoutes(
         context.req.param("agentId"),
         parsed.value,
       );
+      // What changed, not the new values. Repointing the endpoint is the dangerous edit and is worth
+      // naming; a replaced key is worth knowing about and is never worth recording.
+      await record(context, "bot.updated", agent.id, {
+        name: parsed.value.name,
+        ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
+        ...(parsed.value.auth ? { keyReplaced: true } : {}),
+      });
       return context.json({ agent: agentDto(context.var.actor, agent) });
     } catch (error) {
       return mapStoreError(context, error);
@@ -275,6 +330,11 @@ export function createAgentRoutes(
         context.var.actor,
         context.req.param("agentId"),
       );
+      // Recorded against the copy, naming the original: a duplicate inherits an endpoint, so the
+      // reader needs to know a second Bot now points at it.
+      await record(context, "bot.duplicated", agent.id, {
+        copiedFrom: context.req.param("agentId"),
+      });
       return context.json({ agent: agentDto(context.var.actor, agent) }, 201);
     } catch (error) {
       return mapStoreError(context, error);
@@ -288,6 +348,7 @@ export function createAgentRoutes(
         context.req.param("agentId"),
         true,
       );
+      await record(context, "bot.hidden", context.req.param("agentId"));
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);
@@ -301,6 +362,52 @@ export function createAgentRoutes(
         context.req.param("agentId"),
         false,
       );
+      await record(context, "bot.unhidden", context.req.param("agentId"));
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  /*
+   * Issue this agent its callback credential, and show it once.
+   *
+   * A POST because it writes and because it replaces: calling it again rotates, which is how a leaked
+   * token is retired. The token is in the response and nowhere else, ever again, and it is not written
+   * to the audit payload either: a trail that records credentials is a credential store with worse
+   * access control.
+   */
+  routes.post("/:agentId/callback-token", requireUser, async (context) => {
+    try {
+      const token = await store.issueCallbackToken(
+        context.var.actor,
+        context.req.param("agentId"),
+      );
+      // That one was issued, never what it is. A trail that records credentials is a credential
+      // store with worse access control.
+      await record(
+        context,
+        "bot.callback_token_issued",
+        context.req.param("agentId"),
+      );
+      return context.json({ token }, 201);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  /** Take it away. The agent may still hold a conversation; it may not reach anything outside one. */
+  routes.delete("/:agentId/callback-token", requireUser, async (context) => {
+    try {
+      await store.revokeCallbackToken(
+        context.var.actor,
+        context.req.param("agentId"),
+      );
+      await record(
+        context,
+        "bot.callback_token_revoked",
+        context.req.param("agentId"),
+      );
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);
@@ -310,6 +417,7 @@ export function createAgentRoutes(
   routes.delete("/:agentId", requireUser, async (context) => {
     try {
       await store.softDelete(context.var.actor, context.req.param("agentId"));
+      await record(context, "bot.deleted", context.req.param("agentId"));
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);
@@ -345,6 +453,8 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     // and any credential for it lives in the vault, never in this row.
     endpoint: agent.endpoint,
     hasAuth: agent.hasAuth,
+    // Whether one exists, never what it is.
+    hasCallbackToken: agent.hasCallbackToken,
     canManage: canManageAgent(actor, agent),
     // Ownership, kept separate from permission. `canManage` is also true for an administrator on
     // another user's coworker, so a roster that split "mine" on it would file other people's work

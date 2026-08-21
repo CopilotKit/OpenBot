@@ -1,4 +1,5 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 
 /**
  * A channel as the browser sees it.
@@ -31,17 +32,38 @@ export const channelKeys = {
   detail: (channelId: string) => ["channels", "detail", channelId] as const,
 };
 
+/** One page of channels, and where the next one starts. */
+export type ChannelPage = {
+  channels: ChannelSummary[];
+  nextCursor: string | null;
+};
+
+/**
+ * The sidebar's channels, a page at a time.
+ *
+ * It used to ask for every channel this person has, one row per channel-agent pair, on every render.
+ * Nothing removes a channel, so somebody who talks to their Bot daily accumulates thousands and the
+ * query grows monotonically for as long as they use the product.
+ *
+ * The pages are flattened for the caller, so the sidebar and the socket that patches it both see one
+ * array in recency order and neither has to know this is paged.
+ */
 export function channelListQueryOptions() {
-  return queryOptions({
+  return infiniteQueryOptions({
     queryKey: channelKeys.list(),
-    queryFn: async (): Promise<ChannelSummary[]> => {
-      const response = await fetch("/api/channels", {
-        credentials: "include",
+    initialPageParam: "",
+    queryFn: async ({ pageParam }): Promise<ChannelPage> => {
+      const suffix = pageParam
+        ? `?cursor=${encodeURIComponent(pageParam as string)}`
+        : "";
+      const response = await client(`/api/channels${suffix}`, {
+        fallback: "Could not load channels",
       });
-      if (!response.ok) throw new Error("Could not load channels");
-      return ((await response.json()) as { channels: ChannelSummary[] })
-        .channels;
+      return (await response.json()) as ChannelPage;
     },
+    getNextPageParam: (page: ChannelPage) => page.nextCursor ?? undefined,
+    select: (data): ChannelSummary[] =>
+      data.pages.flatMap((page) => page.channels),
   });
 }
 
@@ -49,11 +71,9 @@ export function channelQueryOptions(channelId: string) {
   return queryOptions({
     queryKey: channelKeys.detail(channelId),
     queryFn: async (): Promise<AgentChannel> => {
-      const response = await fetch(`/api/channels/${channelId}`, {
-        credentials: "include",
+      return client(`/api/channels/${channelId}`, "channel", {
+        fallback: "Could not load this channel",
       });
-      if (!response.ok) throw new Error("Could not load this channel");
-      return ((await response.json()) as { channel: AgentChannel }).channel;
     },
   });
 }

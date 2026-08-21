@@ -1,6 +1,7 @@
 import { useForm } from "@tanstack/react-form";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { queryClient } from "@/query-client";
 import { z } from "zod";
 import { PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
@@ -12,30 +13,14 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { connectorKeys } from "@/lib/connectors/queries";
+import { setUpGoogleDriveMutationOptions } from "@/lib/connectors/mutations";
 
 export const Route = createFileRoute("/_authed/admin/connectors/google-drive")({
   component: GoogleDriveConnectorPage,
 });
 
 function GoogleDriveConnectorPage() {
-  const queryClient = useQueryClient();
-  const setup = useMutation({
-    mutationFn: async (value: {
-      serviceAccountJson: string;
-      impersonationSubject: string;
-    }) => {
-      const response = await fetch("/api/admin/connectors/google-drive/setup", {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(value),
-      });
-      if (!response.ok) throw new Error("Could not set up Google Drive");
-    },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: connectorKeys.all }),
-  });
+  const setup = useMutation(setUpGoogleDriveMutationOptions(queryClient));
   const form = useForm({
     defaultValues: { serviceAccountJson: "", impersonationSubject: "" },
     validators: {

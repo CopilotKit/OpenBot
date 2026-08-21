@@ -1,5 +1,6 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -25,86 +26,41 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { useBotNames } from "@/lib/agents/bot-names";
-
-type ComputerProfile = {
-  botId: string;
-  running: boolean;
-  startedAt: string | null;
-  egress: string | null;
-};
-
-/** API placeholder id; the list endpoint returns all computers. */
-const COMPUTER_ID = "openbot-computer";
+import { setComputerStateMutationOptions } from "@/lib/computers/mutations";
+import { computerFleetQueryOptions } from "@/lib/computers/queries";
+import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/admin/computers")({
   component: ComputersPage,
 });
 
 function ComputersPage() {
-  const [computers, setComputers] = useState<ComputerProfile[] | null>(null);
-  /** Whether each Bot has an isolated browser profile. */
-  const [isolation, setIsolation] = useState<"per-bot" | "shared" | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
   /** Bot id currently running a stop/reset request. */
   const [busy, setBusy] = useState<string | null>(null);
   /** Reset deletes the browser profile, so it requires confirmation. */
   const [confirming, setConfirming] = useState<string | null>(null);
   const nameFor = useBotNames();
 
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/computers/${COMPUTER_ID}/computers`, {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        setProblem(body?.error ?? "The computers could not be listed.");
-        return;
-      }
-      const body = (await response.json()) as {
-        computers: ComputerProfile[];
-        isolation?: "per-bot" | "shared";
-      };
-      setComputers(body.computers);
-      setIsolation(body.isolation ?? null);
-      setProblem(null);
-    } catch {
-      setProblem("The computers could not be reached.");
-    }
-  }, []);
+  const fleet = useQuery(computerFleetQueryOptions());
+  const setState = useMutation(setComputerStateMutationOptions(queryClient));
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const computers = fleet.data?.computers ?? null;
+  const isolation = fleet.data?.isolation ?? null;
+  /*
+   * One line for either failure. A list that could not be read and an action that was refused are
+   * both "this did not work", and the page has one place to say so.
+   */
+  const problem = fleet.error
+    ? "The computers could not be listed."
+    : setState.error
+      ? setState.error.message
+      : null;
 
-  const run = useCallback(
-    async (botId: string, action: "stop" | "reset") => {
-      setBusy(botId);
-      setConfirming(null);
-      try {
-        const response = await fetch(
-          `/api/computers/${encodeURIComponent(botId)}/computers/${action}`,
-          { method: "POST", credentials: "include" },
-        );
-        if (!response.ok) {
-          const body = (await response.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          setProblem(body?.error ?? `The computer could not be ${action}.`);
-        } else {
-          setProblem(null);
-        }
-      } catch {
-        setProblem("The computer could not be reached.");
-      } finally {
-        setBusy(null);
-        await load();
-      }
-    },
-    [load],
-  );
+  const run = (botId: string, action: "stop" | "reset") => {
+    setBusy(botId);
+    setConfirming(null);
+    setState.mutate({ action, botId }, { onSettled: () => setBusy(null) });
+  };
 
   return (
     <PageShell
@@ -139,9 +95,7 @@ function ComputersPage() {
       <PageSection title="Computers in this deployment">
         {computers === null && problem ? (
           <PageEmpty>The list could not be loaded.</PageEmpty>
-        ) : computers === null ? (
-          <PageEmpty>Loading…</PageEmpty>
-        ) : computers.length === 0 ? (
+        ) : computers === null ? null : computers.length === 0 ? (
           <PageEmpty>
             No computers yet. One appears the first time a Bot opens a page.
           </PageEmpty>
@@ -159,9 +113,11 @@ function ComputersPage() {
                         ? `Browser running since ${new Date(computer.startedAt ?? "").toLocaleTimeString()}`
                         : "No browser running. It starts when the Bot next needs it."}
                       {" · "}
-                      {computer.egress
-                        ? `Leaves through ${computer.egress}`
-                        : "Leaves directly"}
+                      {computer.egress === undefined
+                        ? "Egress not reported"
+                        : computer.egress === null
+                          ? "Leaves directly"
+                          : `Leaves through ${computer.egress}`}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>

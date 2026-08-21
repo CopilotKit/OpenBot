@@ -104,7 +104,7 @@ describe("registered Copilot agents", () => {
   });
 
   test("fails an unavailable built-in agent through the AG-UI lifecycle", async () => {
-    const agents = buildAgents(
+    const agents = await buildAgents(
       [
         {
           id: "general-assistant",
@@ -139,8 +139,8 @@ describe("registered Copilot agents", () => {
     );
   });
 
-  test("constructs built-in and remote agents together", () => {
-    const agents = buildAgents(
+  test("constructs built-in and remote agents together", async () => {
+    const agents = await buildAgents(
       [
         {
           id: "general-assistant",
@@ -171,7 +171,7 @@ describe("registered Copilot agents", () => {
    * Bot's own name reaches it matters because that name is what the person is shown when its stream
    * goes quiet, and a guard handed the wrong one would say so convincingly.
    */
-  test("hands a remote Bot's fetch to the stall guard, and a built-in Bot none", () => {
+  test("hands a remote Bot's fetch to the stall guard, and a built-in Bot none", async () => {
     const watched: { id: string; name: string }[] = [];
     const stallGuard = {
       watch: (bot: { id: string; name: string }) => {
@@ -181,7 +181,7 @@ describe("registered Copilot agents", () => {
       stop: () => undefined,
     };
 
-    const agents = buildAgents(
+    const agents = await buildAgents(
       [
         {
           id: "general-assistant",
@@ -213,7 +213,7 @@ describe("registered Copilot agents", () => {
    * The same registration is built twice, with a guard whose watch returns a fetch nothing else
    * could have produced and then without one, and the two are compared.
    */
-  test("leaves a remote Bot's fetch alone when no timeout is configured", () => {
+  test("leaves a remote Bot's fetch alone when no timeout is configured", async () => {
     const sentinel = async () => new Response(null);
     const registered = [
       {
@@ -225,11 +225,13 @@ describe("registered Copilot agents", () => {
     ];
     const model = { provider: "openai" as const, defaultModel: "gpt-4.1" };
 
-    const guarded = buildAgents(registered, model, null, {
-      watch: () => sentinel,
-      stop: () => undefined,
-    }).risk;
-    const unguarded = buildAgents(registered, model, null).risk;
+    const guarded = (
+      await buildAgents(registered, model, null, {
+        watch: () => sentinel,
+        stop: () => undefined,
+      })
+    ).risk;
+    const unguarded = (await buildAgents(registered, model, null)).risk;
     if (!(guarded instanceof HttpAgent) || !(unguarded instanceof HttpAgent)) {
       throw new Error("Expected the remote agent");
     }
@@ -327,7 +329,7 @@ describe("standing agent roles", () => {
 
   test("sends one standing role message ahead of the conversation", async () => {
     await using endpoint = fakeAgUiEndpoint();
-    const agents = buildAgents(
+    const agents = await buildAgents(
       [remoteAgent(endpoint.url)],
       { provider: "openai", defaultModel: "gpt-4.1" },
       null,
@@ -351,7 +353,7 @@ describe("standing agent roles", () => {
 
   test("keeps the standing role out of forwarded props and agent state", async () => {
     await using endpoint = fakeAgUiEndpoint();
-    const agents = buildAgents(
+    const agents = await buildAgents(
       [remoteAgent(endpoint.url)],
       { provider: "openai", defaultModel: "gpt-4.1" },
       null,
@@ -370,7 +372,7 @@ describe("standing agent roles", () => {
 
   test("resolves a deleted coworker as a tombstone that never reaches its endpoint", async () => {
     await using endpoint = fakeAgUiEndpoint();
-    const agents = buildAgents(
+    const agents = await buildAgents(
       [
         {
           id: "agent_expense",

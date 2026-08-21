@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 import { type AgentProfile, type AgentVisibility, agentKeys } from "./queries";
 
 export type AgentInput = {
@@ -12,30 +13,8 @@ export type AgentInput = {
   auth?: { header: string; value: string };
 };
 
-async function agentRequest(
-  path: string,
-  init: { method: string; body?: AgentInput },
-): Promise<Response> {
-  const response = await fetch(path, {
-    method: init.method,
-    credentials: "include",
-    headers: init.body ? { "content-type": "application/json" } : undefined,
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
-  if (!response.ok) {
-    // The server's message is the useful one: it names the field or the permission that failed.
-    const message = await response
-      .json()
-      .then((body: { error?: string }) => body.error)
-      .catch(() => undefined);
-    throw new Error(message ?? "Coworker operation failed");
-  }
-  return response;
-}
-
-async function agentFrom(response: Response): Promise<AgentProfile> {
-  return ((await response.json()) as { agent: AgentProfile }).agent;
-}
+/** The sentence for every write here, since they all fail the same way to a reader. */
+const FALLBACK = "Coworker operation failed";
 
 /** Server-derived fields are invalidated instead of patched by hand. */
 function invalidateAgents(queryClient: QueryClient) {
@@ -44,35 +23,38 @@ function invalidateAgents(queryClient: QueryClient) {
 
 export function createAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (input: AgentInput) =>
-      agentFrom(
-        await agentRequest("/api/agents", { method: "POST", body: input }),
-      ),
+    mutationFn: (input: AgentInput): Promise<AgentProfile> =>
+      client("/api/agents", "agent", {
+        method: "POST",
+        body: input,
+        fallback: FALLBACK,
+      }),
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
 
 export function updateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (variables: { agentId: string; input: AgentInput }) =>
-      agentFrom(
-        await agentRequest(`/api/agents/${variables.agentId}`, {
-          method: "PATCH",
-          body: variables.input,
-        }),
-      ),
+    mutationFn: (variables: {
+      agentId: string;
+      input: AgentInput;
+    }): Promise<AgentProfile> =>
+      client(`/api/agents/${variables.agentId}`, "agent", {
+        method: "PATCH",
+        body: variables.input,
+        fallback: FALLBACK,
+      }),
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
 
 export function duplicateAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
-    mutationFn: async (agentId: string) =>
-      agentFrom(
-        await agentRequest(`/api/agents/${agentId}/duplicate`, {
-          method: "POST",
-        }),
-      ),
+    mutationFn: (agentId: string): Promise<AgentProfile> =>
+      client(`/api/agents/${agentId}/duplicate`, "agent", {
+        method: "POST",
+        fallback: FALLBACK,
+      }),
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
@@ -80,9 +62,9 @@ export function duplicateAgentMutationOptions(queryClient: QueryClient) {
 export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (variables: { agentId: string; hidden: boolean }) => {
-      await agentRequest(
+      await client(
         `/api/agents/${variables.agentId}/${variables.hidden ? "hide" : "unhide"}`,
-        { method: "POST" },
+        { method: "POST", fallback: FALLBACK },
       );
     },
     onSuccess: () => invalidateAgents(queryClient),
@@ -92,7 +74,41 @@ export function setAgentHiddenMutationOptions(queryClient: QueryClient) {
 export function deleteAgentMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentId: string) => {
-      await agentRequest(`/api/agents/${agentId}`, { method: "DELETE" });
+      await client(`/api/agents/${agentId}`, {
+        method: "DELETE",
+        fallback: FALLBACK,
+      });
+    },
+    onSuccess: () => invalidateAgents(queryClient),
+  });
+}
+
+/**
+ * Issue this coworker a credential for calling tools back, and hand it over once.
+ *
+ * The token is in this response and nowhere else, ever again, so the caller has to show it to the
+ * person immediately. Calling this on a coworker that already has one rotates it, which is how a
+ * leaked token is retired.
+ */
+export function issueCallbackTokenMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (agentId: string): Promise<string> =>
+      client(`/api/agents/${agentId}/callback-token`, "token", {
+        method: "POST",
+        fallback: FALLBACK,
+      }),
+    onSuccess: () => invalidateAgents(queryClient),
+  });
+}
+
+/** Take the credential away. The coworker may still talk; it may not reach anything outside a chat. */
+export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (agentId: string) => {
+      await client(`/api/agents/${agentId}/callback-token`, {
+        method: "DELETE",
+        fallback: FALLBACK,
+      });
     },
     onSuccess: () => invalidateAgents(queryClient),
   });

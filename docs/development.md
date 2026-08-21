@@ -56,6 +56,37 @@ bun run --filter server db:migrate
 
 Review generated migration files before sharing them. `start.sh` applies existing migrations when it starts the stack.
 
+**Do not hand-edit a generated migration.** It leaves a file that no longer matches what the
+generator produced. If the generated SQL will not work — `ADD COLUMN ... NOT NULL` fails on a table
+that already has rows — split it instead: generate the column nullable, add the data step, then
+generate the constraint.
+
+**A constraint that tightens an existing column belongs to a later release**, not to the release that
+adds the column. A rolling deploy runs the migrations and then serves from old and new replicas at
+once, and an old replica writes rows without the new column: under `NOT NULL` its writes start
+failing, so the release that added the column breaks for everybody who lands on a replica that has
+not been replaced yet. Ship the column nullable, let the fleet turn over, then tighten it. `issuer`
+on `accounts` is the worked example: the column is nullable and no migration tightens it.
+
+**A data step is its own migration**, created with the flag that exists for it:
+
+```sh
+bun run --filter server db:generate -- --custom --name=backfill_something
+```
+
+A generator diffs schema against schema, so a rule like "the rows whose provider is Google get
+Google's issuer" can never come out of one: it is not in the schema. `--custom` writes an empty file
+registered in the journal, and it is the only migration anybody should be writing by hand.
+
+CI enforces two things about this: `drizzle-kit check` for collisions and gaps between migrations,
+and a generate-and-fail-if-dirty probe that refuses a schema change with no migration written for it.
+
+**If `drizzle-kit migrate` hangs and then exits non-zero with no error**, the journal names a
+migration file that is not there. A rebase does this: `meta/_journal.json` is a checked-in file, so
+restoring it can reinstate entries for migrations that were renamed. `drizzle-kit check` reports
+"Everything's fine" in that state, because it compares schemas rather than checking that the journal
+and the directory agree. Compare `meta/_journal.json` against `ls server/drizzle/*.sql`.
+
 ## Quality checks
 
 Run these before opening a pull request:

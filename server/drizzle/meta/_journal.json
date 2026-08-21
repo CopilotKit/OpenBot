@@ -8,6 +8,55 @@
       "when": 1786891733850,
       "tag": "0000_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787198911059,
+      "tag": "0001_swift_morph",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787275307382,
+      "tag": "0002_sign_in",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787275307621,
+      "tag": "0003_backfill_account_issuer",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787324562029,
+      "tag": "0004_identity_provider_outlives_its_registrar",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787322944029,
+      "tag": "0005_computer_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787330336906,
+      "tag": "0006_audit_read_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787330552602,
+      "tag": "0007_audit_retention_window",
+      "breakpoints": true
     }
   ]
 }

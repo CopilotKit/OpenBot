@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { client } from "@/lib/client";
 
 export type ConnectorStatus = {
   id: string;
@@ -17,12 +18,9 @@ export function connectorListQueryOptions() {
   return queryOptions({
     queryKey: connectorKeys.list(),
     queryFn: async (): Promise<ConnectorStatus[]> => {
-      const response = await fetch("/api/admin/connectors", {
-        credentials: "include",
+      return client("/api/admin/connectors", "connectors", {
+        fallback: "Could not load connectors",
       });
-      if (!response.ok) throw new Error("Could not load connectors");
-      return ((await response.json()) as { connectors: ConnectorStatus[] })
-        .connectors;
     },
   });
 }

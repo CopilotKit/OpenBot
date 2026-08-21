@@ -21,6 +21,7 @@ bash scripts/start.sh
 | `DATABASE_URL`                | PostgreSQL connection string.                                                                         |
 | `KEY_ENCRYPTION_KEY`          | Base64-encoded 32-byte key for encrypted stored credentials. Generate with `openssl rand -base64 32`. |
 | `MANAGED_AGENT_AG_UI_URL`     | Default AG-UI endpoint for coworkers created in the product. Must be HTTP(S).                         |
+| `MANAGED_AGENT_TOKEN`          | Secret sent only to the managed AG-UI endpoint. Generate with `openssl rand -base64 32`.               |
 | `INTELLIGENCE_API_URL`        | CopilotKit Intelligence API URL.                                                                      |
 | `INTELLIGENCE_GATEWAY_WS_URL` | CopilotKit Intelligence realtime gateway URL.                                                         |
 | `INTELLIGENCE_API_KEY`        | Runtime key for the Intelligence project.                                                             |
@@ -33,7 +34,7 @@ All four Intelligence values are required together. Missing any of them stops se
 | Variable             | Default                            | Meaning                                                             |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------- |
 | `PORT`               | `3001`                             | API server port.                                                    |
-| `NODE_ENV`           | unset                              | `production` enables startup refusals for local-only settings.      |
+| `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
 | `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project.          |
 | `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
@@ -45,6 +46,20 @@ All four Intelligence values are required together. Missing any of them stops se
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
 | `BOT_MODEL`          | provider default from Bot code/env | Model used by the shipped Bots.                                     |
 | `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
+| `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it. |
+| `AGENT_TOOL_TOKEN`   | unset                              | The secret a framework Bot presents when it calls a granted tool back through this server. |
+| `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
+
+**`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
+show: a stream that stops producing anything. Every other audit row is something that happened, and
+this one is the absence of anything happening, which leaves no trace of its own. Ending the turn
+writes `agent.stream_stalled`. Unset or `0` switches it off and nothing is watched. `.env.example`
+ships `60000`, so a new clone has it on and an upgraded deployment does not acquire it unasked.
+
+**`AGENT_TOOL_TOKEN`** exists because a framework Bot runs its own loop in its own process and still
+may not reach a vendor directly. It calls the deployment that granted the tool, which is where the
+grant, the policy and the audit row live. Absent, no Bot may call tools back, and it is told so
+rather than quietly allowed.
 
 ## OpenAI-compatible endpoints
 
@@ -81,15 +96,52 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 
 | Variable                     | Meaning                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
-| `OPENBOT_DEV_NO_AUTH`        | Local-only fixed administrator when set to `true`. Refused with `NODE_ENV=production`. |
+| `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. **Required** when no identity provider is configured, or the deployment refuses to start. Ignored when one is. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
-| `BETTER_AUTH_SECRET`         | At least 32 characters. Required with Google OAuth.                                    |
-| `BETTER_AUTH_URL`            | Public API server base URL. Required with Google OAuth.                                |
-| `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API.                                       |
-| `INITIAL_ADMIN_EMAILS`       | Comma-separated users seeded as administrators.                                        |
+| `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
+| `MICROSOFT_OAUTH_CLIENT_SECRET` | Microsoft Entra ID client secret.                                                   |
+| `MICROSOFT_OAUTH_TENANT_ID`  | Directory to admit. `common` by default, which admits personal accounts too; a GUID admits one directory. |
+| `OKTA_OAUTH_CLIENT_ID`       | Okta client id.                                                                        |
+| `OKTA_OAUTH_CLIENT_SECRET`   | Okta client secret.                                                                    |
+| `OKTA_OAUTH_ISSUER`          | Which Okta, for example `https://example.okta.com/oauth2/default`.                     |
+| `BETTER_AUTH_SECRET`         | At least 32 characters. Required with any provider.                                    |
+| `BETTER_AUTH_URL`            | Public API server base URL, where OAuth callbacks return. Required with any provider.  |
+| `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API, plus every host in a registered OIDC provider's discovery document. |
+| `INITIAL_ADMIN_EMAILS`       | Comma-separated administrators. **Required** with any provider.                        |
 
-Google OAuth client id and secret must be configured together. If Google OAuth is configured, `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are also required.
+**With no provider at all, `OPENBOT_SINGLE_USER=true` is required.** A deployment that configures
+nothing to sign anybody in and does not say that was deliberate refuses to start, naming what to
+configure, because a public URL where every visitor is an administrator fails silently. `NODE_ENV`
+does not enter into it. `.env.example` ships the line switched on, so a clone runs with no
+configuration at all.
+
+**Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
+secret must be set together, Okta additionally needs its issuer, and any of them requires
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` and `INITIAL_ADMIN_EMAILS`. Every incomplete combination is
+refused at start-up rather than at somebody's first attempt to sign in.
+
+`INITIAL_ADMIN_EMAILS` is required because nothing else grants the administrator role at first: an
+address it names becomes an administrator at every sign-in and cannot be demoted from the People
+screen, which is what guarantees a way back in. Everybody else's role is decided there instead.
+
+SAML and OpenID Connect providers are not configured here. They are registered while the deployment
+runs, under Admin → Identity providers, and routed by email domain.
+
+**Registering an OpenID Connect provider needs its endpoints in `TRUSTED_ORIGINS`.** Better Auth
+fetches the discovery document and refuses any endpoint inside it that is not a trusted origin, which
+is what stops a registration pointing the deployment at an address of somebody else's choosing. It is
+every host in the document and not only the issuer, so a Google issuer also needs
+`oauth2.googleapis.com` and `openidconnect.googleapis.com`; a typical Okta tenant serves all of them
+from one host and needs only that. A registration refused this way names the host it objected to.
+
+What is registered belongs to the deployment rather than to whoever registered it. Every
+administrator sees the same list and can remove any of it, and a provider outlives the person who
+added it. The client secret and any SAML signing material are encrypted at rest with
+`KEY_ENCRYPTION_KEY`.
+
+The redirect URI to register with each provider is `<BETTER_AUTH_URL>/api/auth/callback/<provider>`,
+where `<provider>` is `google`, `microsoft` or `okta`.
 
 ## Computer and supervisor
 
@@ -97,6 +149,8 @@ Google OAuth client id and secret must be configured together. If Google OAuth i
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
+| `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. |
+| `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. Cloud metadata addresses are still refused. |
@@ -112,6 +166,12 @@ Google OAuth client id and secret must be configured together. If Google OAuth i
 - `COMPUTER_BOT_ID`
 - `EGRESS_PROXY_DEFAULT`
 - `EGRESS_PROXY_<BOT_ID>`
+- `COMPUTER_SHELL_ENV`
+
+A command on the computer inherits PATH, locale and terminal names, and the proxy variables, not
+the rest of the process environment. Userinfo is stripped from a proxy URL, so a password in
+`HTTP_PROXY` is not in `env`. `COMPUTER_SHELL_ENV` is a comma-separated list of extra names to
+pass. Naming a secret or a credentialed proxy there is an operator's decision; the default does not.
 
 The supervisor also reads:
 
@@ -212,7 +272,7 @@ agents:
     role_description: Answer company knowledge questions and cite sources.
     avatar_seed: knowledge
     type: built-in
-    system_prompt: Answer from authorized company knowledge and cite every source.
+    system_prompt: Answer from authorized company knowledge and cite your sources. When none is connected, say so plainly rather than inventing a citation.
 
   - id: risk-analyst
     name: Risk Analyst
@@ -247,6 +307,18 @@ channels:
 ```
 
 Each channel requires `id`, `name`, `description`, `permitted_agents`, and `allowed_groups`. Every `permitted_agents` entry must match an agent id.
+
+`allowed_groups` is validated and stored, and nothing reads it. It decides nothing today, and a
+deployment that writes one must not treat it as an access control. Both halves of that control are
+missing, not one: `users.groups` exists as a column and no sign-in path, claim mapping or admin
+screen ever populates it, so there is nothing for a channel's list to be compared against. Channel
+access is decided by membership alone — every channel route resolves the caller's row in
+`channel_memberships` and refuses without it.
+
+Package-declared channels get no membership rows from `synchronizeTenantPackage`, so today they
+are unreachable rather than open. The field is kept because the enforcement it is named for needs
+the declaration and needs group membership arriving from the identity provider, and neither this
+column nor `users.groups` is the wrong shape for it.
 
 ### `model.yaml`
 

@@ -14,7 +14,7 @@ agents:
     role_description: Help answer company knowledge questions and cite sources when available.
     avatar_seed: knowledge
     type: built-in
-    system_prompt: Answer from authorized company knowledge and cite every source.
+    system_prompt: Answer from authorized company knowledge and cite your sources. When none is connected, say so plainly rather than inventing a citation.
   # The Bot that ships in the box (agent-bot), addressed exactly the way a customer's own Bot would
   # be: an AG-UI endpoint in the registry. Names in dollar-brace form are read from the environment,
   # so the address belongs to the deployment. Replace it with your own service and nothing changes.
@@ -24,4 +24,4 @@ agents:
     role_description: Investigate policies, transaction monitoring, and control evidence.
     avatar_seed: risk-analyst
     type: remote-ag-ui
-    endpoint: ${MANAGED_AGENT_AG_UI_URL:-http://localhost:4200/ag-ui}
+    endpoint: ${MANAGED_AGENT_AG_UI_URL:-http://localhost:4201/ag-ui}

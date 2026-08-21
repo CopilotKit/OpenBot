@@ -50,6 +50,14 @@ export const users = pgTable("users", {
   name: text("name"),
   image: text("image"),
   emailVerified: boolean("email_verified").notNull().default(false),
+  /**
+   * The person's groups, for a group-based rule to be evaluated against.
+   *
+   * Empty on every row: no sign-in path, claim mapping or admin screen writes this, and nothing
+   * reads it. It is the other half of `channels.allowedGroups`, and #82 is about the pair. Anything
+   * that starts deciding access on a group has to populate this first, or it decides on an empty
+   * list for everybody.
+   */
   groups: text("groups").array().notNull().default([]),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -74,6 +82,22 @@ export const accounts = pgTable(
     id: text("id").primaryKey(),
     accountId: text("account_id").notNull(),
     providerId: text("provider_id").notNull(),
+    /*
+     * Who vouched for this account, as the identity provider names itself.
+     *
+     * Required by Better Auth from 1.7. A real OIDC provider supplies its own
+     * (`https://accounts.google.com`), and one without gets a synthetic
+     * `local:oauth:<providerId>`, so nothing this deployment writes leaves it empty. It exists
+     * because `providerId` alone stopped being enough once a deployment can register more than one
+     * OIDC provider: two companies' Okta tenants are both "okta" and are not the same directory.
+     *
+     * Nullable in the database, deliberately, even though every write fills it. A rolling deploy runs
+     * the migrations and then serves from old and new replicas at once, and an old replica inserts an
+     * account without this column. Under `NOT NULL` that insert fails, so the release that adds the
+     * column would break the first sign-in of everybody who landed on a replica that had not been
+     * replaced yet. The constraint belongs to a later release, once no replica predates the column.
+     */
+    issuer: text("issuer"),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -120,6 +144,61 @@ export const userRoles = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.role] })],
 );
 
+/**
+ * An enterprise identity provider this deployment has been told about.
+ *
+ * The other three providers are configuration: one Google, one Entra, one Okta, named in the
+ * environment. These are not, because a company's own IdP is not something a deployment can be
+ * built knowing. It is registered while running, by an administrator holding the metadata their
+ * identity team gave them, and there can be several.
+ *
+ * `oidcConfig` and `samlConfig` are JSON held as text because Better Auth writes them that way. They
+ * carry a client secret or a signing certificate, so nothing here is ever projected to a browser.
+ *
+ * `domain` is what routes somebody to the right one: they type an email address, and the part after
+ * the @ decides which identity provider is asked about them.
+ */
+export const ssoProviders = pgTable("sso_providers", {
+  id: text("id").primaryKey(),
+  issuer: text("issuer").notNull(),
+  oidcConfig: text("oidc_config"),
+  samlConfig: text("saml_config"),
+  /**
+   * Who registered it, as a note rather than as an owner.
+   *
+   * Better Auth writes this and then scopes its own listing and delete routes to it, which is the
+   * right model for a personal integration and the wrong one here: a company's Okta tenant does not
+   * belong to whichever administrator pasted the metadata in. Reads and removals go through
+   * identity-provider-store.ts instead, against the whole table.
+   *
+   * `set null` and not `cascade`. Under cascade, removing the person who set sign-in up deleted the
+   * deployment's sign-in with them, which is a bad afternoon for a company whose IT lead has left.
+   */
+  userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+  providerId: text("provider_id").notNull().unique(),
+  organizationId: text("organization_id"),
+  domain: text("domain").notNull(),
+});
+
+/**
+ * People an administrator has removed, by email address.
+ *
+ * Keyed on the address rather than the user id, because deleting the user row is not removal: the
+ * next sign-in through the identity provider creates it again, with a fresh id and no memory of
+ * having been removed. The address is the only thing that survives that.
+ *
+ * Lower-cased on the way in, since a provider is free to return whatever case it likes and two rows
+ * differing only in case would be one person with one of them enforced.
+ */
+export const revokedAccess = pgTable("revoked_access", {
+  email: text("email").primaryKey(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  /** Who did it, for the trail. Not a foreign key: an administrator may later be removed too. */
+  revokedBy: text("revoked_by").notNull(),
+});
+
 export const deploymentPackages = pgTable("deployment_packages", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: text("tenant_id").notNull().unique(),
@@ -150,6 +229,16 @@ export const channels = pgTable(
     name: text("name").notNull(),
     description: text("description").notNull(),
     suggestedPrompts: text("suggested_prompts").array().notNull().default([]),
+    /**
+     * Which groups the tenant package says this channel is for.
+     *
+     * Written by `synchronizeTenantPackage` and read by nothing. Channel access is membership: every
+     * route resolves the caller in `channelMemberships` and refuses without a row, and this column is
+     * not consulted on the way. It is not currently a hole, because package channels get no
+     * membership rows either and so are unreachable rather than open, but it is a control the name
+     * promises and nothing keeps. See #82, and `users.groups`, which is the half that has to arrive
+     * from the identity provider before this one can decide anything.
+     */
     allowedGroups: text("allowed_groups").array().notNull().default([]),
     packageId: uuid("package_id").references(() => deploymentPackages.id, {
       onDelete: "set null",
@@ -374,7 +463,38 @@ export const auditEvents = pgTable(
     payload: jsonb("payload").notNull(),
     createdAt: createdAt(),
   },
-  (table) => [index("audit_events_created_at_idx").on(table.createdAt)],
+  /*
+   * The trail becomes the largest table in the deployment within weeks of real use: every click,
+   * keystroke, scroll, tool call, refusal, command and sign-in is a row.
+   *
+   * One index on `created_at` served the unfiltered screen and nothing else. The audit screen filters
+   * by event type, by who did it, and by what it was done to, and every one of those was a sequential
+   * scan over the biggest table there is. Each filter therefore leads its own index and carries the
+   * sort, so the filtered read is one index scan rather than a scan plus a sort.
+   *
+   * `id` is in each of them because the keyset pages on `(created_at, id)`: two rows written in the
+   * same millisecond are ordered by id, and an index that stopped at the timestamp would leave the
+   * tie to be broken by a sort.
+   */
+  (table) => [
+    index("audit_events_created_at_idx").on(table.createdAt),
+    index("audit_events_type_time_idx").on(
+      table.eventType,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index("audit_events_actor_time_idx").on(
+      table.actorUserId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index("audit_events_target_time_idx").on(
+      table.targetType,
+      table.targetId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+  ],
 );
 
 export const intelligenceChannelMappings = pgTable(

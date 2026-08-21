@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { client, tryClient } from "@/lib/client";
 import { type AgentChannel, channelKeys } from "./queries";
 
 /**
@@ -9,19 +10,11 @@ import { type AgentChannel, channelKeys } from "./queries";
 export function createChannelMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
     mutationFn: async (agentIds: string[]): Promise<AgentChannel> => {
-      const response = await fetch("/api/channels", {
+      const response = await client("/api/channels", {
         method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agentIds }),
+        body: { agentIds },
+        fallback: "Could not start a channel",
       });
-      if (!response.ok) {
-        const message = await response
-          .json()
-          .then((body: { error?: string }) => body.error)
-          .catch(() => undefined);
-        throw new Error(message ?? "Could not start a channel");
-      }
       return ((await response.json()) as { channel: AgentChannel }).channel;
     },
     onSuccess: () =>
@@ -45,15 +38,14 @@ export function recordChannelActivityMutationOptions() {
       agentId: string | null;
       at: string;
     }) => {
-      await fetch(`/api/channels/${variables.channelId}/activity`, {
+      /* Still fire-and-forget: `tryClient` does not throw, and the result is not read. */
+      await tryClient(`/api/channels/${variables.channelId}/activity`, {
         method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+        body: {
           agentId: variables.agentId,
           at: variables.at,
           text: variables.text,
-        }),
+        },
       });
     },
   });

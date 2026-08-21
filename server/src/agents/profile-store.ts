@@ -7,7 +7,16 @@ import {
   agents,
   deploymentPackages,
 } from "../db/schema";
-import { authFromConfiguration, storeAgentAuth } from "./auth-header";
+import {
+  authFromConfiguration,
+  retireReplacedKey,
+  storeAgentAuth,
+} from "./auth-header";
+import {
+  hashCallbackToken,
+  mintCallbackToken,
+  sameToken,
+} from "./callback-token";
 import { canManageAgent } from "./profile-policy";
 import type {
   AgentActor,
@@ -47,6 +56,23 @@ export type AgentProfileStore = {
   duplicate(actor: AgentActor, id: string): Promise<AgentProfile>;
   setHidden(actor: AgentActor, id: string, hidden: boolean): Promise<void>;
   softDelete(actor: AgentActor, id: string): Promise<void>;
+  /**
+   * Issue this agent a credential for calling tools back, and return it once.
+   *
+   * Returned rather than stored: only the hash is kept, so this is the one moment the token exists in
+   * a readable form. Calling it again replaces the old one, which is how rotation works and how a
+   * leaked token is retired.
+   */
+  issueCallbackToken(actor: AgentActor, id: string): Promise<string>;
+  /** Take the credential away. The agent may talk, and may no longer call anything back. */
+  revokeCallbackToken(actor: AgentActor, id: string): Promise<void>;
+  /**
+   * Which agent holds this token, if any.
+   *
+   * By hash, because that is all this side keeps. Not scoped to an actor: the caller is a machine
+   * presenting a credential, and the credential is the whole of its claim.
+   */
+  agentForCallbackToken(hash: string): Promise<{ id: string } | null>;
 };
 
 export class AgentNotFoundError extends Error {
@@ -81,6 +107,8 @@ const joinedProjection = {
   packageId: deploymentPackages.id,
   hiddenAt: agentPreferences.hiddenAt,
   deletedAt: agentProfiles.deletedAt,
+  /* The hash, only so a surface can say whether one exists. It never leaves this module. */
+  callbackTokenHash: agentProfiles.callbackTokenHash,
   configuration: agents.configuration,
 };
 
@@ -122,6 +150,7 @@ function mapProfile(
     visibility: row.visibility,
     ownerUserId: row.ownerUserId,
     systemOwned: row.packageId !== null,
+    hasCallbackToken: row.callbackTokenHash !== null,
     hidden: row.hiddenAt !== null,
     deletedAt: row.deletedAt,
     endpoint: endpointOf(row.configuration),
@@ -195,6 +224,36 @@ function requireManageable(actor: AgentActor, profile: AgentProfile) {
 
 function newAgentId() {
   return `agent_${crypto.randomUUID()}`;
+}
+
+/**
+ * Which agent a token belongs to.
+ *
+ * Selected by hash and then compared in constant time. The lookup alone would be enough to identify
+ * the row, and the comparison is what keeps a timing difference from confirming a partial guess
+ * against an index.
+ */
+async function findByTokenHash(
+  database: Database,
+  hash: string,
+): Promise<{ id: string } | null> {
+  const rows = await database
+    .select({
+      agentId: agentProfiles.agentId,
+      hash: agentProfiles.callbackTokenHash,
+    })
+    .from(agentProfiles)
+    .where(
+      and(
+        eq(agentProfiles.callbackTokenHash, hash),
+        isNull(agentProfiles.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (!row?.hash) return null;
+  return sameToken(row.hash, hash) ? { id: row.agentId } : null;
 }
 
 export function createAgentProfileStore(
@@ -300,8 +359,12 @@ export function createAgentProfileStore(
             .from(agents)
             .where(eq(agents.id, id))
             .limit(1);
+          const previous = (row?.configuration ?? {}) as Record<
+            string,
+            unknown
+          >;
           const configuration = {
-            ...((row?.configuration ?? {}) as Record<string, unknown>),
+            ...previous,
             ...(input.endpoint ? { endpoint: input.endpoint } : {}),
             ...(input.auth && vault
               ? {
@@ -315,6 +378,21 @@ export function createAgentProfileStore(
                 }
               : {}),
           };
+
+          /*
+           * The key this one replaces is retired.
+           *
+           * Rotating a key is the standard answer to a suspected leak, and without this it did not
+           * answer it: the old credential stayed in the vault, decryptable and still valid, and
+           * nothing listed it or could reach it. "Is that leaked key still live" was yes. The
+           * credentials table also grew one unrevoked secret per edit per Bot.
+           *
+           * After the new one is stored, so a failure here leaves the Bot working with a key too
+           * many rather than with none.
+           */
+          if (input.auth && vault) {
+            await retireReplacedKey(vault.store, previous, configuration);
+          }
           await transaction
             .update(agents)
             .set({ name: input.name, configuration, updatedAt })
@@ -400,9 +478,88 @@ export function createAgentProfileStore(
             .update(agentProfiles)
             .set({ deletedAt, updatedAt: deletedAt })
             .where(eq(agentProfiles.agentId, id));
+
+          /*
+           * And its key stops working.
+           *
+           * A deleted Bot left its credential in the vault, decryptable and still valid, with
+           * nothing listing it and no screen able to reach it: deleting the Bot was the last chance
+           * anybody had to retire it. The profile is a soft delete, deliberately, but the key is not
+           * something to keep pending an undelete that would ask for a new one anyway.
+           */
+          if (vault) {
+            const [row] = await transaction
+              .select({ configuration: agents.configuration })
+              .from(agents)
+              .where(eq(agents.id, id))
+              .limit(1);
+            await retireReplacedKey(
+              vault.store,
+              (row?.configuration ?? {}) as Record<string, unknown>,
+              {},
+            );
+          }
         },
         { isolationLevel: "read committed" },
       );
+    },
+
+    issueCallbackToken(actor, id) {
+      return database.transaction(
+        async (transaction) => {
+          await lockProfileMutationRows(transaction, id);
+          const profile = await findAccessibleProfile(transaction, actor, id);
+          if (!profile) throw new AgentNotFoundError(id);
+          /*
+           * Whoever may change the agent may credential it.
+           *
+           * The same gate as renaming it or repointing its endpoint, and repointing the endpoint is
+           * the more dangerous of the two: it decides which process the token is for.
+           */
+          requireManageable(actor, profile);
+
+          const token = mintCallbackToken();
+          const issuedAt = new Date();
+          await transaction
+            .update(agentProfiles)
+            .set({
+              callbackTokenHash: hashCallbackToken(token),
+              callbackTokenIssuedAt: issuedAt,
+              updatedAt: issuedAt,
+            })
+            .where(eq(agentProfiles.agentId, id));
+
+          // The only time it is readable. Nothing here writes it to a log.
+          return token;
+        },
+        { isolationLevel: "read committed" },
+      );
+    },
+
+    revokeCallbackToken(actor, id) {
+      return database.transaction(
+        async (transaction) => {
+          await lockProfileMutationRows(transaction, id);
+          const profile = await findAccessibleProfile(transaction, actor, id);
+          if (!profile) throw new AgentNotFoundError(id);
+          requireManageable(actor, profile);
+
+          const now = new Date();
+          await transaction
+            .update(agentProfiles)
+            .set({
+              callbackTokenHash: null,
+              callbackTokenIssuedAt: null,
+              updatedAt: now,
+            })
+            .where(eq(agentProfiles.agentId, id));
+        },
+        { isolationLevel: "read committed" },
+      );
+    },
+
+    agentForCallbackToken(hash) {
+      return findByTokenHash(database, hash);
     },
   };
 }

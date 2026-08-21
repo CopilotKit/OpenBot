@@ -1,20 +1,18 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import {
-  type ComputerClient,
+  type ActionActor,
+  ActionRefusedError,
+  type ComputerGateway,
   ComputerUnavailableError,
   ElementNotFoundError,
   NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
-} from "./client";
-import {
-  type ActionActor,
-  ActionRefusedError,
-  type ComputerGateway,
 } from "./gateway";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
 
@@ -25,33 +23,71 @@ import { type PolicyStore, parseActionPolicy } from "./policy-store";
  * session guard because `COMPUTER_TOKEN` proves the caller is an internal service, not which user is
  * asking to drive the browser.
  *
- * Read-only calls go to the client; acting calls go to the gateway. That split is the governance
- * boundary: every acting route in this file passes through a policy decision and audit row before it
- * reaches the computer.
+ * Every computer call goes through the gateway. That is the governance seam: each acting route in
+ * this file passes through a policy decision and audit row before it reaches the computer.
  */
+/**
+ * Paths under this router that are about the deployment rather than about a Bot.
+ *
+ * The bot-access middleware matches `/:botId/*`, and Hono's `/*` matches zero segments, so a
+ * single-segment path like `/policy` reaches it as a Bot id. These have their own guards.
+ */
+const DEPLOYMENT_ROUTES = new Set(["policy"]);
+
 export function createComputerRoutes(
-  client: ComputerClient,
   gateway: ComputerGateway,
   policyStore: PolicyStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+  /**
+   * Whether the caller may act as the Bot in the path. Required rather than optional, so a new
+   * deployment cannot be wired up without an answer to it.
+   */
+  canUseBot: BotAccessCheck,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
-  routes.get("/:botId/status", requireUser, async (context) =>
-    context.json(await client.status(context.req.param("botId"))),
-  );
+  /**
+   * Every route under a Bot id, in one place.
+   *
+   * The Bot travels in the path, so each route would otherwise have to remember to ask, and the one
+   * that forgot would be the whole surface. Reads are gated as well as actions: a screenshot of
+   * somebody's Bot is whatever page it is signed into.
+   *
+   * The answer is the same for a Bot that does not exist and one belonging to somebody else, so this
+   * cannot be used to find out which Bots a deployment has.
+   */
+  routes.use("/:botId/*", requireUser, async (context, next) => {
+    const botId = context.req.param("botId");
+    /*
+     * `/policy` is this router's own, and it is not about a Bot.
+     *
+     * Hono matches `/*` against zero segments, so `/policy` arrives here as a Bot called "policy",
+     * `canUseBot` quite correctly says there is no such Bot, and the Boundaries screen answers 404
+     * for everybody including an administrator. Named rather than inferred from the segment count,
+     * because a second deployment-wide route added later should have to think about this line.
+     */
+    if (botId && DEPLOYMENT_ROUTES.has(botId)) return next();
 
-  routes.get("/:botId/screenshot", requireUser, async (context) => {
+    if (botId && !(await canUseBot(context.var.actor, botId))) {
+      return context.json({ error: "There is no such Bot." }, 404);
+    }
+    await next();
+  });
+
+  routes.get("/:botId/status", async (context) => {
+    const botId = context.req.param("botId");
+    return context.json(await gateway.status(botId));
+  });
+
+  routes.get("/:botId/screenshot", async (context) => {
     try {
-      return context.json(
-        await client.forBot(context.req.param("botId")).screenshot(),
-      );
+      return context.json(await gateway.screenshot(context.req.param("botId")));
     } catch (error) {
       return context.json({ error: describe(error) }, statusFor(error));
     }
   });
 
-  routes.get("/:botId/read", requireUser, async (context) => {
+  routes.get("/:botId/read", async (context) => {
     try {
       return context.json(await gateway.read(context.req.param("botId")));
     } catch (error) {
@@ -59,7 +95,7 @@ export function createComputerRoutes(
     }
   });
 
-  routes.post("/:botId/navigate", requireUser, async (context) => {
+  routes.post("/:botId/navigate", async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
       url?: unknown;
     } | null;
@@ -70,7 +106,6 @@ export function createComputerRoutes(
     try {
       return context.json(
         await gateway.navigate(
-          context.req.param("botId") ?? "default",
           context.req.param("botId") ?? "default",
           {
             id: context.var.actor.id,
@@ -95,7 +130,7 @@ export function createComputerRoutes(
     }
   });
 
-  routes.post("/:botId/snapshot", requireUser, async (context) => {
+  routes.post("/:botId/snapshot", async (context) => {
     try {
       return context.json(await gateway.snapshot(context.req.param("botId")));
     } catch (error) {
@@ -106,18 +141,18 @@ export function createComputerRoutes(
   /**
    * The acting routes.
    *
-   * Each one hands the gateway the computer id, the Bot, the actor and the input, and does no checking
+   * Each one hands the gateway the Bot, the actor and the input, and does no checking
    * of its own beyond the shape of the request. Where a decision gets made is a single place.
    */
-  routes.post("/:botId/click", requireUser, (context) =>
+  routes.post("/:botId/click", (context) =>
     act(context, (botId, actor, body, signal) => {
       const ref = asRef(body);
       if (!ref) return badRef;
-      return gateway.click(botId, botId, actor, ref, signal);
+      return gateway.click(botId, actor, ref, signal);
     }),
   );
 
-  routes.post("/:botId/type", requireUser, (context) =>
+  routes.post("/:botId/type", (context) =>
     act(context, (botId, actor, body, signal) => {
       const ref = asRef(body);
       if (!ref) return badRef;
@@ -125,7 +160,6 @@ export function createComputerRoutes(
         return { error: "The text to enter is required." };
       }
       return gateway.type(
-        botId,
         botId,
         actor,
         {
@@ -138,14 +172,13 @@ export function createComputerRoutes(
     }),
   );
 
-  routes.post("/:botId/key", requireUser, (context) =>
+  routes.post("/:botId/key", (context) =>
     act(context, (botId, actor, body, signal) => {
       if (typeof body?.key !== "string" || !body.key) {
         return { error: "A key name is required, such as Enter or Tab." };
       }
       const ref = asRef(body);
       return gateway.key(
-        botId,
         botId,
         actor,
         {
@@ -157,9 +190,9 @@ export function createComputerRoutes(
     }),
   );
 
-  routes.post("/:botId/scroll", requireUser, (context) =>
+  routes.post("/:botId/scroll", (context) =>
     act(context, (botId, actor, body) =>
-      gateway.scroll(botId, botId, actor, {
+      gateway.scroll(botId, actor, {
         ...(typeof body?.deltaY === "number" ? { deltaY: body.deltaY } : {}),
       }),
     ),
@@ -169,7 +202,7 @@ export function createComputerRoutes(
    * Who has the wheel. Polled by the surface next to the screen, so the person sees the Bot ask for
    * help without reloading anything.
    */
-  routes.get("/:botId/control", requireUser, async (context) => {
+  routes.get("/:botId/control", async (context) => {
     try {
       return context.json(await gateway.control(context.req.param("botId")));
     } catch (error) {
@@ -177,10 +210,9 @@ export function createComputerRoutes(
     }
   });
 
-  routes.post("/:botId/control/request", requireUser, (context) =>
+  routes.post("/:botId/control/request", (context) =>
     act(context, (botId, actor, body) =>
       gateway.requestHelp(
-        botId,
         botId,
         actor,
         typeof body?.reason === "string" && body.reason.trim()
@@ -194,10 +226,16 @@ export function createComputerRoutes(
    * The computers, for the admin surface.
    *
    * Not per-Bot in the path the way the acting routes are: this asks the computer what it holds, and
-   * it holds a list. `:botId` is still there because every route under this router has it and the
-   * gateway wants somebody to attribute the call to.
+   * it holds a list. `:botId` is still there because every route under this router has it. The
+   * list itself is every computer, so a signed-in user is not enough; an administrator has to ask.
    */
-  routes.get("/:botId/computers", requireUser, async (context) => {
+  routes.get("/:botId/computers", async (context) => {
+    // The session guard and the question of whether this person may act as the Bot in the path are
+    // both applied by the middleware above. Neither is the question here: the answer is the whole
+    // fleet whatever `:botId` says, so it takes administering the deployment.
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
     try {
       return context.json(await gateway.computers());
     } catch (error) {
@@ -206,25 +244,25 @@ export function createComputerRoutes(
   });
 
   /** Stop the browser, keep the logins. */
-  routes.post("/:botId/computers/stop", requireUser, (context) =>
-    act(context, (botId, actor) => gateway.stopComputer(botId, botId, actor)),
+  routes.post("/:botId/computers/stop", (context) =>
+    act(context, (botId, actor) => gateway.stopComputer(botId, actor)),
   );
 
   /** Delete the profile. Every login goes with it, which is the point and also the danger. */
-  routes.post("/:botId/computers/reset", requireUser, (context) =>
-    act(context, (botId, actor) => gateway.resetComputer(botId, botId, actor)),
+  routes.post("/:botId/computers/reset", (context) =>
+    act(context, (botId, actor) => gateway.resetComputer(botId, actor)),
   );
 
-  routes.post("/:botId/control/take", requireUser, (context) =>
-    act(context, (botId, actor) => gateway.takeControl(botId, botId, actor)),
+  routes.post("/:botId/control/take", (context) =>
+    act(context, (botId, actor) => gateway.takeControl(botId, actor)),
   );
 
-  routes.post("/:botId/control/release", requireUser, (context) =>
-    act(context, (botId, actor) => gateway.releaseControl(botId, botId, actor)),
+  routes.post("/:botId/control/release", (context) =>
+    act(context, (botId, actor) => gateway.releaseControl(botId, actor)),
   );
 
   /** The Bot asking for a value it must not be told. */
-  routes.post("/:botId/control/secret", requireUser, (context) =>
+  routes.post("/:botId/control/secret", (context) =>
     act(context, (botId, actor, body) => {
       if (typeof body?.ref !== "string" || !body.ref) {
         return {
@@ -235,7 +273,7 @@ export function createComputerRoutes(
       if (typeof body?.snapshotId !== "number") {
         return { error: "The snapshotId the ref came from is required." };
       }
-      return gateway.requestSecret(botId, botId, actor, {
+      return gateway.requestSecret(botId, actor, {
         label:
           typeof body?.label === "string" && body.label.trim()
             ? body.label.trim()
@@ -253,24 +291,23 @@ export function createComputerRoutes(
    * route rather than a `kind` on the input route below, so that grepping for where a secret can enter
    * this server returns exactly one place.
    */
-  routes.post("/:botId/human/secret", requireUser, (context) =>
+  routes.post("/:botId/human/secret", (context) =>
     act(context, (botId, actor, body) => {
       if (typeof body?.text !== "string" || !body.text) {
         return { error: "A value is required." };
       }
-      return gateway.supplySecret(botId, botId, actor, body.text);
+      return gateway.supplySecret(botId, actor, body.text);
     }),
   );
 
   /**
    * A person's own mouse and keyboard.
    *
-   * Not through the policy gateway, and not audited per keystroke, see the note on `humanInput` in
-   * client.ts. The takeover is the audited event; what the person typed during it is deliberately
-   * unrecorded, because the reason a takeover exists is to let them enter the thing nothing else
-   * should keep.
+   * Not through the policy decision, and not audited per keystroke. See `ComputerGateway.humanInput`.
+   * The takeover is the audited event; what the person typed during it is deliberately unrecorded,
+   * because the reason a takeover exists is to let them enter the thing nothing else should keep.
    */
-  routes.post("/:botId/human/:kind", requireUser, async (context) => {
+  routes.post("/:botId/human/:kind", async (context) => {
     const kind = context.req.param("kind");
     if (
       kind !== "click" &&
@@ -297,9 +334,9 @@ export function createComputerRoutes(
   });
 
   /** The Bot's files. Through the gateway, like every other acting call. */
-  routes.post("/:botId/files/list", requireUser, (context) =>
+  routes.post("/:botId/files/list", (context) =>
     act(context, (botId, actor, body) =>
-      gateway.listFiles(botId, botId, actor, {
+      gateway.listFiles(botId, actor, {
         ...(typeof body?.path === "string" && body.path.trim()
           ? { path: body.path.trim() }
           : {}),
@@ -307,16 +344,45 @@ export function createComputerRoutes(
     ),
   );
 
-  routes.post("/:botId/files/read", requireUser, (context) =>
+  routes.post("/:botId/files/read", (context) =>
     act(context, (botId, actor, body) => {
       if (typeof body?.path !== "string" || !body.path.trim()) {
         return { error: "A file path is required." };
       }
-      return gateway.readFile(botId, botId, actor, { path: body.path.trim() });
+      return gateway.readFile(botId, actor, { path: body.path.trim() });
     }),
   );
 
-  routes.post("/:botId/files/write", requireUser, (context) =>
+  /*
+   * A command on the Bot's computer.
+   *
+   * Same shape as every other acting route: the gateway decides and records, this only shapes the
+   * request. `timeoutMs` is passed through and capped by the computer rather than here, so one place
+   * owns the limit.
+   */
+  routes.post("/:botId/exec", (context) =>
+    act(context, (botId, actor, body, signal) => {
+      if (typeof body?.command !== "string" || !body.command.trim()) {
+        return { error: "A command is required." };
+      }
+      // The fourth argument, like every other acting route. Without it the plumbing through
+      // gateway.runCommand and into the shell's own abort listener was dead code, and Stop ended the
+      // run in the transcript while the command carried on to completion inside the container.
+      return gateway.runCommand(
+        botId,
+        actor,
+        {
+          command: body.command,
+          ...(typeof body.timeoutMs === "number"
+            ? { timeoutMs: body.timeoutMs }
+            : {}),
+        },
+        signal,
+      );
+    }),
+  );
+
+  routes.post("/:botId/files/write", (context) =>
     act(context, (botId, actor, body) => {
       if (typeof body?.path !== "string" || !body.path.trim()) {
         return { error: "A file path is required." };
@@ -324,7 +390,7 @@ export function createComputerRoutes(
       if (typeof body?.contents !== "string") {
         return { error: "The contents to write are required." };
       }
-      return gateway.writeFile(botId, botId, actor, {
+      return gateway.writeFile(botId, actor, {
         path: body.path.trim(),
         contents: body.contents,
         append: body.append === true,

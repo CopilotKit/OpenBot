@@ -1,4 +1,5 @@
 import type { Message } from "@ag-ui/core";
+import { newId } from "../new-id";
 
 /**
  * Insert explanatory tool results for unanswered tool calls before sending history to providers.
@@ -21,7 +22,12 @@ function isToolResult(message: Message): message is Message & ToolResult {
  */
 export function repairUnansweredToolCalls(
   messages: ReadonlyArray<Message>,
-  newId: () => string = () => crypto.randomUUID(),
+  /*
+   * Named so it cannot shadow the import it defaults to. A parameter called `newId` defaulting to
+   * `newId()` resolves to itself and recurses until the stack goes, and it does so only on the
+   * repair branch, which every test avoided by passing its own. Biome said so, as an unused import.
+   */
+  mintId: () => string = newId,
 ): ReadonlyArray<Message> {
   const answered = new Set<string>();
   for (const message of messages) {
@@ -46,7 +52,7 @@ export function repairUnansweredToolCalls(
       // OpenAI requires the results to follow their calls, and some providers require the order to
       // match the `tool_calls` array as well.
       repaired.push({
-        id: newId(),
+        id: mintId(),
         role: "tool",
         toolCallId: call.id,
         content: UNANSWERED,

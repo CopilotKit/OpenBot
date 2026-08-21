@@ -42,6 +42,12 @@ services:
     environment:
       # The secret every caller must present. The container refuses to start without it.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-}
+      # How many Bots may hold a running browser at once, and how long an untouched one is kept.
+      # A few hundred MB each, so on a deployment with many Bots these are the difference between
+      # a container that holds steady and one that is killed for memory. Defaults are 8 and 30
+      # minutes; closing a browser costs only a relaunch, because the profile is on the volume below.
+      COMPUTER_MAX_BROWSERS: ${COMPUTER_MAX_BROWSERS:-}
+      COMPUTER_BROWSER_IDLE_MS: ${COMPUTER_BROWSER_IDLE_MS:-}
     volumes:
       - agent-workspace:/workspace
       # Chromium's user-data directory is volume-backed so logins survive container restarts.
@@ -160,9 +166,14 @@ services:
       context: .
       dockerfile: agent-bot/Dockerfile
     ports:
-      - "${BOT_PORT:-4200}:4200"
+      # Loopback, not every interface. The token is the boundary; this means an attacker needs to be
+      # on the machine before they can even try it. Nothing legitimate reaches a Bot from another
+      # host: the server calls it over localhost, and other containers use the compose network.
+      - "127.0.0.1:${BOT_PORT:-4200}:4200"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Server sends this on every call to the managed Bot. It refuses to start without it.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
       # to it verbatim.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
@@ -179,19 +190,28 @@ services:
       context: .
       dockerfile: agent-langgraph/Dockerfile
     ports:
-      - "${LANGGRAPH_PORT:-4201}:4201"
+      # Loopback, for the same reason as agent-bot above.
+      - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4201"
     environment:
       # The selected provider reads its own key. Models requiring the Responses API use
       # BOT_RESPONSES_API instead of changing the streaming loop here.
       BOT_PROVIDER: ${BOT_PROVIDER:-openai}
+      # Same server-to-Bot request boundary as agent-bot above.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
-      BOT_MODEL: ${BOT_MODEL:-}
+      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
       BOT_RESPONSES_API: ${BOT_RESPONSES_API:-false}
+      # Where this Bot runs a tool: back through the deployment that granted it, never at the vendor.
+      # `host.docker.internal` because the API server runs on the host, not in this network.
+      OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}
+      AGENT_TOOL_TOKEN: ${AGENT_TOOL_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4201/health')\""]
       interval: 10s

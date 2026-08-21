@@ -1,13 +1,18 @@
 import {
   IconBolt,
+  IconBox,
   IconLogout,
   IconPlus,
   IconSearch,
   IconSettings,
   IconShieldLock,
-  IconBox,
 } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Link, type LinkOptions, useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
@@ -42,6 +47,7 @@ import {
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { appConfig } from "@/lib/generated/application-config";
+import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
@@ -73,9 +79,6 @@ function UserAvatar() {
  * Cap layout animation because `layout` measures every animated row on each reorder.
  */
 const MAX_ANIMATED_ROWS = 60;
-
-const ENTRANCE_SECONDS = 0.2;
-const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 /**
  * The roster, narrowed to what the person typed.
@@ -152,7 +155,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
-  const channels = useQuery(channelListQueryOptions());
+  const channels = useInfiniteQuery(channelListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
   const [search, setSearch] = useState("");

@@ -1,4 +1,5 @@
 import {
+  IconBuildingBank,
   IconChevronRight,
   IconCode,
   IconDeviceDesktop,
@@ -8,6 +9,7 @@ import {
   IconPlugConnected,
   IconPuzzle,
   IconShieldCheck,
+  IconUsers,
 } from "@tabler/icons-react";
 import {
   createFileRoute,
@@ -91,7 +93,7 @@ const SECTIONS: {
         linkOptions: { to: "/admin/plugins" },
       },
       {
-        title: "Components",
+        title: "UI Components",
         description: "Custom pieces a Bot can draw in a conversation.",
         icon: IconLayoutGrid,
         linkOptions: { to: "/admin/components" },
@@ -101,6 +103,26 @@ const SECTIONS: {
         description: "Write a component and watch it render as you type.",
         icon: IconCode,
         linkOptions: { to: "/admin/playground" },
+      },
+    ],
+  },
+  {
+    title: "Who can get in",
+    description: "",
+    items: [
+      {
+        title: "People",
+        description:
+          "Everybody who has signed in, who administers this deployment, and whose access has been removed.",
+        icon: IconUsers,
+        linkOptions: { to: "/admin/people" },
+      },
+      {
+        title: "Identity providers",
+        description:
+          "A company's own SAML or OpenID Connect provider, routed by email domain.",
+        icon: IconBuildingBank,
+        linkOptions: { to: "/admin/identity-providers" },
       },
     ],
   },

@@ -3,7 +3,7 @@
  * for durable threads and memory. Configuration the product cannot function without belongs at the
  * boot boundary.
  */
-import { devAuthEnabled } from "./auth/dev-actor";
+import { singleUserEnabled } from "./auth/dev-actor";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
 
@@ -21,10 +21,77 @@ export type IntelligenceSettings = {
   licenseToken: string;
 };
 
+export type DockerComputerConfig = {
+  provider: "docker";
+  baseUrl: string;
+  supervisorToken?: string;
+  token?: string;
+  allowPrivateHosts: boolean;
+  policy?: ActionPolicy;
+};
+
+export type SharedComputerConfig = {
+  provider: "shared";
+  baseUrl: string;
+  token?: string;
+  allowPrivateHosts: boolean;
+  policy?: ActionPolicy;
+};
+
+export type ComputerConfig = DockerComputerConfig | SharedComputerConfig;
+
+/**
+ * Who a deployment lets in, and through which front door.
+ *
+ * One identity provider is a product decision somebody else already made. A company running this
+ * has Google or Entra or Okta and is not going to acquire another, so the shape here is a set of
+ * optional providers rather than one required one, and the deployment turns on whichever it has.
+ */
+export type AuthProviderId = "google" | "microsoft" | "okta";
+
+/** An OAuth client, as every provider here needs one. */
+export type OAuthClient = { clientId: string; clientSecret: string };
+
+export type AuthConfig = {
+  baseUrl: string;
+  secret: string;
+  trustedOrigins: string[];
+  initialAdminEmails: string[];
+  google?: OAuthClient;
+  /**
+   * `tenantId` decides who may sign in at all, so it is not a detail. `common` admits any Microsoft
+   * account including personal ones, `organizations` any work or school account anywhere, and a GUID
+   * admits one directory. A deployment that wants only its own company needs the GUID.
+   */
+  microsoft?: OAuthClient & { tenantId: string };
+  /** Okta is an OIDC provider rather than a named one, so it is identified by its issuer. */
+  okta?: OAuthClient & { issuer: string };
+};
+
+/**
+ * The providers this deployment can actually sign somebody in with.
+ *
+ * Ordered, and deliberately not alphabetically: this is the order the buttons appear in, and it is
+ * fixed here rather than left to object key order so the sign-in screen cannot change shape because
+ * of how a configuration happened to be written.
+ */
+export function configuredAuthProviders(
+  auth: AuthConfig | undefined,
+): AuthProviderId[] {
+  if (!auth) return [];
+  const providers: AuthProviderId[] = [];
+  if (auth.google) providers.push("google");
+  if (auth.microsoft) providers.push("microsoft");
+  if (auth.okta) providers.push("okta");
+  return providers;
+}
+
 export type DeploymentConfig = {
   databaseUrl: string;
   keyEncryptionKey: string;
   managedAgentAgUiUrl: URL;
+  /** Secret sent only to the managed Bot endpoint. Never stored in an agent row. */
+  managedAgentToken: string;
   /**
    * What this deployment calls itself, when more than one shares an Intelligence project.
    *
@@ -43,46 +110,51 @@ export type DeploymentConfig = {
    * deployment does not acquire it without being asked.
    */
   agentStallTimeoutMs: number;
+  /**
+   * How many days of audit trail this deployment keeps, or undefined to keep everything.
+   *
+   * Undefined by default. Deleting somebody's audit trail because a default said so is the worse of
+   * the two failures, and a deployment that has not thought about retention should keep everything
+   * until it has.
+   */
+  auditRetentionDays: number | undefined;
   oauth: {
     google?: { clientId: string; clientSecret: string };
   };
-  auth?: {
-    baseUrl: string;
-    secret: string;
-    google: { clientId: string; clientSecret: string };
-    trustedOrigins: string[];
-    initialAdminEmails: string[];
-  };
+  auth?: AuthConfig;
   /**
-   * Local development only: admit everybody as a fixed administrator instead of requiring sign-in.
-   * See auth/dev-actor.ts for the two locks that stop this reaching a deployment.
+   * Admit everybody as one fixed administrator instead of requiring sign-in.
+   *
+   * True only when no identity provider is configured. See auth/dev-actor.ts for what stops this
+   * reaching somewhere other people can get to.
    */
-  devNoAuth: boolean;
+  singleUser: boolean;
+  /** Names OpenBot on the analytics the runtime already sends. Off with OPENBOT_ACCESSIBILITY_DISABLED. */
+  accessibility: boolean;
+  /**
+   * Where the built app is, when this process serves it.
+   *
+   * Set in a container image that carries both. Unset in development, where Vite serves the app and
+   * proxies the API here, so the server stays an API and nothing shadows a route.
+   */
+  appDistDir?: string;
   /**
    * The Bot computer. Absent means the feature is off and its routes are not mounted, rather than
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
-  computer?: {
-    baseUrl: string;
-    /** The secret every computer requires of its caller. */
-    token?: string;
-    /**
-     * The container supervisor, when each Bot is to get a computer of its own. Absent means one
-     * shared computer at `baseUrl`, which is what a laptop wants and is honest about being one
-     * machine.
-     */
-    supervisor?: { baseUrl: string; token?: string };
-    /** True on a laptop, where browsing the deployment's own services is the point. */
-    allowPrivateHosts: boolean;
-    /**
-     * What Bots may do on their computers. Absent means the built-in default applies.
-     *
-     * A whole policy in one variable rather than a variable per rule, because the rules are an
-     * ordered pair of lists and splitting them across `AGENT_COMPUTER_DENY_1`-style names makes their
-     * precedence, which is the only subtle thing about them, impossible to see.
-     */
-    policy?: ActionPolicy;
-  };
+  computer?: ComputerConfig;
+  /**
+   * The secret a Bot presents when it calls a tool back through this server.
+   *
+   * A framework Bot runs its own tool loop, in its own process, which is what makes it a real
+   * harness rather than a shape the browser drives. It still may not reach a vendor directly: it
+   * calls here, and here is where the grant, the policy and the audit row are. This is what tells
+   * that call apart from anybody else on the network.
+   *
+   * Absent means no Bot may call tools back, and a deployment that wanted them gets a refusal rather
+   * than an open door.
+   */
+  agentToolToken?: string;
 };
 
 type Environment = Record<string, string | undefined>;
@@ -167,8 +239,8 @@ function requiredHttpUrl(environment: Environment, name: string): URL {
 
 function oauthClient(
   environment: Environment,
-  provider: "GOOGLE",
-): { clientId: string; clientSecret: string } | undefined {
+  provider: "GOOGLE" | "MICROSOFT" | "OKTA",
+): OAuthClient | undefined {
   const clientId = optional(environment, `${provider}_OAUTH_CLIENT_ID`);
   const clientSecret = optional(environment, `${provider}_OAUTH_CLIENT_SECRET`);
 
@@ -176,7 +248,7 @@ function oauthClient(
   // than at start-up, which is the worst moment to discover it.
   if (Boolean(clientId) !== Boolean(clientSecret)) {
     throw new Error(
-      "Google OAuth configuration requires both client ID and client secret",
+      `${provider}_OAUTH_CLIENT_ID and ${provider}_OAUTH_CLIENT_SECRET must be set together`,
     );
   }
 
@@ -190,39 +262,119 @@ function commaSeparated(environment: Environment, name: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Sign-in, if this deployment has an identity provider to sign people in with.
+ *
+ * Any one of the three turns authentication on. More than one is allowed and is the normal shape
+ * for a company mid-migration, where some people are on Entra and some are still on Okta.
+ *
+ * Every combination that cannot work refuses at start-up rather than at somebody's first attempt to
+ * sign in, which is the worst moment to discover it: a provider with half its credentials, a
+ * provider with no session secret to mint against, or a session secret configured with no provider
+ * to use it.
+ */
 function authConfig(
   environment: Environment,
-  google: { clientId: string; clientSecret: string } | undefined,
-): DeploymentConfig["auth"] {
+  google: OAuthClient | undefined,
+): AuthConfig | undefined {
+  const microsoft = microsoftAuth(environment);
+  const okta = oktaAuth(environment);
+
   const secret = optional(environment, "BETTER_AUTH_SECRET");
   const baseUrl = url(environment, "BETTER_AUTH_URL");
-  if (!google) {
+
+  if (!google && !microsoft && !okta) {
     if (secret || baseUrl) {
       throw new Error(
-        "Google authentication requires GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET",
+        "BETTER_AUTH_SECRET or BETTER_AUTH_URL is set but no identity provider is. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_*, or unset both",
       );
     }
     return undefined;
   }
   if (!secret) {
-    throw new Error("Google authentication requires BETTER_AUTH_SECRET");
+    throw new Error("Sign-in requires BETTER_AUTH_SECRET");
   }
   if (secret.length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");
   }
   if (!baseUrl) {
-    throw new Error("Google authentication requires BETTER_AUTH_URL");
+    throw new Error("Sign-in requires BETTER_AUTH_URL");
+  }
+
+  /*
+   * Somebody has to be an administrator, and only this says who.
+   *
+   * The role is written from this list and there is no route anywhere that changes one, so a
+   * deployment that configures sign-in without it admits everybody as a plain user, shows nobody
+   * the admin screens, and offers no way to promote anyone. Refusing at start-up is the only cheap
+   * moment to catch that; the expensive one is after the first person has signed in.
+   */
+  const initialAdminEmails = commaSeparated(
+    environment,
+    "INITIAL_ADMIN_EMAILS",
+  );
+  if (initialAdminEmails.length === 0) {
+    throw new Error(
+      "Sign-in requires INITIAL_ADMIN_EMAILS naming at least one administrator. Nothing else grants the role, and no screen can promote somebody once the deployment is running",
+    );
   }
 
   return {
     baseUrl,
     secret,
-    google,
     trustedOrigins: commaSeparated(environment, "TRUSTED_ORIGINS").length
       ? commaSeparated(environment, "TRUSTED_ORIGINS")
       : ["http://localhost:3000"],
-    initialAdminEmails: commaSeparated(environment, "INITIAL_ADMIN_EMAILS"),
+    initialAdminEmails,
+    ...(google ? { google } : {}),
+    ...(microsoft ? { microsoft } : {}),
+    ...(okta ? { okta } : {}),
   };
+}
+
+/**
+ * Entra ID, and which directory it admits.
+ *
+ * `common` by default, matching Microsoft's own default, and said out loud in `.env.example` because
+ * it admits personal Microsoft accounts as well as work ones. A company that means "our staff"
+ * wants its directory GUID here.
+ */
+function microsoftAuth(
+  environment: Environment,
+): (OAuthClient & { tenantId: string }) | undefined {
+  const client = oauthClient(environment, "MICROSOFT");
+  if (!client) return undefined;
+  return {
+    ...client,
+    tenantId: optional(environment, "MICROSOFT_OAUTH_TENANT_ID") ?? "common",
+  };
+}
+
+/**
+ * Okta, which is an OIDC provider rather than a named one.
+ *
+ * The issuer is what makes it a particular Okta rather than Okta in general, so it is required
+ * alongside the credentials rather than defaulted to anything.
+ */
+function oktaAuth(
+  environment: Environment,
+): (OAuthClient & { issuer: string }) | undefined {
+  const client = oauthClient(environment, "OKTA");
+  const issuer = url(environment, "OKTA_OAUTH_ISSUER");
+  if (!client) {
+    if (issuer) {
+      throw new Error(
+        "OKTA_OAUTH_ISSUER is set but OKTA_OAUTH_CLIENT_ID and OKTA_OAUTH_CLIENT_SECRET are not",
+      );
+    }
+    return undefined;
+  }
+  if (!issuer) {
+    throw new Error(
+      "Okta sign-in requires OKTA_OAUTH_ISSUER, such as https://example.okta.com/oauth2/default",
+    );
+  }
+  return { ...client, issuer };
 }
 
 /**
@@ -262,36 +414,48 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   };
 }
 
-function computerConfig(
-  environment: Environment,
-): DeploymentConfig["computer"] {
-  const baseUrl = url(environment, "AGENT_COMPUTER_URL");
-  if (!baseUrl) {
+function computerConfig(environment: Environment): ComputerConfig | undefined {
+  const supervisorAddress = optional(environment, "COMPUTER_SUPERVISOR_URL");
+  const sharedAddress = optional(environment, "AGENT_COMPUTER_URL");
+  if (!supervisorAddress && !sharedAddress) {
     return undefined;
   }
-  const policy = actionPolicy(environment);
+
   /*
    * The secret the computers require. Without it every call to a computer is refused, and that is the
    * intended failure: `agent-computer` drives a browser holding real logins and must not answer
    * unauthenticated callers that can reach its port.
    */
   const computerToken = optional(environment, "COMPUTER_TOKEN");
+
+  const allowPrivateHosts =
+    optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true";
+  const policy = actionPolicy(environment);
+
   const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
-  const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+  if (supervisorUrl) {
+    const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+    return {
+      provider: "docker",
+      baseUrl: supervisorUrl,
+      allowPrivateHosts,
+      ...(supervisorToken ? { supervisorToken } : {}),
+      ...(computerToken ? { token: computerToken } : {}),
+      ...(policy ? { policy } : {}),
+    };
+  }
+
+  const baseUrl = url(environment, "AGENT_COMPUTER_URL");
+  if (!baseUrl) {
+    return undefined;
+  }
+
   return {
+    provider: "shared",
     baseUrl,
-    allowPrivateHosts:
-      optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true",
-    ...(policy ? { policy } : {}),
+    allowPrivateHosts,
     ...(computerToken ? { token: computerToken } : {}),
-    ...(supervisorUrl
-      ? {
-          supervisor: {
-            baseUrl: supervisorUrl,
-            ...(supervisorToken ? { token: supervisorToken } : {}),
-          },
-        }
-      : {}),
+    ...(policy ? { policy } : {}),
   };
 }
 
@@ -333,6 +497,31 @@ function actionPolicy(environment: Environment): ActionPolicy | undefined {
  *
  * Zero is a legitimate value and means off. It is not the same as a malformed one.
  */
+function accessibilityEnabled(environment: Environment): boolean {
+  const off = optional(environment, "OPENBOT_ACCESSIBILITY_DISABLED");
+  return off !== "true" && off !== "1";
+}
+
+/**
+ * How long the audit trail is kept.
+ *
+ * Refused rather than coerced, like everything else here. "We accepted your retention policy but not
+ * the one you wrote" is a bad answer about a control an auditor will ask to see, and a typo that
+ * silently became 0 would delete the trail rather than keep it.
+ */
+function auditRetentionDays(environment: Environment): number | undefined {
+  const raw = optional(environment, "AUDIT_RETENTION_DAYS");
+  if (!raw) return undefined;
+
+  const days = Number(raw);
+  if (!Number.isInteger(days) || days < 1) {
+    throw new Error(
+      "AUDIT_RETENTION_DAYS must be a whole number of days, at least 1. Leave it unset to keep the audit trail forever.",
+    );
+  }
+  return days;
+}
+
 function agentStallTimeoutMs(environment: Environment): number {
   const raw = optional(environment, "AGENT_STALL_TIMEOUT_MS");
   if (!raw) {
@@ -352,6 +541,7 @@ export function loadConfig(
   environment: Environment = process.env,
 ): DeploymentConfig {
   const google = oauthClient(environment, "GOOGLE");
+  const auth = authConfig(environment, google);
 
   return {
     databaseUrl: required(environment, "DATABASE_URL"),
@@ -360,14 +550,26 @@ export function loadConfig(
       environment,
       "MANAGED_AGENT_AG_UI_URL",
     ),
+    managedAgentToken: required(environment, "MANAGED_AGENT_TOKEN"),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     tenantPackageDirectory:
       optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
     runtime: runtimeCapabilities(environment),
     agentStallTimeoutMs: agentStallTimeoutMs(environment),
+    auditRetentionDays: auditRetentionDays(environment),
     oauth: { google },
-    auth: authConfig(environment, google),
-    devNoAuth: devAuthEnabled(environment),
+    auth,
+    singleUser: singleUserEnabled(
+      environment,
+      configuredAuthProviders(auth).length > 0,
+    ),
+    accessibility: accessibilityEnabled(environment),
+    ...(optional(environment, "APP_DIST_DIR")
+      ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
+      : {}),
     computer: computerConfig(environment),
+    ...(optional(environment, "AGENT_TOOL_TOKEN")
+      ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
+      : {}),
   };
 }

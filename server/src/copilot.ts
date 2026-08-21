@@ -9,6 +9,8 @@ import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
+import { z } from "zod";
+import type { GrantedTool } from "./plugins/tools";
 
 /**
  * The CopilotKit runtime, always in Intelligence mode.
@@ -164,6 +166,15 @@ export function builtInAgentConfiguration(
   agent: RegisteredBuiltInAgent,
   model: RuntimeModel,
   apiKey: string | null,
+  /**
+   * What this Bot may call, resolved for the person asking.
+   *
+   * Handed to the agent rather than registered by the surface, so a run needs no browser. These are
+   * not raw MCP servers on purpose: each one executes through the plugin store, which checks the
+   * grant, evaluates the policy and writes the audit row. Passing `mcpServers` here instead would
+   * let the agent reach a vendor directly and walk around all three.
+   */
+  tools: GrantedTool[] = [],
 ): BuiltInAgentConfiguration {
   if (!apiKey) {
     return {
@@ -181,8 +192,26 @@ export function builtInAgentConfiguration(
     model: `${model.provider}/${model.defaultModel}`,
     prompt: agent.systemPrompt,
     apiKey,
+    /*
+     * A run stops after one step unless told otherwise, which for a Bot with tools means it calls
+     * one and never speaks: the tool executes, the result arrives, and the run ends before the model
+     * can say what it found. The person sees their own question and nothing else.
+     *
+     * Only set when there are tools, because a Bot with none has nothing to continue for. The cap
+     * bounds a model that would otherwise call tools in a circle. Interrupt tools, if any are ever
+     * added here, require the default of one and must not be mixed in.
+     */
+    ...(tools.length > 0 ? { tools, maxSteps: TOOL_STEPS } : {}),
   };
 }
+
+/**
+ * How many turns of the tool loop one run may take.
+ *
+ * Enough for a Bot to search, read what came back, search again on a better term, and answer.
+ * Beyond that a model is not making progress, and every extra step is somebody's money.
+ */
+const TOOL_STEPS = 8;
 
 /**
  * Build the built-in and remote AG-UI agent map the runtime serves.
@@ -190,34 +219,53 @@ export function builtInAgentConfiguration(
  * Keyed by the registry id, which is what the browser sends as the agent name, so the two cannot
  * drift apart without the lookup failing loudly rather than silently running the wrong Bot.
  */
-export function buildAgents(
+export async function buildAgents(
   agents: RegisteredAgent[],
   model: RuntimeModel,
   apiKey: string | null,
   /** Absent leaves every stream unwatched, which is what an unconfigured timeout means. */
   stallGuard?: StallGuard,
-): Record<string, AbstractAgent> {
+  /** Absent leaves every Bot with no tools, which is the correct answer when nothing is granted. */
+  loadTools: LoadToolsForBot = async () => [],
+  signRun?: SignRun,
+): Promise<Record<string, AbstractAgent>> {
   return Object.fromEntries(
-    agents.map((agent) => [
-      agent.id,
-      buildAgent(agent, model, apiKey, stallGuard),
-    ]),
+    await Promise.all(
+      agents.map(async (agent) => [
+        agent.id,
+        await buildAgent(agent, model, apiKey, stallGuard, loadTools, signRun),
+      ]),
+    ),
   );
 }
 
-function buildAgent(
+async function buildAgent(
   agent: RegisteredAgent,
   model: RuntimeModel,
   apiKey: string | null,
-  stallGuard?: StallGuard,
-): AbstractAgent {
+  stallGuard: StallGuard | undefined,
+  loadTools: LoadToolsForBot,
+  signRun?: SignRun,
+): Promise<AbstractAgent> {
   if (agent.type === "built_in") {
-    return new BuiltInAgent(builtInAgentConfiguration(agent, model, apiKey));
+    return new BuiltInAgent(
+      builtInAgentConfiguration(
+        agent,
+        model,
+        apiKey,
+        await loadTools(agent.id),
+      ),
+    );
   }
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
   }
-  return remoteAgentWithStandingRole(agent, stallGuard);
+  return remoteAgentWithStandingRole(
+    agent,
+    stallGuard,
+    await loadTools(agent.id),
+    signRun,
+  );
 }
 
 /**
@@ -234,7 +282,16 @@ function buildAgent(
  */
 function remoteAgentWithStandingRole(
   agent: RegisteredRemoteAgent,
-  stallGuard?: StallGuard,
+  stallGuard: StallGuard | undefined,
+  /**
+   * What this Bot was granted, described rather than executable.
+   *
+   * A framework Bot runs its own loop and calls these back through `/api/agent-tools/call`, so what
+   * it needs from here is the offer: the name, what the tool is for, and the arguments it takes.
+   * The executing half stays on this side, where the grant and the policy are.
+   */
+  tools: GrantedTool[] = [],
+  signRun?: SignRun,
 ) {
   const remote = new HttpAgent({
     url: agent.endpoint,
@@ -255,7 +312,57 @@ function remoteAgentWithStandingRole(
           (message) => message.id !== agent.standingMessage.id,
         ),
       ],
-    }),
+      /*
+       * The Bot's own grants, added to whatever the surface offered.
+       *
+       * Sent on every run rather than configured once on the endpoint, because a grant an
+       * administrator adds or revokes has to apply to the next run and the endpoint is somebody
+       * else's process.
+       */
+      tools: [
+        ...(input.tools ?? []),
+        ...tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: z.toJSONSchema(tool.parameters) as Record<
+            string,
+            unknown
+          >,
+        })),
+      ],
+      // Who the Bot is calling back as, so the audit row names it rather than "an agent".
+      forwardedProps: {
+        ...(input.forwardedProps ?? {}),
+        openbotBotId: agent.id,
+        /*
+         * Which of those tools this deployment runs, as opposed to the surface.
+         *
+         * `tools` mixes two kinds that a name cannot tell apart: the Bot's grants, which execute
+         * here through the policy and the audit trail, and the components the browser draws. A Bot
+         * that ran the second kind through this deployment asked it to execute a chart, was told it
+         * could not, and then apologised to the person for not showing the chart that was on screen
+         * in front of them. Only this side knows which is which, so only this side can say.
+         */
+        openbotDeploymentTools: tools.map((tool) => tool.name),
+        /*
+         * This deployment's own statement of what this run is.
+         *
+         * Signed, short-lived, and naming the Bot and the person. The agent hands it back when it
+         * calls a tool, and that is where the Bot and the actor come from: its own token says which
+         * agent is calling, and this says who it is calling for. Neither is taken from the request
+         * body any more, which is what used to make the audit trail forgeable by anything holding
+         * one shared secret.
+         */
+        ...(signRun
+          ? { openbotRun: signRun(agent.id, input.runId) }
+          : /*
+             * Absent means this deployment cannot sign, so the agent is given nothing to hand back
+             * and its tool calls will be refused. That is the right direction to fail: a Bot that
+             * cannot prove whose run it is should not be spending anybody's grants.
+             */
+            {}),
+      },
+    } as never),
   );
   return remote;
 }
@@ -280,6 +387,8 @@ export async function resolveRuntimeAgents(
   model: RuntimeModel,
   resolveModelApiKey: () => Promise<string | null>,
   stallGuard?: StallGuard,
+  loadTools?: LoadToolsForBot,
+  signRun?: SignRun,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -291,8 +400,20 @@ export async function resolveRuntimeAgents(
   const apiKey = registered.some((agent) => agent.type === "built_in")
     ? await resolveModelApiKey()
     : null;
-  return buildAgents(registered, model, apiKey, stallGuard);
+  return buildAgents(registered, model, apiKey, stallGuard, loadTools, signRun);
 }
+
+/** What one Bot may call, for the person whose request this is. */
+export type LoadToolsForBot = (botId: string) => Promise<GrantedTool[]>;
+
+/**
+ * The deployment's signed statement of what a run is, for the agent that will run it.
+ *
+ * A closure rather than a key passed down, so the encryption key stays in the module that owns
+ * configuration and this one never holds a secret. Shaped like `LoadToolsForBot` on purpose: both are
+ * per-actor facts resolved once per request and asked per Bot.
+ */
+export type SignRun = (botId: string, runId: string) => string;
 
 /** Who is asking. Agent visibility is decided per person, so a run has to know this first. */
 export type IdentifyActor = (request: Request) => Promise<AgentActor>;
@@ -320,6 +441,10 @@ export function createRequestAgents(
    * that opened it has been answered.
    */
   stallGuard?: StallGuard,
+  /** What each Bot may call, resolved for whoever is asking. Absent means no tools. */
+  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
+  /** Resolved per request, because what it signs is who this request turned out to be. */
+  signRunForActor?: (actorId: string) => SignRun,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -328,6 +453,8 @@ export function createRequestAgents(
       model,
       resolveModelApiKey,
       stallGuard,
+      loadToolsForActor?.(actor.id),
+      signRunForActor?.(actor.id),
     );
   };
 }
@@ -352,6 +479,8 @@ export function mountCopilotRuntime(
    * there is no reason for a caller to have to say `undefined` here to reach `basePath`.
    */
   stallGuard: StallGuard,
+  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
+  signRunForActor?: (actorId: string) => SignRun,
   basePath = "/api/copilotkit",
 ) {
   const { intelligence } = config.runtime;
@@ -369,6 +498,11 @@ export function mountCopilotRuntime(
       apiKey: intelligence.apiKey,
     }),
     licenseToken: intelligence.licenseToken,
+    // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
+    // other deployment's. Adds no events of its own.
+    ...(config.accessibility
+      ? { telemetryProperties: { accessibility_title: "OpenBot" } }
+      : {}),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(
@@ -377,6 +511,8 @@ export function mountCopilotRuntime(
       model,
       resolveModelApiKey,
       stallGuard,
+      loadToolsForActor,
+      signRunForActor,
     ) as never,
   });
 

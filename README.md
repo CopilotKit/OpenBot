@@ -27,7 +27,7 @@ your own machine.
 
 > **Alpha, and under active development.** OpenBot is early. Expect rough edges and bugs, and expect things to move. Issues and pull requests are welcome.
 
-> **Runs on your machine.** Everything below is written for a laptop. Out of the box OpenBot runs with `OPENBOT_DEV_NO_AUTH`, which skips signing in and admits every request as one administrator. [Google sign-in](#sign-in-with-google) can be wired up instead.
+> **Runs on your machine.** Everything below is written for a laptop. `.env.example` carries `OPENBOT_SINGLE_USER=true`, which admits every request as one administrator, so a fresh clone reaches the product without registering an OAuth client first. [Sign-in](#sign-in) turns that off, and is required before anybody else can reach the deployment.
 
 ## What it is
 
@@ -50,9 +50,9 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 ## Requirements
 
-- Docker, for PostgreSQL, browser computers, the supervisor, and the shipped Bots.
+- Docker, for PostgreSQL and the shipped Bots.
 - [Bun](https://bun.sh) 1.3+, for the app and API server.
-- A CopilotKit Intelligence project and license.
+- A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
 - A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
 
 ## Quick start
@@ -96,6 +96,21 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 `scripts/start.sh` starts Docker services, applies migrations, starts the API server on port 3001, starts the app on port 3010, and checks that the services answer their own health routes before printing next steps.
 
+## Deploy it
+
+One image carries the app, the API, the browser the Bots drive, and optionally PostgreSQL. Same
+`.env`, no Kubernetes.
+
+```sh
+docker build -t openbot .
+docker run -p 3001:3001 --env-file .env \
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql/data openbot
+```
+
+Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
+[docs/deployment.md](docs/deployment.md) has the minimum sizes, the platform notes, and why this runs
+as one replica for now.
+
 ## Try it
 
 - Open `/bot` and ask: `Open news.ycombinator.com and tell me the top story.`
@@ -109,7 +124,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 | -------------------- | ------------------------------------------------------------------ |
 | `/`                  | Start and browse channels.                                         |
 | `/agents`            | Create, edit, duplicate, hide, delete, and launch coworkers.       |
-| `/channel/:id`       | Converse with one coworker and view its live screen/profile panel. |
+| `/channel/:id`       | Converse with one coworker, watch its screen, and see what it ran. |
 | `/bot`               | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/skills`            | Create and enable personal skills.                                 |
 | `/settings`          | User preferences.                                                  |
@@ -125,14 +140,18 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 ## Features
 
 - **A computer per Bot**: the supervisor gives each Bot its own container, its own `/workspace` volume and its own browser profile. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
+- **A shell, not just a browser**: a Bot can run a command in its workspace, install what it needs, and process a file it saved. Through the same gate as everything else, so a rule can refuse a shell outright or refuse particular commands, and the command is on the record either way. The command inherits PATH, locale, terminal and proxy variables, not the rest of the deployment's environment.
 - **The gateway is the only way in**: it resolves the target from a server-held snapshot, evaluates the policy, writes the audit row, and only then calls the computer. There is no path that acts without the record existing first.
 - **CEL policy, fail closed**: rules can inspect `tool.name`, `intent`, `bot.id`, `actor.id`, `page.url`, `page.host`, `element.*`, `key`, `file.*` and `mcp.*`. Deny is evaluated before allow, a missing policy permits nothing, and a broken rule refuses rather than opens.
+- **Watch what it is doing**: the screen shows what a Bot is looking at, and the Activity tab beside it shows what it ran, read and saved, with the output. A command line in the transcript opens to the same thing. A saved file shows its path and size, never its contents.
 - **Take the wheel**: a Bot that hits a login wall or a 2FA prompt asks for help. Control is handed over in the same panel and recorded as `computer.help_requested`, `computer.control_taken` and `computer.control_released`. While a person is driving, Bot actions are refused rather than queued.
 - **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
 - **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
 - **Governed MCP**: a curated catalogue ships for Atlassian, Box, Slack, Salesforce and ServiceNow. Custom servers must pass URL checks, and any tool not positively classified as a read is treated as a write.
 - **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer.
+- **Sign in with what your company already has**: Google, Microsoft or Okta from the environment, or a company's own SAML or OpenID Connect provider registered while the deployment runs and routed by email domain. Any one turns sign-in on; several may be configured at once.
+- **Decide who gets in**: `/admin/people` lists everybody who has signed in, promotes and demotes them, and removes access, which ends the session they are using and stops the next sign-in. Every change is on the audit trail.
 - **An audit trail you can read**: `/admin/audit` lists what was permitted, what was refused and what failed, and every refusal carries the rule that caused it.
 - **Credentials encrypted at rest**: stored through `/admin/credentials`, never returned by an API, and redacted from audit events.
 - **Loopback by default**: computers bind to `127.0.0.1` and require a per-container token, so nothing reaches a logged-in browser by knowing its port.
@@ -165,6 +184,7 @@ See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/
 - `DATABASE_URL`
 - `KEY_ENCRYPTION_KEY`
 - `MANAGED_AGENT_AG_UI_URL`
+- `MANAGED_AGENT_TOKEN`
 - `INTELLIGENCE_API_URL`
 - `INTELLIGENCE_GATEWAY_WS_URL`
 - `INTELLIGENCE_API_KEY`
@@ -174,13 +194,15 @@ Settings worth knowing:
 
 | Variable                             | Use                                                                       |
 | ------------------------------------ | ------------------------------------------------------------------------- |
-| `OPENBOT_DEV_NO_AUTH`                | Admits every request as one administrator. How OpenBot runs today.        |
+| `OPENBOT_SINGLE_USER`                | Admits every request as one administrator. Required when no identity provider is configured; `.env.example` ships it on. |
 | `OPENAI_BASE_URL`                    | Answers the OpenAI-shaped calls from somewhere else: a gateway, a proxy.  |
 | `ANTHROPIC_BASE_URL`, `GOOGLE_GENERATIVE_AI_BASE_URL` | The same, for those two APIs.            |
 | `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` sets one.      |
 | `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` sets one.                      |
 | `COMPUTER_SUPERVISOR_URL`            | Gives each Bot a computer of its own instead of one shared computer.      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run computers under gVisor, where the host has it.      |
+| `COMPUTER_SANDBOX`                   | Set to `on` for Chromium's own sandbox, where the host permits it.        |
+| `EMBEDDED_POSTGRES`                  | Set to `on` for a database inside the deployment container.               |
 | `AGENT_COMPUTER_POLICY`              | JSON action policy. Malformed JSON stops server startup.                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Lets a Bot reach this machine's own services.                             |
 | `TENANT_PACKAGE_DIR`                 | Directory containing tenant YAML. Defaults to `../examples/fintech`.      |
@@ -208,25 +230,64 @@ endpoints; keep them private and do not use them to bypass the gateway.
 
 More detail: [docs/architecture.md](docs/architecture.md).
 
-## Sign in with Google
+## Sign in
 
-`OPENBOT_DEV_NO_AUTH` is the default because it needs no OAuth credentials and no consent screen. To sign in for real instead, create a Google OAuth client and set all four of these together:
+`.env.example` ships `OPENBOT_SINGLE_USER=true`, which is one administrator and no sign-in: how a
+fresh clone reaches the product without registering an OAuth client first. Delete that line and
+configure **any one** of Google, Microsoft or Okta before anybody else can reach the deployment.
+With neither, it refuses to start rather than admitting everybody as an administrator. Configure
+more than one provider and the sign-in screen offers each of them.
+
+These four are needed whichever you pick:
 
 ```sh
-BETTER_AUTH_URL=http://localhost:3001
-BETTER_AUTH_SECRET=        # openssl rand -base64 32, at least 32 characters
-GOOGLE_OAUTH_CLIENT_ID=
-GOOGLE_OAUTH_CLIENT_SECRET=
+BETTER_AUTH_URL=http://localhost:3001        # where OAuth callbacks come back to
+BETTER_AUTH_SECRET=                          # openssl rand -base64 32
+TRUSTED_ORIGINS=http://localhost:3010        # where the app is served from
+INITIAL_ADMIN_EMAILS=you@example.com         # comma separated
 ```
 
-Then set the two that decide who gets in and from where:
+Then the provider. Register the redirect URI shown beside it.
 
-- `TRUSTED_ORIGINS` — where the app is served from, `http://localhost:3010` locally. It defaults to `http://localhost:3000`, which is not where `start.sh` serves the app.
-- `INITIAL_ADMIN_EMAILS` — comma separated. An address listed here becomes an administrator the first time it signs in; everybody else becomes a user.
+```sh
+# Google — http://localhost:3001/api/auth/callback/google
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
 
-Remove `OPENBOT_DEV_NO_AUTH`, then restart: the sign-in button is written into the app's generated config at startup, so it appears only once all four settings are present. Accounts, sessions and roles are stored in the same PostgreSQL database as everything else.
+# Microsoft — http://localhost:3001/api/auth/callback/microsoft
+MICROSOFT_OAUTH_CLIENT_ID=
+MICROSOFT_OAUTH_CLIENT_SECRET=
+MICROSOFT_OAUTH_TENANT_ID=common             # your directory GUID for staff only
 
-A partial set is refused rather than ignored: the server will not start with `BETTER_AUTH_SECRET` or `BETTER_AUTH_URL` but no client credentials, or with a secret shorter than 32 characters.
+# Okta — http://localhost:3001/api/auth/callback/okta
+OKTA_OAUTH_CLIENT_ID=
+OKTA_OAUTH_CLIENT_SECRET=
+OKTA_OAUTH_ISSUER=https://example.okta.com/oauth2/default
+```
+
+Restart. Accounts, sessions and roles are stored in the same PostgreSQL database as everything else.
+
+A company's own SAML or OpenID Connect provider is registered while the deployment runs, under
+Admin → Identity providers, and routed by email domain. An OIDC registration needs every host in the
+provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
+
+- `INITIAL_ADMIN_EMAILS` is required, because nothing else grants the administrator role and no
+  screen can promote somebody afterwards. It is re-read on every sign-in, so editing it takes effect
+  the next time that person signs in.
+- `MICROSOFT_OAUTH_TENANT_ID` defaults to `common`, which admits personal Microsoft accounts as well
+  as work ones. On a multi-tenant app registration Entra may send no `email` claim at all, so
+  OpenBot falls back to `upn` and then `preferred_username`. If none of the three arrives the
+  sign-in is refused and the reason is logged: add `email` as an optional claim, or use your
+  directory GUID here.
+- A half-configured provider is refused at start-up rather than at somebody's first attempt to sign
+  in: a client id with no secret, a secret shorter than 32 characters, or an Okta issuer with no
+  credentials behind it.
+- **SAML and OIDC** are registered while the deployment runs rather than configured here. Sign in as
+  an administrator and go to Admin → Identity providers with the metadata your identity team gave
+  you. People then sign in by typing their email address, and the domain decides which provider
+  they are sent to.
+- **Put TLS in front of any deployment.** A page served over plain `http://` on anything but
+  localhost is not a secure context, and sign-in cookies want `Secure`.
 
 ## Keeping it to your machine
 
@@ -261,6 +322,8 @@ Use `bash scripts/start.sh` for the whole stack. Use `bun run dev` only when you
 - [docs/configuration.md](docs/configuration.md)
 - [docs/development.md](docs/development.md)
 - [docs/coworkers.md](docs/coworkers.md)
+- [docs/deployment.md](docs/deployment.md)
+- [docs/releasing.md](docs/releasing.md)
 
 ## Contributing
 

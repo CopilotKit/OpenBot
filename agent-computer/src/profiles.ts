@@ -32,9 +32,12 @@
  * operations this process applies to its own browser, so the same design works under Compose,
  * Kubernetes or ECS, where the orchestrator's own restart policy brings a process back.
  */
+
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
+import { profileDirectoryFor } from "./bot-id";
+import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 
 /** The viewport, which is what a person's click coordinates are relative to. */
@@ -60,11 +63,47 @@ const SINGLETON_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
  * This is obfuscation at rest, not protection. Anything that can read the volume can read the
  * cookies. The volume's own permissions are the security boundary.
  */
+/**
+ * Whether Chromium gets to use its own sandbox.
+ *
+ * OFF BY DEFAULT, AND THAT IS NOT A PREFERENCE. Chromium's sandbox creates user namespaces, and
+ * Docker's default seccomp profile blocks the syscall it needs, so a container that does nothing
+ * special gets `No usable sandbox!` and the browser will not start at all. Verified both ways in
+ * this image: default profile fails, relaxed profile renders.
+ *
+ * TURN IT ON WHERE THE HOST ALLOWS IT. On a VM or self-hosted Docker, run with a Chromium seccomp
+ * profile and set `COMPUTER_SANDBOX=on`. That is strictly better than everything below, because it
+ * is the boundary Chromium itself maintains against the pages it renders.
+ *
+ * WHERE IT CANNOT BE ON. Serverless container platforms do not let you set a seccomp profile or add
+ * capabilities; Fargate restricts `CAP_SYS_ADMIN` explicitly. There the sandbox is unavailable, and
+ * the compensating controls are the ones this image already has, a non-root user, plus gVisor
+ * underneath, which Cloud Run applies to everything by default.
+ *
+ * Said out loud at start-up either way. An operator should not have to read this file to find out
+ * whether the browser rendering the open internet is sandboxed.
+ */
+const SANDBOX_ENABLED = process.env.COMPUTER_SANDBOX === "on";
+
 const LAUNCH_ARGS = [
-  "--no-sandbox",
+  ...(SANDBOX_ENABLED ? [] : ["--no-sandbox"]),
   "--disable-dev-shm-usage",
   "--password-store=basic",
 ];
+
+console.info(
+  JSON.stringify({
+    type: "computer-sandbox",
+    sandbox: SANDBOX_ENABLED ? "on" : "off",
+    ...(SANDBOX_ENABLED
+      ? {
+          note: "Chromium's own sandbox is in use. It will refuse to start if the host does not permit user namespaces.",
+        }
+      : {
+          note: "Chromium runs without its own sandbox, which is the only thing that works under a default container seccomp profile. Set COMPUTER_SANDBOX=on where the host allows it.",
+        }),
+  }),
+);
 
 /**
  * How long to let a closing browser finish writing before moving on.
@@ -105,16 +144,119 @@ async function closeAndWait(context: BrowserContext): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, CLOSE_SETTLE_MS));
 }
 
+/**
+ * A number an operator set, or the default.
+ *
+ * `Number("")` is zero, and an unset variable in a compose file arrives as an empty string rather
+ * than as absent. Read with `??` alone, an operator who had not set the cap would get a cap of zero
+ * and every browser would be closed the moment it opened. Anything that is not a positive number
+ * falls back, because "I typed this wrong" and "I did not set it" both mean the default.
+ */
+function numberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * How many browsers one computer holds at once.
+ *
+ * There was no cap. A context was started the first time each Bot was used and kept, and the only
+ * things that dropped one were an explicit stop, a browser that had already died, and shutdown. A
+ * deployment where every employee has a Bot therefore trends toward one resident Chromium per
+ * employee in a single container, at a few hundred MB each, until the container is killed for memory
+ * and `page()` relaunches its way back to the same state.
+ *
+ * A cap rather than only an idle timeout, because the failure is concurrent breadth rather than age:
+ * fifty people using their Bots inside the same minute are fifty live browsers and none of them are
+ * idle. The least recently used is closed, which is the one whose Bot has been quiet longest.
+ *
+ * Closing is not losing anything. The profile is on disk, so a Bot whose browser was closed starts
+ * again where it left off, which is what `stop` already means here.
+ */
+const MAX_LIVE_BROWSERS = numberFromEnv("COMPUTER_MAX_BROWSERS", 8);
+
+/**
+ * How long a browser may sit untouched before it is closed.
+ *
+ * The other half. A deployment under the cap still holds a browser per Bot that was used once last
+ * Tuesday, and that memory is doing nothing for anybody.
+ */
+const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000);
+
+/** How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`. */
+const IDLE_SWEEP_MS = 60_000;
+
 export function createProfiles(root: string) {
-  /** One running browser per Bot. */
+  /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
   const live = new Map<
     string,
-    { context: BrowserContext; page: Page; startedAt: string }
+    {
+      context: BrowserContext;
+      page: Page;
+      startedAt: string;
+      /** When this Bot last asked for its page. Decides what the cap and the sweep close. */
+      usedAt: number;
+    }
   >();
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
 
-  const directoryFor = (botId: string): string => join(root, botId);
+  // Checked, not joined. `join(root, botId)` normalizes `..` away, so a Bot id of `../workspace`
+  // used to resolve outside the root and `reset` would delete whatever was there.
+  const directoryFor = (botId: string): string =>
+    profileDirectoryFor(root, botId);
+
+  /**
+   * Close one Bot's browser and forget it.
+   *
+   * Gracefully, so Chromium flushes the profile: the whole point of closing one is that the Bot's
+   * logins survive and its next request starts where it left off.
+   */
+  const evict = async (botId: string, reason: string): Promise<void> => {
+    const running = live.get(botId);
+    if (!running) return;
+    live.delete(botId);
+    console.info(
+      JSON.stringify({ type: "computer-browser-closed", botId, reason }),
+    );
+    await closeAndWait(running.context).catch(() => undefined);
+  };
+
+  /**
+   * Keep the number of running browsers under the cap.
+   *
+   * Least recently used first, which is the Bot that has been quiet longest. Called after a launch
+   * rather than before, so the Bot that just asked is never the one closed.
+   */
+  const enforceCap = async (): Promise<void> => {
+    for (const botId of chooseEvictions(live.entries(), MAX_LIVE_BROWSERS)) {
+      await evict(botId, "the cap on running browsers was reached");
+    }
+  };
+
+  /**
+   * Close browsers nothing has touched for a while.
+   *
+   * The cap answers concurrent breadth; this answers a Bot used once last Tuesday whose browser is
+   * still resident and doing nothing for anybody.
+   */
+  const sweepIdle = async (): Promise<void> => {
+    for (const botId of chooseIdle(
+      live.entries(),
+      IDLE_TIMEOUT_MS,
+      Date.now(),
+    )) {
+      await evict(botId, "it had been idle");
+    }
+  };
+
+  const idleSweep = setInterval(() => {
+    void sweepIdle().catch(() => undefined);
+  }, IDLE_SWEEP_MS);
+  // Housekeeping must not hold the process open on the way out.
+  idleSweep.unref?.();
 
   const sweepLocks = async (dir: string): Promise<void> => {
     await Promise.all(
@@ -145,6 +287,8 @@ export function createProfiles(root: string) {
         existing?.context.browser()?.isConnected() &&
         !existing.page.isClosed()
       ) {
+        // Touched on every use, which is what makes "least recently used" mean anything.
+        existing.usedAt = Date.now();
         return existing.page;
       }
       if (existing) {
@@ -160,6 +304,10 @@ export function createProfiles(root: string) {
         const proxy = egressFor(botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
           args: LAUNCH_ARGS,
+          // Playwright adds `--no-sandbox` on its own unless told otherwise, so leaving this out
+          // means the flag above decides nothing and a deployment that asked for the sandbox does
+          // not get one. Verified by reading the launched process arguments, not by trusting either.
+          chromiumSandbox: SANDBOX_ENABLED,
           viewport: VIEWPORT,
           // This process owns shutdown. Playwright's signal handlers kill Chromium immediately on
           // SIGTERM, before pending cookie writes have time to flush.
@@ -170,7 +318,15 @@ export function createProfiles(root: string) {
         });
         // Persistent contexts open with a page already; reuse it rather than leaving an extra blank tab.
         const page = context.pages()[0] ?? (await context.newPage());
-        live.set(botId, { context, page, startedAt: new Date().toISOString() });
+        live.set(botId, {
+          context,
+          page,
+          startedAt: new Date().toISOString(),
+          usedAt: Date.now(),
+        });
+        // After the new one is in the map, so the cap counts what is really running and the Bot that
+        // just asked is the most recently used and therefore never the one closed.
+        await enforceCap();
         return page;
       })();
 
@@ -251,9 +407,25 @@ export function createProfiles(root: string) {
      * here gives Chromium the chance to flush its profile within that grace period.
      */
     async closeAll(): Promise<void> {
+      clearInterval(idleSweep);
       const contexts = [...live.values()];
       live.clear();
       await Promise.all(contexts.map((c) => closeAndWait(c.context)));
+    },
+
+    /** How many browsers are running. For the idle sweep's own tests, and for a status reader. */
+    liveCount(): number {
+      return live.size;
+    },
+
+    /** Whether this Bot has a browser right now, so a caller can drop state that belongs to one. */
+    isLive(botId: string): boolean {
+      return live.has(botId);
+    },
+
+    /** Run the idle sweep now. Exposed so a test does not have to wait a minute for the interval. */
+    sweepIdleNow(): Promise<void> {
+      return sweepIdle();
     },
   };
 }

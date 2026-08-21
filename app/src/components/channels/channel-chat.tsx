@@ -6,6 +6,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ConversationView } from "@/components/channels/conversation-view";
 import {
@@ -21,6 +22,7 @@ import { ConversationProvider } from "@/lib/copilot/conversation";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import { newId } from "../../lib/new-id";
 
 /**
  * Backstop for the first message of a new channel; a stalled join must not lose the message.
@@ -60,7 +62,7 @@ export function ChannelChat({
    */
   const [seed] = useState<Message | null>(() => {
     const pending = takeFirstMessage(channel.id);
-    return pending ? seedMessage(pending, crypto.randomUUID()) : null;
+    return pending ? seedMessage(pending, newId()) : null;
   });
 
   /** Cleared by the send-on-mount effect without restarting it. */
@@ -105,23 +107,14 @@ export function ChannelChat({
       }
 
       try {
-        const response = await fetch(
-          `/api/copilotkit/threads/${encodeURIComponent(channel.threadId)}/messages?agentId=${encodeURIComponent(runtimeAgentId)}`,
-          { credentials: "include" },
+        const stored = await readThreadMessages(
+          channel.threadId,
+          runtimeAgentId,
         );
-        if (response.ok && current) {
-          const stored = (await response.json())?.messages;
-          // Never overwrite local messages that arrived while history was loading.
-          if (
-            Array.isArray(stored) &&
-            stored.length > 0 &&
-            agent.messages.length === 0
-          ) {
-            agent.setMessages(stored);
-          }
+        // Never overwrite local messages that arrived while history was loading.
+        if (current && stored.length > 0 && agent.messages.length === 0) {
+          agent.setMessages(stored);
         }
-      } catch {
-        // An unreadable history is not a reason to block the composer.
       } finally {
         // Release even on join/restore failure; the gate orders messages, not withholds them.
         openJoinGate.current();
@@ -219,14 +212,14 @@ export function ChannelChat({
     for (const instruction of skillInstructions) {
       agent.addMessage({
         content: instruction,
-        id: crypto.randomUUID(),
+        id: newId(),
         role: "system",
       });
     }
 
     agent.addMessage({
       content: trimmed,
-      id: crypto.randomUUID(),
+      id: newId(),
       role: "user",
     });
     report(trimmed, null);

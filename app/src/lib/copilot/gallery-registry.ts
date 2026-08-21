@@ -28,6 +28,21 @@ export type GalleryComponent = {
    */
   description: string;
   parameters: ToolParameters;
+  /**
+   * The props that show this component at its best, for anywhere it is displayed rather than called.
+   *
+   * A gallery of names tells somebody nothing: the question they arrived with is "what does an
+   * answer from this thing look like", and only the component itself answers that. Kept beside the
+   * component so a new one cannot be added without deciding how it introduces itself.
+   *
+   * Props rather than tool arguments, because they are not always the same thing: a component that
+   * suspends the run is handed the whole interaction, `{ status, args, respond }`, and would crash
+   * on arguments alone.
+   *
+   * Omitted by a component that cannot be drawn away from a conversation, which is then shown as an
+   * unpreviewable tile rather than as a component that failed.
+   */
+  preview?: Record<string, unknown>;
   Component: (props: Record<string, unknown>) => ReactElement | null;
   /**
    * The line the model is given once it is on screen. Ignored for a `decision`, whose result is the
@@ -91,3 +106,17 @@ export function galleryManifest(): GalleryManifestEntry[] {
 export const RENDERABLE_NAMES: ReadonlySet<string> = new Set(
   GALLERY_COMPONENTS.map((component) => component.name),
 );
+
+const BY_NAME: ReadonlyMap<string, GalleryComponent> = new Map(
+  GALLERY_COMPONENTS.map((component) => [component.name, component]),
+);
+
+/**
+ * The component behind a catalogue name, or `undefined` where this build has no renderer for it.
+ *
+ * A deployment's component rows are governance state and outlive the build that drew them, so a
+ * name arriving from the server is not a promise that anything here can draw it.
+ */
+export function galleryComponent(name: string): GalleryComponent | undefined {
+  return BY_NAME.get(name);
+}

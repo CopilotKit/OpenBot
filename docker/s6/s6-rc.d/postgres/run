@@ -1,0 +1,13 @@
+#!/command/with-contenv sh
+# The database, when this container is asked to be its own.
+#
+# `EMBEDDED_POSTGRES=on` turns it on. Off, this service exits 0 immediately and s6 leaves it alone,
+# which is how one image serves both shapes without two Dockerfiles.
+set -eu
+if [ "${EMBEDDED_POSTGRES:-off}" != "on" ]; then
+  exec /bin/true
+fi
+exec s6-setuidgid postgres /usr/lib/postgresql/16/bin/postgres \
+  -D /var/lib/postgresql/data \
+  -c listen_addresses=127.0.0.1 \
+  -c port=5432

@@ -87,6 +87,49 @@ describe("evaluateActionPolicy", () => {
     expect(decision.source).toBe("deny");
   });
 
+  // The other way a rule is broken. These parse and evaluate, so nothing throws; they simply do not
+  // answer the question that was asked, and the only safe reading of a deny rule that did not answer
+  // is that it denied. `"Submit order"` is what somebody writes who thinks the list takes labels
+  // rather than expressions, and it is a valid CEL string.
+  test.each([
+    ['"Submit order"', "a bare string, i.e. the list read as labels"],
+    ["element.name", "a bare field reference"],
+    ['contains(element.name, "submit") ? element.name : false', "a ternary"],
+    ["repeat.count", "a number"],
+  ])(
+    "a deny expression that is not a question (%s: %s) still denies",
+    (rule) => {
+      const decision = evaluateActionPolicy(
+        { ...permissive, deny: [rule] },
+        context(),
+      );
+      expect(decision.allowed).toBe(false);
+      expect(decision.source).toBe("deny");
+    },
+  );
+
+  // The mirror. A rule that does not answer must not permit either, which is what this already did by
+  // reading anything other than true as no match.
+  test("an allow expression that is not a question does not permit", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: [], allow: ['"Submit order"'] },
+      context(),
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.source).toBe("default");
+  });
+
+  // A rule that answers "no" is not broken, and must not be read as one: a deny list where every
+  // false reading became a denial would refuse everything.
+  test("a deny expression that answers false permits", () => {
+    const decision = evaluateActionPolicy(
+      { ...permissive, deny: ['contains(element.name, "cancel")'] },
+      context(),
+    );
+    expect(decision.allowed).toBe(true);
+    expect(decision.source).toBe("allow");
+  });
+
   test("a broken allow expression does not permit", () => {
     const decision = evaluateActionPolicy(
       { mode: "enforce", deny: [], allow: ["also not ( valid"] },
@@ -348,5 +391,132 @@ describe("a rule that names an identifier only some actions carry", () => {
       },
     );
     expect(decision.allowed).toBe(false);
+  });
+});
+
+/**
+ * What a refusal says it refused.
+ *
+ * A tool call carries every browser field the engine knows about, all of them empty, so that a rule
+ * written about a page evaluates to false against it rather than being unevaluable. That is correct
+ * for the decision and wrong for the sentence: each of those empty fields is present, so a refusal
+ * described from them names a page nobody visited or a file nobody touched.
+ */
+describe("describing a refusal", () => {
+  const mcpContext: PolicyContext = {
+    tool: { name: "mcp__notes__search_notes" },
+    bot: { id: "knowledge" },
+    actor: { id: "dev-local-user" },
+    page: { url: "", host: "" },
+    element: { ref: "", role: "", name: "", type: "" },
+    key: "",
+    file: { path: "", name: "", extension: "" },
+    mcp: { server: "notes", tool: "search_notes", effect: "read" },
+  };
+
+  test("a refused tool call names the tool and the server it was aimed at", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: ['mcp.server == "notes"'], allow: ["true"] },
+      mcpContext,
+    );
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toBe(
+      'This deployment\'s policy does not allow that: search_notes on notes is blocked by the rule `mcp.server == "notes"`.',
+    );
+    // The neutral file field is present and empty on every tool call. Described from it, the
+    // sentence read "the file  is blocked", naming a workspace the call never went near.
+    expect(decision.reason).not.toContain("the file");
+  });
+
+  test("a refused file action still names the file", () => {
+    const decision = evaluateActionPolicy(
+      {
+        mode: "enforce",
+        deny: ['contains(file.path, "secrets")'],
+        allow: ["true"],
+      },
+      context({
+        tool: { name: "computer_read_file" },
+        file: {
+          path: "/workspace/secrets.env",
+          name: "secrets.env",
+          extension: "env",
+        },
+      }),
+    );
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("the file /workspace/secrets.env");
+  });
+});
+
+/**
+ * A shell command, judged like any other action.
+ *
+ * The blunt rule matters more than the clever one here. A deployment that does not want its Bots
+ * running commands says so once with `intent`, and does not have to imagine every command it would
+ * have wanted to refuse.
+ */
+describe("commands", () => {
+  const runCommand = (command: string): PolicyContext => ({
+    tool: { name: "computer_run_command" },
+    bot: { id: "general-assistant" },
+    actor: { id: "dev-local-user" },
+    page: { url: "", host: "" },
+    intent: "run_command",
+    command,
+  });
+
+  test("a deployment can refuse the shell outright", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: ['intent == "run_command"'], allow: ["true"] },
+      runCommand("apt-get install -y jq"),
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.matched).toBe('intent == "run_command"');
+  });
+
+  test("a rule can name what the command says", () => {
+    const policy = {
+      mode: "enforce" as const,
+      deny: ['contains(command, "rm -rf")'],
+      allow: ["true"],
+    };
+    expect(evaluateActionPolicy(policy, runCommand("rm -rf /")).allowed).toBe(
+      false,
+    );
+    expect(evaluateActionPolicy(policy, runCommand("ls -la")).allowed).toBe(
+      true,
+    );
+  });
+
+  test("commands are allowed when nothing refuses them", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: [], allow: ["true"] },
+      runCommand("echo hello"),
+    );
+    expect(decision.allowed).toBe(true);
+  });
+
+  /*
+   * A rule written about the browser must not catch a command. The neutral empty fields make
+   * `page.host` and the element fields evaluate to false rather than being unevaluable, which is
+   * what keeps the shipped deny preset from refusing every command a Bot ever runs.
+   */
+  test("a browser rule does not refuse a command", () => {
+    const decision = evaluateActionPolicy(
+      {
+        mode: "enforce",
+        deny: ['contains(element.name, "submit") || key == "Enter"'],
+        allow: ["true"],
+      },
+      {
+        ...runCommand("echo hello"),
+        element: { ref: "", role: "", name: "", type: "" },
+        key: "",
+      },
+    );
+    expect(decision.allowed).toBe(true);
   });
 });

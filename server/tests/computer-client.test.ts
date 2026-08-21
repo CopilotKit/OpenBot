@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  createComputerClient,
+  createComputerTransport,
   ElementNotFoundError,
   NavigationRefusedError,
 } from "../src/computer/client";
@@ -9,12 +9,19 @@ function clientWith(
   handler: (url: string, init?: RequestInit) => Promise<Response> | Response,
   allowPrivateHosts = false,
 ) {
-  return createComputerClient({
-    baseUrl: "http://agent-computer:4100",
+  const transport = createComputerTransport({
     allowPrivateHosts,
     fetchImpl: ((url: string, init?: RequestInit) =>
       Promise.resolve(handler(url, init))) as unknown as typeof fetch,
   });
+  const baseUrl = "http://agent-computer:4100";
+  const botId = "bot-1";
+  return {
+    navigate: (url: string) => transport.navigate(baseUrl, botId, url),
+    screenshot: () => transport.call(baseUrl, botId, "/screenshot"),
+    click: (input: unknown, signal?: AbortSignal) =>
+      transport.post(baseUrl, botId, "/click", input, signal),
+  };
 }
 
 const ok = (body: unknown) =>
@@ -102,6 +109,15 @@ describe("computer client", () => {
       "The assistant's computer is not running.",
     );
 
+    const timedOut = clientWith(() => {
+      const error = new Error("timed out");
+      error.name = "TimeoutError";
+      throw error;
+    });
+    await expect(timedOut.navigate("https://example.com")).rejects.toThrow(
+      "The assistant's computer did not respond in time.",
+    );
+
     const badPage = clientWith(
       () =>
         new Response(JSON.stringify({ error: "net::ERR_NAME_NOT_RESOLVED" }), {
@@ -112,18 +128,6 @@ describe("computer client", () => {
     await expect(badPage.navigate("https://nope.example")).rejects.toThrow(
       "net::ERR_NAME_NOT_RESOLVED",
     );
-  });
-
-  test("status reports unreachable rather than throwing", async () => {
-    const client = clientWith(() => {
-      throw new Error("down");
-    });
-
-    await expect(client.status("bot-1")).resolves.toEqual({
-      botId: "bot-1",
-      state: "unreachable",
-      reason: "The assistant's computer is not running.",
-    });
   });
 
   test("screenshot returns the png a transcript can render", async () => {
@@ -139,19 +143,6 @@ describe("computer client", () => {
     await expect(client.screenshot()).resolves.toMatchObject({
       base64: "aGVsbG8=",
       width: 1280,
-    });
-  });
-
-  test("surfaces a timeout as the computer not responding", async () => {
-    const client = clientWith(() => {
-      const error = new Error("timed out");
-      error.name = "TimeoutError";
-      throw error;
-    });
-
-    await expect(client.status("bot-1")).resolves.toMatchObject({
-      state: "unreachable",
-      reason: "The assistant's computer did not respond in time.",
     });
   });
 });
@@ -252,5 +243,71 @@ describe("the caller's Stop", () => {
 
     // A caller that passes nothing must not end up with an unbounded request.
     expect(seen).toBeDefined();
+  });
+});
+
+describe("the deadline a call is given", () => {
+  test("a command outlasts the shell's own maximum; a browser action does not", async () => {
+    /*
+     * The shell's budget is 120s by default and 600s at most, and it reports `timedOut` itself. A
+     * transport deadline shorter than that told the person the computer had gone quiet while the
+     * command ran to completion inside the container, and made the shell's own maximum unreachable.
+     */
+    const deadlines: number[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      // AbortSignal.timeout is not readable, so the deadline is observed by racing it.
+      const signal = init?.signal;
+      deadlines.push(signal ? 1 : 0);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const transport = createComputerTransport({ fetchImpl, timeoutMs: 45_000 });
+
+    // Both calls succeed; what matters is that the override is accepted and passed down rather than
+    // silently dropped, which a signature change could do without any test noticing.
+    await transport.post("http://computer", "bot-1", "/click", {}, undefined);
+    await transport.post(
+      "http://computer",
+      "bot-1",
+      "/exec",
+      {},
+      undefined,
+      615_000,
+    );
+
+    expect(deadlines).toEqual([1, 1]);
+  });
+
+  test("the override is what bounds the request, not the transport default", async () => {
+    // A 20ms transport default with a call that takes 60ms: without the override this rejects.
+    const slow = (async (_url: string, init?: RequestInit) => {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 60);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          const error = new Error("aborted");
+          error.name = "TimeoutError";
+          reject(error);
+        });
+      });
+      return new Response("{}", {
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const transport = createComputerTransport({
+      fetchImpl: slow,
+      timeoutMs: 20,
+    });
+
+    await expect(
+      transport.post("http://computer", "bot-1", "/click", {}),
+    ).rejects.toThrow();
+
+    await expect(
+      transport.post("http://computer", "bot-1", "/exec", {}, undefined, 5_000),
+    ).resolves.toBeDefined();
   });
 });

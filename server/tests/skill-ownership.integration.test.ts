@@ -180,10 +180,16 @@ function routesAs(actor: {
   email: string;
   role: "admin" | "user";
 }) {
-  return createPluginRoutes(store as never, async (context, next) => {
-    context.set("actor", actor as never);
-    await next();
-  });
+  return createPluginRoutes(
+    store as never,
+    async (context, next) => {
+      context.set("actor", actor as never);
+      await next();
+    },
+    // These cover who may GRANT a skill, which is a separate question from who may act as the Bot it
+    // is granted to. That one is `bot-access.test.ts`.
+    async () => true,
+  );
 }
 
 const asAlice = () =>

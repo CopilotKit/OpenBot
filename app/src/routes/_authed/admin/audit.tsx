@@ -87,9 +87,7 @@ function AuditPage() {
           ))}
         </div>
 
-        {events.isPending ? (
-          <PageEmpty>Loading the trail…</PageEmpty>
-        ) : events.isError ? (
+        {events.isPending ? null : events.isError ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             The audit trail could not be loaded.
           </p>
@@ -175,6 +173,9 @@ function Row({
           </span>
         ) : typeof payload.file === "string" ? (
           <span className="font-mono text-xs">{payload.file}</span>
+        ) : typeof payload.command === "string" ? (
+          // The command is the subject of its own row, the way a path is for a file action.
+          <span className="font-mono text-xs">{payload.command}</span>
         ) : typeof element === "object" && element?.name ? (
           <span>
             {element.name}
@@ -189,6 +190,7 @@ function Row({
         )}
         {/* Page host is meaningful only for browser actions, not workspace file actions. */}
         {typeof payload.file !== "string" &&
+        typeof payload.command !== "string" &&
         typeof payload.page === "string" &&
         payload.page ? (
           <div className="text-xs text-muted-foreground">

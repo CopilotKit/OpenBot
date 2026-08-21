@@ -2,6 +2,7 @@ import type { BaseEvent, RunAgentInput } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 import { serve } from "bun";
 import OpenAI from "openai";
+import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { SYSTEM_PROMPT } from "../../shared/bot-prompt";
 
 /**
@@ -16,6 +17,13 @@ import { SYSTEM_PROMPT } from "../../shared/bot-prompt";
  */
 
 const PORT = Number.parseInt(process.env.PORT ?? "4200", 10);
+const MANAGED_AGENT_TOKEN = process.env.MANAGED_AGENT_TOKEN?.trim();
+if (!MANAGED_AGENT_TOKEN) {
+  console.error(
+    "MANAGED_AGENT_TOKEN is not set. This process holds a model credential and will not start without a token for OpenBot's server.",
+  );
+  process.exit(1);
+}
 /**
  * Which model drives the Bot.
  *
@@ -37,8 +45,25 @@ const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
  */
 const BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
 
+/**
+ * The key that model is answered with, checked at startup rather than on the first conversation.
+ *
+ * Without the check the Bot starts, answers the healthcheck, and then fails every run, so the
+ * compose healthcheck reports a Bot that cannot answer as healthy. The LangGraph Bot already
+ * refuses to start without its provider's key, and this file already refuses without its token
+ * above; the model key was the one configuration that escaped the same posture. A missing key
+ * should fail in front of whoever is deploying, not in front of whoever is asking.
+ */
+const API_KEY = process.env.OPENAI_API_KEY?.trim();
+if (!API_KEY) {
+  console.error(
+    "OPENAI_API_KEY is not set. This Bot cannot answer without a model.",
+  );
+  process.exit(1);
+}
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: API_KEY,
   baseURL: BASE_URL,
 });
 
@@ -224,6 +249,9 @@ serve({
     }
 
     if (url.pathname === "/ag-ui" && request.method === "POST") {
+      if (!hasManagedAgentToken(request, MANAGED_AGENT_TOKEN)) {
+        return Response.json({ error: "Unauthorized." }, { status: 401 });
+      }
       const input = (await request.json()) as RunAgentInput;
       return runAgent(input);
     }

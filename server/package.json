@@ -13,18 +13,20 @@
   },
   "dependencies": {
     "@ag-ui/client": "0.0.57",
-    "@better-auth/drizzle-adapter": "^1.6.27",
-    "@copilotkit/runtime": "1.67.1",
+    "@better-auth/drizzle-adapter": "^1.7.1",
+    "@better-auth/sso": "^1.7.1",
+    "@copilotkit/runtime": "1.68.3",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "better-auth": "^1.6.27",
+    "better-auth": "^1.7.1",
     "cel-js": "^0.8.2",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.10.0",
     "postgres": "^3.4.9",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@copilotkit/aimock": "^1.38.0",
+    "@copilotkit/aimock": "1.39.0",
     "drizzle-kit": "^0.31.10",
     "eventsource": "3.0.7"
   }

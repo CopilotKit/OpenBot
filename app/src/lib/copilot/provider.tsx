@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { ActiveBotProvider } from "./active-bot";
 import { ComputerTools } from "./computer-tools";
 import { GalleryTools } from "./gallery-tools";
-import { PluginTools } from "./plugin-tools";
 import { SandboxedTools } from "./sandboxed-tools";
 
 /**
@@ -28,8 +27,6 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         <ComputerTools />
         {/* Gallery tools are registered once; their handlers re-read the active Bot to avoid shadowing renderers. */}
         <GalleryTools />
-        {/* MCP tools share the same active-Bot context and server-side grant checks. */}
-        <PluginTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}
         <SandboxedTools />
         {children}

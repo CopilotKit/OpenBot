@@ -1,29 +1,36 @@
 import { serve } from "bun";
+import { mintRunAssertion } from "./agents/callback-token";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
+import { startAuditRetention } from "./audit-retention";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
+import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import type { OpenBotRole } from "./auth/roles";
 import {
   createChannelEventHub,
   startChannelActivityListener,
 } from "./channels/events";
 import { createChannelStore } from "./channels/routes";
+import { websocket as channelSocket } from "./channels/socket";
 import { createStallGuard } from "./channels/stall-guard";
 import { createThreadIdentity } from "./channels/thread-identity";
-import { websocket as channelSocket } from "./channels/socket";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
-import { createComputerClient } from "./computer/client";
 import { createComputerGateway } from "./computer/gateway";
+import { startPolicyListener } from "./computer/policy-listener";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
 } from "./computer/policy-store";
-import { createSupervisorClient } from "./computer/supervisor";
+import {
+  createComputerProvider,
+  describeComputerIsolation,
+} from "./computer/provider";
+import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
 import { createConnectorAdminService } from "./connectors";
 import {
@@ -37,7 +44,9 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
+import { grantedTools } from "./plugins/tools";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -56,7 +65,7 @@ async function resolveRequestActor(request: Request): Promise<{
   name: string;
   role: OpenBotRole;
 }> {
-  if (config.devNoAuth) {
+  if (config.singleUser) {
     return { id: DEV_ACTOR.id, name: DEV_ACTOR.email, role: DEV_ACTOR.role };
   }
   const session = await auth?.api.getSession({ headers: request.headers });
@@ -105,7 +114,7 @@ const identifyActor: IdentifyActor = async (request) => {
 const config = loadConfig();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
 const database = createDatabase(config.databaseUrl);
-await initializeDevActorUser(database, config.devNoAuth);
+await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
@@ -147,24 +156,41 @@ const channelActivityListener = await startChannelActivityListener(
   channelEvents,
 );
 const roleRepository = createRoleRepository(database);
-const loadAgentsForActor = createRuntimeAgentLoader(database, agentVault);
+const loadAgentsForActor = createRuntimeAgentLoader(database, agentVault, {
+  endpoint: config.managedAgentAgUiUrl,
+  token: config.managedAgentToken,
+});
 await synchronizeTenantPackage(database, tenantPackage);
-const auth = config.auth ? createAuth(config, database) : undefined;
-// One computer each, when a supervisor is configured to give them out. Without one every Bot shares
-// the computer at `baseUrl`, which is what a laptop wants and is honest about being one machine.
-const supervisor = config.computer?.supervisor
-  ? createSupervisorClient(config.computer.supervisor)
+/*
+ * Built before `auth`, because the deny list is consulted during sign-in and the store is what
+ * holds it. It needs the administrator list too, so it can tell the screen which people the
+ * deployment's configuration has already decided about.
+ */
+const peopleStore = createPeopleStore(
+  database,
+  config.auth?.initialAdminEmails ?? [],
+);
+const identityProviderStore = createIdentityProviderStore(database);
+/*
+ * Built before `auth` for the same reason the people store is: sign-in writes to the trail, and the
+ * store that receives those rows has to exist before anything can sign in.
+ */
+const signInAuditStore = createAuditStore(database);
+const auth = config.auth
+  ? createAuth(
+      config,
+      database,
+      (email) => peopleStore.isRevoked(email),
+      signInAuditStore,
+    )
   : undefined;
-const computerClient = config.computer
-  ? createComputerClient({
-      baseUrl: config.computer.baseUrl,
-      allowPrivateHosts: config.computer.allowPrivateHosts,
-      ...(config.computer.token ? { token: config.computer.token } : {}),
-      ...(supervisor
-        ? { resolveBaseUrl: (botId: string) => supervisor.locate(botId) }
-        : {}),
-    })
+const computerProvider = config.computer
+  ? createComputerProvider(config.computer)
   : undefined;
+
+if (computerProvider?.warm) {
+  void computerProvider.warm();
+}
 // What Bots may do on their computers. Configuration supplies the deployment's default; an
 // administrator can change it while running, and a restart returns to the configured one.
 const policyStore = createPolicyStore(
@@ -174,6 +200,17 @@ const policyStore = createPolicyStore(
 // A boundary an administrator set is read back before the first action is decided, so a restart no
 // longer silently returns to the configured default.
 const policySource = await policyStore.load();
+/*
+ * And kept current afterwards.
+ *
+ * A boundary an administrator changes arrives at one server. Without this, every other server keeps
+ * enforcing what it read at boot, so a new deny rule stops roughly one action in N while the screen
+ * and the audit row both report success. See policy-listener.ts.
+ */
+const policyListener = await startPolicyListener(
+  config.databaseUrl,
+  policyStore,
+);
 
 /*
  * Record which boundary this process started with.
@@ -185,6 +222,29 @@ const policySource = await policyStore.load();
  * unavailable, and the row is a note for a reader rather than something the server depends on.
  */
 const bootAuditStore = createAuditStore(database);
+/*
+ * Old audit rows removed on a schedule, when a deployment has asked for that.
+ *
+ * One server sweeps rather than all of them, decided by an advisory lock. Off unless
+ * `AUDIT_RETENTION_DAYS` is set. See audit-retention.ts.
+ */
+const auditRetention = startAuditRetention(
+  config.databaseUrl,
+  config.auditRetentionDays,
+);
+const computerGateway = computerProvider
+  ? createComputerGateway({
+      provider: computerProvider,
+      auditStore: bootAuditStore,
+      policy: () => policyStore.get(),
+      // In Postgres, so the ref a click carries resolves against the snapshot that produced it even
+      // when the snapshot was taken by another server. A Map here would be blank on every replica
+      // but the one that snapshotted, and the boundary would decide with no element to look at.
+      snapshots: createSnapshotStore(database),
+      allowPrivateHosts: config.computer?.allowPrivateHosts,
+      token: config.computer?.token,
+    })
+  : undefined;
 
 /**
  * What a Bot can reach beyond its own computer.
@@ -225,33 +285,26 @@ void recordAuditEvent(bootAuditStore, {
 /*
  * Record whether each Bot has a computer of its own.
  *
- * Without a supervisor every Bot shares the browser at `AGENT_COMPUTER_URL`. That is a fine way to
- * run on a laptop, but the shared isolation state must be visible rather than inferred.
+ * A shared provider is a fine way to run on a laptop, but the shared isolation state must be visible
+ * rather than inferred.
  */
+const isolation = describeComputerIsolation(computerProvider);
+
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.isolation_loaded",
   targetType: "computer",
-  payload: supervisor
-    ? {
-        isolation: "one computer per Bot",
-        note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
-      }
-    : {
-        isolation: "one shared computer",
-        note: "No supervisor is configured, so every Bot uses the same browser. Sessions, files and logins are shared between them. Set COMPUTER_SUPERVISOR_URL to give each Bot its own.",
-      },
+  payload: {
+    isolation: isolation.isolation,
+    note: isolation.note,
+  },
 }).catch(() => undefined);
 
 console.info(
   JSON.stringify({
     type: "computer-isolation",
-    isolation: supervisor ? "one computer per Bot" : "one shared computer",
-    ...(supervisor
-      ? {}
-      : {
-          warning:
-            "Every Bot shares one browser. Set COMPUTER_SUPERVISOR_URL for a computer each.",
-        }),
+    provider: computerProvider ? computerProvider.name : "none",
+    isolation: isolation.isolation,
+    ...(isolation.warning ? { warning: isolation.warning } : {}),
   }),
 );
 /**
@@ -333,20 +386,23 @@ const app = createApp(
     identifyUser,
     identifyActor,
     stallGuard,
+    // Tools run here, not in the browser. Each one still executes through the plugin store, so the
+    // grant, the policy and the audit row are exactly where they were.
+    (actorId) => (botId) =>
+      grantedTools({ store: pluginStore, botId, actorId }),
+    /*
+     * What the deployment tells a remote Bot about the run it is starting.
+     *
+     * Signed here, where the encryption key lives, so the runtime module never holds a secret. The Bot
+     * hands this back when it calls a tool, and it is where the Bot id and the person's name come
+     * from: its own token proves which agent is calling, this proves who it is calling for, and
+     * neither is read out of the request body any more.
+     */
+    (actorId) => (botId, runId) =>
+      mintRunAssertion({ botId, actorId, runId }, config.keyEncryptionKey),
   ),
-  computerClient,
   // The only path to an acting call.
-  computerClient
-    ? createComputerGateway({
-        client: computerClient,
-        auditStore: bootAuditStore,
-        // Read on every decision rather than captured once, so a rule an administrator adds while the
-        // server is running applies to the very next action instead of after a restart.
-        policy: () => policyStore.get(),
-        // Stop, reset and the listing act on containers when there are containers to act on.
-        ...(supervisor ? { supervisor } : {}),
-      })
-    : undefined,
+  computerGateway,
   policyStore,
   // Bots as durable objects, and the channels they run in.
   agentProfileStore,
@@ -363,6 +419,11 @@ const app = createApp(
   sandboxedStore,
   // How a thread that has no channel is named, so the direct Bot chat is in the same namespace.
   threadIdentity,
+  // Who has signed in, and what an administrator may do about them.
+  peopleStore,
+  // The enterprise identity providers registered here. Read as facts about the deployment rather
+  // than through Better Auth's own listing, which answers per person. See identity-provider-store.ts.
+  identityProviderStore,
 );
 
 /**
@@ -425,19 +486,38 @@ serve<SocketData>({
       }
       // The session guard, applied by hand because middleware does not run on an upgrade. An
       // unauthenticated socket here would be the whole point of the proxy defeated.
-      const actor = await identifyUser(request).catch(() => null);
+      const actor = await resolveRequestActor(request).catch(() => null);
       if (!actor) {
         return new Response("Sign in first.", { status: 401 });
       }
-      // Located per Bot when there is a supervisor, and the one shared computer when there is not.
+      // And which Bot, which the guard above does not answer. This socket carries that Bot's screen,
+      // so signing in is not enough: without this, anybody signed in watches anybody's Bot work.
+      if (
+        !(await agentProfileStore
+          .get({ id: actor.id, role: actor.role }, streamBotId)
+          .catch(() => null))
+      ) {
+        return new Response("There is no such Bot.", { status: 404 });
+      }
+      /*
+       * Through the gateway, not the provider.
+       *
+       * `gateway.locate` runs checkComputerAddress; `provider.locate` does not, and the URL built
+       * below carries COMPUTER_TOKEN in its query string. A provider that answered with a foreign
+       * host was handed the deployment's computer token, which is the case that check was written
+       * for. Every acting path already went through the gateway; this one did not.
+       */
       let upstream: string;
       try {
-        upstream = toStreamUrl(
-          supervisor
-            ? await supervisor.locate(streamBotId)
-            : config.computer.baseUrl,
-          streamBotId,
-        );
+        const streamBase = computerGateway
+          ? await computerGateway.locate(streamBotId)
+          : undefined;
+        if (!streamBase) {
+          return new Response("No computer address is configured.", {
+            status: 503,
+          });
+        }
+        upstream = toStreamUrl(streamBase, streamBotId);
       } catch (error) {
         // Said out loud rather than falling back to another Bot's computer, which is the failure this
         // whole path exists to prevent.
@@ -492,19 +572,24 @@ serve<SocketData>({
   },
 });
 
-if (config.devNoAuth) {
+if (config.singleUser) {
   // Loud, every boot. A server that is not checking who is asking should never be a quiet default.
   console.warn(
-    "OPENBOT_DEV_NO_AUTH is on: every request is treated as " +
-      `${DEV_ACTOR.email} (administrator). Local development only.`,
+    "No identity provider is configured, so every request is treated as " +
+      `${DEV_ACTOR.email} (administrator). Configure GOOGLE_OAUTH_*, ` +
+      "MICROSOFT_OAUTH_* or OKTA_OAUTH_* before anybody else can reach this.",
   );
 }
 
-// The activity listener holds a connection of its own for the life of the process. Released on the
-// way out, so a watch-mode restart does not leave one behind on every reload.
+// Each listener holds a connection of its own for the life of the process. Released on the way out,
+// so a watch-mode restart does not leave two behind on every reload.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void channelActivityListener.stop().finally(() => process.exit(0));
+    void Promise.allSettled([
+      channelActivityListener.stop(),
+      policyListener.stop(),
+      Promise.resolve(auditRetention.stop()),
+    ]).finally(() => process.exit(0));
   });
 }
 

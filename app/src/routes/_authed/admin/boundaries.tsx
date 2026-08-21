@@ -1,6 +1,14 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
+import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
+import {
+  type ActionPolicy,
+  actionPolicyQueryOptions,
+  type PolicyMode,
+} from "@/lib/computers/queries";
+import { queryClient } from "@/query-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -8,14 +16,6 @@ import { Input } from "@/components/ui/input";
  * CEL computer-action boundary editor. Rules are shown as the gateway evaluates them, and denied
  * actions are recorded in Audit with the matching rule.
  */
-
-type PolicyMode = "dry-run" | "enforce";
-
-type ActionPolicy = {
-  mode: PolicyMode;
-  deny: string[];
-  allow: string[];
-};
 
 /**
  * Presets are concrete CEL rules, not a separate policy language.
@@ -44,61 +44,28 @@ export const Route = createFileRoute("/_authed/admin/boundaries")({
 });
 
 function BoundariesPage() {
-  const [policy, setPolicy] = useState<ActionPolicy | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [draft, setDraft] = useState("");
 
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch("/api/computers/policy", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        setProblem("The boundary could not be read.");
-        return;
-      }
-      const body = (await response.json()) as { policy: ActionPolicy };
-      setPolicy(body.policy);
-      setProblem(null);
-    } catch {
-      setProblem("The boundary could not be reached.");
-    }
-  }, []);
+  const stored = useQuery(actionPolicyQueryOptions());
+  const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  /*
+   * The saved policy wins while a save is in flight and after it lands: the server normalises what
+   * it stores, so what came back is the policy, not what was sent.
+   */
+  const policy = savePolicy.data ?? stored.data ?? null;
+  const saving = savePolicy.isPending;
 
-  const save = useCallback(async (next: ActionPolicy) => {
-    setSaving(true);
+  const save = (next: ActionPolicy) => {
     setSaved(false);
-    try {
-      const response = await fetch("/api/computers/policy", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(next),
-      });
-      const body = (await response.json().catch(() => null)) as {
-        policy?: ActionPolicy;
-        error?: string;
-      } | null;
-      if (!response.ok) {
-        setProblem(body?.error ?? "The boundary could not be saved.");
-        return;
-      }
-      // Display the persisted policy in case the server normalized it.
-      if (body?.policy) setPolicy(body.policy);
-      setProblem(null);
-      setSaved(true);
-    } catch {
-      setProblem("The boundary could not be reached.");
-    } finally {
-      setSaving(false);
-    }
-  }, []);
+    setProblem(null);
+    savePolicy.mutate(next, {
+      onError: (thrown: Error) => setProblem(thrown.message),
+      onSuccess: () => setSaved(true),
+    });
+  };
 
   if (problem && !policy) {
     return (
@@ -110,14 +77,9 @@ function BoundariesPage() {
     );
   }
 
+  /* Nothing until the policy is known: a rule list that guesses is worse than a blank. */
   if (!policy) {
-    return (
-      <PageShell title="Boundaries">
-        <p className="mt-4 text-muted-foreground text-sm">
-          Loading the boundary…
-        </p>
-      </PageShell>
-    );
+    return <PageShell title="Boundaries">{null}</PageShell>;
   }
 
   const addRule = (rule: string) => {
@@ -141,7 +103,10 @@ function BoundariesPage() {
       }
       title="Boundaries"
     >
-      <PageSection title="When a rule matches">
+      <PageSection
+        description="Enforce stops the action. Record it and allow it writes the same row and lets the action through, which is how a rule is tried on real traffic before it starts refusing anybody."
+        title="When a rule matches"
+      >
         <div className="mt-2 flex gap-2">
           {(["enforce", "dry-run"] as PolicyMode[]).map((mode) => (
             <Button
@@ -166,7 +131,24 @@ function BoundariesPage() {
         </p>
       </PageSection>
 
-      <PageSection title="It may never">
+      <PageSection
+        description={
+          <>
+            Checked first, and a match ends it: nothing below is consulted and
+            the Bot is told which rule refused it. Rules are CEL, and can ask
+            about <code>tool.name</code>, <code>intent</code>,{" "}
+            <code>bot.id</code>, <code>actor.id</code>, <code>page.url</code>{" "}
+            and <code>page.host</code>, the element being acted on, the{" "}
+            <code>key</code> being pressed, the file being touched, the{" "}
+            <code>command</code> being run, and <code>mcp.server</code>,{" "}
+            <code>mcp.tool</code> and <code>mcp.effect</code> for a call to
+            somebody else&rsquo;s tools. A rule that cannot be evaluated counts
+            as a match, so a mistyped deny refuses rather than quietly
+            permitting what it was meant to forbid.
+          </>
+        }
+        title="It may never"
+      >
         {policy.deny.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">
             No rules. Every action is allowed and recorded.
@@ -244,7 +226,10 @@ function BoundariesPage() {
         </ul>
       </PageSection>
 
-      <PageSection title="Otherwise it may">
+      <PageSection
+        description="The floor, applied to anything the deny list did not catch. It is not a formality: an empty list here permits nothing, so a deployment that clears this refuses every action rather than allowing every action."
+        title="Otherwise it may"
+      >
         <ul className="mt-2 space-y-1">
           {policy.allow.map((rule) => (
             <li className="font-mono text-xs text-muted-foreground" key={rule}>

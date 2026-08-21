@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { client, tryClient } from "@/lib/client";
 
 /** A component as the Admin surface sees it: its state, its versions and who is held back from it. */
 export type ComponentRecord = {
@@ -34,11 +35,11 @@ export function componentListQueryOptions() {
   return queryOptions({
     queryKey: componentKeys.list(),
     queryFn: async (): Promise<ComponentRecord[]> => {
-      const response = await fetch("/api/components", {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("The components could not be loaded.");
-      return (await response.json()).components ?? [];
+      return (
+        (await client("/api/components", "components", {
+          fallback: "The components could not be loaded.",
+        })) ?? []
+      );
     },
   });
 }
@@ -58,14 +59,13 @@ export function agentComponentsQueryOptions(agentId: string | undefined) {
     // out an interval before it shows.
     refetchOnWindowFocus: true,
     queryFn: async (): Promise<GrantedComponent[]> => {
-      const response = await fetch(
-        `/api/components/for-agent/${encodeURIComponent(agentId ?? "")}`,
-        { credentials: "include" },
+      return (
+        (await client(
+          `/api/components/for-agent/${encodeURIComponent(agentId ?? "")}`,
+          "components",
+          { fallback: "This Bot's components could not be loaded." },
+        )) ?? []
       );
-      if (!response.ok) {
-        throw new Error("This Bot's components could not be loaded.");
-      }
-      return (await response.json()).components ?? [];
     },
   });
 }
@@ -80,11 +80,9 @@ export async function announceGallery(
   }[],
 ): Promise<string[]> {
   try {
-    const response = await fetch("/api/components/catalogue", {
+    const response = await tryClient("/api/components/catalogue", {
       method: "PUT",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ components }),
+      body: { components },
     });
     if (!response.ok) return [];
     return (await response.json()).added ?? [];
@@ -104,12 +102,11 @@ export function dataFunctionsQueryOptions() {
   return queryOptions({
     queryKey: ["components", "functions"] as const,
     queryFn: async (): Promise<DataFunctionSummary[]> => {
-      const response = await fetch("/api/components/functions", {
-        credentials: "include",
-      });
-      if (!response.ok)
-        throw new Error("The data functions could not be loaded.");
-      return (await response.json()).functions ?? [];
+      return (
+        (await client("/api/components/functions", "functions", {
+          fallback: "The data functions could not be loaded.",
+        })) ?? []
+      );
     },
   });
 }
@@ -132,14 +129,9 @@ export async function callComponentFunction(
   error?: string;
 }> {
   try {
-    const response = await fetch(
+    const response = await tryClient(
       `/api/components/${encodeURIComponent(component)}/call`,
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agentId, args, function: functionName }),
-      },
+      { method: "POST", body: { agentId, args, function: functionName } },
     );
     const payload = await response.json().catch(() => null);
     if (payload && typeof payload === "object") {
@@ -169,14 +161,9 @@ export async function decideComponent(
   functions: readonly string[] = [],
 ): Promise<{ allowed: boolean; reason?: string }> {
   try {
-    const response = await fetch(
+    const response = await tryClient(
       `/api/components/${encodeURIComponent(name)}/decision`,
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agentId, functions }),
-      },
+      { method: "POST", body: { agentId, functions } },
     );
     if (!response.ok) {
       return {
