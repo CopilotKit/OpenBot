@@ -88,3 +88,4 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: docker build -f agent-computer/Dockerfile -t openbot-agent-computer:test .
+      - run: docker build -t openbot:test .

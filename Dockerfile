@@ -20,7 +20,8 @@
 
 FROM mcr.microsoft.com/playwright:v1.62.1-noble AS base
 
-# unzip is not in the Playwright image and bun's installer needs it.
+# unzip is not in the Playwright image and bun's installer needs it. Openbox gives Cua Driver's
+# native input route a foreground X11 window without adding a desktop environment.
 # Bun is pinned. The installer takes whatever is newest otherwise, so the runtime drifts from the
 # one the lockfile was resolved against and an image built next month is not the image built today.
 ARG BUN_VERSION=1.3.14
@@ -28,7 +29,7 @@ ARG BUN_VERSION=1.3.14
 # root's home. Set before the install, or the installer has already chosen the wrong directory.
 ENV BUN_INSTALL=/usr/local
 ENV PATH="/usr/local/bin:${PATH}"
-RUN apt-get update && apt-get install -y --no-install-recommends unzip xz-utils \
+RUN apt-get update && apt-get install -y --no-install-recommends openbox unzip xz-utils \
   && rm -rf /var/lib/apt/lists/* \
   && curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
 
@@ -45,8 +46,8 @@ COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 RUN bun install --frozen-lockfile
 
-COPY agent-computer/package.json agent-computer/package.json
-RUN cd agent-computer && bun install
+COPY agent-computer/package.json agent-computer/bun.lock agent-computer/
+RUN cd agent-computer && bun install --frozen-lockfile
 
 # A second tree with the build-time dependencies left out, for the runtime stage to take. Vite,
 # biome and the test tooling are a gigabyte that nothing in a running container imports.
@@ -172,7 +173,8 @@ ENV AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true
 # The two directories the browser writes are its workspace and its profile, the second being what
 # keeps a Bot signed in between turns. Owned here, because a non-root process cannot create them at
 # the root of the filesystem and the failure surfaces as EACCES on the first navigation.
-RUN mkdir -p /workspace /profiles \
+RUN mkdir -p /workspace /profiles /tmp/.X11-unix \
+  && chmod 1777 /tmp/.X11-unix \
   && chown -R pwuser:pwuser /workspace /profiles /app
 
 # Where the embedded database answers, when there is one. Overridden by whatever you set, so an

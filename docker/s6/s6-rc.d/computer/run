@@ -6,4 +6,57 @@
 cd /app/agent-computer
 export PORT=4100
 export WORKSPACE_DIR=/workspace
-exec s6-setuidgid pwuser /usr/local/bin/bun src/index.ts
+
+if [ "${COMPUTER_BACKEND:-playwright}" != "cua-driver" ]; then
+  exec s6-setuidgid pwuser /usr/local/bin/bun src/index.ts
+fi
+
+# Cua Driver's foreground keyboard and takeover paths need a window manager. Keep the display and
+# browser under the same unprivileged account, and stop every child if s6 asks this service to exit.
+exec s6-setuidgid pwuser sh -c '
+  display_pid=""
+  openbox_pid=""
+  computer_pid=""
+
+  stop_display() {
+    [ -z "$openbox_pid" ] || kill "$openbox_pid" 2>/dev/null || true
+    [ -z "$display_pid" ] || kill "$display_pid" 2>/dev/null || true
+    [ -z "$openbox_pid" ] || wait "$openbox_pid" 2>/dev/null || true
+    [ -z "$display_pid" ] || wait "$display_pid" 2>/dev/null || true
+  }
+  terminate() {
+    trap "" HUP INT TERM
+    if [ -n "$computer_pid" ]; then
+      kill "$computer_pid" 2>/dev/null || true
+      wait "$computer_pid" 2>/dev/null || true
+      computer_pid=""
+    fi
+    stop_display
+    exit 143
+  }
+  trap terminate HUP INT TERM
+
+  export HOME=/home/pwuser
+  export USER=pwuser
+  export LOGNAME=pwuser
+  export DISPLAY=:99
+  export CUA_DRIVER_BROWSER_PROFILE_ROOT="${CUA_DRIVER_BROWSER_PROFILE_ROOT:-${PROFILES_DIR:-/profiles}/cua-driver}"
+  if [ "${COMPUTER_SANDBOX:-off}" != "on" ]; then
+    export CUA_E2E_BROWSER_NO_SANDBOX=1
+  fi
+  Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &
+  display_pid=$!
+  until [ -S /tmp/.X11-unix/X99 ]; do
+    kill -0 "$display_pid" 2>/dev/null || exit 1
+    sleep 0.05
+  done
+  openbox --sm-disable &
+  openbox_pid=$!
+  /usr/local/bin/bun src/index.ts &
+  computer_pid=$!
+  wait "$computer_pid"
+  computer_status=$?
+  computer_pid=""
+  stop_display
+  exit "$computer_status"
+'

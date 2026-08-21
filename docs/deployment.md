@@ -18,7 +18,9 @@ docker run -p 3001:3001 --env-file .env \
 
 **In it:** the built app, the API, and Chromium. One port, 3001. The browser listens on 4100 inside
 the container and is deliberately not published: it holds real logins and its only caller is the
-process beside it.
+process beside it. Playwright remains the default browser backend. Set
+`COMPUTER_BACKEND=cua-driver` to use Cua Driver; the image starts its private X11 display and window
+manager only for that backend so native takeover input never reaches a host desktop session.
 
 **PostgreSQL, if you ask for it.** `EMBEDDED_POSTGRES=on` starts one inside the container, creates
 the database and the `vector` extension the first time, and runs the migrations on every start. It

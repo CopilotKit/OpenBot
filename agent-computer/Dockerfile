@@ -32,7 +32,6 @@ EXPOSE 4100
 HEALTHCHECK --interval=2s --timeout=3s --start-period=2s --retries=30 \
   CMD bun -e "const r = await fetch('http://localhost:4100/health'); process.exit(r.ok ? 0 : 1)"
 
-# `xvfb-run` waits indefinitely for its readiness signal when it is PID 1. Start the fixed private
-# display and its small window manager directly. Openbox can then foreground the isolated browser
-# for native keyboard/takeover input and restore focus without touching a host desktop session.
-CMD ["sh", "-c", "Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & until [ -S /tmp/.X11-unix/X99 ]; do sleep 0.05; done; openbox --sm-disable & export CUA_DRIVER_BROWSER_PROFILE_ROOT=\"${CUA_DRIVER_BROWSER_PROFILE_ROOT:-${PROFILES_DIR:-/profiles}/cua-driver}\"; exec bun src/index.ts"]
+# Cua needs a private display and window manager for native keyboard/takeover input. Playwright stays
+# on its existing headless path. Fail startup if Xvfb dies instead of waiting forever for its socket.
+CMD ["sh", "-c", "if [ \"${COMPUTER_BACKEND:-playwright}\" != cua-driver ]; then exec bun src/index.ts; fi; Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp & display_pid=$!; until [ -S /tmp/.X11-unix/X99 ]; do kill -0 \"$display_pid\" 2>/dev/null || exit 1; sleep 0.05; done; openbox --sm-disable & export CUA_DRIVER_BROWSER_PROFILE_ROOT=\"${CUA_DRIVER_BROWSER_PROFILE_ROOT:-${PROFILES_DIR:-/profiles}/cua-driver}\"; exec bun src/index.ts"]
