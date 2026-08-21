@@ -266,7 +266,10 @@ Restart. Accounts, sessions and roles are stored in the same PostgreSQL database
   screen can promote somebody afterwards. It is re-read on every sign-in, so editing it takes effect
   the next time that person signs in.
 - `MICROSOFT_OAUTH_TENANT_ID` defaults to `common`, which admits personal Microsoft accounts as well
-  as work ones.
+  as work ones. On a multi-tenant app registration Entra may send no `email` claim at all, so
+  OpenBot falls back to `upn` and then `preferred_username`. If none of the three arrives the
+  sign-in is refused and the reason is logged: add `email` as an optional claim, or use your
+  directory GUID here.
 - A half-configured provider is refused at start-up rather than at somebody's first attempt to sign
   in: a client id with no secret, a secret shorter than 32 characters, or an Okta issuer with no
   credentials behind it.
