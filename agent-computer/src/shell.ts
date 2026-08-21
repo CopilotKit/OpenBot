@@ -11,8 +11,9 @@ import { spawn } from "node:child_process";
  * the same as it does for a click. This file is the hands, not the judgement.
  *
  * WHAT THIS DOES DEFEND is the shape of the call rather than its content: a command cannot run
- * forever, cannot return unbounded output, and runs in the workspace rather than wherever the
- * process happens to be.
+ * forever, cannot return unbounded output, runs in the workspace rather than wherever the process
+ * happens to be, and does not inherit the computer's environment, so `env` cannot print the
+ * deployment's secrets.
  *
  * ISOLATION IS THE CONTAINER'S JOB. A shell can reach whatever the container can reach, so the
  * deployment that gives a Bot one should give each Bot a computer of its own. In a container shared
@@ -41,6 +42,72 @@ export type ShellResult = {
   elapsedMs: number;
 };
 
+/**
+ * The environment a command sees.
+ *
+ * WHY AN ALLOW LIST. The computer process holds the deployment's secrets when it runs inside the
+ * one-container image. Spreading `process.env` into the child makes `env` print them. A deny list
+ * is the secrets that existed on the day it was written; the next variable added to a deployment
+ * is not on it.
+ *
+ * PATH, locale, terminal and the proxy variables pass because a command that cannot find `apt-get`,
+ * cannot speak the operator's language, or cannot reach the network behind a corporate proxy is not
+ * a shell. Everything else is named in COMPUTER_SHELL_ENV, read as names, so passing a secret is an
+ * operator's decision rather than the default.
+ *
+ * HOME is the workspace. A command that writes to ~ should write where the Bot's files already are.
+ */
+const PATH_NAMES = ["PATH"] as const;
+const LOCALE_NAMES = ["LANG", "LANGUAGE"] as const;
+const TERMINAL_NAMES = ["TERM", "TERMINFO", "COLORTERM"] as const;
+const PROXY_NAMES = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "ALL_PROXY",
+  "FTP_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "all_proxy",
+  "ftp_proxy",
+] as const;
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const LOCALE_CATEGORY = /^LC_[A-Za-z0-9_]+$/;
+
+export function environmentForCommand(
+  source: NodeJS.ProcessEnv,
+  workspaceDir: string,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  const copy = (name: string) => {
+    const value = source[name];
+    if (value !== undefined) env[name] = value;
+  };
+
+  for (const name of PATH_NAMES) copy(name);
+  for (const name of LOCALE_NAMES) copy(name);
+  for (const name of Object.keys(source)) {
+    if (LOCALE_CATEGORY.test(name)) copy(name);
+  }
+  for (const name of TERMINAL_NAMES) copy(name);
+  for (const name of PROXY_NAMES) copy(name);
+  for (const name of extraShellEnvNames(source.COMPUTER_SHELL_ENV)) copy(name);
+
+  env.HOME = workspaceDir;
+  return env;
+}
+
+function extraShellEnvNames(raw: string | undefined): readonly string[] {
+  if (raw === undefined || raw.trim() === "") return [];
+  return raw
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => ENV_NAME.test(name));
+}
+
 function clamp(text: string): { text: string; truncated: boolean } {
   if (Buffer.byteLength(text, "utf8") <= MAX_OUTPUT_BYTES) {
     return { text, truncated: false };
@@ -53,7 +120,10 @@ function clamp(text: string): { text: string; truncated: boolean } {
   return { text: kept, truncated: true };
 }
 
-export function createShell(workspaceDir: string) {
+export function createShell(
+  workspaceDir: string,
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+) {
   return {
     async run(input: {
       command: string;
@@ -78,7 +148,7 @@ export function createShell(workspaceDir: string) {
        */
       const child = spawn("/bin/bash", ["-lc", input.command], {
         cwd: workspaceDir,
-        env: { ...process.env, HOME: workspaceDir },
+        env: environmentForCommand(sourceEnv, workspaceDir),
       });
 
       let stdout = "";
