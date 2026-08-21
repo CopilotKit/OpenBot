@@ -1,13 +1,14 @@
 import { serve } from "bun";
-import { sql } from "drizzle-orm";
 import { mintRunAssertion } from "./agents/callback-token";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
+import { startAuditRetention } from "./audit-retention";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
+import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import type { OpenBotRole } from "./auth/roles";
 import {
   createChannelEventHub,
@@ -20,6 +21,7 @@ import { createThreadIdentity } from "./channels/thread-identity";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
+import { startPolicyListener } from "./computer/policy-listener";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
@@ -28,6 +30,7 @@ import {
   createComputerProvider,
   describeComputerIsolation,
 } from "./computer/provider";
+import { createSnapshotStore } from "./computer/snapshot-store";
 import { loadConfig } from "./config";
 import {
   type IdentifyActor,
@@ -40,7 +43,6 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
-import { ssoProviders } from "./db/schema";
 import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
 import { grantedTools } from "./plugins/tools";
@@ -167,8 +169,19 @@ const peopleStore = createPeopleStore(
   database,
   config.auth?.initialAdminEmails ?? [],
 );
+const identityProviderStore = createIdentityProviderStore(database);
+/*
+ * Built before `auth` for the same reason the people store is: sign-in writes to the trail, and the
+ * store that receives those rows has to exist before anything can sign in.
+ */
+const signInAuditStore = createAuditStore(database);
 const auth = config.auth
-  ? createAuth(config, database, (email) => peopleStore.isRevoked(email))
+  ? createAuth(
+      config,
+      database,
+      (email) => peopleStore.isRevoked(email),
+      signInAuditStore,
+    )
   : undefined;
 const computerProvider = config.computer
   ? createComputerProvider(config.computer)
@@ -186,6 +199,17 @@ const policyStore = createPolicyStore(
 // A boundary an administrator set is read back before the first action is decided, so a restart no
 // longer silently returns to the configured default.
 const policySource = await policyStore.load();
+/*
+ * And kept current afterwards.
+ *
+ * A boundary an administrator changes arrives at one server. Without this, every other server keeps
+ * enforcing what it read at boot, so a new deny rule stops roughly one action in N while the screen
+ * and the audit row both report success. See policy-listener.ts.
+ */
+const policyListener = await startPolicyListener(
+  config.databaseUrl,
+  policyStore,
+);
 
 /*
  * Record which boundary this process started with.
@@ -197,11 +221,25 @@ const policySource = await policyStore.load();
  * unavailable, and the row is a note for a reader rather than something the server depends on.
  */
 const bootAuditStore = createAuditStore(database);
+/*
+ * Old audit rows removed on a schedule, when a deployment has asked for that.
+ *
+ * One server sweeps rather than all of them, decided by an advisory lock. Off unless
+ * `AUDIT_RETENTION_DAYS` is set. See audit-retention.ts.
+ */
+const auditRetention = startAuditRetention(
+  config.databaseUrl,
+  config.auditRetentionDays,
+);
 const computerGateway = computerProvider
   ? createComputerGateway({
       provider: computerProvider,
       auditStore: bootAuditStore,
       policy: () => policyStore.get(),
+      // In Postgres, so the ref a click carries resolves against the snapshot that produced it even
+      // when the snapshot was taken by another server. A Map here would be blank on every replica
+      // but the one that snapshotted, and the boundary would decide with no element to look at.
+      snapshots: createSnapshotStore(database),
       allowPrivateHosts: config.computer?.allowPrivateHosts,
       token: config.computer?.token,
     })
@@ -373,13 +411,9 @@ const app = createApp(
   threadIdentity,
   // Who has signed in, and what an administrator may do about them.
   peopleStore,
-  // Whether the sign-in screen should offer the email box that routes by domain.
-  async () => {
-    const [row] = await database
-      .select({ count: sql<number>`count(*)::int` })
-      .from(ssoProviders);
-    return row?.count ?? 0;
-  },
+  // The enterprise identity providers registered here. Read as facts about the deployment rather
+  // than through Better Auth's own listing, which answers per person. See identity-provider-store.ts.
+  identityProviderStore,
 );
 
 /**
@@ -442,9 +476,18 @@ serve<SocketData>({
       }
       // The session guard, applied by hand because middleware does not run on an upgrade. An
       // unauthenticated socket here would be the whole point of the proxy defeated.
-      const actor = await identifyUser(request).catch(() => null);
+      const actor = await resolveRequestActor(request).catch(() => null);
       if (!actor) {
         return new Response("Sign in first.", { status: 401 });
+      }
+      // And which Bot, which the guard above does not answer. This socket carries that Bot's screen,
+      // so signing in is not enough: without this, anybody signed in watches anybody's Bot work.
+      if (
+        !(await agentProfileStore
+          .get({ id: actor.id, role: actor.role }, streamBotId)
+          .catch(() => null))
+      ) {
+        return new Response("There is no such Bot.", { status: 404 });
       }
       /*
        * Through the gateway, not the provider.
@@ -528,11 +571,15 @@ if (config.singleUser) {
   );
 }
 
-// The activity listener holds a connection of its own for the life of the process. Released on the
-// way out, so a watch-mode restart does not leave one behind on every reload.
+// Each listener holds a connection of its own for the life of the process. Released on the way out,
+// so a watch-mode restart does not leave two behind on every reload.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    void channelActivityListener.stop().finally(() => process.exit(0));
+    void Promise.allSettled([
+      channelActivityListener.stop(),
+      policyListener.stop(),
+      Promise.resolve(auditRetention.stop()),
+    ]).finally(() => process.exit(0));
   });
 }
 

@@ -1,5 +1,5 @@
 {
-  "id": "9b8bb4f8-e59a-4abc-a5b7-07b4ab1e8c39",
+  "id": "107b8166-ff54-49c7-8871-fe1b5a4fbfbf",
   "prevId": "ab829598-5c7b-4ed7-9641-79d8dbe2bd19",
   "version": "7",
   "dialect": "postgresql",
@@ -1717,6 +1717,50 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.computer_snapshot": {
+      "name": "computer_snapshot",
+      "schema": "",
+      "columns": {
+        "computer_id": {
+          "name": "computer_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "elements": {
+          "name": "elements",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "taken_at": {
+          "name": "taken_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.agent_preferences": {
       "name": "agent_preferences",
       "schema": "",
@@ -2243,106 +2287,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.mcp_user_credentials": {
-      "name": "mcp_user_credentials",
-      "schema": "",
-      "columns": {
-        "server_id": {
-          "name": "server_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credential_id": {
-          "name": "credential_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "connected_at": {
-          "name": "connected_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "mcp_user_credentials_user_idx": {
-          "name": "mcp_user_credentials_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "mcp_user_credentials_server_id_mcp_servers_id_fk": {
-          "name": "mcp_user_credentials_server_id_mcp_servers_id_fk",
-          "tableFrom": "mcp_user_credentials",
-          "tableTo": "mcp_servers",
-          "columnsFrom": ["server_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "mcp_user_credentials_user_id_users_id_fk": {
-          "name": "mcp_user_credentials_user_id_users_id_fk",
-          "tableFrom": "mcp_user_credentials",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "mcp_user_credentials_credential_id_credentials_id_fk": {
-          "name": "mcp_user_credentials_credential_id_credentials_id_fk",
-          "tableFrom": "mcp_user_credentials",
-          "tableTo": "credentials",
-          "columnsFrom": ["credential_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "mcp_user_credentials_server_id_user_id_pk": {
-          "name": "mcp_user_credentials_server_id_user_id_pk",
-          "columns": ["server_id", "user_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.plugin_grants": {
       "name": "plugin_grants",
       "schema": "",
@@ -2699,14 +2643,7 @@
     "public.credential_kind": {
       "name": "credential_kind",
       "schema": "public",
-      "values": [
-        "model",
-        "connector",
-        "agent",
-        "mcp",
-        "mcp_oauth_client",
-        "mcp_user_token"
-      ]
+      "values": ["model", "connector", "agent", "mcp"]
     },
     "public.role": {
       "name": "role",

@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 
 /**
@@ -29,15 +29,38 @@ export type Person = {
 
 export const peopleKeys = {
   all: ["people"] as const,
-  list: () => ["people", "list"] as const,
+  list: (search = "") => ["people", "list", { search }] as const,
 };
 
-export function peopleListQueryOptions() {
-  return queryOptions({
-    queryKey: peopleKeys.list(),
-    queryFn: (): Promise<Person[]> =>
-      client("/api/admin/people", "people", {
+/** One page of people, and where the next one starts. */
+export type PeoplePage = {
+  people: Person[];
+  nextCursor: string | null;
+};
+
+/**
+ * The people in this deployment, a page at a time.
+ *
+ * Paged because this list grows with the company. It used to fetch everybody on every render of the
+ * screen, joined to their roles, accounts and sessions.
+ *
+ * The search goes to the server rather than filtering what arrived, for the same reason: the point
+ * is to find somebody who is not on the first page.
+ */
+export function peopleListQueryOptions(search = "") {
+  return infiniteQueryOptions({
+    queryKey: peopleKeys.list(search),
+    initialPageParam: "",
+    queryFn: ({ pageParam }): Promise<PeoplePage> => {
+      const query = new URLSearchParams();
+      if (search) query.set("search", search);
+      if (pageParam) query.set("cursor", pageParam as string);
+      const suffix = query.size > 0 ? `?${query}` : "";
+
+      return client(`/api/admin/people${suffix}`, {
         fallback: "Could not load people",
-      }),
+      }).then((response) => response.json() as Promise<PeoplePage>);
+    },
+    getNextPageParam: (page: PeoplePage) => page.nextCursor ?? undefined,
   });
 }

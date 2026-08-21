@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
 import { CATALOGUE, catalogueEntry } from "./catalogue";
@@ -41,11 +42,21 @@ export function createPluginRoutes(
   store: PluginStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   /**
+   * Whether the caller may act as the Bot they named. Required rather than optional, so a deployment
+   * cannot end up calling somebody else's tools by leaving an argument off.
+   */
+  canUseBot: BotAccessCheck,
+  /**
    * What the connect flow needs that the store does not hold: the key its state is signed with, and
    * the address a vendor sends people back to.
    *
    * Optional, so a deployment with no public URL configured simply cannot start a connect flow and
    * says so, rather than building a redirect URI out of a request header and failing at the vendor.
+   *
+   * Last, and after every required parameter, because that is the only position an optional argument
+   * can hold. Both of these arrived on separate branches as "one more parameter", which is how a
+   * positional list becomes a trap: every argument from here on is optional, so a misplaced one
+   * typechecks and simply does nothing.
    */
   connect?: {
     encryptionKey: string;
@@ -563,26 +574,86 @@ export function createPluginRoutes(
   });
 
   /** What one Bot holds. The runtime reads this to decide what to offer a model. */
-  routes.get("/for/:agentId", requireUser, async (context) =>
-    context.json(await store.listForAgent(context.req.param("agentId"))),
-  );
+  routes.get("/for/:agentId", requireUser, async (context) => {
+    const agentId = context.req.param("agentId");
+    // A grant list is a fact about the Bot it belongs to. Left open it says which tools somebody
+    // else's private coworker has been given.
+    if (!(await canUseBot(context.var.actor, agentId))) {
+      return context.json({ error: "There is no such Bot." }, 404);
+    }
+    return context.json(await store.listForAgent(agentId));
+  });
 
-  /*
-   * THERE IS NO BROWSER TOOL-CALL ENDPOINT ANY MORE.
+  /**
+   * Call a tool, as a Bot.
    *
-   * `POST /call` was how the browser ran a Bot's tool loop: every MCP tool was registered as a
-   * frontend tool and its handler posted back here. That loop moved to the server, and the client
-   * helper that called this was already dead code — so what was left was an authenticated endpoint
-   * nobody used, which could take a tool name and call a vendor.
+   * The grant, the policy and the audit row all happen inside the store, so this endpoint cannot
+   * accidentally satisfy one of them and skip another. A refusal comes back as 403 with the reason
+   * the model and the person are both shown, which is the same sentence written to the trail.
    *
-   * It also could not work for the connectors this deployment now has. It passed `actorEmail`, and
-   * a per-person connection is keyed by `users.id`, so every call through it would have been told
-   * the asker had not connected their account. Deleted rather than corrected: an endpoint with no
-   * caller is not something to keep working.
-   *
-   * A framework Bot calling a granted tool back still has its own path, in `app.ts`, behind
-   * `AGENT_TOOL_TOKEN` and a signed run assertion.
+   * NOTHING IN THIS REPOSITORY CALLS IT. It is what the browser used to post to when a Bot's tool
+   * loop ran client-side; that loop moved to the server, and the client helper for this went with it.
+   * Kept rather than removed, because #37 hardened it with `canUseBot` after that move — so removing
+   * it belongs in a change that says so, not in a merge resolution.
    */
+  routes.post("/call", requireUser, async (context) => {
+    const body = (await context.req.json().catch(() => null)) as {
+      ref?: string;
+      args?: Record<string, unknown>;
+      agentId?: string;
+    } | null;
+    if (!body?.ref || !body.agentId) {
+      return context.json({ error: "A tool and a Bot are required." }, 400);
+    }
+
+    // Asked before the grant is looked up, and before anything reaches a vendor. The grant says this
+    // Bot may use the tool; it says nothing about whether this person may act as this Bot, and the
+    // call goes out on the deployment's own credential either way.
+    if (!(await canUseBot(context.var.actor, body.agentId))) {
+      return context.json({ error: "There is no such Bot." }, 404);
+    }
+
+    try {
+      const result = await store.callTool({
+        ref: body.ref,
+        args: body.args ?? {},
+        botId: body.agentId,
+        /*
+         * The user id, not the address.
+         *
+         * `callTool` keys a per-person connection on `users.id`, so an address here finds nothing and
+         * every call through this route would be answered "you have not connected your account" —
+         * about a connector the person has connected. It never surfaced because a Bot's own tool loop
+         * runs on the server and does not come through here.
+         *
+         * The other uses of `actorEmail` in this file are `by:` on configuration changes, where an
+         * address is the useful thing to record. This one is an identity being resolved, not a name
+         * being written down, and the two are not interchangeable.
+         */
+        actorId: context.var.actor.id,
+      });
+      return context.json(result);
+    } catch (error) {
+      if (error instanceof PluginRefusedError) {
+        return context.json({ error: error.message, rule: error.rule }, 403);
+      }
+      if (error instanceof CatalogueEntryUnknownError) {
+        return context.json({ error: error.message }, 404);
+      }
+      // A server that failed is not a refusal, and saying so matters: one means the deployment
+      // decided against it, the other means somebody else's software did not answer.
+      return context.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "The server did not answer.",
+          failed: true,
+        },
+        502,
+      );
+    }
+  });
 
   return routes;
 }

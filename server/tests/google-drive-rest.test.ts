@@ -191,17 +191,42 @@ describe("reading a file asks Drive what it is first", () => {
     );
   });
 
-  test("an ordinary file is downloaded", async () => {
+  test("an ordinary text file is downloaded", async () => {
+    const calls = stubFetch({
+      id: "txt1",
+      name: "notes.txt",
+      mimeType: "text/plain",
+    });
+
+    await callTool(connection, "read_file_content", { fileId: "txt1" });
+
+    expect(new URL(calls[1].url).searchParams.get("alt")).toBe("media");
+    expect(calls[1].url).not.toContain("/export");
+  });
+
+  /*
+   * A PDF is declined by name rather than decoded and hoped for.
+   *
+   * `response.text()` on binary produces thousands of replacement characters, and that goes straight
+   * into a model's context: it costs the tokens of the real document, says nothing, and looks enough
+   * like content that the model will try to summarise it. The assertion that matters is the second
+   * one — the download is never even attempted, so the bytes never exist to be mangled.
+   */
+  test("a binary file is declined instead of being read as text", async () => {
     const calls = stubFetch({
       id: "pdf1",
       name: "Contract.pdf",
       mimeType: "application/pdf",
     });
 
-    await callTool(connection, "read_file_content", { fileId: "pdf1" });
+    const result = await callTool(connection, "read_file_content", {
+      fileId: "pdf1",
+    });
 
-    expect(new URL(calls[1].url).searchParams.get("alt")).toBe("media");
-    expect(calls[1].url).not.toContain("/export");
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("application/pdf");
+    // One call: the metadata lookup. No download followed it.
+    expect(calls).toHaveLength(1);
   });
 
   test("a file id is required, and no request is made without one", async () => {
