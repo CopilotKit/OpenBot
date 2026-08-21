@@ -4,7 +4,7 @@ import { genericOAuth, okta } from "better-auth/plugins";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
 import { accounts, sessions, users, verifications } from "../db/schema";
-import { reconcileRole, reconcileRoleForUserId } from "./roles";
+import { applyConfiguredAdmin, seedRole } from "./roles";
 
 export function createAuth(config: DeploymentConfig, database: Database) {
   const authConfig = config.auth;
@@ -68,7 +68,7 @@ export function createAuth(config: DeploymentConfig, database: Database) {
              * deployment mid-migration has the same person arriving through Entra one week and
              * Okta the next, and they are the same person to this list.
              */
-            await reconcileRole(
+            await seedRole(
               database,
               user.id,
               user.email,
@@ -81,11 +81,12 @@ export function createAuth(config: DeploymentConfig, database: Database) {
         create: {
           after: async (session) => {
             /*
-             * Again on every sign-in, not only the first. The list is a file an operator edits, and
-             * editing it has to mean something for the people already in the table: otherwise
-             * adding yourself after you first signed in silently does nothing.
+             * The configured floor, re-applied on every sign-in. Editing the list has to mean
+             * something for people already in the table, or adding yourself after you first signed
+             * in silently does nothing. Only promotes, and only addresses the list names: everybody
+             * else's role belongs to the admin screen.
              */
-            await reconcileRoleForUserId(
+            await applyConfiguredAdmin(
               database,
               session.userId,
               authConfig.initialAdminEmails,

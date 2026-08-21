@@ -3,6 +3,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { ProviderLogo } from "@/components/auth/provider-logo";
 import { Button } from "@/components/ui/button";
 import { providerName, signInWith } from "@/lib/auth/client";
 import { appConfig } from "@/lib/generated/application-config";
@@ -98,19 +99,32 @@ function SignScreen() {
         >
           {providers.length > 0 ? (
             <div className="flex flex-col gap-2">
-              {providers.map((provider, index) => (
+              {providers.map((provider) => (
+                /*
+                 * Every provider gets the same button, and it is the light-themed outline one
+                 * rather than the app's filled primary. Google's guidelines require their button be
+                 * at least as prominent as any other sign-in option and specify its fill and
+                 * stroke, so making one provider the loud one would break that for the others. The
+                 * same size and weight throughout is also the honest presentation: a deployment
+                 * that configured three has three, and none of them is the recommended one.
+                 */
                 <Button
-                  className="h-10 w-full tracking-tight"
+                  className="h-10 w-full justify-start gap-3 px-3 tracking-tight"
                   disabled={opening !== null}
                   key={provider}
                   onClick={() => handleSignIn(provider)}
                   size="lg"
-                  // The first provider a deployment configured is the one most of its people use.
-                  variant={index === 0 ? "default" : "outline"}
+                  variant="outline"
                 >
-                  {opening === provider
-                    ? `Opening ${providerName(provider)}…`
-                    : `Continue with ${providerName(provider)}`}
+                  <ProviderLogo provider={provider} />
+                  {/* Centred against the button, not against the space left of the mark. */}
+                  <span className="flex-1 text-center">
+                    {opening === provider
+                      ? `Opening ${providerName(provider)}…`
+                      : `Continue with ${providerName(provider)}`}
+                  </span>
+                  {/* Balances the mark so the label sits in the middle of the button. */}
+                  <span aria-hidden="true" className="size-[18px]" />
                 </Button>
               ))}
             </div>

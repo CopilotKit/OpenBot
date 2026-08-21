@@ -4,43 +4,44 @@ import { userRoles, users } from "../db/schema";
 
 export type OpenBotRole = "admin" | "user";
 
-export function roleForEmail(
+/**
+ * Whether this address is an administrator by configuration.
+ *
+ * A floor, not the whole answer. Somebody named here is always an administrator and cannot be
+ * demoted from the admin screen, which is what makes it the way back in when the last administrator
+ * demotes themselves by accident. Everybody else's role is whatever an administrator has set.
+ */
+export function isConfiguredAdmin(
   email: string,
   initialAdminEmails: readonly string[],
-): OpenBotRole {
+): boolean {
   const normalizedEmail = email.trim().toLowerCase();
 
   return initialAdminEmails.some(
     (adminEmail) => adminEmail.trim().toLowerCase() === normalizedEmail,
-  )
-    ? "admin"
-    : "user";
+  );
+}
+
+export function roleForEmail(
+  email: string,
+  initialAdminEmails: readonly string[],
+): OpenBotRole {
+  return isConfiguredAdmin(email, initialAdminEmails) ? "admin" : "user";
 }
 
 /**
- * Bring somebody's role in line with the deployment's administrator list.
+ * Give somebody exactly one role.
  *
- * Applied on every sign-in, not only when the account is first created. Writing it once at creation
- * was a trap with no way out: adding yourself to `INITIAL_ADMIN_EMAILS` after you had already signed
- * in did nothing, the row said `user` for ever, and no route anywhere changes a role. Somebody who
- * signed in before editing their `.env` had an adminless deployment and no way to fix it short of
- * editing the database by hand.
- *
- * It demotes as well as promotes, because `user_roles` is a set and the guard takes `admin` if any
- * row says so. An address removed from the list therefore has to lose its `admin` row, or a former
- * administrator is one nobody can remove.
- *
- * Delete-then-insert inside one transaction, because between the two a request arriving on another
- * process would find no row at all and be refused with a 403 that looks like a permissions bug.
+ * `user_roles` is a set with a `(user_id, role)` primary key and the guard takes `admin` if any row
+ * says so, so setting a role means removing the rows that should not be there rather than only
+ * inserting one. Both statements inside one transaction: between them a request arriving on another
+ * process would find no role at all and be refused with a 403 that reads as a permissions bug.
  */
-export async function reconcileRole(
+export async function setRole(
   database: Database,
   userId: string,
-  email: string,
-  initialAdminEmails: readonly string[],
+  role: OpenBotRole,
 ): Promise<OpenBotRole> {
-  const role = roleForEmail(email, initialAdminEmails);
-
   await database.transaction(async (tx) => {
     await tx
       .delete(userRoles)
@@ -52,16 +53,39 @@ export async function reconcileRole(
 }
 
 /**
- * The same, for somebody identified only by the session being created.
+ * The role a brand-new account starts with.
  *
- * A session hook is handed a user id and no email, and the list is written in email addresses, so
- * the address has to be read back before the two can be compared.
+ * The only moment configuration decides somebody who is not on the list: from here on that person's
+ * role belongs to whoever administers the deployment.
  */
-export async function reconcileRoleForUserId(
+export async function seedRole(
+  database: Database,
+  userId: string,
+  email: string,
+  initialAdminEmails: readonly string[],
+): Promise<OpenBotRole> {
+  return setRole(database, userId, roleForEmail(email, initialAdminEmails));
+}
+
+/**
+ * Re-apply the configured floor, on every sign-in.
+ *
+ * Only ever promotes, and only for an address the deployment names. Somebody added to the list
+ * after they first signed in becomes an administrator at their next sign-in, which is the trap this
+ * exists to close: the role used to be written once at account creation, so editing the list did
+ * nothing at all and no screen could fix it.
+ *
+ * Everybody else is left exactly as they are, because their role is the admin screen's to decide and
+ * a sign-in that overwrote it would make that screen lie the moment they came back.
+ */
+export async function applyConfiguredAdmin(
   database: Database,
   userId: string,
   initialAdminEmails: readonly string[],
 ): Promise<void> {
+  // Nothing configured cannot promote anybody, so there is no reason to read the user back.
+  if (initialAdminEmails.length === 0) return;
+
   const [user] = await database
     .select({ email: users.email })
     .from(users)
@@ -72,5 +96,7 @@ export async function reconcileRoleForUserId(
   // to report: Better Auth is about to fail on its own and would only be given a worse message here.
   if (!user) return;
 
-  await reconcileRole(database, userId, user.email, initialAdminEmails);
+  if (!isConfiguredAdmin(user.email, initialAdminEmails)) return;
+
+  await setRole(database, userId, "admin");
 }

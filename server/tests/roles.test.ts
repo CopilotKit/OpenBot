@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { reconcileRole, roleForEmail } from "../src/auth/roles";
+import {
+  applyConfiguredAdmin,
+  isConfiguredAdmin,
+  roleForEmail,
+  seedRole,
+  setRole,
+} from "../src/auth/roles";
 import type { Database } from "../src/db/client";
 
 describe("roleForEmail", () => {
@@ -60,13 +66,11 @@ function recordingDatabase(): {
   return { database, statements };
 }
 
-describe("reconcileRole", () => {
-  test("makes an address on the list an administrator", async () => {
+describe("setRole", () => {
+  test("replaces the set rather than adding to it", async () => {
     const { database, statements } = recordingDatabase();
 
-    const role = await reconcileRole(database, "u1", "admin@openbot.test", [
-      "admin@openbot.test",
-    ]);
+    const role = await setRole(database, "u1", "admin");
 
     expect(role).toBe("admin");
     expect(statements).toEqual([
@@ -76,18 +80,13 @@ describe("reconcileRole", () => {
   });
 
   /**
-   * The half that create-time assignment could never do.
-   *
-   * Taking somebody off the list has to remove the `admin` row, because the guard reads the set and
-   * one leftover row keeps them an administrator for ever. Nothing else in the product can remove
-   * it: there is no route that changes a role.
+   * Demotion has to remove the `admin` row, because the guard reads the set and one leftover row
+   * keeps somebody an administrator for ever.
    */
-  test("takes the role back from an address no longer on the list", async () => {
+  test("removes the admin row when setting somebody back to user", async () => {
     const { database, statements } = recordingDatabase();
 
-    const role = await reconcileRole(database, "u1", "former@openbot.test", [
-      "admin@openbot.test",
-    ]);
+    const role = await setRole(database, "u1", "user");
 
     expect(role).toBe("user");
     expect(statements).toEqual([
@@ -112,10 +111,117 @@ describe("reconcileRole", () => {
       },
     } as unknown as Database;
 
-    await reconcileRole(database, "u1", "admin@openbot.test", [
+    await setRole(database, "u1", "admin");
+
+    expect(transactions).toBe(1);
+  });
+});
+
+/**
+ * The configured floor, applied at every sign-in.
+ *
+ * This is the half that has to coexist with an admin screen. `INITIAL_ADMIN_EMAILS` guarantees a way
+ * back in, so an address it names is promoted whenever they sign in; everybody else's role belongs
+ * to whoever administers the deployment, and a sign-in that rewrote it would make that screen lie
+ * the moment they came back.
+ */
+function databaseWithUser(email: string | null): {
+  database: Database;
+  written: string[];
+} {
+  const written: string[] = [];
+  const database = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => (email === null ? [] : [{ email }]),
+        }),
+      }),
+    }),
+    transaction: async (run: (t: unknown) => Promise<void>) => {
+      await run({
+        delete: () => ({ where: () => Promise.resolve() }),
+        insert: () => ({
+          values: (row: { role: string }) => ({
+            onConflictDoNothing: () => {
+              written.push(row.role);
+              return Promise.resolve();
+            },
+          }),
+        }),
+      });
+    },
+  } as unknown as Database;
+
+  return { database, written };
+}
+
+describe("applyConfiguredAdmin", () => {
+  test("promotes an address the deployment names", async () => {
+    const { database, written } = databaseWithUser("admin@openbot.test");
+
+    await applyConfiguredAdmin(database, "u1", ["admin@openbot.test"]);
+
+    expect(written).toEqual(["admin"]);
+  });
+
+  /**
+   * The reason this is a floor and not the whole answer.
+   *
+   * Somebody promoted from the admin screen is not on the list, and rewriting their role here would
+   * silently undo that promotion the next time they signed in.
+   */
+  test("leaves everybody else exactly as the admin screen set them", async () => {
+    const { database, written } = databaseWithUser("member@openbot.test");
+
+    await applyConfiguredAdmin(database, "u1", ["admin@openbot.test"]);
+
+    expect(written).toEqual([]);
+  });
+
+  test("writes nothing when the deployment names nobody", async () => {
+    const { database, written } = databaseWithUser("admin@openbot.test");
+
+    await applyConfiguredAdmin(database, "u1", []);
+
+    expect(written).toEqual([]);
+  });
+
+  test("does nothing for a session whose user is not there", async () => {
+    const { database, written } = databaseWithUser(null);
+
+    await applyConfiguredAdmin(database, "u1", ["admin@openbot.test"]);
+
+    expect(written).toEqual([]);
+  });
+});
+
+describe("seedRole", () => {
+  test("starts an address on the list as an administrator", async () => {
+    const { database, written } = databaseWithUser("admin@openbot.test");
+
+    await seedRole(database, "u1", "admin@openbot.test", [
       "admin@openbot.test",
     ]);
 
-    expect(transactions).toBe(1);
+    expect(written).toEqual(["admin"]);
+  });
+
+  test("starts everybody else as a user", async () => {
+    const { database, written } = databaseWithUser("member@openbot.test");
+
+    await seedRole(database, "u1", "member@openbot.test", [
+      "admin@openbot.test",
+    ]);
+
+    expect(written).toEqual(["user"]);
+  });
+});
+
+describe("isConfiguredAdmin", () => {
+  test("ignores case and surrounding space, on both sides", () => {
+    expect(
+      isConfiguredAdmin("  Admin@OpenBot.test ", [" admin@openbot.TEST "]),
+    ).toBe(true);
   });
 });

@@ -23,10 +23,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   needs one entry. The same checks run again against the release commit when a release is published,
   so they gate the release rather than the proposal for one.
 - **Sign in with Google, Microsoft or Okta.** Any one of them turns sign-in on; configure several
-  and the sign-in screen offers each. `INITIAL_ADMIN_EMAILS` says who is an administrator, and it is
-  now re-read on every sign-in rather than only when an account is created, so editing the list
-  takes effect. It is also required whenever a provider is configured: nothing else grants the role
-  and no screen can promote somebody afterwards.
+  and the sign-in screen offers each, on matching buttons carrying each provider's own mark.
+  `INITIAL_ADMIN_EMAILS` says who is an administrator. It is required whenever a provider is
+  configured, because nothing else grants the role, and it is now a floor rather than a one-off:
+  an address it names is made an administrator at every sign-in, so adding somebody to the list
+  works even after they have already signed in.
 - **One container that runs the whole thing.** The root `Dockerfile` builds an image carrying the
   app, the API, a Bot computer, and optionally PostgreSQL, supervised together. Point `DATABASE_URL`
   at a database you already run and the built-in one never starts; leave it unset and the container
