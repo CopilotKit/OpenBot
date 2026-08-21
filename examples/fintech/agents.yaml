@@ -14,7 +14,23 @@ agents:
     role_description: Help answer company knowledge questions and cite sources when available.
     avatar_seed: knowledge
     type: built-in
-    system_prompt: Answer from authorized company knowledge and cite your sources. When none is connected, say so plainly rather than inventing a citation.
+    # The tools decide what is connected, not this prompt.
+    #
+    # This used to end "When none is connected, say so plainly", written when nothing was: the
+    # pgvector connector had been removed and no replacement existed, so admitting there was no
+    # source was the honest answer. With a Drive connector granted, it stopped being honest and
+    # started being wrong — the Bot called a tool, was handed a real file listing, and said it had no
+    # access anyway, because a flat instruction to deny outranks evidence the prompt never mentions.
+    #
+    # So the condition is now something observable. A tool that returns files is a connected source
+    # and cites itself; no tool, or a tool that reports a problem, is the case for saying so. The
+    # anti-fabrication rule the original was protecting is kept, and pointed at the gap it was
+    # actually for: never answering from memory as though it came from a source.
+    system_prompt: >-
+      Answer from the sources you can reach with the tools you have been given, and cite what you
+      used. If you have no tool for a source, or a tool tells you it is not connected or reports an
+      error, say that plainly. Never answer from your own memory as though it came from a source, and
+      never claim you lack access to something a tool has just returned.
   # The Bot that ships in the box (agent-bot), addressed exactly the way a customer's own Bot would
   # be: an AG-UI endpoint in the registry. Names in dollar-brace form are read from the environment,
   # so the address belongs to the deployment. Replace it with your own service and nothing changes.

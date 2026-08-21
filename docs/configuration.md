@@ -260,7 +260,11 @@ agents:
     role_description: Answer company knowledge questions and cite sources.
     avatar_seed: knowledge
     type: built-in
-    system_prompt: Answer from authorized company knowledge and cite your sources. When none is connected, say so plainly rather than inventing a citation.
+    system_prompt: >-
+      Answer from the sources you can reach with the tools you have been given, and cite what you
+      used. If you have no tool for a source, or a tool tells you it is not connected or reports an
+      error, say that plainly. Never answer from your own memory as though it came from a source, and
+      never claim you lack access to something a tool has just returned.
 
   - id: risk-analyst
     name: Risk Analyst
