@@ -90,33 +90,38 @@ export function createPolicyStore(
         // Written before it is enforced. If the write fails this throws and the caller reports a
         // failure, which is the honest outcome: an administrator who is told a rule was saved must
         // not be enforcing a rule that will disappear at the next restart.
-        await database
-          .insert(actionPolicy)
-          .values({
-            id: CURRENT,
-            mode: next.mode,
-            deny: next.deny,
-            allow: next.allow,
-            updatedBy: by ?? null,
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: actionPolicy.id,
-            set: {
+        //
+        // The announcement goes in the same transaction, so it is delivered on commit: a write that
+        // rolls back announces nothing, and there is no window where the row has changed and the
+        // other servers have not been told. Same shape as `channels/routes.ts`.
+        await database.transaction(async (transaction) => {
+          await transaction
+            .insert(actionPolicy)
+            .values({
+              id: CURRENT,
               mode: next.mode,
               deny: next.deny,
               allow: next.allow,
               updatedBy: by ?? null,
               updatedAt: new Date(),
-            },
-          });
+            })
+            .onConflictDoUpdate({
+              target: actionPolicy.id,
+              set: {
+                mode: next.mode,
+                deny: next.deny,
+                allow: next.allow,
+                updatedBy: by ?? null,
+                updatedAt: new Date(),
+              },
+            });
+
+          // Every server hears it, including this one, which re-reads and arrives at what it
+          // already has.
+          await announce(transaction);
+        });
       }
       current = next;
-
-      // Announced after the row is written, so a server that re-reads on this signal finds the new
-      // rule rather than the old one. Every server hears it, including this one, which re-reads and
-      // arrives at what it already has.
-      if (database) await announce(database);
     },
 
     reset: async () => {
@@ -124,10 +129,14 @@ export function createPolicyStore(
       // this deployment has no boundary of its own again, and changing what configuration says then
       // changes what it enforces, which is what an operator expects of a reset.
       if (database) {
-        await database.delete(actionPolicy).where(eq(actionPolicy.id, CURRENT));
+        await database.transaction(async (transaction) => {
+          await transaction
+            .delete(actionPolicy)
+            .where(eq(actionPolicy.id, CURRENT));
+          await announce(transaction);
+        });
       }
       current = clone(configured);
-      if (database) await announce(database);
     },
 
     load: async () => {
@@ -176,7 +185,7 @@ export function createPolicyStore(
  * announcement costs the other servers their update until their next restart, which is worth a loud
  * log and is not worth failing a write an administrator has been told succeeded.
  */
-async function announce(database: Database): Promise<void> {
+async function announce(database: Pick<Database, "execute">): Promise<void> {
   try {
     await database.execute(sql`select pg_notify(${ACTION_POLICY_TOPIC}, '')`);
   } catch (error) {

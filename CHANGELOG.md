@@ -23,6 +23,13 @@ Registering an OpenID Connect provider needs every host in its discovery documen
 issuer also needs `oauth2.googleapis.com` and `openidconnect.googleapis.com`. Registration is
 refused with the untrusted host named.
 
+A Bot id may now contain only letters, digits, hyphen and underscore, and must start with a letter or
+digit. The same rule container and volume names have always followed. A deployment whose
+`COMPUTER_BOT_ID` breaks it refuses to start and says so, rather than answering 400 to everything.
+
+`AUDIT_RETENTION_DAYS` is new and unset, which keeps the audit trail forever, as before. Set it to a
+whole number of days to have old rows removed.
+
 Sessions survive and nobody signs in again.
 
 ### Added
@@ -86,6 +93,55 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **A boundary rule applied on one server out of N.** The policy is read from memory on every action,
+  which is right, but memory was only ever filled at boot. An administrator's new deny rule was
+  enforced by whichever process served the request and roughly one action in N went through it, while
+  the admin screen reported success because the row really was saved and the audit trail agreed
+  because it records the boundary each process started with. Both honest, and both describing
+  something other than what the fleet was enforcing. A write now announces on Postgres in the same
+  transaction and every server re-reads, including on reconnect, so a server that was down when the
+  rule changed catches up rather than waiting for a restart. Reset travels the same way.
+- **A ref resolved on one replica and nowhere else.** The gateway turns the opaque ref in a click into
+  the element it points at, and that mapping lived in a `Map` in the process that took the snapshot.
+  On any other replica the ref resolved to nothing, so a deny rule written about the element did not
+  match and the click went through, recorded as allowed with no rule. It is in Postgres now, keyed on
+  the generation the computer stamped, so a ref from a superseded page still resolves to nothing.
+- **Anybody signed in could act as anybody's Bot.** The Bot id travels in the path and the acting
+  routes checked only that somebody was signed in, so a signed-in person could drive another person's
+  private Bot, reset its browser, read its screen and fire its granted tools. Every route under a Bot
+  id now asks the store the same question the roster already asks, and a Bot that does not exist and
+  one belonging to somebody else answer identically.
+- **The computer fleet listing was open to any signed-in person.** It ignores its `:botId` and returns
+  every Bot's machine, so it told anybody who could reach it every Bot id in the deployment and
+  whether each was running, private coworkers included. Administrator-only now.
+- **A Bot id could name a directory outside the profiles volume.** The id arrives as a URL segment or
+  a header, was joined onto a filesystem path, and `reset` deletes that path recursively as root, so
+  `../../tmp/something` deleted it. Refused at the request boundary and again where the path is built.
+- **A mistyped deny rule permitted instead of refusing.** A rule that parsed and evaluated but
+  answered with something other than true or false was neither a match nor an error, so
+  `deny: ["Submit order"]` — what somebody writes who reads the list as labels — let the action
+  through with nothing logged, while the rule sat on the Boundaries page looking as though it were in
+  force. Any non-boolean answer is now a broken rule and takes the existing fail-closed path.
+- **Rotating a Bot's key left the old one live.** Editing a key wrote a new vault row and repointed
+  the Bot at it, leaving the previous credential decryptable and still valid with nothing listing it,
+  so rotation did not do the one thing rotation is for. Deleting a Bot left its key live too. Both
+  revoke now.
+- **Nothing recorded what changed about a Bot.** Ten mutating routes wrote one audit row between them
+  and there was no event type for any of the other nine. A Bot's endpoint is where conversation
+  content is sent, so "who pointed this Bot at that host, and when" is the first question in an
+  incident and could not be answered. Eight event types and eight rows now, recording what changed and
+  never a value.
+- **The people list and the channel list grew without bound.** Both were read in full on every render,
+  and reading one person ran the whole people aggregate over the deployment twice per role change.
+  Both are paged now, and the people screen searches on the server so somebody can be found without
+  walking pages.
+- **A computer accumulated one browser per Bot, forever.** Nothing closed an idle one, so a deployment
+  where every employee has a Bot trends toward a resident Chromium per employee in one container until
+  it is killed for memory. There is a cap and an idle timeout, and closing one costs only a relaunch
+  because the profile is on disk.
+- **The audit screen's filters were sequential scans.** It filters by event type, by who did it and by
+  what it was done to, and the only index was on the timestamp, over what becomes the largest table in
+  the deployment. Each filter leads its own index now.
 - **A deployment with no identity provider came up open by default.** Covered under Changed above,
   and listed here too because it is the one on this list that was reachable from the internet.
 - **Registering a company's identity provider was owned by whoever registered it.** Better Auth
@@ -156,6 +212,18 @@ Sessions survive and nobody signs in again.
 
 ### Changed
 
+- **A retention policy for the audit trail.** `AUDIT_RETENTION_DAYS` removes rows older than the
+  window it names, swept hourly by whichever server holds an advisory lock. Unset by default, because
+  deleting somebody's audit trail because a default said so is the worse of the two failures. The
+  trail stays append-only: the database permits a delete only when the transaction declares a
+  retention window and only for rows already outside it, so removing recent rows is still impossible
+  and an `UPDATE` still is under every condition.
+- **`allowed_groups` is documented as a declaration, not a control.** The tenant package writes it and
+  nothing reads it on any access path, and `users.groups` is written by nothing either, so both halves
+  of the rule are waiting on group membership arriving from the identity provider. Channel access is
+  membership alone. The columns stay, because they are the right shape for the rule they are named
+  for. Thanks to [@NathanTarbert](https://github.com/CopilotKit/OpenBot/pull/92) and
+  [@andreolf](https://github.com/CopilotKit/OpenBot/issues/82).
 - **Running with no sign-in takes a flag and nothing else.** It used to be locked with
   `NODE_ENV=production`, which is exactly backwards: `NODE_ENV` is unset unless somebody sets it, so
   a container on a VM with a hand-written env file and no identity provider served every visitor on
