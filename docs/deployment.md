@@ -77,8 +77,7 @@ the container, so there is nothing to share it with.
 **Authentication is required.** With no identity provider configured the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
 Configure Google, Microsoft or Okta, or set `OPENBOT_SINGLE_USER=true` to say you meant an open
-deployment. This does not depend on `NODE_ENV`, which is unset unless something sets it and so used
-to let a hand-written env file through.
+deployment. `NODE_ENV` does not affect this.
 
 **Put TLS in front of it.** Not only for the cookies. A page served from `http://<address>` is not a
 secure context, which removes a set of browser APIs that are present on `http://localhost` and so

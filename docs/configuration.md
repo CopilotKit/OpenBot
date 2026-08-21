@@ -112,10 +112,9 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 
 **With no provider at all, `OPENBOT_SINGLE_USER=true` is required.** A deployment that configures
 nothing to sign anybody in and does not say that was deliberate refuses to start, naming what to
-configure. It used to come up open unless `NODE_ENV=production`, which is unset by default and so
-missed exactly the deployment that needed catching: a container on a VM with a hand-written env
-file served every visitor as an administrator and looked like it was working. `.env.example` ships
-the line switched on, so a clone still runs with no configuration at all.
+configure, because a public URL where every visitor is an administrator fails silently. `NODE_ENV`
+does not enter into it. `.env.example` ships the line switched on, so a clone runs with no
+configuration at all.
 
 **Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
 secret must be set together, Okta additionally needs its issuer, and any of them requires

@@ -160,7 +160,7 @@ Connector credentials are stored through the credential vault and referenced by 
 - A provider's client secret and SAML signing material are encrypted at rest with `KEY_ENCRYPTION_KEY`, through a wrapper on the Better Auth storage adapter, since the plugin stores them as plaintext JSON. OAuth access and refresh tokens use Better Auth's own encryption, keyed on `BETTER_AUTH_SECRET`.
 - Signing in, being refused, and being granted the administrator role by configuration each write an audit row. Without them nothing recorded that somebody who could edit `INITIAL_ADMIN_EMAILS` had promoted themselves, and revoking a person deleted the sessions that were the only evidence they had been here.
 - Removing somebody deletes their sessions and denies their address, because deleting the user row alone is not removal: the next sign-in through the provider recreates it.
-- With no identity provider configured, the deployment refuses to start unless `OPENBOT_SINGLE_USER=true` says every request may be one fixed administrator. The lock is that flag and nothing else: it used to be `NODE_ENV`, which is unset by default and so admitted exactly the deployment it existed to catch.
+- With no identity provider configured, the deployment refuses to start unless `OPENBOT_SINGLE_USER=true` says every request may be one fixed administrator. That flag is the only thing that permits it; `NODE_ENV` does not.
 - `KEY_ENCRYPTION_KEY` must be a base64-encoded 32-byte value. The example key is refused with `NODE_ENV=production`.
 - Credential plaintext is encrypted at rest, never returned by APIs, and redacted from audit events.
 - Browser navigation allows `http` and `https`; cloud metadata addresses are refused under every configuration.

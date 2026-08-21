@@ -66,7 +66,7 @@ adds the column. A rolling deploy runs the migrations and then serves from old a
 once, and an old replica writes rows without the new column: under `NOT NULL` its writes start
 failing, so the release that added the column breaks for everybody who lands on a replica that has
 not been replaced yet. Ship the column nullable, let the fleet turn over, then tighten it. `issuer`
-on `accounts` is the worked example, and the reason `0004` is not what it originally was.
+on `accounts` is the worked example: the column is nullable and no migration tightens it.
 
 **A data step is its own migration**, created with the flag that exists for it:
 
