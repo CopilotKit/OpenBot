@@ -116,6 +116,13 @@ Sessions survive and nobody signs in again.
   laptop `http://localhost` counts as one, so this never showed up in development; on a real
   address it does not, and the surface did nothing at all when you pressed send. No message, no
   error. Ids now come from an API with no such restriction.
+- **A package Bot did not know it had a computer.** The instructions that make the computer usable —
+  snapshot before acting, and ask a person to take the wheel at a sign-in rather than reporting the
+  task as impossible — were imported by the two shipped Bots and by nothing else, so a built-in agent
+  knew only the role its package gave it. The tools were on offer to it the whole time. Asked to file
+  an issue on a site it was not signed in to, it browsed to the page, said it could not, and never
+  called `computer_request_help`, so nobody was ever offered the wheel. Built-in agents are now told
+  the same thing the shipped Bots are told, wherever a computer is configured.
 
 ### Changed
 
