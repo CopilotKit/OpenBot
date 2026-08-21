@@ -606,6 +606,7 @@ describe("expanding a package file against the environment", () => {
 
   test("takes the value from the environment", () => {
     expect(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
       expandEnvironment("endpoint: ${AG_UI_URL}", file, {
         AG_UI_URL: "https://bots.example.test/ag-ui",
       }),
@@ -615,6 +616,7 @@ describe("expanding a package file against the environment", () => {
   test("falls back to the default when the name is not set", () => {
     expect(
       expandEnvironment(
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
         "endpoint: ${AG_UI_URL:-http://localhost:4200}",
         file,
         {},
@@ -624,6 +626,7 @@ describe("expanding a package file against the environment", () => {
 
   test("prefers the environment over the default", () => {
     expect(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
       expandEnvironment("endpoint: ${AG_UI_URL:-http://localhost:4200}", file, {
         AG_UI_URL: "https://bots.example.test",
       }),
@@ -632,6 +635,7 @@ describe("expanding a package file against the environment", () => {
 
   test("treats an empty value as unset", () => {
     expect(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
       expandEnvironment("endpoint: ${AG_UI_URL:-http://localhost:4200}", file, {
         AG_UI_URL: "",
       }),
@@ -639,12 +643,14 @@ describe("expanding a package file against the environment", () => {
   });
 
   test("an empty default is allowed and is not an error", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
     expect(expandEnvironment("suffix: ${NOTHING:-}", file, {})).toBe(
       "suffix: ",
     );
   });
 
   test("refuses a name with neither a value nor a default", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
     expect(() => expandEnvironment("endpoint: ${AG_UI_URL}", file, {})).toThrow(
       /agents\.yaml refers to \$\{AG_UI_URL\}/,
     );

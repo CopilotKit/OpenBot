@@ -10,6 +10,7 @@ test("provides PostgreSQL with pgvector for local development", () => {
 
   expect(compose).toContain("postgres:");
   expect(compose).toContain("pgvector/pgvector:");
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
   expect(compose).toContain("${POSTGRES_PORT:-5432}:5432");
 });
 

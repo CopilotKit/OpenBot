@@ -15,7 +15,7 @@
     "generate:app-config": "bun --env-file=.env scripts/generate-app-config.ts",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
-    "lint": "bunx biome lint .",
+    "lint": "bunx biome lint --error-on-warnings .",
     "test": "bun test",
     "typecheck": "bun run --filter '*' typecheck",
     "test:ci": "bun scripts/test-ci.ts",

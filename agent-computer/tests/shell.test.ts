@@ -216,6 +216,7 @@ describe("the command that actually runs", () => {
     );
 
     const result = await createShell(root, source()).run({
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal `${...}` is the fixture — this asserts on unexpanded placeholder text, so a real template would break the test.
       command: 'echo "[${MARKER:-clean}]"',
     });
 
