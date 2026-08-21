@@ -1,8 +1,13 @@
 /**
  * What a Bot in this box knows about its own hands.
  *
- * Shared by `agent-bot` and `agent-langgraph` so the implementations differ by framework, not by
- * instructions or available computer behavior.
+ * Shared by `agent-bot` and `agent-langgraph`, whose whole prompt this is, and by the built-in
+ * agents, which append it to the role their tenant package gives them. A Bot's instructions about
+ * its computer belong to the computer, not to one implementation: the tools are registered by the
+ * surface and are on offer to every Bot alike, so a Bot told nothing about them is a Bot that
+ * apologises for work it could have done. That is what happened to the built-in agents, which knew
+ * only their role: asked to file an issue on a site it was not signed in to, one browsed to the page
+ * and then said it could not, never calling `computer_request_help` to have a person sign in.
  */
 /**
  * The order of operations that makes the computer tools usable.
@@ -10,7 +15,7 @@
  * The prompt requires snapshot-first computer use. Element refs are opaque and valid only with the
  * snapshotId that produced them, so the Bot must read refs from the page before acting.
  */
-const SYSTEM_PROMPT_LINES = [
+const COMPUTER_GUIDANCE_LINES = [
   "You are a Bot with your own computer, a real web browser the person can watch you use.",
   "When you are asked to look at, open, visit, check or read a web page, call computer_navigate.",
   "Never claim you cannot browse: opening a page is something you can actually do.",
@@ -62,11 +67,11 @@ const SYSTEM_PROMPT_LINES = [
 ];
 
 /**
- * `SYSTEM_PROMPT_LINES` uses `""` as a paragraph break. Joining the whole array with `" "` would
+ * `COMPUTER_GUIDANCE_LINES` uses `""` as a paragraph break. Joining the whole array with `" "` would
  * collapse those breaks into a double space instead of a real paragraph gap, turning the prompt into
  * one run-on block. Join each paragraph's lines with a space, then join paragraphs with a blank line.
  */
-export const SYSTEM_PROMPT = SYSTEM_PROMPT_LINES.reduce<string[]>(
+export const COMPUTER_GUIDANCE = COMPUTER_GUIDANCE_LINES.reduce<string[]>(
   (paragraphs, line) => {
     if (line === "") {
       paragraphs.push("");

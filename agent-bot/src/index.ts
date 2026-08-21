@@ -3,7 +3,7 @@ import { EventEncoder } from "@ag-ui/encoder";
 import { serve } from "bun";
 import OpenAI from "openai";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
-import { SYSTEM_PROMPT } from "../../shared/bot-prompt";
+import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
 
 /**
  * The built-in Bot is an AG-UI HTTP service registered the same way as any customer-provided Bot.
@@ -70,7 +70,7 @@ const openai = new OpenAI({
 /** Translate the conversation AG-UI carries into the shape the model provider expects. */
 function toProviderMessages(input: RunAgentInput) {
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: COMPUTER_GUIDANCE },
   ];
 
   for (const message of input.messages) {

@@ -18,7 +18,7 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
-import { SYSTEM_PROMPT } from "../../shared/bot-prompt";
+import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
 
 /**
  * The same Bot, on a framework.
@@ -129,7 +129,7 @@ if (!API_KEY) {
 
 /** Translate the conversation AG-UI carries into LangChain's message classes. */
 function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
-  const messages: BaseMessage[] = [new SystemMessage(SYSTEM_PROMPT)];
+  const messages: BaseMessage[] = [new SystemMessage(COMPUTER_GUIDANCE)];
 
   for (const message of input.messages) {
     if (message.role === "user") {
