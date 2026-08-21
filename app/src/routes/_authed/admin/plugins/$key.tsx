@@ -1,14 +1,6 @@
-import {
-  IconBook,
-  IconChevronRight,
-  IconExternalLink,
-  IconKey,
-  IconServer,
-  IconTool,
-  IconUserCheck,
-} from "@tabler/icons-react";
+import { IconChevronRight, IconExternalLink } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useParams } from "@tanstack/react-router";
+import { createFileRoute, useParams } from "@tanstack/react-router";
 import * as React from "react";
 import { useState } from "react";
 import {
@@ -35,7 +27,6 @@ import {
   ItemContent,
   ItemDescription,
   ItemFooter,
-  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
@@ -50,10 +41,7 @@ import {
   removePluginServerMutationOptions,
   setPluginGrantMutationOptions,
 } from "@/lib/plugins/mutations";
-import {
-  connectionsQueryOptions,
-  pluginsPageQueryOptions,
-} from "@/lib/plugins/queries";
+import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -74,7 +62,6 @@ function RouteComponent() {
   const { key } = useParams({ from: "/_authed/admin/plugins/$key" });
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
-  const connections = useQuery(connectionsQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
   const nameFor = useBotNames();
 
@@ -109,9 +96,6 @@ function RouteComponent() {
 
   const entry = plugins.data?.catalogue.find((item) => item.key === key);
   const server = plugins.data?.servers.find((item) => item.id === key);
-  const youConnected = (connections.data?.connections ?? []).some(
-    (row) => row.serverId === key,
-  );
   const bots = (agents ?? []).map((agent: { id: string }) => ({
     id: agent.id,
     name: nameFor(agent.id),
@@ -190,7 +174,11 @@ function RouteComponent() {
         </p>
       ) : null}
 
-      <PageSection title="Availability">
+      {/*
+       * No section heading. This is one decision, and a heading over a single row that repeats the
+       * row's own title tells a reader nothing they cannot already see.
+       */}
+      <PageSection>
         <PageRows>
           {/*
            * Binary and immediate, which is what the layout skill reserves a Switch for: it takes
@@ -202,7 +190,6 @@ function RouteComponent() {
            * switching this off deletes every grant on the vendor's tools and that is not recoverable
            * by switching it back on.
            */}
-          {/* No leading icon: the row is this deployment's own switch, not a thing to identify. */}
           <Item size="sm">
             <ItemContent>
               <ItemTitle>Enable for this deployment</ItemTitle>
@@ -231,11 +218,17 @@ function RouteComponent() {
         <PageSection
           description={
             auth === "user-oauth"
-              ? "This vendor answers as whoever is asking. The deployment registers an OAuth client; everybody then connects their own account, so a Bot only ever sees what that person can see."
+              ? "This vendor answers as whoever is asking. The deployment registers an OAuth client; everybody then connects their own account in Preferences, so a Bot only ever sees what that person can see."
               : "What this deployment presents to the vendor. One credential, used for everybody."
           }
           title="Connection"
         >
+          {/*
+           * Rows that DO something, and nothing else. The layout skill's third row kind — a value
+           * with no chevron and nothing to click — earns its place on a screen full of them, but
+           * among four actionable rows a dead one reads as a control that has stopped working. The
+           * redirect URI is prose under the card instead.
+           */}
           <PageRows>
             {auth === "deployment-bearer" ? (
               <Item
@@ -244,9 +237,6 @@ function RouteComponent() {
                 }
                 size="sm"
               >
-                <ItemMedia variant="icon">
-                  <IconKey className="size-4" />
-                </ItemMedia>
                 <ItemContent>
                   <ItemTitle>Access token</ItemTitle>
                   <ItemDescription>
@@ -263,77 +253,26 @@ function RouteComponent() {
             ) : null}
 
             {auth === "user-oauth" ? (
-              <>
-                <Item
-                  render={
-                    <button onClick={() => setDialog("client")} type="button" />
-                  }
-                  size="sm"
-                >
-                  <ItemMedia variant="icon">
-                    <IconKey className="size-4" />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>OAuth client</ItemTitle>
-                    <ItemDescription>
-                      Identifies this deployment to the vendor. It reaches
-                      nobody's documents on its own.
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <span className="text-muted-foreground text-xs">
-                      {server?.hasCredential ? "Registered" : "Not registered"}
-                    </span>
-                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                  </ItemActions>
-                </Item>
-                <Separator />
-                {/* Read-only: a value with no chevron, because there is nothing here to change. */}
-                <Item size="sm">
-                  <ItemMedia variant="icon">
-                    <IconServer className="size-4" />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>Redirect URI</ItemTitle>
-                    <ItemDescription className="line-clamp-none">
-                      Add this to the client's authorised redirect URIs at the
-                      vendor, exactly as written. A single wrong character fails
-                      there, with a message that does not mention OpenBot.
-                    </ItemDescription>
-                    <ItemFooter>
-                      {plugins.data?.redirectUri ? (
-                        <code className="block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
-                          {plugins.data.redirectUri}
-                        </code>
-                      ) : (
-                        <span className="text-destructive text-xs">
-                          This deployment has no public URL, so nobody can
-                          complete a consent flow. Set OPENBOT_PUBLIC_URL.
-                        </span>
-                      )}
-                    </ItemFooter>
-                  </ItemContent>
-                </Item>
-                <Separator />
-                <Item render={<Link to="/settings" />} size="sm">
-                  <ItemMedia variant="icon">
-                    <IconUserCheck className="size-4" />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>Your account</ItemTitle>
-                    <ItemDescription>
-                      Yours to grant and yours to withdraw, in Preferences.
-                      Nobody can connect it for you.
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <span className="text-muted-foreground text-xs">
-                      {youConnected ? "Connected" : "Not connected"}
-                    </span>
-                    <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
-                  </ItemActions>
-                </Item>
-              </>
+              <Item
+                render={
+                  <button onClick={() => setDialog("client")} type="button" />
+                }
+                size="sm"
+              >
+                <ItemContent>
+                  <ItemTitle>OAuth client</ItemTitle>
+                  <ItemDescription>
+                    Identifies this deployment to the vendor. It reaches
+                    nobody's documents on its own.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    {server?.hasCredential ? "Registered" : "Not registered"}
+                  </span>
+                  <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                </ItemActions>
+              </Item>
             ) : null}
 
             {entry?.perInstance ? (
@@ -348,9 +287,6 @@ function RouteComponent() {
                   }
                   size="sm"
                 >
-                  <ItemMedia variant="icon">
-                    <IconServer className="size-4" />
-                  </ItemMedia>
                   <ItemContent>
                     <ItemTitle>Instance host</ItemTitle>
                     <ItemDescription>
@@ -377,9 +313,6 @@ function RouteComponent() {
                   }
                   size="sm"
                 >
-                  <ItemMedia variant="icon">
-                    <IconBook className="size-4" />
-                  </ItemMedia>
                   <ItemContent>
                     <ItemTitle>Vendor documentation</ItemTitle>
                     <ItemDescription>
@@ -393,6 +326,27 @@ function RouteComponent() {
               </>
             ) : null}
           </PageRows>
+
+          {auth === "user-oauth" ? (
+            <div className="mt-3">
+              <p className="text-muted-foreground text-sm">
+                Add this to the client's authorised redirect URIs at the vendor,
+                exactly as written. A single wrong character fails there, with a
+                message that does not mention OpenBot.
+              </p>
+              {plugins.data?.redirectUri ? (
+                /* Selectable and monospaced: it is copied by hand into somebody else's console. */
+                <code className="mt-1 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {plugins.data.redirectUri}
+                </code>
+              ) : (
+                <p className="mt-1 text-destructive text-sm" role="alert">
+                  This deployment has no public URL, so nobody can complete a
+                  consent flow. Set OPENBOT_PUBLIC_URL.
+                </p>
+              )}
+            </div>
+          ) : null}
         </PageSection>
       ) : null}
 
@@ -411,9 +365,6 @@ function RouteComponent() {
               {server.tools.map((tool, index) => (
                 <React.Fragment key={tool.ref}>
                   <Item size="sm">
-                    <ItemMedia variant="icon">
-                      <IconTool className="size-4" />
-                    </ItemMedia>
                     <ItemContent>
                       <ItemTitle className="font-mono text-xs">
                         {tool.name}
