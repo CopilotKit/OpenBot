@@ -43,6 +43,13 @@
       "when": 1787322944029,
       "tag": "0005_computer_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787334166722,
+      "tag": "0006_snapshot_catches_up_with_the_schema",
+      "breakpoints": true
     }
   ]
 }
