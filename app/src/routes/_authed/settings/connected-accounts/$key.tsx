@@ -1,4 +1,8 @@
-import { IconExternalLink } from "@tabler/icons-react";
+import {
+  IconArrowUpRight,
+  IconChevronDown,
+  IconExternalLink,
+} from "@tabler/icons-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -15,8 +19,14 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {
   connectionsQueryOptions,
@@ -108,39 +118,85 @@ function RouteComponent() {
         <PageRows>
           <Item size="sm">
             <ItemContent>
-              <ItemTitle>Connect your account</ItemTitle>
+              {/* Not "Connect your account": the row is also the connected state, and a title has to
+                  read for both. */}
+              <ItemTitle>Your account</ItemTitle>
               <ItemDescription>
                 {!enabled
                   ? "An administrator has not enabled this connector, so there is nothing to connect to yet."
                   : connection
                     ? "A Bot granted its tools reads this as you, and sees only what you can see."
-                    : "No Bot can read this as you. Switching this on sends you to the vendor to consent."}
+                    : "No Bot can read this as you. Connecting takes you to the vendor to consent."}
               </ItemDescription>
             </ItemContent>
             <ItemActions>
-              <Switch
-                aria-label={`Connect your ${entry.title} account`}
-                checked={connection !== undefined}
-                disabled={!enabled || connect.isPending}
-                onCheckedChange={(next) => {
-                  setNotice(null);
-                  if (next) {
+              {connection ? (
+                /*
+                 * A state and a menu, not a switch. Connected is a fact about a grant that lives at
+                 * the vendor, and withdrawing it is a deliberate act rather than the other half of a
+                 * position — so it is named in a menu instead of being whatever happens when
+                 * something slides back.
+                 */
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button size="sm" type="button" variant="outline">
+                        <span
+                          aria-hidden="true"
+                          className="size-1.5 rounded-full bg-emerald-500"
+                        />
+                        Connected
+                        <IconChevronDown />
+                      </Button>
+                    }
+                  />
+                  {/*
+                   * `w-auto`, because the default is `w-(--anchor-width)` — the width of the trigger,
+                   * which here is a small "Connected" button. Left alone, the one item inside wraps
+                   * onto three lines and a destructive action becomes hard to read at the moment it
+                   * most needs to be legible.
+                   */}
+                  <DropdownMenuContent align="end" className="w-auto">
+                    <DropdownMenuItem
+                      onClick={() =>
+                        /*
+                         * NOT BUILT YET, and it says so rather than appearing to work.
+                         *
+                         * Withdrawing is three acts — revoke at the vendor, revoke the vault
+                         * credential, delete the row — and none exist. An item that closed the menu
+                         * and changed nothing would report that access had been withdrawn when it
+                         * had not, which is the one outcome worse than not offering it.
+                         */
+                        setNotice(
+                          `Disconnecting is not built yet. Until it is, revoke it in your ${entry.vendor} account's third-party access settings — that stops this deployment reading anything immediately.`,
+                        )
+                      }
+                      className="whitespace-nowrap"
+                      variant="destructive"
+                    >
+                      Disconnect your {entry.title} account
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                /*
+                 * The arrow says this leaves OpenBot. It does: the next thing on screen is the
+                 * vendor's own consent page, and a control that navigates away should look like one.
+                 */
+                <Button
+                  disabled={!enabled || connect.isPending}
+                  onClick={() => {
+                    setNotice(null);
                     connect.mutate(key);
-                    return;
-                  }
-                  /*
-                   * NOT BUILT YET, and it says so rather than doing nothing.
-                   *
-                   * Withdrawing is a real act with three parts — revoke at the vendor, revoke the
-                   * vault credential, delete the row — and none of them exist. A switch that moved
-                   * and changed nothing would be worse than one that refuses: it would report that
-                   * access had been withdrawn when it had not.
-                   */
-                  setNotice(
-                    "Withdrawing access is not built yet. Until it is, revoke it in your Google account's third-party access settings — that stops the deployment reading your Drive immediately.",
-                  );
-                }}
-              />
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Connect
+                  <IconArrowUpRight />
+                </Button>
+              )}
             </ItemActions>
           </Item>
         </PageRows>
