@@ -10,8 +10,11 @@ FROM ghcr.io/spiffe/spire-server:1.15.1 AS spire
 FROM oven/bun:1.3.14-alpine
 
 WORKDIR /app
-COPY supervisor/package.json ./
-RUN bun install
+# The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh
+# and exits 0. This is the process whose compromise costs the host, so what it runs is the tree that
+# was reviewed, not whatever the registry had this morning.
+COPY supervisor/package.json supervisor/bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY --from=spire /opt/spire/bin/spire-server /usr/local/bin/spire-server
 

@@ -5,8 +5,10 @@
 FROM oven/bun:1.3-alpine
 
 WORKDIR /app
-COPY agent-langgraph/package.json ./agent-langgraph/
-RUN cd agent-langgraph && bun install
+# The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh
+# and exits 0, so the file has to be here for the flag to mean anything.
+COPY agent-langgraph/package.json agent-langgraph/bun.lock ./agent-langgraph/
+RUN cd agent-langgraph && bun install --frozen-lockfile
 
 # The repo's own layout, kept exactly, so `../../shared/bot-prompt` resolves the same here as it
 # does on a laptop. Flattening src to /app/src would change the depth and break only on deploy.

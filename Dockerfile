@@ -45,8 +45,13 @@ COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 RUN bun install --frozen-lockfile
 
+# The lockfile travels with the manifest, because `--frozen-lockfile` with no lockfile in the context
+# is not an error: bun resolves afresh, succeeds, and the flag has decorated nothing. With both files
+# here, the tree in the image is the tree this repository resolved and committed. Bun is already
+# pinned twenty-odd lines above for the same reason; this is the install below it.
 COPY agent-computer/package.json agent-computer/package.json
-RUN cd agent-computer && bun install
+COPY agent-computer/bun.lock agent-computer/bun.lock
+RUN cd agent-computer && bun install --frozen-lockfile
 
 # A second tree with the build-time dependencies left out, for the runtime stage to take. Vite,
 # biome and the test tooling are a gigabyte that nothing in a running container imports.
