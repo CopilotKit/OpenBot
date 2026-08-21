@@ -115,9 +115,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   refuses to start instead, because a public URL where every visitor is an administrator is silent
   and looks like it works. `OPENBOT_SINGLE_USER=true` replaces `OPENBOT_DEV_NO_AUTH`, which is still
   honoured, and is how somebody says they meant an open deployment.
-- **Requires Better Auth 1.7**, which adds an `issuer` to every account. Migration `0002` adds the
-  column and backfills existing rows with their provider's real issuer, so nobody is asked to sign
-  in again.
+- **Requires Better Auth 1.7**, which adds an `issuer` to every account. Migrations `0002` to `0004`
+  add the column, backfill existing rows with their provider's real issuer, and then make it
+  required, so nobody is asked to sign in again.
 - **Where a Bot's computer runs is now a plug.** One `ComputerProvider` interface sits under the
   gateway, with the Docker supervisor as one implementation and a shared computer as another. A
   computer somewhere else is an adapter rather than a change to the governed path. Thanks to

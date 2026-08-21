@@ -85,12 +85,31 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. Only read when no identity provider is configured, and only needed where `NODE_ENV=production` would otherwise refuse to start. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
-| `BETTER_AUTH_SECRET`         | At least 32 characters. Required with Google OAuth.                                    |
-| `BETTER_AUTH_URL`            | Public API server base URL. Required with Google OAuth.                                |
+| `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
+| `MICROSOFT_OAUTH_CLIENT_SECRET` | Microsoft Entra ID client secret.                                                   |
+| `MICROSOFT_OAUTH_TENANT_ID`  | Directory to admit. `common` by default, which admits personal accounts too; a GUID admits one directory. |
+| `OKTA_OAUTH_CLIENT_ID`       | Okta client id.                                                                        |
+| `OKTA_OAUTH_CLIENT_SECRET`   | Okta client secret.                                                                    |
+| `OKTA_OAUTH_ISSUER`          | Which Okta, for example `https://example.okta.com/oauth2/default`.                     |
+| `BETTER_AUTH_SECRET`         | At least 32 characters. Required with any provider.                                    |
+| `BETTER_AUTH_URL`            | Public API server base URL, where OAuth callbacks return. Required with any provider.  |
 | `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API.                                       |
-| `INITIAL_ADMIN_EMAILS`       | Comma-separated users seeded as administrators.                                        |
+| `INITIAL_ADMIN_EMAILS`       | Comma-separated administrators. **Required** with any provider.                        |
 
-Google OAuth client id and secret must be configured together. If Google OAuth is configured, `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are also required.
+**Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
+secret must be set together, Okta additionally needs its issuer, and any of them requires
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` and `INITIAL_ADMIN_EMAILS`. Every incomplete combination is
+refused at start-up rather than at somebody's first attempt to sign in.
+
+`INITIAL_ADMIN_EMAILS` is required because nothing else grants the administrator role at first: an
+address it names becomes an administrator at every sign-in and cannot be demoted from the People
+screen, which is what guarantees a way back in. Everybody else's role is decided there instead.
+
+SAML and OpenID Connect providers are not configured here. They are registered while the deployment
+runs, under Admin → Identity providers, and routed by email domain.
+
+The redirect URI to register with each provider is `<BETTER_AUTH_URL>/api/auth/callback/<provider>`,
+where `<provider>` is `google`, `microsoft` or `okta`.
 
 ## Computer and supervisor
 
