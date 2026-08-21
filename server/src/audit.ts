@@ -190,6 +190,25 @@ export const auditEventTypes = [
    */
   "identity_provider.registered",
   "identity_provider.removed",
+  /*
+   * What a Bot is and what it may reach.
+   *
+   * The trail recorded every mouse movement a Bot made and could not answer "who pointed this Bot at
+   * that host, and when", which is the first question asked in an incident. A Bot's endpoint is
+   * where conversation content is sent and its callback token is a capability handed to somebody
+   * else's infrastructure, so the two ends of both belong here.
+   *
+   * `bot.updated` carries what changed rather than the new values: the endpoint is worth naming, and
+   * a key never is.
+   */
+  "bot.created",
+  "bot.updated",
+  "bot.duplicated",
+  "bot.hidden",
+  "bot.unhidden",
+  "bot.deleted",
+  "bot.callback_token_issued",
+  "bot.callback_token_revoked",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];
