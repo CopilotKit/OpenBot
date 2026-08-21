@@ -159,6 +159,13 @@ Sessions survive and nobody signs in again.
   access and refresh tokens use Better Auth's own encryption, keyed on `BETTER_AUTH_SECRET`.
 - **A failed provider registration looked like a button that did not work.** The error was rendered
   on the page behind the dialog, which was covering it.
+- **A write could follow a symlink out of the Bot's workspace.** The confinement resolved the
+  directory a write would land in but not the name it would land on, so a link left at `notes.txt`
+  pointing outside was followed by the write; a read through the identical link was already refused.
+  The gateway had already decided and written the audit row against the path as it was asked for, so a
+  rule written for `credentials/` never saw the file that was written and the trail named a file
+  nothing had touched. A dangling link escaped the same way, because resolving the path throws where
+  the write would still land. Links pointing back inside the workspace continue to work.
 - **A Bot could become root inside its container.** `sudo` was granted as `NOPASSWD: ALL`, and the
   comment above it named the two conditions that made that acceptable: the container being one Bot's
   alone, and not holding a database. The image meets neither, because the supervisor is deliberately

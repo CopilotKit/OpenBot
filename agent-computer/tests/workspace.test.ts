@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -204,6 +211,74 @@ describe("escaping the workspace", () => {
     await expect(workspace().write("escape/owned.txt", "x")).rejects.toThrow(
       WorkspacePathError,
     );
+  });
+
+  test("refuses to write THROUGH a symlinked FILE that points outside", async () => {
+    // The asymmetry between the two tests above. Resolving `dirname` catches a link standing in for a
+    // directory; a link standing in for the FILE has the workspace as its parent and passes, and then
+    // `writeFile` follows it. Refusing is only half of what this asserts: the file outside has to be
+    // untouched afterwards, because an error thrown after the bytes landed would still be an escape.
+    const secret = join(outside, "secret.txt");
+    await symlink(secret, join(root, "notes.txt"));
+    await expect(workspace().write("notes.txt", "owned")).rejects.toThrow(
+      WorkspacePathError,
+    );
+    expect(await readFile(secret, "utf8")).toBe("a private key");
+  });
+
+  test("refuses to append THROUGH a symlinked file that points outside", async () => {
+    // `append` is a separate flag reaching a separate `writeFile` mode, so it is a separate way in.
+    const secret = join(outside, "secret.txt");
+    await symlink(secret, join(root, "log.txt"));
+    await expect(
+      workspace().write("log.txt", "owned", { append: true }),
+    ).rejects.toThrow(WorkspacePathError);
+    expect(await readFile(secret, "utf8")).toBe("a private key");
+  });
+
+  test("refuses to write through a DANGLING link that points outside", async () => {
+    // The harder half. `realpath` throws on a link whose destination does not exist, so a check built
+    // on it treats this as "no such file" and lets the write through the failure path, while
+    // `writeFile` creates the destination regardless. Nothing exists here to prove the escape with,
+    // so the assertion is that the file was never created outside.
+    const notThere = join(outside, "planted.txt");
+    await symlink(notThere, join(root, "fresh.txt"));
+    await expect(workspace().write("fresh.txt", "owned")).rejects.toThrow(
+      WorkspacePathError,
+    );
+    await expect(readFile(notThere, "utf8")).rejects.toThrow();
+  });
+
+  test("refuses a chain of links that ends up outside", async () => {
+    // One hop is the obvious case and the only one a single `readlink` would catch.
+    await symlink(join(outside, "secret.txt"), join(root, "second.txt"));
+    await symlink(join(root, "second.txt"), join(root, "first.txt"));
+    await expect(workspace().write("first.txt", "owned")).rejects.toThrow(
+      WorkspacePathError,
+    );
+    expect(await readFile(join(outside, "secret.txt"), "utf8")).toBe(
+      "a private key",
+    );
+  });
+
+  test("refuses a cycle of links rather than following it forever", async () => {
+    // Two links pointing at each other never reach something that is not a link. The walk has to stop
+    // on its own and say why, instead of spinning or surfacing an ELOOP from the write.
+    await symlink(join(root, "b.txt"), join(root, "a.txt"));
+    await symlink(join(root, "a.txt"), join(root, "b.txt"));
+    await expect(workspace().write("a.txt", "owned")).rejects.toThrow(
+      WorkspacePathError,
+    );
+  });
+
+  test("writing THROUGH a link that points back inside still works", async () => {
+    // Confining, not forbidding, on the write side too. Refusing every link would pass the tests
+    // above and quietly break a Bot that keeps `latest.csv` pointing at the newest report.
+    const ws = workspace();
+    await ws.write("real/data.txt", "before");
+    await symlink(join(root, "real/data.txt"), join(root, "alias.txt"));
+    await ws.write("alias.txt", "after");
+    expect((await ws.read("real/data.txt")).text).toBe("after");
   });
 
   test("a symlink pointing back INSIDE the workspace still works", async () => {
