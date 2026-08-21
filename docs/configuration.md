@@ -110,6 +110,7 @@ Google OAuth client id and secret must be configured together. If Google OAuth i
 - `WORKSPACE_DIR`
 - `PROFILES_DIR`
 - `COMPUTER_BOT_ID`
+- `COMPUTER_SHELL_ENV`
 - `EGRESS_PROXY_DEFAULT`
 - `EGRESS_PROXY_<BOT_ID>`
 
