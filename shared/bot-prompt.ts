@@ -15,7 +15,7 @@
  * The prompt requires snapshot-first computer use. Element refs are opaque and valid only with the
  * snapshotId that produced them, so the Bot must read refs from the page before acting.
  */
-export const COMPUTER_GUIDANCE = [
+const COMPUTER_GUIDANCE_LINES = [
   "You are a Bot with your own computer, a real web browser the person can watch you use.",
   "When you are asked to look at, open, visit, check or read a web page, call computer_navigate.",
   "Never claim you cannot browse: opening a page is something you can actually do.",
@@ -58,4 +58,22 @@ export const COMPUTER_GUIDANCE = [
   "something to retry: say plainly what was blocked and why, and stop. Do not try another route to",
   "the same thing.",
   "Say what you found or did in plain language, briefly.",
-].join(" ");
+];
+
+/**
+ * `COMPUTER_GUIDANCE_LINES` uses `""` as a paragraph break. Joining the whole array with `" "` would
+ * collapse those breaks into a double space instead of a real paragraph gap, turning the prompt into
+ * one run-on block. Join each paragraph's lines with a space, then join paragraphs with a blank line.
+ */
+export const COMPUTER_GUIDANCE = COMPUTER_GUIDANCE_LINES.reduce<string[]>(
+  (paragraphs, line) => {
+    if (line === "") {
+      paragraphs.push("");
+      return paragraphs;
+    }
+    const last = paragraphs.length - 1;
+    paragraphs[last] = paragraphs[last] ? `${paragraphs[last]} ${line}` : line;
+    return paragraphs;
+  },
+  [""],
+).join("\n\n");
