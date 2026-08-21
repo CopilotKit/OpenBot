@@ -41,7 +41,9 @@ function appWith(
 } {
   const calls: string[] = [];
   const store: PeopleStore = {
-    list: async () => people,
+    // One page, and no next one: what a small deployment answers. The paging itself is covered
+    // against a real database in people-paging.integration.test.ts.
+    list: async () => ({ people, nextCursor: null }),
     find: async (userId) => people.find((entry) => entry.id === userId),
     setRole: async (userId, next) => {
       calls.push(`setRole:${userId}:${next}`);
@@ -86,7 +88,10 @@ describe("people routes", () => {
     const response = await request("/api/admin/people");
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ people: [person()] });
+    expect(await response.json()).toEqual({
+      people: [person()],
+      nextCursor: null,
+    });
   });
 
   // A plain user reading the list would learn every colleague's address and when they last signed

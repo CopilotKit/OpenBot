@@ -266,7 +266,27 @@ export function createApp(
       return context.json({ error: "People are not available." }, 503);
     }
 
-    return context.json({ people: await peopleStore.list() });
+    /*
+     * A page, not the deployment.
+     *
+     * `limit` is clamped by the store, so a caller cannot ask for everybody by naming a large
+     * number. `search` is what makes paging usable: an administrator looking for one colleague
+     * should not have to walk pages to reach them.
+     */
+    const url = new URL(context.req.url);
+    const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+
+    return context.json(
+      await peopleStore.list({
+        ...(url.searchParams.get("search")
+          ? { search: url.searchParams.get("search") as string }
+          : {}),
+        ...(url.searchParams.get("cursor")
+          ? { cursor: url.searchParams.get("cursor") as string }
+          : {}),
+        ...(Number.isFinite(limit) ? { limit } : {}),
+      }),
+    );
   });
 
   app.post("/api/admin/people/:userId/role", requireUser, async (context) => {
