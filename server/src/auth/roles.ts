@@ -77,14 +77,18 @@ export async function seedRole(
  *
  * Everybody else is left exactly as they are, because their role is the admin screen's to decide and
  * a sign-in that overwrote it would make that screen lie the moment they came back.
+ *
+ * Answers whether this call is what granted the role, so the caller can put that on the audit trail.
+ * Anybody who can edit the configuration can make themselves an administrator, and until this
+ * returned something there was no row anywhere saying it had happened.
  */
 export async function applyConfiguredAdmin(
   database: Database,
   userId: string,
   initialAdminEmails: readonly string[],
-): Promise<void> {
+): Promise<boolean> {
   // Nothing configured cannot promote anybody, so there is no reason to read the user back.
-  if (initialAdminEmails.length === 0) return;
+  if (initialAdminEmails.length === 0) return false;
 
   const [user] = await database
     .select({ email: users.email })
@@ -94,9 +98,19 @@ export async function applyConfiguredAdmin(
 
   // No user means a session is being made for somebody who is not there, which is not this module's
   // to report: Better Auth is about to fail on its own and would only be given a worse message here.
-  if (!user) return;
+  if (!user) return false;
 
-  if (!isConfiguredAdmin(user.email, initialAdminEmails)) return;
+  if (!isConfiguredAdmin(user.email, initialAdminEmails)) return false;
+
+  const [already] = await database
+    .select({ role: userRoles.role })
+    .from(userRoles)
+    .where(and(eq(userRoles.userId, userId), eq(userRoles.role, "admin")))
+    .limit(1);
 
   await setRole(database, userId, "admin");
+
+  // Whether this sign-in is what granted it. The caller writes an audit row when it did, and a
+  // returning administrator must not produce one on every sign-in.
+  return !already;
 }

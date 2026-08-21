@@ -2,6 +2,7 @@ import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { authoriseAgentCall } from "./agents/callback-token";
+import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import {
@@ -18,6 +19,7 @@ import {
   type RoleRepository,
   requireAdmin,
 } from "./auth/guards";
+import type { IdentityProviderStore } from "./auth/identity-provider-store";
 import type { ChannelEventHub } from "./channels/events";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
@@ -138,12 +140,13 @@ export function createApp(
    */
   peopleStore?: PeopleStore,
   /**
-   * How many enterprise identity providers are registered.
+   * The enterprise identity providers this deployment has registered.
    *
-   * A count rather than the store, because the only question anybody outside Better Auth asks is
-   * whether the sign-in screen should offer the email box at all.
+   * Read here rather than through Better Auth's own listing route, which scopes to the person asking:
+   * a company's Okta tenant belongs to the deployment, not to whichever administrator pasted the
+   * metadata in. See identity-provider-store.ts.
    */
-  ssoProviderCount?: () => Promise<number>,
+  identityProviders?: IdentityProviderStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -173,7 +176,7 @@ export function createApp(
        * that routes by domain; naming the providers would tell anybody who loads the page which
        * companies use this deployment, which is not theirs to have before they sign in.
        */
-      ssoConfigured: (await ssoProviderCount?.()) ? true : false,
+      ssoConfigured: ((await identityProviders?.list()) ?? []).length > 0,
     }),
   );
   /*
@@ -265,7 +268,27 @@ export function createApp(
       return context.json({ error: "People are not available." }, 503);
     }
 
-    return context.json({ people: await peopleStore.list() });
+    /*
+     * A page, not the deployment.
+     *
+     * `limit` is clamped by the store, so a caller cannot ask for everybody by naming a large
+     * number. `search` is what makes paging usable: an administrator looking for one colleague
+     * should not have to walk pages to reach them.
+     */
+    const url = new URL(context.req.url);
+    const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+
+    return context.json(
+      await peopleStore.list({
+        ...(url.searchParams.get("search")
+          ? { search: url.searchParams.get("search") as string }
+          : {}),
+        ...(url.searchParams.get("cursor")
+          ? { cursor: url.searchParams.get("cursor") as string }
+          : {}),
+        ...(Number.isFinite(limit) ? { limit } : {}),
+      }),
+    );
   });
 
   app.post("/api/admin/people/:userId/role", requireUser, async (context) => {
@@ -397,6 +420,73 @@ export function createApp(
 
     return context.json({ person: await peopleStore.find(userId) });
   });
+
+  /*
+   * The identity providers this deployment has registered.
+   *
+   * Not Better Auth's own `GET /sso/providers`, which answers with the ones the person asking
+   * registered themselves. Two administrators therefore saw two different deployments: the second
+   * one to open this screen found it empty and registered a provider that was already there. What is
+   * registered is a fact about the deployment, so every administrator sees the same list.
+   */
+  app.get("/api/admin/identity-providers", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) {
+      return denied;
+    }
+    if (!identityProviders) {
+      return context.json(
+        { error: "Identity providers are not available." },
+        503,
+      );
+    }
+
+    return context.json({ providers: await identityProviders.list() });
+  });
+
+  /*
+   * Remove one.
+   *
+   * Ours rather than Better Auth's `delete-provider`, which refuses unless the person asking is the
+   * one who registered it. That leaves a provider nobody can remove as soon as the administrator who
+   * set it up has left, which is the same moment somebody most needs to.
+   */
+  app.delete(
+    "/api/admin/identity-providers/:providerId",
+    requireUser,
+    async (context) => {
+      const denied = requireAdmin(context);
+      if (denied) {
+        return denied;
+      }
+      if (!identityProviders) {
+        return context.json(
+          { error: "Identity providers are not available." },
+          503,
+        );
+      }
+
+      const providerId = context.req.param("providerId");
+      const removed = await identityProviders.remove(providerId);
+      if (!removed) {
+        // A screen somebody left open, or two administrators removing the same one. Saying so beats
+        // reporting success for something that was not there.
+        return context.json({ error: "There is no such provider." }, 404);
+      }
+
+      if (auditStore) {
+        await recordAuditEvent(auditStore, {
+          eventType: "identity_provider.removed",
+          targetType: "identity_provider",
+          targetId: providerId,
+          actorUserId: context.var.actor.id,
+          payload: { removedBy: context.var.actor.email },
+        });
+      }
+
+      return context.json({ removed: true });
+    },
+  );
 
   app.get("/api/admin/credentials", requireUser, async (context) => {
     const denied = requireAdmin(context);
@@ -541,13 +631,33 @@ export function createApp(
     app.route("/", copilotHandler);
   }
 
+  /**
+   * May this person act as this Bot?
+   *
+   * The store's own read path already applies `canAccessAgent`, so asking it for the Bot is the same
+   * question the roster and the runtime ask, rather than a second copy of the rule.
+   *
+   * A deployment with no profile store has no agents table and therefore no private Bot to protect:
+   * its Bots come from the tenant package and are public to everybody who can sign in. Answering yes
+   * there keeps that deployment working without weakening one that has owners.
+   */
+  const canUseBot: BotAccessCheck = agentProfileStore
+    ? async (actor, botId) =>
+        (await agentProfileStore.get(actor, botId)) !== null
+    : async () => true;
+
   // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
   // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is
   // the one shape of this feature that must not exist.
   if (computerGateway && computerPolicy) {
     app.route(
       "/api/computers",
-      createComputerRoutes(computerGateway, computerPolicy, requireUser),
+      createComputerRoutes(
+        computerGateway,
+        computerPolicy,
+        requireUser,
+        canUseBot,
+      ),
     );
   }
 
@@ -577,12 +687,15 @@ export function createApp(
   if (componentStore) {
     app.route(
       "/api/components",
-      createComponentRoutes(componentStore, requireUser, auditStore),
+      createComponentRoutes(componentStore, requireUser, auditStore, canUseBot),
     );
   }
 
   if (pluginStore) {
-    app.route("/api/plugins", createPluginRoutes(pluginStore, requireUser));
+    app.route(
+      "/api/plugins",
+      createPluginRoutes(pluginStore, requireUser, canUseBot),
+    );
   }
 
   /*

@@ -190,6 +190,15 @@ const POLICY_FUNCTIONS: Record<string, (...args: never[]) => unknown> = {
  * `onError` decides what a broken expression means, because the safe answer differs by list: a broken
  * `allow` must not permit, and a broken `deny` must not stop denying. Both are logged loudly, because
  * a policy that silently misbehaves is worse than one that visibly refuses.
+ *
+ * A rule can be broken two ways and only one of them throws. `"Submit order"` is valid CEL: it parses,
+ * it evaluates, and it answers with a string, which is not an answer to "does this rule apply". That
+ * is what somebody writes who reads the deny list as a list of labels rather than expressions, and
+ * reading it as "no match" would let the action through under the permissive allow rule that ships by
+ * default, with nothing logged and the rule still listed on the Boundaries page as though it were in
+ * force. So anything other than a boolean is a broken rule, and takes the same fail-closed path as a
+ * throw. False is a real answer and stays one; a deny list that read every false as a denial would
+ * refuse everything.
  */
 function matches(
   expression: string,
@@ -197,13 +206,22 @@ function matches(
   onError: boolean,
 ): boolean {
   try {
-    return (
-      evaluate(
-        expression,
-        context as unknown as Record<string, unknown>,
-        POLICY_FUNCTIONS as Record<string, CallableFunction>,
-      ) === true
+    const result = evaluate(
+      expression,
+      context as unknown as Record<string, unknown>,
+      POLICY_FUNCTIONS as Record<string, CallableFunction>,
     );
+    if (typeof result === "boolean") return result;
+
+    console.error(
+      JSON.stringify({
+        type: "computer-policy-expression-error",
+        expression,
+        error: `expected a true or false answer, got ${result === null ? "null" : typeof result}`,
+        treatedAs: onError,
+      }),
+    );
+    return onError;
   } catch (error) {
     console.error(
       JSON.stringify({

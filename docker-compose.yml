@@ -42,6 +42,12 @@ services:
     environment:
       # The secret every caller must present. The container refuses to start without it.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-}
+      # How many Bots may hold a running browser at once, and how long an untouched one is kept.
+      # A few hundred MB each, so on a deployment with many Bots these are the difference between
+      # a container that holds steady and one that is killed for memory. Defaults are 8 and 30
+      # minutes; closing a browser costs only a relaunch, because the profile is on the volume below.
+      COMPUTER_MAX_BROWSERS: ${COMPUTER_MAX_BROWSERS:-}
+      COMPUTER_BROWSER_IDLE_MS: ${COMPUTER_BROWSER_IDLE_MS:-}
     volumes:
       - agent-workspace:/workspace
       # Chromium's user-data directory is volume-backed so logins survive container restarts.

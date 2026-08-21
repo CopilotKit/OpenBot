@@ -4,6 +4,8 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { genericOAuth, okta } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
+import type { AuditEventInput, AuditStore } from "../audit";
+import { recordAuditEvent } from "../audit";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
 import {
@@ -13,7 +15,33 @@ import {
   users,
   verifications,
 } from "../db/schema";
+import { encryptSsoConfig } from "./encrypt-sso-config";
 import { applyConfiguredAdmin, seedRole } from "./roles";
+
+/**
+ * Write a row about a sign-in, and never let the writing of it stop one.
+ *
+ * These run inside Better Auth's own hooks, where a thrown error becomes a refused sign-in. A trail
+ * that is briefly unavailable must not lock everybody out of the deployment, so the failure is
+ * logged where an operator will see it and the sign-in continues.
+ */
+async function record(
+  auditStore: AuditStore | undefined,
+  event: AuditEventInput,
+): Promise<void> {
+  if (!auditStore) return;
+  try {
+    await recordAuditEvent(auditStore, event);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "sign-in-audit-write-failed",
+        eventType: event.eventType,
+        error: String(error),
+      }),
+    );
+  }
+}
 
 /**
  * An address for somebody arriving from Entra, whatever claim it turned up in.
@@ -68,6 +96,18 @@ export function createAuth(
    * having worked while quietly not having.
    */
   isRevoked?: (email: string) => Promise<boolean>,
+  /**
+   * Where getting in, and being turned away, are written down.
+   *
+   * Sign-in was the one thing this deployment did that left no trace. Two questions could not be
+   * answered at all: who granted themselves the administrator role by editing the configuration, and
+   * whether a person somebody has just removed had ever been here, because removing them deletes the
+   * sessions that were the only evidence.
+   *
+   * Optional and never fatal. A trail that is unavailable must not stop somebody signing in, so every
+   * write below is guarded and its failure is logged rather than raised.
+   */
+  auditStore?: AuditStore,
 ) {
   const authConfig = config.auth;
   if (!authConfig) {
@@ -127,11 +167,34 @@ export function createAuth(
     baseURL: authConfig.baseUrl,
     secret: authConfig.secret,
     trustedOrigins: authConfig.trustedOrigins,
-    database: drizzleAdapter(database, {
-      provider: "pg",
-      usePlural: true,
-      schema: { users, sessions, accounts, verifications, ssoProviders },
-    }),
+    /*
+     * Wrapped, so a company's client secret is ciphertext in the column.
+     *
+     * The SSO plugin writes `oidc_config` and `saml_config` as plaintext JSON, and the client secret
+     * for a customer's directory is inside them. Every other secret this deployment keeps goes
+     * through `KEY_ENCRYPTION_KEY`; these two were the exception. See encrypt-sso-config.ts.
+     */
+    database: encryptSsoConfig(
+      drizzleAdapter(database, {
+        provider: "pg",
+        usePlural: true,
+        schema: { users, sessions, accounts, verifications, ssoProviders },
+      }),
+      config.keyEncryptionKey,
+    ),
+    account: {
+      /*
+       * The provider's access and refresh tokens, encrypted at rest.
+       *
+       * Better Auth's own mechanism, which uses `BETTER_AUTH_SECRET` rather than
+       * `KEY_ENCRYPTION_KEY`. Deliberately theirs: it encrypts on the way into storage and decrypts
+       * on the way out, in the one place that knows every path a token takes, and hand-rolling that
+       * inside somebody else's storage layer is how rows become permanently unreadable. It also
+       * tolerates the plaintext already in the column, so switching it on does not invalidate the
+       * accounts of everybody who has already signed in.
+       */
+      encryptOAuthTokens: true,
+    },
     plugins,
     socialProviders: {
       ...(authConfig.google ? { google: authConfig.google } : {}),
@@ -158,6 +221,16 @@ export function createAuth(
            */
           before: async (user) => {
             if (await isRevoked?.(user.email)) {
+              // The row a removed person coming back produces. Nothing else records the attempt:
+              // no user row is written and no session exists to look at afterwards.
+              await record(auditStore, {
+                eventType: "session.refused",
+                targetType: "person",
+                payload: {
+                  email: user.email,
+                  reason: "access removed by an administrator",
+                },
+              });
               throw new APIError("FORBIDDEN", {
                 message: "Your access to this deployment has been removed.",
               });
@@ -192,6 +265,16 @@ export function createAuth(
               .where(eq(users.id, session.userId))
               .limit(1);
             if (user && (await isRevoked?.(user.email))) {
+              await record(auditStore, {
+                eventType: "session.refused",
+                targetType: "person",
+                targetId: session.userId,
+                actorUserId: session.userId,
+                payload: {
+                  email: user.email,
+                  reason: "access removed by an administrator",
+                },
+              });
               throw new APIError("FORBIDDEN", {
                 message: "Your access to this deployment has been removed.",
               });
@@ -205,11 +288,47 @@ export function createAuth(
              * in silently does nothing. Only promotes, and only addresses the list names: everybody
              * else's role belongs to the admin screen.
              */
-            await applyConfiguredAdmin(
+            const promoted = await applyConfiguredAdmin(
               database,
               session.userId,
               authConfig.initialAdminEmails,
             );
+
+            const [user] = await database
+              .select({ email: users.email })
+              .from(users)
+              .where(eq(users.id, session.userId))
+              .limit(1);
+
+            /*
+             * The promotion, on the trail.
+             *
+             * The floor is applied silently by design, which meant anybody who could edit
+             * `INITIAL_ADMIN_EMAILS` made themselves an administrator and nothing anywhere said so.
+             * Written only when the role actually changed, so a returning administrator does not
+             * produce one of these on every sign-in.
+             */
+            if (promoted) {
+              await record(auditStore, {
+                eventType: "person.admin_by_configuration",
+                targetType: "person",
+                targetId: session.userId,
+                actorUserId: session.userId,
+                payload: {
+                  email: user?.email,
+                  reason:
+                    "this address is named in INITIAL_ADMIN_EMAILS, so the configuration granted it",
+                },
+              });
+            }
+
+            await record(auditStore, {
+              eventType: "session.signed_in",
+              targetType: "person",
+              targetId: session.userId,
+              actorUserId: session.userId,
+              payload: { email: user?.email },
+            });
           },
         },
       },

@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { type ChannelSummary, channelKeys } from "./queries";
+import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
 
 /**
  * Keep the roster live.
@@ -52,34 +52,55 @@ export function useChannelEvents() {
           return;
         }
 
+        /*
+         * The list is paged, so the cache holds pages rather than one array.
+         *
+         * The channel is patched inside whichever page holds it and that page is re-sorted. Sorting
+         * across pages is deliberately not attempted: a channel that has just become the most recent
+         * belongs at the top of page one, and moving a row between pages would fight the cursors the
+         * next fetch uses. The page it is on stays correct, and the next refetch puts it in order.
+         */
         queryClient.setQueryData(
           channelKeys.list(),
-          (channels: ChannelSummary[] | undefined) => {
-            if (!channels) return channels;
-            // Unknown channel ids mean the roster is stale; refetch the list instead of patching.
-            if (!channels.some((c) => c.id === activity.channelId)) {
+          (
+            data: { pages: ChannelPage[]; pageParams: unknown[] } | undefined,
+          ) => {
+            if (!data) return data;
+
+            const holdingPage = data.pages.findIndex((page) =>
+              page.channels.some(
+                (channel) => channel.id === activity.channelId,
+              ),
+            );
+            // An unknown channel id means the roster is stale; refetch rather than patch.
+            if (holdingPage === -1) {
               void queryClient.invalidateQueries({
                 queryKey: channelKeys.list(),
               });
-              return channels;
+              return data;
             }
-            // Preserve object identity for unchanged rows so memoized rows do not re-render.
-            const index = channels.findIndex(
+
+            const page = data.pages[holdingPage] as ChannelPage;
+            const index = page.channels.findIndex(
               (channel) => channel.id === activity.channelId,
             );
-            const previous = channels[index];
-            if (!previous) return channels;
+            const previous = page.channels[index];
+            if (!previous) return data;
 
-            const patched = { ...previous, ...activity };
-            const next = channels.slice();
-            next[index] = patched;
+            // Preserve object identity for unchanged rows so memoized rows do not re-render.
+            const next = page.channels.slice();
+            next[index] = { ...previous, ...activity };
             next.sort(byRecency);
 
-            // An event that changes nothing visible, a duplicate, or a report the server ignored
-            // as stale, returns the original array, so React re-renders nothing at all.
-            return next.every((channel, at) => channel === channels[at])
-              ? channels
-              : next;
+            // An event that changes nothing visible, a duplicate, or a report the server ignored as
+            // stale, returns the original object, so React re-renders nothing at all.
+            if (next.every((channel, at) => channel === page.channels[at])) {
+              return data;
+            }
+
+            const pages = data.pages.slice();
+            pages[holdingPage] = { ...page, channels: next };
+            return { ...data, pages };
           },
         );
       };

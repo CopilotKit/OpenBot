@@ -7,7 +7,11 @@ import {
   agents,
   deploymentPackages,
 } from "../db/schema";
-import { authFromConfiguration, storeAgentAuth } from "./auth-header";
+import {
+  authFromConfiguration,
+  retireReplacedKey,
+  storeAgentAuth,
+} from "./auth-header";
 import {
   hashCallbackToken,
   mintCallbackToken,
@@ -355,8 +359,12 @@ export function createAgentProfileStore(
             .from(agents)
             .where(eq(agents.id, id))
             .limit(1);
+          const previous = (row?.configuration ?? {}) as Record<
+            string,
+            unknown
+          >;
           const configuration = {
-            ...((row?.configuration ?? {}) as Record<string, unknown>),
+            ...previous,
             ...(input.endpoint ? { endpoint: input.endpoint } : {}),
             ...(input.auth && vault
               ? {
@@ -370,6 +378,21 @@ export function createAgentProfileStore(
                 }
               : {}),
           };
+
+          /*
+           * The key this one replaces is retired.
+           *
+           * Rotating a key is the standard answer to a suspected leak, and without this it did not
+           * answer it: the old credential stayed in the vault, decryptable and still valid, and
+           * nothing listed it or could reach it. "Is that leaked key still live" was yes. The
+           * credentials table also grew one unrevoked secret per edit per Bot.
+           *
+           * After the new one is stored, so a failure here leaves the Bot working with a key too
+           * many rather than with none.
+           */
+          if (input.auth && vault) {
+            await retireReplacedKey(vault.store, previous, configuration);
+          }
           await transaction
             .update(agents)
             .set({ name: input.name, configuration, updatedAt })
@@ -455,6 +478,27 @@ export function createAgentProfileStore(
             .update(agentProfiles)
             .set({ deletedAt, updatedAt: deletedAt })
             .where(eq(agentProfiles.agentId, id));
+
+          /*
+           * And its key stops working.
+           *
+           * A deleted Bot left its credential in the vault, decryptable and still valid, with
+           * nothing listing it and no screen able to reach it: deleting the Bot was the last chance
+           * anybody had to retire it. The profile is a soft delete, deliberately, but the key is not
+           * something to keep pending an undelete that would ask for a new one anyway.
+           */
+          if (vault) {
+            const [row] = await transaction
+              .select({ configuration: agents.configuration })
+              .from(agents)
+              .where(eq(agents.id, id))
+              .limit(1);
+            await retireReplacedKey(
+              vault.store,
+              (row?.configuration ?? {}) as Record<string, unknown>,
+              {},
+            );
+          }
         },
         { isolationLevel: "read committed" },
       );

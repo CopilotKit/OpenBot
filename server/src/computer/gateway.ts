@@ -20,6 +20,7 @@
 import { type AuditStore, recordAuditEvent } from "../audit";
 import { ComputerUnavailableError, createComputerTransport } from "./client";
 import { checkComputerAddress } from "./target";
+
 export {
   ComputerUnavailableError,
   ElementNotFoundError,
@@ -28,6 +29,7 @@ export {
   WorkspaceRefusedError,
   WorkspaceRequestError,
 } from "./client";
+
 import {
   type ActionPolicy,
   evaluateActionPolicy,
@@ -49,6 +51,8 @@ import type {
   ReadFileInput,
   ReadFileResult,
   ReadResult,
+  RunCommandInput,
+  RunCommandResult,
   ScreenshotResult,
   ScrollInput,
   SecretRequest,
@@ -56,11 +60,14 @@ import type {
   SnapshotElement,
   SnapshotResult,
   TypeInput,
-  RunCommandInput,
-  RunCommandResult,
   WriteFileInput,
   WriteFileResult,
 } from "./schema";
+import {
+  createInMemorySnapshotStore,
+  type SnapshotStore,
+  type StoredSnapshot,
+} from "./snapshot-store";
 
 export class ActionRefusedError extends Error {
   /** The rule that refused it, so the surface can show which one and an operator can find it. */
@@ -92,6 +99,14 @@ export type ComputerGatewayOptions = {
   token?: string;
   /** An injectable fetch implementation for focused gateway tests. */
   fetchImpl?: typeof fetch;
+  /**
+   * Where the snapshot a ref is resolved against is kept.
+   *
+   * A deployment passes the database-backed store, because the process that takes a snapshot is
+   * rarely the one that resolves a ref from it. Absent, the gateway keeps snapshots in memory, which
+   * is correct in one process and is what a unit test wants. See snapshot-store.ts.
+   */
+  snapshots?: SnapshotStore;
 };
 
 export interface ComputerGateway {
@@ -188,20 +203,6 @@ export interface ComputerGateway {
   ): Promise<{ cleared: boolean }>;
 }
 
-/**
- * The last snapshot the server took, per computer.
- *
- * In memory. It describes the live contents of a browser window, so it is
- * meaningless the moment the process holding that window restarts. Persisting it would create a cache
- * that can disagree with the page, which is worse than not having one: the refs would resolve to names
- * that are no longer on screen and the policy would decide on fiction.
- */
-type CachedSnapshot = {
-  snapshotId: number;
-  elements: Map<string, SnapshotElement>;
-  url: string;
-};
-
 export function createComputerGateway(
   options: ComputerGatewayOptions,
 ): ComputerGateway {
@@ -213,7 +214,18 @@ export function createComputerGateway(
       : {}),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
-  const snapshots = new Map<string, CachedSnapshot>();
+  /**
+   * Where the snapshot a ref is resolved against lives.
+   *
+   * Not a `Map` in this process. It describes the live contents of a browser window, and the process
+   * that took it is rarely the one that resolves a ref from it: OpenBot is several servers behind a
+   * load balancer, and consecutive calls on one conversation land on different ones. Kept in memory,
+   * the mapping is absent on every replica but the one that snapshotted, so the ref resolves to
+   * nothing, the policy decides with no element in front of it, and the audit row cannot name what
+   * was touched. The store puts it in Postgres, and the generation carried on every action keeps a
+   * ref from a superseded page from resolving to whatever now holds it. See snapshot-store.ts.
+   */
+  const snapshots = options.snapshots ?? createInMemorySnapshotStore();
 
   /**
    * Where this Bot's computer is, checked before anything is sent to it.
@@ -281,6 +293,16 @@ export function createComputerGateway(
     return get<ScreenshotResult>(botId, "/screenshot");
   }
 
+  /**
+   * Read-only for the page, but it writes the resolution table the boundary reads.
+   *
+   * Nothing on the page changes and there is nothing to decide, so the snapshot itself passes
+   * straight through. What it does record is the ref-to-element mapping every later action on this
+   * computer is resolved against, and it records it where another replica can read it: the click that
+   * uses these refs will almost certainly arrive on a different process. The write is awaited before
+   * the refs are returned, so the snapshot cannot be resolved against on one server before it exists
+   * on the store.
+   */
   async function snapshot(botId: string): Promise<SnapshotResult> {
     const result = await transport.call<SnapshotResult>(
       await locate(botId),
@@ -288,7 +310,7 @@ export function createComputerGateway(
       "/snapshot",
       { method: "POST" },
     );
-    snapshots.set(botId, {
+    await snapshots.save(botId, {
       snapshotId: result.snapshotId,
       url: result.url,
       elements: new Map(
@@ -303,18 +325,25 @@ export function createComputerGateway(
   }
 
   /**
-   * Resolve a ref against the snapshot the server holds.
+   * Resolve a ref against the snapshot the server holds, and only against the one it came from.
    *
    * Returns undefined for an unknown ref rather than throwing, because the policy still has to run:
-   * an action on an element we cannot identify must still receive a policy decision.
-   * A deny rule written against a page a Bot has not snapshotted should still refuse it.
+   * an action on an element we cannot identify must still receive a policy decision, and a deny rule
+   * written against a page a Bot has not snapshotted should still refuse it.
+   *
+   * A ref resolves only when its generation matches the stored snapshot's. A ref carrying a
+   * superseded generation resolves to nothing rather than to whatever now holds that ref: the policy
+   * must never decide on an element the caller has already scrolled off the page. The computer makes
+   * the same generation check when the action reaches it; this one keeps the decision and the audit
+   * row honest before it gets there, on whichever replica the action landed.
    */
   function resolve(
-    botId: string,
+    stored: StoredSnapshot | undefined,
     ref: string | undefined,
+    snapshotId: number | undefined,
   ): SnapshotElement | undefined {
-    if (!ref) return undefined;
-    return snapshots.get(botId)?.elements.get(ref);
+    if (!ref || !stored || stored.snapshotId !== snapshotId) return undefined;
+    return stored.elements.get(ref);
   }
 
   /**
@@ -330,6 +359,8 @@ export function createComputerGateway(
     actor: ActionActor,
     subject: {
       ref?: string;
+      /** The generation the ref came from. A ref only resolves against its own snapshot. */
+      snapshotId?: number;
       filePath?: string;
       targetUrl?: string;
       key?: string;
@@ -340,13 +371,15 @@ export function createComputerGateway(
     },
     run: () => Promise<T>,
   ): Promise<T> {
-    const { ref, filePath } = subject;
-    const element = resolve(botId, ref);
-    const cached = snapshots.get(botId);
+    const { ref, filePath, snapshotId } = subject;
+    // Loaded from the store, not this process's memory: the snapshot these refs belong to was very
+    // likely taken by another replica, and resolving against a local map would find nothing there.
+    const stored = await snapshots.load(botId);
+    const element = resolve(stored, ref, snapshotId);
     // For a navigation the relevant page is the one being opened, not the one already loaded. Using
-    // the cached URL would mean `page.host == "..."` could never match the destination, which is the
+    // the stored URL would mean `page.host == "..."` could never match the destination, which is the
     // only thing a rule about navigation would ever want to say.
-    const pageUrl = subject.targetUrl ?? cached?.url ?? "";
+    const pageUrl = subject.targetUrl ?? stored?.url ?? "";
 
     const intent = intentOf(toolName, subject.key);
 
@@ -539,7 +572,9 @@ export function createComputerGateway(
      */
     async resetComputer(botId: string, actor: ActionActor) {
       const result = await provider.reset(botId);
-      snapshots.delete(botId);
+      // The refs the last snapshot handed out describe a page that no longer exists, and a fresh
+      // computer counts generations from one again, so the row has to go with the profile.
+      await snapshots.clear(botId);
       await writeControlEvent(auditStore, "computer.reset", {
         botId,
         actor,
@@ -617,7 +652,11 @@ export function createComputerGateway(
         "computer_click",
         botId,
         actor,
-        { ref: input.ref, ...(signal ? { signal } : {}) },
+        {
+          ref: input.ref,
+          snapshotId: input.snapshotId,
+          ...(signal ? { signal } : {}),
+        },
         () => post<ActionResult>(botId, "/click", input, signal),
       );
     },
@@ -632,7 +671,11 @@ export function createComputerGateway(
         "computer_type",
         botId,
         actor,
-        { ref: input.ref, ...(signal ? { signal } : {}) },
+        {
+          ref: input.ref,
+          snapshotId: input.snapshotId,
+          ...(signal ? { signal } : {}),
+        },
         () => post<ActionResult>(botId, "/type", input, signal),
       );
     },
@@ -649,7 +692,12 @@ export function createComputerGateway(
         actor,
         // The key is part of the subject, so a rule can tell Enter from a letter. Form submission can
         // happen through a keypress as well as a click, so the policy context carries the key.
-        { ref: input.ref, key: input.key, ...(signal ? { signal } : {}) },
+        {
+          ref: input.ref,
+          snapshotId: input.snapshotId,
+          key: input.key,
+          ...(signal ? { signal } : {}),
+        },
         () => post<ActionResult>(botId, "/key", input, signal),
       );
     },

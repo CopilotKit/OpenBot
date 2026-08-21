@@ -15,6 +15,13 @@ export type IdentityProvider = {
   domain: string;
   /** Which protocol it speaks. SAML is what most enterprise identity teams hand over. */
   protocol: "saml" | "oidc";
+  /**
+   * Whether the person who registered it still has an account here. Null once they are gone.
+   *
+   * Shown so somebody auditing a deployment can see that a provider outlived whoever set it up,
+   * which is the normal case a year in and used to be the case where the provider vanished instead.
+   */
+  registeredBy: string | null;
 };
 
 export const identityProviderKeys = {
@@ -25,34 +32,20 @@ export const identityProviderKeys = {
 /**
  * The registered providers.
  *
- * Read from Better Auth's own route rather than one of ours, because the plugin owns the table and a
- * second reader would be a second answer. The payload carries no client secret or signing key: the
- * fields below are all this asks for.
+ * Read from our own admin route, not Better Auth's `GET /sso/providers`. That one answers with the
+ * providers the person asking registered themselves, so two administrators saw two different
+ * deployments and the second one to open this screen found it empty and registered a provider that
+ * already existed. What is registered is a fact about the deployment.
+ *
+ * The payload carries no client secret or signing certificate; the server's projection cannot express
+ * them.
  */
 export function identityProviderListQueryOptions() {
   return queryOptions({
     queryKey: identityProviderKeys.list(),
-    queryFn: async (): Promise<IdentityProvider[]> => {
-      // `{ providers: [...] }`, not a bare array. Better Auth's own routes carry their own
-      // envelope, which is why this reads the body rather than passing a key to `client`.
-      const response = await client("/api/auth/sso/providers", {
+    queryFn: (): Promise<IdentityProvider[]> =>
+      client("/api/admin/identity-providers", "providers", {
         fallback: "Could not load identity providers",
-      });
-      const { providers = [] } = (await response.json()) as {
-        providers?: {
-          providerId: string;
-          issuer: string;
-          domain: string;
-          samlConfig?: unknown;
-        }[];
-      };
-
-      return providers.map((provider) => ({
-        providerId: provider.providerId,
-        issuer: provider.issuer,
-        domain: provider.domain,
-        protocol: provider.samlConfig ? "saml" : "oidc",
-      }));
-    },
+      }),
   });
 }

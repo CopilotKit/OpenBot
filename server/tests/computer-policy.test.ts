@@ -87,6 +87,49 @@ describe("evaluateActionPolicy", () => {
     expect(decision.source).toBe("deny");
   });
 
+  // The other way a rule is broken. These parse and evaluate, so nothing throws; they simply do not
+  // answer the question that was asked, and the only safe reading of a deny rule that did not answer
+  // is that it denied. `"Submit order"` is what somebody writes who thinks the list takes labels
+  // rather than expressions, and it is a valid CEL string.
+  test.each([
+    ['"Submit order"', "a bare string, i.e. the list read as labels"],
+    ["element.name", "a bare field reference"],
+    ['contains(element.name, "submit") ? element.name : false', "a ternary"],
+    ["repeat.count", "a number"],
+  ])(
+    "a deny expression that is not a question (%s: %s) still denies",
+    (rule) => {
+      const decision = evaluateActionPolicy(
+        { ...permissive, deny: [rule] },
+        context(),
+      );
+      expect(decision.allowed).toBe(false);
+      expect(decision.source).toBe("deny");
+    },
+  );
+
+  // The mirror. A rule that does not answer must not permit either, which is what this already did by
+  // reading anything other than true as no match.
+  test("an allow expression that is not a question does not permit", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: [], allow: ['"Submit order"'] },
+      context(),
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.source).toBe("default");
+  });
+
+  // A rule that answers "no" is not broken, and must not be read as one: a deny list where every
+  // false reading became a denial would refuse everything.
+  test("a deny expression that answers false permits", () => {
+    const decision = evaluateActionPolicy(
+      { ...permissive, deny: ['contains(element.name, "cancel")'] },
+      context(),
+    );
+    expect(decision.allowed).toBe(true);
+    expect(decision.source).toBe("allow");
+  });
+
   test("a broken allow expression does not permit", () => {
     const decision = evaluateActionPolicy(
       { mode: "enforce", deny: [], allow: ["also not ( valid"] },
