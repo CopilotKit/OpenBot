@@ -59,7 +59,12 @@ describe("credential encryption", () => {
             stored.push(value);
             return { id: "credential-1", revokedAt: null };
           },
+          rotate: async () => {
+            throw new Error("nothing live to replace, so create is the path");
+          },
           revoke: async () => new Date(),
+          isLive: async () => false,
+          findLiveByKey: async () => null,
         },
         auditStore: {
           insert: async (event) => {
@@ -266,44 +271,23 @@ describe("model credential resolution", () => {
 });
 
 describe("model credential store lookup", () => {
-  test("selects the newest active matching model credential with id as the timestamp tie-breaker", async () => {
-    const matchingOldId = randomUUID();
-    const matchingLowerId = "00000000-0000-4000-8000-000000000001";
-    const matchingHigherId = "00000000-0000-4000-8000-000000000002";
+  test("selects the live matching model credential and ignores the rest", async () => {
+    // A key holds one live credential, which `credentials_active_key_idx`
+    // enforces, so the lookup never has more than one candidate to choose
+    // between. What is under test is the filter: the rows that do not match on
+    // kind, provider or keyId, and the revoked row for this very key, all have
+    // to be passed over.
+    const activeId = randomUUID();
     const ignoredIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
-    const allIds = [
-      matchingOldId,
-      matchingLowerId,
-      matchingHigherId,
-      ...ignoredIds,
-    ];
-    credentialIds.push(...allIds);
+    credentialIds.push(activeId, ...ignoredIds);
 
     await database.insert(credentials).values([
       {
-        id: matchingOldId,
+        id: activeId,
         kind: "model",
         provider: "openai",
         keyId: "openai-api-key",
-        encryptedValue: "old-matching-value",
-        metadata: {},
-        createdAt: new Date("2026-01-01T00:00:00.000Z"),
-      },
-      {
-        id: matchingLowerId,
-        kind: "model",
-        provider: "openai",
-        keyId: "openai-api-key",
-        encryptedValue: "lower-id-value",
-        metadata: {},
-        createdAt: new Date("2026-02-01T00:00:00.000Z"),
-      },
-      {
-        id: matchingHigherId,
-        kind: "model",
-        provider: "openai",
-        keyId: "openai-api-key",
-        encryptedValue: "higher-id-value",
+        encryptedValue: "active-value",
         metadata: {},
         createdAt: new Date("2026-02-01T00:00:00.000Z"),
       },
@@ -342,7 +326,7 @@ describe("model credential store lookup", () => {
         encryptedValue: "revoked-value",
         metadata: {},
         revokedAt: new Date("2026-03-01T00:00:00.000Z"),
-        createdAt: new Date("2026-03-01T00:00:00.000Z"),
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
       },
     ]);
 
@@ -351,7 +335,7 @@ describe("model credential store lookup", () => {
         provider: "openai",
         keyId: "openai-api-key",
       }),
-    ).resolves.toEqual({ encryptedValue: "higher-id-value" });
+    ).resolves.toEqual({ encryptedValue: "active-value" });
   });
 });
 
@@ -503,6 +487,87 @@ describe("credential store rotation", () => {
     });
 
     await expect(store.revoke(id)).rejects.toThrow("already revoked");
+  });
+});
+
+describe("one live credential per key", () => {
+  test("the index refuses a second live credential for the same key", async () => {
+    const first = randomUUID();
+    const second = randomUUID();
+    credentialIds.push(first, second);
+    const keyId = `unique-active-${first}`;
+    await database.insert(credentials).values({
+      id: first,
+      kind: "model",
+      provider: "openai",
+      keyId,
+      encryptedValue: "first",
+      metadata: {},
+    });
+
+    await expect(
+      (async () =>
+        database.insert(credentials).values({
+          id: second,
+          kind: "model",
+          provider: "openai",
+          keyId,
+          encryptedValue: "second",
+          metadata: {},
+        }))(),
+    ).rejects.toThrow();
+  });
+
+  test("storing a credential for a key that has one replaces it", async () => {
+    // The Credentials page offers Add and Revoke and no rotate control, so
+    // replacing a key is done by adding one for the same provider and keyId.
+    // That has to retire what is there rather than raise a unique violation.
+    const audited: { eventType: string; targetId?: string }[] = [];
+    const service = {
+      encryptionKey: key,
+      store: createCredentialStore(database),
+      auditStore: {
+        insert: async (event: { eventType: string; targetId?: string }) => {
+          audited.push(event);
+        },
+      },
+    };
+    const keyId = `replace-on-add-${randomUUID()}`;
+
+    const first = await createCredential(service, {
+      kind: "model",
+      provider: "openai",
+      keyId,
+      metadata: {},
+      plaintext: "first-secret",
+      actorUserId: "admin",
+    });
+    credentialIds.push(first.id);
+
+    const second = await createCredential(service, {
+      kind: "model",
+      provider: "openai",
+      keyId,
+      metadata: {},
+      plaintext: "second-secret",
+      actorUserId: "admin",
+    });
+    credentialIds.push(second.id);
+
+    expect(second.id).not.toBe(first.id);
+    const rows = await database
+      .select({ id: credentials.id, revokedAt: credentials.revokedAt })
+      .from(credentials)
+      .where(eq(credentials.keyId, keyId));
+    const byId = Object.fromEntries(rows.map((row) => [row.id, row]));
+    expect(byId[first.id]?.revokedAt).not.toBeNull();
+    expect(byId[second.id]?.revokedAt).toBeNull();
+
+    // The trail says what happened: an addition, then a replacement naming it.
+    expect(audited.map((event) => event.eventType)).toEqual([
+      "credential.created",
+      "credential.rotated",
+    ]);
   });
 });
 

@@ -9,7 +9,7 @@ import { TEST_POOL } from "./support/database";
 import {
   agents,
   auditEvents,
-  credentials,
+  credentials as credentialRows,
   mcpServers,
   mcpTools,
   pluginGrants,
@@ -63,19 +63,30 @@ let serverWasAlreadyConfigured = false;
  */
 let toolWasAlreadyAdvertised = false;
 
+const revokedCredentialIds: string[] = [];
+const issuedCredentialIds: string[] = [];
 const store = createPluginStore({
   database,
   auditStore: createAuditStore(database),
   credentials: {
     // No credential is ever read in these tests, because every call is refused before the vault.
     readSecret: async () => null,
-    // Nor written. Loud rather than absent: a call reaching either of these would mean this file had
-    // started exercising something it does not claim to, and a silent no-op would hide that.
+    // Nor created. Loud rather than absent: a call reaching this would mean this file had started
+    // exercising something it does not claim to, and a silent no-op would hide that.
     create: async () => {
       throw new Error("this suite does not write credentials");
     },
-    revoke: async () => {
-      throw new Error("this suite does not revoke credentials");
+    // `removeServer` does revoke: it retires the token the server was configured with so a re-add
+    // does not collide on `credentials_active_key_idx`. The stamp goes to the real row, because
+    // `removeServer` reads liveness from the table before deciding whether to revoke at all.
+    revoke: async (id: string) => {
+      const revokedAt = new Date();
+      await database
+        .update(credentialRows)
+        .set({ revokedAt, updatedAt: revokedAt })
+        .where(eq(credentialRows.id, id));
+      revokedCredentialIds.push(id);
+      return revokedAt;
     },
   },
   encryptionKey: "x".repeat(44),
@@ -200,6 +211,9 @@ afterAll(async () => {
   }
   await database.delete(agents).where(eq(agents.id, holderId));
   await database.delete(agents).where(eq(agents.id, strangerId));
+  for (const id of issuedCredentialIds) {
+    await database.delete(credentialRows).where(eq(credentialRows.id, id));
+  }
 });
 
 describe("a grant is the permission", () => {
@@ -421,6 +435,82 @@ describe("a boundary written about the browser does not refuse tool calls", () =
     // vendor reached as the person asking, which is a different sentence and a different cause.
     expect((thrown as PluginRefusedError).rule).toBeNull();
     expect((thrown as PluginRefusedError).message).toContain("connected");
+  });
+});
+
+describe("removing an MCP server", () => {
+  test("revokes the credential the server was configured with", async () => {
+    // Without this, the credential row stays live after the server row is
+    // gone, and re-adding the same server would unique-violate on
+    // `credentials_active_key_idx`. The audit trail also carries the
+    // revocation with `reason: mcp_server_removed`.
+    const removalServerId = `removal-target-${suite}`;
+    revokedCredentialIds.length = 0;
+    const [credentialRow] = await database
+      .insert(credentialRows)
+      .values({
+        kind: "mcp",
+        provider: removalServerId,
+        keyId: `mcp-${removalServerId}`,
+        encryptedValue: "{}",
+        metadata: {},
+      })
+      .returning({ id: credentialRows.id });
+    const credentialId = credentialRow?.id;
+    if (!credentialId) throw new Error("credential row was not created");
+    issuedCredentialIds.push(credentialId);
+    await database.insert(mcpServers).values({
+      id: removalServerId,
+      title: "removal target",
+      vendor: "test",
+      url: "https://example.invalid/mcp",
+      credentialId,
+      provenance: "custom",
+    });
+
+    await store.removeServer(removalServerId, "admin@openbot.local");
+
+    expect(revokedCredentialIds).toEqual([credentialId]);
+    const [row] = await database
+      .select({ id: mcpServers.id })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, removalServerId));
+    expect(row).toBeUndefined();
+    const audit = await database
+      .select({
+        eventType: auditEvents.eventType,
+        payload: auditEvents.payload,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.targetType, "credential"),
+          eq(auditEvents.targetId, credentialId),
+        ),
+      );
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.eventType).toBe("credential.revoked");
+    expect((audit[0]?.payload as { reason?: string })?.reason).toBe(
+      "mcp_server_removed",
+    );
+    // Audit is append-only in Postgres; leaving the row is fine because
+    // `credentialId` is suite-scoped, so re-runs never collide.
+  });
+
+  test("does not call revoke when the server had no credential", async () => {
+    const removalServerId = `removal-target-nocred-${suite}`;
+    revokedCredentialIds.length = 0;
+    await database.insert(mcpServers).values({
+      id: removalServerId,
+      title: "removal target no cred",
+      vendor: "test",
+      url: "https://example.invalid/mcp",
+      provenance: "custom",
+    });
+
+    await store.removeServer(removalServerId, "admin@openbot.local");
+
+    expect(revokedCredentialIds).toEqual([]);
   });
 });
 

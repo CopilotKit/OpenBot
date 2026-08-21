@@ -314,6 +314,11 @@ export type PluginStoreOptions = {
    * client belongs to the server registration and a refresh token belongs to a connection, so both
    * are written by the code that owns those acts — otherwise the first of two calls can succeed and
    * the second fail, leaving a secret in the vault that nothing points at and nobody knows to revoke.
+   *
+   * `revoke` is part of it because a key holds at most one live credential now. `removeServer`
+   * retires the server's token, and the two write paths here replace rather than add, so re-adding a
+   * server or re-authorizing a connection does not meet its own leftover on
+   * `credentials_active_key_idx`.
    */
   credentials: CredentialSecretReader & CredentialStore;
   encryptionKey: string;
@@ -757,7 +762,63 @@ export function createPluginStore(options: PluginStoreOptions) {
       return added;
     },
 
+    /**
+     * Remove a server, and stop its token being live.
+     *
+     * The token is keyed `mcp-<serverId>` and nothing else revokes it, so
+     * leaving it behind means re-adding the same server meets its own
+     * abandoned row on `credentials_active_key_idx`. It is revoked rather
+     * than deleted, because the vault keeps revoked rows for audit.
+     *
+     * The revoke goes first. These are two writes on two tables and the
+     * store exposes no transaction that spans both, so the order decides
+     * what a failure between them leaves: revoke-then-delete leaves a server
+     * whose token no longer works and which removing again will finish off,
+     * while delete-then-revoke leaves a live token no server references and
+     * no operation can reach.
+     */
     async removeServer(serverId: string, by: string): Promise<void> {
+      const [existing] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId));
+
+      /**
+       * Whether that token is still live, read rather than inferred from a
+       * thrown error, so a token a previous attempt already revoked, or one
+       * whose row is gone entirely, is skipped while a database fault still
+       * propagates and leaves the server row in place to be removed again.
+       *
+       * Two queries rather than a join because `mcp_servers.credential_id` is
+       * `text` and `credentials.id` is `uuid`, so the two columns do not
+       * compare without a cast.
+       */
+      const [live] = existing?.credentialId
+        ? await database
+            .select({ id: credentialRows.id })
+            .from(credentialRows)
+            .where(
+              and(
+                eq(credentialRows.id, existing.credentialId),
+                isNull(credentialRows.revokedAt),
+              ),
+            )
+        : [];
+
+      if (live) {
+        await credentials.revoke(live.id);
+        await recordAuditEvent(auditStore, {
+          eventType: "credential.revoked",
+          targetType: "credential",
+          targetId: live.id,
+          payload: {
+            actor: by,
+            reason: "mcp_server_removed",
+            server: serverId,
+          },
+        });
+      }
+
       await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",

@@ -329,6 +329,7 @@ export function createAgentProfileStore(
                     agentId: id,
                     header: input.auth.header,
                     value: input.auth.value,
+                    executor: transaction,
                   }),
                 }
               : {}),
@@ -387,6 +388,13 @@ export function createAgentProfileStore(
                     agentId: id,
                     header: input.auth.header,
                     value: input.auth.value,
+                    // An agent that already has a live key is being edited, not
+                    // first-created, so the vault rotates rather than inserting
+                    // a second live row for the same agent id.
+                    previousCredentialId: authFromConfiguration(
+                      row?.configuration,
+                    )?.credentialId,
+                    executor: transaction,
                   }),
                 }
               : {}),
