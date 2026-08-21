@@ -35,14 +35,27 @@ type StoredCredential = {
   revokedAt: Date | null;
 };
 
+export type CredentialStoreValue = {
+  kind: CredentialKind;
+  provider: string;
+  keyId: string;
+  metadata: Record<string, unknown>;
+  encryptedValue: string;
+};
+
 export type CredentialStore = {
-  create: (value: {
-    kind: CredentialKind;
-    provider: string;
-    keyId: string;
-    metadata: Record<string, unknown>;
-    encryptedValue: string;
-  }) => Promise<StoredCredential>;
+  create: (value: CredentialStoreValue) => Promise<StoredCredential>;
+  /**
+   * Replace one credential with another, as a single database transaction.
+   *
+   * Retiring the old secret and storing the new one are one decision, so they
+   * are one write. Two separate calls cannot be made safe from the outside:
+   * an `UPDATE` can commit and still throw on the way back, and no compensating
+   * revoke survives the process being killed between them.
+   */
+  rotate: (
+    input: CredentialStoreValue & { previousCredentialId: string },
+  ) => Promise<StoredCredential>;
   revoke: (id: string) => Promise<Date>;
 };
 
@@ -175,16 +188,98 @@ export function createCredentialStore(
       }
       return credential;
     },
+    rotate: async (input) => {
+      return database.transaction(async (transaction) => {
+        /**
+         * The previous credential, locked for the rest of the transaction.
+         *
+         * Two replicas rotating the same secret would otherwise both read it
+         * as live and both act; the second waits here and then finds it
+         * revoked. Its identity is read alongside its state so a rotation
+         * aimed at the wrong id is refused rather than silently retiring a
+         * secret the caller never named.
+         */
+        const [previous] = await transaction
+          .select({
+            revokedAt: credentials.revokedAt,
+            kind: credentials.kind,
+            provider: credentials.provider,
+            keyId: credentials.keyId,
+          })
+          .from(credentials)
+          .where(eq(credentials.id, input.previousCredentialId))
+          .for("update");
+        if (!previous) {
+          throw new Error("Previous credential was not found");
+        }
+        if (previous.revokedAt) {
+          throw new Error("Previous credential is already revoked");
+        }
+        if (
+          previous.kind !== input.kind ||
+          previous.provider !== input.provider ||
+          previous.keyId !== input.keyId
+        ) {
+          throw new Error(
+            "Previous credential does not match the input's kind, provider or keyId",
+          );
+        }
+
+        // Revoke, then insert. Both orders are invisible from outside the
+        // transaction, and this one never holds two live rows for one key even
+        // in the middle of it, which is the invariant a uniqueness constraint
+        // on live credentials would later depend on.
+        const revokedAt = new Date();
+        const [revoked] = await transaction
+          .update(credentials)
+          .set({ revokedAt, updatedAt: revokedAt })
+          .where(
+            and(
+              eq(credentials.id, input.previousCredentialId),
+              isNull(credentials.revokedAt),
+            ),
+          )
+          .returning({ revokedAt: credentials.revokedAt });
+        if (!revoked?.revokedAt) {
+          // Ruled out by the lock above under contention; reaching here means
+          // the row was deleted outright between the two statements, which
+          // aborts the transaction and leaves nothing committed.
+          throw new Error("Previous credential was not found");
+        }
+
+        const [inserted] = await transaction
+          .insert(credentials)
+          .values({
+            kind: input.kind,
+            provider: input.provider,
+            keyId: input.keyId,
+            metadata: input.metadata,
+            encryptedValue: input.encryptedValue,
+          })
+          .returning({
+            id: credentials.id,
+            revokedAt: credentials.revokedAt,
+          });
+        if (!inserted) {
+          throw new Error("Credential could not be stored");
+        }
+
+        return inserted;
+      });
+    },
     revoke: async (id) => {
       const revokedAt = new Date();
       const [credential] = await database
         .update(credentials)
         .set({ revokedAt, updatedAt: revokedAt })
-        .where(eq(credentials.id, id))
+        // Only a live row is stamped. Without the guard a second revoke would
+        // overwrite the first one's timestamp and report success, so a caller
+        // could not tell retiring a credential from finding it already gone.
+        .where(and(eq(credentials.id, id), isNull(credentials.revokedAt)))
         .returning({ revokedAt: credentials.revokedAt });
 
       if (!credential?.revokedAt) {
-        throw new Error("Credential was not found");
+        throw new Error("Credential was not found or already revoked");
       }
       return credential.revokedAt;
     },
@@ -310,14 +405,24 @@ export async function createCredential(
 export async function rotateCredential(
   service: CredentialService,
   input: CredentialInput & { previousCredentialId: string },
-) {
-  const credential = await persistCredential(service, input);
-  await service.store.revoke(input.previousCredentialId);
+): Promise<CredentialStatus> {
+  // Encryption happens before the transaction opens, so no database connection
+  // is held while it runs. The store then performs both writes atomically, and
+  // a failure leaves the vault as it was, which is why the audit event below is
+  // written only once that has returned.
+  const stored = await service.store.rotate({
+    previousCredentialId: input.previousCredentialId,
+    kind: input.kind,
+    provider: input.provider,
+    keyId: input.keyId,
+    metadata: input.metadata,
+    encryptedValue: await encryptSecret(service.encryptionKey, input.plaintext),
+  });
 
   await recordAuditEvent(service.auditStore, {
     eventType: "credential.rotated",
     targetType: "credential",
-    targetId: credential.id,
+    targetId: stored.id,
     actorUserId: input.actorUserId,
     payload: {
       previousCredentialId: input.previousCredentialId,
@@ -327,7 +432,14 @@ export async function rotateCredential(
     },
   });
 
-  return credential;
+  return {
+    id: stored.id,
+    kind: input.kind,
+    provider: input.provider,
+    keyId: input.keyId,
+    metadata: input.metadata,
+    revokedAt: stored.revokedAt,
+  };
 }
 
 export async function revokeCredential(

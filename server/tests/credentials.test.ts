@@ -102,12 +102,17 @@ describe("credential encryption", () => {
   });
 
   test("rotates then revokes credentials without returning plaintext", async () => {
+    const rotated: { previousCredentialId: string }[] = [];
     const revoked: string[] = [];
     const audited: unknown[] = [];
     const service = {
       encryptionKey: key,
       store: {
-        create: async () => ({ id: "credential-new", revokedAt: null }),
+        create: async () => ({ id: "credential-unused", revokedAt: null }),
+        rotate: async (input: { previousCredentialId: string }) => {
+          rotated.push(input);
+          return { id: "credential-new", revokedAt: null };
+        },
         revoke: async (id: string) => {
           revoked.push(id);
           return new Date("2026-08-13T12:00:00.000Z");
@@ -131,11 +136,57 @@ describe("credential encryption", () => {
     });
     await revokeCredential(service, "credential-new", "admin");
 
-    expect(revoked).toEqual(["credential-old", "credential-new"]);
+    // The rotation retires the previous credential inside the store's own
+    // transaction, so the service makes no separate revoke call of its own.
+    expect(rotated.map((call) => call.previousCredentialId)).toEqual([
+      "credential-old",
+    ]);
+    expect(revoked).toEqual(["credential-new"]);
+    expect(JSON.stringify(rotated)).not.toContain("new-openai-secret");
     expect(JSON.stringify(audited)).not.toContain("new-openai-secret");
     expect(
       audited.map((event) => (event as { eventType: string }).eventType),
     ).toEqual(["credential.rotated", "credential.revoked"]);
+  });
+
+  test("writes no audit event when the rotation fails", async () => {
+    // The store's rotate is one transaction, so a failure commits nothing. The
+    // trail has to agree: a rotation that did not happen leaves no row saying
+    // it did, and the caller sees the original cause rather than a later one.
+    const audited: unknown[] = [];
+    const service = {
+      encryptionKey: key,
+      store: {
+        create: async () => {
+          throw new Error("create is not part of a rotation");
+        },
+        rotate: async () => {
+          throw new Error("Previous credential is already revoked");
+        },
+        revoke: async () => {
+          throw new Error("revoke is not part of a failed rotation");
+        },
+      },
+      auditStore: {
+        insert: async (event: unknown) => {
+          audited.push(event);
+        },
+      },
+    };
+
+    await expect(
+      rotateCredential(service, {
+        previousCredentialId: "credential-old",
+        kind: "model",
+        provider: "openai",
+        keyId: "primary",
+        metadata: {},
+        plaintext: "new-openai-secret",
+        actorUserId: "admin",
+      }),
+    ).rejects.toThrow("Previous credential is already revoked");
+
+    expect(audited).toEqual([]);
   });
 
   test("decrypts only an active credential for server-side use", async () => {
@@ -301,6 +352,157 @@ describe("model credential store lookup", () => {
         keyId: "openai-api-key",
       }),
     ).resolves.toEqual({ encryptedValue: "higher-id-value" });
+  });
+});
+
+describe("credential store rotation", () => {
+  test("retires the previous credential and stores the new one together", async () => {
+    const store = createCredentialStore(database);
+    const previousId = randomUUID();
+    const keyId = `rotation-atomic-${previousId}`;
+    credentialIds.push(previousId);
+    await database.insert(credentials).values({
+      id: previousId,
+      kind: "model",
+      provider: "openai",
+      keyId,
+      encryptedValue: "initial",
+      metadata: {},
+    });
+
+    const rotated = await store.rotate({
+      previousCredentialId: previousId,
+      kind: "model",
+      provider: "openai",
+      keyId,
+      metadata: {},
+      encryptedValue: "rotated",
+    });
+    credentialIds.push(rotated.id);
+
+    const rows = await database
+      .select({
+        id: credentials.id,
+        encryptedValue: credentials.encryptedValue,
+        revokedAt: credentials.revokedAt,
+      })
+      .from(credentials)
+      .where(eq(credentials.keyId, keyId));
+    const byId = Object.fromEntries(rows.map((row) => [row.id, row]));
+
+    expect(byId[previousId]?.revokedAt).not.toBeNull();
+    expect(byId[rotated.id]?.revokedAt).toBeNull();
+    expect(byId[rotated.id]?.encryptedValue).toBe("rotated");
+  });
+
+  test("refuses a previous credential that is already revoked, and stores nothing", async () => {
+    const store = createCredentialStore(database);
+    const previousId = randomUUID();
+    const keyId = `rotation-revoked-${previousId}`;
+    credentialIds.push(previousId);
+    await database.insert(credentials).values({
+      id: previousId,
+      kind: "model",
+      provider: "openai",
+      keyId,
+      encryptedValue: "initial",
+      metadata: {},
+      revokedAt: new Date("2026-08-01T00:00:00.000Z"),
+    });
+
+    await expect(
+      store.rotate({
+        previousCredentialId: previousId,
+        kind: "model",
+        provider: "openai",
+        keyId,
+        metadata: {},
+        encryptedValue: "rotated",
+      }),
+    ).rejects.toThrow("already revoked");
+
+    const rows = await database
+      .select({ id: credentials.id })
+      .from(credentials)
+      .where(eq(credentials.keyId, keyId));
+    expect(rows.map((row) => row.id)).toEqual([previousId]);
+  });
+
+  test("refuses a previous credential that does not exist, and stores nothing", async () => {
+    const store = createCredentialStore(database);
+    const missing = randomUUID();
+    const keyId = `rotation-missing-${missing}`;
+
+    await expect(
+      store.rotate({
+        previousCredentialId: missing,
+        kind: "model",
+        provider: "openai",
+        keyId,
+        metadata: {},
+        encryptedValue: "orphan-if-broken",
+      }),
+    ).rejects.toThrow("not found");
+
+    // Nothing was written, so the failed rotation left no credential behind
+    // for this key at all.
+    const rows = await database
+      .select({ id: credentials.id })
+      .from(credentials)
+      .where(eq(credentials.keyId, keyId));
+    expect(rows).toEqual([]);
+  });
+
+  test("refuses a rotation aimed at a different kind, provider or keyId", async () => {
+    // Rotating one credential with another's identity would retire a secret
+    // the caller never named and leave its key with nothing live, which is a
+    // worse outcome than a raised error.
+    const store = createCredentialStore(database);
+    const previousId = randomUUID();
+    const previousKey = `mismatch-previous-${previousId}`;
+    credentialIds.push(previousId);
+    await database.insert(credentials).values({
+      id: previousId,
+      kind: "model",
+      provider: "openai",
+      keyId: previousKey,
+      encryptedValue: "previous",
+      metadata: {},
+    });
+
+    await expect(
+      store.rotate({
+        previousCredentialId: previousId,
+        kind: "model",
+        provider: "openai",
+        keyId: `mismatch-input-${previousId}`,
+        metadata: {},
+        encryptedValue: "would-retire-the-wrong-secret",
+      }),
+    ).rejects.toThrow("does not match");
+
+    const [after] = await database
+      .select({ revokedAt: credentials.revokedAt })
+      .from(credentials)
+      .where(eq(credentials.id, previousId));
+    expect(after?.revokedAt).toBeNull();
+  });
+
+  test("refuses to revoke a credential that is already revoked", async () => {
+    const store = createCredentialStore(database);
+    const id = randomUUID();
+    credentialIds.push(id);
+    await database.insert(credentials).values({
+      id,
+      kind: "model",
+      provider: "openai",
+      keyId: `revoke-guard-${id}`,
+      encryptedValue: "one",
+      metadata: {},
+      revokedAt: new Date("2026-08-01T00:00:00.000Z"),
+    });
+
+    await expect(store.revoke(id)).rejects.toThrow("already revoked");
   });
 });
 
