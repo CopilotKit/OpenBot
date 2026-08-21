@@ -19,7 +19,14 @@ describe("computer routes", () => {
       _context,
       next,
     ) => next();
-    const routes = createComputerRoutes(gateway, policyStore, requireUser);
+    // Permissive: what this covers is the gateway seam, not who may act as the Bot. That question
+    // has its own suite in bot-access.test.ts.
+    const routes = createComputerRoutes(
+      gateway,
+      policyStore,
+      requireUser,
+      async () => true,
+    );
 
     const response = await routes.request(
       "http://openbot.test/bot-17/screenshot",
