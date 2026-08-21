@@ -98,6 +98,40 @@ type Connection = {
 };
 
 /**
+ * A vendor's failure, as one sentence an operator can act on.
+ *
+ * WHAT THIS REPLACES. The transport throws `Error POSTing to endpoint: <the whole response body>`,
+ * and the status code lives on the error object rather than in the message — so rewrapping by
+ * `.message` alone threw away the only part that says what went wrong and kept the part that does
+ * not.
+ *
+ * Google's Drive MCP makes that worse than it sounds. Asked for its tool list with a token it will
+ * not accept, it answers **401 with a complete, valid tool list in the body** — verified against the
+ * live endpoint. The old message was therefore a wall of successful-looking JSON attached to a
+ * failure, which reads as a parsing bug in OpenBot rather than as a rejected credential.
+ *
+ * So the status leads, and the well-known ones are named. The body is dropped: by the time a vendor
+ * is refusing a credential, its response payload is not what anybody needs to see.
+ */
+function vendorFailure(error: unknown): string {
+  const status =
+    typeof error === "object" && error !== null && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+
+  if (status === 401) {
+    return "The vendor rejected this credential (401). For a connector reached as the person asking, reconnecting the account is the usual fix; if it persists, the scopes it was granted may not cover this server.";
+  }
+  if (status === 403) {
+    return "The vendor accepted the credential and refused the request (403). The account may lack access, or the API may not be enabled for this project.";
+  }
+  if (typeof status === "number") {
+    return `The vendor answered ${status}.`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
  * Build, use and close a client.
  *
  * The `finally` closes the transport whatever happened, because a thrown error is the case where a
@@ -121,9 +155,7 @@ async function withClient<T>(
     // Rewrapped so a caller never has to care whether the failure came from the transport, the
     // handshake or the call, and so the message that reaches an audit row and an admin page is one
     // sentence rather than a stack.
-    throw new McpServerError(
-      error instanceof Error ? error.message : String(error),
-    );
+    throw new McpServerError(vendorFailure(error));
   } finally {
     await client.close().catch(() => {
       // A server that will not say goodbye is not a failure of the work that just succeeded.

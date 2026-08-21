@@ -46,6 +46,14 @@ let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
  * configured server, so it is removed only when the test is what created it.
  */
 let serverWasAlreadyConfigured = false;
+/**
+ * Whether this deployment already advertised the tool this suite inserts.
+ *
+ * The vendor really does advertise `search_files`, so the row may be a refreshed fact about the
+ * vendor rather than the suite's fixture. Deleting by name regardless would take a real one; leaving
+ * it always would leave a fixture that reads on screen as a tool the vendor offers.
+ */
+let toolWasAlreadyAdvertised = false;
 
 const store = createPluginStore({
   database,
@@ -102,6 +110,16 @@ beforeAll(async () => {
         .where(eq(mcpServers.id, serverId))
     ).length > 0;
 
+  toolWasAlreadyAdvertised =
+    (
+      await database
+        .select({ name: mcpTools.name })
+        .from(mcpTools)
+        .where(
+          and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)),
+        )
+    ).length > 0;
+
   // The server row is written directly rather than through addServer, so the test needs no vendor
   // to be reachable. What is under test is the decision, not the listing.
   await database
@@ -123,6 +141,12 @@ beforeAll(async () => {
 afterAll(async () => {
   await database.delete(pluginGrants).where(eq(pluginGrants.ref, ref));
   // A server row is deployment configuration, so it belongs to the deployment rather than here.
+  // The fixture tool goes whether or not this suite owns the server, but only if it put it there.
+  if (!toolWasAlreadyAdvertised) {
+    await database
+      .delete(mcpTools)
+      .where(and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)));
+  }
   if (!serverWasAlreadyConfigured) {
     await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
     await database.delete(mcpServers).where(eq(mcpServers.id, serverId));

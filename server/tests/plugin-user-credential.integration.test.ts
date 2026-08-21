@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { encryptSecret } from "../src/credentials";
@@ -86,6 +86,13 @@ let serverWasAlreadyConfigured = false;
  * primary key, so the database will hold a pointer to a row that does not exist.
  */
 let clientBefore: string | null = null;
+/**
+ * Whether this deployment already advertised the tool this suite inserts.
+ *
+ * The vendor really does advertise `search_files`, so deleting by name regardless would take a real
+ * row; never deleting leaves a fixture that reads on screen as a tool the vendor offers.
+ */
+let toolWasAlreadyAdvertised = false;
 const credentialIds: string[] = [];
 
 const store = createPluginStore({
@@ -206,6 +213,15 @@ beforeAll(async () => {
     .from(mcpServers)
     .where(eq(mcpServers.id, serverId));
   serverWasAlreadyConfigured = existing !== undefined;
+  toolWasAlreadyAdvertised =
+    (
+      await database
+        .select({ name: mcpTools.name })
+        .from(mcpTools)
+        .where(
+          and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)),
+        )
+    ).length > 0;
   clientBefore = existing?.credentialId ?? null;
 
   // Written directly, so the test needs no vendor to be reachable. What is under test is which
@@ -233,9 +249,22 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  /*
+   * The suite's own two people, never every row for this vendor.
+   *
+   * `serverId` here is a real catalogue key, so a deployment somebody uses has real connections
+   * under it — and deleting by server id took a person's actual Drive connection with it, after
+   * their consent had succeeded. The user ids carry this run's random suffix, so nothing outside it
+   * can match.
+   */
   await database
     .delete(mcpUserCredentials)
-    .where(eq(mcpUserCredentials.serverId, serverId));
+    .where(
+      and(
+        eq(mcpUserCredentials.serverId, serverId),
+        inArray(mcpUserCredentials.userId, [askerId, otherId]),
+      ),
+    );
   /*
    * Put the deployment's own client pointer back before deleting anything, so a suite that borrowed
    * live configuration leaves it as it found it. Ordered first on purpose: the deletes below remove
@@ -251,6 +280,12 @@ afterAll(async () => {
     await database.delete(credentials).where(eq(credentials.id, id));
   }
   await database.delete(pluginGrants).where(eq(pluginGrants.ref, ref));
+  // The fixture tool goes whether or not this suite owns the server, but only if it put it there.
+  if (!toolWasAlreadyAdvertised) {
+    await database
+      .delete(mcpTools)
+      .where(and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)));
+  }
   if (!serverWasAlreadyConfigured) {
     await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
     await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
@@ -376,7 +411,12 @@ describe("a person who has connected", () => {
 
     await database
       .delete(mcpUserCredentials)
-      .where(eq(mcpUserCredentials.serverId, serverId));
+      .where(
+        and(
+          eq(mcpUserCredentials.serverId, serverId),
+          inArray(mcpUserCredentials.userId, [askerId, otherId]),
+        ),
+      );
 
     await expect(
       store.callTool({ ref, args: {}, botId, actorId: askerId }),
