@@ -16,6 +16,16 @@ There is deliberately no endpoint for an administrator to connect an account on 
 
 ## What an administrator does
 
+### 0. Enrol the project in the Developer Preview Program
+
+The Workspace MCP servers are, in Google's words, "available as part of the Google Workspace
+Developer Preview Program". A project that is not enrolled can have every other step below correct —
+APIs enabled, client registered, a token Google's own `tokeninfo` endpoint validates — and still be
+refused, because this gate is checked against the project rather than against the credential.
+
+It refuses with `The caller does not have permission`, which says nothing about enrolment. Do this
+first; it is the step with the least evidence that it is missing.
+
 ### 1. Enable both APIs
 
 In a Google Cloud project, enable **both** of these:
@@ -142,6 +152,29 @@ Enabling an API takes a few minutes to propagate. Wait, then press **Refresh too
 
 If the sentence is about access rather than an API, the account genuinely cannot see what was asked
 for, which is the connector working as intended.
+
+### "The caller does not have permission"
+
+Google's `PERMISSION_DENIED`, arriving as an `isError` result rather than an HTTP status. It is a
+statement about the **project**, not about the credential, which is what makes it so misleading: the
+token is fine, and every check that a person can run says so.
+
+Worth knowing how thoroughly fine, because it saves repeating the work. Minting an access token from
+the stored refresh token and asking `https://oauth2.googleapis.com/tokeninfo` about it returns 200
+with the right `aud`, the right `azp` and the granted scope — Google validating its own token. The
+refusal is downstream of everything OpenBot controls.
+
+In order of likelihood:
+
+1. **The project is not enrolled** in the Developer Preview Program ([step 0](#0-enrol-the-project-in-the-developer-preview-program)).
+2. **A scope is missing.** Google's guide lists Drive as needing `drive.readonly` *and*
+   `drive.file`, added together. OpenBot requests only `drive.readonly`, deliberately: `drive.file`
+   is write-capable, and the connector's read-only guarantee is currently the scope itself rather
+   than only the tool classification. Widening it is a decision about what this deployment may do to
+   somebody's Drive, so it is not done pre-emptively.
+
+A missing scope usually reads as "insufficient authentication scopes" instead, which is why
+enrolment is the first thing to check rather than the second.
 
 ### "You have not connected your Google Drive account."
 

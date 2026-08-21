@@ -1290,8 +1290,24 @@ export function createPluginStore(options: PluginStoreOptions) {
           eventType: result.isError ? "mcp.call_failed" : "mcp.call_succeeded",
           targetType: "mcp_tool",
           targetId: input.ref,
+          /*
+           * The vendor's own words, when it is reporting a failure.
+           *
+           * Only on the failure branch, and this is the whole point of the distinction. A successful
+           * result is somebody's data — a file listing, a document — and it has no business in an
+           * audit row that an administrator can read. An `isError` result is a message written for
+           * whoever operates this deployment, and it is the most useful sentence available: Google
+           * refuses the Drive MCP server with "The caller does not have permission", which named the
+           * problem after a generic message had already cost a round of probing.
+           *
+           * Capped, because the failure branch is not a promise about length.
+           */
           payload: result.isError
-            ? { ...decided, failure: "the tool reported an error" }
+            ? {
+                ...decided,
+                failure:
+                  result.text.slice(0, 400) || "the tool reported an error",
+              }
             : decided,
         });
         return { text: result.text, isError: result.isError };
