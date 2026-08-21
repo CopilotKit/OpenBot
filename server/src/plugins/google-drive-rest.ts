@@ -112,6 +112,17 @@ const TOOLS: readonly McpTool[] = Object.freeze([
 
 type Connection = { url: string; token?: string };
 
+/**
+ * No credential is needed to know what this adapter can do, because the answer is in this file.
+ *
+ * This is not a detail. Assuming otherwise made configuring Drive a four-stop journey: an
+ * administrator enabling the connector was refused at "refresh tools" until they had gone to their
+ * own settings page and connected a personal Google account, whose token was then handed to
+ * {@link listTools} — which ignores it — and thrown away. The gate was real and the work behind it
+ * was not.
+ */
+export const listNeedsCredential = false;
+
 /** The same list for everybody, because this adapter's capability is this code rather than a server. */
 export async function listTools(_connection: Connection): Promise<McpTool[]> {
   return TOOLS.map((tool) => ({ ...tool }));

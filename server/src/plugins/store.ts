@@ -603,11 +603,16 @@ export function createPluginStore(options: PluginStoreOptions) {
      * Replaced wholesale, never merged. A tool a vendor withdrew has to stop being offered, and a
      * merge would leave it in the list forever as a name the model will happily call.
      *
-     * `actorId` is who is asking, and it matters for a `user-oauth` server: there is no deployment
-     * credential to list with, so the listing runs on the grant of whoever pressed refresh. An
-     * administrator who has not connected their own account gets a refusal, which lands in
-     * `lastError` and is shown on the Plugins page — the honest state, because until somebody has
-     * connected, this deployment genuinely does not know what that server offers.
+     * `actorId` is who is asking, and whether it is needed at all is the transport's answer rather
+     * than an assumption here. Where listing means asking a remote server — MCP — a `user-oauth`
+     * vendor has no deployment credential to ask with, so the listing runs on the grant of whoever
+     * pressed refresh, and an administrator who has not connected gets a refusal that lands in
+     * `lastError`. That is the honest state: until somebody has connected, this deployment genuinely
+     * does not know what that server offers.
+     *
+     * Where the tool list is this deployment's own code, nothing is asked and no credential is
+     * consulted. Requiring one anyway is what made setting Drive up a round trip through an
+     * administrator's personal settings page for a token that was then discarded.
      *
      * Absent for the refresh that happens right after a server is added, where nobody can have
      * connected yet. It makes no difference to a `deployment-bearer` server, which never consults it.
@@ -619,17 +624,29 @@ export function createPluginStore(options: PluginStoreOptions) {
       const { row, entry } = await requireServer(serverId);
 
       try {
-        /*
-         * Not `row.credentialId` decrypted directly, which is what this used to do.
-         *
-         * For a `user-oauth` server that column holds the OAuth CLIENT, and handing it over as a
-         * bearer token would have sent the deployment's client secret to the vendor as somebody's
-         * access token. Going through the same selection the call path uses means there is one
-         * answer to "what token does this server get", and it cannot be a secret of the wrong kind.
-         */
-        const { token } = await connectionTokenFor(row, entry, actorId);
         // The entry decides the protocol. For a custom server there is no entry, and MCP is right.
-        const tools = await transportFor(entry).listTools({
+        const transport = transportFor(entry);
+
+        /*
+         * A credential only when listing actually needs one.
+         *
+         * Where it is needed, it is taken from the same selection the call path uses rather than by
+         * decrypting `row.credentialId` — which is what this used to do, and which for a `user-oauth`
+         * server would have sent the deployment's OAuth client secret to the vendor as somebody's
+         * access token. One answer to "what token does this server get", and it cannot be a secret of
+         * the wrong kind.
+         *
+         * Where it is NOT needed, asking anyway is not a harmless extra check. For a `user-oauth`
+         * server that call refuses unless the person pressing the button has connected their own
+         * account — so an administrator setting Drive up was blocked at "refresh tools" and sent to
+         * their personal settings page to grant access, so that a token could be minted and handed to
+         * a function that discards it. The gate outlived the reason for it.
+         */
+        const token = transport.listNeedsCredential
+          ? (await connectionTokenFor(row, entry, actorId)).token
+          : undefined;
+
+        const tools = await transport.listTools({
           url: effectiveUrl(row, entry),
           token,
         });

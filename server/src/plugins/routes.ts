@@ -329,6 +329,16 @@ export function createPluginRoutes(
       );
     }
 
+    /*
+     * Where to come back to, as one of two names rather than a URL the caller chose.
+     *
+     * Read from the query and narrowed immediately, so an unrecognised value is the default rather
+     * than something carried into a signed state. See {@link ConnectOrigin}: a destination that could
+     * name another origin is an open redirect with a consent screen in front of it.
+     */
+    const returnTo =
+      context.req.query("returnTo") === "admin" ? "admin" : "settings";
+
     const verifier = createVerifier();
     return context.json({
       authorizationUrl: authorizationUrlFor({
@@ -336,7 +346,7 @@ export function createPluginRoutes(
         clientId: client.clientId,
         redirectUri: redirectUriFor(connect.publicUrl),
         state: signConnectState(
-          { userId: context.var.actor.id, serverId, verifier },
+          { userId: context.var.actor.id, serverId, verifier, returnTo },
           connect.encryptionKey,
         ),
         codeChallenge: challengeFor(verifier),
@@ -393,7 +403,12 @@ export function createPluginRoutes(
     });
 
     return context.redirect(
-      connectedAccountsUrlFor(connect.appUrl, { serverId: state.serverId }),
+      connectedAccountsUrlFor(
+        connect.appUrl,
+        { serverId: state.serverId },
+        // From the signed state, so the destination is one this deployment chose, not the browser.
+        state.returnTo,
+      ),
     );
   });
 

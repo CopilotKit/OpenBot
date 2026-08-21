@@ -72,10 +72,16 @@ At `/admin/plugins/google-drive`:
 1. Turn on **Enable for this deployment**.
 2. Open **OAuth client** and paste the client ID and secret. The secret is encrypted with
    `KEY_ENCRYPTION_KEY` and never read back out to the browser.
-3. Press **Refresh tools**. The server asks Google what the server offers and stores the list.
+3. Press **Refresh tools**, which records the four read tools this connector implements.
 
-Refreshing tools is the first real call out, so it is also the first thing that can fail. If it
-does, the message names what Google said — read it before changing anything.
+That completes setup. No personal account is needed to get this far — the tool list for this
+connector is OpenBot's own code rather than an answer from a remote server, so there is nothing to
+authenticate in order to read it.
+
+To check it actually works, use **Your account** on the same page: it connects *your* Google account
+and returns you here. That is a personal grant like anybody else's, reaching your documents only, and
+it is not part of configuring the connector — a deployment is correctly set up whether or not the
+administrator ever connects.
 
 ### 5. Grant tools to a Bot
 

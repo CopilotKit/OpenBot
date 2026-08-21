@@ -36,6 +36,21 @@ const STATE_TTL_MS = 10 * 60_000;
 /** The one path a vendor is ever told to send somebody back to. */
 const CALLBACK_PATH = "/api/plugins/oauth/callback";
 
+/**
+ * Which screen started this, so somebody is returned to the one they left.
+ *
+ * A closed set of two names, never a URL, and that is the security point rather than a style choice.
+ * Carrying a destination through an OAuth flow is how open redirects get built: a
+ * `returnTo=https://evil.test` the callback honours turns this deployment into a redirector that
+ * arrives with a fresh consent behind it. A name cannot express another origin, and an unrecognised
+ * one falls back instead of being followed, so the worst a tampered state achieves is the wrong page
+ * of this app.
+ *
+ * It lives in the SIGNED state rather than on the callback URL because the callback is a request
+ * somebody else's server sent the browser on. Nothing on it is believable by itself.
+ */
+export type ConnectOrigin = "settings" | "admin";
+
 export type ConnectState = {
   /** Who is connecting. Taken from their session when the flow starts, never from the callback. */
   userId: string;
@@ -43,6 +58,8 @@ export type ConnectState = {
   serverId: string;
   /** The PKCE verifier, held here rather than in a table because it is single-use and short-lived. */
   verifier: string;
+  /** Where to go back to. Absent reads as `settings`, which is where every flow used to end. */
+  returnTo?: ConnectOrigin;
 };
 
 type SignedState = ConnectState & { exp: number };
@@ -73,8 +90,29 @@ export function redirectUriFor(publicUrl: string): string {
 export function connectedAccountsUrlFor(
   appUrl: string | undefined,
   where: { serverId: string } | { failed: true },
+  /**
+   * Which screen to go back to.
+   *
+   * An administrator can start this from the connector's own setup page, and sending them to their
+   * personal settings afterwards would be the same round trip this was meant to remove — they left a
+   * page mid-task and should come back to it. The page they return to shows the same fact either way.
+   */
+  returnTo: ConnectOrigin = "settings",
 ): string {
-  const base = `${appUrl?.replace(/\/+$/, "") ?? ""}/settings/connected-accounts`;
+  const origin = appUrl?.replace(/\/+$/, "") ?? "";
+
+  if (returnTo === "admin") {
+    /*
+     * The admin route takes the server key as its path parameter, so a failure has nowhere generic
+     * to land — and a failed state has no key to build one from. Those cases fall through to the
+     * settings list below, which is the one screen that draws a failure notice.
+     */
+    if ("serverId" in where) {
+      return `${origin}/admin/plugins/${encodeURIComponent(where.serverId)}`;
+    }
+  }
+
+  const base = `${origin}/settings/connected-accounts`;
 
   /*
    * Success returns to the account, not the list.
@@ -157,6 +195,8 @@ export function readConnectState(
       userId: payload.userId,
       serverId: payload.serverId,
       verifier: payload.verifier,
+      // Only the one name is recognised; anything else becomes the default rather than being carried.
+      returnTo: payload.returnTo === "admin" ? "admin" : "settings",
     };
   } catch {
     return null;

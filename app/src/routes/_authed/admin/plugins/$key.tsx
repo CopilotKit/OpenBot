@@ -1,4 +1,8 @@
-import { IconChevronRight, IconExternalLink } from "@tabler/icons-react";
+import {
+  IconArrowUpRight,
+  IconChevronRight,
+  IconExternalLink,
+} from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import * as React from "react";
@@ -36,12 +40,17 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 import { storeMcpToken } from "@/lib/credentials/mutations";
 import {
   addCuratedServerMutationOptions,
+  connectAccountMutationOptions,
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
   setPluginGrantMutationOptions,
 } from "@/lib/plugins/mutations";
-import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import {
+  connectionsQueryOptions,
+  pluginsPageQueryOptions,
+} from "@/lib/plugins/queries";
+import { cn } from "@/lib/utils";
 
 /**
  * One vendor: what it needs from this deployment, and which Bots hold its tools.
@@ -62,7 +71,19 @@ function RouteComponent() {
   const { key } = useParams({ from: "/_authed/admin/plugins/$key" });
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
+  /*
+   * The administrator's OWN connections, not the deployment's.
+   *
+   * On an admin screen that is a deliberate mixture, and it is the useful one: setting a per-person
+   * connector up and finding out whether it works are two different questions, and the second has no
+   * answer anywhere on this page without it. Nobody else's connection is readable here — the endpoint
+   * only ever returns the caller's, so this cannot become a list of who has connected what.
+   */
+  const connections = useQuery(connectionsQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
+  const youConnected = (connections.data?.connections ?? []).some(
+    (row) => row.serverId === key,
+  );
   const nameFor = useBotNames();
 
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +109,19 @@ function RouteComponent() {
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
     ...report,
+  });
+  const connectSelf = useMutation({
+    // Back to this page afterwards, not to the personal settings screen.
+    ...connectAccountMutationOptions("admin"),
+    ...report,
+    /*
+     * A full page navigation, not a fetch. The consent screen is the vendor's own and has to be
+     * shown to this person in their own browser; there is deliberately nothing here that could
+     * complete it for them, and nothing about being an administrator changes that.
+     */
+    onSuccess: (authorizationUrl) => {
+      window.location.href = authorizationUrl;
+    },
   });
   const setGrant = useMutation({
     ...setPluginGrantMutationOptions(queryClient),
@@ -206,7 +240,7 @@ function RouteComponent() {
         <PageSection
           description={
             auth === "user-oauth"
-              ? "This vendor answers as whoever is asking. The deployment registers an OAuth client; everybody then connects their own account in Preferences, so a Bot only ever sees what that person can see."
+              ? "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account, so a Bot only ever sees what that person can see."
               : "What this deployment presents to the vendor. One credential, used for everybody."
           }
           title="Connection"
@@ -261,6 +295,66 @@ function RouteComponent() {
                   <IconChevronRight className="size-4 shrink-0 text-muted-foreground" />
                 </ItemActions>
               </Item>
+            ) : null}
+
+            {/*
+             * The administrator's own account, on the setup screen.
+             *
+             * Setting a connector up and knowing whether it works are different questions, and the
+             * second used to have no answer here: an administrator finished configuring Drive and
+             * had to go to their personal settings to find out whether any of it was right. This row
+             * answers it in place, and stays honest about being personal — it is this person's
+             * connection, not deployment state, and it reaches their documents and nobody else's.
+             *
+             * It is NOT part of setup. The connector is fully configured without it, which is why it
+             * sits below the client and says so rather than reading as the next required step.
+             *
+             * Shown only once a client exists, because there is nothing to consent against before
+             * that: a Connect button with no OAuth client behind it can only fail.
+             */}
+            {auth === "user-oauth" && server?.hasCredential ? (
+              <>
+                <Separator />
+                <Item size="sm">
+                  <ItemContent>
+                    <ItemTitle>Your account</ItemTitle>
+                    <ItemDescription>
+                      {youConnected
+                        ? "Connected, so a Bot granted these tools reads your Drive as you. Everybody else connects their own."
+                        : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    {youConnected ? (
+                      <>
+                        {/* Decorative: the word beside it already says which. */}
+                        <span
+                          aria-hidden="true"
+                          className="size-1.5 rounded-full bg-emerald-500"
+                        />
+                        <span className="text-muted-foreground text-xs">
+                          Connected
+                        </span>
+                      </>
+                    ) : (
+                      /* The arrow says this leaves OpenBot for the vendor's consent page. It does. */
+                      <Button
+                        disabled={connectSelf.isPending}
+                        onClick={() => {
+                          setError(null);
+                          connectSelf.mutate(key);
+                        }}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        Connect
+                        <IconArrowUpRight />
+                      </Button>
+                    )}
+                  </ItemActions>
+                </Item>
+              </>
             ) : null}
 
             {entry?.perInstance ? (

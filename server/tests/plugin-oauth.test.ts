@@ -44,7 +44,55 @@ describe("the state that travels through the vendor", () => {
       userId: "user-1",
       serverId: "google-drive",
       verifier: "v-1",
+      // Absent on the way in, and a definite answer on the way out: a state written before this
+      // field existed still reads as the destination every flow used to have.
+      returnTo: "settings",
     });
+  });
+
+  test("the screen to return to survives the round trip", () => {
+    const signed = signConnectState(
+      {
+        userId: "user-1",
+        serverId: "google-drive",
+        verifier: "v-1",
+        returnTo: "admin",
+      },
+      KEY,
+      NOW,
+    );
+    expect(readConnectState(signed, KEY, NOW)?.returnTo).toBe("admin");
+  });
+
+  /*
+   * THE OPEN REDIRECT THIS CANNOT BECOME. A destination carried through an OAuth flow is the classic
+   * shape of one: the callback arrives with a fresh consent behind it, and anything it is willing to
+   * redirect to is somewhere an attacker can send a person from a link that looked legitimate.
+   *
+   * The defence is that the field cannot express another origin at all. Only "admin" is recognised;
+   * everything else — a URL, a protocol-relative host, a path traversal — reads back as the default.
+   * Asserted through a SIGNED state, because a valid signature is exactly what an attacker would not
+   * have, and the point is that the narrowing does not depend on the signature to hold.
+   */
+  test("a destination that names anywhere else reads back as the default", () => {
+    for (const hostile of [
+      "https://evil.test",
+      "//evil.test",
+      "/admin/plugins/../../evil",
+      "ADMIN",
+    ]) {
+      const signed = signConnectState(
+        {
+          userId: "user-1",
+          serverId: "google-drive",
+          verifier: "v-1",
+          returnTo: hostile as "admin",
+        },
+        KEY,
+        NOW,
+      );
+      expect(readConnectState(signed, KEY, NOW)?.returnTo).toBe("settings");
+    }
   });
 
   test("is refused once a character of it changes", () => {
@@ -225,5 +273,34 @@ describe("where the callback sends somebody afterwards", () => {
     expect(
       connectedAccountsUrlFor(undefined, { serverId: "google-drive" }),
     ).toBe("/settings/connected-accounts/google-drive");
+  });
+
+  test("a connect started on the admin page returns to the admin page", () => {
+    // The round trip this removes: an administrator who connected from the connector's setup screen
+    // used to be put down on their personal settings page, mid-task, on another part of the app.
+    expect(
+      connectedAccountsUrlFor(
+        "http://localhost:3010",
+        { serverId: "google-drive" },
+        "admin",
+      ),
+    ).toBe("http://localhost:3010/admin/plugins/google-drive");
+  });
+
+  test("a failure goes to the list even when it began on the admin page", () => {
+    /*
+     * The admin route takes the server key in its path, and a failed state has no key to build one
+     * from — the whole reason a failure is anonymous is that the state could not be read. The list is
+     * also the only screen that draws the notice, so it is the honest destination either way.
+     */
+    expect(
+      connectedAccountsUrlFor(
+        "http://localhost:3010",
+        { failed: true },
+        "admin",
+      ),
+    ).toBe(
+      "http://localhost:3010/settings/connected-accounts?connected=failed",
+    );
   });
 });

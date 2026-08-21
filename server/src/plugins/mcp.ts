@@ -230,6 +230,14 @@ async function withClient<T>(
   }
 }
 
+/**
+ * A remote server will not list its tools to nobody, so a credential is required to ask.
+ *
+ * Declared rather than assumed, because the other transport in this deployment answers differently
+ * and the difference is the whole shape of an administrator's setup flow. See {@link ./transport}.
+ */
+export const listNeedsCredential = true;
+
 /** What this server says it offers, right now. */
 export async function listTools(connection: Connection): Promise<McpTool[]> {
   return withClient(connection, async (client) => {

@@ -22,6 +22,20 @@ import type { McpCallResult, McpTool } from "./mcp";
  * selection, the grants, the policy engine and the audit trail, knows which protocol is underneath.
  */
 export type VendorTransport = {
+  /**
+   * Whether discovering the tool list needs somebody's credential.
+   *
+   * True for MCP, where the list is an answer from a remote server that will not give it up
+   * unauthenticated. False for an adapter whose tool list is this code, where there is nothing to ask
+   * and nobody to ask it of.
+   *
+   * It is on the transport rather than assumed by the caller because getting it wrong is a whole
+   * broken setup flow. Assumed true, an administrator configuring Drive was sent to their own
+   * settings page to connect a personal account, purely so a token could be minted, passed to a
+   * function that ignores it, and discarded — then sent back to press refresh. Nothing about that
+   * sequence hinted that the middle step was doing no work.
+   */
+  listNeedsCredential: boolean;
   listTools(connection: { url: string; token?: string }): Promise<McpTool[]>;
   callTool(
     connection: { url: string; token?: string },

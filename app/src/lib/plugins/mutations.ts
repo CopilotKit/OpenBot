@@ -198,11 +198,24 @@ export function registerOAuthClientMutationOptions(queryClient: QueryClient) {
  * Answers with the vendor's consent URL rather than navigating, so the caller decides when to leave
  * the page. There is deliberately nothing here that could complete the consent on somebody's behalf.
  */
-export function connectAccountMutationOptions() {
+/**
+ * Start a consent flow, and say which screen it started from.
+ *
+ * `returnTo` decides where the vendor's callback puts somebody down, because two screens offer this:
+ * a person's own connected-accounts page, and the connector's admin page where an administrator
+ * verifies the setup they have just finished. Sending an administrator to their personal settings
+ * afterwards is the round trip the inline row exists to remove.
+ *
+ * A name rather than a URL. The server narrows it to a known set before signing it into the state,
+ * so this parameter cannot become an open redirect however it is called.
+ */
+export function connectAccountMutationOptions(
+  returnTo: "settings" | "admin" = "settings",
+) {
   return mutationOptions({
     mutationFn: (serverId: string): Promise<string> =>
       client<string>(
-        `/api/plugins/servers/${encodeURIComponent(serverId)}/connect`,
+        `/api/plugins/servers/${encodeURIComponent(serverId)}/connect?returnTo=${returnTo}`,
         "authorizationUrl",
         { method: "POST", fallback: "That account could not be connected." },
       ),
