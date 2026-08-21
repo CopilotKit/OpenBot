@@ -22,6 +22,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   supervised service is respawning. A single `verify` check covers every job, so branch protection
   needs one entry. The same checks run again against the release commit when a release is published,
   so they gate the release rather than the proposal for one.
+- **Sign in with Google, Microsoft or Okta.** Any one of them turns sign-in on; configure several
+  and the sign-in screen offers each. `INITIAL_ADMIN_EMAILS` says who is an administrator, and it is
+  now re-read on every sign-in rather than only when an account is created, so editing the list
+  takes effect. It is also required whenever a provider is configured: nothing else grants the role
+  and no screen can promote somebody afterwards.
 - **One container that runs the whole thing.** The root `Dockerfile` builds an image carrying the
   app, the API, a Bot computer, and optionally PostgreSQL, supervised together. Point `DATABASE_URL`
   at a database you already run and the built-in one never starts; leave it unset and the container
@@ -92,6 +97,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Changed
 
+- **A deployment with no identity provider is one administrator, without a flag.** That is how a
+  fresh clone reaches the product. Where `NODE_ENV=production`, an unconfigured deployment now
+  refuses to start instead, because a public URL where every visitor is an administrator is silent
+  and looks like it works. `OPENBOT_SINGLE_USER=true` replaces `OPENBOT_DEV_NO_AUTH`, which is still
+  honoured, and is how somebody says they meant an open deployment.
+- **Requires Better Auth 1.7**, which adds an `issuer` to every account. Migration `0002` adds the
+  column and backfills existing rows with their provider's real issuer, so nobody is asked to sign
+  in again.
 - **Where a Bot's computer runs is now a plug.** One `ComputerProvider` interface sits under the
   gateway, with the Docker supervisor as one implementation and a shared computer as another. A
   computer somewhere else is an adapter rather than a change to the governed path. Thanks to

@@ -3,14 +3,8 @@ import { betterAuth } from "better-auth";
 import { genericOAuth, okta } from "better-auth/plugins";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
-import {
-  accounts,
-  sessions,
-  userRoles,
-  users,
-  verifications,
-} from "../db/schema";
-import { roleForEmail } from "./roles";
+import { accounts, sessions, users, verifications } from "../db/schema";
+import { reconcileRole, reconcileRoleForUserId } from "./roles";
 
 export function createAuth(config: DeploymentConfig, database: Database) {
   const authConfig = config.auth;
@@ -69,18 +63,33 @@ export function createAuth(config: DeploymentConfig, database: Database) {
       user: {
         create: {
           after: async (user) => {
-            await database
-              .insert(userRoles)
-              .values({
-                userId: user.id,
-                /*
-                 * Who is an administrator is decided by email, not by which provider signed them
-                 * in. A deployment mid-migration has the same person arriving through Entra one
-                 * week and Okta the next, and they are the same person to this list.
-                 */
-                role: roleForEmail(user.email, authConfig.initialAdminEmails),
-              })
-              .onConflictDoNothing();
+            /*
+             * Who is an administrator is decided by email, not by which provider signed them in. A
+             * deployment mid-migration has the same person arriving through Entra one week and
+             * Okta the next, and they are the same person to this list.
+             */
+            await reconcileRole(
+              database,
+              user.id,
+              user.email,
+              authConfig.initialAdminEmails,
+            );
+          },
+        },
+      },
+      session: {
+        create: {
+          after: async (session) => {
+            /*
+             * Again on every sign-in, not only the first. The list is a file an operator edits, and
+             * editing it has to mean something for the people already in the table: otherwise
+             * adding yourself after you first signed in silently does nothing.
+             */
+            await reconcileRoleForUserId(
+              database,
+              session.userId,
+              authConfig.initialAdminEmails,
+            );
           },
         },
       },

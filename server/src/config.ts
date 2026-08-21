@@ -293,13 +293,31 @@ function authConfig(
     throw new Error("Sign-in requires BETTER_AUTH_URL");
   }
 
+  /*
+   * Somebody has to be an administrator, and only this says who.
+   *
+   * The role is written from this list and there is no route anywhere that changes one, so a
+   * deployment that configures sign-in without it admits everybody as a plain user, shows nobody
+   * the admin screens, and offers no way to promote anyone. Refusing at start-up is the only cheap
+   * moment to catch that; the expensive one is after the first person has signed in.
+   */
+  const initialAdminEmails = commaSeparated(
+    environment,
+    "INITIAL_ADMIN_EMAILS",
+  );
+  if (initialAdminEmails.length === 0) {
+    throw new Error(
+      "Sign-in requires INITIAL_ADMIN_EMAILS naming at least one administrator. Nothing else grants the role, and no screen can promote somebody once the deployment is running",
+    );
+  }
+
   return {
     baseUrl,
     secret,
     trustedOrigins: commaSeparated(environment, "TRUSTED_ORIGINS").length
       ? commaSeparated(environment, "TRUSTED_ORIGINS")
       : ["http://localhost:3000"],
-    initialAdminEmails: commaSeparated(environment, "INITIAL_ADMIN_EMAILS"),
+    initialAdminEmails,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
     ...(okta ? { okta } : {}),

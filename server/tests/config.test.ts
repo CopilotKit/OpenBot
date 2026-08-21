@@ -11,6 +11,7 @@ const baseEnvironment = {
   GOOGLE_OAUTH_CLIENT_SECRET: "google-client-secret",
   BETTER_AUTH_SECRET: "a-long-enough-local-development-auth-secret",
   BETTER_AUTH_URL: "http://localhost:3001",
+  INITIAL_ADMIN_EMAILS: "admin@openbot.test",
   INTELLIGENCE_API_URL: "http://localhost:7100",
   INTELLIGENCE_GATEWAY_WS_URL: "ws://localhost:7103",
   INTELLIGENCE_API_KEY: "tenant-api-key",
@@ -31,6 +32,7 @@ const {
   GOOGLE_OAUTH_CLIENT_SECRET: _googleSecret,
   BETTER_AUTH_SECRET: _authSecret,
   BETTER_AUTH_URL: _authUrl,
+  INITIAL_ADMIN_EMAILS: _adminEmails,
   ...withoutSignIn
 } = baseEnvironment;
 
@@ -180,6 +182,7 @@ describe("deployment configuration", () => {
   const SESSION = {
     BETTER_AUTH_SECRET: "a-long-enough-local-development-auth-secret",
     BETTER_AUTH_URL: "http://localhost:3001",
+    INITIAL_ADMIN_EMAILS: "admin@openbot.test",
   };
 
   test("enables Microsoft, and admits any account until told a directory", () => {
@@ -270,6 +273,25 @@ describe("deployment configuration", () => {
       "microsoft",
       "okta",
     ]);
+  });
+
+  /**
+   * Somebody has to be an administrator.
+   *
+   * The role is written from this list and no route anywhere changes one, so a deployment that
+   * configures sign-in without it admits everybody as a plain user and can never promote anyone.
+   * Start-up is the only cheap moment to notice.
+   */
+  test("refuses sign-in with nobody named as an administrator", () => {
+    const { INITIAL_ADMIN_EMAILS: _none, ...withoutAdmins } = baseEnvironment;
+
+    expect(() => loadConfig(withoutAdmins)).toThrow("INITIAL_ADMIN_EMAILS");
+  });
+
+  test("asks for no administrator when nothing signs anybody in", () => {
+    // One administrator either way, and no list to write. Requiring one here would mean a fresh
+    // clone could not start.
+    expect(() => loadConfig(withoutSignIn)).not.toThrow();
   });
 
   test("is off, and lists nothing, when no provider is configured", () => {

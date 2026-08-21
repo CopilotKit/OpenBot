@@ -27,7 +27,7 @@ your own machine.
 
 > **Alpha, and under active development.** OpenBot is early. Expect rough edges and bugs, and expect things to move. Issues and pull requests are welcome.
 
-> **Runs on your machine.** Everything below is written for a laptop. Out of the box OpenBot runs with `OPENBOT_DEV_NO_AUTH`, which skips signing in and admits every request as one administrator. [Google sign-in](#sign-in-with-google) can be wired up instead.
+> **Runs on your machine.** Everything below is written for a laptop. With no identity provider configured OpenBot admits every request as one administrator, so a fresh clone reaches the product without registering an OAuth client. [Sign-in](#sign-in) turns that off.
 
 ## What it is
 
@@ -191,7 +191,7 @@ Settings worth knowing:
 
 | Variable                             | Use                                                                       |
 | ------------------------------------ | ------------------------------------------------------------------------- |
-| `OPENBOT_DEV_NO_AUTH`                | Admits every request as one administrator. How OpenBot runs today.        |
+| `OPENBOT_SINGLE_USER`                | Admits every request as one administrator where an unconfigured deployment would otherwise refuse to start. |
 | `OPENAI_BASE_URL`                    | Answers the OpenAI-shaped calls from somewhere else: a gateway, a proxy.  |
 | `ANTHROPIC_BASE_URL`, `GOOGLE_GENERATIVE_AI_BASE_URL` | The same, for those two APIs.            |
 | `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` sets one.      |
@@ -227,25 +227,51 @@ endpoints; keep them private and do not use them to bypass the gateway.
 
 More detail: [docs/architecture.md](docs/architecture.md).
 
-## Sign in with Google
+## Sign in
 
-`OPENBOT_DEV_NO_AUTH` is the default because it needs no OAuth credentials and no consent screen. To sign in for real instead, create a Google OAuth client and set all four of these together:
+Nothing configured means one administrator and no sign-in, which is how a fresh clone reaches the
+product. Configure **any one** of Google, Microsoft or Okta to turn sign-in on. Configure more than
+one and the sign-in screen offers each of them.
+
+These four are needed whichever you pick:
 
 ```sh
-BETTER_AUTH_URL=http://localhost:3001
-BETTER_AUTH_SECRET=        # openssl rand -base64 32, at least 32 characters
-GOOGLE_OAUTH_CLIENT_ID=
-GOOGLE_OAUTH_CLIENT_SECRET=
+BETTER_AUTH_URL=http://localhost:3001        # where OAuth callbacks come back to
+BETTER_AUTH_SECRET=                          # openssl rand -base64 32
+TRUSTED_ORIGINS=http://localhost:3010        # where the app is served from
+INITIAL_ADMIN_EMAILS=you@example.com         # comma separated
 ```
 
-Then set the two that decide who gets in and from where:
+Then the provider. Register the redirect URI shown beside it.
 
-- `TRUSTED_ORIGINS` — where the app is served from, `http://localhost:3010` locally. It defaults to `http://localhost:3000`, which is not where `start.sh` serves the app.
-- `INITIAL_ADMIN_EMAILS` — comma separated. An address listed here becomes an administrator the first time it signs in; everybody else becomes a user.
+```sh
+# Google — http://localhost:3001/api/auth/callback/google
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
 
-Remove `OPENBOT_DEV_NO_AUTH`, then restart: the sign-in button is written into the app's generated config at startup, so it appears only once all four settings are present. Accounts, sessions and roles are stored in the same PostgreSQL database as everything else.
+# Microsoft — http://localhost:3001/api/auth/callback/microsoft
+MICROSOFT_OAUTH_CLIENT_ID=
+MICROSOFT_OAUTH_CLIENT_SECRET=
+MICROSOFT_OAUTH_TENANT_ID=common             # your directory GUID for staff only
 
-A partial set is refused rather than ignored: the server will not start with `BETTER_AUTH_SECRET` or `BETTER_AUTH_URL` but no client credentials, or with a secret shorter than 32 characters.
+# Okta — http://localhost:3001/api/auth/callback/okta
+OKTA_OAUTH_CLIENT_ID=
+OKTA_OAUTH_CLIENT_SECRET=
+OKTA_OAUTH_ISSUER=https://example.okta.com/oauth2/default
+```
+
+Restart. Accounts, sessions and roles are stored in the same PostgreSQL database as everything else.
+
+- `INITIAL_ADMIN_EMAILS` is required, because nothing else grants the administrator role and no
+  screen can promote somebody afterwards. It is re-read on every sign-in, so editing it takes effect
+  the next time that person signs in.
+- `MICROSOFT_OAUTH_TENANT_ID` defaults to `common`, which admits personal Microsoft accounts as well
+  as work ones.
+- A half-configured provider is refused at start-up rather than at somebody's first attempt to sign
+  in: a client id with no secret, a secret shorter than 32 characters, or an Okta issuer with no
+  credentials behind it.
+- **Put TLS in front of any deployment.** A page served over plain `http://` on anything but
+  localhost is not a secure context, and sign-in cookies want `Secure`.
 
 ## Keeping it to your machine
 

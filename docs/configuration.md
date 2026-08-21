@@ -82,7 +82,7 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 
 | Variable                     | Meaning                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
-| `OPENBOT_DEV_NO_AUTH`        | Local-only fixed administrator when set to `true`. Refused with `NODE_ENV=production`. |
+| `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. Only read when no identity provider is configured, and only needed where `NODE_ENV=production` would otherwise refuse to start. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
 | `BETTER_AUTH_SECRET`         | At least 32 characters. Required with Google OAuth.                                    |
