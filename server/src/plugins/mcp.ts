@@ -98,20 +98,67 @@ type Connection = {
 };
 
 /**
+ * The vendor's own sentence out of a failure, when there is one worth reading.
+ *
+ * The transport puts the response body in the message, after a fixed prefix. Two shapes turn up: a
+ * plain error object, and — from Google's Workspace servers — a JSON-RPC result whose `content` holds
+ * the explanation as text under `isError`. Both are worth surfacing; the tool list, which arrives in
+ * the same position under a 403, is not.
+ */
+function reasonFrom(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const body = message.slice(message.indexOf("{"));
+  if (!body.startsWith("{")) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+
+  const asRecord = (value: unknown) =>
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+
+  // `{"error": {"message": "..."}}` — how Google's REST APIs refuse.
+  const restMessage = asRecord(asRecord(parsed).error).message;
+  if (typeof restMessage === "string" && restMessage) {
+    return trimmed(restMessage);
+  }
+
+  // `{"result": {"content": [{"text": "..."}], "isError": true}}` — how its MCP servers refuse.
+  const result = asRecord(asRecord(parsed).result);
+  if (result.isError === true && Array.isArray(result.content)) {
+    const text = result.content
+      .map((part) => asRecord(part).text)
+      .find((value): value is string => typeof value === "string" && !!value);
+    if (text) return trimmed(text);
+  }
+
+  return null;
+}
+
+/** Long enough for a sentence and a URL, short enough not to be the wall of JSON this replaced. */
+const trimmed = (value: string) =>
+  value.length > 400 ? `${value.slice(0, 400)}…` : value;
+
+/**
  * A vendor's failure, as one sentence an operator can act on.
  *
  * WHAT THIS REPLACES. The transport throws `Error POSTing to endpoint: <the whole response body>`,
- * and the status code lives on the error object rather than in the message — so rewrapping by
- * `.message` alone threw away the only part that says what went wrong and kept the part that does
- * not.
+ * and the status lives on the error object rather than in the message — so rewrapping by `.message`
+ * alone threw away the only part that says what went wrong and kept the part that does not.
  *
- * Google's Drive MCP makes that worse than it sounds. Asked for its tool list with a token it will
- * not accept, it answers **401 with a complete, valid tool list in the body** — verified against the
- * live endpoint. The old message was therefore a wall of successful-looking JSON attached to a
- * failure, which reads as a parsing bug in OpenBot rather than as a rejected credential.
+ * Google's Workspace MCP servers make that worse than it sounds. Asked for a tool list with a token
+ * they will not accept, they answer **401, or 403, with a complete and valid tool list in the body** —
+ * verified against the live endpoint. So the message was a wall of successful-looking JSON attached
+ * to a failure, which reads as a parsing bug here rather than as a refusal there.
  *
- * So the status leads, and the well-known ones are named. The body is dropped: by the time a vendor
- * is refusing a credential, its response payload is not what anybody needs to see.
+ * The status leads, and the well-known ones are named. A 403 also keeps the vendor's own sentence
+ * where there is one, because that is where Google says which API is not enabled — and each Workspace
+ * product is two APIs, so nothing else can tell "I enabled it" from "it is enabled".
  */
 function vendorFailure(error: unknown): string {
   const status =
@@ -123,7 +170,27 @@ function vendorFailure(error: unknown): string {
     return "The vendor rejected this credential (401). For a connector reached as the person asking, reconnecting the account is the usual fix; if it persists, the scopes it was granted may not cover this server.";
   }
   if (status === 403) {
-    return "The vendor accepted the credential and refused the request (403). The account may lack access, or the API may not be enabled for this project.";
+    /*
+     * A 403 keeps its reason, unlike a 401.
+     *
+     * This cost a diagnosis. Google refuses a Workspace MCP server with 403 when the API behind it is
+     * not enabled for the project — and the sentence saying so, with the console URL to fix it, is in
+     * the response body. Dropping the body left "the account may lack access, or the API may not be
+     * enabled", which is a guess between two very different problems when the vendor had already
+     * answered the question.
+     *
+     * Worse, each Workspace product is TWO APIs: enabling `drive.googleapis.com` does not enable
+     * `drivemcp.googleapis.com`, so "I enabled it" and "it is enabled" are not the same claim and
+     * only the body can tell them apart.
+     *
+     * Trimmed, because the body may instead be the tool list — the same server answers `tools/list`
+     * with a full, valid list under a 403 — and a wall of JSON is what made the original error
+     * unreadable.
+     */
+    const detail = reasonFrom(error);
+    return detail
+      ? `The vendor accepted the credential and refused the request (403). It said: ${detail}`
+      : "The vendor accepted the credential and refused the request (403). The account may lack access, or the API may not be enabled for this project.";
   }
   if (typeof status === "number") {
     return `The vendor answered ${status}.`;
