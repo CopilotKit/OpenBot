@@ -33,12 +33,12 @@ export function createRoutingRoutes(
 
     const actor = context.var.actor;
     const roster = await store.list(actor, false);
-    if (roster.length === 0) {
-      return context.json({ error: "No coworker is available." }, 409);
-    }
     // The same default the composer shows: the first public coworker, else the first at all.
     const preferred =
-      roster.find((a) => a.visibility === "public") ?? roster[0]!;
+      roster.find((a) => a.visibility === "public") ?? roster[0];
+    if (!preferred) {
+      return context.json({ error: "No coworker is available." }, 409);
+    }
     const candidates: RoutingCandidate[] = roster.map((a) => ({
       id: a.id,
       name: a.name,
