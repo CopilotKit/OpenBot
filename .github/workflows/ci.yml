@@ -66,6 +66,10 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      # The Bots are not root workspaces and each keeps its own lockfile. The startup tests spawn
+      # the real entrypoint, so its dependencies have to be installed as well.
+      - run: bun install --frozen-lockfile
+        working-directory: agent-bot
       # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
       # comes from the job env instead, which drizzle.config.ts already reads.
       - run: bunx drizzle-kit migrate --config=drizzle.config.ts

@@ -324,8 +324,11 @@ export function createComputerRoutes(
     try {
       return context.json(
         await gateway.humanInput(context.req.param("botId"), {
-          kind,
           ...(body ?? {}),
+          // Last, so the checked value wins. Spread over it, a body carrying its own `kind` replaced
+          // the one this route had just checked, and the gateway puts that value into the path it
+          // calls on the computer.
+          kind,
         } as Parameters<typeof gateway.humanInput>[1]),
       );
     } catch (error) {

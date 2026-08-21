@@ -45,6 +45,13 @@ function statusOf(error: unknown): number | undefined {
   return (error as { statusCode?: number }).statusCode;
 }
 
+/** One poll interval, used both by the health wait and by the retry that follows a lost race. */
+function pause(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
+
 export type ComputerState = {
   botId: string;
   container: string;
@@ -56,6 +63,38 @@ export type ComputerState = {
   /** Where to reach it, however it is arranged. */
   url?: string;
 };
+
+/**
+ * The name this Bot's computer would have is held by a container this supervisor does not own.
+ *
+ * Separate from {@link DockerUnavailableError} because the daemon is fine and an operator sent
+ * looking at it would find nothing. What has to happen is that somebody looks at the container
+ * holding the name and decides whether it should be there.
+ */
+export class NameHeldError extends Error {
+  constructor(container: string) {
+    super(
+      `A container named ${container} already exists and does not belong to this deployment. Remove it or rename it; it will not be adopted.`,
+    );
+    this.name = "NameHeldError";
+  }
+}
+
+/**
+ * The container started and the computer inside it never answered.
+ *
+ * Its own class because the two failures need different actions. Docker being unreachable is the
+ * supervisor's problem; this is the computer's, and the message has to say so or an operator reads
+ * "could not reach Docker" about a daemon that is answering.
+ */
+export class ComputerNotAnsweringError extends Error {
+  constructor(container: string, timeoutMs: number) {
+    super(
+      `The computer in ${container} started but did not answer within ${timeoutMs}ms. It is not ready, so it is not being handed out.`,
+    );
+    this.name = "ComputerNotAnsweringError";
+  }
+}
 
 export class DockerUnavailableError extends Error {
   constructor(cause: string) {
@@ -146,6 +185,9 @@ async function inspectOwned(
   }
 }
 
+/** Long enough for a cold start with a large image, short enough that a caller is not left hanging. */
+const DEFAULT_READY_TIMEOUT_MS = 60_000;
+
 /**
  * Wait until the computer actually answers.
  *
@@ -163,7 +205,7 @@ async function inspectOwned(
  */
 async function waitUntilAnswering(
   container: string,
-  timeoutMs = 60_000,
+  timeoutMs: number = DEFAULT_READY_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -180,8 +222,18 @@ async function waitUntilAnswering(
     } catch {
       // Mid-creation, or gone. The deadline is what ends this.
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await pause(250);
   }
+
+  /*
+   * The deadline is a failure, not an answer.
+   *
+   * Returning here reported every computer that never came up as ready, which is the exact thing
+   * this function exists to prevent: the caller is handed an address, sends the deployment's
+   * computer token to it, and gets a transport error it cannot tell from a computer that is broken
+   * in some other way. A wait that cannot fail is a sleep.
+   */
+  throw new ComputerNotAnsweringError(container, timeoutMs);
 }
 
 export type EnsureOptions = {
@@ -198,6 +250,14 @@ export type EnsureOptions = {
    */
   runtime?: string;
   memoryBytes?: number;
+  /**
+   * How long a started computer is given to answer before the attempt is called a failure.
+   *
+   * Configurable because the wait now fails rather than returning, so the number decides when a slow
+   * start becomes an error, and a deployment pulling a large image on a cold host is not the same as
+   * a test that wants an answer in seconds.
+   */
+  readyTimeoutMs?: number;
   pidsLimit?: number;
   /**
    * The volume holding the SPIRE agent's Workload API socket, mounted read-only into each computer
@@ -298,10 +358,23 @@ export async function ensure(
           HostConfig: hostConfig(names, options),
         });
       } catch (error) {
-        // The other request creating the same computer got there first, which is what idempotent
-        // means here. Its container is the one this request goes on to start.
         if (statusOf(error) !== 409) {
           throw new DockerUnavailableError(String(error));
+        }
+        /*
+         * Something already holds the name, and 409 does not say what.
+         *
+         * Usually it is the other request creating the same computer, which is what idempotent means
+         * here, and its container is the one this request goes on to start. The other case is a
+         * container this supervisor does not own: left by a deployment that used a different
+         * namespace, made by hand, or put there by somebody who guessed the name. Ownership is
+         * checked everywhere else precisely so that one is treated as absent, and starting it here
+         * on a 409 was the one path that adopted it instead: `start` names the container, not the
+         * container this supervisor made, and the address goes back to a server that then sends the
+         * deployment's computer token to whatever is listening inside it.
+         */
+        if (!(await inspectOwned(names))) {
+          throw new NameHeldError(names.container);
         }
       }
     }
@@ -311,10 +384,22 @@ export async function ensure(
         await docker.getContainer(names.container).start();
       } catch (error) {
         const status = statusOf(error);
-        // Gone between creating it and starting it: a concurrent reset took the container away, or
-        // the create this request lost the race to was itself rolled back. Nothing about the Bot has
-        // changed, so the answer is to build it again rather than to report Docker as unreachable.
-        if (status === 404 && attempt > 1) continue;
+        /*
+         * Gone between creating it and starting it: a concurrent reset took the container away, the
+         * create this request lost the race to was itself rolled back, or the daemon has not yet
+         * published the name this request just created. Nothing about the Bot has changed, so the
+         * answer is to build it again rather than to report Docker as unreachable.
+         *
+         * Paused first, because the retry is the whole budget. Going straight back round arrives
+         * within a millisecond, sees the same not-yet-published name, and spends the second attempt
+         * on the state that failed the first: the first browser action a Bot is ever asked for fails,
+         * and the second one, seconds later, works. One poll interval is what the health wait uses
+         * for the same question.
+         */
+        if (status === 404 && attempt > 1) {
+          await pause(250);
+          continue;
+        }
         // 304 is "already running", which is success for an idempotent verb.
         if (status !== 304) {
           throw new DockerUnavailableError(String(error));
@@ -323,7 +408,7 @@ export async function ensure(
     }
 
     const settled = await inspectOwned(names);
-    await waitUntilAnswering(names.container);
+    await waitUntilAnswering(names.container, options.readyTimeoutMs);
 
     return {
       botId: names.botId,

@@ -163,6 +163,9 @@ function fakeComputer(options?: {
         calls.push("supplySecret");
         return Response.json({ supplied: true });
       case "/human/click":
+      case "/human/type":
+      case "/human/key":
+      case "/human/scroll":
       case "/human/move":
       case "/human/button":
       case "/human/wheel":
@@ -741,6 +744,48 @@ describe("the computer gateway", () => {
       expect(rows[0]?.eventType).toBe("computer.action_refused");
     });
   });
+});
+
+/**
+ * The gateway builds the computer path from `kind`, so `kind` cannot be a caller's string.
+ *
+ * The route ahead of it checks the four gestures, and this is the layer that holds when something
+ * gets past that: a value reaching here decides which endpoint of the computer's API the deployment
+ * calls, with its computer token attached. `humanInput` is also the one acting method that writes no
+ * audit row, by design, so a redirected call leaves nothing behind to read afterwards.
+ */
+describe("human input names a gesture, not a path", () => {
+  test.each([
+    ["../computers/reset", "another endpoint of the computer's API"],
+    ["../exec", "the shell"],
+    ["click/../../health", "a traversal in the middle"],
+    ["", "nothing at all"],
+  ])("refuses %s (%s), and sends nothing", async (kind) => {
+    const { gateway, requests } = await gatewayWith(PERMISSIVE);
+    const before = requests.length;
+
+    await expect(
+      gateway.humanInput("bot-1", { kind, x: 1, y: 1 } as never),
+    ).rejects.toThrow();
+    // Nothing left this process. Asserting only that it threw would pass just as well when the
+    // request went out and the far side answered 404, which is the failure being fixed.
+    expect(requests.slice(before)).toEqual([]);
+  });
+
+  test.each(["click", "type", "key", "scroll"])(
+    "carries %s through, because that is what a person's hands do",
+    async (kind) => {
+      const { gateway, requests } = await gatewayWith(PERMISSIVE);
+
+      await gateway.humanInput("bot-1", { kind, x: 1, y: 1 } as never);
+
+      expect(
+        requests.some(
+          (request) => new URL(request.url).pathname === `/human/${kind}`,
+        ),
+      ).toBe(true);
+    },
+  );
 });
 
 describe("resolving a computer's address", () => {

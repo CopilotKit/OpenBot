@@ -1,9 +1,11 @@
 import { serve } from "bun";
 import { Hono } from "hono";
 import {
+  ComputerNotAnsweringError,
   DockerUnavailableError,
   ensure,
   listOwned,
+  NameHeldError,
   reachable,
   reset,
   stop,
@@ -127,7 +129,17 @@ app.post("/computers/:botId/ensure", async (context) => {
         : { identity: identity.reason }),
     });
   } catch (error) {
-    if (error instanceof DockerUnavailableError) {
+    // A held name is not an outage. 409 says the conflict is with something already there, so an
+    // operator reads the message rather than going to look at a daemon that is working.
+    if (error instanceof NameHeldError) {
+      return context.json({ error: error.message }, 409);
+    }
+    // Not ready is a 503 like an outage is, because the caller's next move is the same: wait and
+    // ask again. The message is what differs, and it is the part an operator acts on.
+    if (
+      error instanceof DockerUnavailableError ||
+      error instanceof ComputerNotAnsweringError
+    ) {
       return context.json({ error: error.message }, 503);
     }
     throw error;
