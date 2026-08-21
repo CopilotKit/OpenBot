@@ -63,6 +63,9 @@ Sessions survive and nobody signs in again.
   path, rather than reporting an element it was never about.
 - **`COMPUTER_SANDBOX=on`** turns on Chromium's own sandbox where the host permits user namespaces.
   Which way it went is printed at start-up either way.
+- **New chat.** The direct Bot chat has a button that starts a fresh conversation, which it had no way
+  to do before: the thread was minted once and remembered for that Bot forever, so the only way out
+  of a conversation was to clear the browser's storage by hand.
 
 ### Fixed
 - **A Bot could become root inside its container.** `sudo` was granted as `NOPASSWD: ALL`, and the
@@ -116,6 +119,15 @@ Sessions survive and nobody signs in again.
   laptop `http://localhost` counts as one, so this never showed up in development; on a real
   address it does not, and the surface did nothing at all when you pressed send. No message, no
   error. Ids now come from an API with no such restriction.
+- **A chat could quietly forget everything and carry on.** The browser remembers a thread id for each
+  Bot, and nothing ever asked whether Intelligence still had that thread. Where it did not, the
+  transcript loaded empty, every later message silently recreated an empty thread under the same id,
+  and the Bot answered as though the conversation were new — with the reason nowhere but the server
+  log, as a 404 flattened into a 500 by the time it reached the browser. A remembered thread is now
+  checked before it is used: one the platform provably does not have is replaced, because there is no
+  conversation left to lose, and a check that fails for any other reason keeps the thread and says on
+  screen that earlier messages could not be loaded. A person reading a confident answer can now tell
+  whether the Bot has read what came before it.
 
 ### Changed
 

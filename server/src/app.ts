@@ -22,6 +22,7 @@ import type { ChannelEventHub } from "./channels/events";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
+import { createThreadReader } from "./channels/thread-status";
 import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
@@ -31,6 +32,7 @@ import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { ConnectorAdminService } from "./connectors";
+import { createIntelligenceClient } from "./intelligence-client";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
@@ -660,7 +662,21 @@ export function createApp(
   }
 
   if (threadIdentity) {
-    app.route("/api/threads", createThreadRoutes(threadIdentity, requireUser));
+    app.route(
+      "/api/threads",
+      createThreadRoutes(
+        threadIdentity,
+        requireUser,
+        // config.ts refuses to boot without the full Intelligence contract (see copilot.ts's
+        // header comment), so `config.runtime.intelligence` is never missing here. Built from it
+        // rather than assumed, though: this is the one place besides the runtime mount itself that
+        // needs to reach Intelligence, and it should keep working unmodified if that guarantee ever
+        // loosens and a deployment can legitimately have no reader to build.
+        createThreadReader(
+          createIntelligenceClient(config.runtime.intelligence),
+        ),
+      ),
+    );
   }
 
   /*
