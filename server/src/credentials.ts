@@ -43,20 +43,56 @@ export type CredentialStoreValue = {
   encryptedValue: string;
 };
 
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
+ * Where a credential write runs.
+ *
+ * A caller already inside a transaction passes it here, so the write joins that
+ * transaction rather than opening one of its own on a second pooled connection.
+ * Two connections would mean the credential committing separately from the
+ * change that asked for it, and, since the caller is usually holding row locks
+ * by then, a pool with nothing spare to hand out deadlocks instead. See the
+ * note on `max` in `db/client.ts`.
+ */
+export type CredentialExecutor =
+  | Pick<Database, "select" | "insert" | "update">
+  | Pick<Transaction, "select" | "insert" | "update">;
+
 export type CredentialStore = {
-  create: (value: CredentialStoreValue) => Promise<StoredCredential>;
+  create: (
+    value: CredentialStoreValue,
+    executor?: CredentialExecutor,
+  ) => Promise<StoredCredential>;
   /**
-   * Replace one credential with another, as a single database transaction.
+   * Replace one credential with another, atomically.
    *
    * Retiring the old secret and storing the new one are one decision, so they
    * are one write. Two separate calls cannot be made safe from the outside:
    * an `UPDATE` can commit and still throw on the way back, and no compensating
    * revoke survives the process being killed between them.
+   *
+   * Without an executor this opens its own transaction. With one it runs inside
+   * the caller's, and is atomic with whatever else that transaction is doing.
    */
   rotate: (
     input: CredentialStoreValue & { previousCredentialId: string },
+    executor?: CredentialExecutor,
   ) => Promise<StoredCredential>;
-  revoke: (id: string) => Promise<Date>;
+  revoke: (id: string, executor?: CredentialExecutor) => Promise<Date>;
+  /** Whether this credential exists and has not been revoked. */
+  isLive: (id: string, executor?: CredentialExecutor) => Promise<boolean>;
+  /**
+   * The live credential for a key, if this deployment holds one.
+   *
+   * At most one can exist, which is what `credentials_active_key_idx`
+   * enforces, so a caller about to store a secret for a key can ask whether it
+   * is replacing something rather than finding out from a failed insert.
+   */
+  findLiveByKey: (
+    key: { kind: CredentialKind; provider: string; keyId: string },
+    executor?: CredentialExecutor,
+  ) => Promise<{ id: string } | null>;
 };
 
 export type CredentialSecretReader = {
@@ -177,8 +213,8 @@ export function createCredentialStore(
   CredentialStatusReader &
   ModelCredentialSecretReader {
   return {
-    create: async (value) => {
-      const [credential] = await database
+    create: async (value, executor = database) => {
+      const [credential] = await executor
         .insert(credentials)
         .values(value)
         .returning({ id: credentials.id, revokedAt: credentials.revokedAt });
@@ -188,8 +224,8 @@ export function createCredentialStore(
       }
       return credential;
     },
-    rotate: async (input) => {
-      return database.transaction(async (transaction) => {
+    rotate: async (input, executor) => {
+      const write = async (transaction: CredentialExecutor) => {
         /**
          * The previous credential, locked for the rest of the transaction.
          *
@@ -265,11 +301,15 @@ export function createCredentialStore(
         }
 
         return inserted;
-      });
+      };
+
+      // A caller already in a transaction has its own atomicity to keep, and
+      // the credential belongs to it rather than to a transaction of its own.
+      return executor ? write(executor) : database.transaction(write);
     },
-    revoke: async (id) => {
+    revoke: async (id, executor = database) => {
       const revokedAt = new Date();
-      const [credential] = await database
+      const [credential] = await executor
         .update(credentials)
         .set({ revokedAt, updatedAt: revokedAt })
         // Only a live row is stamped. Without the guard a second revoke would
@@ -282,6 +322,29 @@ export function createCredentialStore(
         throw new Error("Credential was not found or already revoked");
       }
       return credential.revokedAt;
+    },
+    isLive: async (id, executor = database) => {
+      const [credential] = await executor
+        .select({ id: credentials.id })
+        .from(credentials)
+        .where(and(eq(credentials.id, id), isNull(credentials.revokedAt)));
+
+      return credential !== undefined;
+    },
+    findLiveByKey: async ({ kind, provider, keyId }, executor = database) => {
+      const [credential] = await executor
+        .select({ id: credentials.id })
+        .from(credentials)
+        .where(
+          and(
+            eq(credentials.kind, kind),
+            eq(credentials.provider, provider),
+            eq(credentials.keyId, keyId),
+            isNull(credentials.revokedAt),
+          ),
+        );
+
+      return credential ?? null;
     },
     readSecret: async (id) => {
       const [credential] = await database
@@ -381,10 +444,36 @@ async function persistCredential(
   };
 }
 
+/**
+ * Store a credential for a key.
+ *
+ * A key holds one live credential, so storing a second one for a key that
+ * already has one is a replacement rather than an addition, and it is carried
+ * out as a rotation: the two writes are atomic and the trail records
+ * `credential.rotated` naming what was replaced.
+ *
+ * This is the shape the product asks for. The Credentials page offers Add and
+ * Revoke and has no rotate control, so replacing a model key is done by adding
+ * one for the same provider and keyId. Refusing that would leave no way to
+ * replace a key at all, and inserting it would raise a bare unique violation
+ * from `credentials_active_key_idx`.
+ */
 export async function createCredential(
   service: CredentialService,
   input: CredentialInput,
 ): Promise<CredentialStatus> {
+  const existing = await service.store.findLiveByKey({
+    kind: input.kind,
+    provider: input.provider,
+    keyId: input.keyId,
+  });
+  if (existing) {
+    return rotateCredential(service, {
+      ...input,
+      previousCredentialId: existing.id,
+    });
+  }
+
   const credential = await persistCredential(service, input);
 
   await recordAuditEvent(service.auditStore, {
