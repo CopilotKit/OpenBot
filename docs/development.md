@@ -61,6 +61,13 @@ generator produced. If the generated SQL will not work — `ADD COLUMN ... NOT N
 that already has rows — split it instead: generate the column nullable, add the data step, then
 generate the constraint.
 
+**A constraint that tightens an existing column belongs to a later release**, not to the release that
+adds the column. A rolling deploy runs the migrations and then serves from old and new replicas at
+once, and an old replica writes rows without the new column: under `NOT NULL` its writes start
+failing, so the release that added the column breaks for everybody who lands on a replica that has
+not been replaced yet. Ship the column nullable, let the fleet turn over, then tighten it. `issuer`
+on `accounts` is the worked example: the column is nullable and no migration tightens it.
+
 **A data step is its own migration**, created with the flag that exists for it:
 
 ```sh

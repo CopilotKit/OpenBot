@@ -1,6 +1,7 @@
 import { IconLock, IconShieldCheck, IconUser } from "@tabler/icons-react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import {
   PageEmpty,
   PageRows,
@@ -9,6 +10,7 @@ import {
 } from "@/components/layout/page-shell";
 import { StaggerItem } from "@/components/layout/stagger";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Item,
   ItemActions,
@@ -60,7 +62,19 @@ function describe(person: Person): string {
 }
 
 function PeoplePage() {
-  const people = useQuery(peopleListQueryOptions());
+  const [search, setSearch] = useState("");
+  /*
+   * Debounced, so typing a name is one request rather than one per keystroke against an aggregate
+   * over every user in the deployment.
+   */
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const people = useInfiniteQuery(peopleListQueryOptions(query));
+  const rows = people.data?.pages.flatMap((page) => page.people) ?? [];
   const currentUser = useQuery(currentUserQueryOptions());
   const setRole = useMutation(setPersonRoleMutationOptions(queryClient));
   const setAccess = useMutation(setPersonAccessMutationOptions(queryClient));
@@ -83,17 +97,31 @@ function PeoplePage() {
             {failure.message}
           </p>
         ) : null}
+        {/*
+          Server-side search. Filtering what already arrived would only search the first page, which
+          is the opposite of what somebody looking for a colleague needs.
+        */}
+        <Input
+          aria-label="Search people"
+          className="mt-4"
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search by name or address"
+          value={search}
+        />
+
         {people.isPending ? null : people.error ? (
           <p className="mt-4 text-destructive text-sm" role="alert">
             Could not load people.
           </p>
-        ) : people.data?.length === 0 ? (
+        ) : rows.length === 0 ? (
           <PageEmpty>
-            Nobody has signed in yet. People appear here once they do.
+            {query
+              ? `Nobody here matches "${query}".`
+              : "Nobody has signed in yet. People appear here once they do."}
           </PageEmpty>
         ) : (
           <PageRows>
-            {people.data?.map((person, index) => {
+            {rows.map((person, index) => {
               const isSelf = person.id === currentUser.data?.id;
               const busy = setRole.isPending || setAccess.isPending;
 
@@ -148,12 +176,28 @@ function PeoplePage() {
                       />
                     </ItemActions>
                   </Item>
-                  {index !== (people.data?.length ?? 0) - 1 && <Separator />}
+                  {index !== rows.length - 1 && <Separator />}
                 </StaggerItem>
               );
             })}
           </PageRows>
         )}
+
+        {/*
+          Only when there is one. A button that says there is more when there is not is worse than
+          no button, and this list ends for most deployments on the first page.
+        */}
+        {people.hasNextPage ? (
+          <Button
+            className="mt-4"
+            disabled={people.isFetchingNextPage}
+            onClick={() => people.fetchNextPage()}
+            size="sm"
+            variant="outline"
+          >
+            {people.isFetchingNextPage ? "Loading…" : "Show more"}
+          </Button>
+        ) : null}
       </PageSection>
     </PageShell>
   );

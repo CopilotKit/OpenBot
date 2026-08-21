@@ -1,5 +1,5 @@
 {
-  "id": "ab829598-5c7b-4ed7-9641-79d8dbe2bd19",
+  "id": "29b80b3f-45c0-4fa9-9f10-ef27b693786f",
   "prevId": "09dc7c9c-6132-4413-a291-72aee0a30b2c",
   "version": "7",
   "dialect": "postgresql",
@@ -30,7 +30,7 @@
           "name": "issuer",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "user_id": {
           "name": "user_id",
@@ -1336,7 +1336,7 @@
           "tableTo": "users",
           "columnsFrom": ["user_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

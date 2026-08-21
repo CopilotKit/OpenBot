@@ -78,16 +78,22 @@ export function registerIdentityProviderMutationOptions(
   });
 }
 
+/**
+ * Remove one.
+ *
+ * Our own route, not Better Auth's `delete-provider`, which refuses unless the person asking is the
+ * one who registered it. That left a provider nobody could remove the moment the administrator who
+ * set it up had left, which is exactly when somebody needs to.
+ */
 export function deleteIdentityProviderMutationOptions(
   queryClient: QueryClient,
 ) {
   return mutationOptions({
     mutationFn: async (providerId: string): Promise<void> => {
-      await client("/api/auth/sso/delete-provider", {
-        method: "POST",
-        body: { providerId },
-        fallback: FALLBACK,
-      });
+      await client(
+        `/api/admin/identity-providers/${encodeURIComponent(providerId)}`,
+        { method: "DELETE", fallback: FALLBACK },
+      );
     },
     onSuccess: () => invalidateProviders(queryClient),
   });

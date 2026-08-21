@@ -72,6 +72,53 @@ export async function storeAgentAuth(input: {
 }
 
 /**
+ * Retire the key an edit has just replaced.
+ *
+ * Rotating a key is the standard answer to a suspected leak, and it only answers it if the old
+ * credential stops working. Editing a Bot's key used to write a new vault row and repoint the agent
+ * at it, leaving the previous one decryptable and still valid with nothing listing it and no way to
+ * reach it: the honest answer to "is that leaked key still live" was yes. The vault also grew one
+ * unrevoked secret per edit per Bot.
+ *
+ * Takes both configurations rather than a credential id, so the caller cannot get the direction
+ * wrong and revoke the key it has just stored. Does nothing when the id has not changed, which is an
+ * edit that left the key alone.
+ *
+ * Never throws. The new key is already stored and the Bot already works; a vault that would not
+ * accept the revocation is worth saying loudly and is not worth failing an edit that has succeeded.
+ */
+export async function retireReplacedKey(
+  store: Pick<CredentialStore, "revoke">,
+  previous: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Promise<void> {
+  const before = credentialIdOf(previous);
+  const after = credentialIdOf(next);
+  if (!before || before === after) return;
+
+  try {
+    await store.revoke(before);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: "agent-key-revoke-failed",
+        credentialId: before,
+        note: "A Bot's key was replaced and the one it replaced is still live in the vault. Revoke it by hand.",
+        error: String(error),
+      }),
+    );
+  }
+}
+
+/** The vault row an agent configuration points at, if it points at one. */
+function credentialIdOf(
+  configuration: Record<string, unknown>,
+): string | undefined {
+  const auth = configuration.auth as { credentialId?: unknown } | undefined;
+  return typeof auth?.credentialId === "string" ? auth.credentialId : undefined;
+}
+
+/**
  * The headers to send to this agent, or none.
  *
  * A revoked or missing credential sends nothing rather than guessing. The run then fails at the

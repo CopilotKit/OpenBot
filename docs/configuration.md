@@ -34,7 +34,7 @@ All four Intelligence values are required together. Missing any of them stops se
 | Variable             | Default                            | Meaning                                                             |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------- |
 | `PORT`               | `3001`                             | API server port.                                                    |
-| `NODE_ENV`           | unset                              | `production` enables startup refusals for local-only settings.      |
+| `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
 | `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project.          |
 | `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
@@ -96,7 +96,7 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 
 | Variable                     | Meaning                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
-| `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. Only read when no identity provider is configured, and only needed where `NODE_ENV=production` would otherwise refuse to start. |
+| `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. **Required** when no identity provider is configured, or the deployment refuses to start. Ignored when one is. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
 | `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
@@ -107,8 +107,14 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `OKTA_OAUTH_ISSUER`          | Which Okta, for example `https://example.okta.com/oauth2/default`.                     |
 | `BETTER_AUTH_SECRET`         | At least 32 characters. Required with any provider.                                    |
 | `BETTER_AUTH_URL`            | Public API server base URL, where OAuth callbacks return. Required with any provider.  |
-| `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API.                                       |
+| `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API, plus every host in a registered OIDC provider's discovery document. |
 | `INITIAL_ADMIN_EMAILS`       | Comma-separated administrators. **Required** with any provider.                        |
+
+**With no provider at all, `OPENBOT_SINGLE_USER=true` is required.** A deployment that configures
+nothing to sign anybody in and does not say that was deliberate refuses to start, naming what to
+configure, because a public URL where every visitor is an administrator fails silently. `NODE_ENV`
+does not enter into it. `.env.example` ships the line switched on, so a clone runs with no
+configuration at all.
 
 **Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
 secret must be set together, Okta additionally needs its issuer, and any of them requires
@@ -122,6 +128,18 @@ screen, which is what guarantees a way back in. Everybody else's role is decided
 SAML and OpenID Connect providers are not configured here. They are registered while the deployment
 runs, under Admin → Identity providers, and routed by email domain.
 
+**Registering an OpenID Connect provider needs its endpoints in `TRUSTED_ORIGINS`.** Better Auth
+fetches the discovery document and refuses any endpoint inside it that is not a trusted origin, which
+is what stops a registration pointing the deployment at an address of somebody else's choosing. It is
+every host in the document and not only the issuer, so a Google issuer also needs
+`oauth2.googleapis.com` and `openidconnect.googleapis.com`; a typical Okta tenant serves all of them
+from one host and needs only that. A registration refused this way names the host it objected to.
+
+What is registered belongs to the deployment rather than to whoever registered it. Every
+administrator sees the same list and can remove any of it, and a provider outlives the person who
+added it. The client secret and any SAML signing material are encrypted at rest with
+`KEY_ENCRYPTION_KEY`.
+
 The redirect URI to register with each provider is `<BETTER_AUTH_URL>/api/auth/callback/<provider>`,
 where `<provider>` is `google`, `microsoft` or `okta`.
 
@@ -131,6 +149,8 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `AGENT_COMPUTER_URL`                 | Shared computer URL. If absent, computer routes are not mounted.                          |
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
+| `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. |
+| `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. Cloud metadata addresses are still refused. |
@@ -287,6 +307,18 @@ channels:
 ```
 
 Each channel requires `id`, `name`, `description`, `permitted_agents`, and `allowed_groups`. Every `permitted_agents` entry must match an agent id.
+
+`allowed_groups` is validated and stored, and nothing reads it. It decides nothing today, and a
+deployment that writes one must not treat it as an access control. Both halves of that control are
+missing, not one: `users.groups` exists as a column and no sign-in path, claim mapping or admin
+screen ever populates it, so there is nothing for a channel's list to be compared against. Channel
+access is decided by membership alone — every channel route resolves the caller's row in
+`channel_memberships` and refuses without it.
+
+Package-declared channels get no membership rows from `synchronizeTenantPackage`, so today they
+are unreachable rather than open. The field is kept because the enforcement it is named for needs
+the declaration and needs group membership arriving from the identity provider, and neither this
+column nor `users.groups` is the wrong shape for it.
 
 ### `model.yaml`
 

@@ -4,7 +4,8 @@
  * Split by owner so two people can add tables all day without touching the same lines. Add tables
  * here; never edit core.ts or coworker.ts to do it.
  */
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { jsonb } from "./json";
 
 /**
  * The boundary this deployment is enforcing, kept where a restart cannot lose it.
@@ -32,4 +33,36 @@ export const actionPolicy = pgTable("action_policy", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
+});
+
+/**
+ * The last snapshot a computer produced, kept where every replica can read it.
+ *
+ * The gateway resolves the opaque ref in an acting call into the element it points at, and it must
+ * resolve it against the snapshot the ref came from, never against a label the caller supplied. That
+ * mapping used to live in a `Map` inside one process. OpenBot runs several processes behind a load
+ * balancer, and the process that took the snapshot is rarely the one that handles the click that
+ * follows it, so the mapping was absent exactly when a click arrived on another replica: the policy
+ * then decided with no element in front of it and the audit row could not name what was touched. The
+ * boundary the whole gateway exists for stopped applying, and nothing said so.
+ *
+ * One row per computer, upserted on every snapshot: the newest one wins, because a ref is only ever
+ * resolved against the snapshot that is current. `snapshot_id` is the generation the far-side
+ * computer stamped on it, so a ref carrying an older generation does not resolve to whatever now
+ * holds that ref — the staleness a persisted cache is rightly warned about is answered by matching
+ * the generation, not by keeping the cache in memory.
+ *
+ * Kept small on purpose: only the interactive elements a policy can match on, keyed by ref. It is a
+ * resolution table for the boundary, not a history of pages, and the next snapshot replaces it.
+ */
+export const computerSnapshot = pgTable("computer_snapshot", {
+  /** The computer these refs belong to. One live snapshot each, so it is the key. */
+  computerId: text("computer_id").primaryKey(),
+  /** The generation the computer stamped on this snapshot. A ref names the one it came from. */
+  snapshotId: integer("snapshot_id").notNull(),
+  /** The page it was taken on, so a rule about the host still has a page to match after a handover. */
+  url: text("url").notNull(),
+  /** The interactive elements, keyed by ref. The one thing resolve looks a ref up in. */
+  elements: jsonb("elements").notNull(),
+  takenAt: timestamp("taken_at", { withTimezone: true }).notNull().defaultNow(),
 });

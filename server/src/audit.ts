@@ -165,6 +165,50 @@ export const auditEventTypes = [
   "person.role_changed",
   "person.access_revoked",
   "person.access_restored",
+  /*
+   * Getting in, and being turned away.
+   *
+   * The trail had nothing about sign-in at all, which left two questions unanswerable. Anybody who
+   * could edit `INITIAL_ADMIN_EMAILS` granted themselves the administrator role on their next
+   * sign-in and no row anywhere said it had happened, because the floor is re-applied silently by
+   * design. And revoking somebody deletes their sessions, which were the only record that they had
+   * ever been here: after a revocation the deployment could not show that the person had signed in,
+   * let alone when or how often.
+   *
+   * `session.refused` is the one somebody investigating actually reaches for. A revoked person still
+   * holding a bookmark, or an address outside the deployment trying the front door, produces nothing
+   * else anywhere.
+   */
+  "session.signed_in",
+  "session.refused",
+  "person.admin_by_configuration",
+  /*
+   * A company's own identity provider, added or taken away.
+   *
+   * Whoever holds this decides who can sign in at all, so the two ends of its life belong on the
+   * trail next to the roles it hands out.
+   */
+  "identity_provider.registered",
+  "identity_provider.removed",
+  /*
+   * What a Bot is and what it may reach.
+   *
+   * The trail recorded every mouse movement a Bot made and could not answer "who pointed this Bot at
+   * that host, and when", which is the first question asked in an incident. A Bot's endpoint is
+   * where conversation content is sent and its callback token is a capability handed to somebody
+   * else's infrastructure, so the two ends of both belong here.
+   *
+   * `bot.updated` carries what changed rather than the new values: the endpoint is worth naming, and
+   * a key never is.
+   */
+  "bot.created",
+  "bot.updated",
+  "bot.duplicated",
+  "bot.hidden",
+  "bot.unhidden",
+  "bot.deleted",
+  "bot.callback_token_issued",
+  "bot.callback_token_revoked",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];
