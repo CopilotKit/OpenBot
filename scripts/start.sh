@@ -45,6 +45,12 @@ COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
 #
 # Written into .env rather than exported for this run alone, so `docker compose up` by hand later
 # sees the same value the script used.
+# The laptop stack runs agent-langgraph on LANGGRAPH_PORT. The one-container image does not, so
+# this default stays in the script rather than in .env: a `docker run --env-file .env` must not
+# inherit a URL that points at a process the image does not contain.
+MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
+export MANAGED_AGENT_AG_UI_URL
+
 MANAGED_AGENT_TOKEN="$(setting MANAGED_AGENT_TOKEN "")"
 if [ -z "$MANAGED_AGENT_TOKEN" ]; then
   MANAGED_AGENT_TOKEN="$(openssl rand -base64 32)"
