@@ -1,5 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import { tryClient } from "@/lib/client";
+import { client, tryClient } from "@/lib/client";
 
 export type AuthenticatedUser = {
   id: string;
@@ -12,7 +12,33 @@ export type AuthenticatedUser = {
 export const authKeys = {
   all: ["auth"] as const,
   currentUser: () => [...authKeys.all, "current-user"] as const,
+  providers: () => [...authKeys.all, "providers"] as const,
 };
+
+/** An identity provider this deployment can sign somebody in with. */
+export type AuthProviderId = "google" | "microsoft" | "okta";
+
+async function authProviders(): Promise<AuthProviderId[]> {
+  // The key argument is what unwraps the envelope. Without it `client` hands back the Response, and
+  // reading a field off that quietly yields undefined: the screen says no provider is configured
+  // while the server is saying it has one.
+  return client<AuthProviderId[]>("/api/capabilities", "authProviders");
+}
+
+/**
+ * Which providers the sign-in screen may offer.
+ *
+ * From the server rather than from the build. The image is built once with no deployment
+ * environment, so a list compiled into the bundle can only ever describe the build machine.
+ */
+export function authProvidersQueryOptions() {
+  return queryOptions({
+    queryKey: authKeys.providers(),
+    queryFn: authProviders,
+    // Configuration, not data. It cannot change without the process restarting.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
 
 async function currentUser(): Promise<AuthenticatedUser | null> {
   /*

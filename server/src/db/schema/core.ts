@@ -74,6 +74,16 @@ export const accounts = pgTable(
     id: text("id").primaryKey(),
     accountId: text("account_id").notNull(),
     providerId: text("provider_id").notNull(),
+    /*
+     * Who vouched for this account, as the identity provider names itself.
+     *
+     * Required by Better Auth from 1.7. A real OIDC provider supplies its own
+     * (`https://accounts.google.com`), and one without gets a synthetic
+     * `local:oauth:<providerId>`, so the column is never empty. It exists because `providerId`
+     * alone stopped being enough once a deployment can register more than one OIDC provider: two
+     * companies' Okta tenants are both "okta" and are not the same directory.
+     */
+    issuer: text("issuer").notNull(),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),

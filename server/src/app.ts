@@ -23,7 +23,7 @@ import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import { authoriseAgentCall } from "./agents/callback-token";
-import type { DeploymentConfig } from "./config";
+import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { ConnectorAdminService } from "./connectors";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { serveStatic } from "hono/bun";
@@ -106,12 +106,23 @@ export function createApp(
     context.json({
       mode: config.runtime.mode,
       durableHistory: config.runtime.durableHistory,
+      /*
+       * Which identity providers this deployment can sign somebody in with.
+       *
+       * Ids only, never the credentials: `configuredAuthProviders` returns names, and the clients
+       * and secrets behind them stay in `config.auth`, which is not projected here.
+       *
+       * Answered at runtime rather than baked into the build, because the container image is built
+       * once and knows nothing about the deployment that will run it. A sign-in screen compiled on a
+       * build machine cannot offer a provider that machine had never heard of.
+       */
+      authProviders: configuredAuthProviders(config.auth),
     }),
   );
   app.on(["GET", "POST"], "/api/auth/*", (context) => {
     if (!auth) {
       return context.json(
-        { error: "Google authentication is not configured." },
+        { error: "No identity provider is configured." },
         503,
       );
     }
@@ -122,11 +133,10 @@ export function createApp(
   const authenticationUnavailable: MiddlewareHandler<{
     Variables: AppVariables;
   }> = async (context) =>
-    context.json({ error: "Google authentication is not configured." }, 503);
-  // Local development can stand in a fixed administrator so the product is reachable before the
-  // authentication slice is built. It is checked first so a machine with the flag set does not also
-  // need Google credentials configured just to boot.
-  const requireUser = config.devNoAuth
+    context.json({ error: "No identity provider is configured." }, 503);
+  // One administrator, when nothing is configured to sign anybody in. Checked first, and only ever
+  // true when there is no provider, so a configured deployment cannot fall back to it.
+  const requireUser = config.singleUser
     ? createDevRequireUser()
     : auth && roleRepository
       ? createRequireUser(auth, roleRepository)

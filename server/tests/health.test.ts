@@ -26,6 +26,8 @@ describe("runtime capabilities", () => {
     await expect(response.json()).resolves.toEqual({
       mode: "intelligence",
       durableHistory: true,
+      // Names only. The sign-in screen reads this to know which buttons to draw.
+      authProviders: ["google"],
     });
   });
 
@@ -39,12 +41,18 @@ describe("runtime capabilities", () => {
     expect(body).not.toContain("tenant-api-key");
     expect(body).not.toContain("license-token");
     // The settings object itself must not be projected, whatever it happens to hold today.
-    expect(Object.keys(parsed)).toEqual(["mode", "durableHistory"]);
+    expect(Object.keys(parsed)).toEqual([
+      "mode",
+      "durableHistory",
+      "authProviders",
+    ]);
+    // The provider list is names, never the clients and secrets behind them.
+    expect(body).not.toContain("google-client-secret");
   });
 });
 
 describe("authentication availability", () => {
-  test("fails loudly when Google authentication has not been configured", async () => {
+  test("fails loudly when no identity provider has been configured", async () => {
     const response = await app.request(
       "http://openbot.local/api/auth/sign-in/social",
       { method: "POST" },
@@ -52,7 +60,7 @@ describe("authentication availability", () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
-      error: "Google authentication is not configured.",
+      error: "No identity provider is configured.",
     });
   });
 

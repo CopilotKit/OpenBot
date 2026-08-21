@@ -4,20 +4,18 @@ import { users } from "../db/schema";
 import type { AppVariables, AuthenticatedActor } from "./guards";
 
 /**
- * A signed-in person, without signing in. Local development only.
+ * A signed-in person, without signing in.
  *
- * Local development can opt into a fixed administrator actor so the product can run without Google
- * OAuth credentials or an interactive consent screen. Hosted deployments must use real
- * authentication.
+ * A clone with no identity provider configured is one administrator, so `bun run dev` reaches the
+ * product without registering an OAuth client first. That is the whole point of it: nobody should
+ * have to set up Entra to look at a Bot.
  *
- * Two independent locks:
+ * The lock is `NODE_ENV`, not a flag. Somewhere reachable by other people, an unconfigured
+ * deployment refuses to start and names what to configure, because a public URL where every visitor
+ * is an administrator is the failure this exists to prevent, and it is silent: it looks like it
+ * works. `OPENBOT_SINGLE_USER=true` is how somebody says they meant it anyway.
  *
- *  1. `OPENBOT_DEV_NO_AUTH=true` must be set. Absent, nothing here runs.
- *  2. `NODE_ENV` must not be `production`. A deployment that sets the flag by accident still refuses,
- *     and it refuses by refusing to start rather than by ignoring the flag, because a
- *     deployment believing it has authentication when it does not is the worst of the three states.
- *
- * The actor is an administrator so admin surfaces can be demonstrated too, and its id is fixed so
+ * The actor is an administrator so admin surfaces can be reached too, and its id is fixed so
  * Intelligence threads and memory stay attached to the same person across restarts.
  */
 
@@ -56,21 +54,37 @@ export async function initializeDevActorUser(
   return true;
 }
 
-export function devAuthEnabled(
+/**
+ * Whether this deployment admits everybody as one administrator.
+ *
+ * Only ever true when no identity provider is configured: a provider always wins, so a deployment
+ * cannot half sign people in.
+ *
+ * @param hasProvider whether any identity provider is configured
+ */
+export function singleUserEnabled(
   environment: Record<string, string | undefined>,
+  hasProvider: boolean,
 ): boolean {
-  if (environment.OPENBOT_DEV_NO_AUTH?.trim() !== "true") {
-    return false;
-  }
+  if (hasProvider) return false;
+
+  // Said explicitly, which is the only way to run open where other people can reach it.
+  const asked =
+    environment.OPENBOT_SINGLE_USER?.trim() === "true" ||
+    // The name this had before. Still honoured so an existing .env keeps working.
+    environment.OPENBOT_DEV_NO_AUTH?.trim() === "true";
+  if (asked) return true;
+
   if (environment.NODE_ENV === "production") {
     throw new Error(
-      "OPENBOT_DEV_NO_AUTH cannot be used with NODE_ENV=production. Refusing to start without authentication.",
+      "No identity provider is configured. Set GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or set OPENBOT_SINGLE_USER=true to run with one administrator and no sign-in. Refusing to start rather than serving an open deployment.",
     );
   }
+
   return true;
 }
 
-/** A guard that admits everybody as {@link DEV_ACTOR}. Only ever mounted when devAuthEnabled(). */
+/** A guard that admits everybody as {@link DEV_ACTOR}. Only ever mounted when singleUserEnabled(). */
 export function createDevRequireUser(): MiddlewareHandler<{
   Variables: AppVariables;
 }> {

@@ -1,11 +1,16 @@
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { signInWithGoogle } from "@/lib/auth/client";
-import { appConfig } from "@/lib/generated/application-config";
-import { currentUserQueryOptions } from "../lib/auth/queries";
 import AgentOrb from "@/components/agents/orb/agent-orb";
+import { Button } from "@/components/ui/button";
+import { providerName, signInWith } from "@/lib/auth/client";
+import { appConfig } from "@/lib/generated/application-config";
+import {
+  type AuthProviderId,
+  authProvidersQueryOptions,
+  currentUserQueryOptions,
+} from "../lib/auth/queries";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
@@ -21,27 +26,33 @@ export const Route = createFileRoute("/sign")({
     if (user) {
       throw redirect({ to: "/" });
     }
+    // Loaded here so the screen paints with its buttons rather than painting empty and then
+    // growing them, which reads as "no providers" for exactly as long as the request takes.
+    await context.queryClient.ensureQueryData(authProvidersQueryOptions());
   },
   component: SignScreen,
 });
 
 function SignScreen() {
-  const [isPending, setIsPending] = useState(false);
+  // Which provider is being opened, rather than whether one is: with three buttons, a single
+  // boolean would put "Opening…" on all of them.
+  const [opening, setOpening] = useState<AuthProviderId | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { data: providers = [] } = useQuery(authProvidersQueryOptions());
 
-  async function handleGoogleSignIn() {
+  async function handleSignIn(provider: AuthProviderId) {
     setError(null);
-    setIsPending(true);
+    setOpening(provider);
 
     try {
-      await signInWithGoogle();
+      await signInWith(provider);
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : "Could not start Google sign-in.",
+          : `Could not start ${providerName(provider)} sign-in.`,
       );
-      setIsPending(false);
+      setOpening(null);
     }
   }
 
@@ -85,18 +96,27 @@ function SignScreen() {
           transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
           variants={{ hidden, shown }}
         >
-          {appConfig.auth.providers.includes("google") ? (
-            <Button
-              className="h-10 w-full tracking-tight"
-              disabled={isPending}
-              onClick={handleGoogleSignIn}
-              size="lg"
-            >
-              {isPending ? "Opening Google…" : "Continue with Google"}
-            </Button>
+          {providers.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {providers.map((provider, index) => (
+                <Button
+                  className="h-10 w-full tracking-tight"
+                  disabled={opening !== null}
+                  key={provider}
+                  onClick={() => handleSignIn(provider)}
+                  size="lg"
+                  // The first provider a deployment configured is the one most of its people use.
+                  variant={index === 0 ? "default" : "outline"}
+                >
+                  {opening === provider
+                    ? `Opening ${providerName(provider)}…`
+                    : `Continue with ${providerName(provider)}`}
+                </Button>
+              ))}
+            </div>
           ) : (
             <p className="text-center text-sm text-muted-foreground">
-              No auth providers are configured.
+              No sign-in provider is configured for this deployment.
             </p>
           )}
           {error ? (

@@ -60,7 +60,7 @@ async function resolveRequestActor(request: Request): Promise<{
   name: string;
   role: OpenBotRole;
 }> {
-  if (config.devNoAuth) {
+  if (config.singleUser) {
     return { id: DEV_ACTOR.id, name: DEV_ACTOR.email, role: DEV_ACTOR.role };
   }
   const session = await auth?.api.getSession({ headers: request.headers });
@@ -109,7 +109,7 @@ const identifyActor: IdentifyActor = async (request) => {
 const config = loadConfig();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
 const database = createDatabase(config.databaseUrl);
-await initializeDevActorUser(database, config.devNoAuth);
+await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
 // key belongs here rather than on the agent row. See agents/auth-header.ts.
 const credentialStore = createCredentialStore(database);
@@ -506,11 +506,12 @@ serve<SocketData>({
   },
 });
 
-if (config.devNoAuth) {
+if (config.singleUser) {
   // Loud, every boot. A server that is not checking who is asking should never be a quiet default.
   console.warn(
-    "OPENBOT_DEV_NO_AUTH is on: every request is treated as " +
-      `${DEV_ACTOR.email} (administrator). Local development only.`,
+    "No identity provider is configured, so every request is treated as " +
+      `${DEV_ACTOR.email} (administrator). Configure GOOGLE_OAUTH_*, ` +
+      "MICROSOFT_OAUTH_* or OKTA_OAUTH_* before anybody else can reach this.",
   );
 }
 

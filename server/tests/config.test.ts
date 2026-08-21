@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadConfig } from "../src/config";
+import { configuredAuthProviders, loadConfig } from "../src/config";
 
 // Intelligence is part of the MINIMUM contract, so it belongs in the base environment every other
 // case builds on. Leaving it out of the base would make most of this file assert the behaviour of a
@@ -18,6 +18,21 @@ const baseEnvironment = {
   MANAGED_AGENT_AG_UI_URL: " http://localhost:4200/ag-ui ",
   MANAGED_AGENT_TOKEN: "managed-agent-token",
 };
+
+/**
+ * The same deployment with nothing signing anybody in.
+ *
+ * `baseEnvironment` ships Google and a session secret because most tests want authentication on.
+ * The provider tests need the opposite starting point, or "Microsoft is configured" cannot be told
+ * apart from "Microsoft and the Google that was already there".
+ */
+const {
+  GOOGLE_OAUTH_CLIENT_ID: _googleId,
+  GOOGLE_OAUTH_CLIENT_SECRET: _googleSecret,
+  BETTER_AUTH_SECRET: _authSecret,
+  BETTER_AUTH_URL: _authUrl,
+  ...withoutSignIn
+} = baseEnvironment;
 
 describe("deployment configuration", () => {
   test("resolves the Intelligence runtime, which is the only runtime", () => {
@@ -92,7 +107,7 @@ describe("deployment configuration", () => {
         GOOGLE_OAUTH_CLIENT_SECRET: "",
       }),
     ).toThrow(
-      "Google OAuth configuration requires both client ID and client secret",
+      "GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together",
     );
   });
 
@@ -154,6 +169,122 @@ describe("deployment configuration", () => {
     });
   });
 
+  /**
+   * Sign-in with more than one identity provider.
+   *
+   * A company mid-migration has some people on Entra and some still on Okta, so more than one at a
+   * time is the normal shape rather than a corner. These assert the shape the sign-in screen reads
+   * and every arrangement that cannot work refusing at start-up, which is the only moment a
+   * misconfiguration is cheap to find.
+   */
+  const SESSION = {
+    BETTER_AUTH_SECRET: "a-long-enough-local-development-auth-secret",
+    BETTER_AUTH_URL: "http://localhost:3001",
+  };
+
+  test("enables Microsoft, and admits any account until told a directory", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
+      MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
+    });
+
+    // `common` is Microsoft's own default and admits personal accounts as well as work ones. A
+    // deployment that means "our staff" has to say so with a directory GUID.
+    expect(config.auth?.microsoft).toEqual({
+      clientId: "entra-client-id",
+      clientSecret: "entra-client-secret",
+      tenantId: "common",
+    });
+    expect(configuredAuthProviders(config.auth)).toEqual(["microsoft"]);
+  });
+
+  test("narrows Microsoft to one directory when given a tenant", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
+      MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
+      MICROSOFT_OAUTH_TENANT_ID: "8f2c1e40-0000-0000-0000-000000000000",
+    });
+
+    expect(config.auth?.microsoft?.tenantId).toBe(
+      "8f2c1e40-0000-0000-0000-000000000000",
+    );
+  });
+
+  test("enables Okta against its issuer", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      OKTA_OAUTH_CLIENT_ID: "okta-client-id",
+      OKTA_OAUTH_CLIENT_SECRET: "okta-client-secret",
+      OKTA_OAUTH_ISSUER: "https://example.okta.com/oauth2/default",
+    });
+
+    expect(config.auth?.okta).toEqual({
+      clientId: "okta-client-id",
+      clientSecret: "okta-client-secret",
+      issuer: "https://example.okta.com/oauth2/default",
+    });
+  });
+
+  test("refuses Okta without an issuer, which names no particular Okta", () => {
+    expect(() =>
+      loadConfig({
+        ...withoutSignIn,
+        ...SESSION,
+        OKTA_OAUTH_CLIENT_ID: "okta-client-id",
+        OKTA_OAUTH_CLIENT_SECRET: "okta-client-secret",
+      }),
+    ).toThrow("OKTA_OAUTH_ISSUER");
+  });
+
+  test("refuses an Okta issuer with no credentials behind it", () => {
+    expect(() =>
+      loadConfig({
+        ...withoutSignIn,
+        ...SESSION,
+        OKTA_OAUTH_ISSUER: "https://example.okta.com/oauth2/default",
+      }),
+    ).toThrow("OKTA_OAUTH_CLIENT_ID");
+  });
+
+  test("carries all three at once, in a fixed order", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      GOOGLE_OAUTH_CLIENT_ID: "google-client-id",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-client-secret",
+      MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
+      MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
+      OKTA_OAUTH_CLIENT_ID: "okta-client-id",
+      OKTA_OAUTH_CLIENT_SECRET: "okta-client-secret",
+      OKTA_OAUTH_ISSUER: "https://example.okta.com/oauth2/default",
+    });
+
+    // The order the buttons appear in, fixed here so it cannot change with how a .env was written.
+    expect(configuredAuthProviders(config.auth)).toEqual([
+      "google",
+      "microsoft",
+      "okta",
+    ]);
+  });
+
+  test("is off, and lists nothing, when no provider is configured", () => {
+    const config = loadConfig(withoutSignIn);
+
+    expect(config.auth).toBeUndefined();
+    expect(configuredAuthProviders(config.auth)).toEqual([]);
+  });
+
+  test("refuses a session secret with no provider to use it", () => {
+    expect(() => loadConfig({ ...withoutSignIn, ...SESSION })).toThrow(
+      "no identity provider",
+    );
+  });
+
   test("rejects incomplete Google authentication deployment settings", () => {
     expect(() =>
       loadConfig({
@@ -163,7 +294,7 @@ describe("deployment configuration", () => {
         BETTER_AUTH_SECRET: "",
         BETTER_AUTH_URL: "http://localhost:3001",
       }),
-    ).toThrow("Google authentication requires BETTER_AUTH_SECRET");
+    ).toThrow("Sign-in requires BETTER_AUTH_SECRET");
   });
 
   // A turn that is ended is a turn somebody loses, so an unset variable leaves every stream alone

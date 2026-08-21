@@ -222,15 +222,15 @@ describe("tenant YAML validation", () => {
         knowledge: "sources: []",
         themeCss: ":root { --primary: oklch(0.32 0.09 250); }",
       }),
-      ["google"],
     );
 
+    // Brand only. Which providers are configured is answered at runtime by /api/capabilities,
+    // because this is compiled into a build that knows nothing about the deployment running it.
     expect(configuration).toEqual({
       brand: {
         tenantId: "fintech",
         productName: "Ledgerline",
       },
-      auth: { providers: ["google"] },
     });
   });
 
