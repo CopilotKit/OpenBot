@@ -1,11 +1,18 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
+import { sso } from "@better-auth/sso";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { genericOAuth, okta } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 import type { DeploymentConfig } from "../config";
 import type { Database } from "../db/client";
-import { accounts, sessions, users, verifications } from "../db/schema";
+import {
+  accounts,
+  sessions,
+  ssoProviders,
+  users,
+  verifications,
+} from "../db/schema";
 import { applyConfiguredAdmin, seedRole } from "./roles";
 
 export function createAuth(
@@ -36,19 +43,43 @@ export function createAuth(
    * They converge again at the browser: `signIn.social({ provider })` starts all three, so the
    * sign-in screen has one code path and does not need to know which kind each provider is.
    */
-  const plugins = authConfig.okta
-    ? [
-        genericOAuth({
-          config: [
-            okta({
-              clientId: authConfig.okta.clientId,
-              clientSecret: authConfig.okta.clientSecret,
-              issuer: authConfig.okta.issuer,
-            }),
-          ],
-        }),
-      ]
-    : [];
+  const plugins = [
+    ...(authConfig.okta
+      ? [
+          genericOAuth({
+            config: [
+              okta({
+                clientId: authConfig.okta.clientId,
+                clientSecret: authConfig.okta.clientSecret,
+                issuer: authConfig.okta.issuer,
+              }),
+            ],
+          }),
+        ]
+      : []),
+    /*
+     * Identity providers a company registers while this is running, by SAML or OIDC.
+     *
+     * Always on, unlike the three above, because it has nothing to configure: what it can do
+     * depends entirely on what an administrator has registered, and an empty table means it offers
+     * nothing. Turning it on and off would only mean a deployment could hold a registered IdP that
+     * silently stopped working.
+     *
+     * `provisionUser` runs when somebody arrives through one of them. Their role has to be written
+     * here or they land with no role at all and the request guard refuses them with a 403, which
+     * reads as a broken deployment rather than a first sign-in.
+     */
+    sso({
+      provisionUser: async ({ user }) => {
+        await seedRole(
+          database,
+          user.id,
+          user.email,
+          authConfig.initialAdminEmails,
+        );
+      },
+    }),
+  ];
 
   return betterAuth({
     baseURL: authConfig.baseUrl,
@@ -57,7 +88,7 @@ export function createAuth(
     database: drizzleAdapter(database, {
       provider: "pg",
       usePlural: true,
-      schema: { users, sessions, accounts, verifications },
+      schema: { users, sessions, accounts, verifications, ssoProviders },
     }),
     plugins,
     socialProviders: {

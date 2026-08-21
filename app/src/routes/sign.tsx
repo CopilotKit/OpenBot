@@ -5,7 +5,13 @@ import { useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { ProviderLogo } from "@/components/auth/provider-logo";
 import { Button } from "@/components/ui/button";
-import { providerName, signInWith } from "@/lib/auth/client";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import {
+  providerName,
+  signInWith,
+  signInWithEmailDomain,
+} from "@/lib/auth/client";
 import { appConfig } from "@/lib/generated/application-config";
 import {
   type AuthProviderId,
@@ -37,9 +43,34 @@ export const Route = createFileRoute("/sign")({
 function SignScreen() {
   // Which provider is being opened, rather than whether one is: with three buttons, a single
   // boolean would put "Opening…" on all of them.
-  const [opening, setOpening] = useState<AuthProviderId | null>(null);
+  const [opening, setOpening] = useState<AuthProviderId | "sso" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { data: providers = [] } = useQuery(authProvidersQueryOptions());
+  const { data: options } = useQuery(authProvidersQueryOptions());
+  const providers = options?.providers ?? [];
+  const [email, setEmail] = useState("");
+
+  /**
+   * Sign in through whichever identity provider covers this address.
+   *
+   * No password is asked for and none is checked here: only the part after the @ is used, to decide
+   * which registered provider to hand somebody to.
+   */
+  async function handleDomainSignIn(submission: React.FormEvent) {
+    submission.preventDefault();
+    setError(null);
+    setOpening("sso");
+
+    try {
+      await signInWithEmailDomain(email);
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "No identity provider is registered for that address.",
+      );
+      setOpening(null);
+    }
+  }
 
   async function handleSignIn(provider: AuthProviderId) {
     setError(null);
@@ -128,11 +159,47 @@ function SignScreen() {
                 </Button>
               ))}
             </div>
-          ) : (
+          ) : options?.sso ? null : (
             <p className="text-center text-sm text-muted-foreground">
               No sign-in provider is configured for this deployment.
             </p>
           )}
+          {/*
+           * The way in for a company that runs its own identity provider.
+           *
+           * Below the buttons, because a deployment with both has more people arriving through the
+           * buttons: the registered providers are for the companies whose IdP was added by hand.
+           */}
+          {options?.sso ? (
+            <form className="mt-3" onSubmit={handleDomainSignIn}>
+              {providers.length > 0 ? (
+                <div className="mb-3 flex items-center gap-3">
+                  <Separator className="flex-1" />
+                  <span className="text-muted-foreground text-xs">or</span>
+                  <Separator className="flex-1" />
+                </div>
+              ) : null}
+              <Input
+                autoComplete="email"
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@company.com"
+                required
+                type="email"
+                value={email}
+              />
+              <Button
+                className="mt-2 h-10 w-full tracking-tight"
+                disabled={opening !== null || email.trim().length === 0}
+                size="lg"
+                type="submit"
+                variant="outline"
+              >
+                {opening === "sso"
+                  ? "Opening…"
+                  : "Continue with your company account"}
+              </Button>
+            </form>
+          ) : null}
           {error ? (
             <p className="mt-3 text-sm text-destructive" role="alert">
               {error}

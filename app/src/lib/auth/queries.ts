@@ -18,11 +18,30 @@ export const authKeys = {
 /** An identity provider this deployment can sign somebody in with. */
 export type AuthProviderId = "google" | "microsoft" | "okta";
 
-async function authProviders(): Promise<AuthProviderId[]> {
-  // The key argument is what unwraps the envelope. Without it `client` hands back the Response, and
-  // reading a field off that quietly yields undefined: the screen says no provider is configured
-  // while the server is saying it has one.
-  return client<AuthProviderId[]>("/api/capabilities", "authProviders");
+/** What the sign-in screen may offer, answered by the process that knows. */
+export type SignInOptions = {
+  providers: AuthProviderId[];
+  /**
+   * Whether any enterprise identity provider is registered.
+   *
+   * A boolean, not a list: naming them would tell anybody who loads the sign-in page which companies
+   * use this deployment, before they have signed in.
+   */
+  sso: boolean;
+};
+
+async function signInOptions(): Promise<SignInOptions> {
+  // The whole body, so both fields arrive together. Reading a field off the Response `client`
+  // returns without a key quietly yields undefined: the screen would say no provider is configured
+  // while the server was saying it has one.
+  const body = (await (
+    await client("/api/capabilities", { fallback: "Could not load sign-in" })
+  ).json()) as { authProviders?: AuthProviderId[]; ssoConfigured?: boolean };
+
+  return {
+    providers: body.authProviders ?? [],
+    sso: body.ssoConfigured === true,
+  };
 }
 
 /**
@@ -34,7 +53,7 @@ async function authProviders(): Promise<AuthProviderId[]> {
 export function authProvidersQueryOptions() {
   return queryOptions({
     queryKey: authKeys.providers(),
-    queryFn: authProviders,
+    queryFn: signInOptions,
     // Configuration, not data. It cannot change without the process restarting.
     staleTime: Number.POSITIVE_INFINITY,
   });

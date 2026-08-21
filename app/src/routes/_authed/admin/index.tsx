@@ -1,4 +1,5 @@
 import {
+  IconBuildingBank,
   IconChevronRight,
   IconCode,
   IconDeviceDesktop,
@@ -115,6 +116,13 @@ const SECTIONS: {
           "Everybody who has signed in, who administers this deployment, and whose access has been removed.",
         icon: IconUsers,
         linkOptions: { to: "/admin/people" },
+      },
+      {
+        title: "Identity providers",
+        description:
+          "A company's own SAML or OpenID Connect provider, routed by email domain.",
+        icon: IconBuildingBank,
+        linkOptions: { to: "/admin/identity-providers" },
       },
     ],
   },

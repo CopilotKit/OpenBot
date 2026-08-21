@@ -135,6 +135,13 @@ export function createApp(
    * answers and an administrator deciding who has access needs to know which one they are reading.
    */
   peopleStore?: PeopleStore,
+  /**
+   * How many enterprise identity providers are registered.
+   *
+   * A count rather than the store, because the only question anybody outside Better Auth asks is
+   * whether the sign-in screen should offer the email box at all.
+   */
+  ssoProviderCount?: () => Promise<number>,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -142,7 +149,7 @@ export function createApp(
   // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including
   // INTELLIGENCE_API_KEY and the licence token, and this endpoint is reachable by anyone. Returning
   // the object wholesale would serve deployment secrets to the browser. Add fields here explicitly.
-  app.get("/api/capabilities", (context) =>
+  app.get("/api/capabilities", async (context) =>
     context.json({
       mode: config.runtime.mode,
       durableHistory: config.runtime.durableHistory,
@@ -157,14 +164,53 @@ export function createApp(
        * build machine cannot offer a provider that machine had never heard of.
        */
       authProviders: configuredAuthProviders(config.auth),
+      /*
+       * Whether any enterprise identity provider has been registered.
+       *
+       * A count, not a list. The sign-in screen only needs to know whether to offer the email box
+       * that routes by domain; naming the providers would tell anybody who loads the page which
+       * companies use this deployment, which is not theirs to have before they sign in.
+       */
+      ssoConfigured: (await ssoProviderCount?.()) ? true : false,
     }),
   );
-  app.on(["GET", "POST"], "/api/auth/*", (context) => {
+  /*
+   * Registering an identity provider is an administrator's decision, not a signed-in one.
+   *
+   * Better Auth's SSO plugin guards these with `sessionMiddleware`, which asks only that somebody is
+   * signed in. That is the wrong bar here: registering an IdP for a domain means anybody it vouches
+   * for can sign in, so a plain user reaching this could mint themselves colleagues. The routes are
+   * mounted through this handler, so the check goes in front of it.
+   */
+  const ADMIN_ONLY_AUTH_ROUTES = new Set([
+    "/api/auth/sso/register",
+    "/api/auth/sso/update-provider",
+    "/api/auth/sso/delete-provider",
+  ]);
+
+  app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     if (!auth) {
       return context.json(
         { error: "No identity provider is configured." },
         503,
       );
+    }
+
+    if (ADMIN_ONLY_AUTH_ROUTES.has(new URL(context.req.url).pathname)) {
+      const session = await auth.api.getSession({
+        headers: context.req.raw.headers,
+        // Fresh, not the cookie cache: a role changed a moment ago has to apply to this request.
+        query: { disableCookieCache: true },
+      });
+      const roles = session?.user
+        ? ((await roleRepository?.rolesForUser(session.user.id)) ?? [])
+        : [];
+      if (!roles.includes("admin")) {
+        return context.json(
+          { error: "Only an administrator may change identity providers." },
+          403,
+        );
+      }
     }
 
     return auth.handler(context.req.raw);

@@ -29,6 +29,13 @@
       "when": 1787272841024,
       "tag": "0003_perfect_wind_dancer",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787273438410,
+      "tag": "0004_panoramic_mauler",
+      "breakpoints": true
     }
   ]
 }

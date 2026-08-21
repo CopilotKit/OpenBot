@@ -1,4 +1,5 @@
 import { serve } from "bun";
+import { sql } from "drizzle-orm";
 import { mintRunAssertion } from "./agents/callback-token";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
@@ -40,6 +41,7 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { ssoProviders } from "./db/schema";
 import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
 import { grantedTools } from "./plugins/tools";
@@ -381,6 +383,13 @@ const app = createApp(
   threadIdentity,
   // Who has signed in, and what an administrator may do about them.
   peopleStore,
+  // Whether the sign-in screen should offer the email box that routes by domain.
+  async () => {
+    const [row] = await database
+      .select({ count: sql<number>`count(*)::int` })
+      .from(ssoProviders);
+    return row?.count ?? 0;
+  },
 );
 
 /**

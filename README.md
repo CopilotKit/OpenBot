@@ -270,6 +270,10 @@ Restart. Accounts, sessions and roles are stored in the same PostgreSQL database
 - A half-configured provider is refused at start-up rather than at somebody's first attempt to sign
   in: a client id with no secret, a secret shorter than 32 characters, or an Okta issuer with no
   credentials behind it.
+- **SAML and OIDC** are registered while the deployment runs rather than configured here. Sign in as
+  an administrator and go to Admin → Identity providers with the metadata your identity team gave
+  you. People then sign in by typing their email address, and the domain decides which provider
+  they are sent to.
 - **Put TLS in front of any deployment.** A page served over plain `http://` on anything but
   localhost is not a secure context, and sign-in cookies want `Secure`.
 

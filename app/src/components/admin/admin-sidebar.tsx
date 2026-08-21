@@ -1,5 +1,6 @@
 import {
   IconArrowLeft,
+  IconBuildingBank,
   IconCode,
   IconDeviceDesktop,
   IconKey,
@@ -94,6 +95,11 @@ const GROUPS: {
         title: "People",
         icon: IconUsers,
         linkOptions: { to: "/admin/people" },
+      },
+      {
+        title: "Identity providers",
+        icon: IconBuildingBank,
+        linkOptions: { to: "/admin/identity-providers" },
       },
     ],
   },

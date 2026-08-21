@@ -131,6 +131,31 @@ export const userRoles = pgTable(
 );
 
 /**
+ * An enterprise identity provider this deployment has been told about.
+ *
+ * The other three providers are configuration: one Google, one Entra, one Okta, named in the
+ * environment. These are not, because a company's own IdP is not something a deployment can be
+ * built knowing. It is registered while running, by an administrator holding the metadata their
+ * identity team gave them, and there can be several.
+ *
+ * `oidcConfig` and `samlConfig` are JSON held as text because Better Auth writes them that way. They
+ * carry a client secret or a signing certificate, so nothing here is ever projected to a browser.
+ *
+ * `domain` is what routes somebody to the right one: they type an email address, and the part after
+ * the @ decides which identity provider is asked about them.
+ */
+export const ssoProviders = pgTable("sso_providers", {
+  id: text("id").primaryKey(),
+  issuer: text("issuer").notNull(),
+  oidcConfig: text("oidc_config"),
+  samlConfig: text("saml_config"),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  providerId: text("provider_id").notNull().unique(),
+  organizationId: text("organization_id"),
+  domain: text("domain").notNull(),
+});
+
+/**
  * People an administrator has removed, by email address.
  *
  * Keyed on the address rather than the user id, because deleting the user row is not removal: the

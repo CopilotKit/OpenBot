@@ -28,6 +28,12 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
   configured, because nothing else grants the role, and it is now a floor rather than a one-off:
   an address it names is made an administrator at every sign-in, so adding somebody to the list
   works even after they have already signed in.
+- **SAML and OpenID Connect, registered while running.** `/admin/identity-providers` takes the
+  metadata a company's identity team supplies and registers their own IdP. Somebody then types their
+  email address on the sign-in screen and the domain decides which provider they are sent to, so a
+  company mid-merger can run two. Registering, changing or removing one is administrator-only, which
+  the upstream plugin does not require: it guards those routes with a session, and anybody who could
+  reach them could register a provider for a domain and mint themselves colleagues.
 - **A People screen.** `/admin/people` lists everybody who has signed in, with the provider they came
   through and when they were last here, and lets an administrator promote, demote, or remove
   somebody. Removing ends the session they are using and stops the next sign-in, keyed on the
