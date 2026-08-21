@@ -26,6 +26,14 @@ import { type PolicyStore, parseActionPolicy } from "./policy-store";
  * Every computer call goes through the gateway. That is the governance seam: each acting route in
  * this file passes through a policy decision and audit row before it reaches the computer.
  */
+/**
+ * Paths under this router that are about the deployment rather than about a Bot.
+ *
+ * The bot-access middleware matches `/:botId/*`, and Hono's `/*` matches zero segments, so a
+ * single-segment path like `/policy` reaches it as a Bot id. These have their own guards.
+ */
+const DEPLOYMENT_ROUTES = new Set(["policy"]);
+
 export function createComputerRoutes(
   gateway: ComputerGateway,
   policyStore: PolicyStore,
@@ -50,6 +58,16 @@ export function createComputerRoutes(
    */
   routes.use("/:botId/*", requireUser, async (context, next) => {
     const botId = context.req.param("botId");
+    /*
+     * `/policy` is this router's own, and it is not about a Bot.
+     *
+     * Hono matches `/*` against zero segments, so `/policy` arrives here as a Bot called "policy",
+     * `canUseBot` quite correctly says there is no such Bot, and the Boundaries screen answers 404
+     * for everybody including an administrator. Named rather than inferred from the segment count,
+     * because a second deployment-wide route added later should have to think about this line.
+     */
+    if (botId && DEPLOYMENT_ROUTES.has(botId)) return next();
+
     if (botId && !(await canUseBot(context.var.actor, botId))) {
       return context.json({ error: "There is no such Bot." }, 404);
     }
