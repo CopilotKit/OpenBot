@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Upgrading
+
+Two configurations now refuse to start:
+
+- A provider configured with no `INITIAL_ADMIN_EMAILS`. Set it to at least one address.
+- No provider at all with `NODE_ENV=production`. Configure one, or set `OPENBOT_SINGLE_USER=true`.
+
+Sessions survive and nobody signs in again.
+
 ### Added
 
 - **Releases are cut by a workflow, not by hand.** `Create release PR` bumps the version and promotes
