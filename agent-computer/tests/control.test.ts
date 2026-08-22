@@ -236,3 +236,55 @@ describe("the crappy paths: secrets", () => {
     ).toEqual(["secretRef", "secretSnapshotId", "secretWanted"]);
   });
 });
+
+/**
+ * A request nobody answered does not outlive the run that made it.
+ *
+ * Control belongs to the computer, not to a conversation, and an unanswered request used to sit on
+ * it forever. The run that asked had ended, but every later conversation with that Bot showed a live
+ * "Take control" for work it was not doing — and showed the reason the Bot gave, which is written
+ * for whoever asked and was being rendered to whoever looked.
+ *
+ * Seen in the product: a brand new channel, on an unrelated question, displaying "Google Docs is
+ * asking for sign-in before I can read the PRD document" from a conversation minutes earlier.
+ */
+describe("an unanswered request to take the wheel", () => {
+  const at = (iso: string) => () => iso;
+
+  test("is still shown inside the window", () => {
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.requestHelp("sign in to Drive");
+
+    clock = "2026-08-22T03:05:00.000Z";
+    const state = control.get();
+    expect(state.requested).toBe(true);
+    expect(state.reason).toBe("sign in to Drive");
+  });
+
+  test("stops being shown once it is stale, and takes its reason with it", () => {
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.requestHelp("sign in to Drive");
+
+    clock = "2026-08-22T03:20:00.000Z";
+    const state = control.get();
+    expect(state.requested).toBe(false);
+    // The reason is the part that leaked between conversations, so it goes too.
+    expect(state.reason).toBeUndefined();
+  });
+
+  test("never takes the wheel back off a person who holds it", () => {
+    /*
+     * The one case that must not expire. Somebody may be halfway through typing a code, and pulling
+     * the browser back mid-sign-in is worse than any stale prompt. Only the ASK times out.
+     */
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.requestHelp("sign in to Drive");
+    control.take();
+
+    clock = "2026-08-22T04:00:00.000Z";
+    expect(control.get().holder).toBe("human");
+  });
+});

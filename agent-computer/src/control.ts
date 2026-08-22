@@ -22,6 +22,15 @@ export type ControlState = {
   /** True once the Bot has asked for help and no person has taken the wheel yet. */
   requested: boolean;
   /**
+   * When the Bot asked, so an unanswered request can stop being shown.
+   *
+   * A request nobody answers used to last forever. The run that made it had already ended, but the
+   * prompt stayed on the computer, and control belongs to the computer rather than to a conversation
+   * — so every later conversation with that Bot showed a live "Take control" for work it was not
+   * doing, with the reason the Bot gave, written for whoever asked and rendered to whoever looked.
+   */
+  requestedAt?: string;
+  /**
    * A secret the Bot is waiting for, described by its label only.
    *
    * Secret entry is scoped rather than a full takeover. The Bot names the field, says what it needs,
@@ -57,6 +66,16 @@ export class ControlRequestError extends Error {
 }
 
 export const NO_SECRET_PENDING = "Nothing is waiting for a secret.";
+/**
+ * How long an unanswered request to take the wheel is shown for.
+ *
+ * Long enough that somebody who stepped away can still act on it, short enough that it does not
+ * follow the Bot into tomorrow's conversations. The run that made it is already over either way:
+ * nothing resumes when a person takes the wheel this late, so the value trades "still useful" against
+ * "still on screen" and nothing else.
+ */
+export const HELP_REQUEST_TTL_MS = 10 * 60 * 1000;
+
 export const HUMAN_HAS_CONTROL =
   "A person has control of the computer right now. Wait for them to hand it back before acting.";
 export const TAKE_CONTROL_FIRST =
@@ -79,8 +98,27 @@ export function createControl(
   };
 
   return {
-    /** The current state, as the surface polls it. A copy, so a caller cannot mutate the machine. */
+    /**
+     * The current state, as the surface polls it. A copy, so a caller cannot mutate the machine.
+     *
+     * An unanswered request is dropped once it is older than {@link HELP_REQUEST_TTL_MS}. It is
+     * expired on read rather than on a timer because there is nothing to wake: the run that asked
+     * has ended, and the only thing that cares is whoever looks next.
+     *
+     * Only ever the ASK. A person actually holding the wheel is never timed out from under them:
+     * they may be halfway through typing a code, and taking the browser back mid-sign-in is worse
+     * than any stale prompt.
+     */
     get(): ControlState {
+      if (
+        state.requested &&
+        state.holder === "bot" &&
+        state.requestedAt &&
+        Date.parse(now()) - Date.parse(state.requestedAt) > HELP_REQUEST_TTL_MS
+      ) {
+        const { reason: _reason, requestedAt: _at, ...rest } = state;
+        state = { ...rest, requested: false };
+      }
       return { ...state };
     },
 
@@ -94,6 +132,7 @@ export function createControl(
       state = {
         ...state,
         requested: true,
+        requestedAt: now(),
         reason:
           typeof reason === "string" && reason.trim()
             ? reason.trim()
