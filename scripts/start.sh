@@ -51,8 +51,16 @@ COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
 MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
 export MANAGED_AGENT_AG_UI_URL
 
+# Whether this run minted a secret that something already running may not have.
+#
+# A process that is answering is not necessarily a process holding the current configuration, and
+# the two are easy to confuse because one is observable and the other is not. Everything below that
+# skips work because a service "is already up" has to consult this first.
+SECRETS_ROTATED=false
+
 MANAGED_AGENT_TOKEN="$(setting MANAGED_AGENT_TOKEN "")"
 if [ -z "$MANAGED_AGENT_TOKEN" ]; then
+  SECRETS_ROTATED=true
   MANAGED_AGENT_TOKEN="$(openssl rand -base64 32)"
   if grep -qE '^MANAGED_AGENT_TOKEN=' "$ROOT/.env"; then
     # A present but empty line, which is what .env.example ships.
@@ -80,6 +88,7 @@ export MANAGED_AGENT_TOKEN
 # be recorded.
 AGENT_TOOL_TOKEN="$(setting AGENT_TOOL_TOKEN "")"
 if [ -z "$AGENT_TOOL_TOKEN" ]; then
+  SECRETS_ROTATED=true
   AGENT_TOOL_TOKEN="$(openssl rand -base64 32)"
   if grep -qE '^AGENT_TOOL_TOKEN=' "$ROOT/.env"; then
     # A present but empty line, which is what .env.example ships.
@@ -137,13 +146,24 @@ SERVICES=(postgres)
 if [ "$ONE_COMPUTER_EACH" = "true" ]; then
   SERVICES+=(supervisor)
 fi
-for svc_port in "agent-computer:$COMPUTER_PORT" "agent-bot:$BOT_PORT" "agent-langgraph:$LANGGRAPH_PORT"; do
-  svc="${svc_port%%:*}"; port="${svc_port##*:}"
-  if curl -fsS --max-time 3 "http://localhost:$port/health" >/dev/null 2>&1; then
-    info "  $svc: already answering on $port"
-  else
-    SERVICES+=("$svc")
-  fi
+#
+# Every Bot service, every run, whether or not it is already answering.
+#
+# This used to skip one that answered its health route, which sounds like an optimisation and is
+# actually a correctness bug: answering says the process is alive, not that its environment still
+# matches the deployment's. A skipped service is never handed to `docker compose up`, so compose
+# never compares its configuration and never recreates it.
+#
+# Which is how a Bot ends up holding a secret this deployment no longer accepts. `AGENT_TOOL_TOKEN`
+# is generated above and written to .env; if the container was answering, it kept the previous one,
+# and every tool call it made was refused at the door. It returns nothing to its own model, and the
+# model tells the person there were no results — a false negative delivered as an answer.
+#
+# `docker compose up -d` is declarative and does nothing for a service whose configuration has not
+# changed, so naming them all costs a comparison and buys the guarantee that what is running is what
+# this run configured.
+for svc in agent-computer agent-bot agent-langgraph; do
+  SERVICES+=("$svc")
 done
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN
@@ -181,6 +201,19 @@ green "  managed coworker endpoint: $MANAGED_AGENT_AG_UI_URL"
 
 info "2/4  Server"
 require_free_or_ours "$SERVER_PORT" server
+#
+# A running server is left alone UNLESS this run minted a secret, because it read its environment
+# once at startup and has no way to notice the file changed underneath it.
+#
+# Skipping it on "already answering" is the same mistake the Bot containers had: answering proves the
+# process is alive, not that it agrees with the deployment. A server holding the previous
+# `AGENT_TOOL_TOKEN` refuses every callback its own Bots make, which reaches a person as "no results"
+# rather than as an error.
+if [ "$SECRETS_ROTATED" = "true" ]; then
+  info "  a secret was generated this run, so the server is restarted to pick it up"
+  pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+  sleep 1
+fi
 if ! curl -fsS --max-time 3 "http://localhost:$SERVER_PORT/api/capabilities" >/dev/null 2>&1; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
     (cd server && PORT="$SERVER_PORT" \
