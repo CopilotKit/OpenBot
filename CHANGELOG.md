@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.3
+
 ### A Bot is offered the tools its message needs, not every tool it holds
 
 A model chooses the right tool reliably out of about ten and unreliably out of thirty, and it fails
