@@ -1,3 +1,4 @@
+import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { AbstractAgent, HttpAgent } from "@ag-ui/client";
 import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
 import {
@@ -6,6 +7,8 @@ import {
   CopilotRuntime,
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
+import type { Observable } from "rxjs";
+import { defer, from, switchMap } from "rxjs";
 import { z } from "zod";
 import {
   COMPUTER_GUIDANCE,
@@ -14,6 +17,12 @@ import {
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
+import type { SelectableSkill, Selection } from "./plugins/selection";
+import {
+  latestUserText,
+  SELECTION_FLOOR,
+  selectTools,
+} from "./plugins/selection";
 import type { GrantedTool } from "./plugins/tools";
 import { grantedToolGuidance } from "./plugins/tools";
 
@@ -285,6 +294,8 @@ export async function buildAgents(
    * is a fact about the deployment; what differs per Bot is which of them it holds.
    */
   loadVendors: () => Promise<readonly string[]> = async () => [],
+  /** How a run's tools are narrowed to what it is about. Absent means they are not. */
+  selection?: ToolSelection,
 ): Promise<Record<string, AbstractAgent>> {
   const vendors = await loadVendors().catch(() => [] as readonly string[]);
   return Object.fromEntries(
@@ -300,6 +311,7 @@ export async function buildAgents(
           signRun,
           computerGuidance,
           vendors,
+          selection,
         ),
       ]),
     ),
@@ -315,30 +327,117 @@ async function buildAgent(
   signRun?: SignRun,
   computerGuidance?: string,
   connectedVendors: readonly string[] = [],
+  selection?: ToolSelection,
 ): Promise<AbstractAgent> {
-  if (agent.type === "built_in") {
-    return new BuiltInAgent(
+  if (agent.type === "unavailable") {
+    return new UnavailableAgent(agent);
+  }
+
+  const granted = await loadTools(agent.id);
+
+  /*
+   * Whether narrowing can do anything here at all.
+   *
+   * A skill that declares no tools is not a unit of retrieval, and a catalogue already small enough
+   * to choose from has nothing to gain. In both cases the Bot is built exactly as it was before any
+   * of this existed: no deferral, no per-run model call, nothing to go wrong. That is most
+   * deployments on their first day, and they should not pay for a feature they are not using.
+   */
+  const skills = selection
+    ? await selection.loadSkills(agent.id).catch(() => [])
+    : [];
+  const narrowing =
+    selection &&
+    skills.some((skill) => skill.tools.length > 0) &&
+    granted.length > (selection.floor ?? SELECTION_FLOOR)
+      ? selection
+      : undefined;
+
+  /** Pass one and pass two, for one run. Shared by both agent kinds; each applies it differently. */
+  const offeredFor = async (input: RunAgentInput): Promise<GrantedTool[]> => {
+    if (!narrowing) return granted;
+    const chosen = await selectTools({
+      tools: granted,
+      skills,
+      text: latestUserText(input.messages),
+      choose: narrowing.choose,
+      ...(narrowing.floor === undefined ? {} : { floor: narrowing.floor }),
+    });
+    // Awaited, so the row is on record before the model is handed the tools it names. A discovery
+    // written afterwards would sit in the trail after the calls it explains.
+    await narrowing.record?.(agent.id, chosen).catch(() => {});
+    return chosen.offered;
+  };
+
+  if (agent.type === "remote_ag_ui") {
+    /*
+     * The remote path narrows inside its own middleware rather than by being wrapped.
+     *
+     * `.use()` middleware is applied by `runAgent`, not by `run`, so an outer agent delegating to
+     * `remote.run(input)` skips it: the endpoint would get a run with no standing role, no holdings
+     * message, no tools and no signed assertion, and every one of those failures is silent.
+     */
+    return remoteAgentWithStandingRole(
+      agent,
+      stallGuard,
+      granted,
+      signRun,
+      connectedVendors,
+      narrowing ? offeredFor : undefined,
+    );
+  }
+
+  /*
+   * A built-in Bot takes its tools in its configuration, so narrowing means building it again once
+   * the message is known. The guidance it is given is generated from the tools passed here, which is
+   * what keeps a narrowed run from being told it holds something it was not offered.
+   */
+  const withTools = (tools: GrantedTool[]) =>
+    new BuiltInAgent(
       builtInAgentConfiguration(
         agent,
         model,
         apiKey,
-        await loadTools(agent.id),
+        tools,
         computerGuidance,
         connectedVendors,
       ),
     );
-  }
-  if (agent.type === "unavailable") {
-    return new UnavailableAgent(agent);
-  }
-  return remoteAgentWithStandingRole(
-    agent,
-    stallGuard,
-    await loadTools(agent.id),
-    signRun,
-    connectedVendors,
+
+  const whole = withTools(granted);
+  if (!narrowing) return whole;
+
+  return new RunSelectedAgent(
+    { agentId: agent.id, description: agent.name },
+    whole,
+    async (input) => {
+      const offered = await offeredFor(input);
+      // Nothing narrowed means nothing to rebuild, and reusing the agent already built for this
+      // request keeps that path allocation-for-allocation what it was.
+      return offered.length === granted.length ? whole : withTools(offered);
+    },
   );
 }
+
+/**
+ * How a deployment narrows a Bot's tools to the ones a run is about. Absent means it does not.
+ *
+ * Three collaborators rather than one, because they fail differently and are configured in
+ * different places: the skills come from the plugin store, the choosing is a model call on the
+ * deployment's own key, and the record goes to the audit trail. A deployment missing any of them
+ * should lose the narrowing and keep the Bot, which is why `record` is optional and the other two
+ * are allowed to throw.
+ */
+export type ToolSelection = {
+  /** What this Bot's granted skills declare. Failure is treated as "no skills". */
+  loadSkills: (botId: string) => Promise<SelectableSkill[]>;
+  /** Pass one. Returns the model's raw answer; throwing means the narrowing is skipped. */
+  choose: (prompt: string) => Promise<string | null>;
+  /** Writes the discovery row. Never allowed to fail a run. */
+  record?: (botId: string, selection: Selection<GrantedTool>) => Promise<void>;
+  /** Overrides the default catalogue size below which nothing is narrowed. */
+  floor?: number;
+};
 
 /**
  * A remote AG-UI agent that states its standing role on every run.
@@ -366,6 +465,19 @@ function remoteAgentWithStandingRole(
   signRun?: SignRun,
   /** As for the built-in path: what this deployment connects to, held or not. */
   connectedVendors: readonly string[] = [],
+  /**
+   * Which of those tools this run is about, decided once the message is known.
+   *
+   * NARROWED HERE RATHER THAN BY WRAPPING THE AGENT, and the difference is not cosmetic. Middleware
+   * registered with `.use()` is applied by `runAgent`, not by `run`: an outer agent that delegated
+   * to `remote.run(input)` would skip this whole function's work, and the endpoint would receive a
+   * run with no standing role, no holdings message, no tools and no signed assertion. Every one of
+   * those is silent — the Bot simply answers worse — so the narrowing goes inside the middleware
+   * that is already here.
+   *
+   * Absent means no narrowing, which is the behaviour every deployment had before this existed.
+   */
+  narrow?: (input: RunAgentInput) => Promise<GrantedTool[]>,
 ) {
   const remote = new HttpAgent({
     url: agent.endpoint,
@@ -388,18 +500,28 @@ function remoteAgentWithStandingRole(
    * tools as an offer and decides for itself what to call, with `COMPUTER_GUIDANCE` as its whole
    * prompt — a page about the browser that mentions connectors nowhere. That is the Bot that browsed
    * to drive.google.com holding four Drive tools.
+   *
+   * Built from the tools this run was offered rather than from everything granted, so a narrowed
+   * run is never told it holds a system it cannot reach on this turn.
    */
-  const holdings = grantedToolGuidance(tools, connectedVendors);
-  const holdingsMessage = holdings
-    ? {
-        id: `granted-tools:${agent.id}`,
-        role: "system" as const,
-        content: holdings,
-      }
-    : null;
+  const holdingsMessageFor = (offered: GrantedTool[]) => {
+    const holdings = grantedToolGuidance(offered, connectedVendors);
+    return holdings
+      ? {
+          id: `granted-tools:${agent.id}`,
+          role: "system" as const,
+          content: holdings,
+        }
+      : null;
+  };
 
-  remote.use((input, next) =>
-    next.run({
+  const runWith = (
+    tools: GrantedTool[],
+    input: RunAgentInput,
+    next: AbstractAgent,
+  ) => {
+    const holdingsMessage = holdingsMessageFor(tools);
+    return next.run({
       ...input,
       messages: [
         agent.standingMessage,
@@ -460,9 +582,108 @@ function remoteAgentWithStandingRole(
              */
             {}),
       },
-    } as never),
+    } as never);
+  };
+
+  /*
+   * Deferred, because choosing the tools is a model call and middleware has to answer with a stream
+   * straight away. `defer` puts the work on the subscription, which is where the run actually
+   * begins, so nothing happens until somebody is listening and a retried run chooses again.
+   */
+  remote.use((input, next) =>
+    defer(() =>
+      from(narrow ? narrow(input) : Promise.resolve(tools)).pipe(
+        switchMap((offered) => runWith(offered, input, next)),
+      ),
+    ),
   );
+
   return remote;
+}
+
+/**
+ * An agent whose tools are decided when the run starts, because that is the first moment anybody
+ * knows what the run is about.
+ *
+ * WHY A WRAPPER AND NOT A NARROWER `loadTools`. Tools are resolved per request, and a request is
+ * earlier than a run: at that point there is a Bot and a person and no message, so there is nothing
+ * to select against. `run(input)` is the first place the message exists. Both underlying agents take
+ * their tools at construction — a built-in one in its configuration, a remote one in the middleware
+ * that sends them — so the only way to hand either a set chosen from the message is to build it
+ * after the message arrives. That is all this does: it defers `build` to the first subscription and
+ * then gets out of the way.
+ *
+ * The deferral is per subscription, so a retried run reselects rather than reusing a decision made
+ * for a message that is no longer the last one.
+ */
+class RunSelectedAgent extends AbstractAgent {
+  /**
+   * The agent this run turned into, once there is one.
+   *
+   * Held only so `abortRun` can reach it. Without this, pressing stop aborts a wrapper that is not
+   * doing anything and leaves the model call underneath it running to completion, spending the
+   * deployment's money on an answer nobody will see.
+   */
+  private inner?: AbstractAgent;
+  /** The same Bot with nothing narrowed, kept to answer questions that are not about one run. */
+  private whole: AbstractAgent;
+  private build: (input: RunAgentInput) => Promise<AbstractAgent>;
+
+  constructor(
+    identity: { agentId: string; description: string },
+    whole: AbstractAgent,
+    build: (input: RunAgentInput) => Promise<AbstractAgent>,
+  ) {
+    super(identity);
+    this.whole = whole;
+    this.build = build;
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    return defer(() =>
+      from(this.build(input)).pipe(
+        switchMap((agent) => {
+          this.inner = agent;
+          return agent.run(input);
+        }),
+      ),
+    );
+  }
+
+  /**
+   * What the Bot can do, answered from the un-narrowed agent.
+   *
+   * Capabilities are asked for outside a run, where there is no message and so nothing to select
+   * against. They are also a fact about the Bot rather than about one turn: a deployment that
+   * narrowed this run to three tools has not stopped supporting whatever the underlying agent
+   * supports.
+   */
+  getCapabilities() {
+    return this.whole.getCapabilities?.() ?? Promise.resolve({});
+  }
+
+  /**
+   * Carried by hand, because `AbstractAgent.clone` does not know this class exists.
+   *
+   * It builds a bare object on the prototype and copies a fixed list of base fields onto it, so
+   * every field declared here arrives `undefined`. The runtime clones an agent before every run
+   * (`agents[agentId].clone()`), which means the omission is not a corner case: without this, the
+   * first message anybody sends fails on a `build` that is not a function.
+   */
+  clone(): RunSelectedAgent {
+    const cloned = super.clone() as RunSelectedAgent;
+    cloned.whole = this.whole;
+    cloned.build = this.build;
+    // Deliberately not the inner agent. A clone is a new run, and inheriting the last run's agent
+    // would point `abortRun` at something already finished.
+    cloned.inner = undefined;
+    return cloned;
+  }
+
+  abortRun(): void {
+    this.inner?.abortRun();
+    super.abortRun();
+  }
 }
 
 class UnavailableAgent extends AbstractAgent {
@@ -489,6 +710,7 @@ export async function resolveRuntimeAgents(
   signRun?: SignRun,
   computerGuidance?: string,
   loadVendors?: () => Promise<readonly string[]>,
+  selection?: ToolSelection,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -509,6 +731,7 @@ export async function resolveRuntimeAgents(
     signRun,
     computerGuidance,
     loadVendors,
+    selection,
   );
 }
 
@@ -558,6 +781,13 @@ export function createRequestAgents(
   computerGuidance?: string,
   /** Which vendors this deployment connects to, held by a Bot or not. Absent means none. */
   loadVendors?: () => Promise<readonly string[]>,
+  /**
+   * How a run's tools are narrowed, resolved for whoever is asking.
+   *
+   * Per actor like the tools themselves, because the skills a Bot holds are read through the same
+   * grants, and because the discovery row has to name the person the run belongs to.
+   */
+  selectionForActor?: (actorId: string) => ToolSelection,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -570,6 +800,7 @@ export function createRequestAgents(
       signRunForActor?.(actor.id),
       computerGuidance,
       loadVendors,
+      selectionForActor?.(actor.id),
     );
   };
 }
@@ -598,6 +829,7 @@ export function mountCopilotRuntime(
   signRunForActor?: (actorId: string) => SignRun,
   basePath = "/api/copilotkit",
   loadVendors?: () => Promise<readonly string[]>,
+  selectionForActor?: (actorId: string) => ToolSelection,
 ) {
   const { intelligence } = config.runtime;
 
@@ -637,6 +869,7 @@ export function mountCopilotRuntime(
        */
       config.computer ? COMPUTER_GUIDANCE : undefined,
       loadVendors,
+      selectionForActor,
     ) as never,
   });
 

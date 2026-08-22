@@ -45,7 +45,7 @@ import {
 import { createDatabase } from "./db/client";
 import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
-import { grantedTools } from "./plugins/tools";
+import { grantedSkills, grantedTools } from "./plugins/tools";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
 import {
@@ -374,6 +374,24 @@ const intentRouter = createIntentRouter({
   }),
 });
 
+/**
+ * Pass one of tool selection: which skills a message needs, on the deployment's own model.
+ *
+ * Built once rather than per request, because it holds nothing about a person: the key is resolved
+ * on every call, so a credential rotated a moment ago is used by the next run.
+ */
+const chooseSkills = createModelCompleter({
+  model: tenantPackage.model,
+  resolveApiKey: () =>
+    resolveModelApiKey({
+      encryptionKey: config.keyEncryptionKey,
+      reader: credentialStore,
+      provider: tenantPackage.model.provider,
+      keyId: tenantPackage.model.credentialSecretRef,
+      environment: process.env,
+    }),
+});
+
 const app = createApp(
   config,
   auth,
@@ -435,6 +453,42 @@ const app = createApp(
         return [];
       }
     },
+    /*
+     * How a run's tools are narrowed to the ones it is about.
+     *
+     * A model picks the right tool reliably out of about ten, and a deployment of this template
+     * clears that as soon as it connects a second vendor. Past it the wrong tool gets called, or
+     * none does and the answer comes from memory, and neither says so. So a Bot holding more than a
+     * handful is offered the tools of the skills that match the message rather than everything at
+     * once. See `plugins/selection.ts`.
+     *
+     * This narrows the offer and nothing else. What a Bot may call is the grant, checked in
+     * `callTool` with the policy and the audit row exactly as before, so every path through here can
+     * be wrong without a Bot gaining anything. That is also why every failure below is silent and
+     * lands on the whole catalogue: the narrowing is worth an accuracy point, never a capability.
+     */
+    (actorId) => ({
+      loadSkills: (botId) => grantedSkills({ store: pluginStore, botId }),
+      // The deployment's own model and key, the same pair the intent router uses, so selection is
+      // never a second thing to configure. It throws on a missing key, which reads as "could not
+      // choose" and leaves the whole catalogue offered.
+      choose: chooseSkills,
+      record: async (botId, selection) => {
+        await recordAuditEvent(bootAuditStore, {
+          eventType: "mcp.tools_discovered",
+          targetType: "bot",
+          targetId: botId,
+          actorUserId: actorId,
+          payload: {
+            bot: botId,
+            reason: selection.reason,
+            granted: selection.granted,
+            offered: selection.offered.length,
+            skills: selection.skills,
+          },
+        });
+      },
+    }),
   ),
   // The only path to an acting call.
   computerGateway,

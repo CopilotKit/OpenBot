@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SelectableSkill } from "./selection";
 import { PluginRefusedError, type PluginStore } from "./store";
 
 /**
@@ -31,6 +32,15 @@ export type GrantedTool = {
   description: string;
   parameters: z.ZodType;
   execute: (args: unknown) => Promise<string>;
+  /**
+   * `<serverId>/<toolName>`, carried alongside the name the model is offered.
+   *
+   * The two spellings exist because a model tool name may not contain a slash, and selection has to
+   * compare a tool against what a skill declared, which is written in the ref spelling because that
+   * is how a grant is written. Carried rather than derived at the comparison, so there is one place
+   * the two forms are converted (`toolNameFor`) and no second parser to drift from it.
+   */
+  ref: string;
 };
 
 /**
@@ -154,6 +164,7 @@ export async function grantedTools(options: {
 
   return granted.tools.map((tool) => ({
     name: tool.toolName,
+    ref: tool.ref,
     description: tool.description,
     parameters: parametersFor(tool.inputSchema),
     execute: async (args: unknown) => {
@@ -196,5 +207,26 @@ export async function grantedTools(options: {
           : "That tool could not be called.";
       }
     },
+  }));
+}
+
+/**
+ * The skills one Bot holds, as much of each as choosing between them needs.
+ *
+ * Read here rather than folded into `grantedTools` because the two answer different questions and
+ * are wanted at different moments: the tools are what a Bot may call, asked once per request, and
+ * the skills are the index a run is narrowed against. Both come from `listForAgent`, and both are
+ * read fresh for the same reason: a grant added a minute ago has to count on the next run.
+ */
+export async function grantedSkills(options: {
+  store: PluginStore;
+  botId: string;
+}): Promise<SelectableSkill[]> {
+  const granted = await options.store.listForAgent(options.botId);
+  return granted.skills.map((skill) => ({
+    slug: skill.slug,
+    title: skill.title,
+    summary: skill.summary,
+    tools: skill.tools,
   }));
 }

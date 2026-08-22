@@ -65,6 +65,24 @@ export const auditEventTypes = [
    * endpoint that dies mid-answer from one that never answers at all.
    */
   "agent.stream_stalled",
+  /*
+   * Which of a Bot's tools were put in front of the model for one run, and why those.
+   *
+   * Discovery, recorded as its own fact, because a run is now offered a subset of what the Bot holds
+   * and every other row here answers a question about a call that happened. This one answers "why
+   * did it call that", and its harder twin, "why did it not call anything" — a Bot that had the
+   * right tool granted, was not offered it, and answered from memory leaves no other trace at all.
+   * Without this row that failure is indistinguishable from a model that simply chose badly.
+   *
+   * DISCOVERY IS NOT PERMISSION, and the row is not an authorization record. Everything named here
+   * was already granted; being offered is what changed. A tool still goes through the grant, the
+   * policy and `mcp.call_succeeded` or `mcp.call_rejected` before anything happens, so this row
+   * never appears in place of one of those, only before it.
+   *
+   * `reason` is the part worth reading. It separates a deployment that narrowed from one that never
+   * declared anything and one whose selector was unreachable, which look identical from outside.
+   */
+  "mcp.tools_discovered",
   "mcp.call_succeeded",
   "mcp.call_rejected",
   /*

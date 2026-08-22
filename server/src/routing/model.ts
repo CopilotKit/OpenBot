@@ -15,9 +15,7 @@ export function createModelCompleter(deps: {
   return async (prompt: string) => {
     const key = await deps.resolveApiKey();
     if (!key) throw new Error("no model key");
-    const base =
-      process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com";
-    const response = await fetch(`${base}/v1/chat/completions`, {
+    const response = await fetch(chatCompletionsUrl(process.env), {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -54,4 +52,33 @@ export function createModelCompleter(deps: {
       throw new Error("router model returned no text");
     return content;
   };
+}
+
+/**
+ * Where this deployment's `/chat/completions` actually is.
+ *
+ * `/v1` USED TO BE APPENDED UNCONDITIONALLY, and that was wrong for every deployment that set the
+ * variable. `.env.example` and `docs/configuration.md` both document it with the version in it
+ * (`https://gateway.internal/v1`), because that is the shape the AI SDK wants: it takes `baseURL`
+ * verbatim and asks for `/chat/completions` under it, which is how the built-in Bots reach the same
+ * endpoint. Appending here produced `/v1/v1/chat/completions`, so on a gateway — the entire reason
+ * the variable exists — every call from this function 404'd.
+ *
+ * That failure was invisible, which is the worst part. The router treats a throw as "not sure" and
+ * lands on the default coworker, so a deployment behind a gateway silently stopped routing and
+ * nothing anywhere said why. Tool selection reads through the same function and would have failed
+ * the same way, offering the whole catalogue on the deployments most likely to have a big one.
+ *
+ * So the version segment is added only when the configured URL does not already end in one, and the
+ * unset case keeps the public API's own `https://api.openai.com/v1`.
+ */
+export function chatCompletionsUrl(
+  environment: Record<string, string | undefined>,
+): string {
+  const base = (environment.OPENAI_BASE_URL?.trim() || "https://api.openai.com")
+    // A trailing slash is the difference between `/v1` and `/v1/`, and no more than that.
+    .replace(/\/+$/, "");
+  return /\/v\d+$/.test(base)
+    ? `${base}/chat/completions`
+    : `${base}/v1/chat/completions`;
 }

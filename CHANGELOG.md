@@ -8,6 +8,35 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot is offered the tools its message needs, not every tool it holds
+
+A model chooses the right tool reliably out of about ten and unreliably out of thirty, and it fails
+quietly: it calls a plausible neighbour, or calls nothing and answers from what it already knew. Two
+connectors is enough to cross that line, so a Bot holding more than twelve tools is now offered, for
+each run, the tools of the skills that match the message.
+
+Skills already declare the tools they need. That declaration is now what the offer is built from:
+the deployment asks its own model which skills a message needs, and the Bot gets those skills' tools
+plus every granted tool no skill has claimed. Nothing here can widen a Bot: the offer is intersected
+with the grants, so naming a tool in a skill still grants nobody anything.
+
+Nothing changes for a deployment that has not declared tools on any skill, or whose Bots hold twelve
+tools or fewer. Those Bots are built exactly as before, with no extra model call.
+
+There is a new audit event, `mcp.tools_discovered`, written before the run. It says how many tools
+were offered out of how many granted, and why: the skills chosen, or that nothing was declared, or
+that the choice could not be made. It answers "why did it call that", and the harder question, "why
+did it not call anything at all" — which until now left no trace.
+
+### The intent router works again behind a gateway
+
+`OPENAI_BASE_URL` is documented ending in `/v1`, and the router appended `/v1/chat/completions` to
+it, so every call went to `/v1/v1/chat/completions` and 404'd. The router reads a failure as "not
+sure" and falls back to the default coworker, so on any deployment that set the variable — a
+gateway, a proxy, a self-hosted model, which is the only reason to set it — untagged messages
+silently stopped being routed and nothing said why. The version segment is now added only when the
+configured URL does not already carry one.
+
 ## 0.0.2
 
 ### Upgrading

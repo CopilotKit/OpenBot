@@ -198,6 +198,18 @@ function Row({
          */}
         {event.eventType === "channel.routed" && event.targetId ? (
           <span title={event.targetId}>{nameFor(event.targetId)}</span>
+        ) : /*
+         * A discovery row's subject is the narrowing itself, so the numbers are the subject. A
+         * reader asking "why did it not call the tool" needs to see that eleven of thirty were
+         * offered before anything else on the row means anything.
+         */
+        event.eventType === "mcp.tools_discovered" ? (
+          <span className="font-mono text-xs">
+            {typeof payload.offered === "number" &&
+            typeof payload.granted === "number"
+              ? `${payload.offered} of ${payload.granted} tools`
+              : "-"}
+          </span>
         ) : /* Named targets and file paths are the audit subject before page elements. */
         NAMED_TARGETS.has(event.targetType) && event.targetId ? (
           <span className="font-mono text-xs">
@@ -267,6 +279,20 @@ function Row({
             {payload.reason}
           </div>
         ) : null}
+        {/*
+         * Why this run was offered what it was, which is the only part of a discovery row that
+         * cannot be worked out from the numbers. "Nothing declared" and "selector unavailable" both
+         * offer everything and mean entirely different things about the deployment.
+         */}
+        {event.eventType === "mcp.tools_discovered" &&
+        typeof payload.reason === "string" ? (
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {DISCOVERY_REASONS[payload.reason] ?? payload.reason}
+            {Array.isArray(payload.skills) && payload.skills.length > 0
+              ? `: ${payload.skills.join(", ")}`
+              : ""}
+          </div>
+        ) : null}
         {event.eventType === "mcp.callback_refused" &&
         typeof payload.refusal === "string" ? (
           <div className="mt-0.5 text-xs text-muted-foreground">
@@ -332,6 +358,21 @@ function Row({
  *
  * Anything else falls through to the element or file subject.
  */
+/**
+ * Why a run was offered the tools it was, in words rather than in the slug the server writes.
+ *
+ * Every one of these looks the same from outside: the Bot was handed some tools. The distinction is
+ * the difference between a deployment that narrowed on purpose, one that has never declared a skill,
+ * and one whose selector could not be reached, and only the last is a fault.
+ */
+const DISCOVERY_REASONS: Record<string, string> = {
+  "under-floor": "Few enough tools to offer them all",
+  "nothing-declared": "No skill declares any of these tools",
+  unavailable: "Could not choose, so all were offered",
+  "nothing-chosen": "No skill applied, so all were offered",
+  selected: "Chosen by skill",
+};
+
 const NAMED_TARGETS = new Set([
   "component",
   "mcp_tool",
@@ -368,6 +409,9 @@ const DECISIONS: Record<string, string> = {
   // A function failure is execution failure, not a policy refusal.
   "component.function_failed": "Could not be read",
 
+  // Not a call and not a decision: the tools this run was allowed to see. Worded so nobody reads it
+  // as permission, which it is not — everything named was already granted.
+  "mcp.tools_discovered": "Tools offered for one run",
   "mcp.call_succeeded": "Called on this Bot's behalf",
   "mcp.call_rejected": "Blocked",
   "mcp.call_failed": "The server did not answer",
