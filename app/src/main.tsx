@@ -7,6 +7,14 @@ import { router } from "./router";
 import "@copilotkit/react-core/v2/styles.css";
 import "./styles.css";
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      // SW registration is best-effort; the app works without it.
+    });
+  });
+}
+
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
