@@ -19,15 +19,24 @@ import { recordChannelActivityMutationOptions } from "@/lib/channels/mutations";
 import type { AgentChannel } from "@/lib/channels/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { ConversationProvider } from "@/lib/copilot/conversation";
+import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import { newId } from "../../lib/new-id";
 
 /**
- * Backstop for the first message of a new channel; a stalled join must not lose the message.
+ * How long a stalled thread join is worth waiting for before it is ended.
+ *
+ * Ended, not outrun. See `lib/copilot/join-thread.ts` for what a connect left in flight does to the
+ * next message sent.
  */
-const SEND_WITHOUT_JOIN_AFTER_MS = 1500;
+const JOIN_DEADLINE_MS = 1500;
+
+/**
+ * Backstop for a message typed before the runtime agent exists; it must not be discarded.
+ */
+const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
 
 /**
  * One channel's conversation with one coworker.
@@ -90,6 +99,15 @@ export function ChannelChat({
   const readyGatePromise = readyGate.current;
   const isReadyRef = useRef(isReady);
   isReadyRef.current = isReady;
+
+  /*
+   * THE AGENT IS READ WHEN IT IS USED, NEVER CAPTURED BEFORE A WAIT. `useAgent` hands back a
+   * provisional agent until the proxied one is registered, and a different object afterwards. The
+   * stale one still runs and still reaches the thread, so the answer is stored and shows up on the
+   * next reload while the rendered agent sits empty. `say` waits, so it spans that swap.
+   */
+  const agentRef = useRef(agent);
+  agentRef.current = agent;
   useEffect(() => {
     if (isReady) openReadyGate.current();
   }, [isReady]);
@@ -100,11 +118,12 @@ export function ChannelChat({
     let current = true;
 
     void (async () => {
-      try {
-        await copilotkit.connectAgent({ agent });
-      } catch {
-        // Reported by the run-failure subscriber below; history is still worth restoring.
-      }
+      // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
+      await joinWithin({
+        connect: copilotkit.connectAgent({ agent }),
+        deadline: afterMs(JOIN_DEADLINE_MS),
+        detach: () => agent.detachActiveRun(),
+      });
 
       try {
         const stored = await readThreadMessages(
@@ -188,11 +207,23 @@ export function ChannelChat({
     if (!isReadyRef.current) {
       await Promise.race([
         readyGatePromise,
-        new Promise((resolve) =>
-          setTimeout(resolve, SEND_WITHOUT_JOIN_AFTER_MS),
-        ),
+        afterMs(SEND_WITHOUT_RUNTIME_AFTER_MS),
       ]);
     }
+
+    /*
+     * EVERY TURN WAITS FOR THE JOIN, not just the first of a new channel: a message added while the
+     * connect is in flight is erased by it either way. Unbounded only in appearance — the join
+     * effect bounds itself and opens this gate from a `finally`. If that effect never ran there is
+     * no runtime agent, and no connect in flight to wait on.
+     */
+    if (isReadyRef.current) {
+      await joinGatePromise;
+    }
+
+    // Every wait is behind us, so this is the agent the screen is actually rendering. Read once and
+    // used throughout, so the message, the repair and the run cannot land on two different agents.
+    const target = agentRef.current;
 
     setRunError(null);
     awaitingReply.current = true;
@@ -210,14 +241,14 @@ export function ChannelChat({
      * chip is what says a skill was used, and it stays visible in the message they sent.
      */
     for (const instruction of skillInstructions) {
-      agent.addMessage({
+      target.addMessage({
         content: instruction,
         id: newId(),
         role: "system",
       });
     }
 
-    agent.addMessage({
+    target.addMessage({
       content: trimmed,
       id: newId(),
       role: "user",
@@ -225,14 +256,14 @@ export function ChannelChat({
     report(trimmed, null);
 
     // Providers reject later turns if prior tool calls have no result; repair before sending.
-    const repaired = repairUnansweredToolCalls(agent.messages);
-    if (repaired !== agent.messages) {
-      agent.setMessages(repaired as typeof agent.messages);
+    const repaired = repairUnansweredToolCalls(target.messages);
+    if (repaired !== target.messages) {
+      target.setMessages(repaired as typeof target.messages);
     }
 
     setRunsInFlight((count) => count + 1);
     try {
-      await copilotkit.runAgent({ agent });
+      await copilotkit.runAgent({ agent: target });
     } finally {
       setRunsInFlight((count) => count - 1);
     }
@@ -296,27 +327,20 @@ export function ChannelChat({
   }, []);
 
   /**
-   * Send the create-channel seed once, after the join gate opens or the backstop expires.
+   * Send the create-channel seed once. No waiting of its own: `say` owns that for every turn, and a
+   * second copy of the ordering here was the one that could disagree with it.
    */
   useEffect(() => {
     const pending = seedRef.current;
     if (!pending) return;
     seedRef.current = null;
 
-    void (async () => {
-      await Promise.race([
-        joinGatePromise,
-        new Promise((resolve) =>
-          setTimeout(resolve, SEND_WITHOUT_JOIN_AFTER_MS),
-        ),
-      ]);
-      await sayRef.current(
-        typeof pending.content === "string" ? pending.content : "",
-      );
-    })();
+    void sayRef.current(
+      typeof pending.content === "string" ? pending.content : "",
+    );
 
-    // Keep `seed` in state; transcriptMessages hides it as soon as agent messages exist.
-  }, [joinGatePromise]);
+    // Keep `seed` in state; transcriptMessages gives it up once the agent holds a user turn.
+  }, []);
 
   return (
     <ConversationProvider ask={askFromComponent}>
