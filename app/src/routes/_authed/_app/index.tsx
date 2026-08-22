@@ -38,18 +38,18 @@ function RouteComponent() {
           disabled={!fallback}
           onSubmit={async (draft) => {
             // A channel is pinned to one coworker for the life of its thread, so the coworker is
-            // chosen now, before it is created. An `@` is an explicit choice and is honoured as-is.
-            // With no `@`, the message is routed to the coworker it is for; if that routing cannot
-            // run, it falls back to the same default the composer used to always use.
+            // chosen now, before it is created. Both cases go through the router so the choice is
+            // recorded: an `@` is honoured as-is and logged as a mention, and with no `@` the message
+            // is routed to the coworker it is for. If routing cannot run, it falls back to the
+            // mentioned coworker when there was one, else the same default the composer always used.
             setError(null);
             try {
-              let agentId: string | undefined = draft.agentId ?? undefined;
-              if (!agentId) {
-                try {
-                  agentId = (await routeMessage(draft.text)).agentId;
-                } catch {
-                  agentId = fallback?.id;
-                }
+              const mentioned = draft.agentId ?? undefined;
+              let agentId: string | undefined;
+              try {
+                agentId = (await routeMessage(draft.text, mentioned)).agentId;
+              } catch {
+                agentId = mentioned ?? fallback?.id;
               }
               if (!agentId) return;
               await start(agentId, draft.text);
