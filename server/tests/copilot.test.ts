@@ -9,6 +9,7 @@ import {
   resolveRuntimeAgents,
   standingRoleMessage,
 } from "../src/copilot";
+import { grantedToolGuidance } from "../src/plugins/tools";
 
 // Every agent row now joins its profile, so the row a coworker is built from always names it.
 const assistantRow = {
@@ -502,3 +503,63 @@ function fakeAgUiEndpoint() {
     [Symbol.asyncDispose]: () => server.stop(true),
   };
 }
+
+/**
+ * A Bot is told what it holds, not only handed it.
+ *
+ * A tool array tells a model a tool exists. It does not say the tool is the right way to reach that
+ * system, and it competes with `COMPUTER_GUIDANCE`: a page of emphatic prose about the browser that
+ * every Bot gets whether or not it has a single connector, and that mentions connectors nowhere.
+ *
+ * The browser prose won. A Bot holding four Google Drive tools browsed to drive.google.com, met a
+ * sign-in page its container could never satisfy, and asked its person to sign in to a vendor that
+ * person had already connected. Asked a question with no tool for it, another went reading a
+ * government website and looped on its 404 page.
+ *
+ * Both kinds are asserted because they are built by different functions, and the remote one is the
+ * one that failed in the product.
+ */
+describe("what a Bot is told it holds", () => {
+  const drive = [
+    { name: "mcp__google-drive__search_files" },
+    { name: "mcp__google-drive__read_file_content" },
+  ] as never[];
+
+  test("names the system and its tools", () => {
+    const guidance = grantedToolGuidance(drive);
+    expect(guidance).toContain("google-drive");
+    expect(guidance).toContain("search_files");
+    expect(guidance).toContain("read_file_content");
+  });
+
+  test("says not to browse to a vendor it has a tool for", () => {
+    // The whole point. Without this line the tool list is inert beside the browser prose.
+    expect(grantedToolGuidance(drive).toLowerCase()).toContain("do not browse");
+  });
+
+  test("says nothing at all when the Bot holds nothing", () => {
+    // A deployment with no connectors must not be told about connectors it does not have.
+    expect(grantedToolGuidance([])).toBe("");
+  });
+
+  test("a built-in Bot is told before it is told about the browser", () => {
+    const prompt = builtInAgentConfiguration(
+      {
+        id: "risk-analyst",
+        name: "Risk Analyst",
+        type: "built_in",
+        systemPrompt: "Investigate policies.",
+      },
+      { provider: "openai", defaultModel: "gpt-4.1" },
+      "openai-secret",
+      drive,
+      "BROWSER GUIDANCE HERE",
+    ).prompt as string;
+
+    // Order is the fix, not merely presence: the grants have to land before the browser prose.
+    expect(prompt.indexOf("google-drive")).toBeGreaterThan(-1);
+    expect(prompt.indexOf("google-drive")).toBeLessThan(
+      prompt.indexOf("BROWSER GUIDANCE HERE"),
+    );
+  });
+});

@@ -8,6 +8,7 @@ import {
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import { z } from "zod";
 import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import { grantedToolGuidance } from "./plugins/tools";
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
@@ -200,9 +201,18 @@ export function builtInAgentConfiguration(
 
   return {
     model: `${model.provider}/${model.defaultModel}`,
-    prompt: computerGuidance
-      ? `${agent.systemPrompt}\n\n${computerGuidance}`
-      : agent.systemPrompt,
+    /*
+     * The package's role, then what this Bot actually holds, then the computer.
+     *
+     * The grants go BEFORE the computer prose on purpose. That prose is long and emphatic about the
+     * browser and mentions connectors nowhere, so a Bot that read it last reached for the browser
+     * even when it held a tool for the exact system being asked about.
+     */
+    prompt: [
+      agent.systemPrompt,
+      ...(grantedToolGuidance(tools) ? [grantedToolGuidance(tools)] : []),
+      ...(computerGuidance ? [computerGuidance] : []),
+    ].join("\n\n"),
     apiKey,
     /*
      * A run stops after one step unless told otherwise, which for a Bot with tools means it calls
@@ -327,13 +337,37 @@ function remoteAgentWithStandingRole(
       ? { fetch: stallGuard.watch({ id: agent.id, name: agent.name }) }
       : {}),
   });
+  /*
+   * What this Bot holds, as a second standing message.
+   *
+   * Beside the role rather than inside it, because the role comes from the package and this comes
+   * from the grants: they change for different reasons and at different times. Sent on every run for
+   * the same reason the tools are, so switching a connector on reaches the next run.
+   *
+   * The remote path needs this more than the built-in one, not less. A framework Bot is handed the
+   * tools as an offer and decides for itself what to call, with `COMPUTER_GUIDANCE` as its whole
+   * prompt — a page about the browser that mentions connectors nowhere. That is the Bot that browsed
+   * to drive.google.com holding four Drive tools.
+   */
+  const holdings = grantedToolGuidance(tools);
+  const holdingsMessage = holdings
+    ? {
+        id: `granted-tools:${agent.id}`,
+        role: "system" as const,
+        content: holdings,
+      }
+    : null;
+
   remote.use((input, next) =>
     next.run({
       ...input,
       messages: [
         agent.standingMessage,
+        ...(holdingsMessage ? [holdingsMessage] : []),
         ...input.messages.filter(
-          (message) => message.id !== agent.standingMessage.id,
+          (message) =>
+            message.id !== agent.standingMessage.id &&
+            message.id !== holdingsMessage?.id,
         ),
       ],
       /*

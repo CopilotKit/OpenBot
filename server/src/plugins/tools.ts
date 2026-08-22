@@ -49,6 +49,48 @@ export function parametersFor(inputSchema: Record<string, unknown>): z.ZodType {
 }
 
 /**
+ * What this Bot holds, said in its instructions rather than left to be inferred from a tool list.
+ *
+ * A tool array tells a model a tool exists. It does not tell it that the tool is the right way to
+ * reach that system, and it competes with a page of prose about the browser that every Bot is given
+ * whether or not it has any connectors at all. The browser prose wins: it is emphatic, it is about
+ * capability, and it says "never claim you cannot browse".
+ *
+ * So a Bot holding four Google Drive tools browsed to drive.google.com, met a sign-in page its
+ * container could never satisfy, and asked its person to sign in to a vendor that person had already
+ * connected. The tools were there the whole time.
+ *
+ * Generated from the grants rather than written down, because the point is that it tracks them. An
+ * administrator switching a connector on, or granting one more of its tools, changes what the Bot is
+ * told on its next run with nothing else to remember and nothing to keep in step.
+ *
+ * Empty when the Bot holds nothing, so a deployment with no connectors says nothing about them.
+ */
+export function grantedToolGuidance(tools: GrantedTool[]): string {
+  if (tools.length === 0) return "";
+
+  const bySystem = new Map<string, string[]>();
+  for (const tool of tools) {
+    // `mcp__server__tool`, which is the shape the model is offered.
+    const parts = tool.name.replace(/^mcp__/, "").split("__");
+    const system = parts.length > 1 ? (parts[0] as string) : "this deployment";
+    const rest = parts.length > 1 ? parts.slice(1).join("__") : tool.name;
+    bySystem.set(system, [...(bySystem.get(system) ?? []), rest]);
+  }
+
+  return [
+    "You can reach these systems directly, as the person asking, with their own access:",
+    ...[...bySystem.entries()].map(
+      ([system, names]) => `- ${system}: ${names.join(", ")}`,
+    ),
+    "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
+    "browser is signed in as nobody, so it sees less than these tools do and will meet a sign-in wall",
+    "that connecting an account has already solved. If one of these systems is involved but no tool",
+    "above covers the part you need, say which part is missing rather than going around it.",
+  ].join("\n");
+}
+
+/**
  * Every MCP tool granted to one Bot, ready to hand to the runtime.
  *
  * A refusal is returned as the tool's result rather than thrown. The model is mid-run and the person
