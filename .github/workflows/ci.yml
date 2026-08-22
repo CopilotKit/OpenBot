@@ -107,6 +107,10 @@ jobs:
       # the real entrypoint, so its dependencies have to be installed as well.
       - run: bun install --frozen-lockfile
         working-directory: agent-bot
+      # Same for the LangGraph Bot: its history tests import @langchain/core, which lives in that
+      # Bot's own tree and not in the root one.
+      - run: bun install --frozen-lockfile
+        working-directory: agent-langgraph
       # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
       # comes from the job env instead, which drizzle.config.ts already reads.
       - run: bunx drizzle-kit migrate --config=drizzle.config.ts
