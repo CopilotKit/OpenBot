@@ -271,6 +271,11 @@ export type PluginStoreOptions = {
    * client belongs to the server registration and a refresh token belongs to a connection, so both
    * are written by the code that owns those acts — otherwise the first of two calls can succeed and
    * the second fail, leaving a secret in the vault that nothing points at and nobody knows to revoke.
+   *
+   * `revoke` is part of it because a key holds at most one live credential now. `removeServer`
+   * retires the server's token, and the two write paths here replace rather than add, so re-adding a
+   * server or re-authorizing a connection does not meet its own leftover on
+   * `credentials_active_key_idx`.
    */
   credentials: CredentialSecretReader & CredentialStore;
   encryptionKey: string;
@@ -603,7 +608,63 @@ export function createPluginStore(options: PluginStoreOptions) {
       return added;
     },
 
+    /**
+     * Remove a server, and stop its token being live.
+     *
+     * The token is keyed `mcp-<serverId>` and nothing else revokes it, so
+     * leaving it behind means re-adding the same server meets its own
+     * abandoned row on `credentials_active_key_idx`. It is revoked rather
+     * than deleted, because the vault keeps revoked rows for audit.
+     *
+     * The revoke goes first. These are two writes on two tables and the
+     * store exposes no transaction that spans both, so the order decides
+     * what a failure between them leaves: revoke-then-delete leaves a server
+     * whose token no longer works and which removing again will finish off,
+     * while delete-then-revoke leaves a live token no server references and
+     * no operation can reach.
+     */
     async removeServer(serverId: string, by: string): Promise<void> {
+      const [existing] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, serverId));
+
+      /**
+       * Whether that token is still live, read rather than inferred from a
+       * thrown error, so a token a previous attempt already revoked, or one
+       * whose row is gone entirely, is skipped while a database fault still
+       * propagates and leaves the server row in place to be removed again.
+       *
+       * Two queries rather than a join because `mcp_servers.credential_id` is
+       * `text` and `credentials.id` is `uuid`, so the two columns do not
+       * compare without a cast.
+       */
+      const [live] = existing?.credentialId
+        ? await database
+            .select({ id: credentialRows.id })
+            .from(credentialRows)
+            .where(
+              and(
+                eq(credentialRows.id, existing.credentialId),
+                isNull(credentialRows.revokedAt),
+              ),
+            )
+        : [];
+
+      if (live) {
+        await credentials.revoke(live.id);
+        await recordAuditEvent(auditStore, {
+          eventType: "credential.revoked",
+          targetType: "credential",
+          targetId: live.id,
+          payload: {
+            actor: by,
+            reason: "mcp_server_removed",
+            server: serverId,
+          },
+        });
+      }
+
       await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
@@ -1006,28 +1067,38 @@ export function createPluginStore(options: PluginStoreOptions) {
         );
       }
 
-      const stored = await credentials.create({
-        kind: "mcp_oauth_client",
+      const key = {
+        kind: "mcp_oauth_client" as const,
         provider: input.serverId,
         keyId: `oauth-client-${input.serverId}`,
+      };
+      const value = {
+        ...key,
         metadata: { server: input.serverId, clientId: input.client.clientId },
         encryptedValue: await encryptSecret(
           encryptionKey,
           JSON.stringify(input.client),
         ),
-      });
+      };
+
+      /*
+       * Re-registering a client replaces the one before it, in one transaction.
+       *
+       * A key holds at most one live credential, so inserting a second for this server would be
+       * refused by `credentials_active_key_idx` rather than leaving the orphan it used to leave.
+       * The question is asked of the key and not of `row.credentialId`, because the server row keeps
+       * naming a credential an administrator has revoked from the Credentials page: the pointer can
+       * be stale where the key is not, and it is the key the index constrains.
+       */
+      const live = await credentials.findLiveByKey(key);
+      const stored = live
+        ? await credentials.rotate({ ...value, previousCredentialId: live.id })
+        : await credentials.create(value);
 
       await database
         .update(mcpServers)
         .set({ credentialId: stored.id, updatedAt: new Date() })
         .where(eq(mcpServers.id, input.serverId));
-
-      if (row.credentialId) {
-        await credentials.revoke(row.credentialId).catch(() => {
-          // A previous client that cannot be revoked must not stop the new one taking effect. The
-          // pointer has already moved, so nothing reaches the old row; it is a tidiness failure.
-        });
-      }
 
       await recordAuditEvent(auditStore, {
         eventType: "mcp.oauth_client_registered",
@@ -1069,13 +1140,28 @@ export function createPluginStore(options: PluginStoreOptions) {
         )
         .limit(1);
 
-      const stored = await credentials.create({
-        kind: "mcp_user_token",
+      const key = {
+        kind: "mcp_user_token" as const,
         provider: input.serverId,
         keyId: input.userId,
+      };
+      /*
+       * Reconnecting replaces this person's token for this server, in one transaction.
+       *
+       * `credentials_active_key_idx` holds one live credential per key, so a second insert for the
+       * same person and server would be refused. Asked of the key rather than of `previous`, because
+       * the connection row can name a credential that has already been revoked while the key itself
+       * is free, and it is the key the index constrains.
+       */
+      const live = await credentials.findLiveByKey(key);
+      const value = {
+        ...key,
         metadata: { server: input.serverId, scope: input.scope },
         encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
-      });
+      };
+      const stored = live
+        ? await credentials.rotate({ ...value, previousCredentialId: live.id })
+        : await credentials.create(value);
 
       await database
         .insert(mcpUserCredentials)
@@ -1093,12 +1179,6 @@ export function createPluginStore(options: PluginStoreOptions) {
             updatedAt: new Date(),
           },
         });
-
-      if (previous) {
-        await credentials.revoke(previous.credentialId).catch(() => {
-          // Same reasoning as above: the pointer has moved, so this is tidiness rather than access.
-        });
-      }
 
       await recordAuditEvent(auditStore, {
         eventType: "mcp.account_connected",

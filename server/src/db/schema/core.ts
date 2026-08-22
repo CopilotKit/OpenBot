@@ -316,17 +316,28 @@ export const channelAgents = pgTable(
   (table) => [primaryKey({ columns: [table.channelId, table.agentId] })],
 );
 
-export const credentials = pgTable("credentials", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  kind: credentialKind("kind").notNull(),
-  provider: text("provider").notNull(),
-  encryptedValue: text("encrypted_value").notNull(),
-  keyId: text("key_id").notNull(),
-  metadata: jsonb("metadata").notNull(),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const credentials = pgTable(
+  "credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: credentialKind("kind").notNull(),
+    provider: text("provider").notNull(),
+    encryptedValue: text("encrypted_value").notNull(),
+    keyId: text("key_id").notNull(),
+    metadata: jsonb("metadata").notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    // At most one live credential per (kind, provider, key_id). Revoked rows are
+    // excluded so history is preserved, and two replicas racing to rotate the
+    // same secret cannot both insert a live row.
+    uniqueIndex("credentials_active_key_idx")
+      .on(table.kind, table.provider, table.keyId)
+      .where(sql`${table.revokedAt} IS NULL`),
+  ],
+);
 
 export const auditEvents = pgTable(
   "audit_events",

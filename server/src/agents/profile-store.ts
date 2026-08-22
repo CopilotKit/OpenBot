@@ -329,6 +329,7 @@ export function createAgentProfileStore(
                     agentId: id,
                     header: input.auth.header,
                     value: input.auth.value,
+                    executor: transaction,
                   }),
                 }
               : {}),
@@ -387,25 +388,28 @@ export function createAgentProfileStore(
                     agentId: id,
                     header: input.auth.header,
                     value: input.auth.value,
+                    // An agent that already has a live key is being edited, not
+                    // first-created, so the vault rotates rather than inserting
+                    // a second live row for the same agent id.
+                    previousCredentialId: authFromConfiguration(
+                      row?.configuration,
+                    )?.credentialId,
+                    executor: transaction,
                   }),
                 }
               : {}),
           };
 
           /*
-           * The key this one replaces is retired.
+           * The key this one replaces is already retired, by the rotation above.
            *
-           * Rotating a key is the standard answer to a suspected leak, and without this it did not
-           * answer it: the old credential stayed in the vault, decryptable and still valid, and
-           * nothing listed it or could reach it. "Is that leaked key still live" was yes. The
-           * credentials table also grew one unrevoked secret per edit per Bot.
-           *
-           * After the new one is stored, so a failure here leaves the Bot working with a key too
-           * many rather than with none.
+           * `storeAgentAuth` locks the previous credential, revokes it and inserts the replacement
+           * inside this transaction, so there is nothing left here to retire. A second revoke from
+           * outside the transaction would wait on the row lock this transaction is holding and never
+           * be released, because the transaction cannot commit until the call it is awaiting
+           * returns: editing a Bot's key would hang until the statement timed out, and the timeout
+           * would then be reported as a key that is still live.
            */
-          if (input.auth && vault) {
-            await retireReplacedKey(vault.store, previous, configuration);
-          }
           await transaction
             .update(agents)
             .set({ name: input.name, configuration, updatedAt })
@@ -513,6 +517,10 @@ export function createAgentProfileStore(
               vault.store,
               (row?.configuration ?? {}) as Record<string, unknown>,
               {},
+              // In this transaction, so the key is retired exactly when the deletion is. On its own
+              // connection the revoke would commit even where the delete rolled back, leaving a Bot
+              // that still exists and can no longer reach its endpoint.
+              transaction,
             );
           }
         },
