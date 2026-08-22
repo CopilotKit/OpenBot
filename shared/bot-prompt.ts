@@ -137,3 +137,29 @@ export const PROVENANCE_GUIDANCE = PROVENANCE_GUIDANCE_LINES.reduce<string[]>(
   },
   [""],
 ).join("\n\n");
+
+/**
+ * What a tool call is given when its answer never came.
+ *
+ * A tool call the surface owns ends the run without a result on purpose: the surface draws it, or
+ * puts it to a person, and starts the next run carrying the answer. When nobody answers — a Bot asks
+ * for the wheel to get past a sign-in and the person decides they do not need it after all — no
+ * answer is ever carried, and the call stays in the history with nothing following it.
+ *
+ * Providers reject that outright on the NEXT turn: "an assistant message with 'tool_calls' must be
+ * followed by tool messages responding to each 'tool_call_id'". So the conversation is not merely
+ * stuck on that one request, it is finished, and the only escape is starting a new one.
+ *
+ * Written for the model rather than for a log, because the model is the only reader: it has to
+ * understand the call is over and not worth waiting for, and be able to say something useful about
+ * it. "Nothing happened" would leave it repeating the request, and a fake success would have it
+ * report work it never did.
+ *
+ * Shared because both Bots in this repo have to say the same thing. The first fix for this landed in
+ * `agent-langgraph` alone, and `agent-bot` — the Bot that ships in the box, and the one behind the
+ * Browser Bot — went on failing in exactly the same way until somebody drove it.
+ */
+export const NO_ANSWER_CAME =
+  "No result. The person did not answer this, and the run it belonged to has ended. " +
+  "Do not wait for it and do not assume it succeeded. Carry on without it, and say plainly what " +
+  "you could not do if it mattered.";
