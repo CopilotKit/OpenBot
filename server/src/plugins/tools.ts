@@ -85,8 +85,12 @@ export function grantedToolGuidance(tools: GrantedTool[]): string {
     ),
     "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
     "browser is signed in as nobody, so it sees less than these tools do and will meet a sign-in wall",
-    "that connecting an account has already solved. If one of these systems is involved but no tool",
-    "above covers the part you need, say which part is missing rather than going around it.",
+    "that connecting an account has already solved.",
+    "If one of these systems is involved and no tool above covers the part you need, that is a",
+    "missing grant and not something to work around. Say so plainly, name the capability you would",
+    "need, and say an administrator can grant it on that connector. Do not reach for the browser, do",
+    "not ask the person to sign in, and do not ask them to fetch it for you: they already have the",
+    "access, and the thing that is missing is yours, not theirs.",
   ].join("\n");
 }
 

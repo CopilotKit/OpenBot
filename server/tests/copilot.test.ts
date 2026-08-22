@@ -537,6 +537,29 @@ describe("what a Bot is told it holds", () => {
     expect(grantedToolGuidance(drive).toLowerCase()).toContain("do not browse");
   });
 
+  test("says a gap in what it holds is a grant to ask for, not a wall to climb", () => {
+    /*
+     * The half of the Drive failure the "do not browse" line does not cover.
+     *
+     * Only `search_files` was granted. The Bot found the document, had no way to read it, and
+     * surfaced that as an authentication problem on `docs.google.com`: it opened the vendor, met
+     * Google's sign-in page and asked its person to take the wheel and sign in. They already had
+     * access. The Bot lacked a grant, and nothing on screen said so.
+     *
+     * A sentence naming the missing capability points at the screen that fixes it. A sign-in box
+     * does not, and asking the person to fetch it instead is the same mistake wearing a hat.
+     */
+    // Whitespace-normalised: the guidance is assembled line by line, so a sentence spans a newline
+    // wherever the source happened to wrap, which is not a fact about what the Bot is told.
+    const guidance = grantedToolGuidance(drive)
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    expect(guidance).toContain("missing grant");
+    expect(guidance).toContain("name the capability");
+    expect(guidance).toContain("administrator can grant it");
+    expect(guidance).toContain("do not ask the person to sign in");
+  });
+
   test("says nothing at all when the Bot holds nothing", () => {
     // A deployment with no connectors must not be told about connectors it does not have.
     expect(grantedToolGuidance([])).toBe("");
