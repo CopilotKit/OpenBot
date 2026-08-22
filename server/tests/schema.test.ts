@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { getTableName } from "drizzle-orm";
-import { getTableConfig } from "drizzle-orm/pg-core";
+import { getTableName, is } from "drizzle-orm";
+import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
+import * as schema from "../src/db/schema";
 import {
   accounts,
   agentPreferences,
@@ -12,13 +13,10 @@ import {
   channelAgents,
   channelMemberships,
   channels,
-  chunks,
   connectorCursors,
   connectorInstances,
   credentials,
   credentialKind,
-  documentAcls,
-  documents,
   intelligenceChannelMappings,
   mcpUserCredentials,
   sessions,
@@ -45,9 +43,6 @@ describe("OpenBot database schema", () => {
         connectorInstances,
         connectorCursors,
         syncRuns,
-        documents,
-        chunks,
-        documentAcls,
         auditEvents,
         intelligenceChannelMappings,
       ].map(getTableName),
@@ -65,9 +60,6 @@ describe("OpenBot database schema", () => {
       "connector_instances",
       "connector_cursors",
       "sync_runs",
-      "documents",
-      "chunks",
-      "document_acls",
       "audit_events",
       "intelligence_channel_mappings",
     ]);
@@ -139,21 +131,33 @@ describe("OpenBot database schema", () => {
     expect(cascading.length).toBe(2);
   });
 
-  test("keeps document embeddings and ACLs separate from document metadata", () => {
-    expect(Object.keys(documents)).toEqual(
-      expect.arrayContaining([
-        "id",
-        "connectorInstanceId",
-        "sourceId",
-        "canonicalUrl",
-      ]),
+  test("holds no copy of a customer's documents", () => {
+    /*
+     * The rule this schema is now built on: a Bot answers from a live system by calling that
+     * system's own search as the person asking, so the vendor decides what they may see. A table
+     * of documents here would be a second copy of somebody's corpus, with a second permission
+     * model of our own to keep in step with theirs, and it would outlive their access to the
+     * original. `documents`, `chunks` and `document_acls` were exactly that and are gone.
+     *
+     * This asserts on every table the schema exports rather than on named ones, so it catches a
+     * reintroduction under a different name, and on column types rather than column names, so it
+     * catches an embedding smuggled onto a table that sounds like something else.
+     */
+    const tables = Object.values(schema).filter((value): value is PgTable =>
+      is(value, PgTable),
     );
-    expect(Object.keys(chunks)).toEqual(
-      expect.arrayContaining(["documentId", "embedding"]),
+    expect(tables.length).toBeGreaterThan(20);
+
+    expect(tables.map(getTableName)).not.toContain("documents");
+    expect(tables.map(getTableName)).not.toContain("chunks");
+    expect(tables.map(getTableName)).not.toContain("document_acls");
+
+    const vectorColumns = tables.flatMap((table) =>
+      getTableConfig(table)
+        .columns.filter((column) => column.getSQLType().startsWith("vector"))
+        .map((column) => `${getTableName(table)}.${column.name}`),
     );
-    expect(Object.keys(documentAcls)).toEqual(
-      expect.arrayContaining(["documentId", "principal", "effect"]),
-    );
+    expect(vectorColumns).toEqual([]);
   });
 
   test("includes Better Auth's verified Google identity records", () => {
