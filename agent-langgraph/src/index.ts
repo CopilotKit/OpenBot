@@ -1,13 +1,7 @@
 import type { BaseEvent, RunAgentInput } from "@ag-ui/core";
 import { EventEncoder } from "@ag-ui/encoder";
 import { ChatAnthropic } from "@langchain/anthropic";
-import {
-  AIMessage,
-  type BaseMessage,
-  HumanMessage,
-  SystemMessage,
-  ToolMessage,
-} from "@langchain/core/messages";
+import { type AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import {
   END,
@@ -18,7 +12,7 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
-import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import { toLangChainMessages } from "./history";
 
 /**
  * The same Bot, on a framework.
@@ -125,61 +119,6 @@ if (!API_KEY) {
     `${keyVariable} is not set, and BOT_PROVIDER=${PROVIDER} needs it. This Bot cannot answer without a model.`,
   );
   process.exit(1);
-}
-
-/** Translate the conversation AG-UI carries into LangChain's message classes. */
-function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
-  const messages: BaseMessage[] = [new SystemMessage(COMPUTER_GUIDANCE)];
-
-  for (const message of input.messages) {
-    if (message.role === "user") {
-      messages.push(new HumanMessage(String(message.content ?? "")));
-      continue;
-    }
-    if (message.role === "system" || message.role === "developer") {
-      messages.push(new SystemMessage(String(message.content ?? "")));
-      continue;
-    }
-    if (message.role === "tool") {
-      // Tool results are appended so the model can continue from the completed call.
-      messages.push(
-        new ToolMessage({
-          tool_call_id: message.toolCallId,
-          content: String(message.content ?? ""),
-        }),
-      );
-      continue;
-    }
-    if (message.role === "assistant") {
-      messages.push(
-        new AIMessage({
-          content: message.content ?? "",
-          tool_calls:
-            message.toolCalls?.map((call) => ({
-              id: call.id,
-              name: call.function.name,
-              // LangChain wants parsed arguments where AG-UI carries the raw string. A call whose
-              // arguments did not parse is passed as empty rather than dropped: the model needs to
-              // see that it made the call, or it makes it again.
-              args: parseArguments(call.function.arguments),
-            })) ?? [],
-        }),
-      );
-    }
-  }
-
-  return messages;
-}
-
-function parseArguments(raw: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(raw || "{}");
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
 }
 
 /**

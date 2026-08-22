@@ -1,0 +1,124 @@
+/**
+ * The conversation AG-UI carries, as LangChain's message classes.
+ *
+ * Its own module so it can be tested without starting a server: `index.ts` calls `serve()` at module
+ * scope, so importing it to reach one pure function binds a port. `agent-computer/src/control.ts`
+ * was split out for the same reason, to keep state-machine tests away from a browser.
+ */
+import type { RunAgentInput } from "@ag-ui/core";
+import {
+  AIMessage,
+  type BaseMessage,
+  HumanMessage,
+  SystemMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
+import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+
+/**
+ * What a tool call is given when its answer never came.
+ *
+ * Written for the model rather than for a log, because the model is the only reader: it has to
+ * understand that the call is over and not worth waiting for, and be able to say something useful
+ * about it. "Nothing happened" would leave it repeating the request.
+ */
+export const NO_ANSWER_CAME =
+  "No result. The person did not answer this, and the run it belonged to has ended. " +
+  "Do not wait for it and do not assume it succeeded. Carry on without it, and say plainly what " +
+  "you could not do if it mattered.";
+
+/** Translate the conversation AG-UI carries into LangChain's message classes. */
+export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
+  const messages: BaseMessage[] = [new SystemMessage(COMPUTER_GUIDANCE)];
+
+  /*
+   * Which calls in this history were ever answered.
+   *
+   * A tool call the surface owns ends the run without a result on purpose: the surface draws it, or
+   * puts it to a person, and starts the next run carrying the answer. When nobody answers — a Bot
+   * asks for the wheel to get past a sign-in and the person decides they do not need it after all —
+   * no answer is ever carried, and the call stays in the history with nothing following it.
+   *
+   * OpenAI rejects that outright on the NEXT turn: "an assistant message with 'tool_calls' must be
+   * followed by tool messages responding to each 'tool_call_id'". So the conversation was not merely
+   * stuck on that request, it was finished. Every later message failed the same way, and the only
+   * escape was starting a new one, which loses it.
+   *
+   * Collected up front because an answer arrives as a later message than the call it answers.
+   */
+  const answered = new Set(
+    input.messages
+      .filter((message) => message.role === "tool")
+      .map((message) => (message as { toolCallId?: string }).toolCallId)
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  for (const message of input.messages) {
+    if (message.role === "user") {
+      messages.push(new HumanMessage(String(message.content ?? "")));
+      continue;
+    }
+    if (message.role === "system" || message.role === "developer") {
+      messages.push(new SystemMessage(String(message.content ?? "")));
+      continue;
+    }
+    if (message.role === "tool") {
+      // Tool results are appended so the model can continue from the completed call.
+      messages.push(
+        new ToolMessage({
+          tool_call_id: message.toolCallId,
+          content: String(message.content ?? ""),
+        }),
+      );
+      continue;
+    }
+    if (message.role === "assistant") {
+      messages.push(
+        new AIMessage({
+          content: message.content ?? "",
+          tool_calls:
+            message.toolCalls?.map((call) => ({
+              id: call.id,
+              name: call.function.name,
+              // LangChain wants parsed arguments where AG-UI carries the raw string. A call whose
+              // arguments did not parse is passed as empty rather than dropped: the model needs to
+              // see that it made the call, or it makes it again.
+              args: parseArguments(call.function.arguments),
+            })) ?? [],
+        }),
+      );
+
+      /*
+       * Close any of its calls that nothing ever answered, immediately after it.
+       *
+       * Position is not cosmetic: a tool result has to follow the assistant message that made the
+       * call, so these go here rather than being appended at the end. A call answered later in the
+       * history is left alone and its real answer arrives in its own turn.
+       */
+      for (const call of message.toolCalls ?? []) {
+        if (call.id && !answered.has(call.id)) {
+          messages.push(
+            new ToolMessage({
+              tool_call_id: call.id,
+              content: NO_ANSWER_CAME,
+              name: call.function.name,
+            }),
+          );
+        }
+      }
+    }
+  }
+
+  return messages;
+}
+
+function parseArguments(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw || "{}");
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
