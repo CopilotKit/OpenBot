@@ -44,7 +44,14 @@ function RouteComponent() {
             setError(null);
             try {
               let agentId: string | undefined = draft.agentId ?? undefined;
-              if (!agentId) {
+              if (agentId) {
+                /*
+                 * Told to the server so the choice is recorded, and its answer thrown away: the
+                 * person already decided and nothing here may change that. Failing to write the
+                 * audit row must not stop the conversation, so a rejection is swallowed whole.
+                 */
+                await routeMessage(draft.text, agentId).catch(() => undefined);
+              } else {
                 try {
                   agentId = (await routeMessage(draft.text)).agentId;
                 } catch {

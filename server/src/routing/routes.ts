@@ -9,12 +9,35 @@ import type { IntentRouter, RoutingCandidate } from "./classify";
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
 
 /**
- * Decide which coworker an untagged message is for, before a channel is pinned to one.
+ * Who to record the routing against, or nobody.
  *
- * The roster is read for the person asking, so the router can only ever pick a coworker they are
+ * The single-user development actor is not a real person and has no row to point at, so it is left
+ * off rather than written as a user id that resolves to nothing.
+ */
+function actorId(
+  actor:
+    | {
+        id?: string;
+        email?: string;
+      }
+    | null
+    | undefined,
+): string | undefined {
+  return actor?.id && actor.email !== DEV_ACTOR_EMAIL ? actor.id : undefined;
+}
+
+/**
+ * Decide which coworker a message is for, before a channel is pinned to one.
+ *
+ * The roster is read for the person asking, so this can only ever land on a coworker they are
  * already allowed to reach. The decision is recorded like every other one in the product: a
  * `channel.routed` row names where it went and why, and carries the candidate ids but never the
  * message itself, which the audit payload redaction would drop anyway.
+ *
+ * A person who named a coworker with `@` has already decided, so nothing is inferred and no model
+ * is called. It is still recorded, with `viaMention` true and the person as the reason. Without
+ * that the trail answered "why did this go to Risk Analyst" for routed conversations and said
+ * nothing at all for chosen ones, which reads exactly like a row that failed to write.
  */
 export function createRoutingRoutes(
   store: AgentProfileStore,
@@ -32,12 +55,41 @@ export function createRoutingRoutes(
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
+  /*
+   * The one place a `channel.routed` row is written, for both ways a message finds a coworker.
+   *
+   * Two call sites writing the same event is two payloads that drift, and a trail whose rows mean
+   * slightly different things depending on which branch produced them cannot be read at all.
+   */
+  async function record(
+    actorUserId: string | undefined,
+    chosen: string,
+    reason: string,
+    fallback: boolean,
+    viaMention: boolean,
+    candidates: readonly string[],
+  ): Promise<void> {
+    if (!auditStore) return;
+    await recordAuditEvent(auditStore, {
+      eventType: "channel.routed",
+      targetType: "agent",
+      targetId: chosen,
+      ...(actorUserId ? { actorUserId } : {}),
+      payload: { chosen, reason, fallback, viaMention, candidates },
+    });
+  }
+
   routes.post("/", requireUser, async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
       text?: unknown;
+      agentId?: unknown;
     } | null;
     const text = typeof body?.text === "string" ? body.text.trim() : "";
     if (!text) return context.json({ error: "A message is required." }, 400);
+    const named =
+      typeof body?.agentId === "string" && body.agentId.trim()
+        ? body.agentId.trim()
+        : null;
 
     const actor = context.var.actor;
     const roster = await store.list(actor, false);
@@ -46,6 +98,33 @@ export function createRoutingRoutes(
       roster.find((a) => a.visibility === "public") ?? roster[0];
     if (!preferred) {
       return context.json({ error: "No coworker is available." }, 409);
+    }
+
+    /*
+     * A named coworker is an instruction, not a question, so it is honoured as given.
+     *
+     * Checked against the same roster the router picks from, so `@` cannot reach further than
+     * routing can: a name that is not on it is refused rather than quietly turned into somebody
+     * else, because silently redirecting a message the person addressed by hand is the worst
+     * available answer.
+     */
+    if (named) {
+      const chosen = roster.find((a) => a.id === named);
+      if (!chosen) {
+        return context.json(
+          { error: "That coworker is not on your roster." },
+          404,
+        );
+      }
+      const reason = "you chose them yourself";
+      await record(actorId(actor), chosen.id, reason, false, true, [chosen.id]);
+      return context.json({
+        agentId: chosen.id,
+        name: chosen.name,
+        reason,
+        fallback: false,
+        viaMention: true,
+      });
     }
     const candidates: RoutingCandidate[] = await Promise.all(
       roster.map(async (a) => ({
@@ -69,29 +148,21 @@ export function createRoutingRoutes(
 
     const decision = await router.route(text, candidates, preferred.id);
 
-    if (auditStore) {
-      await recordAuditEvent(auditStore, {
-        eventType: "channel.routed",
-        targetType: "agent",
-        targetId: decision.agentId,
-        ...(actor?.id && actor.email !== DEV_ACTOR_EMAIL
-          ? { actorUserId: actor.id }
-          : {}),
-        payload: {
-          chosen: decision.agentId,
-          reason: decision.reason,
-          fallback: decision.fallback,
-          viaMention: false,
-          candidates: candidates.map((c) => c.id),
-        },
-      });
-    }
+    await record(
+      actorId(actor),
+      decision.agentId,
+      decision.reason,
+      decision.fallback,
+      false,
+      candidates.map((c) => c.id),
+    );
 
     return context.json({
       agentId: decision.agentId,
       name: decision.name,
       reason: decision.reason,
       fallback: decision.fallback,
+      viaMention: false,
     });
   });
 

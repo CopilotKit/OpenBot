@@ -155,6 +155,22 @@ function Row({
      */
     event.eventType === "mcp.callback_refused";
   const stalled = event.eventType === "agent.stream_stalled";
+  /*
+   * Three different things, and the difference is what somebody comes to this row to find out.
+   *
+   * A person naming a coworker, the router matching one, and the router giving up and using the
+   * default are not the same event, and one label covering all three would make the row worth less
+   * than the reason line under it. Nothing here is a refusal, so none of them take the refusal
+   * colour.
+   */
+  const routed =
+    event.eventType === "channel.routed"
+      ? payload.viaMention === true
+        ? "The person chose this coworker"
+        : payload.fallback === true
+          ? "Sent to the default coworker"
+          : "Sent to the coworker it is for"
+      : null;
   // Allowed by policy but not carried out. A stalled turn belongs in the same family: the Bot was
   // asked and the answer never arrived. Colour is how this table is read, and a row left in the
   // muted foreground reads as "Allowed", which a turn nobody ever got an answer to was not.
@@ -173,8 +189,17 @@ function Row({
           : event.eventType}
       </td>
       <td className="px-4 py-2">
-        {/* Named targets and file paths are the audit subject before page elements. */}
-        {NAMED_TARGETS.has(event.targetType) && event.targetId ? (
+        {/*
+         * A routing row's subject is the coworker it went to, and it is the only thing on the row
+         * worth reading. Its target type is `agent`, which is not a named target because everywhere
+         * else an agent id appears it belongs in the Bot column; here nothing acted, so there is no
+         * Bot and the target is all there is. Rendered through `nameFor` so it reads as the name on
+         * the roster rather than the immutable id.
+         */}
+        {event.eventType === "channel.routed" && event.targetId ? (
+          <span title={event.targetId}>{nameFor(event.targetId)}</span>
+        ) : /* Named targets and file paths are the audit subject before page elements. */
+        NAMED_TARGETS.has(event.targetType) && event.targetId ? (
           <span className="font-mono text-xs">
             {event.targetId}
             {typeof payload.function === "string" ? (
@@ -229,7 +254,8 @@ function Row({
                 : "text-muted-foreground"
           }
         >
-          {DECISIONS[event.eventType] ??
+          {routed ??
+            DECISIONS[event.eventType] ??
             (refused ? "Blocked" : failed ? "Did not happen" : "Allowed")}
         </span>
         {/* Refusal reasons mirror the conversation-facing reason. */}
@@ -245,6 +271,24 @@ function Row({
         typeof payload.refusal === "string" ? (
           <div className="mt-0.5 text-xs text-muted-foreground">
             {payload.refusal}
+          </div>
+        ) : null}
+        {/*
+         * Why the conversation went where it went, which is the whole reason the row is written.
+         * Without it a routing row says "Allowed" and names nobody, which is indistinguishable from
+         * a row that failed to write.
+         */}
+        {event.eventType === "channel.routed" &&
+        typeof payload.reason === "string" ? (
+          /*
+           * A width rather than a max-width, because the table lays itself out from its content and
+           * a max-width on a block inside a cell does not constrain that. A router's reason is a
+           * sentence a model wrote, not a rule name, and left unbounded in the last column it
+           * pushes the table wider than the page and the end of the sentence goes off the edge,
+           * where nobody scrolls to find it.
+           */
+          <div className="mt-0.5 w-[22rem] break-words text-xs text-muted-foreground">
+            {payload.reason}
           </div>
         ) : null}
         {event.eventType === "bot.declined" &&
