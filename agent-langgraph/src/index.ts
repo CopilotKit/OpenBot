@@ -100,7 +100,7 @@ const GOOGLE_BASE_URL =
 function defaultModelFor(provider: string): string {
   if (provider === "anthropic") return "claude-sonnet-4-5";
   if (provider === "google") return "gemini-2.5-flash";
-  return "gpt-5.6-terra";
+  return "gpt-5.5";
 }
 
 /**

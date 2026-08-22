@@ -121,3 +121,61 @@ describe("joinWithin", () => {
     expect(done).toBe(true);
   });
 });
+
+/**
+ * A connect that does not end when it is asked to.
+ *
+ * `detach` is a request, not a guarantee. The wait after it used to be unbounded, on the reasoning
+ * that a detached connect ends promptly, and when it does not nothing here ever returns: the
+ * caller's `finally` never runs, the gate it opens stays shut, and every message typed afterwards
+ * waits on it forever.
+ *
+ * That failure is silent. The message appears in the transcript, no run is started, no request
+ * reaches the server, and nothing is logged. Two Bots sat mute through a whole gate run before this
+ * was found, and the only symptom was an answer that never came.
+ */
+describe("a detached connect that never finishes", () => {
+  test("does not hold the turn forever", async () => {
+    let ended = false;
+    const never = new Promise<void>(() => {});
+
+    const settled = joinWithin({
+      connect: never,
+      deadline: Promise.resolve(),
+      detach: async () => {
+        // Asked, and ignored, which is the case this exists for.
+      },
+    }).then(() => {
+      ended = true;
+    });
+
+    await Promise.race([
+      settled,
+      new Promise((resolve) => setTimeout(resolve, 4_000)),
+    ]);
+
+    expect(ended).toBe(true);
+  }, 10_000);
+
+  test("still waits for a detached connect that does finish", async () => {
+    // The behaviour the grace must not throw away: a connect that ends is waited for, so nothing is
+    // left in flight to overwrite the message.
+    let finished = false;
+    let end: () => void = () => {};
+    const connect = new Promise<void>((resolve) => {
+      end = () => {
+        finished = true;
+        resolve();
+      };
+    });
+
+    const settled = joinWithin({
+      connect,
+      deadline: Promise.resolve(),
+      detach: async () => end(),
+    });
+
+    await settled;
+    expect(finished).toBe(true);
+  });
+});

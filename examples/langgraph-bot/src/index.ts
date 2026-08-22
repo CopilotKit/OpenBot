@@ -27,7 +27,7 @@ import { serve } from "bun";
  */
 
 const PORT = Number.parseInt(process.env.PORT ?? "4300", 10);
-const MODEL = process.env.BOT_MODEL ?? "gpt-5.6-terra";
+const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
 /**
  * `gpt-5.6-*` rejects function tools on `/v1/chat/completions` and needs the Responses API, which
  * this integration speaks. Inferred from the model so setting `BOT_MODEL` alone cannot produce a

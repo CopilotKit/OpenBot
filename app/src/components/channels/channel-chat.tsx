@@ -6,7 +6,6 @@ import {
 } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { toAgentOptions } from "@/components/channels/composer";
 import { ConversationView } from "@/components/channels/conversation-view";
 import {
@@ -22,6 +21,7 @@ import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
+import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
 import { newId } from "../../lib/new-id";
 
@@ -125,12 +125,20 @@ export function ChannelChat({
     let current = true;
 
     void (async () => {
-      // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
-      await joinWithin({
-        connect: copilotkit.connectAgent({ agent }),
-        deadline: afterMs(JOIN_DEADLINE_MS),
-        detach: () => agent.detachActiveRun(),
-      });
+      try {
+        // Bounded, and finished when it returns; `join-thread.ts` has why that matters.
+        await joinWithin({
+          connect: copilotkit.connectAgent({ agent }),
+          deadline: afterMs(JOIN_DEADLINE_MS),
+          detach: () => agent.detachActiveRun(),
+        });
+      } catch {
+        /*
+         * A join that throws is a join that is over. It must not take the gate with it: everything
+         * typed afterwards waits on that gate, so a throw here would silence the conversation
+         * rather than degrade it. History is restored below either way.
+         */
+      }
 
       try {
         const stored = await readThreadMessages(

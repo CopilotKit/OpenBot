@@ -235,14 +235,18 @@ Sessions survive and nobody signs in again.
   shipped `gpt-4.1` as the default for every built-in Bot. Asked to open a page behind a sign-in,
   those Bots answered "would you like me to prompt you to sign in?" and called nothing, three times
   out of three, while the prompt forbids that sentence in as many words. On `gpt-5.6-terra` the same
-  question produces the tool call first try. The default is now `gpt-5.6-terra` across the package,
-  the compose services and both example Bots, and the Responses API is inferred from the model rather
-  than left to a separate switch, because `gpt-5.6-*` rejects function tools on chat completions and
-  a deployment that set the model without knowing that got a Bot which started, looked healthy, and
-  failed on its first tool call. It is a default, not a commitment: `BOT_MODEL` and the package's
-  `model.yaml` still decide. `agent-bot` stays on `gpt-5.5` on purpose, since the only ways to 5.6 on
-  the endpoint it writes by hand are a streaming rewrite or turning reasoning off, and it is the Bot
-  whose job includes deciding when to ask a person for help.
+  question produces the tool call first try, so the package now runs `gpt-5.6-terra`. It is a
+  default, not a commitment: `model.yaml` still decides.
+
+  The Bots that answer over AG-UI stay on `gpt-5.5`, each for its own measured reason. The framework
+  Bot answers nothing at all on `gpt-5.6-*` through the Responses API — `RUN_STARTED`, then
+  `RUN_FINISHED`, no text — and the hand-written one cannot use function tools on
+  `/v1/chat/completions` with a 5.6 model unless reasoning is turned off, which is the wrong trade
+  for a Bot whose job includes deciding when to ask a person for help. It refuses to start on such a
+  model now rather than failing one silent tool call at a time. Where a 5.6 model is set deliberately,
+  the Responses API is switched on for it automatically, because a deployment that set the model and
+  did not know about that switch got a Bot which started, looked healthy, and failed on its first
+  tool call.
 - **A Bot browsed to a vendor this deployment already connects to.** A Bot holding no grants was told
   nothing about connectors at all, so it treated a connected vendor as an ordinary website: asked
   about Google Drive it opened `drive.google.com`, met a sign-in page, and asked the person to sign
