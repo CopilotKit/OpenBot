@@ -346,7 +346,12 @@ export function ChannelChat({
     <ConversationProvider ask={askFromComponent}>
       <ConversationView
         agents={toAgentOptions(agentProfiles, channel.agentIds)}
-        busy={agent.isRunning}
+        /*
+         * THE TURN, not the run. `say` waits for the runtime agent and the join before a run starts,
+         * and `agent.isRunning` alone leaves that gap unmarked — which is the one moment the
+         * "Thinking" line exists for. Same value as `pending`, deliberately.
+         */
+        busy={agent.isRunning || turnsInFlight > 0}
         // The `/` menu exposes only skills granted to this Bot.
         commands={skillCommands}
         // Readiness is handled by `say`; deletion is the only disabled-chat state.
