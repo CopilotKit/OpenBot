@@ -201,6 +201,18 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **A migration stamped in the future silently swallowed the next one.** Drizzle runs a migration only
+  when its journal timestamp is later than the newest one the database has recorded, so a migration
+  stamped ahead of real time raises that ceiling and every migration written after it is skipped
+  until the clock catches up. `drizzle-kit migrate` reports success the whole time. One migration was
+  hand-written a day into the future and did exactly that to the next one to arrive: the table was
+  never created, and the only sign was an integration test failing on a relation that did not exist.
+  The timestamps are corrected, an older inversion between two earlier migrations is corrected with
+  them, and the journal is now checked by a test, because nothing else in the build would notice.
+  **If you ran a build between these, your database has the wrong ceiling recorded and will skip the
+  next migration.** Repair it with
+  `update drizzle.__drizzle_migrations set created_at = 1787359000000 where created_at = 1787444747113;`
+  or start from a fresh database, where migrations all run in one pass and ordering cannot bite.
 - **A Bot named after a deployment route was served without its guard.** The computer router steps
   aside for `/policy` and `/fleet`, which are its own paths and not about a Bot, because Hono matches
   `/*` against zero segments and a single-segment path arrives as a Bot id. It stepped aside on the
