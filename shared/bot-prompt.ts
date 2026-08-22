@@ -83,3 +83,57 @@ export const COMPUTER_GUIDANCE = COMPUTER_GUIDANCE_LINES.reduce<string[]>(
   },
   [""],
 ).join("\n\n");
+
+/**
+ * Where an answer came from, said out loud.
+ *
+ * Asked "a customer made 12 cash deposits just under the reporting threshold, what is our
+ * obligation", the compliance Bot answered at length and with confidence: file a SAR, $5,000 or
+ * more, within 30 calendar days of initial detection, retain for 5 years. The audit trail for that
+ * turn holds one row, the routing decision. No tool call, no source, and no sentence anywhere saying
+ * the answer came from the model rather than from anything this deployment can reach.
+ *
+ * Several of those numbers may well be right, and that is the problem. A confident, plausible,
+ * unsourced answer is indistinguishable from a confident, plausible, wrong one, and nothing marked
+ * the difference on a question about whether to file, against what threshold, inside what deadline.
+ *
+ * One package's `knowledge` Bot had a rule against exactly this, written into its YAML by whoever
+ * happened to think of it. The Bot whose whole subject is regulatory obligation did not, because
+ * `remote-ag-ui` gets its role description and nothing else. A rule that important sitting in one
+ * agent's YAML is a rule that will be missing from the next agent somebody adds, so it lives here
+ * and every Bot gets it.
+ *
+ * The last paragraph is not padding. An earlier attempt at this told Bots to go and find a source,
+ * and they went hunting the open web and looped on a government 404 page, which is worse than the
+ * problem: an unsourced answer marked as unsourced is honest, and a hunt for one is a Bot that
+ * never answers. The instruction is to say where the answer came from, not to go looking.
+ */
+const PROVENANCE_GUIDANCE_LINES = [
+  "Say where an answer came from. When you read it with one of your tools, cite what you read.",
+  "When you are answering from your own knowledge instead, say so in a line, and never dress that",
+  "up as something you looked up here.",
+  "",
+  "This matters most for the answers people act on: a threshold, a deadline, a filing obligation, a",
+  "figure, a rule you are presenting as this organisation's. Never state one of those as established",
+  "here without having read it somewhere you can name. Saying 'I have not checked this against your",
+  "own policy or the current regulation' costs you a sentence. Being confidently wrong about a",
+  "number somebody acts on costs them a great deal more.",
+  "",
+  "This is not an instruction to go looking. If nothing you can reach covers the question, answer as",
+  "well as you can and mark it plainly as unverified. Do not go hunting the open web for something",
+  "to cite, and do not keep retrying a page that is not giving you one: an unsourced answer that",
+  "says it is unsourced is honest, and a search that never ends is a Bot that never answers.",
+];
+
+export const PROVENANCE_GUIDANCE = PROVENANCE_GUIDANCE_LINES.reduce<string[]>(
+  (paragraphs, line) => {
+    if (line === "") {
+      paragraphs.push("");
+      return paragraphs;
+    }
+    const last = paragraphs.length - 1;
+    paragraphs[last] = paragraphs[last] ? `${paragraphs[last]} ${line}` : line;
+    return paragraphs;
+  },
+  [""],
+).join("\n\n");

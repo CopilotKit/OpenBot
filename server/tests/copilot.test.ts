@@ -9,6 +9,7 @@ import {
   resolveRuntimeAgents,
   standingRoleMessage,
 } from "../src/copilot";
+import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import { grantedToolGuidance } from "../src/plugins/tools";
 
 // Every agent row now joins its profile, so the row a coworker is built from always names it.
@@ -99,7 +100,9 @@ describe("registered Copilot agents", () => {
       ),
     ).toEqual({
       model: "openai/gpt-4.1",
-      prompt: "Be helpful.",
+      // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
+      // it. That Bot needs it most: nothing it says was read anywhere.
+      prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}`,
       apiKey: "openai-secret",
     });
   });
@@ -324,6 +327,10 @@ describe("standing agent roles", () => {
         "You are Expense Manager, Finance Operations.",
         "Review receipts, categorize expenses, and prepare reimbursement reports.",
         "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
+        // For a remote Bot this message is the whole instruction, so the provenance rule has to
+        // travel in it or the Bot never hears it. Referenced rather than restated, so the assertion
+        // stays exact without pinning the wording twice.
+        PROVENANCE_GUIDANCE,
       ].join("\n\n"),
     });
   });
@@ -444,6 +451,7 @@ describe("standing agent roles", () => {
         "You are Expense Manager, Finance Operations.",
         "Reconcile corporate card statements.",
         "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
+        PROVENANCE_GUIDANCE,
       ].join("\n\n"),
     );
   });
@@ -584,5 +592,78 @@ describe("what a Bot is told it holds", () => {
     expect(prompt.indexOf("google-drive")).toBeLessThan(
       prompt.indexOf("BROWSER GUIDANCE HERE"),
     );
+  });
+});
+
+/**
+ * Where an answer came from, on every Bot rather than the ones somebody remembered.
+ *
+ * Asked what the obligation was for twelve cash deposits under the reporting threshold, the
+ * compliance Bot answered with a filing requirement, a dollar threshold, a thirty-day deadline and a
+ * five-year retention period. The audit trail for that turn holds exactly one row: the routing
+ * decision. No tool call, no source, and nothing saying the answer came from the model.
+ *
+ * One package's `knowledge` Bot had a rule against this in its YAML. The Bot whose entire subject is
+ * regulatory obligation did not, because a `remote-ag-ui` agent gets its role description and
+ * nothing else. That asymmetry is the bug: a rule this important living in one agent's YAML is a
+ * rule the next agent will not have.
+ *
+ * So both paths are asserted, because they are built by different functions and a fix to one is not
+ * a fix to the other.
+ */
+describe("where a Bot says its answer came from", () => {
+  test("a built-in Bot carries the rule even holding nothing at all", () => {
+    // The Bot that needs it most. No tools and no computer means nothing it says was read anywhere.
+    const prompt = builtInAgentConfiguration(
+      {
+        id: "general-assistant",
+        name: "General Assistant",
+        type: "built_in",
+        systemPrompt: "Be helpful.",
+      },
+      { provider: "openai", defaultModel: "gpt-4.1" },
+      "openai-secret",
+    ).prompt as string;
+
+    expect(prompt).toContain(PROVENANCE_GUIDANCE);
+  });
+
+  test("a remote Bot carries it in the only instruction it ever gets", () => {
+    const content = standingRoleMessage({
+      id: "risk-analyst",
+      name: "Risk Analyst",
+      title: "Risk & Compliance",
+      roleDescription:
+        "Investigate policies, transaction monitoring, and control evidence.",
+    }).content;
+
+    expect(content).toContain(PROVENANCE_GUIDANCE);
+  });
+
+  test("it does not send the Bot hunting for a source", () => {
+    /*
+     * The failure mode of the first attempt at this, which never left a branch. Told to find a
+     * source, Bots went reading the open web and looped on a government 404 page. An unsourced
+     * answer that says it is unsourced is honest; a search that never ends is a Bot that never
+     * answers.
+     */
+    const guidance = PROVENANCE_GUIDANCE.toLowerCase().replace(/\s+/g, " ");
+    expect(guidance).toContain("this is not an instruction to go looking");
+    expect(guidance).toContain("mark it plainly as unverified");
+    expect(guidance).toContain("do not go hunting the open web");
+  });
+
+  test("it names the answers that must not be stated without a source", () => {
+    // The general rule is easy to read past. The list is what makes it bite on the turn that
+    // produced this: a threshold, a deadline, a filing obligation, a figure.
+    const guidance = PROVENANCE_GUIDANCE.toLowerCase().replace(/\s+/g, " ");
+    for (const kind of [
+      "threshold",
+      "deadline",
+      "filing obligation",
+      "figure",
+    ]) {
+      expect(guidance).toContain(kind);
+    }
   });
 });

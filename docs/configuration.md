@@ -319,6 +319,16 @@ Each agent requires `id`, `name`, `title`, `role_description`, and `type`.
 | `built-in`     | `system_prompt` |
 | `remote-ag-ui` | `endpoint`      |
 
+The two types are told different amounts, which is easy to miss. A `built-in` agent gets its
+`system_prompt`; a `remote-ag-ui` agent has none, and its `role_description` is the only instruction
+it ever receives from the package. Write that sentence as the whole brief for the Bot, not as a
+label for a list.
+
+Both kinds are also told, by the deployment rather than by the package, to say where an answer came
+from: cite what a tool returned, and say plainly when the answer is from the model's own knowledge
+rather than from anything it read. That rule is not written per agent, so it cannot be missing from
+the next one somebody adds.
+
 Any `${NAME}` in a package file is replaced with that environment variable, so one package works
 against a local stack, a staging one and production. `${NAME:-fallback}` uses the fallback when the
 name is unset or empty, which is how the example package points at the Bot in the box without

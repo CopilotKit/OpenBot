@@ -7,7 +7,10 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import { z } from "zod";
-import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import {
+  COMPUTER_GUIDANCE,
+  PROVENANCE_GUIDANCE,
+} from "../../shared/bot-prompt";
 import { grantedToolGuidance } from "./plugins/tools";
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
@@ -97,6 +100,14 @@ export function standingRoleMessage(
       `You are ${profile.name}, ${profile.title}.`,
       profile.roleDescription,
       "This standing role applies in every channel. Treat channel messages as task-specific instructions within it.",
+      /*
+       * Here rather than in the package, because for a remote Bot the standing role is the only
+       * instruction there is: `role_description` is one sentence somebody wrote about what it is
+       * for, and nothing else reaches it. The compliance Bot that answered a filing question with
+       * thresholds and deadlines and no source was a `remote-ag-ui` agent whose entire prompt was
+       * "Investigate policies, transaction monitoring, and control evidence."
+       */
+      PROVENANCE_GUIDANCE,
     ].join("\n\n"),
   };
 }
@@ -210,6 +221,14 @@ export function builtInAgentConfiguration(
      */
     prompt: [
       agent.systemPrompt,
+      /*
+       * Unconditional, unlike the two below it.
+       *
+       * Those describe things a deployment may or may not have. This describes how to answer at all,
+       * and a Bot with no tools and no computer needs it most: it has nothing to read, so everything
+       * it says comes from its own knowledge, and saying so is the only honest move available.
+       */
+      PROVENANCE_GUIDANCE,
       ...(grantedToolGuidance(tools) ? [grantedToolGuidance(tools)] : []),
       ...(computerGuidance ? [computerGuidance] : []),
     ].join("\n\n"),
