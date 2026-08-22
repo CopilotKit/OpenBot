@@ -201,6 +201,52 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **Every Bot ran a model two generations old, and it was costing tool calls.** The example package
+  shipped `gpt-4.1` as the default for every built-in Bot. Asked to open a page behind a sign-in,
+  those Bots answered "would you like me to prompt you to sign in?" and called nothing, three times
+  out of three, while the prompt forbids that sentence in as many words. On `gpt-5.6-terra` the same
+  question produces the tool call first try. The default is now `gpt-5.6-terra` across the package,
+  the compose services and both example Bots, and the Responses API is inferred from the model rather
+  than left to a separate switch, because `gpt-5.6-*` rejects function tools on chat completions and
+  a deployment that set the model without knowing that got a Bot which started, looked healthy, and
+  failed on its first tool call. It is a default, not a commitment: `BOT_MODEL` and the package's
+  `model.yaml` still decide. `agent-bot` stays on `gpt-5.5` on purpose, since the only ways to 5.6 on
+  the endpoint it writes by hand are a streaming rewrite or turning reasoning off, and it is the Bot
+  whose job includes deciding when to ask a person for help.
+- **A Bot browsed to a vendor this deployment already connects to.** A Bot holding no grants was told
+  nothing about connectors at all, so it treated a connected vendor as an ordinary website: asked
+  about Google Drive it opened `drive.google.com`, met a sign-in page, and asked the person to sign
+  in to an account the deployment had already connected. Every Bot is now told which vendors exist
+  here, held or not, and says plainly which one it has not been granted rather than reaching for the
+  browser.
+- **A conversation was destroyed by a declined take-the-wheel.** A Bot that asks for help with a
+  sign-in and never gets it left a tool call nothing ever answered, and every later turn in that
+  thread failed at the provider. This was fixed once for the framework Bot and not for the Bot in the
+  box, which is the one behind the Browser Bot, so it went on happening where most people would meet
+  it. Both now answer their own unanswered calls with the truth rather than a fake success.
+- **A Bot refused because a person had the wheel was told its refs were stale.** The computer flags a
+  takeover, the surface branches on that flag, and the flag did not survive the server, so a Bot was
+  sent back round the same action against the person who had just taken the browser. Reported and
+  fixed by @beardthelion.
+- **A person could not take the wheel unless the Bot offered it.** The button appeared only after a
+  Bot called for help, so the control a person needs depended on the Bot getting one instruction
+  right, and when it did not there was nothing to press. It is there whenever the Bot is driving now.
+  The Bot asking for help is still its own row, with its reason.
+- **The first message of a new channel could be lost.** A new channel's thread does not exist until
+  its first run, so the join that restores history had nothing to settle against; the message was sent
+  anyway after a deadline, while that join was still in flight, and the join finishing replaced it
+  with the thread's messages, which were none. The deadline now ends the join and waits for it, so
+  nothing is left in flight to overwrite anything. The transcript also says it is loading rather than
+  showing an empty conversation, and the thinking line is visible for the first time: a CSS rule
+  blanked the colour a gradient was built from, so the glyphs were painted with nothing. Reported and
+  fixed by @zopeVaibhav.
+- **The in-memory snapshot store disagreed with the table.** The database only ever moves a snapshot
+  forward; the in-memory one, which is what a test reaches for when it has no database, took whatever
+  arrived last. A test could therefore prove a boundary property that is false in a deployment.
+  Reported by @beardthelion, fixed by @NathanTarbert.
+- **A computer that had opened nothing still reserved a browser-sized frame.** That put a placeholder
+  the height of a browser window into the middle of a conversation, above an answer that never
+  involved the browser.
 - **A Bot named after a deployment route was served without its guard.** The computer router steps
   aside for `/policy` and `/fleet`, which are its own paths and not about a Bot, because Hono matches
   `/*` against zero segments and a single-segment path arrives as a Bot id. It stepped aside on the
