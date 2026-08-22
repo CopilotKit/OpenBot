@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.2
+
 ### Upgrading
 
 `AGENT_TOOL_TOKEN` is generated for you on a laptop. `scripts/start.sh` mints one and writes it to
