@@ -12,7 +12,7 @@ import {
   TAKE_CONTROL_FIRST,
 } from "./control";
 import { identity } from "./identity";
-import { createProfiles, VIEWPORT } from "./profiles";
+import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
 import {
   type InputMessage,
   type Screencast,
@@ -70,11 +70,8 @@ if (!COMPUTER_TOKEN) {
   process.exit(1);
 }
 
-const PORT = Number.parseInt(process.env.PORT ?? "4100", 10);
-const NAVIGATION_TIMEOUT_MS = Number.parseInt(
-  process.env.NAVIGATION_TIMEOUT_MS ?? "30000",
-  10,
-);
+const PORT = numberFromEnv("PORT", 4100);
+const NAVIGATION_TIMEOUT_MS = numberFromEnv("NAVIGATION_TIMEOUT_MS", 30000);
 
 /**
  * How long one action waits for its element.
@@ -83,10 +80,7 @@ const NAVIGATION_TIMEOUT_MS = Number.parseInt(
  * behaviour we want, but a ref that no longer resolves would otherwise hang for the full navigation
  * timeout before saying so, and the person is sitting watching a screen that is not changing.
  */
-const ACTION_TIMEOUT_MS = Number.parseInt(
-  process.env.ACTION_TIMEOUT_MS ?? "10000",
-  10,
-);
+const ACTION_TIMEOUT_MS = numberFromEnv("ACTION_TIMEOUT_MS", 10000);
 
 /**
  * How much page text a navigation hands back.
