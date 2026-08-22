@@ -10,6 +10,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Upgrading
 
+`AGENT_TOOL_TOKEN` is generated for you on a laptop. `scripts/start.sh` mints one and writes it to
+`.env`, the way it already did for `MANAGED_AGENT_TOKEN`. Without it no Bot could call a tool back
+through the deployment, which is the correct default for a deployment and made every MCP tool dead
+on arrival on a fresh clone. A value already set is kept, and `.env.example` still ships it empty,
+so a deployment not using `start.sh` is unchanged and still fails closed.
+
+`start.sh` also stops skipping work for services that are already answering. A Bot container is now
+handed to `docker compose` on every run and the server is restarted when this run minted a secret,
+because answering says a process is alive and not that it still agrees with the deployment. The cost
+is that a run which rebuilds an image recreates the Bot containers, about five seconds; `supervisor`
+already behaved this way.
+
 Two configurations now refuse to start:
 
 - A provider configured with no `INITIAL_ADMIN_EMAILS`. Set it to at least one address.
@@ -189,6 +201,42 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **A Bot browsed to a vendor it already had tools for.** Granted Google Drive, asked what was in a
+  document, it opened `drive.google.com` in its own browser, met a sign-in page that browser can
+  never satisfy, and asked the person to sign in to an account they had already connected. A tool
+  array says a tool exists; it does not say the tool is the way to reach that system, and it was
+  competing with a page of prose about the browser that mentions connectors nowhere. A Bot is now
+  told which systems it holds tools for, generated from its grants and placed before that prose, so
+  enabling a connector changes what the Bot is told on its next run.
+- **A question went to a coworker that had no way to answer it.** Routing read the sentence somebody
+  wrote about what a coworker is for, which is not the same as what it can reach, so a question about
+  a Drive document went to the one whose description says "company knowledge" and which held no Drive
+  grants. Candidates now carry the systems they hold tools for. Purpose still decides first: a
+  specialist with no connectors is still right for a question about its specialism.
+- **A deny rule about submitting a form was walked around by typing.** `computer_type` takes a
+  `submit` flag that presses Enter once the text is in, and the policy never saw a key, so a rule
+  refused at the button and at the keypress let the third route through. Both shipped copies of that
+  rule name both tools now, the key reaches the policy, and the audit row carries it — without it a
+  row said a field was filled in rather than that a form was sent.
+- **A Bot refused at the door left no trace.** A callback that could not prove which Bot it was
+  returned 401 and wrote nothing, so a Bot holding a token the deployment no longer accepted had
+  every call refused, returned nothing to its own model, and the model told the person there were no
+  results. A false negative delivered as an answer, with the audit trail agreeing nothing had
+  happened. Recorded now as `mcp.callback_refused`, naming the tool and the reason but no Bot or
+  actor, since both arrive in the credential that just failed to verify.
+- **An unanswered request for the wheel followed a Bot around.** Control belongs to a Bot's computer
+  rather than to a conversation, so a request nobody took sat there indefinitely and every later
+  conversation with that Bot showed a live prompt for work it was not doing, captioned with a reason
+  written for somebody else. An unanswered ask now stops being shown after ten minutes and its reason
+  goes with it. A person actually holding the wheel is never timed out.
+- **`/admin/computers` listed nothing, ever.** Admin addressed the fleet through a per-Bot route with
+  a placeholder id, which stopped working when that route began checking whether the caller may act
+  as the Bot in the path. The screen renders nothing while the list is null, so a deployment with two
+  running computers looked like one with none. The fleet has a route of its own, still
+  administrator-only.
+- **Every shipped component was recorded twice on a first start.** Two browsers announcing at once is
+  ordinary and the insert was already safe for it; the answer was not, so the loser of that race
+  named every component anyway and the caller wrote an audit row per name.
 - **A Bot could reach the deployment's own network by writing the address a different way.** The
   guard refused `169.254.169.254` and the private ranges as usually written, but not the same
   addresses spelled as an IPv6-mapped or NAT64 form, an integer, or with a trailing dot, so a Bot

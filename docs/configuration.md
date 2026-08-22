@@ -52,7 +52,7 @@ at `agent-langgraph` on a laptop.
 | `BOT_MODEL`          | provider default from Bot code/env | Model used by the shipped Bots.                                     |
 | `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
 | `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it. |
-| `AGENT_TOOL_TOKEN`   | unset                              | The secret a framework Bot presents when it calls a granted tool back through this server. |
+| `AGENT_TOOL_TOKEN`   | unset; `start.sh` generates one    | The secret a framework Bot presents when it calls a granted tool back through this server. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
 
@@ -66,6 +66,17 @@ ships `60000`, so a new clone has it on and an upgraded deployment does not acqu
 may not reach a vendor directly. It calls the deployment that granted the tool, which is where the
 grant, the policy and the audit row live. Absent, no Bot may call tools back, and it is told so
 rather than quietly allowed.
+
+That default is right for a deployment and wrong for a laptop, where it meant every granted MCP tool
+was refused before it reached the grant, the boundary or the trail — and a refusal at that point is
+not visible in the transcript, so a Bot reported no results rather than an error. `scripts/start.sh`
+therefore generates one and writes it to `.env`, as it already does for `MANAGED_AGENT_TOKEN`. A
+value already set is kept.
+
+It is one of a pair, and they are not interchangeable: `MANAGED_AGENT_TOKEN` is the server proving
+itself to a Bot, this is a Bot proving itself to the server. Rotating either means the process
+holding the old one refuses every call, which is why `start.sh` restarts the server and recreates the
+Bot containers on a run that mints one.
 
 ## OpenAI-compatible endpoints
 
