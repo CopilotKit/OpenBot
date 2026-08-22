@@ -22,6 +22,7 @@ import {
   mcpUserCredentials,
   pluginGrants,
   skills,
+  skillTools,
 } from "../db/schema";
 import {
   type CatalogueEntry,
@@ -83,6 +84,13 @@ export type SkillRecord = {
   origin: string;
   installedBy: string | null;
   grantedTo: string[];
+  /**
+   * The tools this skill says it needs, as `<serverId>/<toolName>` refs.
+   *
+   * A declaration, not a grant: what a Bot may call is `grantedTo` on the tool side and nothing here.
+   * See the comment on `skillTools` in the schema for why that separation is load-bearing.
+   */
+  tools: string[];
 };
 
 /**
@@ -107,6 +115,12 @@ export type GrantedPlugins = {
     title: string;
     summary: string;
     instructions: string;
+    /**
+     * What this skill says it needs, as refs. Never a superset of `tools` above in effect: selection
+     * intersects the two, because a skill naming a tool the Bot lacks must load nothing rather than
+     * make it callable.
+     */
+    tools: string[];
   }[];
 };
 
@@ -318,6 +332,43 @@ export function createPluginStore(options: PluginStoreOptions) {
       byRef.set(row.ref, [...(byRef.get(row.ref) ?? []), row.agentId]);
     }
     return byRef;
+  }
+
+  /** The refs each of these skills declares, keyed by skill id. Skills with none are absent. */
+  async function toolsDeclaredBy(skillIds: string[]) {
+    if (skillIds.length === 0) return new Map<string, string[]>();
+    const rows = await database
+      .select()
+      .from(skillTools)
+      .where(inArray(skillTools.skillId, skillIds))
+      .orderBy(asc(skillTools.ref));
+    const bySkill = new Map<string, string[]>();
+    for (const row of rows) {
+      bySkill.set(row.skillId, [...(bySkill.get(row.skillId) ?? []), row.ref]);
+    }
+    return bySkill;
+  }
+
+  /**
+   * Which of these refs name a tool this deployment has actually seen.
+   *
+   * Asked when a skill is saved, so a typo is refused where it was written rather than becoming a
+   * skill that quietly selects nothing. Not asked at run time: a refresh deletes and rewrites a
+   * server's tool rows, so a ref can be legitimately absent for a moment, and a run must read that as
+   * "load nothing" rather than as a failure.
+   */
+  async function knownToolRefs(refs: string[]) {
+    if (refs.length === 0) return new Set<string>();
+    // Narrowed in the query to the servers actually named, rather than reading the whole catalogue
+    // and filtering here. A deployment aiming at a thousand tools should not scan all of them to
+    // check three.
+    const servers = [...new Set(refs.map((ref) => ref.split("/")[0] ?? ""))];
+    const rows = await database
+      .select({ serverId: mcpTools.serverId, name: mcpTools.name })
+      .from(mcpTools)
+      .where(inArray(mcpTools.serverId, servers));
+    const known = new Set(rows.map((row) => `${row.serverId}/${row.name}`));
+    return new Set(refs.filter((ref) => known.has(ref)));
   }
 
   /**
@@ -781,6 +832,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         "skill",
         rows.map((row) => row.slug),
       );
+      const declared = await toolsDeclaredBy(rows.map((row) => row.id));
       return rows.map((row) => ({
         id: row.id,
         slug: row.slug,
@@ -791,6 +843,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         origin: row.origin,
         installedBy: row.installedBy,
         grantedTo: grants.get(row.slug) ?? [],
+        tools: declared.get(row.id) ?? [],
       }));
     },
 
@@ -827,8 +880,35 @@ export function createPluginStore(options: PluginStoreOptions) {
       origin?: string;
       /** Whose it is. Null writes a skill for the whole deployment, which is an admin's to make. */
       ownerUserId: string | null;
+      /**
+       * The tools this skill needs, as `<serverId>/<toolName>` refs. Absent leaves whatever was
+       * declared before; an empty array clears it, which is how a skill stops asking for anything.
+       */
+      tools?: string[];
       by: string;
     }): Promise<void> {
+      /*
+       * Checked before anything is written, so a save is all-or-nothing from the caller's side: a
+       * skill is never left saved with half its declarations because the fourth ref was a typo.
+       */
+      const declared =
+        input.tools === undefined
+          ? undefined
+          : [...new Set(input.tools.map((ref) => ref.trim()).filter(Boolean))];
+      if (declared !== undefined && declared.length > 0) {
+        const known = await knownToolRefs(declared);
+        const unknown = declared.filter((ref) => !known.has(ref));
+        if (unknown.length > 0) {
+          throw new PluginRefusedError(
+            `No tool by that name has been seen here: ${unknown.join(", ")}. A skill names tools as serverId/toolName, and the server has to have been refreshed at least once.`,
+            // No policy rule refused this; the name simply matches nothing. `rule` is what an audit
+            // reader is shown as the reason, and inventing one here would put a rule in the trail
+            // that nobody wrote.
+            null,
+          );
+        }
+      }
+
       await database
         .insert(skills)
         .values({
@@ -853,6 +933,25 @@ export function createPluginStore(options: PluginStoreOptions) {
           },
         });
 
+      /*
+       * Replaced wholesale rather than merged. What a skill needs is a set the author is editing, so
+       * a save says what it is now; merging would make removing one a thing with no gesture for it.
+       */
+      if (declared !== undefined) {
+        await database
+          .delete(skillTools)
+          .where(eq(skillTools.skillId, input.slug));
+        if (declared.length > 0) {
+          await database.insert(skillTools).values(
+            declared.map((ref) => ({
+              skillId: input.slug,
+              ref,
+              declaredBy: input.by,
+            })),
+          );
+        }
+      }
+
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
         targetType: "skill",
@@ -861,6 +960,9 @@ export function createPluginStore(options: PluginStoreOptions) {
           actor: input.by,
           change: "skill_installed",
           skill: input.slug,
+          // Recorded because it is what the skill will pull into a model's context once selection is
+          // built. It changes nothing about what may be called; the grant still decides that.
+          ...(declared === undefined ? {} : { declares: declared }),
         },
       });
     },
@@ -972,6 +1074,15 @@ export function createPluginStore(options: PluginStoreOptions) {
               .from(skills)
               .where(inArray(skills.slug, skillSlugs));
 
+      /*
+       * What each skill says it needs, carried alongside rather than folded into `tools`.
+       *
+       * `tools` above is what this Bot may call, and nothing here may widen it. Selection, when it is
+       * built, intersects the two; handing the runtime a union instead would make writing a skill a
+       * way to grant a tool, which is the one thing this must never be.
+       */
+      const declared = await toolsDeclaredBy(skillRows.map((row) => row.id));
+
       return {
         tools: grantedTools,
         skills: skillRows.map((row) => ({
@@ -979,6 +1090,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           title: row.title,
           summary: row.summary,
           instructions: row.instructions,
+          tools: declared.get(row.id) ?? [],
         })),
       };
     },

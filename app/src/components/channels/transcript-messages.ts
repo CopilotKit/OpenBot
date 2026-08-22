@@ -3,17 +3,21 @@ import type { Message } from "@ag-ui/core";
 /**
  * What a transcript shows while a brand-new channel is still joining.
  *
- * Channel join replaces the agent's local messages with restored thread history. The first message
- * is held here as a seed until restored messages arrive, then ignored to avoid duplicate rendering.
+ * NOT DECIDED ON `messages.length`: the runtime replaces its messages wholesale, so the seed would
+ * be dropped on the first assistant token with the person's own turn already gone. A role rather
+ * than an id, because the agent's copy and the restored copy each mint their own.
  */
 export function transcriptMessages(
   messages: readonly Message[],
   seed: Message | null,
 ): readonly Message[] {
-  if (messages.length > 0 || seed === null) {
+  if (seed === null) {
     return messages;
   }
-  return [seed];
+  if (messages.some((message) => message.role === "user")) {
+    return messages;
+  }
+  return [seed, ...messages];
 }
 
 /** The person's message, in the shape the transcript and the agent both take. */

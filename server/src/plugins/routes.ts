@@ -458,6 +458,7 @@ export function createPluginRoutes(
       summary?: string;
       instructions?: string;
       global?: boolean;
+      tools?: unknown;
     } | null;
     if (!body?.slug || !body.title || !body.instructions) {
       return context.json(
@@ -485,14 +486,38 @@ export function createPluginRoutes(
     const refusal = await skillRefusal(context, body.slug);
     if (refusal) return context.json({ error: refusal }, 403);
 
-    await store.installSkill({
-      slug: body.slug,
-      title: body.title,
-      summary: body.summary ?? "",
-      instructions: body.instructions,
-      ownerUserId: body.global ? null : actor.id,
-      by: actorEmail(context),
-    });
+    /*
+     * Absent leaves the declarations alone, so a caller that predates this field does not silently
+     * clear one. An array, including an empty one, says what the skill needs now.
+     */
+    if (body.tools !== undefined && !Array.isArray(body.tools)) {
+      return context.json(
+        { error: "Tools are a list of serverId/toolName references." },
+        400,
+      );
+    }
+    const tools = Array.isArray(body.tools)
+      ? body.tools.filter((ref): ref is string => typeof ref === "string")
+      : undefined;
+
+    try {
+      await store.installSkill({
+        slug: body.slug,
+        title: body.title,
+        summary: body.summary ?? "",
+        instructions: body.instructions,
+        ownerUserId: body.global ? null : actor.id,
+        ...(tools === undefined ? {} : { tools }),
+        by: actorEmail(context),
+      });
+    } catch (error) {
+      // A ref naming no tool this deployment has seen. Answered rather than thrown, because it is
+      // something the person writing the skill can fix and the message says what to fix.
+      if (error instanceof PluginRefusedError) {
+        return context.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
     return context.json({ skills: await store.listSkills(actor) });
   });
 
