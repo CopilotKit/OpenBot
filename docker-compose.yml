@@ -177,7 +177,10 @@ services:
       # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
       # to it verbatim.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      BOT_MODEL: ${BOT_MODEL:-gpt-5.6-terra}
+      # gpt-5.5, not the deployment default: this Bot writes /v1/chat/completions by hand, and
+      # gpt-5.6-* rejects function tools there unless reasoning is turned off. Its own variable, so
+      # a BOT_MODEL set for the framework Bot cannot silently take its tools away.
+      BOT_MODEL: ${AGENT_BOT_MODEL:-gpt-5.5}
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4200/health')\""]
       interval: 10s

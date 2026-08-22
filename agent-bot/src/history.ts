@@ -32,7 +32,25 @@ export function toProviderMessages(
       .filter((id): id is string => Boolean(id)),
   );
 
+  /*
+   * Tool results, by the call they answer.
+   *
+   * The history is not guaranteed to arrive with a result after the call it belongs to. Read back
+   * from the durable thread store it arrives the other way round, result first, which is a payload
+   * no provider accepts: a tool message with no preceding call, and then a call with nothing
+   * following it. The model answers that with silence rather than an error, which is the worst of
+   * both, so the pairing is rebuilt here instead of trusted.
+   */
+  const resultsByCall = new Map<string, string>();
   for (const message of input.messages) {
+    if (message.role !== "tool") continue;
+    const id = (message as { toolCallId?: string }).toolCallId;
+    if (id) resultsByCall.set(id, String(message.content ?? ""));
+  }
+
+  for (const message of input.messages) {
+    // Placed with the call they answer, below, rather than wherever they arrived.
+    if (message.role === "tool") continue;
     if (message.role === "user") {
       messages.push({ role: "user", content: String(message.content ?? "") });
       continue;
@@ -41,22 +59,19 @@ export function toProviderMessages(
       messages.push({ role: "system", content: String(message.content ?? "") });
       continue;
     }
-    if (message.role === "tool") {
-      // Tool results are appended so the model can continue from the completed call.
-      messages.push({
-        role: "tool",
-        tool_call_id: message.toolCallId,
-        content: String(message.content ?? ""),
-      });
-      continue;
-    }
     if (message.role === "assistant") {
       const toolCalls = message.toolCalls?.map((call) => ({
         id: call.id,
         type: "function" as const,
         function: {
-          name: call.function.name,
-          arguments: call.function.arguments,
+          /*
+           * A name is required by the provider and is not always present: read back from the thread
+           * store these arrive undefined, and a payload carrying `"name": undefined` is rejected
+           * outright. The call still has to be shown, or the model repeats an action it already
+           * took, so it keeps its id and is named as something the model can read.
+           */
+          name: call.function?.name ?? "tool",
+          arguments: call.function?.arguments ?? "{}",
         },
       }));
       messages.push({
@@ -72,14 +87,22 @@ export function toProviderMessages(
        * call, so these go here rather than being appended at the end. A call answered later in the
        * history is left alone and its real answer arrives in its own turn.
        */
+      /*
+       * Every call this message made, answered, immediately after it.
+       *
+       * The real result where there is one, wherever it arrived in the input, and `NO_ANSWER_CAME`
+       * where there is not. Both cases are the same requirement: a call must be followed by its
+       * result, and the provider rejects the message outright otherwise.
+       */
       for (const call of message.toolCalls ?? []) {
-        if (call.id && !answered.has(call.id)) {
-          messages.push({
-            role: "tool",
-            tool_call_id: call.id,
-            content: NO_ANSWER_CAME,
-          });
-        }
+        if (!call.id) continue;
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: answered.has(call.id)
+            ? (resultsByCall.get(call.id) ?? "")
+            : NO_ANSWER_CAME,
+        });
       }
     }
   }

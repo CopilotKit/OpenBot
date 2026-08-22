@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   createIntentRouter,
-  routingPrompt,
   type RoutingCandidate,
+  routingPrompt,
 } from "../src/routing/classify";
 
 const ROSTER: RoutingCandidate[] = [
@@ -158,5 +158,114 @@ describe("routing on what a coworker can reach", () => {
       { id: "a", name: "A", roleDescription: "alpha" },
     ]);
     expect(plain).not.toContain("can reach");
+  });
+});
+
+/**
+ * A fallback that lands on a coworker who cannot answer.
+ *
+ * Every path into the fallback is "we are not sure", and the default is a guess. When the message
+ * names a system exactly one coworker can reach, it is not a guess: the others cannot answer it at
+ * all, and a Bot without the connector browses to the vendor and meets a sign-in wall the connector
+ * exists to avoid.
+ *
+ * Found by driving it. The router's model call was throwing on every request, so every decision took
+ * the unreachable path, and a question naming Google Drive went to a Bot holding no Drive tools. The
+ * broken call is fixed separately; this is the part that was wrong even when it worked.
+ */
+describe("falling back to somebody who can actually answer", () => {
+  const ROSTER: RoutingCandidate[] = [
+    {
+      id: "general-assistant",
+      name: "General Assistant",
+      roleDescription: "everyday work",
+    },
+    {
+      id: "risk-analyst",
+      name: "Risk Analyst",
+      roleDescription: "risk and compliance",
+      reaches: ["google-drive"],
+    },
+  ];
+
+  const BROKEN = createIntentRouter({
+    complete: async () => {
+      throw new Error("router unreachable");
+    },
+  });
+
+  test("names the one coworker that can reach the system in the message", async () => {
+    const decision = await BROKEN.route(
+      "In my OpenBot PRD in Google Drive, list the proxy metrics.",
+      ROSTER,
+      "general-assistant",
+    );
+
+    expect(decision.agentId).toBe("risk-analyst");
+    expect(decision.reason).toContain("google-drive");
+    // Still a fallback: nothing inferred the fit, the roster just answered it.
+    expect(decision.fallback).toBe(true);
+  });
+
+  test("matches the vendor as somebody would write it", async () => {
+    // `google-drive` is an id. Nobody types a hyphen.
+    const decision = await BROKEN.route(
+      "search google drive for the PRD",
+      ROSTER,
+      "general-assistant",
+    );
+
+    expect(decision.agentId).toBe("risk-analyst");
+  });
+
+  test("uses the default when the message names no system", async () => {
+    const decision = await BROKEN.route(
+      "what is 8 plus 5",
+      ROSTER,
+      "general-assistant",
+    );
+
+    expect(decision.agentId).toBe("general-assistant");
+  });
+
+  test("uses the default when two coworkers reach the same system", async () => {
+    // Not a decision this can make. Two holders is exactly the case the router is for.
+    const shared: RoutingCandidate[] = [
+      { ...ROSTER[0], reaches: ["google-drive"] } as RoutingCandidate,
+      ROSTER[1] as RoutingCandidate,
+    ];
+
+    const decision = await BROKEN.route(
+      "look in google drive",
+      shared,
+      "general-assistant",
+    );
+
+    expect(decision.agentId).toBe("general-assistant");
+  });
+
+  test("a confident match still wins over reach", async () => {
+    /*
+     * The line this must not cross. A specialist with no connectors is the right answer to a
+     * question about its specialism, and reach is a hint for the router rather than a filter over
+     * it. This only decides where a guess would otherwise have.
+     */
+    const confident = createIntentRouter({
+      complete: async () =>
+        JSON.stringify({
+          agentId: "general-assistant",
+          reason: "everyday work",
+          confidence: 0.9,
+        }),
+    });
+
+    const decision = await confident.route(
+      "tidy up my google drive notes",
+      ROSTER,
+      "risk-analyst",
+    );
+
+    expect(decision.agentId).toBe("general-assistant");
+    expect(decision.fallback).toBe(false);
   });
 });

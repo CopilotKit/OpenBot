@@ -146,3 +146,64 @@ describe("a tool call nothing ever answered", () => {
     expect(ids).toEqual(["c1", "c2"]);
   });
 });
+
+/**
+ * The history as the durable thread store hands it back.
+ *
+ * Read back from a stored thread, a tool result arrives BEFORE the assistant message that made the
+ * call, and the call's `function.name` is missing. Both are payloads a provider rejects: a tool
+ * message with no preceding call, and a call with nothing following it. The model answers that with
+ * silence rather than an error, so a Bot that had just read a document said nothing at all and the
+ * conversation looked dead.
+ *
+ * The exact shape below was copied off a real thread after a Google Drive answer went missing.
+ */
+describe("a history that arrives out of order", () => {
+  test("pairs each call with its result, whatever order they arrived in", () => {
+    const messages = withoutGuidance(
+      toProviderMessages(
+        input([
+          { id: "1", role: "user", content: "What is in the PRD?" } as Message,
+          {
+            id: "2",
+            role: "tool",
+            toolCallId: "c1",
+            content: "the document text",
+          } as unknown as Message,
+          {
+            id: "3",
+            role: "assistant",
+            content: "",
+            toolCalls: [call("c1", "read_file_content")],
+          } as unknown as Message,
+        ]),
+      ),
+    );
+
+    // Assistant first, then its result. Never a tool message with no call before it.
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
+    const answer = messages[2] as { tool_call_id?: string; content?: string };
+    expect(answer.tool_call_id).toBe("c1");
+    expect(answer.content).toBe("the document text");
+  });
+
+  test("gives a nameless call a name, because the provider requires one", () => {
+    const messages = withoutGuidance(
+      toProviderMessages(
+        input([
+          {
+            id: "1",
+            role: "assistant",
+            content: "",
+            toolCalls: [{ id: "c1", type: "function", function: {} }],
+          } as unknown as Message,
+        ]),
+      ),
+    );
+
+    const assistant = messages[0] as {
+      tool_calls?: { function: { name: string } }[];
+    };
+    expect(assistant.tool_calls?.[0]?.function.name).toBe("tool");
+  });
+});

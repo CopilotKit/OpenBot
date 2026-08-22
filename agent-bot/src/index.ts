@@ -33,6 +33,25 @@ if (!MANAGED_AGENT_TOKEN) {
  * chat-completions streaming loop.
  */
 const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
+/*
+ * Refuse a model this file cannot use, rather than discover it one tool call at a time.
+ *
+ * `gpt-5.6-*` rejects function tools on `/v1/chat/completions`: "To use function tools, use
+ * /v1/responses or set reasoning_effort to 'none'." The provider answers with an error, this Bot
+ * ends the run, and the person sees no reply and no reason. Silence is the worst failure available
+ * here, and it is what a single mistaken `BOT_MODEL` produced: every tool-using turn stopped dead
+ * while the Bot looked healthy.
+ *
+ * Startup is where a deployment can act on it, which is the same posture as the token check above.
+ */
+if (/^gpt-5\.[6-9]|^gpt-[6-9]/.test(MODEL)) {
+  console.error(
+    `BOT_MODEL=${MODEL} cannot be used by this Bot. It speaks /v1/chat/completions directly, and ` +
+      "that endpoint refuses function tools for this model, so every tool call would fail with no " +
+      "reply. Use gpt-5.5, or the framework Bot on port 4201, which speaks the Responses API.",
+  );
+  process.exit(1);
+}
 
 /**
  * Where that model is answered from.

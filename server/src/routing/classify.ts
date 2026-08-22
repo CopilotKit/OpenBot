@@ -86,6 +86,47 @@ export function routingPrompt(
   ].join("\n");
 }
 
+/**
+ * The one coworker that can reach a system this message names, when there is exactly one.
+ *
+ * A hint for the router became a decision for the fallback, and only there. A confident match on
+ * purpose still wins: a specialist with no connectors is the right answer to a question about its
+ * specialism, and this must not turn reach into a filter that overrides that.
+ *
+ * Matched on the system's own id with separators loosened, so `google-drive` answers to "Google
+ * Drive" as somebody would type it. Deliberately not fuzzy beyond that: a router that guesses at
+ * near-misses is a router nobody can predict.
+ */
+function onlyCoworkerReaching(
+  text: string,
+  candidates: readonly RoutingCandidate[],
+): { id: string; name: string; system: string } | null {
+  const haystack = text.toLowerCase();
+  const named = new Set<string>();
+  for (const candidate of candidates) {
+    for (const system of candidate.reaches ?? []) {
+      const spelled = system.toLowerCase().replace(/[-_]+/g, " ");
+      if (
+        haystack.includes(spelled) ||
+        haystack.includes(system.toLowerCase())
+      ) {
+        named.add(system);
+      }
+    }
+  }
+
+  for (const system of named) {
+    const holders = candidates.filter((candidate) =>
+      candidate.reaches?.includes(system),
+    );
+    const only = holders[0];
+    if (holders.length === 1 && only) {
+      return { id: only.id, name: only.name, system };
+    }
+  }
+  return null;
+}
+
 export function createIntentRouter(deps: {
   /** Runs the prompt and returns the model's raw text. May reject; the router absorbs it. */
   complete: (prompt: string) => Promise<string>;
@@ -98,6 +139,26 @@ export function createIntentRouter(deps: {
     ): Promise<RoutingDecision> {
       const byId = new Map(candidates.map((c) => [c.id, c]));
       const fallback = (reason: string): RoutingDecision => {
+        /*
+         * Before the default, ask whether the message named a system only one coworker can reach.
+         *
+         * Every path into here is "we are not sure", and the default is a guess. When the message
+         * says Google Drive and exactly one coworker holds Google Drive, that is not a guess: the
+         * others cannot answer it at all, and a Bot with no connector meets a sign-in wall the
+         * connector exists to avoid.
+         *
+         * Only when the answer is unambiguous. Two coworkers holding the same system is a choice
+         * this cannot make, and it falls through to the default as before.
+         */
+        const reachable = onlyCoworkerReaching(text, candidates);
+        if (reachable) {
+          return {
+            agentId: reachable.id,
+            name: reachable.name,
+            reason: `the only coworker that can reach ${reachable.system}`,
+            fallback: true,
+          };
+        }
         const chosen = byId.get(defaultId) ?? candidates[0];
         return chosen
           ? { agentId: chosen.id, name: chosen.name, reason, fallback: true }
