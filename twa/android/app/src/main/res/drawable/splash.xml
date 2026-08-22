@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="320dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <!-- Bot body -->
+    <path android:fillColor="#f8fafc"
+        android:pathData="M128,176 Q128,144 160,144 L352,144 Q384,144 384,176 L384,384 Q384,416 352,416 L160,416 Q128,416 128,384 Z" />
+    <!-- Left eye -->
+    <path android:fillColor="#0f172a"
+        android:pathData="M192,240 m-24,0 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0" />
+    <!-- Right eye -->
+    <path android:fillColor="#0f172a"
+        android:pathData="M320,240 m-24,0 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0" />
+    <!-- Mouth -->
+    <path android:fillColor="#0f172a"
+        android:pathData="M208,320 L304,320 Q312,320 312,328 L312,336 Q312,344 304,344 L208,344 Q200,344 200,336 L200,328 Q200,320 208,320 Z" />
+    <!-- Antenna stem -->
+    <path android:fillColor="#f8fafc"
+        android:pathData="M240,112 L272,112 L272,176 L240,176 Z" />
+    <!-- Antenna top -->
+    <path android:fillColor="#f8fafc"
+        android:pathData="M256,80 m-16,0 a16,16 0 1,0 32,0 a16,16 0 1,0 -32,0" />
+    <!-- Left arm -->
+    <path android:fillColor="#f8fafc"
+        android:pathData="M72,240 Q56,240 56,256 L56,320 Q56,336 72,336 L120,336 L120,240 Z" />
+    <!-- Right arm -->
+    <path android:fillColor="#f8fafc"
+        android:pathData="M392,240 L440,240 Q456,240 456,256 L456,320 Q456,336 440,336 L392,336 Z" />
+</vector>

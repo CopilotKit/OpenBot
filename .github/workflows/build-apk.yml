@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       domain:
-        description: "Deployed app domain (e.g. app.example.com)"
-        required: true
+        description: "Deployed app domain (e.g. app.example.com) — leave blank to build with placeholder"
+        required: false
+        default: "example.com"
         type: string
   release:
     types: [published]
@@ -21,46 +22,45 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Bubblewrap
-        run: npm install -g @bubblewrap/cli
-
       - name: Set domain
-        id: domain
+        id: vars
         run: |
-          DOMAIN="${{ github.event.inputs.domain || 'localhost' }}"
+          DOMAIN="${{ github.event.inputs.domain || 'example.com' }}"
           echo "domain=$DOMAIN" >> "$GITHUB_OUTPUT"
 
-      - name: Patch twa-manifest.json with domain
+      - name: Patch domain into Android resources
         run: |
-          DOMAIN="${{ steps.domain.outputs.domain }}"
-          sed -i "s|YOUR_DOMAIN_HERE|$DOMAIN|g" twa/twa-manifest.json
+          DOMAIN="${{ steps.vars.outputs.domain }}"
+          sed -i "s|YOUR_DOMAIN_HERE|$DOMAIN|g" \
+            twa/android/app/src/main/res/values/strings.xml
 
-      - name: Restore or generate keystore
+      - name: Set up Gradle wrapper
+        working-directory: twa/android
+        run: |
+          gradle wrapper --gradle-version 8.6
+
+      - name: Grant gradlew execute permission
+        working-directory: twa/android
+        run: chmod +x gradlew
+
+      - name: Generate keystore
+        working-directory: twa/android
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          mkdir -p twa/android/app
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > twa/android.keystore
+            echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
           else
             keytool -genkeypair -v \
-              -keystore twa/android.keystore \
+              -keystore release.keystore \
               -alias openbot \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=OpenBot, O=OpenBot, C=US" \
               -storepass openbot123 -keypass openbot123
-            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret set — generated a throwaway keystore."
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret — generated a throwaway keystore. The APK installs but cannot be updated on Play Store."
           fi
 
-      - name: Init Bubblewrap project
-        working-directory: twa
-        run: |
-          bubblewrap init \
-            --manifest "https://${{ steps.domain.outputs.domain }}/manifest.webmanifest" \
-            --directory android \
-            --skipPwaValidation || true
-
-      - name: Build APK
+      - name: Build release APK
         working-directory: twa/android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'openbot123' }}
@@ -68,17 +68,25 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'openbot123' }}
         run: |
           ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file=../android.keystore \
+            -Pandroid.injected.signing.store.file="$PWD/release.keystore" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
             -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
 
-      - name: Upload APK
+      - name: Print SHA-256 fingerprint
+        working-directory: twa/android
+        run: |
+          echo "=== Certificate fingerprint for assetlinks.json ==="
+          keytool -printcert \
+            -jarfile app/build/outputs/apk/release/app-release.apk \
+            2>/dev/null | grep "SHA256:" || true
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: openbot-release.apk
           path: twa/android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 30
+          retention-days: 90
 
       - name: Attach APK to GitHub release
         if: github.event_name == 'release'
