@@ -1,3 +1,4 @@
+import type { Message } from "@ag-ui/core";
 import { describe, expect, test } from "bun:test";
 import {
   seedMessage,
@@ -12,6 +13,11 @@ import {
 
 const SEED = seedMessage("what is our refund policy?", "seed-1");
 const STORED = seedMessage("what is our refund policy?", "stored-1");
+const REPLY: Message = {
+  id: "reply-1",
+  role: "assistant",
+  content: "Thirty days, and we pay return shipping.",
+};
 
 describe("transcriptMessages", () => {
   test("shows the seed while the agent has nothing", () => {
@@ -20,6 +26,16 @@ describe("transcriptMessages", () => {
 
   test("shows the agent's messages once it has any, and drops the seed", () => {
     expect(transcriptMessages([STORED], SEED)).toEqual([STORED]);
+  });
+
+  // A reply with no user turn in front of it means the seed is the only copy left, not that it
+  // has been superseded.
+  test("keeps the seed when the agent holds only a reply", () => {
+    expect(transcriptMessages([REPLY], SEED)).toEqual([SEED, REPLY]);
+  });
+
+  test("drops the seed once a user turn stands alongside the reply", () => {
+    expect(transcriptMessages([STORED, REPLY], SEED)).toEqual([STORED, REPLY]);
   });
 
   test("shows nothing for an empty channel with no seed", () => {

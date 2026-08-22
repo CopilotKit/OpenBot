@@ -13,19 +13,13 @@ import {
   SystemMessage,
   ToolMessage,
 } from "@langchain/core/messages";
-import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import { COMPUTER_GUIDANCE, NO_ANSWER_CAME } from "../../shared/bot-prompt";
 
-/**
- * What a tool call is given when its answer never came.
- *
- * Written for the model rather than for a log, because the model is the only reader: it has to
- * understand that the call is over and not worth waiting for, and be able to say something useful
- * about it. "Nothing happened" would leave it repeating the request.
+/*
+ * Re-exported so this module's own tests and callers keep reading it from here, while the wording
+ * itself lives in `shared` where the other Bot can reach it. Both have to say the same thing.
  */
-export const NO_ANSWER_CAME =
-  "No result. The person did not answer this, and the run it belonged to has ended. " +
-  "Do not wait for it and do not assume it succeeded. Carry on without it, and say plainly what " +
-  "you could not do if it mattered.";
+export { NO_ANSWER_CAME };
 
 /** Translate the conversation AG-UI carries into LangChain's message classes. */
 export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {

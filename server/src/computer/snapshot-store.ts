@@ -145,6 +145,13 @@ export function createInMemorySnapshotStore(): SnapshotStore {
   const snapshots = new Map<string, StoredSnapshot>();
   return {
     save: async (computerId, snapshot) => {
+      // Only ever forward, the same rule the table's `setWhere` applies, because the two stores have
+      // to agree about when a save wins. Two snapshots of one computer can complete out of order in a
+      // single process as easily as across two, and a test that reaches for this store because it has
+      // no database would otherwise be told a different story about what the gateway resolves
+      // against: the older page here, the newer one in a deployment.
+      const held = snapshots.get(computerId);
+      if (held && held.snapshotId >= snapshot.snapshotId) return;
       snapshots.set(computerId, snapshot);
     },
     load: async (computerId) => snapshots.get(computerId),

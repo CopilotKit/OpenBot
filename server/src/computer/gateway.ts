@@ -24,6 +24,7 @@ import { checkComputerAddress } from "./target";
 export {
   ComputerUnavailableError,
   ElementNotFoundError,
+  HumanHasControlError,
   NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
