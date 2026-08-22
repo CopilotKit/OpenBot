@@ -71,6 +71,20 @@
       "when": 1787342459868,
       "tag": "0009_lumpy_sunfire",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787357412066,
+      "tag": "0010_drop_the_document_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787358347113,
+      "tag": "0011_drop_the_old_connector_tables",
+      "breakpoints": true
     }
   ]
 }

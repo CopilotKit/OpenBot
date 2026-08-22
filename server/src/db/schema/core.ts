@@ -2,7 +2,6 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
-  integer,
   pgEnum,
   pgTable,
   primaryKey,
@@ -10,7 +9,6 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
-  vector,
 } from "drizzle-orm/pg-core";
 // NOT drizzle's `jsonb`: that one serialises, and so does the driver, so every object landed as a
 // JSON string and nothing in this database could be queried by a JSON field. See ./json.ts.
@@ -49,17 +47,6 @@ export const credentialKind = pgEnum("credential_kind", [
    */
   "mcp_user_token",
 ]);
-export const connectorType = pgEnum("connector_type", [
-  "google_drive",
-  "onedrive",
-]);
-export const syncStatus = pgEnum("sync_status", [
-  "pending",
-  "running",
-  "succeeded",
-  "failed",
-]);
-export const aclEffect = pgEnum("acl_effect", ["allow", "deny"]);
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -340,129 +327,6 @@ export const credentials = pgTable("credentials", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
-
-export const connectorInstances = pgTable("connector_instances", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  type: connectorType("type").notNull(),
-  credentialId: uuid("credential_id").references(() => credentials.id, {
-    onDelete: "set null",
-  }),
-  status: syncStatus("status").notNull().default("pending"),
-  sourceMetadata: jsonb("source_metadata").notNull(),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
-
-export const connectorCursors = pgTable("connector_cursors", {
-  connectorInstanceId: uuid("connector_instance_id")
-    .primaryKey()
-    .references(() => connectorInstances.id, { onDelete: "cascade" }),
-  cursor: text("cursor"),
-  updatedAt: updatedAt(),
-});
-
-export const webhookSubscriptions = pgTable("webhook_subscriptions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  connectorInstanceId: uuid("connector_instance_id")
-    .notNull()
-    .references(() => connectorInstances.id, { onDelete: "cascade" }),
-  providerSubscriptionId: text("provider_subscription_id").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }),
-  createdAt: createdAt(),
-});
-
-export const syncRuns = pgTable(
-  "sync_runs",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    connectorInstanceId: uuid("connector_instance_id")
-      .notNull()
-      .references(() => connectorInstances.id, { onDelete: "cascade" }),
-    status: syncStatus("status").notNull(),
-    startedAt: timestamp("started_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    error: text("error"),
-    stats: jsonb("stats").notNull(),
-  },
-  (table) => [
-    index("sync_runs_connector_started_at_idx").on(
-      table.connectorInstanceId,
-      table.startedAt,
-    ),
-  ],
-);
-
-export const documents = pgTable(
-  "documents",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    connectorInstanceId: uuid("connector_instance_id")
-      .notNull()
-      .references(() => connectorInstances.id, { onDelete: "cascade" }),
-    sourceId: text("source_id").notNull(),
-    title: text("title").notNull(),
-    canonicalUrl: text("canonical_url").notNull(),
-    metadata: jsonb("metadata").notNull(),
-    contentHash: text("content_hash").notNull(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    uniqueIndex("documents_connector_source_idx").on(
-      table.connectorInstanceId,
-      table.sourceId,
-    ),
-    index("documents_connector_deleted_idx").on(
-      table.connectorInstanceId,
-      table.deletedAt,
-    ),
-  ],
-);
-
-export const chunks = pgTable(
-  "chunks",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    documentId: uuid("document_id")
-      .notNull()
-      .references(() => documents.id, { onDelete: "cascade" }),
-    position: integer("position").notNull(),
-    content: text("content").notNull(),
-    embedding: vector("embedding", { dimensions: 1536 }).notNull(),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    uniqueIndex("chunks_document_position_idx").on(
-      table.documentId,
-      table.position,
-    ),
-    index("chunks_document_idx").on(table.documentId),
-  ],
-);
-
-export const documentAcls = pgTable(
-  "document_acls",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    documentId: uuid("document_id")
-      .notNull()
-      .references(() => documents.id, { onDelete: "cascade" }),
-    principal: text("principal").notNull(),
-    effect: aclEffect("effect").notNull(),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    uniqueIndex("document_acls_document_principal_effect_idx").on(
-      table.documentId,
-      table.principal,
-      table.effect,
-    ),
-    index("document_acls_principal_idx").on(table.principal),
-  ],
-);
 
 export const auditEvents = pgTable(
   "audit_events",

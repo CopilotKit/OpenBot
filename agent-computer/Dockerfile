@@ -11,8 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends unzip \
 ENV PATH="/root/.bun/bin:${PATH}"
 
 WORKDIR /app
-COPY agent-computer/package.json ./
-RUN bun install
+# The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh
+# and exits 0, so the file has to be here for the flag to mean anything.
+COPY agent-computer/package.json agent-computer/bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY agent-computer/src ./src
 
