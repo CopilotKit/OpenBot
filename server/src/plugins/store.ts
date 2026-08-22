@@ -1050,12 +1050,34 @@ export function createPluginStore(options: PluginStoreOptions) {
         .filter((row) => row.kind === "skill")
         .map((row) => row.ref);
 
+      /*
+       * Narrowed in the query to the servers this Bot is actually granted something from, the same way
+       * `knownToolRefs` does it and for the same reason: a deployment aiming at a thousand tools should
+       * not read all of them to offer a handful. This is the run-time path, so it ran on every run of
+       * every Bot, selected every row in `mcp_tools`, and then discarded almost all of them here — and
+       * it sits underneath tool selection, so its cost is paid before the narrowing that was added to
+       * make large catalogues work.
+       *
+       * The exact ref is still matched below rather than in the query. Narrowing by server is a
+       * predicate the composite primary key can use; naming every (server, tool) pair would be exact
+       * and is not worth a clause per grant, because a server's own tool list is the bound on what
+       * comes back.
+       */
+      const grantedServers = [
+        ...new Set(toolRefs.map((ref) => ref.split("/")[0] ?? "")),
+      ];
       const toolRows =
-        toolRefs.length === 0
+        grantedServers.length === 0
           ? []
-          : await database.select().from(mcpTools).orderBy(asc(mcpTools.name));
+          : await database
+              .select()
+              .from(mcpTools)
+              .where(inArray(mcpTools.serverId, grantedServers))
+              .orderBy(asc(mcpTools.name));
+      // A set, so this is a lookup per row rather than a walk of the grants per row.
+      const granted = new Set(toolRefs);
       const grantedTools = toolRows
-        .filter((row) => toolRefs.includes(`${row.serverId}/${row.name}`))
+        .filter((row) => granted.has(`${row.serverId}/${row.name}`))
         .map((row) => {
           const ref = `${row.serverId}/${row.name}`;
           return {

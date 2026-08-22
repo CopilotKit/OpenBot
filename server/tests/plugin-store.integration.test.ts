@@ -35,6 +35,8 @@ const strangerId = `agent_plugin_stranger_${suite}`;
 const serverId = "google-drive";
 const toolName = "search_files";
 const ref = `${serverId}/${toolName}`;
+/** A tool on the same server that nobody is granted. Suite-scoped, so it is never a real one. */
+const siblingToolName = `not_granted_${suite}`;
 
 let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
@@ -136,6 +138,22 @@ beforeAll(async () => {
     .insert(mcpTools)
     .values({ serverId, name: toolName, description: "Search files." })
     .onConflictDoNothing();
+  /*
+   * A second tool on the SAME server, granted to nobody.
+   *
+   * `listForAgent` narrows to the servers a Bot holds something from and then matches the exact ref,
+   * and this is what makes the second half load-bearing: without it, holding one tool from a server
+   * would offer every tool that server has. Suite-scoped, so it is unambiguously a fixture and
+   * cannot collide with a name the vendor really advertises.
+   */
+  await database
+    .insert(mcpTools)
+    .values({
+      serverId,
+      name: siblingToolName,
+      description: "A tool on the same server that nobody was granted.",
+    })
+    .onConflictDoNothing();
 });
 
 afterAll(async () => {
@@ -156,6 +174,12 @@ afterAll(async () => {
         eq(pluginGrants.ref, ref),
         inArray(pluginGrants.agentId, [holderId, strangerId]),
       ),
+    );
+  // Suite-scoped, so it is this suite's whatever else is true of the server.
+  await database
+    .delete(mcpTools)
+    .where(
+      and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, siblingToolName)),
     );
   // A server row is deployment configuration, so it belongs to the deployment rather than here.
   // The fixture tool goes whether or not this suite owns the server, but only if it put it there.
@@ -218,6 +242,22 @@ describe("a grant is the permission", () => {
     const nothing = await store.listForAgent(strangerId);
     expect(nothing.tools).toEqual([]);
     expect(nothing.skills).toEqual([]);
+  });
+
+  test("holding one tool from a server does not offer that server's others", async () => {
+    /*
+     * The property the exact-ref match protects, now that the query narrows by server rather than
+     * reading the whole catalogue. Widening this to "every tool on a server you hold anything from"
+     * would pass every other test in this file: the Bot would still be offered what it holds, and the
+     * stranger would still be offered nothing.
+     */
+    await store.grant("mcp", ref, holderId, "admin@openbot.local");
+    const held = await store.listForAgent(holderId);
+
+    expect(held.tools.map((tool) => tool.ref)).toEqual([ref]);
+    expect(held.tools.map((tool) => tool.ref)).not.toContain(
+      `${serverId}/${siblingToolName}`,
+    );
   });
 });
 
