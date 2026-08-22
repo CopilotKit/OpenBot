@@ -19,6 +19,7 @@ import {
   startScreencast,
 } from "./screencast";
 import { createShell } from "./shell";
+import { isCurrentViewer } from "./viewer";
 import {
   createWorkspace,
   WorkspaceFileError,
@@ -441,7 +442,11 @@ serve<StreamData>({
     },
 
     async close(ws) {
-      await stopViewer(sessionFor(ws.data.botId));
+      const session = sessionFor(ws.data.botId);
+      // Only the socket that is casting. A superseded one closing after its replacement has started
+      // would otherwise stop the new viewer; see viewer.ts.
+      if (!isCurrentViewer(session.viewer, ws)) return;
+      await stopViewer(session);
     },
   },
   async fetch(request, server) {
