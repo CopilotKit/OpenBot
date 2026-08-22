@@ -137,6 +137,89 @@ describe("the computer surface", () => {
   });
 });
 
+/*
+ * The deployment paths, and everything that merely starts with one.
+ *
+ * `/policy` and `/fleet` are this router's own and are not about a Bot, so the guard steps aside for
+ * them. What it must not step aside for is the subtree: `/policy/status` is `/:botId/status` with a
+ * Bot called `policy`, and treating the whole subtree as deployment-owned hands that Bot's computer
+ * to anybody who can sign in without the guard being asked at all. Bot ids are reserved against
+ * these names at the other end of the system so no such Bot can exist; this is the half that holds
+ * if one ever does.
+ */
+describe("a path that starts with a deployment route", () => {
+  function app(role: "user" | "admin" = "user") {
+    const reached: string[] = [];
+    const asked: string[] = [];
+    const gateway = {
+      status: async (botId: string) => {
+        reached.push(`status:${botId}`);
+        return { botId, state: "ready" };
+      },
+      screenshot: async (botId: string) => {
+        reached.push(`screenshot:${botId}`);
+        return { image: "" };
+      },
+      computers: async () => [],
+    } as never;
+    const routes = createComputerRoutes(
+      gateway,
+      { get: () => ({ mode: "enforce", deny: [], allow: [] }) } as never,
+      signedIn("somebody", role),
+      // Denies everything, so anything that answers got past the guard rather than through it.
+      async (_actor, botId: string) => {
+        asked.push(botId);
+        return false;
+      },
+    );
+    return { reached, asked, hono: new Hono().route("/api/computers", routes) };
+  }
+
+  for (const [name, path] of [
+    ["policy", "/api/computers/policy/status"],
+    ["fleet", "/api/computers/fleet/status"],
+    ["policy, deeper", "/api/computers/policy/computers"],
+  ] as const) {
+    test(`refuses ${name} as a Bot path, and asks first`, async () => {
+      const { hono, reached, asked } = app();
+      const response = await hono.request(path);
+
+      expect(response.status).toBe(404);
+      expect(reached).toEqual([]);
+      // Asked, rather than skipped: the guard is what produced the 404.
+      expect(asked.length).toBe(1);
+    });
+  }
+
+  test("still serves the fleet listing itself", async () => {
+    // The permissive half. A guard that refused these would have closed the hole by breaking the
+    // two routes it exists to let through.
+    const { hono, asked } = app("admin");
+    const response = await hono.request("http://t/api/computers/fleet");
+
+    expect(response.status).toBe(200);
+    expect(asked).toEqual([]);
+  });
+
+  test("still serves the policy route itself", async () => {
+    const { hono, asked } = app("admin");
+    const response = await hono.request("http://t/api/computers/policy");
+
+    expect(response.status).toBe(200);
+    expect(asked).toEqual([]);
+  });
+
+  test("a trailing slash is not a way back into the subtree", async () => {
+    // `/policy/` matches no route in this router either way, which is the answer wanted here. What
+    // this pins is that it never reaches the computer as a Bot called `policy`.
+    const { hono, reached } = app("admin");
+    const response = await hono.request("http://t/api/computers/policy/");
+
+    expect(reached).toEqual([]);
+    expect(response.status).toBe(404);
+  });
+});
+
 describe("the computer surface, unauthenticated", () => {
   // The access middleware carries the session guard for everything under a Bot id, so the guard has
   // to still refuse a caller with no session at all, and refuse it before anything is asked about a

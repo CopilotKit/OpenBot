@@ -14,6 +14,7 @@ import type {
   AgentProfile,
   CreateAgentInput,
 } from "../src/agents/profile-types";
+import { DEPLOYMENT_ROUTES } from "../src/computer/deployment-routes";
 import { createDatabase } from "../src/db/client";
 import { TEST_POOL } from "./support/database";
 import {
@@ -632,6 +633,34 @@ describe("agent profile store integration", () => {
       .from(agents)
       .where(eq(agents.name, name));
     expect(rows).toHaveLength(0);
+  });
+
+  /*
+   * The id a caller gets is never one they chose.
+   *
+   * The reserved-id checks in `tenant-package.ts` rest on this: a package is the only place a Bot id
+   * is written by a person, so refusing the reserved names there closes them everywhere. The day
+   * this route lets a caller name their own Bot, that stops being true, and this is the test that
+   * says so rather than the reader who happens to notice.
+   */
+  test("mints its own id rather than taking one, for a create and for a copy", async () => {
+    const owner = await createUser();
+    const created = await store.create(owner, {
+      name: `Created ${randomUUID()}`,
+      title: "Created Title",
+      roleDescription: "Created role description.",
+      visibility: "private",
+    } as CreateAgentInput);
+    createdAgentIds.push(created.id);
+    const copy = await store.duplicate(owner, created.id);
+    createdAgentIds.push(copy.id);
+
+    for (const id of [created.id, copy.id]) {
+      expect(id).toMatch(
+        /^agent_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
+      expect(DEPLOYMENT_ROUTES.has(id)).toBe(false);
+    }
   });
 
   test("creates a caller-owned remote AG-UI profile with the requested visibility", async () => {

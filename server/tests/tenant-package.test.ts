@@ -167,6 +167,53 @@ describe("tenant YAML validation", () => {
     ).toThrow("agent.role_description must be a non-empty string");
   });
 
+  /*
+   * A Bot named after a deployment route is refused before it can exist.
+   *
+   * `/:botId/*` under the computer router carries the guard that asks whether this person may act as
+   * the Bot in the path, and it steps aside for the paths that are about the deployment rather than
+   * about a Bot. Hono matches `/*` against zero segments, so those arrive as Bot ids and there is
+   * nothing else to tell them apart by. A package free to name a Bot `policy` therefore hands that
+   * Bot's computer surface to everybody who can sign in, with the guard never consulted at all.
+   *
+   * Refused here rather than guarded there, because a package id is the only way a Bot can have a
+   * chosen id: everything created through the API is `agent_<uuid>`. Refusing at load is also the
+   * answer an operator can act on, and it is where this package's other cross-file checks already
+   * live.
+   */
+  for (const reserved of ["policy", "fleet"]) {
+    test(`rejects an agent whose id is the deployment route "${reserved}"`, () => {
+      expect(() =>
+        validateTenantPackage({
+          brand: "tenant: { id: fintech, product_name: Ledgerline }",
+          agents: `agents: [{ id: ${reserved}, name: Knowledge, title: Company Knowledge, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]`,
+          channels: "channels: []",
+          model:
+            "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+          knowledge: "sources: []",
+          themeCss: "",
+        }),
+      ).toThrow(/reserved/i);
+    });
+  }
+
+  test("an id that merely contains a reserved name is fine", () => {
+    // The collision is exact: `/policy-desk/status` is a Bot path and reaches the guard normally.
+    const tenantPackage = validateTenantPackage({
+      brand: "tenant: { id: fintech, product_name: Ledgerline }",
+      agents:
+        "agents: [{ id: policy-desk, name: Policy Desk, title: Policy, role_description: Answer policy questions., type: built-in, system_prompt: Answer from policy. }]",
+      channels: "channels: []",
+      model:
+        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+      knowledge: "sources: []",
+      themeCss: "",
+    });
+    expect(tenantPackage.agents.map((agent) => agent.id)).toEqual([
+      "policy-desk",
+    ]);
+  });
+
   test("parses an explicit avatar seed and leaves an omitted seed undefined", () => {
     const tenantPackage = validateTenantPackage({
       brand: "tenant: { id: fintech, product_name: Ledgerline }",
@@ -365,6 +412,60 @@ describe("tenant package agent profile synchronization", () => {
       visibility: "public",
       deletedAt: null,
     });
+  });
+
+  /*
+   * The row a corrected package leaves behind.
+   *
+   * Refusing the id in the YAML closes the way a Bot gets that name, not a Bot that already has it:
+   * nothing here deletes a canonical agent when a package stops declaring it, so a deployment that
+   * once shipped `policy` keeps the row after the operator renames it, and the computer router goes
+   * on stepping aside for that path. So the table is checked as well as the file, and a deployment
+   * holding one refuses to start rather than serving it to everybody who can sign in.
+   */
+  test("refuses to synchronize while a Bot named after a deployment route exists", async () => {
+    await database.insert(agents).values({
+      id: "policy",
+      name: "Left behind by an older package",
+      type: "built_in",
+      configuration: {},
+    });
+    createdAgentIds.push("policy");
+
+    const agent = packageAgent();
+    await expect(
+      synchronizeTenantPackage(database, loadedPackage(agent)),
+    ).rejects.toThrow(/reserved for a deployment route/i);
+
+    // The refusal is the whole answer: nothing of the package is half-applied behind it.
+    const [applied] = await database
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agent.id));
+    expect(applied).toBeUndefined();
+  });
+
+  test("synchronizes normally when no such Bot exists", async () => {
+    // The permissive half, so the check above is proved to be about the reserved id and not about
+    // any pre-existing row.
+    await database.insert(agents).values({
+      id: `policy-desk-${randomUUID()}`,
+      name: "An ordinary Bot",
+      type: "built_in",
+      configuration: {},
+    });
+    const agent = packageAgent();
+    const deploymentPackage = await synchronizeTenantPackage(
+      database,
+      loadedPackage(agent),
+    );
+    createdAgentIds.push(agent.id);
+    createdPackageIds.push(deploymentPackage.id);
+    const [applied] = await database
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agent.id));
+    expect(applied).toBeDefined();
   });
 
   test("resynchronizes and undeletes an existing package profile", async () => {

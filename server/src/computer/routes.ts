@@ -14,6 +14,7 @@ import {
   WorkspaceRefusedError,
   WorkspaceRequestError,
 } from "./gateway";
+import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
 
 /**
@@ -26,13 +27,6 @@ import { type PolicyStore, parseActionPolicy } from "./policy-store";
  * Every computer call goes through the gateway. That is the governance seam: each acting route in
  * this file passes through a policy decision and audit row before it reaches the computer.
  */
-/**
- * Paths under this router that are about the deployment rather than about a Bot.
- *
- * The bot-access middleware matches `/:botId/*`, and Hono's `/*` matches zero segments, so a
- * single-segment path like `/policy` reaches it as a Bot id. These have their own guards.
- */
-const DEPLOYMENT_ROUTES = new Set(["policy", "fleet"]);
 
 export function createComputerRoutes(
   gateway: ComputerGateway,
@@ -59,14 +53,23 @@ export function createComputerRoutes(
   routes.use("/:botId/*", requireUser, async (context, next) => {
     const botId = context.req.param("botId");
     /*
-     * `/policy` is this router's own, and it is not about a Bot.
+     * `/policy` and `/fleet` are this router's own, and they are not about a Bot.
      *
      * Hono matches `/*` against zero segments, so `/policy` arrives here as a Bot called "policy",
      * `canUseBot` quite correctly says there is no such Bot, and the Boundaries screen answers 404
      * for everybody including an administrator. Named rather than inferred from the segment count,
      * because a second deployment-wide route added later should have to think about this line.
+     *
+     * The name alone is not enough to step aside on, though. Both deployment routes are a single
+     * segment, so `/policy/status` is `/:botId/status` and nothing more: skipping the whole subtree
+     * would hand the computer of a Bot called `policy` to anybody who can sign in, with the guard
+     * never asked rather than merely bypassed. Bot ids are reserved against these names where a Bot
+     * is created, so such a Bot should not exist; this is the half that holds if one ever does.
      */
-    if (botId && DEPLOYMENT_ROUTES.has(botId)) return next();
+    const path = context.req.path.replace(/\/+$/, "");
+    if (botId && DEPLOYMENT_ROUTES.has(botId) && path.endsWith(`/${botId}`)) {
+      return next();
+    }
 
     if (botId && !(await canUseBot(context.var.actor, botId))) {
       return context.json({ error: "There is no such Bot." }, 404);
