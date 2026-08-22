@@ -21,6 +21,14 @@ export function createRoutingRoutes(
   router: IntentRouter,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   auditStore?: AuditStore,
+  /**
+   * Which systems a coworker can reach, for the router to weigh alongside what it is for.
+   *
+   * Optional, and absent leaves routing exactly as it was: a deployment with no connectors has
+   * nothing to add here, and one that cannot answer the question should not have routing fail over
+   * it. Asked per request rather than held, because a grant added a minute ago has to count.
+   */
+  reachableSystems?: (agentId: string) => Promise<readonly string[]>,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -39,11 +47,25 @@ export function createRoutingRoutes(
     if (!preferred) {
       return context.json({ error: "No coworker is available." }, 409);
     }
-    const candidates: RoutingCandidate[] = roster.map((a) => ({
-      id: a.id,
-      name: a.name,
-      roleDescription: a.roleDescription,
-    }));
+    const candidates: RoutingCandidate[] = await Promise.all(
+      roster.map(async (a) => ({
+        id: a.id,
+        name: a.name,
+        roleDescription: a.roleDescription,
+        /*
+         * Never allowed to break routing. A connector store that is slow or unhappy must not turn
+         * "who is this for" into an error, so a failure here is the same as holding nothing: the
+         * router falls back to matching on purpose alone, which is what it did before.
+         */
+        ...(reachableSystems
+          ? {
+              reaches: await reachableSystems(a.id).catch(
+                () => [] as readonly string[],
+              ),
+            }
+          : {}),
+      })),
+    );
 
     const decision = await router.route(text, candidates, preferred.id);
 

@@ -18,6 +18,20 @@ export type RoutingCandidate = {
   name: string;
   /** What this coworker is for. The one line an operator wrote to say when to reach them. */
   roleDescription: string;
+  /**
+   * The systems this coworker can actually reach, by name.
+   *
+   * Routing on the role description alone routes on what somebody wrote a coworker was for, which is
+   * not the same as what it can do. A question about a document in Google Drive went to the coworker
+   * whose description says "company knowledge" and which held no Drive grants at all, so it browsed
+   * to the vendor, met a sign-in wall and asked the person to sign in to an account they had already
+   * connected. The coworker that could have answered was one line further down the roster.
+   *
+   * Empty for a coworker holding nothing, which is most of them in most deployments. It is a hint
+   * rather than a filter: a specialist with no connectors is still the right answer to a question
+   * about its specialism.
+   */
+  reaches?: readonly string[];
 };
 
 export type RoutingDecision = {
@@ -37,7 +51,16 @@ export function routingPrompt(
   candidates: readonly RoutingCandidate[],
 ): string {
   const roster = candidates
-    .map((c) => `- id: ${c.id}\n  name: ${c.name}\n  for: ${c.roleDescription}`)
+    .map((c) =>
+      [
+        `- id: ${c.id}`,
+        `  name: ${c.name}`,
+        `  for: ${c.roleDescription}`,
+        ...(c.reaches && c.reaches.length > 0
+          ? [`  can reach: ${c.reaches.join(", ")}`]
+          : []),
+      ].join("\n"),
+    )
     .join("\n");
   return [
     "You route a person's message to the one coworker best suited to it.",
@@ -46,6 +69,18 @@ export function routingPrompt(
     "",
     'Reply with only JSON: {"agentId": "<one id from the list>", "reason": "<short, names the fit>", "confidence": <0..1>}.',
     "Pick the specialist whose purpose matches the message. If none clearly fits, use the most general coworker and give it a low confidence.",
+    /*
+     * Only when somebody on the roster can actually reach something.
+     *
+     * A deployment with no connectors would otherwise carry a rule about systems none of its
+     * coworkers have, in every routing prompt it ever sends. Same principle as the guidance a Bot
+     * gets about its own grants: say nothing about what is not there.
+     */
+    ...(candidates.some((c) => c.reaches && c.reaches.length > 0)
+      ? [
+          "When the message names a system a coworker can reach, prefer that coworker: one that cannot reach it has no way to answer and will fall back to a browser that is signed in as nobody. Purpose still comes first — a specialist with no systems listed is right for a question about its specialism.",
+        ]
+      : []),
     "",
     `Message: ${text}`,
   ].join("\n");

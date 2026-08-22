@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createIntentRouter,
+  routingPrompt,
   type RoutingCandidate,
 } from "../src/routing/classify";
 
@@ -98,5 +99,64 @@ describe("routing a message with no @mention", () => {
     expect(called).toBe(false);
     expect(r.agentId).toBe("general-assistant");
     expect(r.fallback).toBe(true);
+  });
+});
+
+/**
+ * The router is told what each coworker can reach, not only what it is for.
+ *
+ * Routing on the role description alone routes on what somebody wrote a coworker was for, which is
+ * not the same as what it can do. A question about a document in Google Drive went to the coworker
+ * whose description says "company knowledge" and which held no Drive grants at all. It browsed to
+ * the vendor, met a sign-in wall, and asked the person to sign in to an account they had already
+ * connected. The coworker that could have answered was one line further down the roster.
+ */
+describe("routing on what a coworker can reach", () => {
+  const withReach: RoutingCandidate[] = [
+    {
+      id: "knowledge",
+      name: "Knowledge",
+      roleDescription: "company knowledge questions",
+    },
+    {
+      id: "risk-analyst",
+      name: "Risk Analyst",
+      roleDescription: "risk and compliance",
+      reaches: ["google-drive"],
+    },
+  ];
+
+  test("names the systems in the roster the model is given", () => {
+    const prompt = routingPrompt("what is in my Drive doc?", withReach);
+    expect(prompt).toContain("can reach: google-drive");
+  });
+
+  test("says nothing about reach for a coworker that holds nothing", () => {
+    // Most coworkers in most deployments. An empty line here would be noise in every prompt.
+    const prompt = routingPrompt("anything", withReach);
+    const knowledgeBlock = prompt.slice(
+      prompt.indexOf("id: knowledge"),
+      prompt.indexOf("id: risk-analyst"),
+    );
+    expect(knowledgeBlock).not.toContain("can reach");
+  });
+
+  test("tells the model to prefer reach without letting it override purpose", () => {
+    /*
+     * Both halves matter. Preferring a coworker that can reach the system is the fix; letting that
+     * outrank purpose would send every question to whichever coworker happens to hold a connector,
+     * which is a different bug with the same shape.
+     */
+    const prompt = routingPrompt("anything", withReach);
+    expect(prompt).toContain("prefer that coworker");
+    expect(prompt).toContain("Purpose still comes first");
+  });
+
+  test("a roster with no reach at all reads exactly as it did before", () => {
+    // A deployment with no connectors must not have its routing prompt changed by this.
+    const plain = routingPrompt("anything", [
+      { id: "a", name: "A", roleDescription: "alpha" },
+    ]);
+    expect(plain).not.toContain("can reach");
   });
 });
