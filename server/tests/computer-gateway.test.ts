@@ -245,6 +245,21 @@ describe("the computer gateway", () => {
     expect(rows[0]?.targetId).toBe("bot-1");
   });
 
+  test("a rule about MCP does not refuse a browser action", async () => {
+    // An operator blocking MCP writes must not thereby block every click. The gateway carries a
+    // neutral `mcp`, so `mcp.effect == "write"` names a bound field and evaluates to false rather
+    // than throwing, which fails closed and would refuse the click.
+    const { gateway, calls, rows } = await gatewayWith({
+      ...PERMISSIVE,
+      deny: ['mcp.effect == "write"'],
+    });
+
+    await gateway.click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 });
+
+    expect(calls).toEqual(["click"]);
+    expect(rows[0]?.eventType).toBe("computer.action_allowed");
+  });
+
   test("the refusal names the rule, so an operator can find it", async () => {
     const { gateway } = await gatewayWith({
       ...PERMISSIVE,

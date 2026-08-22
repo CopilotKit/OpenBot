@@ -1359,6 +1359,11 @@ export function createPluginStore(options: PluginStoreOptions) {
         element: { ref: "", role: "", name: "", type: "" },
         key: "",
         file: { path: "", name: "", extension: "" },
+        // Empty, like the browser fields above: an MCP call runs no shell command, but a
+        // `deny: contains(command, "rm -rf")` names `command`, and an unbound identifier throws and
+        // fails closed — which would refuse every MCP call once a deployment wrote a rule about its
+        // shell. An empty command matches no such rule.
+        command: "",
         intent: effect === "write" ? "write_tool" : "read_tool",
         mcp: { server: serverId, tool: toolName, effect },
       };

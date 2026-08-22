@@ -419,6 +419,12 @@ export function createComputerGateway(
         ? describeFile(filePath)
         : { path: "", name: "", extension: "" },
       command: subject.command ?? "",
+      // Neutral, like the fields above: this is not an MCP call, but a `deny: mcp.effect == "write"`
+      // names `mcp`, and cel-js throws on an unbound identifier — which fails closed and would refuse
+      // every browser action the moment an operator wrote a rule about their tools. Empty server and
+      // tool and an empty effect match no MCP rule, so a boundary drawn around MCP leaves the browser
+      // alone. The MCP context carries the browser fields empty for the mirror of this reason.
+      mcp: { server: "", tool: "", effect: "" },
     };
 
     const decision = evaluateActionPolicy(options.policy(), context);

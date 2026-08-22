@@ -132,7 +132,12 @@ export type PolicyContext = {
   mcp?: {
     server: string;
     tool: string;
-    effect: "read" | "write";
+    /**
+     * `read` or `write` on a real MCP call. `""` in the neutral `mcp` a non-MCP action carries, so
+     * that neither `mcp.effect == "read"` nor `== "write"` matches a browser or file action. See the
+     * neutral binding in the gateway, and the same reasoning the browser fields carry on an MCP call.
+     */
+    effect: "read" | "write" | "";
   };
   /**
    * The command a Bot is about to run on its computer, verbatim.
