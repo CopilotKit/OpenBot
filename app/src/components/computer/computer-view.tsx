@@ -325,11 +325,37 @@ export function ComputerView({
           </div>
         ) : null}
 
-        {control?.requested && !driving ? (
-          <div className="flex items-start justify-between gap-3 border-t bg-amber-500/10 px-3 py-2 text-sm">
+        {/*
+         * The wheel is offered whether or not the Bot asked for it.
+         *
+         * It only used to appear once the Bot called `computer_request_help`, which made the button
+         * depend on the Bot getting one instruction right. It does not always: asked to open a page
+         * behind a sign-in, a Bot answered "If you'd like, I can prompt you to take control … would
+         * you like to proceed with signing in?" and called nothing. The person was told to take
+         * control, and there was no control to take. The prompt already forbids that sentence in as
+         * many words, so the answer is not more prose: it is that a person who wants their own
+         * browser should not have to be offered it first.
+         *
+         * The amber row stays the Bot ASKING, which is a different thing and still worth its own
+         * colour and its reason. Without a request this is a quiet control that says who is driving.
+         */}
+        {!driving ? (
+          <div
+            className={`flex items-start justify-between gap-3 border-t px-3 py-2 text-sm ${
+              control?.requested ? "bg-amber-500/10" : "bg-muted/40"
+            }`}
+          >
             <span>
-              <strong className="font-medium">The assistant needs you.</strong>{" "}
-              {control.reason}
+              {control?.requested ? (
+                <>
+                  <strong className="font-medium">
+                    The assistant needs you.
+                  </strong>{" "}
+                  {control.reason}
+                </>
+              ) : (
+                "The assistant is driving. You can take over whenever you want."
+              )}
             </span>
             <button
               type="button"
@@ -338,7 +364,11 @@ export function ComputerView({
                 if (state) setControl(state);
                 setExpanded(true);
               }}
-              className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
+              className={`shrink-0 rounded-md px-3 py-1 text-xs font-medium ${
+                control?.requested
+                  ? "bg-primary text-primary-foreground"
+                  : "border"
+              }`}
             >
               Take control
             </button>
@@ -390,7 +420,8 @@ export function ComputerView({
                     >
                       Hand back to the assistant
                     </button>
-                  ) : control?.requested ? (
+                  ) : (
+                    /* Offered here too, and for the same reason: see the inline card above. */
                     <button
                       type="button"
                       onClick={async () => {
@@ -401,7 +432,7 @@ export function ComputerView({
                     >
                       Take control
                     </button>
-                  ) : null}
+                  )}
                   <span className="pointer-events-none text-white/70">
                     {driving
                       ? "Press Escape to close"

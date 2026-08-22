@@ -210,7 +210,13 @@ body {
   background-position: 100% 0;
   background-clip: text;
   -webkit-background-clip: text;
-  color: transparent;
+  /*
+   * THE GLYPH FILL, NOT `color`. This was `color: transparent`, which blanked the gradient too —
+   * `currentColor` resolves against this element's own `color` — so nothing was ever drawn. This
+   * rule is unlayered and beats the `text-*` utility it is given, so the reduced-motion branch
+   * below, which puts `color` back, was the only place the text was readable.
+   */
+  -webkit-text-fill-color: transparent;
   animation: tool-line-sweep 1.6s linear infinite;
 }
 

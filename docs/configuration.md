@@ -93,7 +93,7 @@ A gateway that fronts several providers behind one key is addressed the usual wa
 ```sh
 OPENAI_BASE_URL=https://gateway.internal/v1
 OPENAI_API_KEY=...
-BOT_MODEL=openai/gpt-4o
+BOT_MODEL=openai/gpt-5.6-terra
 ```
 
 and in the tenant package, where the name is namespaced the same way:
@@ -102,7 +102,7 @@ and in the tenant package, where the name is namespaced the same way:
 model:
   provider: openai
   credential_secret_ref: openai-api-key
-  default_model: openai/gpt-4o
+  default_model: openai/gpt-5.6-terra
 ```
 
 Most gateways publish a model list, which is the way to check a name before configuring it.
@@ -366,7 +366,7 @@ column nor `users.groups` is the wrong shape for it.
 model:
   provider: openai
   credential_secret_ref: openai-api-key
-  default_model: gpt-4.1
+  default_model: gpt-5.6-terra
 ```
 
 `provider` must be `openai`. `credential_secret_ref` is a reference to a stored credential, not a credential value. `default_model` is passed through as written, so an OpenAI-compatible endpoint reached through `OPENAI_BASE_URL` takes the name that endpoint publishes.

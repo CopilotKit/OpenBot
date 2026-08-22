@@ -177,7 +177,7 @@ services:
       # Unset means OpenAI. Set, it is any endpoint speaking the same API, and BOT_MODEL is sent
       # to it verbatim.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+      BOT_MODEL: ${BOT_MODEL:-gpt-5.6-terra}
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4200/health')\""]
       interval: 10s
@@ -204,7 +204,7 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
-      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+      BOT_MODEL: ${BOT_MODEL:-gpt-5.6-terra}
       BOT_RESPONSES_API: ${BOT_RESPONSES_API:-false}
       # Where this Bot runs a tool: back through the deployment that granted it, never at the vendor.
       # `host.docker.internal` because the API server runs on the host, not in this network.

@@ -27,7 +27,15 @@ import { serve } from "bun";
  */
 
 const PORT = Number.parseInt(process.env.PORT ?? "4300", 10);
-const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
+const MODEL = process.env.BOT_MODEL ?? "gpt-5.6-terra";
+/**
+ * `gpt-5.6-*` rejects function tools on `/v1/chat/completions` and needs the Responses API, which
+ * this integration speaks. Inferred from the model so setting `BOT_MODEL` alone cannot produce a
+ * Bot that starts, looks healthy, and fails on its first tool call.
+ */
+const USE_RESPONSES_API =
+  process.env.BOT_RESPONSES_API === "true" ||
+  /^gpt-5\.[6-9]|^gpt-[6-9]/.test(MODEL);
 
 /**
  * The graph's state.
@@ -131,7 +139,11 @@ function buildGraph(input: RunAgentInput) {
   // the graph returns once it is finished, and the surface receives a single TEXT_MESSAGE_CONTENT
   // carrying all of it, so a six-hundred-word reply is a blank conversation for eight seconds and
   // then a wall of text. The tokens exist the whole time; nothing was passing them on.
-  const model = new ChatOpenAI({ model: MODEL, streaming: true });
+  const model = new ChatOpenAI({
+    model: MODEL,
+    streaming: true,
+    ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),
+  });
   const tools = toLangChainTools(input);
   const bound = tools.length > 0 ? model.bindTools(tools) : model;
 
