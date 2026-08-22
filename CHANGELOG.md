@@ -201,6 +201,14 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **A Bot named after a deployment route was served without its guard.** The computer router steps
+  aside for `/policy` and `/fleet`, which are its own paths and not about a Bot, because Hono matches
+  `/*` against zero segments and a single-segment path arrives as a Bot id. It stepped aside on the
+  name alone, so it covered everything under those names too: `/policy/status` is `/:botId/status`
+  with a Bot called `policy`, and for that whole subtree the access check was never called at all.
+  The guard now steps aside only for the deployment path itself, and a Bot may no longer be named
+  after one: a package declaring it is refused, and a deployment that already holds such a Bot
+  refuses to start and names it rather than serving it. Reported and fixed by @beardthelion.
 - **Upgrading never reached a Bot's computer.** A computer is a container the supervisor makes, and it
   was reused by name whatever image it was built from, so once a Bot had one, rebuilding the image
   moved the tag and the container went on running the old one indefinitely with nothing to say so.
