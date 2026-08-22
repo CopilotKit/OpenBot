@@ -250,9 +250,9 @@ describe("a 409 from the computer", () => {
 
   test("a 409 with no body at all is still a refusal, not a crash", async () => {
     const bodyless = clientWith(() => new Response(null, { status: 409 }));
-    expect(
-      bodyless.click({ ref: "e1", snapshotId: 1 }),
-    ).rejects.toBeInstanceOf(StaleSnapshotError);
+    expect(bodyless.click({ ref: "e1", snapshotId: 1 })).rejects.toBeInstanceOf(
+      StaleSnapshotError,
+    );
   });
 
   test("carries the reason the computer gave, either way", async () => {

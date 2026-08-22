@@ -54,7 +54,10 @@ describe("a computer call the server refused", () => {
   });
 
   test("a policy refusal is neither", async () => {
-    serverAnswering(403, { error: "That is not allowed here.", rule: "url.host == \"example.com\"" });
+    serverAnswering(403, {
+      error: "That is not allowed here.",
+      rule: 'url.host == "example.com"',
+    });
 
     const outcome = await callComputer("bot-1", "/click", { method: "POST" });
 
