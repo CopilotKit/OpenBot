@@ -8,6 +8,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A click citing a ref this deployment cannot resolve is refused
+
+A Bot acts on a page by citing a ref from a snapshot, and the server turns that ref back into the
+element before the boundary judges it. When the lookup failed, the action went ahead anyway with the
+element half of the decision left empty — so a rule like "never click anything named submit" was not
+declining to match, it was never shown the element, the shipped default permitted, and the click
+landed on whatever that ref points at now.
+
+The computer's own staleness check does not cover this. It compares a citation against its own
+counter, so it catches the cases where the two disagree; the case that bites is the one where the
+computer is content and only this deployment is out of step, which is what restarting a computer
+under a stored snapshot leaves behind. The same click on the same button under the same policy was
+refused before a redeploy and carried out after it.
+
+A citation this server holds a snapshot for and cannot resolve is now refused, and the person is told
+to take a fresh snapshot. Actions that name no element — scrolling, a page-level keypress, a shell
+call, a file read — are untouched, and a computer this deployment holds no snapshot for still has its
+citation forwarded, because there it is the only party that can answer. The refusal is raised after
+the decision row is written, so an action somebody tried to take still appears on the trail.
+
+**A deployment may see refusals it did not see before.** That is the point: those are the actions that
+were being carried out without the boundary seeing what they touched. A Bot that meets one takes a
+fresh snapshot and continues.
+
 ### A package ships its skills, so tool selection works on a clone
 
 Tool selection narrows a Bot's tools to the ones its matching skills declare, and a deployment starts
