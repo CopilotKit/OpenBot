@@ -186,3 +186,72 @@ describe("who may call a tool back, and as whom", () => {
     });
   });
 });
+
+/**
+ * A refused callback leaves a row, because it is a boundary being held.
+ *
+ * The three MCP call outcomes are all written inside `callTool`, which is reached only once the
+ * caller has proved which Bot it is. A caller that fails that check never gets there, so this
+ * refusal used to leave nothing behind at all: no row, no log, nothing to count.
+ *
+ * Which made the product's most confusing failure silent. A Bot holding a token the deployment no
+ * longer accepts — a secret rotated, a container not recreated with it — has every call refused
+ * here, returns nothing to its own model, and the model tells the person "no files were found". A
+ * false negative delivered as an answer, with every place somebody would check agreeing that
+ * nothing had happened. That is how it was found: by driving Drive and getting "no results" from a
+ * Drive that had them.
+ *
+ * These assert the shape the row must keep. `authoriseAgentCall` is the decision the route acts on,
+ * so a verdict that stops being a refusal is the thing that would silently drop the row again.
+ */
+describe("a callback that cannot prove which Bot it is", () => {
+  test("is refused, with a reason and a status to record", async () => {
+    const verdict = await authoriseAgentCall({
+      presented: "obot_agt_not_a_token_this_deployment_issued",
+      run: await mintRunAssertion(RUN, KEY),
+      encryptionKey: KEY,
+      legacyToken: "the-deployment-secret",
+      lookup: async () => null,
+    });
+
+    expect(verdict.ok).toBe(false);
+    if (verdict.ok) return;
+    // Both are written onto the audit row, so both have to exist.
+    expect(typeof verdict.reason).toBe("string");
+    expect(verdict.reason.length).toBeGreaterThan(0);
+    expect(verdict.status).toBeGreaterThanOrEqual(400);
+  });
+
+  test("is refused when the token is right and the run assertion is not", async () => {
+    // The other half of the pair. A shared secret alone must not be enough to spend a Bot's grants:
+    // without a run this deployment signed, there is no statement of who it is acting for.
+    const verdict = await authoriseAgentCall({
+      presented: "the-deployment-secret",
+      run: "not-an-assertion-this-deployment-signed",
+      encryptionKey: KEY,
+      legacyToken: "the-deployment-secret",
+      lookup: async () => null,
+    });
+
+    expect(verdict.ok).toBe(false);
+  });
+
+  test("carries no Bot or actor to record, which is why the row names neither", async () => {
+    /*
+     * The row deliberately records no bot and no actor. Both arrive inside the credential that just
+     * failed to verify, so writing them down would put an unproven claim in the one place that is
+     * supposed to be believed. This holds that there is nothing trustworthy to write.
+     */
+    const verdict = await authoriseAgentCall({
+      presented: "",
+      run: undefined,
+      encryptionKey: KEY,
+      legacyToken: "the-deployment-secret",
+      lookup: async () => null,
+    });
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict).not.toHaveProperty("botId");
+    expect(verdict).not.toHaveProperty("actorId");
+  });
+});

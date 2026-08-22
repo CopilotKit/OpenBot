@@ -35,9 +35,16 @@ const FILTERS = [
   { label: "Computer actions", search: "?eventType=computer.action_allowed" },
   {
     label: "Blocked",
-    // Include every refusal family, not only browser policy refusals.
+    /*
+     * Include every refusal family, not only browser policy refusals.
+     *
+     * `mcp.callback_refused` is here because it is a refusal, even though nothing about a Bot was
+     * judged: a caller could not prove which Bot it was. Somebody filtering for what this deployment
+     * turned away wants that in the list, and it is the one refusal with no policy behind it, so
+     * leaving it out would hide the only evidence that anything was attempted.
+     */
     search:
-      "?eventType=computer.action_refused,mcp.call_rejected,component.refused,component.function_refused",
+      "?eventType=computer.action_refused,mcp.call_rejected,mcp.callback_refused,component.refused,component.function_refused",
   },
   {
     label: "Did not happen",
@@ -140,7 +147,13 @@ function Row({
     event.eventType === "computer.action_refused" ||
     event.eventType === "component.refused" ||
     event.eventType === "component.function_refused" ||
-    event.eventType === "mcp.call_rejected";
+    event.eventType === "mcp.call_rejected" ||
+    /*
+     * A caller that could not prove which Bot it was. Refused like the others, and it has to read
+     * that way here: the fallback below calls anything it does not recognise "Allowed", which for a
+     * refusal is the one wrong answer. A trail that is confidently wrong is worse than a silent one.
+     */
+    event.eventType === "mcp.callback_refused";
   const stalled = event.eventType === "agent.stream_stalled";
   // Allowed by policy but not carried out. A stalled turn belongs in the same family: the Bot was
   // asked and the answer never arrived. Colour is how this table is read, and a row left in the
@@ -228,6 +241,12 @@ function Row({
             {payload.reason}
           </div>
         ) : null}
+        {event.eventType === "mcp.callback_refused" &&
+        typeof payload.refusal === "string" ? (
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {payload.refusal}
+          </div>
+        ) : null}
         {event.eventType === "bot.declined" &&
         typeof payload.reason === "string" ? (
           <div className="mt-0.5 text-xs text-muted-foreground">
@@ -308,6 +327,8 @@ const DECISIONS: Record<string, string> = {
   "mcp.call_succeeded": "Called on this Bot's behalf",
   "mcp.call_rejected": "Blocked",
   "mcp.call_failed": "The server did not answer",
+  // Not "Blocked": nothing about the Bot was judged, because nothing proved which Bot it was.
+  "mcp.callback_refused": "Could not prove which Bot it was",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",

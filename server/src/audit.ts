@@ -83,6 +83,29 @@ export const auditEventTypes = [
    */
   "mcp.call_failed",
   /*
+   * Something presenting itself as a Bot asked to spend a grant and was turned away at the door.
+   *
+   * The fourth outcome, and the only one that used to leave nothing behind. The three above are all
+   * written inside `callTool`, which is reached only after the caller has proved which Bot it is.
+   * A caller that fails THAT check never reaches `callTool`, so a refused callback was invisible:
+   * no row, no log, nothing to count.
+   *
+   * Which made the most confusing failure in the product completely silent. A Bot holding a stale
+   * token — the deployment's secret rotated, a container not recreated with it — has every call
+   * rejected at this line, returns nothing to its own model, and the model tells the person "no
+   * files were found". A false negative, delivered as an answer, about a Drive that has the files.
+   * Every place a person would look to check agreed that nothing had happened.
+   *
+   * It is a security row as much as a diagnostic one. This endpoint is how a Bot spends grants, and
+   * an unauthenticated caller probing it generated no evidence at all.
+   *
+   * The row deliberately does NOT name a Bot or an actor. Both arrive in the credential that just
+   * failed to verify, so writing them down would be recording an unproven claim in the one place
+   * that is supposed to be believed. What is recorded is what is known: that a call was attempted,
+   * which tool it named, and why it was refused.
+   */
+  "mcp.callback_refused",
+  /*
    * An administrator registered this deployment's OAuth client with a vendor.
    *
    * Recorded because it decides what every subsequent consent screen belongs to. If a client is

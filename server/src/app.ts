@@ -734,6 +734,36 @@ export function createApp(
           (await agentProfileStore?.agentForCallbackToken(hash)) ?? null,
       });
       if (!verdict.ok) {
+        /*
+         * Recorded, because this is a boundary being held and every other one here leaves a row.
+         *
+         * The three outcomes inside `callTool` are all written after the caller has proved which Bot
+         * it is. A caller that fails to prove it never reaches them, so this refusal used to leave
+         * nothing at all — and it is the refusal behind the product's most confusing failure: a Bot
+         * whose token no longer matches the deployment's has every call rejected here, returns
+         * nothing to its own model, and the model tells the person there were no results. A false
+         * negative delivered as an answer, with the trail agreeing nothing had happened.
+         *
+         * No Bot id and no actor. Both live in the credential that just failed to verify, so writing
+         * them down would put an unproven claim in the record. The tool name comes from the body and
+         * is capped for the same reason: it is untrusted input, kept because "which tool was being
+         * reached for" is the useful half of the question.
+         */
+        if (auditStore) {
+          await recordAuditEvent(auditStore, {
+            eventType: "mcp.callback_refused",
+            targetType: "mcp_tool",
+            targetId:
+              typeof body?.name === "string"
+                ? body.name.slice(0, 120)
+                : "unknown",
+            payload: {
+              refusal: verdict.reason,
+              status: verdict.status,
+              note: "A caller could not prove which Bot it was, so no grant was consulted.",
+            },
+          });
+        }
         return context.json({ error: verdict.reason }, verdict.status);
       }
 
