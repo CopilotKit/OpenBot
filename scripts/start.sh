@@ -67,6 +67,33 @@ if [ -z "$MANAGED_AGENT_TOKEN" ]; then
 fi
 export MANAGED_AGENT_TOKEN
 
+# The secret a framework Bot presents when it calls a tool back through this server. The other
+# direction of the pair above: that one is the server proving itself to the Bot, this one is the Bot
+# proving itself to the server, and they are deliberately two different secrets.
+#
+# Generated here for the same reason, and it has to be. `.env.example` ships it empty, which is the
+# right default for a deployment: absent, no Bot may call tools back and it is told so rather than
+# quietly allowed. On a laptop that default meant every MCP tool was dead on arrival. An
+# administrator could enable Google Drive, grant `search_files` to a Bot, read "May call this tool"
+# on the grant screen, and get "This Bot has no credential for calling tools back through its
+# deployment" on every single call, with no audit row, because the call never reached the server to
+# be recorded.
+AGENT_TOOL_TOKEN="$(setting AGENT_TOOL_TOKEN "")"
+if [ -z "$AGENT_TOOL_TOKEN" ]; then
+  AGENT_TOOL_TOKEN="$(openssl rand -base64 32)"
+  if grep -qE '^AGENT_TOOL_TOKEN=' "$ROOT/.env"; then
+    # A present but empty line, which is what .env.example ships.
+    tmp="$(mktemp)"
+    grep -vE '^AGENT_TOOL_TOKEN=' "$ROOT/.env" > "$tmp"
+    printf 'AGENT_TOOL_TOKEN=%s\n' "$AGENT_TOOL_TOKEN" >> "$tmp"
+    mv "$tmp" "$ROOT/.env"
+  else
+    printf '\nAGENT_TOOL_TOKEN=%s\n' "$AGENT_TOOL_TOKEN" >> "$ROOT/.env"
+  fi
+  printf '\033[2m%s\033[0m\n' "Generated AGENT_TOOL_TOKEN and wrote it to .env."
+fi
+export AGENT_TOOL_TOKEN
+
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[31m%s\033[0m\n' "$1"; }
 info()  { printf '\033[2m%s\033[0m\n' "$1"; }
