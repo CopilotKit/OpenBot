@@ -1,7 +1,7 @@
 import {
   checkAgentEndpoint,
   createAgentFetch,
-  EndpointRedirectError,
+  EndpointNotAllowedError,
 } from "./endpoint";
 
 /**
@@ -122,9 +122,9 @@ export async function testAgentConnection(
       signal: AbortSignal.timeout(options.timeoutMs ?? TEST_TIMEOUT_MS),
     });
   } catch (error) {
-    // A refused redirect is a specific thing that happened, and the person registering can act on it:
-    // it names where their address sent us.
-    if (error instanceof EndpointRedirectError) {
+    // An address this deployment will not dial is a specific thing that happened, and the person
+    // registering can act on it: it names the address, or the hop their address sent us to.
+    if (error instanceof EndpointNotAllowedError) {
       return { ok: false, reason: error.message };
     }
     const timedOut = error instanceof Error && error.name === "TimeoutError";
