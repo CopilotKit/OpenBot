@@ -24,9 +24,10 @@ import { toLangChainMessages } from "./history";
  * server changes.
  *
  * The model API stops being ours. `agent-bot` speaks `/v1/chat/completions` by hand, which is why
- * gpt-5.6 cannot be used there without rewriting its streaming loop: those models reject function
- * tools on that endpoint and require the Responses API. Here it is `useResponsesApi`, one line,
- * because the migration belongs to the people who maintain the integration.
+ * gpt-5.6 costs it a rewritten streaming loop: those models reject function tools on that endpoint
+ * unless reasoning is turned off, and turning reasoning off on a Bot that has to decide when to ask
+ * a person for help is the wrong trade. Here it is `useResponsesApi`, one line, because the
+ * migration belongs to the people who maintain the integration.
  *
  * The tool loop still runs on the client, exactly as it does in `agent-bot`: a Bot's actions happen
  * on a browser the person is watching, and the surface remains the place that executes those tools.
@@ -66,8 +67,17 @@ const PROVIDER = (process.env.BOT_PROVIDER ?? "openai").toLowerCase();
  * missing configuration.
  */
 const MODEL = process.env.BOT_MODEL?.trim() || defaultModelFor(PROVIDER);
-/** OpenAI only. Its newer models require the Responses API, which the integration handles. */
-const USE_RESPONSES_API = process.env.BOT_RESPONSES_API === "true";
+/**
+ * OpenAI only. Its newer models require the Responses API, which the integration handles.
+ *
+ * Inferred from the model rather than left to a separate switch. `gpt-5.6-*` rejects function tools
+ * on `/v1/chat/completions`, so a deployment that set `BOT_MODEL` to one and did not also know about
+ * this flag got a Bot that started, looked healthy, and failed on its first tool call. The switch is
+ * still honoured, so a model this list has not heard of can be told to use it.
+ */
+const NEEDS_RESPONSES_API = /^gpt-5\.[6-9]|^gpt-[6-9]/.test(MODEL);
+const USE_RESPONSES_API =
+  process.env.BOT_RESPONSES_API === "true" || NEEDS_RESPONSES_API;
 /**
  * OpenAI only, and the same variable the API server reads for its built-in agents.
  *
@@ -90,7 +100,7 @@ const GOOGLE_BASE_URL =
 function defaultModelFor(provider: string): string {
   if (provider === "anthropic") return "claude-sonnet-4-5";
   if (provider === "google") return "gemini-2.5-flash";
-  return "gpt-5.5";
+  return "gpt-5.6-terra";
 }
 
 /**

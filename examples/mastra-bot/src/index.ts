@@ -17,7 +17,15 @@ import { serve } from "bun";
  */
 
 const PORT = Number.parseInt(process.env.PORT ?? "4400", 10);
-const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
+const MODEL = process.env.BOT_MODEL ?? "gpt-5.6-terra";
+/**
+ * `gpt-5.6-*` rejects function tools on `/v1/chat/completions` and needs the Responses API, which
+ * this provider exposes as `openai.responses`. Inferred from the model so setting `BOT_MODEL` alone
+ * cannot produce a Bot that starts, looks healthy, and fails on its first tool call.
+ */
+const NEEDS_RESPONSES_API =
+  process.env.BOT_RESPONSES_API === "true" ||
+  /^gpt-5\.[6-9]|^gpt-[6-9]/.test(MODEL);
 
 const bot = new Agent({
   name: "OpenBot Mastra coworker",
@@ -28,7 +36,7 @@ const bot = new Agent({
     "NEVER state what a page contains unless you have just read it with a tool in this conversation. " +
     "You cannot know a page's contents from memory. If you have not read it, call the tool first, " +
     "and report exactly what the tool returned.",
-  model: openai(MODEL),
+  model: NEEDS_RESPONSES_API ? openai.responses(MODEL) : openai(MODEL),
 });
 
 /**

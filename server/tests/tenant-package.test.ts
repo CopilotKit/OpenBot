@@ -80,7 +80,7 @@ function loadedPackage(
     model: {
       provider: "openai",
       credentialSecretRef: "openai-key",
-      defaultModel: "gpt-4.1",
+      defaultModel: "gpt-5.6-terra",
     },
     knowledgeSources: [],
     themeCss: "",
@@ -145,7 +145,7 @@ describe("tenant YAML validation", () => {
           "agents: [{ id: knowledge, name: Knowledge, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]",
         channels: "channels: []",
         model:
-          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
         knowledge: "sources: []",
         themeCss: "",
       }),
@@ -160,7 +160,7 @@ describe("tenant YAML validation", () => {
           "agents: [{ id: knowledge, name: Knowledge, title: Company Knowledge, type: built-in, system_prompt: Answer from knowledge. }]",
         channels: "channels: []",
         model:
-          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
         knowledge: "sources: []",
         themeCss: "",
       }),
@@ -189,7 +189,7 @@ describe("tenant YAML validation", () => {
           agents: `agents: [{ id: ${reserved}, name: Knowledge, title: Company Knowledge, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]`,
           channels: "channels: []",
           model:
-            "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+            "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
           knowledge: "sources: []",
           themeCss: "",
         }),
@@ -205,7 +205,7 @@ describe("tenant YAML validation", () => {
         "agents: [{ id: policy-desk, name: Policy Desk, title: Policy, role_description: Answer policy questions., type: built-in, system_prompt: Answer from policy. }]",
       channels: "channels: []",
       model:
-        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
       knowledge: "sources: []",
       themeCss: "",
     });
@@ -233,7 +233,7 @@ describe("tenant YAML validation", () => {
     endpoint: http://risk.internal/ag-ui`,
       channels: "channels: []",
       model:
-        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
       knowledge: "sources: []",
       themeCss: "",
     });
@@ -250,7 +250,7 @@ describe("tenant YAML validation", () => {
           "agents: [{ id: knowledge, name: Knowledge, title: Company Knowledge, role_description: Answer company questions., avatar_seed: '', type: built-in, system_prompt: Answer from knowledge. }]",
         channels: "channels: []",
         model:
-          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
         knowledge: "sources: []",
         themeCss: "",
       }),
@@ -265,7 +265,7 @@ describe("tenant YAML validation", () => {
         agents: "agents: []",
         channels: "channels: []",
         model:
-          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
         knowledge: "sources: []",
         themeCss: ":root { --primary: oklch(0.32 0.09 250); }",
       }),
@@ -317,7 +317,7 @@ describe("tenant YAML validation", () => {
       brand: `tenant:\n  id: fintech\n  product_name: Ledgerline\nskin:\n  stylesheet: theme.css`,
       agents: `agents:\n  - id: knowledge\n    name: Knowledge\n    title: Company Knowledge\n    role_description: Answer company questions.\n    type: built-in\n    system_prompt: Answer from knowledge.\n  - id: risk\n    name: Risk\n    title: Risk & Compliance\n    role_description: Investigate policies and controls.\n    type: remote-ag-ui\n    endpoint: http://risk.internal/ag-ui`,
       channels: `channels:\n  - id: company\n    name: Company\n    description: Knowledge channel\n    permitted_agents: [knowledge, risk]\n    allowed_groups: [all]`,
-      model: `model:\n  provider: openai\n  credential_secret_ref: openai-key\n  default_model: gpt-4.1`,
+      model: `model:\n  provider: openai\n  credential_secret_ref: openai-key\n  default_model: gpt-5.6-terra`,
       knowledge: `sources:\n  - type: google-drive\n    roots: [Policies]`,
       themeCss: ":root { --primary: black; }",
     });
@@ -335,7 +335,7 @@ describe("tenant YAML validation", () => {
         channels:
           "channels: [{ id: company, name: Company, description: Test, permitted_agents: [missing], allowed_groups: [all] }]",
         model:
-          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
         knowledge: "sources: []",
         themeCss: ":root { --primary: black; }",
       }),
@@ -365,7 +365,7 @@ describe("tenant YAML validation", () => {
     permitted_agents: [knowledge, risk-analyst]
     allowed_groups: [all]`,
       model:
-        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-4.1 }",
+        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
       knowledge: "sources: []",
       themeCss: "",
     });

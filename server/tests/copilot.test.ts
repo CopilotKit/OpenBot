@@ -95,11 +95,11 @@ describe("registered Copilot agents", () => {
           type: "built_in",
           systemPrompt: "Be helpful.",
         },
-        { provider: "openai", defaultModel: "gpt-4.1" },
+        { provider: "openai", defaultModel: "gpt-5.6-terra" },
         "openai-secret",
       ),
     ).toEqual({
-      model: "openai/gpt-4.1",
+      model: "openai/gpt-5.6-terra",
       // The provenance rule is unconditional, so even a Bot with no tools and no computer carries
       // it. That Bot needs it most: nothing it says was read anywhere.
       prompt: `Be helpful.\n\n${PROVENANCE_GUIDANCE}`,
@@ -117,7 +117,7 @@ describe("registered Copilot agents", () => {
           systemPrompt: "Be helpful.",
         },
       ],
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       null,
     );
     const agent = agents["general-assistant"];
@@ -159,7 +159,7 @@ describe("registered Copilot agents", () => {
           endpoint: "http://risk.internal/ag-ui",
         },
       ],
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       "openai-secret",
     );
 
@@ -200,7 +200,7 @@ describe("registered Copilot agents", () => {
           endpoint: "http://risk.internal/ag-ui",
         },
       ],
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       "openai-secret",
       stallGuard,
     );
@@ -227,7 +227,10 @@ describe("registered Copilot agents", () => {
         endpoint: "http://risk.internal/ag-ui",
       },
     ];
-    const model = { provider: "openai" as const, defaultModel: "gpt-4.1" };
+    const model = {
+      provider: "openai" as const,
+      defaultModel: "gpt-5.6-terra",
+    };
 
     const guarded = (
       await buildAgents(registered, model, null, {
@@ -261,12 +264,12 @@ describe("registered Copilot agents", () => {
 
     const first = await resolveRuntimeAgents(
       async () => registered,
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       resolveModelApiKey,
     );
     const second = await resolveRuntimeAgents(
       async () => registered,
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       resolveModelApiKey,
     );
 
@@ -293,7 +296,7 @@ describe("registered Copilot agents", () => {
           endpoint: "http://risk.internal/ag-ui",
         },
       ],
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       async () => {
         resolverInvoked = true;
         throw new Error("corrupt model credential");
@@ -339,7 +342,7 @@ describe("standing agent roles", () => {
     await using endpoint = fakeAgUiEndpoint();
     const agents = await buildAgents(
       [remoteAgent(endpoint.url)],
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       null,
     );
 
@@ -363,7 +366,7 @@ describe("standing agent roles", () => {
     await using endpoint = fakeAgUiEndpoint();
     const agents = await buildAgents(
       [remoteAgent(endpoint.url)],
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       null,
     );
 
@@ -389,7 +392,7 @@ describe("standing agent roles", () => {
           reason: "Expense Manager has been deleted.",
         },
       ],
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       null,
     );
 
@@ -417,7 +420,7 @@ describe("standing agent roles", () => {
         seen.actors.push(actor);
         return [remoteAgent("http://coworker.internal/ag-ui")];
       },
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       async () => null,
     );
 
@@ -436,7 +439,7 @@ describe("standing agent roles", () => {
       async () => [
         remoteAgent("http://coworker.internal/ag-ui", { roleDescription }),
       ],
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       async () => null,
     );
     const request = new Request("http://openbot.test/api/copilotkit");
@@ -581,7 +584,7 @@ describe("what a Bot is told it holds", () => {
         type: "built_in",
         systemPrompt: "Investigate policies.",
       },
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       "openai-secret",
       drive,
       "BROWSER GUIDANCE HERE",
@@ -621,7 +624,7 @@ describe("where a Bot says its answer came from", () => {
         type: "built_in",
         systemPrompt: "Be helpful.",
       },
-      { provider: "openai", defaultModel: "gpt-4.1" },
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
       "openai-secret",
     ).prompt as string;
 
