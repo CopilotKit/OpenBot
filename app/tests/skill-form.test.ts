@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { emptySkillForm, skillFormSchema } from "@/lib/skills/form";
+import {
+  emptySkillForm,
+  skillFormSchema,
+  undeclaredElsewhere,
+} from "@/lib/skills/form";
 
 /**
  * The declared tools, as the form carries them.
@@ -56,5 +60,56 @@ describe("declaring the tools a skill needs", () => {
       skillFormSchema.safeParse({ ...valid, tools: ["nope/not_a_tool"] })
         .success,
     ).toBeTrue();
+  });
+});
+
+/**
+ * Declared refs the picker cannot draw as a tool.
+ *
+ * The picker lists the tools of the servers this deployment has connected, and a declaration is not
+ * confined to those: a package ships skills naming tools for connectors nobody has added yet, and a
+ * person's own skill outlives the server it was written against. Anything left over has to be shown,
+ * or the screen states part of the declaration as though it were the whole of it.
+ */
+describe("declared tools no connected server offers", () => {
+  const offered = [
+    "google-drive/search_files",
+    "google-drive/read_file_content",
+  ];
+
+  test("a ref for a connector nobody has added is surfaced", () => {
+    expect(
+      undeclaredElsewhere(
+        ["google-drive/search_files", "jira/search_issues"],
+        offered,
+      ),
+    ).toEqual(["jira/search_issues"]);
+  });
+
+  test("a fully matched declaration leaves nothing over", () => {
+    expect(undeclaredElsewhere(offered, offered)).toEqual([]);
+  });
+
+  test("declaring nothing leaves nothing over", () => {
+    expect(undeclaredElsewhere([], offered)).toEqual([]);
+  });
+
+  test("with no server connected, every declared ref is left over", () => {
+    // The case a fresh clone is in: the package ships skills declaring Drive tools and Drive has not
+    // been connected. Every one of them has to be visible, or the skill reads as declaring nothing.
+    expect(
+      undeclaredElsewhere(
+        ["google-drive/search_files", "google-drive/read_file_content"],
+        [],
+      ),
+    ).toEqual(["google-drive/search_files", "google-drive/read_file_content"]);
+  });
+
+  test("order is the declaration's, so the list does not reshuffle as servers connect", () => {
+    expect(undeclaredElsewhere(["z/one", "a/two", "m/three"], [])).toEqual([
+      "z/one",
+      "a/two",
+      "m/three",
+    ]);
   });
 });

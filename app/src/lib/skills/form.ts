@@ -56,3 +56,25 @@ export const emptySkillForm: SkillFormValues = {
   instructions: "",
   tools: [],
 };
+
+/**
+ * The declared refs no connected server offers.
+ *
+ * WHY THIS EXISTS. The picker draws the tools of the servers this deployment has connected, and a
+ * skill's declared set is not confined to those: a package ships skills declaring tools for
+ * connectors nobody has added yet, and a person's own skill outlives the server it was written
+ * against. Rendering only what matched meant the screen showed a subset of the declaration and
+ * presented it as the whole thing — a skill needing two tools drew one, and nothing said the other
+ * was there. Editing it silently kept a tool the author had just been shown they did not have.
+ *
+ * A wrong number on a screen somebody governs with is worse than no number, so the leftovers are
+ * named rather than dropped. They are not an error: a ref for a connector that does not exist here
+ * loads nothing, because the offer is intersected with the Bot's grants.
+ */
+export function undeclaredElsewhere(
+  selected: readonly string[],
+  offered: readonly string[],
+): string[] {
+  const known = new Set(offered);
+  return selected.filter((ref) => !known.has(ref));
+}

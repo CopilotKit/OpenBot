@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import { undeclaredElsewhere } from "@/lib/skills/form";
 
 /**
  * Which tools this skill says it needs.
@@ -53,6 +54,26 @@ export function SkillTools({
   const servers = (plugins.data?.servers ?? []).filter(
     (server) => server.tools.length > 0,
   );
+
+  /*
+   * Declared, and offered by nothing this deployment has connected.
+   *
+   * Shown rather than dropped, because the alternative is a screen that states part of the
+   * declaration as though it were all of it. A package ships skills declaring tools for connectors
+   * nobody has added yet, and a person's own skill outlives the server it was written against, so
+   * this is the ordinary case rather than a corner of one. Left out, a skill needing two tools drew
+   * one and the second was invisible to the person governing it.
+   *
+   * Only computed once the list has actually loaded: while the query is pending every ref looks
+   * unmatched, and flashing the whole declared set into this group and out again would be worse
+   * than showing nothing for a moment.
+   */
+  const elsewhere = plugins.data
+    ? undeclaredElsewhere(
+        selected,
+        servers.flatMap((server) => server.tools.map((tool) => tool.ref)),
+      )
+    : [];
 
   return (
     <Field>
@@ -111,6 +132,36 @@ export function SkillTools({
           ))}
         </div>
       )}
+
+      {elsewhere.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-muted-foreground text-xs">Not connected here</p>
+          <div className="flex flex-wrap gap-2">
+            {elsewhere.map((ref) => (
+              <Button
+                key={ref}
+                onClick={() => toggle(ref)}
+                size="sm"
+                /*
+                 * The whole ref, not a tool name. There is no server here to put it under, and the
+                 * server id is the part that says which connector is missing.
+                 */
+                title={`${ref} — no connected server offers this`}
+                type="button"
+                variant="secondary"
+              >
+                {ref}
+              </Button>
+            ))}
+          </div>
+          <p className="text-muted-foreground text-xs">
+            This skill names these, and no server connected here offers them —
+            because the connector has not been added, or was removed. They cost
+            nothing and load nothing until it exists. Click one to stop naming
+            it.
+          </p>
+        </div>
+      ) : null}
 
       <p className="text-muted-foreground text-xs">
         Picking this skill is what loads these tools for a turn. It does not

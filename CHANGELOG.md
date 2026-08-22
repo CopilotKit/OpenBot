@@ -45,6 +45,11 @@ so a skill naming a tool its Bot does not hold selects the skill and loads nothi
 anybody may write a skill while connecting a server stays an administrator's decision. The screen says
 so, next to the choice.
 
+A tool the skill names that no connected server offers is shown too, under its own heading, rather
+than left out. A package ships skills declaring tools for connectors nobody has added yet, and a
+skill outlives the server it was written against, so a screen that drew only what matched was
+stating part of the declaration as though it were all of it.
+
 ## 0.0.3
 
 ### A Bot is offered the tools its message needs, not every tool it holds
