@@ -69,7 +69,7 @@ Sessions survive and nobody signs in again.
   that system's own search as the person asking, so the vendor decides what they may see and there is
   no second copy of anybody's documents here to keep in step, to secure, or to leave behind when
   somebody is removed. The local index that was being filled — `documents`, `chunks` and
-  `document_acls` — is read by nothing, and the connector that filled it is going away. Retrieval over
+  `document_acls` — is read by nothing, and the connector that filled it has been removed. Retrieval over
   a copy of a customer's corpus is not a thing OpenBot does.
 
 ### Added
@@ -184,6 +184,19 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **A Bot could reach the deployment's own network by writing the address a different way.** The
+  guard refused `169.254.169.254` and the private ranges as usually written, but not the same
+  addresses spelled as an IPv6-mapped or NAT64 form, an integer, or with a trailing dot, so a Bot
+  talked into fetching one still reached cloud metadata or an internal host. The address is
+  canonicalised before it is checked now, the mapped form of `0.0.0.0` (which reaches every local
+  port) is refused, and the container credential endpoints a hosted deployment must never expose —
+  ECS and Fargate's `169.254.170.2`, Alibaba's `100.100.100.200` — are refused even when the
+  private-host opt-in is on. The same guard backs agent registration, so it is closed there too.
+- **The supervisor could adopt a container it did not create.** When starting a Bot's computer hit a
+  name already taken, it started whatever held the name and handed it the deployment's computer
+  token, so on a Docker host shared with anything else it could drive a stranger's container as a
+  Bot's. It now refuses a container that does not carry its own namespace label, read from the
+  container rather than inferred, so a second deployment on the same host is never adopted.
 - **Removing somebody left the credentials they had granted this deployment sitting in the vault.**
   Removing them from the People screen ended their sessions and stopped the next sign-in, and left the
   refresh token behind, unrevoked. They could not use it — the account comes from a session they no

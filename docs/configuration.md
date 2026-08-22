@@ -54,6 +54,7 @@ at `agent-langgraph` on a laptop.
 | `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it. |
 | `AGENT_TOOL_TOKEN`   | unset                              | The secret a framework Bot presents when it calls a granted tool back through this server. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
+| `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
 
 **`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
 show: a stream that stops producing anything. Every other audit row is something that happened, and
@@ -169,6 +170,7 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. Cloud metadata addresses are still refused. |
 | `AGENT_COMPUTER_POLICY`              | JSON action policy: `{"mode":"enforce","deny":[...],"allow":[...]}`.                      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run supervised computers under gVisor.                                  |
+| `COMPUTER_SANDBOX`                   | Set to `on` to enable Chromium's own sandbox where the host permits user namespaces. Which way it went is printed at start-up. |
 
 `agent-computer` also reads:
 

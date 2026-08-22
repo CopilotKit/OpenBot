@@ -108,8 +108,7 @@ docker run -p 3001:3001 --env-file .env \
 ```
 
 Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
-[docs/deployment.md](docs/deployment.md) has the minimum sizes, the platform notes, and why this runs
-as one replica for now.
+[docs/deployment.md](docs/deployment.md) has the minimum sizes, the platform notes, and how it behaves behind more than one replica.
 
 ## Try it
 

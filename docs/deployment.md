@@ -111,7 +111,9 @@ supervisor is still not in this image, so every replica shares the one browser i
 
 ## Platform notes
 
-**Google Cloud Run.** Set memory to at least 2 GB and max instances to 1. Cloud Run runs every
+**Google Cloud Run.** Set memory to at least 2 GB. More than one instance is fine (see Replicas
+above); each instance has its own browser, so a Bot's logins stay on whichever instance served them.
+Cloud Run runs every
 container under gVisor, which Chromium is sensitive to; test a navigation before trusting it.
 `gcloud run compose up` will also deploy the whole compose file if you want a throwaway database
 alongside.
