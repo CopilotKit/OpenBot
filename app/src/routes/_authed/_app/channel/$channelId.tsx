@@ -12,6 +12,7 @@ import { ComputerView } from "@/components/computer/computer-view";
 import { useNeedsYou } from "@/components/computer/needs-you";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { Button } from "@/components/ui/button";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
 import {
   activityFor,
@@ -204,6 +205,7 @@ function RouteComponent() {
         <div className="h-12 border-b border-border sticky top-0 flex flex-row items-center justify-between px-3 gap-2">
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
           <div className="flex min-w-0 items-center gap-1.5">
+            <SidebarTrigger className="md:hidden shrink-0" />
             <motion.div
               animate={{ opacity: 1 }}
               className="shrink-0"

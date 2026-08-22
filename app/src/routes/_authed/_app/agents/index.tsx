@@ -66,7 +66,7 @@ function AgentsScreen() {
           </div>
           <div className="flex flex-row mt-4">
             {!!mine?.length && (
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                 {mine.map((agent, index) => {
                   return (
                     <StaggerItem index={index} key={agent.id}>
@@ -91,7 +91,7 @@ function AgentsScreen() {
         </div>
         <div className="mt-8 w-full max-w-2xl">
           <h2 className="font-bold text-lg">Explore agents</h2>
-          <div className="grid grid-cols-4 gap-4 mt-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-4">
             {!!explore?.length &&
               explore.map((agent, index) => {
                 return (

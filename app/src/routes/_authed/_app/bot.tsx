@@ -2,6 +2,7 @@ import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
@@ -37,10 +38,13 @@ function RouteComponent() {
   const stopped = useStoppedTurn(agentId);
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="border-b px-6 py-3">
+    <div className="flex h-full flex-col">
+      <header className="border-b px-3 py-3">
         <div className="flex items-baseline justify-between">
-          <h1 className="text-lg font-semibold">Browser Bot</h1>
+          <div className="flex items-center gap-1">
+            <SidebarTrigger className="md:hidden" />
+            <h1 className="text-lg font-semibold">Browser Bot</h1>
+          </div>
           {/*
            * Labelled rather than the bare icon button the sidebar uses for its own "start
            * something new" control: that one opens an empty screen, but this one throws away
