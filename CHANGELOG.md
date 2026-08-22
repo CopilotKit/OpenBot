@@ -49,13 +49,38 @@ each person connects their own account.
 
 `knowledge.yaml` is still parsed and still refused when malformed, because it is part of the
 deployment-package contract. Its `sources:` are now read by nothing.
+`MANAGED_AGENT_AG_UI_URL` is no longer required to start. The one-container image does not carry a
+Bot, so requiring it registered the shipped Risk Analyst against a host that was not there and every
+conversation with it failed. Leave it unset for that image. A laptop `scripts/start.sh` still points
+it at `agent-langgraph`. A URL with no `MANAGED_AGENT_TOKEN` still refuses to start; a leftover
+token with no URL is ignored.
+
+A `.env` copied from an older `.env.example` still has `MANAGED_AGENT_AG_UI_URL=http://localhost:4201/ag-ui`.
+Unset it before `docker run --env-file .env`, or the coworker comes back.
 The built-in Bot refuses to start without `OPENAI_API_KEY`. It used to start, report healthy, and
 then fail every conversation, so a missing key looked like a working deployment. The LangGraph Bot
 already refused the same way.
 
 Sessions survive and nobody signs in again.
 
+### Changed
+
+- **This deployment does not search documents itself.** A Bot answers from a live system by calling
+  that system's own search as the person asking, so the vendor decides what they may see and there is
+  no second copy of anybody's documents here to keep in step, to secure, or to leave behind when
+  somebody is removed. The local index that was being filled — `documents`, `chunks` and
+  `document_acls` — is read by nothing, and the connector that filled it is going away. Retrieval over
+  a copy of a customer's corpus is not a thing OpenBot does.
+
 ### Added
+- **A message with no `@` goes to the coworker it is for.** Typing without naming anyone used to
+  reach the default coworker; to get a specialist you had to `@` them. Now an untagged message is
+  routed to the coworker whose purpose matches it, chosen against each coworker's own description by
+  the deployment's own model, before the channel is pinned. It is named, not silent: the channel
+  header is the coworker it went to, and a `channel.routed` row records the choice, the reason, and
+  the candidates it chose between (never the message itself). `@` still wins as an explicit override
+  and skips routing entirely. If the router is uncertain or unreachable, it falls back to the same
+  default the composer always used, and says so, rather than misroute or drop.
 
 - **A Bot can answer from Google Drive, as the person asking.** Ask a Bot a question whose answer is
   in a document and it answers from the live file rather than from an index, citing a link that opens
@@ -169,6 +194,10 @@ Sessions survive and nobody signs in again.
   found and retired too. This stops the deployment holding a usable secret. It does **not** withdraw
   the grant at the vendor, which needs revoking there until disconnect ships, and the audit row says
   which of the two happened rather than implying both.
+- **The one-container image registered a coworker it could not run.** `MANAGED_AGENT_AG_UI_URL`
+  defaulted to `localhost:4201` and was required, so Risk Analyst appeared on the roster and every
+  conversation with it failed. The URL is optional; the package omits that coworker when it is
+  unset. `scripts/start.sh` still points it at `agent-langgraph` on a laptop.
 - **A boundary rule applied on one server out of N.** The policy is read from memory on every action,
   which is right, but memory was only ever filled at boot. An administrator's new deny rule was
   enforced by whichever process served the request and roughly one action in N went through it, while
@@ -235,6 +264,16 @@ Sessions survive and nobody signs in again.
   access and refresh tokens use Better Auth's own encryption, keyed on `BETTER_AUTH_SECRET`.
 - **A failed provider registration looked like a button that did not work.** The error was rendered
   on the page behind the dialog, which was covering it.
+- **Deleting a component in the playground could release one the build ships.** `DELETE
+  /api/sandboxed/:name` deleted from the shared components table by name, without checking
+  which kind of component the name belonged to. Naming a compiled component removed its
+  governance row, and the foreign keys took that component's per-Bot withholdings and its
+  function grants with it. Withholding is the half that fails open: a published component is
+  available to every Bot unless a row says otherwise, so the next catalogue announcement brought
+  the component back published, and available to a Bot it had deliberately been kept from. The
+  audit row called it `kind: "sandboxed"`. The endpoint now refuses a name this surface does not
+  own and answers 404, the way publishing already did. A governance row whose source is already
+  gone is still this surface's to clear.
 - **A write could follow a symlink out of the Bot's workspace.** The confinement resolved the
   directory a write would land in but not the name it would land on, so a link left at `notes.txt`
   pointing outside was followed by the write; a read through the identical link was already refused.

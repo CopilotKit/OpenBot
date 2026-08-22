@@ -96,6 +96,15 @@ export class ProtectedAgentError extends Error {
   }
 }
 
+export class ManagedAgentUnavailableError extends Error {
+  constructor() {
+    super(
+      "This deployment has no managed Bot. Give the coworker its own AG-UI endpoint.",
+    );
+    this.name = "ManagedAgentUnavailableError";
+  }
+}
+
 const joinedProjection = {
   id: agents.id,
   name: agents.name,
@@ -258,16 +267,16 @@ async function findByTokenHash(
 
 export function createAgentProfileStore(
   database: Database,
-  managedAgentAgUiUrl: URL,
+  managedAgentAgUiUrl: URL | undefined,
   /**
    * Where a customer agent's key is kept. Optional so a deployment without a vault still runs; an
    * agent with a key then simply cannot be created, which is better than storing it in the clear.
    */
   vault?: { store: CredentialStore; encryptionKey: string },
 ): AgentProfileStore {
-  const managedConfiguration = {
-    endpoint: managedAgentAgUiUrl.toString(),
-  };
+  const managedConfiguration = managedAgentAgUiUrl
+    ? { endpoint: managedAgentAgUiUrl.toString() }
+    : undefined;
 
   return {
     async list(actor, hidden = false) {
@@ -295,6 +304,12 @@ export function createAgentProfileStore(
     create(actor, input) {
       return database.transaction(async (transaction) => {
         const id = newAgentId();
+        const endpoint = input.endpoint
+          ? { endpoint: input.endpoint }
+          : managedConfiguration;
+        if (!endpoint) {
+          throw new ManagedAgentUnavailableError();
+        }
         await transaction.insert(agents).values({
           id,
           name: input.name,
@@ -305,9 +320,7 @@ export function createAgentProfileStore(
           // The key, if there is one, goes to the vault and only its reference is stored here. See
           // auth-header.ts for why a bearer token must not sit next to the endpoint.
           configuration: {
-            ...(input.endpoint
-              ? { endpoint: input.endpoint }
-              : managedConfiguration),
+            ...endpoint,
             ...(input.auth && vault
               ? {
                   auth: await storeAgentAuth({
@@ -420,6 +433,9 @@ export function createAgentProfileStore(
         const source = await findAccessibleProfile(transaction, actor, id);
         if (!source) throw new AgentNotFoundError(id);
 
+        if (!managedConfiguration) {
+          throw new ManagedAgentUnavailableError();
+        }
         const duplicateId = newAgentId();
         await transaction.insert(agents).values({
           id: duplicateId,

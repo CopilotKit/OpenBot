@@ -168,7 +168,7 @@ From `/agents`, create a coworker with:
 - optional AG-UI endpoint;
 - optional write-only authorization header.
 
-The server validates agent endpoints with the same target checks used for browser navigation. If no custom endpoint is set, product-created coworkers use `MANAGED_AGENT_AG_UI_URL`.
+The server validates agent endpoints with the same target checks used for browser navigation. If no custom endpoint is set, product-created coworkers use `MANAGED_AGENT_AG_UI_URL` when it is configured, and are refused when it is not.
 
 Tenant package agents are declared in `agents.yaml` as either:
 
@@ -183,8 +183,6 @@ See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/
 
 - `DATABASE_URL`
 - `KEY_ENCRYPTION_KEY`
-- `MANAGED_AGENT_AG_UI_URL`
-- `MANAGED_AGENT_TOKEN`
 - `INTELLIGENCE_API_URL`
 - `INTELLIGENCE_GATEWAY_WS_URL`
 - `INTELLIGENCE_API_KEY`

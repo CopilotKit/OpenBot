@@ -254,7 +254,8 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
   const tenant = asRecord(brand.tenant, "brand.tenant");
   const skin =
     brand.skin === undefined ? undefined : asRecord(brand.skin, "brand.skin");
-  const agents = asList(agentsYaml.agents, "agents.yaml agents").map(
+  const omittedAgentIds = new Set<string>();
+  const agents = asList(agentsYaml.agents, "agents.yaml agents").flatMap(
     (value) => {
       const agent = asRecord(value, "agent");
       const type: TenantAgent["type"] | undefined =
@@ -266,29 +267,42 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       if (!type) {
         throw new Error("agent.type must be built-in or remote-ag-ui");
       }
-      return {
-        id: requiredString(agent.id, "agent.id"),
-        name: requiredString(agent.name, "agent.name"),
-        title: requiredString(agent.title, "agent.title"),
-        roleDescription: requiredString(
-          agent.role_description,
-          "agent.role_description",
-        ),
-        avatarSeed:
-          agent.avatar_seed === undefined
-            ? undefined
-            : requiredString(agent.avatar_seed, "agent.avatar_seed"),
-        type,
-        configuration:
-          type === "built_in"
-            ? {
-                systemPrompt: requiredString(
-                  agent.system_prompt,
-                  "agent.system_prompt",
-                ),
-              }
-            : { endpoint: requiredString(agent.endpoint, "agent.endpoint") },
-      };
+      const id = requiredString(agent.id, "agent.id");
+      if (type === "remote_ag_ui") {
+        const endpoint =
+          typeof agent.endpoint === "string" ? agent.endpoint.trim() : "";
+        if (!endpoint) {
+          omittedAgentIds.add(id);
+          return [];
+        }
+      }
+      return [
+        {
+          id,
+          name: requiredString(agent.name, "agent.name"),
+          title: requiredString(agent.title, "agent.title"),
+          roleDescription: requiredString(
+            agent.role_description,
+            "agent.role_description",
+          ),
+          avatarSeed:
+            agent.avatar_seed === undefined
+              ? undefined
+              : requiredString(agent.avatar_seed, "agent.avatar_seed"),
+          type,
+          configuration:
+            type === "built_in"
+              ? {
+                  systemPrompt: requiredString(
+                    agent.system_prompt,
+                    "agent.system_prompt",
+                  ),
+                }
+              : {
+                  endpoint: requiredString(agent.endpoint, "agent.endpoint"),
+                },
+        },
+      ];
     },
   );
   const agentIds = new Set(agents.map((agent) => agent.id));
@@ -298,7 +312,7 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       const permittedAgents = stringArray(
         channel.permitted_agents,
         "channel.permitted_agents",
-      );
+      ).filter((agentId) => !omittedAgentIds.has(agentId));
       for (const agentId of permittedAgents) {
         if (!agentIds.has(agentId)) {
           throw new Error(`channel references unknown agent "${agentId}"`);

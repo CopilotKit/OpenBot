@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AgentCard } from "@/components/agents/agent-card";
 import { Composer, toAgentOptions } from "@/components/channels/composer";
 import { agentListQueryOptions } from "@/lib/agents/queries";
+import { routeMessage } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
 import { appConfig } from "@/lib/generated/application-config";
 
@@ -36,12 +37,21 @@ function RouteComponent() {
           className="w-full max-w-2xl"
           disabled={!fallback}
           onSubmit={async (draft) => {
-            // A channel is pinned to one coworker for the life of its thread.
-            const agentId = draft.agentId ?? fallback?.id;
-            if (!agentId) return;
-
+            // A channel is pinned to one coworker for the life of its thread, so the coworker is
+            // chosen now, before it is created. An `@` is an explicit choice and is honoured as-is.
+            // With no `@`, the message is routed to the coworker it is for; if that routing cannot
+            // run, it falls back to the same default the composer used to always use.
             setError(null);
             try {
+              let agentId: string | undefined = draft.agentId ?? undefined;
+              if (!agentId) {
+                try {
+                  agentId = (await routeMessage(draft.text)).agentId;
+                } catch {
+                  agentId = fallback?.id;
+                }
+              }
+              if (!agentId) return;
               await start(agentId, draft.text);
             } catch (caught) {
               setError(
@@ -58,7 +68,8 @@ function RouteComponent() {
           // Said out loud: a message that silently reaches somebody you did not choose is the
           // kind of surprise that costs trust the first time it happens.
           <p className="mt-2 w-full max-w-2xl text-xs text-muted-foreground text-center">
-            Goes to {fallback.name}. Type <code>@</code> to reach somebody else.
+            Sent to the coworker it is for. Type <code>@</code> to choose one
+            yourself.
           </p>
         ) : null}
         {error ? (

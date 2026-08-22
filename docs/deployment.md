@@ -68,11 +68,16 @@ and the fix would not be available.
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted |
 | `COPILOTKIT_LICENSE_TOKEN` | from `npx copilotkit@latest license --write` |
-| `MANAGED_AGENT_AG_UI_URL` | the AG-UI endpoint for the example remote Bot |
 | a model key | `OPENAI_API_KEY`, or the provider you configured |
 
 `COMPUTER_TOKEN` is generated at start if you do not set one. Both processes that need it are inside
 the container, so there is nothing to share it with.
+
+`MANAGED_AGENT_AG_UI_URL` is not required here. The image does not carry `agent-langgraph` or
+`agent-bot`. Leave it unset and the shipped Risk Analyst coworker is omitted rather than registered
+against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when a Bot is actually
+reachable from this container. Unset it if your `.env` still has the laptop default
+`http://localhost:4201/ag-ui`.
 
 **Authentication is required.** With no identity provider configured the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
@@ -98,12 +103,11 @@ docker run --rm --env-file .env openbot \
   sh -c "cd /app/server && bun x drizzle-kit migrate --config=drizzle.config.ts"
 ```
 
-## One replica, for now
+## Replicas
 
-Run one. The gateway still caches the page snapshot a Bot resolves element references against in
-process memory, so a second replica answers a click with a snapshot it never took. The symptom is an
-element that cannot be found, intermittently, which reads as a flaky Bot rather than as a
-configuration problem. Pin the platform's maximum instance count until that moves to the database.
+The page snapshot a Bot resolves element references against lives in Postgres, so a second replica
+can answer a click the first one snapshotted. Run more than one if the platform wants it. The
+supervisor is still not in this image, so every replica shares the one browser inside it.
 
 ## Platform notes
 

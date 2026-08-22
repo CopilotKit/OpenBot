@@ -40,4 +40,4 @@ agents:
     role_description: Investigate policies, transaction monitoring, and control evidence.
     avatar_seed: risk-analyst
     type: remote-ag-ui
-    endpoint: ${MANAGED_AGENT_AG_UI_URL:-http://localhost:4201/ag-ui}
+    endpoint: ${MANAGED_AGENT_AG_UI_URL:-}

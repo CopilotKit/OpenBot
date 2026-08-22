@@ -6,6 +6,7 @@ import {
   AgentNotManageableError,
   type AgentProfileStore,
   createAgentProfileStore,
+  ManagedAgentUnavailableError,
   ProtectedAgentError,
 } from "../src/agents/profile-store";
 import type {
@@ -220,6 +221,20 @@ async function racePackageAttachment(
 }
 
 describe("agent profile store integration", () => {
+  test("refuses to create a coworker with no endpoint when this deployment has no managed Bot", async () => {
+    const owner = await createUser();
+    const withoutManaged = createAgentProfileStore(database, undefined);
+
+    await expect(
+      withoutManaged.create(owner, {
+        name: "No Endpoint",
+        title: "Needs an address",
+        roleDescription: "Should not land on a missing Bot.",
+        visibility: "private",
+      }),
+    ).rejects.toBeInstanceOf(ManagedAgentUnavailableError);
+  });
+
   test("lets an owner and admin get and list a private profile but hides it from another user", async () => {
     const owner = await createUser();
     const other = await createUser();
