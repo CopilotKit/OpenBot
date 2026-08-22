@@ -249,8 +249,6 @@ describe("the crappy paths: secrets", () => {
  * asking for sign-in before I can read the PRD document" from a conversation minutes earlier.
  */
 describe("an unanswered request to take the wheel", () => {
-  const at = (iso: string) => () => iso;
-
   test("is still shown inside the window", () => {
     let clock = "2026-08-22T03:00:00.000Z";
     const control = createControl(() => clock);
