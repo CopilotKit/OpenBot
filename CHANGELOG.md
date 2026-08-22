@@ -189,6 +189,16 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **The audit trail could be erased with one statement.** It is append-only because a database
+  trigger refuses updates and deletes, and that trigger is row-level, so `TRUNCATE` never reached it.
+  Anything holding `DATABASE_URL` could empty the table and nothing raised. That is the case the
+  guarantee exists for: the trail is enforced in the database rather than the application precisely
+  because the application is not the only thing that reaches it. A statement-level trigger now refuses
+  a truncate, and it answers before the retention setting is read, so declaring a retention window no
+  longer permits one. Retention itself is unchanged: rows older than the window are still removed, and
+  recent ones are still refused. Note that the connection the application uses is the database owner
+  in the shipped compose file, and an owner can still disable or drop a trigger; closing that needs a
+  role with `INSERT` and `SELECT` only, which is a separate change.
 - **A Bot could reach the deployment's own network by writing the address a different way.** The
   guard refused `169.254.169.254` and the private ranges as usually written, but not the same
   addresses spelled as an IPv6-mapped or NAT64 form, an integer, or with a trailing dot, so a Bot
