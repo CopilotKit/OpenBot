@@ -47,16 +47,6 @@ export const credentialKind = pgEnum("credential_kind", [
    */
   "mcp_user_token",
 ]);
-export const connectorType = pgEnum("connector_type", [
-  "google_drive",
-  "onedrive",
-]);
-export const syncStatus = pgEnum("sync_status", [
-  "pending",
-  "running",
-  "succeeded",
-  "failed",
-]);
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -337,59 +327,6 @@ export const credentials = pgTable("credentials", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
-
-export const connectorInstances = pgTable("connector_instances", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  type: connectorType("type").notNull(),
-  credentialId: uuid("credential_id").references(() => credentials.id, {
-    onDelete: "set null",
-  }),
-  status: syncStatus("status").notNull().default("pending"),
-  sourceMetadata: jsonb("source_metadata").notNull(),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
-
-export const connectorCursors = pgTable("connector_cursors", {
-  connectorInstanceId: uuid("connector_instance_id")
-    .primaryKey()
-    .references(() => connectorInstances.id, { onDelete: "cascade" }),
-  cursor: text("cursor"),
-  updatedAt: updatedAt(),
-});
-
-export const webhookSubscriptions = pgTable("webhook_subscriptions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  connectorInstanceId: uuid("connector_instance_id")
-    .notNull()
-    .references(() => connectorInstances.id, { onDelete: "cascade" }),
-  providerSubscriptionId: text("provider_subscription_id").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }),
-  createdAt: createdAt(),
-});
-
-export const syncRuns = pgTable(
-  "sync_runs",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    connectorInstanceId: uuid("connector_instance_id")
-      .notNull()
-      .references(() => connectorInstances.id, { onDelete: "cascade" }),
-    status: syncStatus("status").notNull(),
-    startedAt: timestamp("started_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    error: text("error"),
-    stats: jsonb("stats").notNull(),
-  },
-  (table) => [
-    index("sync_runs_connector_started_at_idx").on(
-      table.connectorInstanceId,
-      table.startedAt,
-    ),
-  ],
-);
 
 export const auditEvents = pgTable(
   "audit_events",
