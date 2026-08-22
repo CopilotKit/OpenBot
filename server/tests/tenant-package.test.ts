@@ -7,6 +7,8 @@ import {
   agentProfiles,
   agents,
   deploymentPackages,
+  skillTools,
+  skills as skillsTable,
   users,
 } from "../src/db/schema";
 import {
@@ -83,6 +85,7 @@ function loadedPackage(
       defaultModel: "gpt-5.6-terra",
     },
     knowledgeSources: [],
+    skills: [],
     themeCss: "",
     sourcePath: `/test/${randomUUID()}`,
     checksum: randomUUID(),
@@ -755,5 +758,298 @@ describe("expanding a package file against the environment", () => {
     expect(() => expandEnvironment("endpoint: ${AG_UI_URL}", file, {})).toThrow(
       /agents\.yaml refers to \$\{AG_UI_URL\}/,
     );
+  });
+});
+
+/**
+ * The skills a package ships, and why it ships them at all.
+ *
+ * Selection narrows a Bot's tools to the ones its matching skills declare, and a deployment starts
+ * with no skills. Left to a screen, that means the narrowing is off on every clone until somebody
+ * maps tools to skills by hand — so the declaration ships with the package that declares it, and the
+ * cases below are the ones that decide whether that is safe to seed.
+ */
+describe("skills a package ships", () => {
+  const base = {
+    brand: "tenant: { id: fintech, product_name: Ledgerline }",
+    agents:
+      "agents: [{ id: knowledge, name: Knowledge, title: Company Knowledge, role_description: Answer company questions., type: built-in, system_prompt: Answer from knowledge. }]",
+    channels: "channels: []",
+    model:
+      "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+    knowledge: "sources: []",
+    themeCss: "",
+  };
+
+  test("a package with no skills file still loads, and ships none", () => {
+    // Every package written before this existed has no `skills.yaml`, and all of them keep working.
+    expect(validateTenantPackage(base).skills).toEqual([]);
+  });
+
+  test("an empty skills file ships none", () => {
+    expect(validateTenantPackage({ ...base, skills: "   " }).skills).toEqual(
+      [],
+    );
+    expect(
+      validateTenantPackage({ ...base, skills: "skills: []" }).skills,
+    ).toEqual([]);
+  });
+
+  test("a skill carries its declared tools through unaltered", () => {
+    const { skills } = validateTenantPackage({
+      ...base,
+      skills: `skills:
+  - slug: find-a-document
+    title: Find a document
+    summary: Search the sources and read what comes back.
+    instructions: Search first, then read the file you found.
+    tools:
+      - google-drive/search_files
+      - google-drive/read_file_content`,
+    });
+    expect(skills).toHaveLength(1);
+    expect(skills[0]?.slug).toBe("find-a-document");
+    expect(skills[0]?.tools).toEqual([
+      "google-drive/search_files",
+      "google-drive/read_file_content",
+    ]);
+  });
+
+  test("a skill may declare tools for a connector nobody has added", () => {
+    /*
+     * The whole point of shipping the declaration. A package is written before anybody connects
+     * anything, so refusing an unknown ref would mean a template could only ship skills for
+     * connectors it could guarantee, which is none of them. The ref sits inert until its connector
+     * exists, because the run-time offer is intersected with the grants.
+     */
+    const { skills } = validateTenantPackage({
+      ...base,
+      skills: `skills:
+  - slug: triage
+    title: Triage
+    summary: Triage incoming issues.
+    instructions: Read the issue and classify it.
+    tools: [jira/search_issues, some-server-nobody-added/do_a_thing]`,
+    });
+    expect(skills[0]?.tools).toEqual([
+      "jira/search_issues",
+      "some-server-nobody-added/do_a_thing",
+    ]);
+  });
+
+  test("a skill needs no tools at all", () => {
+    // A skill is an instruction first. One that declares nothing is still worth shipping; it simply
+    // takes no part in narrowing.
+    const { skills } = validateTenantPackage({
+      ...base,
+      skills: `skills:
+  - slug: be-brief
+    title: Be brief
+    summary: Answer in as few words as the question allows.
+    instructions: Answer in one sentence unless asked for more.`,
+    });
+    expect(skills[0]?.tools).toEqual([]);
+  });
+
+  test("a slug nobody could type after a slash is refused", () => {
+    expect(() =>
+      validateTenantPackage({
+        ...base,
+        skills: `skills:
+  - slug: Find A Document
+    title: Find a document
+    summary: Search.
+    instructions: Search.`,
+      }),
+    ).toThrow('skill.slug "Find A Document" must be lowercase');
+  });
+
+  test("a ref that is not serverId/toolName is refused", () => {
+    // It could never match a grant, so it would sit in the table doing nothing. Better to refuse the
+    // package than to ship a skill that quietly loads no tools.
+    expect(() =>
+      validateTenantPackage({
+        ...base,
+        skills: `skills:
+  - slug: triage
+    title: Triage
+    summary: Triage.
+    instructions: Triage.
+    tools: [search_issues]`,
+      }),
+    ).toThrow(
+      'skill.tools entry "search_issues" must be in the form serverId/toolName',
+    );
+  });
+
+  test("a skill without instructions is refused", () => {
+    expect(() =>
+      validateTenantPackage({
+        ...base,
+        skills: `skills:
+  - slug: triage
+    title: Triage
+    summary: Triage.`,
+      }),
+    ).toThrow("skill.instructions must be a non-empty string");
+  });
+
+  test("editing the skills file changes the package checksum", () => {
+    // Otherwise a deployment reports itself unchanged after its skills were rewritten, and never
+    // reseeds them.
+    const one = validateTenantPackage({ ...base, skills: "skills: []" });
+    const two = validateTenantPackage({
+      ...base,
+      skills: `skills:
+  - slug: triage
+    title: Triage
+    summary: Triage.
+    instructions: Triage.`,
+    });
+    expect(one.skills).not.toEqual(two.skills);
+  });
+});
+
+/**
+ * Seeding those skills into a deployment.
+ *
+ * The parser above decides what a package may say. These decide what happens when it is applied to a
+ * database that may already have skills in it, which is where the two ways this could go wrong live:
+ * a package quietly replacing something a person wrote, and a person being able to stop the
+ * deployment booting by taking a name.
+ */
+describe("seeding the skills a package ships", () => {
+  const createdSkillIds: string[] = [];
+
+  afterEach(async () => {
+    for (const id of createdSkillIds.splice(0)) {
+      await database.delete(skillTools).where(eq(skillTools.skillId, id));
+      await database.delete(skillsTable).where(eq(skillsTable.id, id));
+    }
+  });
+
+  function withSkills(skills: LoadedTenantPackage["skills"]) {
+    const loaded = loadedPackage();
+    for (const skill of skills) createdSkillIds.push(skill.slug);
+    return { ...loaded, skills };
+  }
+
+  const skill = (
+    overrides: Partial<LoadedTenantPackage["skills"][number]> = {},
+  ) => ({
+    slug: `pkg-${randomUUID().slice(0, 8)}`,
+    title: "Find a document",
+    summary: "Search the sources and read what comes back.",
+    instructions: "Search first, then read the file you found.",
+    tools: ["google-drive/search_files", "google-drive/read_file_content"],
+    ...overrides,
+  });
+
+  test("lands as a deployment skill with its declarations", async () => {
+    const shipped = skill();
+    const loaded = withSkills([shipped]);
+    createdAgentIds.push(loaded.agents[0]?.id as string);
+    const created = await synchronizeTenantPackage(database, loaded);
+    createdPackageIds.push(created.id);
+
+    const [row] = await database
+      .select()
+      .from(skillsTable)
+      .where(eq(skillsTable.slug, shipped.slug));
+    expect(row?.origin).toBe("catalogue");
+    // Null owner is what makes it everybody's, the same as one an administrator wrote.
+    expect(row?.ownerUserId).toBeNull();
+    expect(row?.instructions).toBe(shipped.instructions);
+
+    const declared = await database
+      .select()
+      .from(skillTools)
+      .where(eq(skillTools.skillId, shipped.slug));
+    expect(declared.map((entry) => entry.ref).sort()).toEqual([
+      "google-drive/read_file_content",
+      "google-drive/search_files",
+    ]);
+  });
+
+  test("a ref for a connector nobody has added is stored anyway", async () => {
+    /*
+     * The property that makes shipping the declaration possible at all. The API path refuses a tool
+     * this deployment has never seen; a package cannot be held to that, because it is written before
+     * anybody connects anything. The ref does nothing until its connector exists.
+     */
+    const shipped = skill({ tools: ["not-added-yet/do_a_thing"] });
+    const loaded = withSkills([shipped]);
+    createdAgentIds.push(loaded.agents[0]?.id as string);
+    const created = await synchronizeTenantPackage(database, loaded);
+    createdPackageIds.push(created.id);
+
+    const declared = await database
+      .select()
+      .from(skillTools)
+      .where(eq(skillTools.skillId, shipped.slug));
+    expect(declared.map((entry) => entry.ref)).toEqual([
+      "not-added-yet/do_a_thing",
+    ]);
+  });
+
+  test("re-seeding replaces the declared set rather than adding to it", async () => {
+    const shipped = skill();
+    const first = withSkills([shipped]);
+    createdAgentIds.push(first.agents[0]?.id as string);
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, first)).id,
+    );
+
+    const narrowed = { ...shipped, tools: ["google-drive/search_files"] };
+    const second = { ...first, skills: [narrowed] };
+    await synchronizeTenantPackage(database, second);
+
+    const declared = await database
+      .select()
+      .from(skillTools)
+      .where(eq(skillTools.skillId, shipped.slug));
+    // A tool the package stopped declaring stops being declared, rather than lingering.
+    expect(declared.map((entry) => entry.ref)).toEqual([
+      "google-drive/search_files",
+    ]);
+  });
+
+  test("a skill somebody here wrote keeps its name, and the deployment still boots", async () => {
+    /*
+     * The `/` namespace is shared and first to take a name keeps it. Anybody signed in may write a
+     * skill, so a collision cannot be fatal: throwing here would let one person stop the deployment
+     * starting by choosing a name the package also uses.
+     */
+    const owner = `user_${randomUUID().slice(0, 8)}`;
+    createdUserIds.push(owner);
+    await database
+      .insert(users)
+      .values({ id: owner, email: `${owner}@example.test`, name: owner });
+
+    const shipped = skill();
+    await database.insert(skillsTable).values({
+      id: `mine-${shipped.slug}`,
+      ownerUserId: owner,
+      slug: shipped.slug,
+      title: "Mine",
+      summary: "Written here.",
+      instructions: "Do it my way.",
+      origin: "yours",
+    });
+    createdSkillIds.push(`mine-${shipped.slug}`);
+
+    const loaded = withSkills([shipped]);
+    createdAgentIds.push(loaded.agents[0]?.id as string);
+    // Resolves rather than throwing: that is the assertion.
+    const created = await synchronizeTenantPackage(database, loaded);
+    createdPackageIds.push(created.id);
+
+    const [row] = await database
+      .select()
+      .from(skillsTable)
+      .where(eq(skillsTable.slug, shipped.slug));
+    expect(row?.instructions).toBe("Do it my way.");
+    expect(row?.origin).toBe("yours");
+    expect(row?.ownerUserId).toBe(owner);
   });
 });

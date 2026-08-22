@@ -1,0 +1,68 @@
+# Skills this deployment ships, and the tools each one needs.
+#
+# A skill is a named instruction anybody here can invoke with `/`. It adds no capability: it can only
+# ask a Bot to use what that Bot was already granted, and every one of those calls is still decided,
+# policy-checked and recorded.
+#
+# `tools:` is the second thing a skill is for, and the reason this file exists rather than a screen.
+# A Bot holding more than a handful of tools is offered, per run, only the tools of the skills that
+# match the message, because a model picks the right tool reliably out of about ten and unreliably
+# out of thirty. That matching needs skills to match against, and a deployment starts with none — so
+# left to a screen, the narrowing is switched off on every clone until somebody maps tools to skills
+# by hand, in each deployment, again after each new connector. Shipping the declaration with the
+# skill is what makes connecting a connector the only step.
+#
+# NAMING A TOOL HERE GRANTS NOBODY ANYTHING. What a Bot may call is its grants, and the offer is
+# always intersected with them: a skill naming a tool its Bot does not hold loads nothing. So this
+# file may name tools for connectors this deployment has not added, and should — that is what makes
+# them work the moment somebody does.
+#
+# Refs are `<serverId>/<toolName>`, the same form a grant is written in. `google-drive` is the
+# catalogue connector; a server an administrator adds by URL uses the id it was given.
+skills:
+  - slug: find-a-document
+    title: Find a document
+    summary: Search the connected document sources for a file and read what it says.
+    instructions: >-
+      Find the document the person is asking about before answering anything about its contents.
+      Search first, then read the file you found rather than answering from its title. If the search
+      returns nothing, say so and say what you searched for, rather than guessing at what the
+      document might contain. Name the document you used.
+    tools:
+      - google-drive/search_files
+      - google-drive/read_file_content
+      - google-drive/get_file_metadata
+
+  - slug: whats-changed
+    title: What changed recently
+    summary: List recently changed documents and say who changed them and when.
+    instructions: >-
+      List what has changed recently in the sources you can reach, newest first. Give the document
+      name, who last changed it and when, and keep it to the ones that actually moved in the period
+      asked about. Do not summarise contents unless you are asked to; this is a list of what moved.
+    tools:
+      - google-drive/list_recent_files
+      - google-drive/get_file_metadata
+
+  - slug: who-owns-this
+    title: Who owns this
+    summary: Find who owns a document and when they last touched it.
+    instructions: >-
+      Identify the owner of the document being asked about, and say when it was last changed. Search
+      for the document first if you were given a name rather than a link. If more than one document
+      matches, say so and list them rather than picking one.
+    tools:
+      - google-drive/search_files
+      - google-drive/get_file_metadata
+
+  - slug: check-a-claim
+    title: Check a claim against a source
+    summary: Take a statement and check it against what the documents actually say.
+    instructions: >-
+      You are checking a claim, not answering a question. Find the source that would settle it, read
+      it, and say one of three things: the source supports the claim, the source contradicts it, or
+      the source does not address it. Quote the sentence you are relying on. Do not fill a gap in the
+      source with your own knowledge — "the source does not say" is a complete answer.
+    tools:
+      - google-drive/search_files
+      - google-drive/read_file_content

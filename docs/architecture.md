@@ -146,6 +146,8 @@ Every MCP call checks the grant first, then evaluates the same action policy eng
 
 A model picks the right tool reliably out of about ten, and unreliably out of thirty. A deployment that connects two vendors passes that point on its first afternoon, so a Bot holding more than a handful of tools is offered, per run, only the tools of the skills that match the message.
 
+Skills come from two places: a person writes one, or the tenant package ships one in `skills.yaml`. Package skills are seeded on boot as deployment skills, carrying the tool refs they need, which is what lets narrowing work on a fresh clone instead of waiting for somebody to map tools to skills by hand. A slug a person already took stays theirs and the package loses that skill rather than the deployment refusing to start.
+
 A skill declares the tools it needs (`skill_tools`). Before the run starts, the deployment asks its own model which skills the message needs, and the Bot is built with those skills' tools plus every granted tool no skill claims. A declaration grants nothing: the offer is always intersected with what the Bot was already granted, so writing a skill can never hand anybody a tool.
 
 This narrows the offer. It is not a boundary, and it never substitutes for one. The grant, the policy and the audit row decide what may happen; this decides only what the model can see. Every way it can fail — no skills declared, a model that cannot answer, a message that matches nothing, twelve tools or fewer — leaves the whole catalogue offered, because a narrowing that failed closed would remove capability an administrator granted, silently. `mcp.tools_discovered` records what was offered, out of how much, and why.

@@ -11,6 +11,8 @@ import {
   channelAgents,
   channels as channelTable,
   deploymentPackages,
+  skillTools,
+  skills as skillTable,
 } from "./db/schema";
 
 const approvedThemeVariables = new Set([
@@ -84,7 +86,43 @@ type PackageFiles = {
   channels: string;
   model: string;
   knowledge: string;
+  /**
+   * Optional, unlike the five above, because packages written before skills shipped do not have it
+   * and must keep loading. Absent means a deployment with no skills of its own, which is what every
+   * package had until now.
+   */
+  skills?: string;
   themeCss: string;
+};
+
+/**
+ * A skill the package ships, and the tools it says it needs.
+ *
+ * WHY THE PACKAGE AND NOT A SCREEN. Selection narrows a Bot's tools to the ones the matching skills
+ * declare, so with no skills there is nothing to match and the narrowing never switches on. Every
+ * deployment starts with no skills, so left to a screen the feature is off on every clone until
+ * somebody sits down and maps tools to skills by hand — in each deployment, again after each new
+ * connector. That is curation work a product with a services team can absorb and a template cannot.
+ *
+ * So the declaration ships with the thing that declares it. A package skill names the tools it needs
+ * the way it names its own instructions, and connecting the connector is the only step left.
+ */
+export type TenantSkill = {
+  slug: string;
+  title: string;
+  summary: string;
+  instructions: string;
+  /**
+   * `<serverId>/<toolName>` refs, and deliberately NOT checked against the tools this deployment has
+   * seen.
+   *
+   * A package is written before anybody connects anything, so it names tools for connectors that may
+   * not be added yet and may never be. An unknown ref has to sit there inert — the run-time
+   * intersection drops it, which is why `skill_tools` carries no foreign key. Refusing to load the
+   * package over one would mean a template could only ship skills for connectors it could guarantee,
+   * which is none of them.
+   */
+  tools: string[];
 };
 
 type TenantAgent = {
@@ -130,6 +168,8 @@ export type TenantPackage = {
     type: "google-drive" | "microsoft-onedrive";
     roots: string[];
   }[];
+  /** What `skills.yaml` ships, or empty for a package that has none. */
+  skills: TenantSkill[];
   themeCss: string;
 };
 
@@ -252,6 +292,11 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
   const channelsYaml = yaml(files.channels, "channels.yaml");
   const modelYaml = yaml(files.model, "model.yaml");
   const knowledgeYaml = yaml(files.knowledge, "knowledge.yaml");
+  // Absent is a package with no skills, not a malformed one. A file that is present and wrong is
+  // still refused, the way every other file here is.
+  const skillsYaml = files.skills?.trim()
+    ? yaml(files.skills, "skills.yaml")
+    : {};
   const tenant = asRecord(brand.tenant, "brand.tenant");
   const skin =
     brand.skin === undefined ? undefined : asRecord(brand.skin, "brand.skin");
@@ -382,8 +427,51 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       defaultModel: requiredString(model.default_model, "model.default_model"),
     },
     knowledgeSources: sources,
+    skills: parseTenantSkills(skillsYaml.skills),
     themeCss: files.themeCss,
   };
+}
+
+/**
+ * The skills a package ships, as rows a deployment can be seeded with.
+ *
+ * A slug is what a person types after `/`, so the shape the API enforces is enforced here too: a
+ * package shipping `Find A Document` would create a command nobody can type.
+ */
+function parseTenantSkills(value: unknown): TenantSkill[] {
+  if (value === undefined || value === null) return [];
+  return asList(value, "skills.yaml skills").map((entry) => {
+    const skill = asRecord(entry, "skill");
+    const slug = requiredString(skill.slug, "skill.slug");
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+      throw new Error(
+        `skill.slug "${slug}" must be lowercase letters, digits and hyphens, and start with a letter or digit`,
+      );
+    }
+    const tools =
+      skill.tools === undefined || skill.tools === null
+        ? []
+        : stringArray(skill.tools, "skill.tools").map((ref) => {
+            /*
+             * `<serverId>/<toolName>` is the one shape a grant and a declaration share, so a ref in
+             * any other shape can never match a grant and would sit in the table doing nothing.
+             * Refused here rather than left to be discovered as a skill that quietly loads no tools.
+             */
+            if (!/^[^/\s]+\/[^/\s]+$/.test(ref)) {
+              throw new Error(
+                `skill.tools entry "${ref}" must be in the form serverId/toolName`,
+              );
+            }
+            return ref;
+          });
+    return {
+      slug,
+      title: requiredString(skill.title, "skill.title"),
+      summary: requiredString(skill.summary, "skill.summary"),
+      instructions: requiredString(skill.instructions, "skill.instructions"),
+      tools,
+    };
+  });
 }
 
 export async function loadTenantPackage(
@@ -411,19 +499,37 @@ export async function loadTenantPackage(
       throw error;
     },
   );
+  /*
+   * Optional, like `theme.css` and unlike the five required files.
+   *
+   * Every package written before skills shipped has no `skills.yaml`, and those packages have to go
+   * on loading. Missing is a deployment with no skills of its own; present and malformed is still
+   * refused.
+   */
+  const skills = await readFile(join(sourcePath, "skills.yaml"), "utf8")
+    .then((file) => expandEnvironment(file, "skills.yaml"))
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    });
   const tenantPackage = validateTenantPackage({
     brand,
     agents,
     channels,
     model,
     knowledge,
+    skills,
     themeCss,
   });
 
   return {
     ...tenantPackage,
     sourcePath,
-    checksum: createHash("sha256").update(contents.join("\n")).digest("hex"),
+    // `skills` is in the checksum, so editing it is a package change like any other and the
+    // deployment notices on the next boot rather than reporting itself unchanged.
+    checksum: createHash("sha256")
+      .update([...contents, skills].join("\n"))
+      .digest("hex"),
   };
 }
 
@@ -564,6 +670,81 @@ export async function synchronizeTenantPackage(
           channel.permittedAgents.map((agentId) => ({
             channelId: channel.id,
             agentId,
+          })),
+        );
+      }
+    }
+
+    /*
+     * The skills the package ships, and what each one declares it needs.
+     *
+     * A DEPLOYMENT SKILL, not a person's: `owner_user_id` is null, so everybody sees it in their `/`
+     * menu, the same as one an administrator wrote. `origin` says where it came from, which is the
+     * only thing distinguishing it from an administrator's own on the Skills page.
+     *
+     * The declared refs are NOT checked against `mcp_tools` here, unlike the API path, which refuses
+     * a tool this deployment has never seen. A package is written before anybody connects anything,
+     * so it necessarily names tools for connectors that may not be added yet — and that is the point
+     * of shipping it. An unknown ref sits inert until its connector exists, because the run-time
+     * intersection only ever offers what the Bot was granted.
+     */
+    for (const skill of tenantPackage.skills) {
+      const [seeded] = await transaction
+        .insert(skillTable)
+        .values({
+          id: skill.slug,
+          ownerUserId: null,
+          slug: skill.slug,
+          title: skill.title,
+          summary: skill.summary,
+          instructions: skill.instructions,
+          origin: "catalogue",
+          installedBy: null,
+        })
+        .onConflictDoUpdate({
+          target: skillTable.slug,
+          /*
+           * Only ever a package skill. The `/` namespace is shared and first to take a name keeps
+           * it, so a person who wrote their own skill under this slug keeps theirs and the package
+           * loses one — rather than the package silently replacing something somebody wrote.
+           *
+           * A collision is skipped rather than thrown, unlike the agent case above. Anybody signed
+           * in may write a skill, so throwing would let one person stop the deployment booting by
+           * choosing a name.
+           */
+          setWhere: eq(skillTable.origin, "catalogue"),
+          set: {
+            title: skill.title,
+            summary: skill.summary,
+            instructions: skill.instructions,
+            updatedAt: new Date(),
+          },
+        })
+        .returning({ id: skillTable.id });
+
+      if (!seeded) {
+        console.warn(
+          JSON.stringify({
+            type: "package-skill-skipped",
+            slug: skill.slug,
+            reason:
+              "a skill written in this deployment already answers to that name, and it keeps it",
+          }),
+        );
+        continue;
+      }
+
+      // Replaced wholesale, so a tool the package stopped declaring stops being declared. The same
+      // rule the API path applies, and the reason the table is keyed on (skill, ref).
+      await transaction
+        .delete(skillTools)
+        .where(eq(skillTools.skillId, seeded.id));
+      if (skill.tools.length > 0) {
+        await transaction.insert(skillTools).values(
+          skill.tools.map((ref) => ({
+            skillId: seeded.id,
+            ref,
+            declaredBy: null,
           })),
         );
       }

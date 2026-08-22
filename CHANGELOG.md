@@ -8,6 +8,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A package ships its skills, so tool selection works on a clone
+
+Tool selection narrows a Bot's tools to the ones its matching skills declare, and a deployment starts
+with no skills at all. There was no `skills.yaml`, nothing seeded any, and nothing ever created one
+— so on every fresh clone there was nothing to match against and the narrowing never switched on.
+Left to a screen it would have stayed that way until somebody sat down and mapped tools to skills by
+hand, in each deployment, again after each new connector.
+
+A tenant package may now carry `skills.yaml`. Each skill has a slug, a title, a summary, its
+instructions, and the `serverId/toolName` refs it needs. They are seeded on boot as deployment
+skills, everybody sees them in the `/` menu, and connecting a connector is the only step left.
+
+`skills.yaml` is optional, so every existing package loads unchanged and ships no skills. A package
+may declare tools for a connector nobody has added: an unknown ref sits inert, because the offer is
+still intersected with the Bot's grants. Naming a tool in a package grants nothing, exactly as
+before.
+
+A skill somebody wrote in the deployment keeps its name. If a package ships a slug a person already
+took, theirs stands, the package loses that one, and the deployment starts — a name is not worth
+refusing to boot over.
+
+The example package ships four: `/find-a-document`, `/whats-changed`, `/who-owns-this` and
+`/check-a-claim`.
+
 ## 0.0.3
 
 ### A Bot is offered the tools its message needs, not every tool it holds

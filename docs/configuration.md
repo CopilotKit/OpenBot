@@ -260,7 +260,7 @@ Set `OPENBOT_ONE_COMPUTER_EACH=false` when using `start.sh` to run all Bots agai
 
 ## Tenant package
 
-The tenant package contains five required YAML files:
+The tenant package contains five required YAML files, and one optional:
 
 ```text
 examples/fintech/
@@ -268,7 +268,8 @@ examples/fintech/
 ├── agents.yaml
 ├── channels.yaml
 ├── model.yaml
-└── knowledge.yaml
+├── knowledge.yaml
+└── skills.yaml      (optional)
 ```
 
 ### `brand.yaml`
@@ -382,6 +383,30 @@ sources:
 ```
 
 Supported source types are `google-drive` and `microsoft-onedrive`.
+
+### `skills.yaml` (optional)
+
+```yaml
+skills:
+  - slug: find-a-document
+    title: Find a document
+    summary: Search the connected document sources for a file and read what it says.
+    instructions: >-
+      Search first, then read the file you found rather than answering from its title.
+    tools:
+      - google-drive/search_files
+      - google-drive/read_file_content
+```
+
+Each skill becomes a deployment skill on boot: everybody sees it in the `/` menu, and which Bots carry it is decided in Admin like any other.
+
+`tools` is why this file matters beyond the instructions. A Bot holding more than twelve tools is offered, per run, only the tools of the skills that match the message, so the matching needs skills to match against. Shipping the declaration with the skill is what makes connecting a connector the only step; without it a deployment has no skills, nothing matches, and the narrowing never switches on.
+
+Refs are `serverId/toolName`, the same form a grant is written in. A package may name tools for a connector nobody has added — the ref sits inert until that connector exists, because what a Bot is offered is always intersected with what it was granted. **Naming a tool here grants nothing.**
+
+Slugs are lowercase letters, digits and hyphens. If a package ships a slug somebody in the deployment already wrote a skill under, theirs keeps the name, the package loses that skill, and startup continues.
+
+Omit the file entirely for a package with no skills.
 
 ## Change workflow
 
