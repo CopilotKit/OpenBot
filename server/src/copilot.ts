@@ -13,7 +13,7 @@ import {
 } from "../../shared/bot-prompt";
 import { grantedToolGuidance } from "./plugins/tools";
 import type { AgentActor } from "./agents/profile-types";
-import type { StallGuard } from "./channels/stall-guard";
+import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import type { GrantedTool } from "./plugins/tools";
 
@@ -271,6 +271,14 @@ export async function buildAgents(
   signRun?: SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
   computerGuidance?: string,
+  /**
+   * The fetch a remote agent is dialled with.
+   *
+   * Absent uses the runtime's own, which follows redirects wherever they point. A deployment passes
+   * one that re-checks each hop, because the address a registration was validated against and the
+   * address a run finally reaches are only the same address while nobody redirects.
+   */
+  agentFetch?: AgentFetch,
 ): Promise<Record<string, AbstractAgent>> {
   return Object.fromEntries(
     await Promise.all(
@@ -284,6 +292,7 @@ export async function buildAgents(
           loadTools,
           signRun,
           computerGuidance,
+          agentFetch,
         ),
       ]),
     ),
@@ -298,6 +307,7 @@ async function buildAgent(
   loadTools: LoadToolsForBot,
   signRun?: SignRun,
   computerGuidance?: string,
+  agentFetch?: AgentFetch,
 ): Promise<AbstractAgent> {
   if (agent.type === "built_in") {
     return new BuiltInAgent(
@@ -318,6 +328,7 @@ async function buildAgent(
     stallGuard,
     await loadTools(agent.id),
     signRun,
+    agentFetch,
   );
 }
 
@@ -345,6 +356,7 @@ function remoteAgentWithStandingRole(
    */
   tools: GrantedTool[] = [],
   signRun?: SignRun,
+  agentFetch?: AgentFetch,
 ) {
   const remote = new HttpAgent({
     url: agent.endpoint,
@@ -352,9 +364,18 @@ function remoteAgentWithStandingRole(
     // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
     // `{ url, headers?, fetch? }`, verified against @ag-ui/client 0.0.57.
     ...(agent.headers ? { headers: agent.headers } : {}),
+    // The watch wraps whichever fetch is underneath, so a deployment gets both the stall timeout and
+    // the redirect check rather than having to choose.
     ...(stallGuard
-      ? { fetch: stallGuard.watch({ id: agent.id, name: agent.name }) }
-      : {}),
+      ? {
+          fetch: stallGuard.watch(
+            { id: agent.id, name: agent.name },
+            agentFetch,
+          ),
+        }
+      : agentFetch
+        ? { fetch: agentFetch }
+        : {}),
   });
   /*
    * What this Bot holds, as a second standing message.
@@ -467,6 +488,7 @@ export async function resolveRuntimeAgents(
   loadTools?: LoadToolsForBot,
   signRun?: SignRun,
   computerGuidance?: string,
+  agentFetch?: AgentFetch,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -486,6 +508,7 @@ export async function resolveRuntimeAgents(
     loadTools,
     signRun,
     computerGuidance,
+    agentFetch,
   );
 }
 
@@ -533,6 +556,7 @@ export function createRequestAgents(
   signRunForActor?: (actorId: string) => SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
   computerGuidance?: string,
+  agentFetch?: AgentFetch,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -544,6 +568,7 @@ export function createRequestAgents(
       loadToolsForActor?.(actor.id),
       signRunForActor?.(actor.id),
       computerGuidance,
+      agentFetch,
     );
   };
 }
@@ -570,6 +595,8 @@ export function mountCopilotRuntime(
   stallGuard: StallGuard,
   loadToolsForActor?: (actorId: string) => LoadToolsForBot,
   signRunForActor?: (actorId: string) => SignRun,
+  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
+  agentFetch?: AgentFetch,
   basePath = "/api/copilotkit",
 ) {
   const { intelligence } = config.runtime;
@@ -609,6 +636,7 @@ export function mountCopilotRuntime(
        * as impossible. Absent computer, absent guidance: a Bot is not told about hands it has not got.
        */
       config.computer ? COMPUTER_GUIDANCE : undefined,
+      agentFetch,
     ) as never,
   });
 

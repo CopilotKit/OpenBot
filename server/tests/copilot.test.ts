@@ -210,6 +210,102 @@ describe("registered Copilot agents", () => {
   });
 
   /*
+   * The dialling fetch reaches a remote Bot, through the guard and without one.
+   *
+   * Same sentinel trick as below, and for the same reason. This is the wiring that keeps the endpoint
+   * check applied at run time: a registration is validated once, and every run afterwards dials that
+   * address again, so the fetch that follows a redirect has to be the one that re-checks where it
+   * goes.
+   */
+  test("dials a remote Bot with the fetch it was given, guarded or not", async () => {
+    const dialler = async () => new Response(null);
+    const registered = [
+      {
+        id: "risk",
+        name: "Risk",
+        type: "remote_ag_ui" as const,
+        endpoint: "http://risk.internal/ag-ui",
+      },
+    ];
+    const model = { provider: "openai" as const, defaultModel: "gpt-4.1" };
+
+    const plain = (
+      await buildAgents(
+        registered,
+        model,
+        null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        dialler,
+      )
+    ).risk;
+    if (!(plain instanceof HttpAgent))
+      throw new Error("Expected the remote agent");
+    expect(plain.fetch).toBe(dialler);
+
+    // With a timeout configured the watch wraps it, so the guard is handed the dialling fetch rather
+    // than replacing it. A deployment gets both, not whichever was wired last.
+    let handed: unknown;
+    const watched = (
+      await buildAgents(
+        registered,
+        model,
+        null,
+        {
+          watch: (_bot: { id: string; name: string }, inner?: unknown) => {
+            handed = inner;
+            return dialler;
+          },
+          stop: () => undefined,
+        } as never,
+        undefined,
+        undefined,
+        undefined,
+        dialler,
+      )
+    ).risk;
+    if (!(watched instanceof HttpAgent))
+      throw new Error("Expected the remote agent");
+    expect(handed).toBe(dialler);
+  });
+
+  /*
+   * The same fetch, but arriving the way the server actually builds agents.
+   *
+   * `buildAgents` is not what the runtime calls; `resolveRuntimeAgents` is, and it takes the fetch as
+   * its own parameter. A parameter accepted and not forwarded looks identical from the outside to one
+   * that works, and the run would quietly go back to the runtime's own fetch, which follows a
+   * redirect anywhere.
+   */
+  test("carries the dialling fetch through resolveRuntimeAgents", async () => {
+    const dialler = async () => new Response(null);
+    const agents = await resolveRuntimeAgents(
+      async () => [
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui" as const,
+          endpoint: "http://risk.internal/ag-ui",
+        },
+      ],
+      { provider: "openai" as const, defaultModel: "gpt-4.1" },
+      async () => null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      dialler,
+    );
+
+    const risk = agents.risk;
+    if (!(risk instanceof HttpAgent))
+      throw new Error("Expected the remote agent");
+    expect(risk.fetch).toBe(dialler);
+  });
+
+  /*
    * Told apart by a sentinel, because nothing else tells them apart.
    *
    * @ag-ui/client fills `fetch` in with a wrapper of its own whenever the config does not carry one,
