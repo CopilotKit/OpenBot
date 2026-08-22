@@ -113,6 +113,51 @@ describe("keeping the audit trail to a retention policy", () => {
     expect(await remaining()).toBe(1);
   });
 
+  test("the database refuses a malformed window even when the caller does not", async () => {
+    // The test above stops in TypeScript: sweepAuditTrail returns before it opens a connection, so
+    // it proves the caller's guard and says nothing about the trigger. The trigger has its own
+    // branch for this and nothing exercised it, which is the shape where a guard reads as covered
+    // and is not. These set the value the sweep would set and then delete directly.
+    await event(400, 1);
+
+    for (const window of ["0", "-1", "", "garbage"]) {
+      await refusedAsAppendOnly(() =>
+        database.transaction(async (tx) => {
+          await tx.execute(
+            sql`select set_config('openbot.audit_retention_days', ${window}, true)`,
+          );
+          await tx.delete(auditEvents).where(eq(auditEvents.targetType, MARKER));
+        }),
+      );
+    }
+    expect(await remaining()).toBe(1);
+  });
+
+  test("the trail cannot be truncated away", async () => {
+    // TRUNCATE does not fire row-level triggers, so audit_events_append_only never ran and the whole
+    // trail went in one statement. The guard for it has to answer before the retention setting is
+    // read: a statement trigger has no OLD row, so a version that reaches the window comparison
+    // returns NULL there and permits the truncate. It refuses only while the setting is unset, which
+    // is the case a happy-path test would pick.
+    await event(400, 1);
+
+    await refusedAsAppendOnly(() =>
+      database.execute(sql`truncate table ${auditEvents}`),
+    );
+    expect(await remaining()).toBe(1);
+
+    // The setting that makes a delete legal must not make a truncate legal.
+    await refusedAsAppendOnly(() =>
+      database.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('openbot.audit_retention_days', '30', true)`,
+        );
+        await tx.execute(sql`truncate table ${auditEvents}`);
+      }),
+    );
+    expect(await remaining()).toBe(1);
+  });
+
   test("a row exactly inside the window survives", async () => {
     // The boundary. Off by a day here means a deployment promising 90 days keeps 89.
     await event(89, 1);

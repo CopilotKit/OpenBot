@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { createApp } from "../src/app";
 import {
   auditEventTypes,
@@ -98,15 +98,29 @@ describe("audit payload redaction", () => {
 });
 
 describe("audit event immutability", () => {
-  test("installs a database trigger that rejects updates and deletes", async () => {
-    const migration = await readFile(
-      new URL("../drizzle/0000_schema.sql", import.meta.url),
-      "utf8",
-    );
+  // What the trigger DOES is proved against a real database in
+  // audit-retention.integration.test.ts. This asserts only that the guard is still installed by
+  // some migration, because reading 0000 alone stopped being true: 0007 replaced the function and
+  // 0012 replaced it again and added the truncate trigger, so the old assertions described a
+  // definition no database runs. A mirror test pinned to one file passes while the thing it
+  // describes is edited out from under it.
+  test("some migration still installs the append-only guard", async () => {
+    const directory = new URL("../drizzle/", import.meta.url);
+    const files = (await readdir(directory))
+      .filter((name) => name.endsWith(".sql"))
+      .sort();
+    const chain = (
+      await Promise.all(
+        files.map((name) => readFile(new URL(name, directory), "utf8")),
+      )
+    ).join("\n");
 
-    expect(migration).toContain("CREATE FUNCTION prevent_audit_event_mutation");
-    expect(migration).toContain("BEFORE UPDATE OR DELETE ON audit_events");
-    expect(migration).toContain("Audit events are append-only");
+    expect(chain).toContain("FUNCTION prevent_audit_event_mutation");
+    expect(chain).toContain("BEFORE UPDATE OR DELETE ON audit_events");
+    expect(chain).toContain("BEFORE TRUNCATE ON audit_events");
+    expect(chain).toContain("Audit events are append-only");
+    expect(chain).not.toContain("DROP TRIGGER audit_events_append_only");
+    expect(chain).not.toContain("DROP TRIGGER audit_events_no_truncate");
   });
 });
 
