@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.4
+
 ### A click citing a ref this deployment cannot resolve is refused
 
 A Bot acts on a page by citing a ref from a snapshot, and the server turns that ref back into the
