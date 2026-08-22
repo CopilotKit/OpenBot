@@ -30,6 +30,11 @@ digit. The same rule container and volume names have always followed. A deployme
 `AUDIT_RETENTION_DAYS` is new and unset, which keeps the audit trail forever, as before. Set it to a
 whole number of days to have old rows removed.
 
+The local document index and the old connector tables are dropped by migration. `documents`,
+`chunks`, `document_acls` and the four connector-bookkeeping tables are removed and their rows go
+with them; this cannot be rolled back. A deployment that had been syncing into the local index loses
+that copy, which is the point: answering now goes through a live system's own search.
+
 **An MCP server pointed at a credential that no longer exists loses the pointer.** `mcp_servers`
 now names its credential with a real foreign key, where the column was `text` against a `uuid`
 primary key with nothing checking it — so a deployment is allowed to be holding a pointer to a vault
@@ -69,7 +74,7 @@ Sessions survive and nobody signs in again.
   that system's own search as the person asking, so the vendor decides what they may see and there is
   no second copy of anybody's documents here to keep in step, to secure, or to leave behind when
   somebody is removed. The local index that was being filled — `documents`, `chunks` and
-  `document_acls` — is read by nothing, and the connector that filled it has been removed. Retrieval over
+  `document_acls` — and the connector that filled it have both been dropped. Retrieval over
   a copy of a customer's corpus is not a thing OpenBot does.
 
 ### Added
