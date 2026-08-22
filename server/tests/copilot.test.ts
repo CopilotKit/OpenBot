@@ -233,6 +233,7 @@ describe("registered Copilot agents", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
         dialler,
       )
     ).risk;
@@ -255,6 +256,7 @@ describe("registered Copilot agents", () => {
           },
           stop: () => undefined,
         } as never,
+        undefined,
         undefined,
         undefined,
         dialler,
@@ -286,6 +288,7 @@ describe("registered Copilot agents", () => {
       ],
       { provider: "openai" as const, defaultModel: "gpt-4.1" },
       async () => null,
+      undefined,
       undefined,
       undefined,
       undefined,

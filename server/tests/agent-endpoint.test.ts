@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { agentAuthHeaders, storeAgentAuth } from "../src/agents/auth-header";
 import { testAgentConnection } from "../src/agents/connection-test";
-import { checkAgentEndpoint } from "../src/agents/endpoint";
+import { checkAgentEndpoint, createAgentFetch } from "../src/agents/endpoint";
 import { parseAgentInput } from "../src/agents/routes";
 
 /** A 32-byte key, as the vault expects. */
@@ -304,5 +304,214 @@ describe("the key a customer's agent sits behind", () => {
     });
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.value.auth).toBeUndefined();
+  });
+});
+
+/**
+ * The fetch a run is dialled with, rather than the check a registration passed.
+ *
+ * The address in the database was allowed once, by whatever rules were in force that day, and every
+ * run afterwards dials it again. So this fetch re-asks the question on the way out: the stored
+ * address is checked before the first byte, and each redirect is checked before it is followed.
+ *
+ * The second half is what a redirect does to the things the request is carrying. A hop that leaves
+ * the host it was authorised for is a hop to somebody else, and everything on that request that
+ * proves who we are, the customer's key in the headers and this deployment's own signed run in the
+ * body, has to stop there.
+ */
+describe("dialling a stored agent endpoint", () => {
+  /** A fetch that records what it was asked to do and answers however the test says. */
+  function recorder(answers: Array<() => Response>) {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    let index = 0;
+    const impl = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      const answer = answers[Math.min(index, answers.length - 1)];
+      index += 1;
+      return answer();
+    }) as unknown as typeof fetch;
+    return { calls, impl };
+  }
+
+  const redirectTo = (location: string) => () =>
+    new Response(null, { status: 307, headers: { location } });
+  const arrived = () => new Response("ok");
+
+  /** What a run carries: the customer's key, and this deployment's statement of whose run it is. */
+  const runRequest = {
+    method: "POST",
+    // Capitalised the way `@ag-ui/client` actually sends them, so a check keyed on the lower-cased
+    // name is tested against the shape a run really arrives in rather than a tidier one.
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      Authorization: "Bearer customer-key",
+      "X-Api-Key": "customer-key",
+    },
+    body: JSON.stringify({
+      threadId: "t",
+      forwardedProps: { openbotBotId: "risk", openbotRun: "signed.run.token" },
+    }),
+  };
+
+  test("the stored address is checked again before it is dialled", async () => {
+    // The row was written before this guard existed, or under an older rule. Checking only the
+    // redirects leaves the one address that is dialled on every single run unchecked.
+    const { calls, impl } = recorder([arrived]);
+    const dial = createAgentFetch({ fetchImpl: impl });
+
+    await expect(
+      dial("http://169.254.169.254/latest/meta-data/", runRequest),
+    ).rejects.toThrow(/may not live there|refus/i);
+    expect(calls.length).toBe(0);
+  });
+
+  test("a hop to another host does not take the credentials with it", async () => {
+    // What curl and a browser do, and for the reason they do it: the key was handed to us for one
+    // host, and a redirect is that host naming a different one.
+    const { calls, impl } = recorder([
+      redirectTo("https://elsewhere.example.com/ag-ui"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({ fetchImpl: impl });
+
+    const response = await dial("https://agent.example.com/ag-ui", runRequest);
+    expect(response.status).toBe(200);
+    expect(calls.length).toBe(2);
+
+    const first = new Headers(calls[0]?.init.headers);
+    expect(first.get("authorization")).toBe("Bearer customer-key");
+
+    const second = new Headers(calls[1]?.init.headers);
+    expect(second.get("authorization")).toBeNull();
+    expect(second.get("x-api-key")).toBeNull();
+    // The protocol headers are not credentials, and an AG-UI POST without them is not an AG-UI POST.
+    expect(second.get("content-type")).toBe("application/json");
+    expect(second.get("accept")).toBe("text/event-stream");
+  });
+
+  test("a hop to another host does not take the signed run with it", async () => {
+    // The run assertion is a bearer capability: whoever holds it can call back as this Bot, for this
+    // person. It rides in the body, so stripping headers alone leaves the leak open.
+    const { calls, impl } = recorder([
+      redirectTo("https://elsewhere.example.com/ag-ui"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({ fetchImpl: impl });
+
+    await dial("https://agent.example.com/ag-ui", runRequest);
+
+    const forwarded = JSON.parse(String(calls[1]?.init.body)) as {
+      threadId?: string;
+      forwardedProps?: Record<string, unknown>;
+    };
+    expect(forwarded.forwardedProps?.openbotRun).toBeUndefined();
+    // Only the credential is removed. The rest of the run is still the run.
+    expect(forwarded.threadId).toBe("t");
+    expect(forwarded.forwardedProps?.openbotBotId).toBe("risk");
+  });
+
+  test("a hop that stays on the same host keeps them", async () => {
+    // An agent that redirects `/ag-ui` to `/ag-ui/` is the same agent, and stripping its own key
+    // there would answer a working registration with a 401.
+    const { calls, impl } = recorder([
+      redirectTo("https://agent.example.com/ag-ui/"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({ fetchImpl: impl });
+
+    await dial("https://agent.example.com/ag-ui", runRequest);
+
+    const second = new Headers(calls[1]?.init.headers);
+    expect(second.get("authorization")).toBe("Bearer customer-key");
+    const forwarded = JSON.parse(String(calls[1]?.init.body)) as {
+      forwardedProps?: Record<string, unknown>;
+    };
+    expect(forwarded.forwardedProps?.openbotRun).toBe("signed.run.token");
+  });
+
+  test("an upgrade from http to https on the same host keeps them", async () => {
+    // The ordinary case a deployment behind a redirect actually has. Treating a scheme upgrade as a
+    // different host would break it while protecting nothing: the credential ends up somewhere
+    // strictly safer than it started.
+    const { calls, impl } = recorder([
+      redirectTo("https://agent.example.com/ag-ui"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({ fetchImpl: impl });
+
+    await dial("http://agent.example.com/ag-ui", runRequest);
+
+    const second = new Headers(calls[1]?.init.headers);
+    expect(second.get("authorization")).toBe("Bearer customer-key");
+  });
+
+  test("a downgrade from https to http does not", async () => {
+    // Same host, but the key would leave over a connection anybody on the path can read.
+    const { calls, impl } = recorder([
+      redirectTo("http://agent.example.com/ag-ui"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({
+      fetchImpl: impl,
+      allowPrivateHosts: false,
+    });
+
+    await dial("https://agent.example.com/ag-ui", runRequest);
+
+    const second = new Headers(calls[1]?.init.headers);
+    expect(second.get("authorization")).toBeNull();
+  });
+
+  test("a body this cannot read is not forwarded to another host at all", async () => {
+    // Sanitising a body means understanding it. A stream is not a shape this deployment sends, so
+    // the only two options are refusing an unreachable case or handing something unexamined to a
+    // host the request was never authorised for.
+    const { calls, impl } = recorder([
+      redirectTo("https://elsewhere.example.com/ag-ui"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({ fetchImpl: impl });
+
+    await expect(
+      dial("https://agent.example.com/ag-ui", {
+        method: "POST",
+        body: new ReadableStream(),
+      }),
+    ).rejects.toThrow(/will not forward/i);
+    expect(calls.length).toBe(1);
+  });
+
+  test("a body that is not the JSON it should be is not forwarded either", async () => {
+    const { calls, impl } = recorder([
+      redirectTo("https://elsewhere.example.com/ag-ui"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({ fetchImpl: impl });
+
+    await expect(
+      dial("https://agent.example.com/ag-ui", {
+        method: "POST",
+        body: "not json at all",
+      }),
+    ).rejects.toThrow(/will not forward/i);
+    expect(calls.length).toBe(1);
+  });
+
+  test("credentials dropped on one hop do not come back on the next", async () => {
+    // A chain that leaves the host and returns to it is not a way to get the key back: the request
+    // has already been shown to somebody else.
+    const { calls, impl } = recorder([
+      redirectTo("https://elsewhere.example.com/one"),
+      redirectTo("https://agent.example.com/ag-ui"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({ fetchImpl: impl });
+
+    await dial("https://agent.example.com/ag-ui", runRequest);
+
+    expect(calls.length).toBe(3);
+    const third = new Headers(calls[2]?.init.headers);
+    expect(third.get("authorization")).toBeNull();
   });
 });
