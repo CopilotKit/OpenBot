@@ -67,6 +67,35 @@ describe("the in-memory snapshot store", () => {
     expect(loaded?.elements.get("e9")?.name).toBe("Cancel");
   });
 
+  test("an older snapshot arriving late does not overwrite the newer one", async () => {
+    // The property #46 established, asked of this store rather than of the table. A test that reaches
+    // for the in-memory store because it has no database must not be told a different story about
+    // when a save wins: two snapshots of one computer can complete out of order here too, and the
+    // generation is what decides between them in both implementations.
+    const store = createInMemorySnapshotStore();
+    await store.save(
+      "default",
+      snapshot(8, [{ ref: "e9", role: "button", name: "Cancel" }]),
+    );
+
+    await store.save(
+      "default",
+      snapshot(7, [{ ref: "e9", role: "button", name: "Submit order" }]),
+    );
+
+    // A save of the generation already held loses too, the way `setWhere`'s `lt` refuses it: the
+    // stored snapshot is the one that generation named, and a second delivery of it carries nothing
+    // newer to say.
+    await store.save(
+      "default",
+      snapshot(8, [{ ref: "e9", role: "button", name: "Submit order" }]),
+    );
+
+    const loaded = await store.load("default");
+    expect(loaded?.snapshotId).toBe(8);
+    expect(loaded?.elements.get("e9")?.name).toBe("Cancel");
+  });
+
   test("clearing forgets the snapshot, so nothing resolves against a wiped computer", async () => {
     const store = createInMemorySnapshotStore();
     await store.save(

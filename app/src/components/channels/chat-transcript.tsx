@@ -12,6 +12,7 @@ import {
   MessageFooter,
   Message as MessageRow,
 } from "@/components/ui/message";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -40,6 +41,8 @@ type ChatTranscriptProps = {
   queued?: readonly QueuedMessage[];
   /** Take one back before it runs. Without it a queued line is shown but cannot be undone. */
   onRemoveQueued?: (id: string) => void;
+  /** History has been asked for and has not arrived. Drawn only when there is nothing else to draw. */
+  restoring?: boolean;
   /**
    * Why the last turn ended without an answer, if it did.
    *
@@ -75,6 +78,40 @@ function splitSkillChip(
     return null;
   }
   return { chip: match[1], rest: text.slice(match[0].length) };
+}
+
+/**
+ * The shape of a conversation, while it is still being fetched. Shaped like what is coming rather
+ * than like a loading widget, on the same line pitch so the column does not jump when words land.
+ */
+const RESTORING_ANSWER_LINES = [
+  { id: "line-1", width: "w-full" },
+  { id: "line-2", width: "w-11/12" },
+  { id: "line-3", width: "w-full" },
+  { id: "line-4", width: "w-10/12" },
+  { id: "line-5", width: "w-11/12" },
+  { id: "line-6", width: "w-full" },
+  { id: "line-7", width: "w-11/12" },
+  { id: "line-8", width: "w-2/3" },
+] as const;
+
+function RestoringTranscript() {
+  return (
+    // One announcement, with every bar hidden from it: nine empty shapes read aloud is worse.
+    <div aria-label="Loading this conversation" role="status">
+      <div aria-hidden="true" className="flex justify-end pb-7">
+        <Skeleton className="h-10 w-64 rounded-xl bg-muted/40 motion-reduce:animate-none" />
+      </div>
+      <div aria-hidden="true" className="flex flex-col gap-3">
+        {RESTORING_ANSWER_LINES.map((line) => (
+          <Skeleton
+            className={`h-4 bg-muted/40 motion-reduce:animate-none ${line.width}`}
+            key={line.id}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -529,6 +566,7 @@ export function ChatTranscript({
   messages,
   onRemoveQueued,
   queued = EMPTY_QUEUE,
+  restoring = false,
   stopped,
 }: ChatTranscriptProps) {
   /*
@@ -593,6 +631,8 @@ export function ChatTranscript({
              * memoising it would achieve nothing. Its child is what costs — markdown parsing and
              * chart SVGs — and that is what is skipped.
              */}
+            {/* Instead of the rows, never alongside them: one real message and this is a lie. */}
+            {items.length === 0 && restoring ? <RestoringTranscript /> : null}
             {items.map((item, index) =>
               item.kind === "tool" ? (
                 <MessageScrollerItem key={item.id} messageId={item.id}>

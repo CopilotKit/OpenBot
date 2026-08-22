@@ -40,7 +40,7 @@
     {
       "idx": 5,
       "version": "7",
-      "when": 1787322944029,
+      "when": 1787324600000,
       "tag": "0005_computer_snapshot",
       "breakpoints": true
     },
@@ -89,8 +89,15 @@
     {
       "idx": 12,
       "version": "7",
-      "when": 1787444747113,
+      "when": 1787359000000,
       "tag": "0012_truncate_is_not_a_way_around_append_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787380044372,
+      "tag": "0013_skill_tools",
       "breakpoints": true
     }
   ]
