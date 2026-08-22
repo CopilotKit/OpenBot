@@ -10,6 +10,7 @@ import type {
   ComputerLocation,
   ComputerProvider,
 } from "../src/computer/provider";
+import { StaleSnapshotError } from "../src/computer/client";
 import type { SnapshotResult } from "../src/computer/schema";
 import {
   createInMemorySnapshotStore,
@@ -519,12 +520,16 @@ describe("the computer gateway", () => {
 
   test("an action on an unresolvable ref is still decided and still recorded", async () => {
     const { gateway, rows } = await gatewayWith(PERMISSIVE);
-    await gateway.click("bot-1", ACTOR, {
-      ref: "e404",
-      snapshotId: 7,
-    });
-    // Permitted here only because the shipped default permits; the row says plainly that the server
-    // could not identify what was touched, rather than omitting the field.
+    // The assertion this test was written for is unchanged: the decision is taken and the row says
+    // plainly that the server could not identify what was touched, rather than omitting the field.
+    // What changed is what happens after the row: the action used to be forwarded, so an
+    // element-keyed deny rule could not match and the click landed anyway. It is now refused. The
+    // row is still written first, which is what keeps the attempt on the trail.
+    const refusal = await gateway
+      .click("bot-1", ACTOR, { ref: "e404", snapshotId: 7 })
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(StaleSnapshotError);
     expect(rows[0]?.payload.element).toBe("not in the current snapshot");
   });
 
@@ -1049,12 +1054,14 @@ describe("resolving a ref across replicas", () => {
     });
     expect(current.element?.name).toBe("Submit order");
 
-    const superseded = await handlesClick.gateway.click("bot-1", ACTOR, {
-      ref: "e9",
-      snapshotId: 6,
-    });
-    // Not resolved to snapshot 7's Submit button: the ref carried an older generation.
-    expect(superseded.element).toBeUndefined();
+    // Not resolved to snapshot 7's Submit button: the ref carried an older generation. The claim is
+    // unchanged; the assertion moved because a citation that cannot be resolved is now refused rather
+    // than forwarded with an empty element, which is what let an element-keyed deny rule go inert.
+    const superseded = await handlesClick.gateway
+      .click("bot-1", ACTOR, { ref: "e9", snapshotId: 6 })
+      .catch((error: unknown) => error);
+
+    expect(superseded).toBeInstanceOf(StaleSnapshotError);
     expect(handlesClick.rows[1]?.payload.element).toBe(
       "not in the current snapshot",
     );
@@ -1071,6 +1078,11 @@ describe("resolving a ref across replicas", () => {
     await tookSnapshot.gateway.snapshot("bot-1");
     await tookSnapshot.gateway.resetComputer("bot-1", ACTOR);
 
+    // Still forwarded with the element unresolved, and deliberately so. A reset deletes the row, so
+    // this server holds no snapshot for the computer at all and has nothing to judge the citation
+    // against; the refusal added for a stale citation fires only where there is a stored page to see
+    // that it is stale. The computer is the party that can answer here, and taking its answer away
+    // would also take away the one that says a person has the wheel.
     const afterReset = await handlesClick.gateway.click("bot-1", ACTOR, {
       ref: "e9",
       snapshotId: 7,
@@ -1112,14 +1124,19 @@ describe("a ref that outlived its computer", () => {
 
     /*
      * The same generation the model is still holding, now belonging to a different run. Resolving it
-     * would hand the policy an element from the dead page; refusing to resolve leaves the boundary
-     * deciding with no element, which is the honest answer and the one a deny rule treats as a
-     * match.
+     * would hand the policy an element from the dead page.
+     *
+     * This comment used to say that refusing to resolve leaves the boundary deciding with no element,
+     * "which is the honest answer and the one a deny rule treats as a match". The first half is right
+     * and the second was not: an all-empty element is what a deny rule keyed on `element.name` fails
+     * to match, so the action was permitted by the shipped default and carried out. The citation is
+     * refused now, which is what makes the sentence true.
      */
-    await gateway.click("bot-1", ACTOR, {
-      ref: "e9",
-      snapshotId: taken.snapshotId,
-    });
+    const refusal = await gateway
+      .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(StaleSnapshotError);
 
     // Recorded as unresolved rather than as the dead page's button, which is what the audit row
     // said before: `element: { name: "Confirm transfer" }` on a click nowhere near it.
@@ -1148,5 +1165,60 @@ describe("a ref that outlived its computer", () => {
     expect(rows.at(-1)?.payload.element).toMatchObject({
       name: "Submit order",
     });
+  });
+});
+
+describe("acting on a ref the server cannot resolve", () => {
+  const DENY_SUBMIT: ActionPolicy = {
+    ...PERMISSIVE,
+    deny: ['contains(element.name, "submit")'],
+  };
+
+  test("the rule refuses the click while it can see the element", async () => {
+    // The control. Without it a fix that refused everything would look identical to a fix that
+    // works, and the rule below would prove nothing about the element being visible to the policy.
+    const { gateway, calls } = await gatewayWith(DENY_SUBMIT);
+
+    const refusal = await gateway
+      .click("bot-1", ACTOR, { ref: "e9", snapshotId: 7 })
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(ActionRefusedError);
+    expect(calls).toEqual([]);
+  });
+
+  test("a cited ref that does not resolve is refused, not carried out with the rule blind", async () => {
+    // The same rule, the same button, and a citation the server cannot resolve. The element half of
+    // the policy context is then all-empty, so `contains(element.name, "submit")` is false and the
+    // shipped default permits: the click was forwarded and performed while the rule that exists to
+    // stop it never saw what it was about to touch. The audit row was honest about not identifying
+    // the element, which is what makes this a prevention failure rather than a detection one.
+    const { gateway, calls, rows } = await gatewayWith(DENY_SUBMIT);
+
+    const refusal = await gateway
+      .click("bot-1", ACTOR, { ref: "e9", snapshotId: 2 })
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(StaleSnapshotError);
+    expect(calls).toEqual([]);
+    // Still recorded. An action whose ref resolves to nothing is an action somebody tried to take,
+    // and refusing it before the row is written would be a way to act without appearing on the trail.
+    expect(rows.map((row) => row.eventType)).toEqual([
+      "computer.action_allowed",
+      "computer.action_failed",
+    ]);
+    expect(rows[0]?.payload.element).toBe("not in the current snapshot");
+  });
+
+  test("an action that names no ref is untouched, because it has nothing to have failed to resolve", async () => {
+    // The boundary. A scroll, a page-level keypress, a shell call and a file read legitimately carry
+    // no element, and the neutral empty element is the right answer for them: it is what keeps a rule
+    // about one action surface from throwing on another. Only a citation that was made and could not
+    // be honoured is refused here.
+    const { gateway, calls } = await gatewayWith(PERMISSIVE);
+
+    await gateway.scroll("bot-1", ACTOR, { deltaY: 200 });
+
+    expect(calls).toEqual(["scroll"]);
   });
 });

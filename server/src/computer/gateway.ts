@@ -18,7 +18,11 @@
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
-import { ComputerUnavailableError, createComputerTransport } from "./client";
+import {
+  ComputerUnavailableError,
+  createComputerTransport,
+  StaleSnapshotError,
+} from "./client";
 import { checkComputerAddress } from "./target";
 
 export {
@@ -480,6 +484,39 @@ export function createComputerGateway(
 
     let result: T;
     try {
+      /*
+       * A citation that was made and could not be honoured is refused, not carried out.
+       *
+       * `resolve` answering undefined leaves the element half of the context all-empty, and empty is
+       * the honest neutral value for an action that names no element: it is what stops a rule about
+       * one action surface throwing on another. It is the wrong answer for an action that named a ref
+       * and did not get one. Every element-keyed rule then evaluates against empty strings, so a deny
+       * that exists to stop this exact click does not match, the shipped default permits, and the
+       * click lands on whatever that ref is now. The rule did not decline to match. It was never
+       * shown the element.
+       *
+       * The computer's own staleness check does not make this safe. It compares the citation against
+       * its own counter, so it catches the cases where the two disagree; the case that matters is the
+       * one where the computer is content and only this server is out of step, which is what a
+       * computer restarting its generation counter under a stored row leaves behind.
+       *
+       * Only a cited ref, and only against a snapshot this server actually holds. Scroll, a
+       * page-level keypress, a shell call and a file read name no element, so they have nothing to
+       * have failed to resolve. A computer this server has no snapshot for at all is a different
+       * situation: there is no page here to judge the citation against, the computer is the only
+       * party that can, and refusing locally would take its answer away, including the one that says
+       * a person has taken the wheel. What is refused here is a citation this server can see is stale.
+       *
+       * Thrown from inside the attempt, after the decision row, on purpose: an action whose ref
+       * resolves to nothing is still an action somebody tried to take, and refusing it before the row
+       * was written would be a way to act without appearing on the trail. The failure row beside it is
+       * what stops the trail claiming a permitted action was carried out when nothing was sent.
+       */
+      if (ref && stored && !element) {
+        throw new StaleSnapshotError(
+          `${ref} is not on the page this computer is showing, so nothing can be checked against it before acting. Take a fresh snapshot and use the refs it returns.`,
+        );
+      }
       result = await run();
     } catch (error) {
       /**
