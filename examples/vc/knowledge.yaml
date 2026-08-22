@@ -1,0 +1,8 @@
+# Where authorized knowledge is read from. Only google-drive and microsoft-onedrive are supported
+# today. roots are the top-level folders a source is allowed to reach; keep them scoped to what the
+# coworkers above actually need. Access is still governed per channel and group, not granted here.
+sources:
+  - type: google-drive
+    roots: [Deals, Portfolio, Thesis]
+  - type: microsoft-onedrive
+    roots: [LP, Fund Operations]

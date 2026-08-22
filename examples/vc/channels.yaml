@@ -1,0 +1,33 @@
+# Who can talk to which coworker. Every id in permitted_agents must name an agent in agents.yaml, and
+# allowed_groups decides which people the channel is open to. The groups here — partners, investment,
+# platform — are an example; map them to your own directory groups.
+channels:
+  - id: deal-flow
+    name: Deal Flow
+    description: Screen inbound deals and brief them against the thesis.
+    permitted_agents: [deal-scout, knowledge]
+    allowed_groups: [partners, investment]
+
+  - id: diligence
+    name: Diligence
+    description: Run first-pass market and company diligence on a governed computer.
+    permitted_agents: [diligence-analyst, knowledge]
+    allowed_groups: [partners, investment]
+
+  - id: portfolio
+    name: Portfolio
+    description: Track portfolio company news, updates, and signals.
+    permitted_agents: [portfolio-monitor, knowledge]
+    allowed_groups: [partners, investment, platform]
+
+  - id: lp-relations
+    name: LP Relations
+    description: Draft LP updates and answers from authorized fund data.
+    permitted_agents: [lp-relations, knowledge]
+    allowed_groups: [partners]
+
+  - id: fund-knowledge
+    name: Fund Knowledge
+    description: Ask the fund's thesis, memos, and prior deals.
+    permitted_agents: [knowledge]
+    allowed_groups: [partners, investment, platform]
