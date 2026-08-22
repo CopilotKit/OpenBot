@@ -211,6 +211,64 @@ describe("keeping the audit trail to a retention policy", () => {
     expect(await remaining()).toBe(1);
   });
 
+  /*
+   * TRUNCATE, which for a while was the one statement that emptied this table and raised nothing.
+   *
+   * The append-only guarantee was a row-level trigger, and a row-level trigger cannot fire on a
+   * statement that removes rows without visiting them. So UPDATE and DELETE were refused while
+   * `TRUNCATE audit_events` took the lot and reported success.
+   *
+   * The transaction always throws, so it always rolls back. That is not tidiness: if this ever
+   * regresses, a committed truncate here would destroy the audit trail of whatever database the
+   * suite is pointed at, and the run that discovers the bug must not also be the run that proves
+   * how bad it is. A truncate that goes through leaves the sentinel on the cause chain instead of
+   * the refusal, so the assertion fails with the table still whole.
+   */
+  const ROLLED_BACK = "rolled back on purpose, never committed";
+
+  test("the whole table cannot be truncated", async () => {
+    await event(400, 1);
+
+    expect(
+      await refusedAsAppendOnly(() =>
+        database.transaction(async (tx) => {
+          await tx.execute(sql`truncate table audit_events`);
+          throw new Error(ROLLED_BACK);
+        }),
+      ),
+    ).toBe(true);
+
+    expect(await remaining()).toBe(1);
+  });
+
+  test("a declared retention window does not open the door to it", async () => {
+    /*
+     * The failure mode of the obvious fix, and the reason the trigger answers TG_OP before it reads
+     * anything. Pointing a statement-level trigger at a function that tests `OLD.created_at`
+     * compares against NULL, because a statement trigger has no OLD record, and falls straight
+     * through to the return that lets the statement proceed.
+     *
+     * That path opens exactly while a retention sweep has the window set, so a happy-path check
+     * with no setting would report the guard working and miss it entirely. Both states are checked
+     * here, and this is the one that matters.
+     */
+    await event(400, 1);
+
+    expect(
+      await refusedAsAppendOnly(() =>
+        database.transaction(async (tx) => {
+          await tx.execute(
+            sql`select set_config('openbot.audit_retention_days', '30', true)`,
+          );
+          await tx.execute(sql`truncate table audit_events`);
+          throw new Error(ROLLED_BACK);
+        }),
+      ),
+    ).toBe(true);
+
+    expect(await remaining()).toBe(1);
+  });
+
   test("the lock is released, so the next sweep can run", async () => {
     // A sweep that kept the lock would be the last one this deployment ever ran.
     await event(400, 1);
