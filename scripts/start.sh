@@ -141,13 +141,16 @@ for table in agent_profiles agent_preferences; do
 done
 green "  coworker tables migrated"
 
-MANAGED_URL="$(grep -E '^MANAGED_AGENT_AG_UI_URL=' "$ROOT/.env" | tail -1 | cut -d= -f2-)"
-if [ -z "$MANAGED_URL" ]; then
-  red "  MANAGED_AGENT_AG_UI_URL is not set in .env."
-  red "  See .env.example."
-  exit 1
-fi
-green "  managed coworker endpoint: $MANAGED_URL"
+# Resolved at the top, where the default that .env deliberately does not carry is applied. Reading
+# .env again here would have demanded the line be present in a file the comment above that default
+# says must not contain it, which is how this came to refuse every fresh clone: `cp .env.example
+# .env` leaves it commented out, so the grep matched nothing.
+#
+# It failed silently, too. Under `set -o pipefail` a grep that matches nothing fails its whole
+# pipeline, and `set -e` then aborts the assignment before the check below could say why. The same
+# grep survives inside `setting()` only because `local v="$(...)"` takes `local`'s own exit status
+# and masks it. So: report what was resolved, and do not re-read the file.
+green "  managed coworker endpoint: $MANAGED_AGENT_AG_UI_URL"
 
 info "2/4  Server"
 require_free_or_ours "$SERVER_PORT" server

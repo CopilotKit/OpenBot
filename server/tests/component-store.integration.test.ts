@@ -285,6 +285,36 @@ describe("learning what a build ships", () => {
     expect(stored?.withheldFrom).toEqual([botA]);
   });
 
+  test("two browsers announcing at once add it once, and record it once", async () => {
+    /*
+     * The insert has always been safe: `onConflictDoNothing` is there because two page loads racing
+     * is ordinary. What was not safe was the answer. `added` reported what the call had *tried* to
+     * insert, so the loser of that ordinary race named every component anyway, and the caller writes
+     * one audit row per name. A first start with two tabs open recorded all thirteen shipped
+     * components twice, in the trail whose whole value is that it says what happened once.
+     *
+     * Concurrent rather than sequential on purpose: the sequential case was always covered by
+     * "announcing again adds nothing", and it passed throughout.
+     */
+    const racer = {
+      name: `testRaced_${suite}`,
+      title: "Raced",
+      kind: "card",
+      description: "Announced by two page loads at the same moment.",
+    };
+
+    const [first, second] = await Promise.all([
+      store.syncCatalogue([racer]),
+      store.syncCatalogue([racer]),
+    ]);
+
+    const named = [...first.added, ...second.added];
+    expect(named).toEqual([racer.name]);
+
+    const rows = (await store.list()).filter((one) => one.name === racer.name);
+    expect(rows).toHaveLength(1);
+  });
+
   test("announcing nothing is not a request to forget everything", async () => {
     // A build with no components, or a failed manifest, must not empty the catalogue.
     const before = (await store.list()).length;

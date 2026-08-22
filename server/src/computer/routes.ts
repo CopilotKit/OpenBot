@@ -32,7 +32,7 @@ import { type PolicyStore, parseActionPolicy } from "./policy-store";
  * The bot-access middleware matches `/:botId/*`, and Hono's `/*` matches zero segments, so a
  * single-segment path like `/policy` reaches it as a Bot id. These have their own guards.
  */
-const DEPLOYMENT_ROUTES = new Set(["policy"]);
+const DEPLOYMENT_ROUTES = new Set(["policy", "fleet"]);
 
 export function createComputerRoutes(
   gateway: ComputerGateway,
@@ -229,6 +229,26 @@ export function createComputerRoutes(
    * it holds a list. `:botId` is still there because every route under this router has it. The
    * list itself is every computer, so a signed-in user is not enough; an administrator has to ask.
    */
+  /**
+   * Every computer in the deployment.
+   *
+   * Its own route rather than `/:botId/computers`, which is what Admin used to call with a
+   * placeholder id. That worked until the bot-access middleware arrived: the placeholder is not a
+   * Bot, `canUseBot` said so, and the screen 404d for everybody including an administrator, showing
+   * an empty page rather than the fleet. The list is deployment-wide, so it is addressed
+   * deployment-wide and named in DEPLOYMENT_ROUTES beside `/policy`.
+   */
+  routes.get("/fleet", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
+    try {
+      return context.json(await gateway.computers());
+    } catch (error) {
+      return context.json({ error: describe(error) }, statusFor(error));
+    }
+  });
+
   routes.get("/:botId/computers", async (context) => {
     // The session guard and the question of whether this person may act as the Bot in the path are
     // both applied by the middleware above. Neither is the question here: the answer is the whole

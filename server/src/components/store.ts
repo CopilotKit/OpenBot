@@ -125,7 +125,7 @@ export function createComponentStore(database: Database): ComponentStore {
       const missing = entries.filter((entry) => !known.has(entry.name));
       if (missing.length === 0) return { added: [] };
 
-      await database
+      const inserted = await database
         .insert(components)
         .values(
           missing.map((entry) => ({
@@ -142,9 +142,15 @@ export function createComponentStore(database: Database): ComponentStore {
         )
         // Two browsers announcing the same new component at once is ordinary, not a fault: whichever
         // arrives second must be a no-op rather than a duplicate-key error thrown at a page load.
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        // What was actually inserted, which after `onConflictDoNothing` is only the rows this call
+        // won the race for. Returning `missing` instead would report the intent: the loser of that
+        // ordinary race would name every component it had tried to insert, and the caller writes an
+        // audit row per name, so a first start with two tabs open recorded all thirteen components
+        // twice. The insert was already protected; the trail was not.
+        .returning({ name: components.name });
 
-      return { added: missing.map((entry) => entry.name) };
+      return { added: inserted.map((row) => row.name) };
     },
 
     async list() {

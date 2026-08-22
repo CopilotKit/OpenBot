@@ -41,17 +41,20 @@ export const computerKeys = {
 };
 
 /**
- * A placeholder id in the path. The endpoint answers with every computer regardless, so this is
- * addressing a collection through a member's route rather than naming one.
+ * The deployment-wide fleet route.
+ *
+ * Not a Bot id in a member route, which is what this used to be. That placeholder stopped working
+ * when the server began checking whether the caller may act as the Bot in the path: a placeholder
+ * is not a Bot, so the list 404d and this screen showed nothing at all.
  */
-const FLEET_ID = "openbot-computer";
+const FLEET_PATH = "/api/computers/fleet";
 
 /** No envelope key: the body carries both the list and the isolation mode. */
 export function computerFleetQueryOptions() {
   return queryOptions({
     queryKey: computerKeys.fleet(),
     queryFn: async (): Promise<ComputerFleet> => {
-      const response = await client(`/api/computers/${FLEET_ID}/computers`, {
+      const response = await client(FLEET_PATH, {
         fallback: "The computers could not be listed.",
       });
       return response.json();
