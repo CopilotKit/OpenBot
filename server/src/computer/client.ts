@@ -50,6 +50,21 @@ export class StaleSnapshotError extends Error {
 }
 
 /**
+ * A person has the wheel, so the Bot's action was not carried out.
+ *
+ * Its own condition rather than a stale snapshot, though both arrive as 409, because what the caller
+ * should do next is the opposite in each case. Stale refs mean take a fresh snapshot and go again;
+ * this means stop and leave the browser to the person holding it. Told apart by the flag the computer
+ * puts on the body, which is the only thing in the response that distinguishes them.
+ */
+export class HumanHasControlError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "HumanHasControlError";
+  }
+}
+
+/**
  * Transport options used inside the computer gateway.
  *
  * This is an internal seam. Application code uses ComputerGateway and does not
@@ -206,6 +221,10 @@ function throwMappedError(
   const detail =
     typeof body?.error === "string" ? body.error : `HTTP ${status}`;
   if (status === 409) {
+    // The computer says which kind of 409 this is. Absent, it is the ordinary one.
+    if (body?.humanHasControl === true) {
+      throw new HumanHasControlError(detail);
+    }
     throw new StaleSnapshotError(detail);
   }
   if (status === 403) {

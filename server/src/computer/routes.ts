@@ -10,6 +10,7 @@ import {
   ComputerUnavailableError,
   ElementNotFoundError,
   NavigationRefusedError,
+  HumanHasControlError,
   StaleSnapshotError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
@@ -86,7 +87,7 @@ export function createComputerRoutes(
     try {
       return context.json(await gateway.screenshot(context.req.param("botId")));
     } catch (error) {
-      return context.json({ error: describe(error) }, statusFor(error));
+      return context.json(errorBody(error), statusFor(error));
     }
   });
 
@@ -94,7 +95,7 @@ export function createComputerRoutes(
     try {
       return context.json(await gateway.read(context.req.param("botId")));
     } catch (error) {
-      return context.json({ error: describe(error) }, statusFor(error));
+      return context.json(errorBody(error), statusFor(error));
     }
   });
 
@@ -129,7 +130,7 @@ export function createComputerRoutes(
       if (error instanceof NavigationRefusedError) {
         return context.json({ error: error.message }, 403);
       }
-      return context.json({ error: describe(error) }, statusFor(error));
+      return context.json(errorBody(error), statusFor(error));
     }
   });
 
@@ -137,7 +138,7 @@ export function createComputerRoutes(
     try {
       return context.json(await gateway.snapshot(context.req.param("botId")));
     } catch (error) {
-      return context.json({ error: describe(error) }, statusFor(error));
+      return context.json(errorBody(error), statusFor(error));
     }
   });
 
@@ -209,7 +210,7 @@ export function createComputerRoutes(
     try {
       return context.json(await gateway.control(context.req.param("botId")));
     } catch (error) {
-      return context.json({ error: describe(error) }, statusFor(error));
+      return context.json(errorBody(error), statusFor(error));
     }
   });
 
@@ -248,7 +249,7 @@ export function createComputerRoutes(
     try {
       return context.json(await gateway.computers());
     } catch (error) {
-      return context.json({ error: describe(error) }, statusFor(error));
+      return context.json(errorBody(error), statusFor(error));
     }
   });
 
@@ -262,7 +263,7 @@ export function createComputerRoutes(
     try {
       return context.json(await gateway.computers());
     } catch (error) {
-      return context.json({ error: describe(error) }, statusFor(error));
+      return context.json(errorBody(error), statusFor(error));
     }
   });
 
@@ -355,7 +356,7 @@ export function createComputerRoutes(
         } as Parameters<typeof gateway.humanInput>[1]),
       );
     } catch (error) {
-      return context.json({ error: describe(error) }, statusFor(error));
+      return context.json(errorBody(error), statusFor(error));
     }
   });
 
@@ -548,7 +549,7 @@ async function act(
     if (error instanceof WorkspaceRequestError) {
       return context.json({ error: error.message }, 400);
     }
-    return context.json({ error: describe(error) }, statusFor(error));
+    return context.json(errorBody(error), statusFor(error));
   }
 }
 
@@ -588,8 +589,27 @@ function describe(error: unknown): string {
  * not running (an operator fixes it), the refs are stale (the model fixes it by snapshotting again),
  * and everything else. Navigation established this; the acting routes follow it.
  */
+/**
+ * What a failed computer call looks like to the caller.
+ *
+ * One place, because the flag below decides what a Bot does next and a route that renders its own
+ * error would silently not carry it. The computer marks a takeover on both the acting path and
+ * navigate, and those two are answered by different code here, so the version of this that lived in
+ * the acting helper alone fixed one of them.
+ */
+function errorBody(error: unknown): Record<string, unknown> {
+  return {
+    error: describe(error),
+    // Not "the refs are stale, take another snapshot", which is what the surface says without it.
+    ...(error instanceof HumanHasControlError ? { humanHasControl: true } : {}),
+  };
+}
+
 function statusFor(error: unknown): 409 | 500 | 503 {
   if (error instanceof StaleSnapshotError) return 409;
+  // Same status as a stale snapshot and for the same reason: nothing is broken, the caller has to do
+  // something else first. What differs is what that something is, which the body carries.
+  if (error instanceof HumanHasControlError) return 409;
   // The same answer as a stale snapshot, because it is the same instruction: the refs are wrong, take
   // another snapshot. Not 503, which says the computer is unavailable and sends an operator hunting a
   // container that is running perfectly.
