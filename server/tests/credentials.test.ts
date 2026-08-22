@@ -154,10 +154,13 @@ describe("credential encryption", () => {
     ).toEqual(["credential.rotated", "credential.revoked"]);
   });
 
-  test("writes no audit event when the rotation fails", async () => {
-    // The store's rotate is one transaction, so a failure commits nothing. The
-    // trail has to agree: a rotation that did not happen leaves no row saying
-    // it did, and the caller sees the original cause rather than a later one.
+  test("records the refusal when the rotation fails, and never a success", async () => {
+    // The store's rotate is one transaction, so a failure commits nothing and
+    // no row may say a rotation happened. The refusal itself is recorded
+    // though: a rotation aimed at a revoked credential, at one that does not
+    // exist, or at a key other than the credential's own is either a caller
+    // with a bug or an attempt to retire somebody else's key, and it used to
+    // leave nothing behind. The caller still sees the original cause.
     const audited: unknown[] = [];
     const service = {
       encryptionKey: key,
@@ -191,7 +194,20 @@ describe("credential encryption", () => {
       }),
     ).rejects.toThrow("Previous credential is already revoked");
 
-    expect(audited).toEqual([]);
+    expect(audited).toEqual([
+      {
+        eventType: "credential.rotation_refused",
+        targetType: "credential",
+        targetId: "credential-old",
+        actorUserId: "admin",
+        payload: {
+          kind: "model",
+          provider: "openai",
+          keyId: "primary",
+          reason: "Previous credential is already revoked",
+        },
+      },
+    ]);
   });
 
   test("decrypts only an active credential for server-side use", async () => {
