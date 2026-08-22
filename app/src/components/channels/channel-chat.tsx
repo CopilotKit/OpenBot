@@ -108,6 +108,13 @@ export function ChannelChat({
    */
   const agentRef = useRef(agent);
   agentRef.current = agent;
+
+  /**
+   * History has been asked for and has not arrived. True for a channel opened from the roster, where
+   * an empty transcript is also a real answer; false for one started from the compose screen, which
+   * already has the message that started it.
+   */
+  const [restoring, setRestoring] = useState(seed === null);
   useEffect(() => {
     if (isReady) openReadyGate.current();
   }, [isReady]);
@@ -135,6 +142,9 @@ export function ChannelChat({
           agent.setMessages(stored);
         }
       } finally {
+        // Cleared on failure too: placeholders over an empty transcript promise messages that are
+        // never coming.
+        if (current) setRestoring(false);
         // Release even on join/restore failure; the gate orders messages, not withholds them.
         openJoinGate.current();
       }
@@ -407,6 +417,7 @@ export function ChannelChat({
          * above.
          */
         queueWhileBusy
+        restoring={restoring}
         /*
          * The run, not the turn. Stop reaches a run through the core's abort controller, and that
          * controller does not exist until `say` has finished waiting for the runtime agent — so

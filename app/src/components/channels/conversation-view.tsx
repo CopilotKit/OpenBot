@@ -29,6 +29,7 @@ export function ConversationView({
   stopped,
   stoppable,
   queueWhileBusy = false,
+  restoring = false,
   onSubmit,
   onStop,
 }: {
@@ -73,6 +74,8 @@ export function ConversationView({
    * moving it onto this composer or asking for it upstream, and neither is a queue.
    */
   queueWhileBusy?: boolean;
+  /** History has been asked for and has not arrived. Drawn as placeholder rows; see `ChatTranscript`. */
+  restoring?: boolean;
   onSubmit: (draft: ComposerDraft) => void | Promise<void>;
   /** Stop the Bot mid-answer; forwarded to turn the send button into a stop button. */
   onStop?: () => void;
@@ -213,6 +216,7 @@ export function ConversationView({
             apply({ id, type: "remove" });
           }}
           queued={queued}
+          restoring={restoring}
           {...(stopped ? { stopped } : {})}
         />
       </div>
