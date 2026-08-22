@@ -201,6 +201,15 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **Upgrading never reached a Bot's computer.** A computer is a container the supervisor makes, and it
+  was reused by name whatever image it was built from, so once a Bot had one, rebuilding the image
+  moved the tag and the container went on running the old one indefinitely with nothing to say so.
+  `docker compose down` does not touch these either, because compose did not make them, so even a
+  full teardown left them behind. That is worse than stale code: the computer is the browser, the
+  workspace and the confinement around both, so a fix to any of them silently did not apply. A
+  computer built from a different image is now replaced on next use. Its profile and its workspace
+  are volumes and are kept, so a Bot comes back on the new image still signed in to what it was
+  signed in to, with its files where it left them.
 - **The audit trail could be erased with one statement.** It is append-only because a database
   trigger refuses updates and deletes, and that trigger is row-level, so `TRUNCATE` never reached it:
   anything holding `DATABASE_URL` could empty the table and nothing raised. That is the case the

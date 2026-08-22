@@ -273,5 +273,8 @@ Try:
 
 Logs: $LOGS
 Stop Docker services: docker compose down
+  A Bot's computer is made by the supervisor rather than by compose, so it keeps running:
+  docker rm -f \$(docker ps -q --filter label=openbot.supervisor=true)
+  Its files and its browser profile are volumes and survive either way.
 Stop host app/server: kill the processes using ports $APP_PORT and $SERVER_PORT
 EOF

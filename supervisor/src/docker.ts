@@ -169,7 +169,7 @@ export async function listOwned(): Promise<ComputerState[]> {
  */
 async function inspectOwned(
   names: ComputerNames,
-): Promise<{ status: string; port?: number } | null> {
+): Promise<{ status: string; port?: number; image?: string } | null> {
   try {
     const info = await docker.getContainer(names.container).inspect();
     if (!ours(info.Config?.Labels)) return null;
@@ -178,10 +178,48 @@ async function inspectOwned(
     return {
       status: info.State?.Status ?? "unknown",
       ...(published ? { port: Number.parseInt(published, 10) } : {}),
+      // The resolved image, not the tag it was started from. A tag moves when the image is
+      // rebuilt; this is what the container is actually running.
+      ...(info.Image ? { image: info.Image } : {}),
     };
   } catch (error) {
     if ((error as { statusCode?: number }).statusCode === 404) return null;
     throw new DockerUnavailableError(String(error));
+  }
+}
+
+/**
+ * Whether the computer that exists is running the image this deployment now ships.
+ *
+ * `ensure` reused any container with the right name, whatever it was built from, so once a Bot had a
+ * computer, upgrading OpenBot never reached it. Rebuilding the image moves the tag; the container
+ * goes on running the old one, indefinitely, and nothing says so. Found by rebuilding every image,
+ * restarting the whole stack, and watching a Bot's computer answer with in-memory state from an hour
+ * earlier: `docker compose down` does not touch these, because the supervisor makes them rather than
+ * compose.
+ *
+ * That is worse than stale code. `agent-computer` is the browser, the workspace and the confinement,
+ * so a fix to any of them silently would not apply to a Bot that already had a computer.
+ *
+ * Compared by resolved id rather than by tag, because both sides are the same tag and the whole
+ * question is whether the tag has moved since.
+ *
+ * Unanswerable is not stale. If the image cannot be inspected — never pulled, a registry that cannot
+ * be reached, a daemon that will not say — this reports true and the existing computer is kept.
+ * Destroying a Bot's working browser over a failed inspect is a worse answer than running an image
+ * that may be a version behind.
+ */
+async function runsCurrentImage(
+  existingImage: string | undefined,
+  image: string,
+): Promise<boolean> {
+  if (!existingImage) return true;
+  try {
+    const current = await docker.getImage(image).inspect();
+    const id = current?.Id;
+    return typeof id === "string" && id ? id === existingImage : true;
+  } catch {
+    return true;
   }
 }
 
@@ -329,7 +367,34 @@ export async function ensure(
   options: EnsureOptions,
 ): Promise<ComputerState> {
   for (let attempt = ATTEMPTS; attempt > 0; attempt--) {
-    const existing = await inspectOwned(names);
+    let existing = await inspectOwned(names);
+
+    /*
+     * An upgrade reaches a computer that already exists, by replacing it.
+     *
+     * Safe to do: the profile and the workspace are named volumes and are not removed here, so the
+     * Bot keeps its logins and its files and comes back on the new image. That is the difference
+     * between this and `reset`, which is asked for deliberately and does take the profile.
+     *
+     * What is lost is whatever the old computer held in memory: an open page and an outstanding
+     * request for a person to take the wheel. Both belong to a run that the upgrade has already
+     * ended, and a Bot carrying an hour-old handover prompt into a new conversation is the symptom
+     * that found this.
+     */
+    if (existing && !(await runsCurrentImage(existing.image, options.image))) {
+      try {
+        await docker
+          .getContainer(names.container)
+          .remove({ force: true, v: false });
+      } catch (error) {
+        // Already gone is the outcome this wanted. Anything else and the computer stays as it is,
+        // which is the same answer this function gave before it could replace one at all.
+        if (statusOf(error) !== 404) {
+          throw new DockerUnavailableError(String(error));
+        }
+      }
+      existing = null;
+    }
 
     if (!existing) {
       for (const volume of [names.profileVolume, names.workspaceVolume]) {

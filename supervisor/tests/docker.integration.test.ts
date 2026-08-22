@@ -156,3 +156,130 @@ describe.skipIf(runtime === null)("a computer that never answers", () => {
     ).rejects.toBeInstanceOf(withDocker().supervisor.ComputerNotAnsweringError);
   }, 90_000);
 });
+
+describe.skipIf(runtime === null)(
+  "a computer built from an older image",
+  () => {
+    /*
+     * The upgrade that never reached the computers.
+     *
+     * `ensure` reused any container with the right name whatever it was built from, so once a Bot had
+     * a computer, rebuilding the image moved the tag and the container went on running the old one
+     * indefinitely, with nothing to say so. `docker compose down` does not touch these either, because
+     * the supervisor makes them rather than compose, so even a full teardown left them behind.
+     *
+     * Found by rebuilding every image, restarting the whole stack, and watching a Bot's computer
+     * answer with in-memory state from an hour before: a handover prompt about a page from a previous
+     * conversation, offered on a new one.
+     *
+     * Two different images rather than a rebuild of one, because what the code compares is the
+     * resolved id on either side and two tags is the cheapest way to have two of those.
+     */
+    const OTHER = process.env.SUPERVISOR_TEST_OTHER_IMAGE ?? "alpine:3";
+
+    async function pull(image: string): Promise<boolean> {
+      try {
+        await withDocker().docker.getImage(image).inspect();
+        return true;
+      } catch {
+        // Not present locally. Pulling in a test is a network call this suite otherwise never makes,
+        // so it is attempted once and its failure skips rather than fails.
+        try {
+          const stream = await withDocker().docker.pull(image);
+          await new Promise((resolve, reject) => {
+            withDocker().docker.modem.followProgress(
+              stream as never,
+              (error: unknown) => (error ? reject(error) : resolve(null)),
+            );
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    }
+
+    test("is replaced, and keeps its profile and workspace", async () => {
+      if (!(await pull(OTHER))) return;
+
+      // A computer this supervisor owns, made the way it makes them, on the wrong image.
+      await withDocker().supervisor.ensure(names, {
+        image: OTHER,
+        environment: [],
+      });
+      const before = await withDocker()
+        .docker.getContainer(names.container)
+        .inspect();
+
+      // Something in the volumes, so "kept" is a fact about their contents and not only their names.
+      // Volumes outlive the container by not being removed with it; that is what makes replacing one
+      // safe, and it is the whole reason this fix is allowed to be automatic.
+      const volumes = await Promise.all(
+        [names.profileVolume, names.workspaceVolume].map((volume) =>
+          withDocker().docker.getVolume(volume).inspect(),
+        ),
+      );
+
+      const state = await withDocker().supervisor.ensure(names, {
+        image: IMAGE,
+        environment: [],
+      });
+      const after = await withDocker()
+        .docker.getContainer(names.container)
+        .inspect();
+
+      expect(state).not.toBeNull();
+      // A different container, on the image asked for.
+      expect(after.Id).not.toBe(before.Id);
+      expect(after.Image).not.toBe(before.Image);
+
+      const wanted = await withDocker().docker.getImage(IMAGE).inspect();
+      expect(after.Image).toBe(wanted.Id);
+
+      // The same volumes, not replacements: a Bot keeps its logins and its files across an upgrade.
+      const kept = await Promise.all(
+        [names.profileVolume, names.workspaceVolume].map((volume) =>
+          withDocker().docker.getVolume(volume).inspect(),
+        ),
+      );
+      expect(kept.map((v) => v.CreatedAt)).toEqual(
+        volumes.map((v) => v.CreatedAt),
+      );
+    }, 180_000);
+
+    test("is left alone when it is already the image asked for", async () => {
+      /*
+       * The other half, and the one that keeps this from being a fix that restarts every computer on
+       * every request. `ensure` is called whenever a computer is needed, so a comparison that ever
+       * reported stale for a current container would throw away a Bot's browser mid-task.
+       */
+      const first = await withDocker().supervisor.ensure(names, {
+        image: IMAGE,
+        environment: [],
+      });
+      const before = await withDocker()
+        .docker.getContainer(names.container)
+        .inspect();
+
+      const second = await withDocker().supervisor.ensure(names, {
+        image: IMAGE,
+        environment: [],
+      });
+      const after = await withDocker()
+        .docker.getContainer(names.container)
+        .inspect();
+
+      /*
+       * Identity, not liveness. The placeholder image has no long-running command, so the container
+       * exits and Docker restarts it; its status and its start time at any instant are facts about
+       * that image rather than about `ensure`. What matters here is that the same container is
+       * still there: a replacement would have a different id, and `ensure` is called for every
+       * request, so a comparison that ever reported stale for a current container would throw away
+       * a Bot's browser mid-task.
+       */
+      expect(first).not.toBeNull();
+      expect(second).not.toBeNull();
+      expect(after.Id).toBe(before.Id);
+    }, 180_000);
+  },
+);
