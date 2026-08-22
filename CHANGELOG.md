@@ -201,6 +201,41 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **The audit trail could be erased with one statement.** It is append-only because a database
+  trigger refuses updates and deletes, and that trigger is row-level, so `TRUNCATE` never reached it:
+  anything holding `DATABASE_URL` could empty the table and nothing raised. That is the case the
+  guarantee exists for, since it is enforced in the database precisely because the application is not
+  the only thing that reaches the table. A statement-level trigger now refuses a truncate, and it
+  answers before the retention setting is read, so declaring a retention window no longer permits one
+  either. Retention itself is unchanged: rows older than the window are still removed, and recent
+  ones are still refused. The connection the application uses is the database owner in the shipped
+  compose file, and an owner can still disable or drop a trigger; closing that needs a role with
+  `INSERT` and `SELECT` only, which is a separate change. Reported by @beardthelion, who also named
+  the failure mode of the obvious fix and saved it from shipping as one.
+- **A declined take-the-wheel destroyed the conversation.** A Bot that asks for help with a sign-in
+  and never gets it left an assistant message holding a tool call that nothing ever answered, and
+  every later turn in that thread failed at the provider. Declining once meant nothing you typed
+  afterwards got an answer, with no way back but a new chat. Unanswered calls are now answered when
+  the history is rebuilt, with the truth rather than a fake success: no result came, the run has
+  ended, carry on without it and say what could not be done.
+- **The audit trail could not say why a conversation went where it did.** It recorded the router's
+  choice and recorded nothing at all when a person named a coworker with `@`, which is
+  indistinguishable from a row that failed to write. A mention is now recorded too, as the person's
+  own choice, without asking the model a question they had already answered. The audit page names the
+  coworker and separates the three cases: chosen by the person, matched by the router, or the default
+  because nothing matched.
+- **A Bot with half a connector sent people to a sign-in box.** Granted a vendor's search but not its
+  read, it found the document, could not read it, and opened the vendor's website to try, where it
+  met a sign-in wall and asked the person to take the wheel. They already had access; the missing
+  thing was the Bot's grant, and nothing said so. A gap in what a Bot holds is now reported as a gap:
+  it names the capability it would need and says an administrator can grant it on that connector.
+- **Answers arrived with no sign of where they came from.** Asked a compliance question, a Bot
+  replied with a filing obligation, a dollar threshold, a deadline and a retention period, and the
+  audit trail for that turn held one row: the routing decision. A confident unsourced answer is
+  indistinguishable from a confident wrong one. Every Bot is now told to cite what it read and to say
+  plainly when an answer is from its own knowledge instead. It is told this by the deployment rather
+  than per agent, so it cannot be missing from the next Bot somebody adds, and it is explicitly not
+  an instruction to go hunting for a source.
 - **A Bot browsed to a vendor it already had tools for.** Granted Google Drive, asked what was in a
   document, it opened `drive.google.com` in its own browser, met a sign-in page that browser can
   never satisfy, and asked the person to sign in to an account they had already connected. A tool

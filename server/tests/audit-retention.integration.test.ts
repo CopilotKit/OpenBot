@@ -113,6 +113,37 @@ describe("keeping the audit trail to a retention policy", () => {
     expect(await remaining()).toBe(1);
   });
 
+  test("the database refuses a malformed window even when the caller does not", async () => {
+    /*
+     * The test above stops in TypeScript. `sweepAuditTrail` returns `{deleted: null}` before it ever
+     * opens a connection, so it proves the caller's guard and says nothing about the trigger, which
+     * has a branch of its own for this that nothing exercised. That is the shape where a guard reads
+     * as covered and is not: anything reaching the table without going through the sweep meets the
+     * trigger and only the trigger.
+     *
+     * These set the value the sweep would have set and then delete directly.
+     *
+     * Reported by @beardthelion.
+     */
+    await event(400, 1);
+
+    for (const window of ["0", "-1", "", "garbage"]) {
+      expect(
+        await refusedAsAppendOnly(() =>
+          database.transaction(async (tx) => {
+            await tx.execute(
+              sql`select set_config('openbot.audit_retention_days', ${window}, true)`,
+            );
+            await tx
+              .delete(auditEvents)
+              .where(eq(auditEvents.targetType, MARKER));
+          }),
+        ),
+      ).toBe(true);
+    }
+    expect(await remaining()).toBe(1);
+  });
+
   test("a row exactly inside the window survives", async () => {
     // The boundary. Off by a day here means a deployment promising 90 days keeps 89.
     await event(89, 1);
