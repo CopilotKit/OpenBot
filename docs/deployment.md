@@ -123,7 +123,7 @@ in ECR, and is what AWS points App Runner users at now that App Runner takes no 
 Plain ECS on Fargate behind an ALB is the answer if you want task definitions and fine-grained IAM.
 No shared-memory configuration is needed or possible.
 
-**Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240 second request
+**Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets
 are capped at 350 per instance on the basic tier.
 
