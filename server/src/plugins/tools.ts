@@ -66,8 +66,19 @@ export function parametersFor(inputSchema: Record<string, unknown>): z.ZodType {
  *
  * Empty when the Bot holds nothing, so a deployment with no connectors says nothing about them.
  */
-export function grantedToolGuidance(tools: GrantedTool[]): string {
-  if (tools.length === 0) return "";
+export function grantedToolGuidance(
+  tools: GrantedTool[],
+  /**
+   * Systems this deployment connects to that this Bot holds nothing for.
+   *
+   * Without these a Bot holding no grants is told nothing at all, so it treats a connected vendor as
+   * an ordinary website and browses to it. That is how a Bot with no Drive grant ended up on Google's
+   * sign-in page asking a person to sign in to an account the deployment had already connected: the
+   * connector existed, the Bot simply was not on it, and nothing said so.
+   */
+  connectedButNotHeld: readonly string[] = [],
+): string {
+  if (tools.length === 0 && connectedButNotHeld.length === 0) return "";
 
   const bySystem = new Map<string, string[]>();
   for (const tool of tools) {
@@ -78,19 +89,51 @@ export function grantedToolGuidance(tools: GrantedTool[]): string {
     bySystem.set(system, [...(bySystem.get(system) ?? []), rest]);
   }
 
+  const held = [...bySystem.keys()];
+  const missing = connectedButNotHeld.filter(
+    (system) => !held.includes(system),
+  );
+
   return [
-    "You can reach these systems directly, as the person asking, with their own access:",
+    ...(tools.length > 0
+      ? [
+          "You can reach these systems directly, as the person asking, with their own access:",
+        ]
+      : []),
     ...[...bySystem.entries()].map(
       ([system, names]) => `- ${system}: ${names.join(", ")}`,
     ),
-    "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
-    "browser is signed in as nobody, so it sees less than these tools do and will meet a sign-in wall",
-    "that connecting an account has already solved.",
-    "If one of these systems is involved and no tool above covers the part you need, that is a",
-    "missing grant and not something to work around. Say so plainly, name the capability you would",
-    "need, and say an administrator can grant it on that connector. Do not reach for the browser, do",
-    "not ask the person to sign in, and do not ask them to fetch it for you: they already have the",
-    "access, and the thing that is missing is yours, not theirs.",
+    ...(tools.length > 0
+      ? [
+          "Use them for anything about those systems. Do NOT browse to one of their websites instead: your",
+          "browser is signed in as nobody, so it sees less than these tools do and will meet a sign-in wall",
+          "that connecting an account has already solved.",
+          "If one of these systems is involved and no tool above covers the part you need, that is a",
+          "missing grant and not something to work around. Say so plainly, name the capability you would",
+          "need, and say an administrator can grant it on that connector. Do not reach for the browser, do",
+          "not ask the person to sign in, and do not ask them to fetch it for you: they already have the",
+          "access, and the thing that is missing is yours, not theirs.",
+        ]
+      : []),
+    /*
+     * The vendors this deployment connects to and this Bot does not hold.
+     *
+     * Named so the Bot can say which one, because "I have not been granted it" is only actionable if
+     * the person is told what "it" is. The browser is refused for these by the same reasoning as
+     * above and for a sharper reason: a connector exists precisely so the vendor is reached as the
+     * person asking, and the container's browser is signed in as nobody, so browsing there abandons
+     * the per-person path and lands on a login wall by construction.
+     */
+    ...(missing.length > 0
+      ? [
+          ...(tools.length > 0 ? [""] : []),
+          `This deployment also connects to: ${missing.join(", ")}. You hold none of their tools.`,
+          "If a question needs one of them, say plainly that you have not been granted it and that an",
+          "administrator can grant it on that connector. Do NOT browse to its website: that is not the",
+          "same thing, your browser is signed in as nobody, and it will meet a sign-in wall that the",
+          "connector exists to avoid. Do not ask the person to sign in there either.",
+        ]
+      : []),
   ].join("\n");
 }
 

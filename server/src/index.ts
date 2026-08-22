@@ -1,5 +1,3 @@
-import { createIntentRouter } from "./routing/classify";
-import { createModelCompleter } from "./routing/model";
 import { serve } from "bun";
 import { mintRunAssertion } from "./agents/callback-token";
 import { createAgentProfileStore } from "./agents/profile-store";
@@ -48,6 +46,8 @@ import { createDatabase } from "./db/client";
 import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
 import { grantedTools } from "./plugins/tools";
+import { createIntentRouter } from "./routing/classify";
+import { createModelCompleter } from "./routing/model";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -416,6 +416,25 @@ const app = createApp(
      */
     (actorId) => (botId, runId) =>
       mintRunAssertion({ botId, actorId, runId }, config.keyEncryptionKey),
+    undefined,
+    /*
+     * Which vendors this deployment connects to, held by a Bot or not.
+     *
+     * A Bot holding no grants used to be told nothing about connectors at all, so it treated a
+     * connected vendor as an ordinary website and browsed to it: a Bot with no Drive grant opened
+     * Google's sign-in page and asked a person to sign in to an account the deployment had already
+     * connected. Naming them lets it say which one it has not been granted instead.
+     *
+     * Read per request rather than held, because a connector added a minute ago has to count, and
+     * failing is the same as having none: a Bot that cannot be told loses a sentence, not a run.
+     */
+    async () => {
+      try {
+        return (await pluginStore.listServers()).map((server) => server.id);
+      } catch {
+        return [];
+      }
+    },
   ),
   // The only path to an acting call.
   computerGateway,

@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { LiveScreen } from "./live-screen";
-import { ComputerPlaceholder } from "./placeholder";
 import {
+  type ControlState,
   readControl,
   releaseControl,
   supplySecret,
   takeControl,
-  type ControlState,
 } from "@/lib/computers/control";
 import { readScreenshot, type Screenshot } from "@/lib/computers/screen";
+import { LiveScreen } from "./live-screen";
+import { ComputerPlaceholder } from "./placeholder";
 
 /** Explicit blank-browser URLs use placeholder artwork; missing URL fields are treated as real pages. */
 function isBlankBrowser(shot: Screenshot): boolean {
@@ -171,11 +171,22 @@ export function ComputerView({
     return () => window.removeEventListener("keydown", onKey);
   }, [expanded]);
 
-  // Sized from the ratio, never from the payload, so the frame is identical in all three states.
-  const frameStyle = { aspectRatio, minWidth, minHeight };
-
   // Always render the card frame; help/secret controls live below the conditional picture.
   const blankBrowser = shot ? isBlankBrowser(shot) : false;
+
+  /*
+   * Sized from the ratio, never from the payload, so the frame is identical while a screen is
+   * loading and once it arrives.
+   *
+   * A browser that has opened nothing is the exception. Reserving a screen-sized frame for it put a
+   * placeholder the height of a browser window into the middle of a conversation, above an answer
+   * that never involved the browser at all: a Bot asked about Google Drive rendered a full-size
+   * empty panel saying it had not opened a page. Nothing is loading there and nothing is coming, so
+   * there is no layout jump to protect against and no reason to take the room.
+   */
+  const frameStyle = blankBrowser
+    ? { minWidth }
+    : { aspectRatio, minWidth, minHeight };
   /** Blank browser placeholders should not be opened as readable screens. */
   const showScreen = shot !== null && !blankBrowser;
 
@@ -206,6 +217,8 @@ export function ComputerView({
           {blankBrowser ? (
             <ComputerPlaceholder className="absolute inset-0 h-full w-full" />
           ) : null}
+          {/* The blank state is a line of text, so it needs its own height rather than the frame's. */}
+          {blankBrowser ? <span className="block py-6" /> : null}
 
           {showScreen ? null : (
             <span

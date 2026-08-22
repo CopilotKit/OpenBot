@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { HttpAgent } from "@ag-ui/client";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
+import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import {
   buildAgents,
   builtInAgentConfiguration,
@@ -9,7 +10,6 @@ import {
   resolveRuntimeAgents,
   standingRoleMessage,
 } from "../src/copilot";
-import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import { grantedToolGuidance } from "../src/plugins/tools";
 
 // Every agent row now joins its profile, so the row a coworker is built from always names it.
@@ -568,9 +568,40 @@ describe("what a Bot is told it holds", () => {
     expect(guidance).toContain("do not ask the person to sign in");
   });
 
+  test("names a connected vendor it holds nothing for, so it can say which", () => {
+    /*
+     * The case a Bot holding no grants used to be told nothing about.
+     *
+     * The deployment had Google Drive connected and this Bot was not on it, so the guidance was
+     * empty and the Bot treated the vendor as an ordinary website: it opened Google's sign-in page
+     * and asked a person to sign in to an account the deployment had already connected. The
+     * connector existed; nothing said the Bot simply was not on it.
+     */
+    const guidance = grantedToolGuidance([], ["google-drive"])
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+    expect(guidance).toContain("google-drive");
+    expect(guidance).toContain("you hold none of their tools");
+    expect(guidance).toContain("have not been granted it");
+    expect(guidance).toContain("do not browse to its website");
+  });
+
+  test("does not name a vendor it does hold as one it does not", () => {
+    // The list is the deployment's, so it includes what this Bot has. Saying "you hold none of
+    // their tools" about a system it is holding four tools for would be worse than saying nothing.
+    const guidance = grantedToolGuidance(drive, ["google-drive"]);
+
+    expect(guidance).toContain("search_files");
+    expect(guidance.toLowerCase()).not.toContain(
+      "you hold none of their tools",
+    );
+  });
+
   test("says nothing at all when the Bot holds nothing", () => {
     // A deployment with no connectors must not be told about connectors it does not have.
     expect(grantedToolGuidance([])).toBe("");
+    expect(grantedToolGuidance([], [])).toBe("");
   });
 
   test("a built-in Bot is told before it is told about the browser", () => {

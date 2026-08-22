@@ -11,11 +11,11 @@ import {
   COMPUTER_GUIDANCE,
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
-import { grantedToolGuidance } from "./plugins/tools";
 import type { AgentActor } from "./agents/profile-types";
 import type { StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import type { GrantedTool } from "./plugins/tools";
+import { grantedToolGuidance } from "./plugins/tools";
 
 /**
  * The CopilotKit runtime, always in Intelligence mode.
@@ -197,6 +197,13 @@ export function builtInAgentConfiguration(
    * be promising something that does not exist.
    */
   computerGuidance?: string,
+  /**
+   * Vendors this deployment connects to, whether or not this Bot holds any of their tools.
+   *
+   * A Bot holding nothing was told nothing, so it treated a connected vendor as an ordinary website
+   * and browsed to it. See `grantedToolGuidance`.
+   */
+  connectedVendors: readonly string[] = [],
 ): BuiltInAgentConfiguration {
   if (!apiKey) {
     return {
@@ -229,7 +236,9 @@ export function builtInAgentConfiguration(
        * it says comes from its own knowledge, and saying so is the only honest move available.
        */
       PROVENANCE_GUIDANCE,
-      ...(grantedToolGuidance(tools) ? [grantedToolGuidance(tools)] : []),
+      ...(grantedToolGuidance(tools, connectedVendors)
+        ? [grantedToolGuidance(tools, connectedVendors)]
+        : []),
       ...(computerGuidance ? [computerGuidance] : []),
     ].join("\n\n"),
     apiKey,
@@ -271,7 +280,13 @@ export async function buildAgents(
   signRun?: SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
   computerGuidance?: string,
+  /**
+   * Which vendors this deployment connects to. Asked once per build rather than per Bot, because it
+   * is a fact about the deployment; what differs per Bot is which of them it holds.
+   */
+  loadVendors: () => Promise<readonly string[]> = async () => [],
 ): Promise<Record<string, AbstractAgent>> {
+  const vendors = await loadVendors().catch(() => [] as readonly string[]);
   return Object.fromEntries(
     await Promise.all(
       agents.map(async (agent) => [
@@ -284,6 +299,7 @@ export async function buildAgents(
           loadTools,
           signRun,
           computerGuidance,
+          vendors,
         ),
       ]),
     ),
@@ -298,6 +314,7 @@ async function buildAgent(
   loadTools: LoadToolsForBot,
   signRun?: SignRun,
   computerGuidance?: string,
+  connectedVendors: readonly string[] = [],
 ): Promise<AbstractAgent> {
   if (agent.type === "built_in") {
     return new BuiltInAgent(
@@ -307,6 +324,7 @@ async function buildAgent(
         apiKey,
         await loadTools(agent.id),
         computerGuidance,
+        connectedVendors,
       ),
     );
   }
@@ -318,6 +336,7 @@ async function buildAgent(
     stallGuard,
     await loadTools(agent.id),
     signRun,
+    connectedVendors,
   );
 }
 
@@ -345,6 +364,8 @@ function remoteAgentWithStandingRole(
    */
   tools: GrantedTool[] = [],
   signRun?: SignRun,
+  /** As for the built-in path: what this deployment connects to, held or not. */
+  connectedVendors: readonly string[] = [],
 ) {
   const remote = new HttpAgent({
     url: agent.endpoint,
@@ -368,7 +389,7 @@ function remoteAgentWithStandingRole(
    * prompt — a page about the browser that mentions connectors nowhere. That is the Bot that browsed
    * to drive.google.com holding four Drive tools.
    */
-  const holdings = grantedToolGuidance(tools);
+  const holdings = grantedToolGuidance(tools, connectedVendors);
   const holdingsMessage = holdings
     ? {
         id: `granted-tools:${agent.id}`,
@@ -467,6 +488,7 @@ export async function resolveRuntimeAgents(
   loadTools?: LoadToolsForBot,
   signRun?: SignRun,
   computerGuidance?: string,
+  loadVendors?: () => Promise<readonly string[]>,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -486,6 +508,7 @@ export async function resolveRuntimeAgents(
     loadTools,
     signRun,
     computerGuidance,
+    loadVendors,
   );
 }
 
@@ -533,6 +556,8 @@ export function createRequestAgents(
   signRunForActor?: (actorId: string) => SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
   computerGuidance?: string,
+  /** Which vendors this deployment connects to, held by a Bot or not. Absent means none. */
+  loadVendors?: () => Promise<readonly string[]>,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -544,6 +569,7 @@ export function createRequestAgents(
       loadToolsForActor?.(actor.id),
       signRunForActor?.(actor.id),
       computerGuidance,
+      loadVendors,
     );
   };
 }
@@ -571,6 +597,7 @@ export function mountCopilotRuntime(
   loadToolsForActor?: (actorId: string) => LoadToolsForBot,
   signRunForActor?: (actorId: string) => SignRun,
   basePath = "/api/copilotkit",
+  loadVendors?: () => Promise<readonly string[]>,
 ) {
   const { intelligence } = config.runtime;
 
@@ -609,6 +636,7 @@ export function mountCopilotRuntime(
        * as impossible. Absent computer, absent guidance: a Bot is not told about hands it has not got.
        */
       config.computer ? COMPUTER_GUIDANCE : undefined,
+      loadVendors,
     ) as never,
   });
 
