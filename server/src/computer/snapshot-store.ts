@@ -27,7 +27,7 @@
  * Without a database it stays in memory. Tests that only exercise decision logic do not need
  * Postgres, exactly as the policy store does not.
  */
-import { eq, lt } from "drizzle-orm";
+import { eq, lt, ne, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { computerSnapshot } from "../db/schema";
 import type { SnapshotElement } from "./schema";
@@ -42,6 +42,15 @@ export type StoredSnapshot = {
   snapshotId: number;
   url: string;
   elements: Map<string, SnapshotElement>;
+  /**
+   * Which run of the computer took it, when the provider can say.
+   *
+   * The generation only orders snapshots within one session. This is what tells two sessions apart,
+   * so a ref from a computer that has since been replaced resolves to nothing instead of to whatever
+   * now holds that ref. Undefined where there is no supervisor to ask, which leaves the behaviour as
+   * it was.
+   */
+  session?: string;
 };
 
 export type SnapshotStore = {
@@ -85,6 +94,7 @@ export function createSnapshotStore(database?: Database): SnapshotStore {
         url: snapshot.url,
         elements,
         takenAt: new Date(),
+        session: snapshot.session ?? null,
       };
       await database
         .insert(computerSnapshot)
@@ -99,6 +109,7 @@ export function createSnapshotStore(database?: Database): SnapshotStore {
             url: values.url,
             elements: values.elements,
             takenAt: values.takenAt,
+            session: values.session,
           },
           // Only ever forward. The generation is stamped by the computer and increases by one per
           // snapshot, so a lower number is an older page. Two replicas snapshotting the same computer
@@ -106,7 +117,27 @@ export function createSnapshotStore(database?: Database): SnapshotStore {
           // last would win, so the older snapshot could overwrite the newer one and every ref the
           // model is holding would stop resolving. Timestamps cannot decide it, because they come
           // from two machines' clocks; the generation comes from one.
-          setWhere: lt(computerSnapshot.snapshotId, values.snapshotId),
+          /*
+           * Forward within a session, and always across one.
+           *
+           * The generation guard is right while the computer is the same computer. It is wrong the
+           * moment it is replaced: the new session counts from one, so every snapshot it takes looks
+           * older than the dead row and none of them land. The row then describes a page nobody is
+           * on until the counter climbs back past it, and the one that finally matches resolves refs
+           * against the dead page.
+           *
+           * A different session is therefore not a stale write to be refused. It is the only write
+           * that can be right.
+           */
+          setWhere: or(
+            lt(computerSnapshot.snapshotId, values.snapshotId),
+            values.session === null
+              ? sql`${computerSnapshot.session} is not null`
+              : or(
+                  sql`${computerSnapshot.session} is null`,
+                  ne(computerSnapshot.session, values.session),
+                ),
+          ),
         });
     },
 
@@ -129,6 +160,7 @@ export function createSnapshotStore(database?: Database): SnapshotStore {
         elements: elementsFromObject(
           row.elements as Record<string, SnapshotElement>,
         ),
+        ...(row.session ? { session: row.session } : {}),
       };
     },
   };
@@ -151,7 +183,11 @@ export function createInMemorySnapshotStore(): SnapshotStore {
       // no database would otherwise be told a different story about what the gateway resolves
       // against: the older page here, the newer one in a deployment.
       const held = snapshots.get(computerId);
-      if (held && held.snapshotId >= snapshot.snapshotId) return;
+      // Same rule as the table: forward within a session, and always across one. A replaced computer
+      // counts from one again, so refusing its snapshots for being "older" leaves the dead page in
+      // place until the counter climbs back past it.
+      const sameSession = held?.session === snapshot.session;
+      if (held && sameSession && held.snapshotId >= snapshot.snapshotId) return;
       snapshots.set(computerId, snapshot);
     },
     load: async (computerId) => snapshots.get(computerId),

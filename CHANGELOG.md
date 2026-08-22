@@ -211,6 +211,14 @@ Sessions survive and nobody signs in again.
   is unavailable never blocks a sign-in.
 
 ### Fixed
+- **A ref could resolve against a page from a computer that no longer existed.** The generation a
+  computer stamps on a snapshot is unique only within one run of it, so a replaced container counts
+  from one again and a ref the model is still holding matches a row nothing has overwritten. The
+  policy then decides on an element from a dead page, and the audit row names it. Wiping a computer
+  cleared the row for that reason and was the only thing that did; replacing one whose image changed
+  did not, and the server was never told. A snapshot now carries which run of the computer took it,
+  refs from an earlier run resolve to nothing, and the first snapshot of a new run replaces the old
+  row however low its generation.
 - **A migration stamped in the future silently swallowed the next one.** Drizzle runs a migration only
   when its journal timestamp is later than the newest one the database has recorded, so a migration
   stamped ahead of real time raises that ceiling and every migration written after it is skipped

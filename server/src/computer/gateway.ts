@@ -317,8 +317,27 @@ export function createComputerGateway(
       elements: new Map(
         result.elements.map((element) => [element.ref, element]),
       ),
+      // Read after `locate`, which is the `/ensure` that reports it.
+      ...(await sessionOf(botId)),
     });
     return result;
+  }
+
+  /**
+   * Which run of the computer this is, shaped to spread into a snapshot.
+   *
+   * Absent for a provider that cannot say, and absent if asking fails: a session that cannot be read
+   * must not stop a snapshot being recorded, because a snapshot nobody stored is a ref that resolves
+   * to nothing and a boundary deciding with no element in front of it.
+   */
+  async function sessionOf(botId: string): Promise<{ session?: string }> {
+    if (!provider.sessionOf) return {};
+    try {
+      const session = await provider.sessionOf(botId);
+      return session ? { session } : {};
+    } catch {
+      return {};
+    }
   }
 
   async function read(botId: string): Promise<ReadResult> {
@@ -342,8 +361,27 @@ export function createComputerGateway(
     stored: StoredSnapshot | undefined,
     ref: string | undefined,
     snapshotId: number | undefined,
+    /**
+     * The run of the computer the action is reaching, when the provider can say.
+     *
+     * Undefined means unknown, not mismatched: a provider with no sessions to report, or one that
+     * could not be asked, leaves the generation check exactly as it was.
+     */
+    session?: string,
   ): SnapshotElement | undefined {
     if (!ref || !stored || stored.snapshotId !== snapshotId) return undefined;
+    /*
+     * A generation is only unique within one run of the computer.
+     *
+     * A replaced container counts from one again, so a ref the model is still holding from the run
+     * before matches a row nothing has overwritten, and the element handed to the policy belongs to
+     * a page that no longer exists. `resetComputer` clears the row for that reason and is the only
+     * thing that does; the supervisor replacing a computer whose image changed does not, and the
+     * server is never told. Comparing the run closes both.
+     */
+    if (session && stored.session && stored.session !== session) {
+      return undefined;
+    }
     return stored.elements.get(ref);
   }
 
@@ -376,7 +414,8 @@ export function createComputerGateway(
     // Loaded from the store, not this process's memory: the snapshot these refs belong to was very
     // likely taken by another replica, and resolving against a local map would find nothing there.
     const stored = await snapshots.load(botId);
-    const element = resolve(stored, ref, snapshotId);
+    const { session } = await sessionOf(botId);
+    const element = resolve(stored, ref, snapshotId, session);
     // For a navigation the relevant page is the one being opened, not the one already loaded. Using
     // the stored URL would mean `page.host == "..."` could never match the destination, which is the
     // only thing a rule about navigation would ever want to say.

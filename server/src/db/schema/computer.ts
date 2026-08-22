@@ -65,4 +65,18 @@ export const computerSnapshot = pgTable("computer_snapshot", {
   /** The interactive elements, keyed by ref. The one thing resolve looks a ref up in. */
   elements: jsonb("elements").notNull(),
   takenAt: timestamp("taken_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * Which run of the computer took it.
+   *
+   * The generation only tells snapshots apart within one session: a replaced container counts from
+   * one again, so a ref from a dead session matches a row the new one has not overwritten yet, and
+   * the policy decides against an element from a page that no longer exists. Reset clears the row
+   * for exactly that reason, but reset is not the only way a computer is replaced — an image change
+   * does it too, and the server is never told. This is the session, so a stale row is recognisable
+   * without anybody having to remember to delete it.
+   *
+   * Null where the provider cannot say, which is a deployment with one shared computer and no
+   * supervisor. There the behaviour is what it was before this column existed.
+   */
+  session: text("session"),
 });

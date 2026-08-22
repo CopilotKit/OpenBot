@@ -99,6 +99,13 @@
       "when": 1787380044372,
       "tag": "0013_skill_tools",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787380104372,
+      "tag": "0014_snapshot_session",
+      "breakpoints": true
     }
   ]
 }

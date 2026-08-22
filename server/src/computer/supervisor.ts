@@ -16,6 +16,14 @@
 import type { ComputerStatus } from "./schema";
 import type { ComputerLocation, ComputerProvider } from "./provider";
 
+/**
+ * The last container start time seen for each Bot, from the `/ensure` that located it.
+ *
+ * Not a cache in front of the supervisor: `locate` still calls it every time. This only carries the
+ * answer the few lines to whoever needs to know which run of the computer they are talking to.
+ */
+const sessions = new Map<string, string>();
+
 type SupervisorComputerLocation = {
   botId: string;
   container?: string;
@@ -146,10 +154,22 @@ export function createDockerSupervisorProvider(
      * is an error rather than a URL, the alternative is a caller quietly falling back to somebody
      * else's computer.
      */
+    async sessionOf(botId: string): Promise<string | undefined> {
+      /*
+       * Read from the same `/ensure` every action already makes, and remembered rather than asked
+       * for again: `locate` runs immediately before the call that needs this, so the value is as
+       * fresh as the address it was fetched with. Asking twice would double the supervisor's work on
+       * the hot path to learn something it just told us.
+       */
+      return sessions.get(botId);
+    },
+
     async locate(botId: string): Promise<string> {
       const state = (await call(
         `/computers/${encodeURIComponent(botId)}/ensure`,
       )) as SupervisorComputerLocation;
+      // Recorded on every ensure, so a replaced container is visible to whatever asks next.
+      if (state?.startedAt) sessions.set(botId, state.startedAt);
       // The supervisor says where it is, because only it knows whether these computers sit on a
       // shared network or answer on a published port.
       if (state?.url) return state.url;

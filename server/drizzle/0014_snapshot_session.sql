@@ -1,0 +1,15 @@
+-- Which run of the computer a snapshot belongs to.
+--
+-- The generation a computer stamps on a snapshot only tells snapshots apart within one session. A
+-- replaced container counts from one again, so a ref the model still holds from the previous session
+-- matches a row the new one has not overwritten, and the policy decides against an element from a
+-- page that no longer exists.
+--
+-- `resetComputer` clears the row for exactly that reason, and it is the only thing that does. It is
+-- not the only way a computer is replaced: the supervisor replaces one whose image has changed, and
+-- the server is never told. So the row outlives the session that wrote it, and the generation cannot
+-- tell.
+--
+-- Nullable because a deployment with one shared computer and no supervisor has no session to report.
+-- There the comparison is skipped and the behaviour is what it was before this column.
+ALTER TABLE "computer_snapshot" ADD COLUMN "session" text;

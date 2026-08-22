@@ -43,6 +43,8 @@ function fakeComputer(options?: {
   resetResult?: { cleared: boolean };
   locations?: ComputerLocation[];
   routes?: Record<string, (init?: RequestInit) => Response | Promise<Response>>;
+  /** Which run of the computer this stands for. Absent means a provider that cannot say. */
+  session?: () => string | undefined;
 }) {
   const calls: string[] = [];
   const addressedAs: string[] = [];
@@ -62,6 +64,7 @@ function fakeComputer(options?: {
       addressedAs.push(botId);
       return "http://agent-computer:4100";
     },
+    ...(options?.session ? { sessionOf: async () => options.session?.() } : {}),
     status: async (botId) => ({ botId, state: "ready" }),
     stop: async (botId) => {
       calls.push(`stop:${botId}`);
@@ -1073,5 +1076,77 @@ describe("resolving a ref across replicas", () => {
       snapshotId: 7,
     });
     expect(afterReset.element).toBeUndefined();
+  });
+});
+
+/**
+ * A ref from a computer that has since been replaced.
+ *
+ * The generation a computer stamps on a snapshot is unique only within one run of it. A replaced
+ * container counts from one again, so a ref the model is still holding from the run before matches
+ * a row nothing has overwritten, and the element handed to the policy belongs to a page that no
+ * longer exists: a deny rule about "Confirm transfer" fires on a click that is nowhere near it, or
+ * worse, does not fire on one that is.
+ *
+ * `resetComputer` clears the row for exactly that reason and is the only thing that does. The
+ * supervisor replaces a computer whose image has changed without telling the server, so the row
+ * outlives the run that wrote it and nothing notices.
+ */
+describe("a ref that outlived its computer", () => {
+  test("does not resolve against the dead run's page", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    let run = "run-1";
+    const { provider, fetchImpl } = fakeComputer({ session: () => run });
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      snapshots,
+    });
+
+    const taken = await gateway.snapshot("bot-1");
+    // The computer is replaced. Its generation counter starts again, and nothing clears the row.
+    run = "run-2";
+
+    /*
+     * The same generation the model is still holding, now belonging to a different run. Resolving it
+     * would hand the policy an element from the dead page; refusing to resolve leaves the boundary
+     * deciding with no element, which is the honest answer and the one a deny rule treats as a
+     * match.
+     */
+    await gateway.click("bot-1", ACTOR, {
+      ref: "e9",
+      snapshotId: taken.snapshotId,
+    });
+
+    // Recorded as unresolved rather than as the dead page's button, which is what the audit row
+    // said before: `element: { name: "Confirm transfer" }` on a click nowhere near it.
+    expect(rows.at(-1)?.payload.element).toBe("not in the current snapshot");
+  });
+
+  test("still resolves while the computer is the same one", async () => {
+    // The control. A session check that refused everything would look identical in the test above.
+    const snapshots = createInMemorySnapshotStore();
+    const { provider, fetchImpl } = fakeComputer({ session: () => "run-1" });
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      snapshots,
+    });
+
+    const taken = await gateway.snapshot("bot-1");
+    await gateway.click("bot-1", ACTOR, {
+      ref: "e9",
+      snapshotId: taken.snapshotId,
+    });
+
+    expect(rows.at(-1)?.payload.element).toMatchObject({
+      name: "Submit order",
+    });
   });
 });

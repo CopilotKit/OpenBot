@@ -167,9 +167,12 @@ export async function listOwned(): Promise<ComputerState[]> {
  *
  * Ownership is checked here rather than at the call sites, so no verb can skip it by accident.
  */
-async function inspectOwned(
-  names: ComputerNames,
-): Promise<{ status: string; port?: number; image?: string } | null> {
+async function inspectOwned(names: ComputerNames): Promise<{
+  status: string;
+  port?: number;
+  image?: string;
+  startedAt?: string;
+} | null> {
   try {
     const info = await docker.getContainer(names.container).inspect();
     if (!ours(info.Config?.Labels)) return null;
@@ -181,6 +184,15 @@ async function inspectOwned(
       // The resolved image, not the tag it was started from. A tag moves when the image is
       // rebuilt; this is what the container is actually running.
       ...(info.Image ? { image: info.Image } : {}),
+      /*
+       * When this run of the container began, which is what tells two runs apart.
+       *
+       * `State.StartedAt` rather than `Created`, because a restart is a new run: the browser has
+       * lost every page it had, so the refs the server handed out from the previous one describe
+       * pages that no longer exist. `listOwned` reports `Created` for "how long has this been up",
+       * which is a different question.
+       */
+      ...(info.State?.StartedAt ? { startedAt: info.State.StartedAt } : {}),
     };
   } catch (error) {
     if ((error as { statusCode?: number }).statusCode === 404) return null;
@@ -479,6 +491,7 @@ export async function ensure(
       botId: names.botId,
       container: names.container,
       status: settled?.status ?? "unknown",
+      ...(settled?.startedAt ? { startedAt: settled.startedAt } : {}),
       ...(settled?.port ? { port: settled.port } : {}),
       // How to reach it. A name on a shared network, a host port otherwise, the caller does not have
       // to know which arrangement it is in.

@@ -79,6 +79,15 @@ export interface ComputerProvider {
   list(): Promise<ComputerLocation[]>;
   /** Prepare provider resources before the first computer request. */
   warm?(): Promise<void>;
+  /**
+   * Which run of this Bot's computer is current, if the provider can tell.
+   *
+   * A snapshot's generation only orders snapshots within one run: a replaced container counts from
+   * one again, so a ref from the run before it matches a row nothing has overwritten. This is what
+   * tells the two apart. Optional because a deployment with one shared computer has no supervisor to
+   * ask, and there the comparison is skipped and behaviour is unchanged.
+   */
+  sessionOf?(botId: string): Promise<string | undefined>;
 }
 
 export type SharedComputerProviderOptions = {

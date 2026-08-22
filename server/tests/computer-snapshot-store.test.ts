@@ -148,3 +148,82 @@ describe("the in-memory snapshot store", () => {
     );
   });
 });
+
+describe("a computer that has been replaced", () => {
+  /*
+   * The generation only orders snapshots within one run of the computer.
+   *
+   * A replaced container counts from one again, so its first snapshots look older than the row the
+   * dead one left behind and none of them land. The row then describes a page nobody is on, and the
+   * generation that finally matches resolves refs against it: the policy decides on an element from
+   * a page that no longer exists, and the audit row names it.
+   *
+   * `resetComputer` clears the row for exactly this reason and is the only thing that does. The
+   * supervisor replacing a computer whose image has changed does not, and the server is never told,
+   * so the row outlives the session that wrote it.
+   */
+  test("its first snapshot replaces the dead one, however low the generation", async () => {
+    const store = createInMemorySnapshotStore();
+    await store.save("bot", {
+      snapshotId: 7,
+      url: "https://bank.example/transfer",
+      elements: new Map([
+        ["e9", { ref: "e9", role: "button", name: "Confirm transfer" }],
+      ]),
+      session: "2026-08-22T10:00:00Z",
+    });
+
+    await store.save("bot", {
+      snapshotId: 1,
+      url: "https://docs.example/index",
+      elements: new Map([
+        ["e9", { ref: "e9", role: "link", name: "Table of contents" }],
+      ]),
+      session: "2026-08-22T11:00:00Z",
+    });
+
+    const held = await store.load("bot");
+    expect(held?.snapshotId).toBe(1);
+    expect(held?.url).toBe("https://docs.example/index");
+    expect(held?.session).toBe("2026-08-22T11:00:00Z");
+  });
+
+  test("within one session the generation still only goes forward", async () => {
+    // The guard the replacement case must not undo: two replicas snapshotting at once, where the
+    // older write must not overwrite the newer one.
+    const store = createInMemorySnapshotStore();
+    const session = "2026-08-22T10:00:00Z";
+    await store.save("bot", {
+      snapshotId: 7,
+      url: "https://example.com/new",
+      elements: new Map(),
+      session,
+    });
+    await store.save("bot", {
+      snapshotId: 5,
+      url: "https://example.com/old",
+      elements: new Map(),
+      session,
+    });
+
+    expect((await store.load("bot"))?.url).toBe("https://example.com/new");
+  });
+
+  test("a provider that reports no session behaves as it did", async () => {
+    // One shared computer and no supervisor: nothing to compare, so the generation rule stands
+    // alone rather than every save counting as a new session and overwriting the last.
+    const store = createInMemorySnapshotStore();
+    await store.save("bot", {
+      snapshotId: 7,
+      url: "https://example.com/new",
+      elements: new Map(),
+    });
+    await store.save("bot", {
+      snapshotId: 5,
+      url: "https://example.com/old",
+      elements: new Map(),
+    });
+
+    expect((await store.load("bot"))?.url).toBe("https://example.com/new");
+  });
+});
