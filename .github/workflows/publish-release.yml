@@ -181,14 +181,27 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          bun -e '
-            const [version, digest, commit] = process.argv.slice(-3);
-            const repository = "ghcr.io/copilotkit/openbot";
-            console.log(JSON.stringify({
-              version, commit,
-              images: { openbot: { repository, digest, reference: `${repository}@${digest}` } },
-            }, null, 2));
-          ' -- "$VERSION" "$DIGEST" "$COMMIT" > container-images.json
+          # `jq`, not `bun`: this job deliberately checks out without credentials and installs no
+          # toolchain, so reaching for the repository's runtime here is a step that was never taken.
+          # It was, and the tag was never cut: the manifest step died on `bun: command not found`
+          # after the image had already been pushed, which is the one point in the release where a
+          # failure leaves a published image with nothing pointing at it.
+          jq -n \
+            --arg version "$VERSION" \
+            --arg digest "$DIGEST" \
+            --arg commit "$COMMIT" \
+            --arg repository "ghcr.io/copilotkit/openbot" \
+            '{
+              version: $version,
+              commit: $commit,
+              images: {
+                openbot: {
+                  repository: $repository,
+                  digest: $digest,
+                  reference: ($repository + "@" + $digest),
+                },
+              },
+            }' > container-images.json
           cat container-images.json
       - name: Tag and publish
         env:
