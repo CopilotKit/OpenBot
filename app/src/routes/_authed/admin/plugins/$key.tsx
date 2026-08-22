@@ -519,6 +519,46 @@ function RouteComponent() {
         </PageSection>
       ) : null}
 
+      {/*
+       * Only when there is something to say. An empty section here would teach a reader to scroll past
+       * a heading that is usually blank, which is the opposite of the point.
+       *
+       * Its own section rather than rows inside Tools, because these are not tools: they are not
+       * listed by the vendor, there is no page to open for one, and putting them in the same list
+       * would make the count above it wrong.
+       */}
+      {server && server.withdrawn.length > 0 ? (
+        <PageSection
+          description="This vendor no longer lists these, so no Bot is told about them and no model can call one. The grant is still recorded, and the tool would be offered again if the vendor started listing it. Revoke from the Bot's own page if that is not what you want."
+          title="Held but not offered"
+        >
+          <PageRows>
+            {server.withdrawn.map((held, index) => (
+              <React.Fragment key={held.ref}>
+                <Item size="sm">
+                  <ItemContent>
+                    <ItemTitle className="font-mono text-xs">
+                      {held.name}
+                    </ItemTitle>
+                    <ItemDescription>
+                      Not listed by {title}
+                      {server.toolsRefreshedAt ? ` as of the last refresh` : ""}
+                      .
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <span className="text-muted-foreground text-xs">
+                      {grantSummary(held.grantedTo.length, bots.length)}
+                    </span>
+                  </ItemActions>
+                </Item>
+                {index !== server.withdrawn.length - 1 && <Separator />}
+              </React.Fragment>
+            ))}
+          </PageRows>
+        </PageSection>
+      ) : null}
+
       <Dialog
         onOpenChange={(open) => setDialog(open ? dialog : null)}
         open={dialog !== null}

@@ -14,6 +14,21 @@ export type PluginTool = {
   grantedTo: string[];
 };
 
+/**
+ * A grant on a tool this server does not currently advertise.
+ *
+ * Held and not offered: nothing reaches a model, because a Bot is told about a tool only when the
+ * grant and the tool list agree. That is a fact about what the vendor advertises today, not about the
+ * grant, so it is reported rather than quietly dropped — a connector that starts advertising the name
+ * again offers it again.
+ */
+export type WithdrawnGrant = {
+  /** `<serverId>/<toolName>`. What a grant names, and what an administrator revokes. */
+  ref: string;
+  name: string;
+  grantedTo: string[];
+};
+
 export type PluginServer = {
   id: string;
   title: string;
@@ -28,6 +43,8 @@ export type PluginServer = {
   lastError: string | null;
   addedBy: string | null;
   tools: PluginTool[];
+  /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
+  withdrawn: WithdrawnGrant[];
 };
 
 export type PluginSkill = {

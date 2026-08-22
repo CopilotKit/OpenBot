@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import {
   type ActionPolicy,
@@ -57,6 +57,28 @@ export type ToolRecord = {
   grantedTo: string[];
 };
 
+/**
+ * A grant naming a tool this server does not currently advertise.
+ *
+ * Held and not offered. `listForAgent` reads the grant against the tool list, so nothing reaches a
+ * model — but that is a property of what the vendor is advertising today rather than of the grant, and
+ * it changes the moment the vendor advertises the name again. Google's Drive entry says so in its own
+ * comment: the REST transport is one line from being swapped back to MCP, and "tool names match
+ * Google's MCP server exactly, so grants survive the swap in either direction".
+ *
+ * So it is reported rather than pruned. A grant is the record of a decision somebody made, and the
+ * refresh that would have deleted it is not a safe place to decide from: the tool list is replaced by
+ * a `delete` and then an `insert`, and a vendor answering with an empty list is a success, so one bad
+ * answer would revoke every grant on that server and stamp the refresh as healthy.
+ */
+export type WithdrawnGrant = {
+  /** `<serverId>/<toolName>`, exactly as the grant is stored. */
+  ref: string;
+  /** The tool half, for a screen that already has the server. */
+  name: string;
+  grantedTo: string[];
+};
+
 export type ServerRecord = {
   id: string;
   title: string;
@@ -71,6 +93,13 @@ export type ServerRecord = {
   lastError: string | null;
   addedBy: string | null;
   tools: ToolRecord[];
+  /**
+   * Grants on tools this server no longer advertises.
+   *
+   * Empty for a healthy connector. Non-empty is the discrepancy an administrator should be reading
+   * about, which is why it is here rather than inferred by a screen comparing two lists.
+   */
+  withdrawn: WithdrawnGrant[];
 };
 
 export type SkillRecord = {
@@ -327,6 +356,35 @@ export function createPluginStore(options: PluginStoreOptions) {
       .select()
       .from(pluginGrants)
       .where(and(eq(pluginGrants.kind, kind), inArray(pluginGrants.ref, refs)));
+    const byRef = new Map<string, string[]>();
+    for (const row of rows) {
+      byRef.set(row.ref, [...(byRef.get(row.ref) ?? []), row.agentId]);
+    }
+    return byRef;
+  }
+
+  /**
+   * Every MCP grant belonging to these servers, whether or not the tool is still advertised.
+   *
+   * {@link grantsFor} asks about refs somebody already has, which is the wrong question when the
+   * point is to find the ones nothing else knows about: called with the advertised refs it can only
+   * ever return a subset of them, so a grant on a withdrawn tool is invisible by construction.
+   *
+   * Matched on the server half in the query rather than by reading every grant and splitting here.
+   * `split_part` rather than a `LIKE` prefix, because a server id is text a person can choose for a
+   * custom server and `%` in one would silently widen the match.
+   */
+  async function mcpGrantsForServers(serverIds: string[]) {
+    if (serverIds.length === 0) return new Map<string, string[]>();
+    const rows = await database
+      .select({ ref: pluginGrants.ref, agentId: pluginGrants.agentId })
+      .from(pluginGrants)
+      .where(
+        and(
+          eq(pluginGrants.kind, "mcp"),
+          inArray(sql`split_part(${pluginGrants.ref}, '/', 1)`, serverIds),
+        ),
+      );
     const byRef = new Map<string, string[]>();
     for (const row of rows) {
       byRef.set(row.ref, [...(byRef.get(row.ref) ?? []), row.agentId]);
@@ -739,6 +797,41 @@ export function createPluginStore(options: PluginStoreOptions) {
           })
           .where(eq(mcpServers.id, serverId));
 
+        /*
+         * A grant left pointing at nothing goes in the trail, at the moment it starts pointing at
+         * nothing.
+         *
+         * Reporting it on a screen answers "what is true now", which somebody has to go and look at.
+         * This answers "when did it stop being offered, and what was holding it" — the question asked
+         * after a transport is swapped back and a name starts resolving again. Without the row, the
+         * only record of the gap is its absence.
+         *
+         * Not a refusal and not an error, so `configuration.changed` rather than a new event type:
+         * nothing was denied and the refresh succeeded. Written after the tool list is replaced, so
+         * what it names is what is actually left over.
+         */
+        const advertised = new Set(tools.map((tool) => tool.name));
+        const stranded = [...(await mcpGrantsForServers([serverId])).entries()]
+          .filter(([ref]) => !advertised.has(ref.slice(serverId.length + 1)))
+          .sort(([left], [right]) => left.localeCompare(right));
+
+        if (stranded.length > 0) {
+          await recordAuditEvent(auditStore, {
+            eventType: "configuration.changed",
+            targetType: "mcp_server",
+            targetId: serverId,
+            payload: {
+              actor: actorId,
+              change: "grants_not_advertised",
+              server: serverId,
+              // The refs, because that is what a grant is keyed on and what an administrator revokes.
+              refs: stranded.map(([ref]) => ref),
+              bots: [...new Set(stranded.flatMap(([, agents]) => agents))],
+              note: "Held by a Bot and not offered to any model, because this server no longer advertises the tool. Offered again if it starts.",
+            },
+          });
+        }
+
         return { tools: tools.length };
       } catch (error) {
         const message =
@@ -775,8 +868,13 @@ export function createPluginStore(options: PluginStoreOptions) {
         )
         .orderBy(asc(mcpTools.name));
 
-      const grants = await grantsFor(
-        "mcp",
+      /*
+       * Every grant on these servers, not only the ones matching a tool that is still advertised.
+       * Asking about the advertised refs answers "who holds what is offered", which cannot report the
+       * grants that are the point here — see `mcpGrantsForServers`.
+       */
+      const grants = await mcpGrantsForServers(rows.map((row) => row.id));
+      const advertised = new Set(
         tools.map((tool) => `${tool.serverId}/${tool.name}`),
       );
 
@@ -808,6 +906,21 @@ export function createPluginStore(options: PluginStoreOptions) {
                 grantedTo: grants.get(ref) ?? [],
               };
             }),
+          /*
+           * Sorted by ref so the list is stable between reads, which matters because this is the one
+           * place a discrepancy is reported and a reader comparing two visits should see the same
+           * order.
+           */
+          withdrawn: [...grants.entries()]
+            .filter(
+              ([ref]) => ref.startsWith(`${row.id}/`) && !advertised.has(ref),
+            )
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([ref, grantedTo]) => ({
+              ref,
+              name: ref.slice(row.id.length + 1),
+              grantedTo,
+            })),
         };
       });
     },

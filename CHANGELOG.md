@@ -77,6 +77,23 @@ Refusals are now on the audit trail as `agent.dial_refused`, with the address an
 refused run already told the person what happened; nothing told the deployment, and an agent that
 has quietly started redirecting somewhere it should not is worth being able to count.
 
+### A connector says which of its granted tools it no longer offers
+
+A grant names `serverId/toolName`, and a Bot is told about a tool only when the grant and the vendor's
+current tool list agree — so a grant on a tool the vendor has stopped listing reaches no model. That
+is a property of what the vendor advertises today rather than of the grant, and nothing said it was
+happening: the plugins page built its grant list from the advertised tools, so such a grant appeared
+nowhere at all. The one screen an administrator reads to answer "what may this Bot do" was quietly
+leaving some of the answer out.
+
+A connector's page now has a "Held but not offered" section listing them, with how many Bots hold
+each, and a refresh that leaves any behind writes an audit row naming the refs and the Bots. The
+grants themselves are untouched: a tool the vendor starts listing again is offered again, and revoking
+stays a decision somebody makes rather than a side effect of a vendor's bad afternoon.
+
+Nothing changes for a connector whose grants all match its tool list, which is the normal case — the
+section is not drawn and no row is written.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
@@ -102,7 +119,6 @@ the decision row is written, so an action somebody tried to take still appears o
 **A deployment may see refusals it did not see before.** That is the point: those are the actions that
 were being carried out without the boundary seeing what they touched. A Bot that meets one takes a
 fresh snapshot and continues.
-
 ### A package ships its skills, so tool selection works on a clone
 
 Tool selection narrows a Bot's tools to the ones its matching skills declare, and a deployment starts

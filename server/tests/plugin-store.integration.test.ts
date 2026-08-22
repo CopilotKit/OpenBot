@@ -443,3 +443,79 @@ describe("the trail can be read by a second reader", () => {
     expect(row?.bot).toBeTruthy();
   });
 });
+
+/**
+ * A grant outliving the tool it names.
+ *
+ * The runtime already handles it: `listForAgent` reads the grant against the tool list, so a tool the
+ * vendor has stopped advertising reaches no model. What was missing is that nothing said so — the
+ * plugins page derives its grant list from the advertised refs, so a grant on a withdrawn tool was
+ * invisible on the one screen an administrator reads to answer "what may this Bot do".
+ */
+describe("a grant on a tool the vendor no longer lists", () => {
+  const withdrawnName = `withdrawn_${suite}`;
+  const withdrawnRef = `${serverId}/${withdrawnName}`;
+
+  afterAll(async () => {
+    await database
+      .delete(pluginGrants)
+      .where(
+        and(
+          eq(pluginGrants.ref, withdrawnRef),
+          eq(pluginGrants.agentId, holderId),
+        ),
+      );
+    await database
+      .delete(mcpTools)
+      .where(
+        and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, withdrawnName)),
+      );
+  });
+
+  test("is reported as held and not offered, and still reaches no model", async () => {
+    // Advertised once, which is how a grant comes to exist against it.
+    await database
+      .insert(mcpTools)
+      .values({
+        serverId,
+        name: withdrawnName,
+        description: "Listed by the vendor when the grant was made.",
+      })
+      .onConflictDoNothing();
+    await store.grant("mcp", withdrawnRef, holderId, "admin@openbot.local");
+
+    // Then withdrawn. A refresh replaces the tool list wholesale, so this is what one does to a name
+    // the vendor has stopped offering.
+    await database
+      .delete(mcpTools)
+      .where(
+        and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, withdrawnName)),
+      );
+
+    const drive = (await store.listServers()).find(
+      (server) => server.id === serverId,
+    );
+
+    // Not a tool: it is not in the list the vendor gave, so it must not be counted as one.
+    expect(drive?.tools.map((tool) => tool.ref)).not.toContain(withdrawnRef);
+    // But it is reported, with who holds it, which is the whole point.
+    expect(drive?.withdrawn.map((held) => held.ref)).toContain(withdrawnRef);
+    const held = drive?.withdrawn.find((row) => row.ref === withdrawnRef);
+    expect(held?.name).toBe(withdrawnName);
+    expect(held?.grantedTo).toContain(holderId);
+
+    // And the property that made it inert in the first place is unchanged. This is the assertion that
+    // would fail if reporting a grant had turned into honouring one.
+    const offered = await store.listForAgent(holderId);
+    expect(offered.tools.map((tool) => tool.ref)).not.toContain(withdrawnRef);
+  });
+
+  test("a healthy connector reports nothing withdrawn", async () => {
+    // The empty case, because a field that is only ever exercised non-empty is a field whose empty
+    // shape nobody has checked — and this one is read by a screen that hides itself when it is empty.
+    const drive = (await store.listServers()).find(
+      (server) => server.id === serverId,
+    );
+    expect(drive?.withdrawn.map((row) => row.ref)).not.toContain(ref);
+  });
+});
