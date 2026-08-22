@@ -17,6 +17,14 @@ export type SkillInput = {
   summary?: string;
   instructions: string;
   global?: boolean;
+  /**
+   * The tools this skill says it needs, as `<serverId>/<toolName>` refs.
+   *
+   * Sent on every save, including empty, because the server replaces the set rather than merging
+   * into it: omitting the field to mean "leave them alone" and sending `[]` to mean "clear them"
+   * would be the same request from a form that just had its last one unticked.
+   */
+  tools?: string[];
 };
 
 /** A curated server from the catalogue, which supplies the URL. */

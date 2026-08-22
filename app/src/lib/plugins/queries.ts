@@ -41,6 +41,15 @@ export type PluginSkill = {
   origin: string;
   installedBy: string | null;
   grantedTo: string[];
+  /**
+   * The tools this skill says it needs, as `<serverId>/<toolName>` refs.
+   *
+   * A declaration, not a grant, and the difference is the whole reason anybody may write a skill:
+   * naming a tool here cannot make it callable. Selection intersects this with what the Bot was
+   * granted, so a skill naming a tool its Bot does not hold selects the skill and loads nothing.
+   * `grantedTo` on the tool side is what decides.
+   */
+  tools: string[];
 };
 
 export type CatalogueItem = {

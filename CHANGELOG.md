@@ -32,6 +32,19 @@ refusing to boot over.
 The example package ships four: `/find-a-document`, `/whats-changed`, `/who-owns-this` and
 `/check-a-claim`.
 
+### The tools a skill needs can be picked where the skill is written
+
+A package's skills arrive with their tools declared. A skill somebody writes here could not: the
+`tools` field existed on the save endpoint and on no screen, so a skill written in the product declared
+nothing, and the only way to change that was to call the API by hand. Writing or editing a skill now
+lists the tools of every connected server, grouped by server, with the ones that change something
+marked.
+
+Picking a tool here is not granting it. The offer is still intersected with what the Bot was granted,
+so a skill naming a tool its Bot does not hold selects the skill and loads nothing — which is why
+anybody may write a skill while connecting a server stays an administrator's decision. The screen says
+so, next to the choice.
+
 ## 0.0.3
 
 ### A Bot is offered the tools its message needs, not every tool it holds

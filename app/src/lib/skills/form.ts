@@ -34,6 +34,17 @@ export const skillFormSchema = z.object({
     .string()
     .trim()
     .min(1, "Instructions are required — this is what the Bot follows."),
+  /**
+   * The tools this skill says it needs, as `<serverId>/<toolName>` refs.
+   *
+   * No minimum, and no validation of the refs themselves. A skill needing no tool is ordinary — most
+   * are prose — and the server already refuses a ref it has never seen with a sentence naming it,
+   * which is a better answer than anything this file could reconstruct about which tools exist.
+   *
+   * Part of the form rather than saved on press, unlike granting. What a skill needs is the author's
+   * draft until they save it, so unticking one and closing the panel has to change nothing.
+   */
+  tools: z.array(z.string()),
 });
 
 export type SkillFormValues = z.infer<typeof skillFormSchema>;
@@ -43,4 +54,5 @@ export const emptySkillForm: SkillFormValues = {
   title: "",
   summary: "",
   instructions: "",
+  tools: [],
 };

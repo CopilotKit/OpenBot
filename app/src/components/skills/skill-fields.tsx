@@ -1,4 +1,5 @@
 import { useForm } from "@tanstack/react-form";
+import { SkillTools } from "@/components/skills/skill-tools";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -187,6 +188,14 @@ export function SkillFields({
               </Field>
             );
           }}
+        </form.Field>
+        <form.Field name="tools">
+          {(field) => (
+            <SkillTools
+              onChange={field.handleChange}
+              selected={field.state.value}
+            />
+          )}
         </form.Field>
       </FieldGroup>
 

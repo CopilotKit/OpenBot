@@ -62,6 +62,9 @@ export function EditSkill({ slug }: { slug: string }) {
           title: skill.title,
           summary: skill.summary ?? "",
           instructions: skill.instructions,
+          // Defaulted, so a skill written before this field existed opens with nothing ticked rather
+          // than with an undefined the form would refuse to submit.
+          tools: skill.tools ?? [],
         }}
         error={saveSkill.error}
         /*
