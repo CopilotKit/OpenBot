@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   createComputerTransport,
   ElementNotFoundError,
+  HumanHasControlError,
   NavigationRefusedError,
+  StaleSnapshotError,
 } from "../src/computer/client";
 
 function clientWith(
@@ -191,6 +193,88 @@ describe("acting on an element that is not there", () => {
 });
 
 /**
+ * A refusal because a person took the wheel, told apart from stale refs.
+ *
+ * Both arrive as 409, and the computer says which is which by putting `humanHasControl` on the body
+ * (agent-computer/src/index.ts). Mapping every 409 to the same condition throws that away, and the
+ * surface then tells the model its refs are stale and to take a fresh snapshot: advice that sends a
+ * Bot round the loop again against a person who has deliberately taken the browser. The status is
+ * the same either way; what differs is what the caller should do next, which is the only thing the
+ * distinction is for.
+ */
+describe("a 409 from the computer", () => {
+  const refusing = (body: unknown) =>
+    clientWith(
+      () =>
+        new Response(JSON.stringify(body), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+  test("is a person holding the wheel when the computer says so", async () => {
+    expect(
+      refusing({
+        error: "A person has taken control of this computer.",
+        humanHasControl: true,
+      }).click({ ref: "e1", snapshotId: 1 }),
+    ).rejects.toBeInstanceOf(HumanHasControlError);
+  });
+
+  test("is a stale snapshot when it does not", async () => {
+    // The permissive half, and the one that must not change: an ordinary stale-ref 409 carries no
+    // flag and keeps its own condition, so the refs-are-stale instruction still reaches the model.
+    expect(
+      refusing({ error: "Snapshot 3 is not the current one." }).click({
+        ref: "e1",
+        snapshotId: 1,
+      }),
+    ).rejects.toBeInstanceOf(StaleSnapshotError);
+  });
+
+  test("is a stale snapshot for every shape that is not the flag", async () => {
+    // The flag decides an instruction a Bot acts on, so only the computer's own `true` counts. A
+    // string, a false, or a 409 with nothing on it at all stays the ordinary condition rather than
+    // parking a Bot to wait for a person who is not there.
+    for (const body of [
+      { error: "no flag" },
+      { error: "explicitly not a takeover", humanHasControl: false },
+      { error: "a string is not a boolean", humanHasControl: "true" },
+      {},
+    ]) {
+      expect(
+        refusing(body).click({ ref: "e1", snapshotId: 1 }),
+      ).rejects.toBeInstanceOf(StaleSnapshotError);
+    }
+  });
+
+  test("a 409 with no body at all is still a refusal, not a crash", async () => {
+    const bodyless = clientWith(() => new Response(null, { status: 409 }));
+    expect(bodyless.click({ ref: "e1", snapshotId: 1 })).rejects.toBeInstanceOf(
+      StaleSnapshotError,
+    );
+  });
+
+  test("carries the reason the computer gave, either way", async () => {
+    for (const body of [
+      {
+        error: "A person has taken control of this computer.",
+        humanHasControl: true,
+      },
+      { error: "Snapshot 3 is not the current one." },
+    ]) {
+      try {
+        await refusing(body).click({ ref: "e1", snapshotId: 1 });
+        throw new Error("should have refused");
+      } catch (error) {
+        expect((error as Error).message).toBe(body.error);
+      }
+    }
+  });
+});
+
+/**
+ * Stop has to travel./**
  * Stop has to travel.
  *
  * Pressing Stop aborts the surface's request. That abort is only useful if it reaches the browser: a

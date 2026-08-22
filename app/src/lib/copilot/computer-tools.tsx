@@ -42,7 +42,14 @@ async function waitForPerson(
   return "gave up";
 }
 
-async function callComputer(
+/**
+ * Exported for the test that covers what a Bot is told when a call is refused.
+ *
+ * The distinctions this draws from a status and a body decide the model's next step, and they are
+ * drawn nowhere else, so they are worth pinning without standing up the tool registrations and the
+ * runtime around them.
+ */
+export async function callComputer(
   botId: string,
   path: string,
   /*

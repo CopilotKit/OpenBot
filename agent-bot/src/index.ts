@@ -3,7 +3,7 @@ import { EventEncoder } from "@ag-ui/encoder";
 import { serve } from "bun";
 import OpenAI from "openai";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
-import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import { toProviderMessages } from "./history";
 
 /**
  * The built-in Bot is an AG-UI HTTP service registered the same way as any customer-provided Bot.
@@ -66,50 +66,6 @@ const openai = new OpenAI({
   apiKey: API_KEY,
   baseURL: BASE_URL,
 });
-
-/** Translate the conversation AG-UI carries into the shape the model provider expects. */
-function toProviderMessages(input: RunAgentInput) {
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: COMPUTER_GUIDANCE },
-  ];
-
-  for (const message of input.messages) {
-    if (message.role === "user") {
-      messages.push({ role: "user", content: String(message.content ?? "") });
-      continue;
-    }
-    if (message.role === "system" || message.role === "developer") {
-      messages.push({ role: "system", content: String(message.content ?? "") });
-      continue;
-    }
-    if (message.role === "tool") {
-      // Tool results are appended so the model can continue from the completed call.
-      messages.push({
-        role: "tool",
-        tool_call_id: message.toolCallId,
-        content: String(message.content ?? ""),
-      });
-      continue;
-    }
-    if (message.role === "assistant") {
-      const toolCalls = message.toolCalls?.map((call) => ({
-        id: call.id,
-        type: "function" as const,
-        function: {
-          name: call.function.name,
-          arguments: call.function.arguments,
-        },
-      }));
-      messages.push({
-        role: "assistant",
-        content: message.content ?? null,
-        ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
-      });
-    }
-  }
-
-  return messages;
-}
 
 /** Every tool comes from the caller. This service publishes none of its own, on purpose. */
 function toProviderTools(input: RunAgentInput) {
