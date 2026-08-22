@@ -226,6 +226,46 @@ export const skills = pgTable(
 );
 
 /**
+ * The tools a skill says it needs. A row is a declaration, and a declaration is not a grant.
+ *
+ * WHY THIS EXISTS. Choosing between a thousand tools is a retrieval problem, and the unit being
+ * retrieved has to be the skill rather than the tool: a model picks the skill from its summary, and
+ * the skill says which tools to load. Without this table there is no such unit. See K3.
+ *
+ * IT GRANTS NOTHING, AND THAT IS LOAD-BEARING RATHER THAN TIDY. Anybody signed in may write a skill,
+ * precisely because a skill adds no capability — `plugins/routes.ts` says so where it declines to
+ * require an administrator. If naming a tool here could make it callable, then writing a skill would
+ * be a way to grant yourself a tool, and the one surface in this deployment that is deliberately not
+ * an administrator's would become the way around every surface that is. What a Bot may call stays
+ * `plugin_grants`; this only ever narrows what is offered out of what was already granted.
+ *
+ * NO FOREIGN KEY TO `mcp_tools`, on purpose. Refreshing a server deletes every one of its tool rows
+ * and writes them again (`plugins/store.ts`), so a composite key with `on delete cascade` would empty
+ * every skill's declarations on a routine refresh. `plugin_grants.ref` is plain text for the same
+ * reason, and holding the two in the same shape is what lets them be compared without either side
+ * parsing the other's format. The cost is a ref that can outlive the tool it names, which is the
+ * price grants already pay, and is why a missing tool must read as "load nothing" rather than as an
+ * error at run time.
+ */
+export const skillTools = pgTable(
+  "skill_tools",
+  {
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skills.id, { onDelete: "cascade" }),
+    /** `<serverId>/<toolName>`, the same key a grant is written against. */
+    ref: text("ref").notNull(),
+    declaredBy: text("declared_by"),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.skillId, table.ref] }),
+    // Answering "which skills want this tool" without scanning, for the withdrawal question in #106.
+    index("skill_tools_ref_idx").on(table.ref),
+  ],
+);
+
+/**
  * One Bot's hold on one plugin, whether that plugin is an MCP tool or a skill. A row is the grant.
  *
  * Absence is the refusal, the same shape component grants use and for the same reason. A Bot
