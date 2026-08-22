@@ -2,6 +2,7 @@ import { IconX } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { EASE_OUT } from "@/lib/motion";
 
 /**
@@ -45,6 +46,39 @@ export function DetailPanel({
 }) {
   // Reduced motion keeps the fade, which explains the change, and drops the movement.
   const shouldReduceMotion = useReducedMotion();
+  const isMobile = useIsMobile();
+
+  const detailHeader = (
+    <div className="h-12 shrink-0 sticky top-0 flex flex-row items-center justify-between px-2 gap-2">
+      <div className="flex min-w-0 w-full items-center gap-1.5">{title}</div>
+      <div className="flex flex-row gap-1.5">
+        <Button onClick={onClose} variant="ghost" size="icon">
+          <IconX className="size-4.5" />
+        </Button>
+      </div>
+    </div>
+  );
+
+  // On mobile the detail panel overlays the full pane rather than pushing the content aside,
+  // because a fixed 400px side panel next to a 340px sidebar leaves nothing for the main view.
+  if (isMobile) {
+    return (
+      <div className="relative flex h-full min-h-0">
+        <div className="flex flex-1 min-w-0 flex-col">{children}</div>
+        {open ? (
+          <motion.div
+            animate={{ opacity: 1 }}
+            className="absolute inset-0 z-10 flex flex-col bg-sidebar border-l border-border overflow-hidden"
+            initial={{ opacity: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.15, ease: EASE_OUT }}
+          >
+            {detailHeader}
+            <div className="flex-1 min-h-0 overflow-y-auto">{detail}</div>
+          </motion.div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0">
@@ -64,16 +98,7 @@ export function DetailPanel({
           style={{ width: detailWidth }}
         >
           {/* Rendered for the whole animation, so the way out is available immediately. */}
-          <div className="h-12 shrink-0 sticky top-0 flex flex-row items-center justify-between px-2 gap-2">
-            <div className="flex min-w-0 w-full items-center gap-1.5">
-              {title}
-            </div>
-            <div className="flex flex-row gap-1.5">
-              <Button onClick={onClose} variant="ghost" size="icon">
-                <IconX className="size-4.5" />
-              </Button>
-            </div>
-          </div>
+          {detailHeader}
           {/*
            * Unmount while closed so dismissed form state and detail queries do not remain active.
            */}

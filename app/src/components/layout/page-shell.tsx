@@ -3,6 +3,7 @@ import type * as React from "react";
 import { cn } from "@/lib/utils";
 import { Link, type LinkProps } from "@tanstack/react-router";
 import { Button } from "../ui/button";
+import { SidebarTrigger } from "../ui/sidebar";
 import { IconChevronLeft } from "@tabler/icons-react";
 
 /**
@@ -59,6 +60,9 @@ export function PageShell({
 }) {
   return (
     <>
+      <div className="md:hidden h-12 flex items-center px-2 border-b border-border">
+        <SidebarTrigger />
+      </div>
       {!!backButton && (
         <div className="max-w-7xl w-full h-14 flex items-center px-3">
           <Button

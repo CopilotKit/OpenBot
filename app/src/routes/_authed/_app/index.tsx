@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { AgentCard } from "@/components/agents/agent-card";
 import { Composer, toAgentOptions } from "@/components/channels/composer";
 import { agentListQueryOptions } from "@/lib/agents/queries";
@@ -22,6 +23,10 @@ function RouteComponent() {
   const fallback = explore?.[0] ?? agents?.[0];
 
   return (
+    <div className="flex-1 flex flex-col w-full">
+      <div className="md:hidden h-12 flex items-center px-2 border-b border-border shrink-0">
+        <SidebarTrigger />
+      </div>
     <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
       <div className="flex flex-col items-center">
         <h2 className="text-sm uppercase text-muted-foreground font-medium tracking-tight text-center">
@@ -105,6 +110,7 @@ function RouteComponent() {
             ))}
         </div>
       </div>
+    </div>
     </div>
   );
 }
