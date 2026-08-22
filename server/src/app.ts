@@ -683,6 +683,10 @@ export function createApp(
       "/api/plugins",
       createPluginRoutes(pluginStore, requireUser, canUseBot, {
         encryptionKey: config.keyEncryptionKey,
+        // The deployment-wide fallback a Bot may present, as a yes or no. The secret itself stays
+        // in config and is checked in `/api/agent-tools/call`; the surface only needs to know
+        // whether a Bot without its own credential has any way to call back.
+        botsMayCallBack: Boolean(config.agentToolToken),
         publicUrl: config.publicUrl,
         appUrl: config.appUrl,
       }),

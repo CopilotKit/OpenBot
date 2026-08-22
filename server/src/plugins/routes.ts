@@ -60,6 +60,15 @@ export function createPluginRoutes(
    */
   connect?: {
     encryptionKey: string;
+    /**
+     * Whether this deployment holds a shared secret a Bot may present when calling a tool back.
+     *
+     * A boolean about configuration, never the secret. Without it, a Bot can only call back if it
+     * holds a credential issued to it alone, and a Bot with neither is refused before the call ever
+     * reaches the grant, the boundary or the trail. The Bots screen needs this to stop promising a
+     * grant the deployment cannot honour.
+     */
+    botsMayCallBack?: boolean;
     publicUrl: string | undefined;
     /**
      * Where the app is, which is not where this API is.
@@ -119,6 +128,15 @@ export function createPluginRoutes(
         auth: entry.auth.kind,
         perInstance: entry.host === null,
       })),
+      /*
+       * Whether a Bot with no credential of its own can still call a tool back.
+       *
+       * The grant switch decides whether a tool is offered to a model; this decides whether any
+       * call it makes can be authenticated at all. They are different questions and the screen used
+       * to answer only the first, so a grant could read "May call this tool" on a deployment where
+       * every call was refused before it reached the boundary.
+       */
+      botsMayCallBack: connect?.botsMayCallBack === true,
       servers: await store.listServers(),
       // Scoped: the deployment's skills plus this person's own. An administrator sees them all.
       skills: await store.listSkills(skillActor(context)),

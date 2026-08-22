@@ -66,6 +66,15 @@ export type PluginsPage = {
   servers: PluginServer[];
   skills: PluginSkill[];
   /**
+   * Whether a Bot holding no credential of its own can still call a tool back.
+   *
+   * True when the deployment has a shared secret configured for it. A grant decides whether a tool
+   * is offered to a model at all; this decides whether the call it makes can be authenticated. With
+   * neither this nor a credential issued to the Bot, every call is refused before it reaches the
+   * grant, the boundary or the audit trail, which is not something a grant switch can show.
+   */
+  botsMayCallBack: boolean;
+  /**
    * The redirect URI to register with a `user-oauth` vendor, exactly as this deployment will send it.
    *
    * From the server rather than assembled here, because it has to match what was registered

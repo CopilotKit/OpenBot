@@ -44,6 +44,18 @@ function RouteComponent() {
   const queryClient = useQueryClient();
   const plugins = useQuery(pluginsPageQueryOptions());
   const { data: agents } = useQuery(agentListQueryOptions());
+  /*
+   * Whether a call from this Bot could be authenticated at all.
+   *
+   * Its own issued credential, or the deployment's shared one. Separate from the grant: the switch
+   * decides whether the tool is offered to the model, this decides whether the call it makes gets
+   * past the front door. A Bot with the grant and neither credential produced "May call this tool"
+   * beside a tool that refused every call, with no audit row, because the call never arrived.
+   */
+  const sharedCallback = plugins.data?.botsMayCallBack === true;
+  const canCallBack = (bot: { id: string }) =>
+    sharedCallback ||
+    agents?.find((one) => one.id === bot.id)?.hasCallbackToken === true;
   const nameFor = useBotNames();
   const [error, setError] = useState<string | null>(null);
 
@@ -162,7 +174,9 @@ function RouteComponent() {
                       <ItemTitle>{bot.name}</ItemTitle>
                       <ItemDescription>
                         {held
-                          ? "May call this tool. Every call is still checked against the boundaries and written to the audit trail."
+                          ? canCallBack(bot)
+                            ? "May call this tool. Every call is still checked against the boundaries and written to the audit trail."
+                            : "Granted, but this Bot has no credential for calling tools back, so every call is refused before it reaches the boundary. Issue one on its own page, or set AGENT_TOOL_TOKEN for the deployment."
                           : "Cannot call this tool. It is not offered to the model at all, so it has nothing to refuse."}
                       </ItemDescription>
                     </ItemContent>
