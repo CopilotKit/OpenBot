@@ -127,6 +127,8 @@ describe("recording which coworker a message went to", () => {
       viaMention: true,
       fallback: false,
     });
+    // Third person: an administrator reading this row is not the person who chose.
+    expect(written[0]?.payload.reason).toBe("named by the person asking");
   });
 
   test("naming a coworker never asks the model", async () => {

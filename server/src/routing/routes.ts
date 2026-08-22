@@ -116,7 +116,16 @@ export function createRoutingRoutes(
           404,
         );
       }
-      const reason = "you chose them yourself";
+      /*
+       * Third person, because the audit page is not read by the person who chose.
+       *
+       * This said "you chose them yourself", which is true in the conversation and false on an
+       * administrator's screen, where every row is somebody else's. The person is already on the
+       * row as `actorUserId`; the reason only has to say what kind of decision it was.
+       *
+       * @zopeVaibhav had this right in #134.
+       */
+      const reason = "named by the person asking";
       await record(actorId(actor), chosen.id, reason, false, true, [chosen.id]);
       return context.json({
         agentId: chosen.id,
