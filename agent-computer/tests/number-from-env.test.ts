@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { numberFromEnv } from "../src/profiles";
+import { numberFromEnv } from "../src/env";
 
 const NAME = "OPENBOT_TEST_NUMBER_FROM_ENV";
 

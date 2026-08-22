@@ -39,6 +39,11 @@ import { type BrowserContext, chromium, type Page } from "playwright";
 import { profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
+import { numberFromEnv } from "./env";
+
+// Re-exported so callers that already import it from here do not change, while the test imports it
+// from the playwright-free `./env` instead of pulling this module's browser driver in with it.
+export { numberFromEnv };
 
 /** The viewport, which is what a person's click coordinates are relative to. */
 export const VIEWPORT = { width: 1280, height: 800 };
@@ -142,28 +147,6 @@ async function closeAndWait(context: BrowserContext): Promise<void> {
   await context.close().catch(() => undefined);
   // A fixed settle is used because persistent contexts do not expose a reliable browser-exit signal.
   await new Promise((resolve) => setTimeout(resolve, CLOSE_SETTLE_MS));
-}
-
-/**
- * A number an operator set, or the default.
- *
- * `Number("")` is zero, and an unset variable in a compose file arrives as an empty string rather
- * than as absent. Read with `??` alone, an operator who had not set the cap would get a cap of zero
- * and every browser would be closed the moment it opened. Anything that is not a positive number
- * falls back, because "I typed this wrong" and "I did not set it" both mean the default.
- */
-/**
- * A positive number from the environment, or the fallback.
- *
- * `Number.parseInt(process.env.X ?? "default")` is not enough: an unset variable declared in a
- * compose file arrives as an empty string rather than as absent, so `??` never fires and the parse
- * yields `NaN`. Empty, absent, non-numeric and non-positive all mean "not set" and take the fallback.
- */
-export function numberFromEnv(name: string, fallback: number): number {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 /**
