@@ -123,18 +123,25 @@ export async function storeAgentAuth(input: {
  *
  * Never throws. The new key is already stored and the Bot already works; a vault that would not
  * accept the revocation is worth saying loudly and is not worth failing an edit that has succeeded.
+ *
+ * Takes the caller's transaction where there is one, and must be given it whenever the caller holds
+ * a lock on the row being retired. On a pooled connection the revoke is a second session competing
+ * with the caller's own open transaction: it waits for a lock only that transaction can release, and
+ * the transaction cannot commit while it is awaiting this call. Nothing breaks that, so the edit
+ * hangs to the statement timeout and the timeout is then reported here as a key still live.
  */
 export async function retireReplacedKey(
   store: Pick<CredentialStore, "revoke">,
   previous: Record<string, unknown>,
   next: Record<string, unknown>,
+  executor?: CredentialExecutor,
 ): Promise<void> {
   const before = credentialIdOf(previous);
   const after = credentialIdOf(next);
   if (!before || before === after) return;
 
   try {
-    await store.revoke(before);
+    await store.revoke(before, executor);
   } catch (error) {
     console.error(
       JSON.stringify({

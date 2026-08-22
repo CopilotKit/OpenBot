@@ -1067,28 +1067,38 @@ export function createPluginStore(options: PluginStoreOptions) {
         );
       }
 
-      const stored = await credentials.create({
-        kind: "mcp_oauth_client",
+      const key = {
+        kind: "mcp_oauth_client" as const,
         provider: input.serverId,
         keyId: `oauth-client-${input.serverId}`,
+      };
+      const value = {
+        ...key,
         metadata: { server: input.serverId, clientId: input.client.clientId },
         encryptedValue: await encryptSecret(
           encryptionKey,
           JSON.stringify(input.client),
         ),
-      });
+      };
+
+      /*
+       * Re-registering a client replaces the one before it, in one transaction.
+       *
+       * A key holds at most one live credential, so inserting a second for this server would be
+       * refused by `credentials_active_key_idx` rather than leaving the orphan it used to leave.
+       * The question is asked of the key and not of `row.credentialId`, because the server row keeps
+       * naming a credential an administrator has revoked from the Credentials page: the pointer can
+       * be stale where the key is not, and it is the key the index constrains.
+       */
+      const live = await credentials.findLiveByKey(key);
+      const stored = live
+        ? await credentials.rotate({ ...value, previousCredentialId: live.id })
+        : await credentials.create(value);
 
       await database
         .update(mcpServers)
         .set({ credentialId: stored.id, updatedAt: new Date() })
         .where(eq(mcpServers.id, input.serverId));
-
-      if (row.credentialId) {
-        await credentials.revoke(row.credentialId).catch(() => {
-          // A previous client that cannot be revoked must not stop the new one taking effect. The
-          // pointer has already moved, so nothing reaches the old row; it is a tidiness failure.
-        });
-      }
 
       await recordAuditEvent(auditStore, {
         eventType: "mcp.oauth_client_registered",
@@ -1130,13 +1140,28 @@ export function createPluginStore(options: PluginStoreOptions) {
         )
         .limit(1);
 
-      const stored = await credentials.create({
-        kind: "mcp_user_token",
+      const key = {
+        kind: "mcp_user_token" as const,
         provider: input.serverId,
         keyId: input.userId,
+      };
+      /*
+       * Reconnecting replaces this person's token for this server, in one transaction.
+       *
+       * `credentials_active_key_idx` holds one live credential per key, so a second insert for the
+       * same person and server would be refused. Asked of the key rather than of `previous`, because
+       * the connection row can name a credential that has already been revoked while the key itself
+       * is free, and it is the key the index constrains.
+       */
+      const live = await credentials.findLiveByKey(key);
+      const value = {
+        ...key,
         metadata: { server: input.serverId, scope: input.scope },
         encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
-      });
+      };
+      const stored = live
+        ? await credentials.rotate({ ...value, previousCredentialId: live.id })
+        : await credentials.create(value);
 
       await database
         .insert(mcpUserCredentials)
@@ -1154,12 +1179,6 @@ export function createPluginStore(options: PluginStoreOptions) {
             updatedAt: new Date(),
           },
         });
-
-      if (previous) {
-        await credentials.revoke(previous.credentialId).catch(() => {
-          // Same reasoning as above: the pointer has moved, so this is tidiness rather than access.
-        });
-      }
 
       await recordAuditEvent(auditStore, {
         eventType: "mcp.account_connected",

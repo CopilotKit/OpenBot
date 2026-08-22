@@ -497,16 +497,48 @@ export async function rotateCredential(
 ): Promise<CredentialStatus> {
   // Encryption happens before the transaction opens, so no database connection
   // is held while it runs. The store then performs both writes atomically, and
-  // a failure leaves the vault as it was, which is why the audit event below is
-  // written only once that has returned.
-  const stored = await service.store.rotate({
-    previousCredentialId: input.previousCredentialId,
-    kind: input.kind,
-    provider: input.provider,
-    keyId: input.keyId,
-    metadata: input.metadata,
-    encryptedValue: await encryptSecret(service.encryptionKey, input.plaintext),
-  });
+  // a failure leaves the vault as it was, which is why the success event below
+  // is written only once that has returned.
+  let stored: StoredCredential;
+  try {
+    stored = await service.store.rotate({
+      previousCredentialId: input.previousCredentialId,
+      kind: input.kind,
+      provider: input.provider,
+      keyId: input.keyId,
+      metadata: input.metadata,
+      encryptedValue: await encryptSecret(
+        service.encryptionKey,
+        input.plaintext,
+      ),
+    });
+  } catch (error) {
+    /*
+     * A refused rotation is worth a row of its own.
+     *
+     * The vault refuses one aimed at a credential that is already revoked, one aimed at a credential
+     * that does not exist, and one whose key does not match the credential it names. Each of those is
+     * either a caller with a bug or an attempt to retire a key the caller was not asked to retire,
+     * and each of them left nothing behind while only successes were recorded.
+     *
+     * Written outside the transaction that has just rolled back, so the row survives the failure it
+     * describes. The reason is the vault's own message and never the secret, which never left this
+     * function.
+     */
+    await recordAuditEvent(service.auditStore, {
+      eventType: "credential.rotation_refused",
+      targetType: "credential",
+      targetId: input.previousCredentialId,
+      actorUserId: input.actorUserId,
+      payload: {
+        kind: input.kind,
+        provider: input.provider,
+        keyId: input.keyId,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    });
+    throw error;
+  }
 
   await recordAuditEvent(service.auditStore, {
     eventType: "credential.rotated",
