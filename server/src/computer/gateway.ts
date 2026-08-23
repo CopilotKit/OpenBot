@@ -534,6 +534,13 @@ export function createComputerGateway(
        * Writing the decision before acting is still right, because an allowed action may have partial
        * effects before failing. The failure row records the outcome separately from the policy
        * decision.
+       *
+       * It carries the same subject the decision row did, and for the same reasons: a shell call
+       * that failed part-way is the row somebody most needs to name the command from, and a keypress
+       * that failed is still the difference between a submitted form and a typed letter. Leaving
+       * them off also chose the wrong element branch below, because "this action never had an
+       * element" is decided by the command and the file path — so a failed command claimed a
+       * snapshot lookup that never happened.
        */
       await write(auditStore, {
         toolName,
@@ -541,6 +548,8 @@ export function createComputerGateway(
         actor,
         element,
         ref,
+        ...(subject.key ? { key: subject.key } : {}),
+        ...(subject.command ? { command: subject.command } : {}),
         filePath,
         pageUrl,
         decision,

@@ -201,6 +201,11 @@ async function gatewayWith(
     resetResult?: { cleared: boolean };
     locations?: ComputerLocation[];
     token?: string;
+    /** Endpoints the computer answers differently, for the calls that have to fail. */
+    routes?: Record<
+      string,
+      (init?: RequestInit) => Response | Promise<Response>
+    >;
   },
 ) {
   const { provider, fetchImpl, calls, addressedAs, requests } =
@@ -442,6 +447,68 @@ describe("the computer gateway", () => {
     expect(calls).toEqual([]);
     expect(rows[0]?.eventType).toBe("computer.action_refused");
     expect(rows[0]?.payload.command).toBe("cat secrets.txt");
+  });
+
+  /**
+   * The two rows describe one action, so they have to describe the same one.
+   *
+   * Asserted as agreement rather than field by field on purpose: the failure row is a second
+   * hand-maintained argument list, and what goes wrong with one of those is not a particular field
+   * being wrong, it is a field being added to one and not the other. Comparing the payloads catches
+   * the next one too.
+   */
+  test("a permitted action that fails is recorded the same way it was decided", async () => {
+    const failing = () =>
+      Response.json({ error: "device or resource busy" }, { status: 500 });
+
+    for (const action of [
+      {
+        what: "a command",
+        route: "/exec",
+        run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
+          gateway.runCommand("bot-1", ACTOR, {
+            command: "rm -rf /workspace/build",
+          }),
+      },
+      {
+        what: "a keypress",
+        route: "/key",
+        run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
+          gateway.key("bot-1", ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            key: "Enter",
+          }),
+      },
+      {
+        what: "a file write",
+        route: "/files/write",
+        run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
+          gateway.writeFile("bot-1", ACTOR, { path: "notes.md", text: "kept" }),
+      },
+    ]) {
+      const { gateway, rows } = await gatewayWith(PERMISSIVE, {
+        routes: { [action.route]: failing },
+      });
+      rows.length = 0;
+
+      await expect(action.run(gateway)).rejects.toThrow();
+
+      const allowed = rows.find(
+        (row) => row.eventType === "computer.action_allowed",
+      );
+      const failed = rows.find(
+        (row) => row.eventType === "computer.action_failed",
+      );
+      expect(allowed, action.what).toBeDefined();
+      expect(failed, action.what).toBeDefined();
+
+      // The outcome is the only thing the failure row adds. Everything describing what was attempted
+      // is the same action and reads the same on both rows.
+      const { failure, ...attempted } = failed?.payload ?? {};
+      expect(failure, action.what).toBeString();
+      expect(attempted, action.what).toEqual(allowed?.payload ?? {});
+    }
   });
 
   test("the computer is told WHICH Bot is asking", async () => {
