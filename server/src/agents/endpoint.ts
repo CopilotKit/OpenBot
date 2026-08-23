@@ -175,9 +175,37 @@ function strippedBody(body: BodyInit | null | undefined): { body?: BodyInit } {
  * following a link.
  */
 export function createAgentFetch(
-  options: { allowPrivateHosts?: boolean; fetchImpl?: typeof fetch } = {},
+  options: {
+    allowPrivateHosts?: boolean;
+    fetchImpl?: typeof fetch;
+    /**
+     * Told about every address this refused to dial, and why.
+     *
+     * A refusal is the one thing on this path an operator cannot otherwise learn. The person who
+     * registered the agent finds out immediately, because their run fails and says why; the
+     * deployment finds out nothing, and a stored agent that has quietly begun redirecting to the
+     * metadata address is precisely the event worth being able to count.
+     *
+     * A callback rather than an audit store, so this module keeps deciding and nothing else. It is
+     * the same reason `checkAgentEndpoint` reuses the navigation target check instead of growing a
+     * second one: a file that decides is testable without the machinery that records.
+     *
+     * Reporting must never be able to stop a refusal, so a throwing reporter is swallowed. The
+     * refusal is the security property and the row is the record of it; losing the record is bad and
+     * turning it into a dialled request would be worse.
+     */
+    onRefusal?: (refusal: { address: string; reason: string }) => void;
+  } = {},
 ): (url: string, init?: RequestInit) => Promise<Response> {
   const doFetch = options.fetchImpl ?? fetch;
+  const refuse = (address: string, reason: string) => {
+    try {
+      options.onRefusal?.({ address, reason });
+    } catch {
+      // See above: a reporter that throws must not become a request that succeeds.
+    }
+    return new EndpointNotAllowedError(reason);
+  };
   const check = (address: string) =>
     checkAgentEndpoint(address, {
       ...(options.allowPrivateHosts !== undefined
@@ -188,7 +216,8 @@ export function createAgentFetch(
   return async function guardedFetch(url: string, init?: RequestInit) {
     const stored = check(url);
     if (!stored.allowed) {
-      throw new EndpointNotAllowedError(
+      throw refuse(
+        url,
         `This deployment will not dial ${url}: ${stored.reason.charAt(0).toLowerCase()}${stored.reason.slice(1)}`,
       );
     }
@@ -214,17 +243,31 @@ export function createAgentFetch(
       const next = new URL(location, target).toString();
       const verdict = check(next);
       if (!verdict.allowed) {
-        throw new EndpointNotAllowedError(
+        throw refuse(
+          next,
           `That address redirected to ${next}, and ${verdict.reason.charAt(0).toLowerCase()}${verdict.reason.slice(1)}`,
         );
       }
       if (!sameCredentialScope(origin, verdict.url)) {
-        carried = withoutCredentials(carried);
+        // A body this cannot strip refuses the hop rather than forwarding it, and that refusal is
+        // worth the same row as any other: it means a run was carrying something unreadable to a
+        // host it was not authorised for.
+        try {
+          carried = withoutCredentials(carried);
+        } catch (error) {
+          throw refuse(
+            verdict.url,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       }
       target = verdict.url;
     }
 
-    throw new EndpointNotAllowedError(
+    // Counted with the rest. An agent that loops is not a trust decision, but it is an endpoint
+    // failing in a way only the trail can show is happening repeatedly.
+    throw refuse(
+      target,
       `That address redirected more than ${MAX_REDIRECTS} times without arriving anywhere.`,
     );
   };

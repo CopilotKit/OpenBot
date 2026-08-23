@@ -52,6 +52,20 @@ export const auditEventTypes = [
   "channel.routed",
   "agent.invoked",
   /**
+   * An address this deployment declined to dial for a Bot, and why.
+   *
+   * The stored endpoint is re-checked on the way out of every run, and so is each address it
+   * redirects to. When one of those is refused the run fails and the person sees why, which is the
+   * whole of what anybody learns without this row.
+   *
+   * That is the wrong shape for the thing worth knowing. A registration is one person at one moment;
+   * a stored agent quietly beginning to redirect somewhere it should not is a fact about an endpoint,
+   * happening on every run, with nobody watching. It reads as an agent being flaky until somebody can
+   * count it. The row names the address and the reason, so a reader can tell an agent that moved from
+   * one aimed at the metadata endpoint.
+   */
+  "agent.dial_refused",
+  /**
    * A Bot's stream stopped producing anything and the turn was ended for it.
    *
    * Recorded because a Bot is somebody else's infrastructure and this is the failure it has that

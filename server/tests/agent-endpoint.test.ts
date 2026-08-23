@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { agentAuthHeaders, storeAgentAuth } from "../src/agents/auth-header";
 import { testAgentConnection } from "../src/agents/connection-test";
-import { checkAgentEndpoint, createAgentFetch } from "../src/agents/endpoint";
+import {
+  checkAgentEndpoint,
+  createAgentFetch,
+  EndpointNotAllowedError,
+} from "../src/agents/endpoint";
 import { parseAgentInput } from "../src/agents/routes";
 
 /** A 32-byte key, as the vault expects. */
@@ -364,6 +368,77 @@ describe("dialling a stored agent endpoint", () => {
       dial("http://169.254.169.254/latest/meta-data/", runRequest),
     ).rejects.toThrow(/may not live there|refus/i);
     expect(calls.length).toBe(0);
+  });
+
+  /**
+   * A refusal here is the one thing on this path an operator cannot otherwise find out about.
+   *
+   * The person who registered the agent learns immediately, because their run fails and says why. The
+   * deployment learns nothing: a stored agent that quietly began redirecting to the metadata address
+   * is exactly the event worth counting, and it is invisible in the trail unless the refusal writes a
+   * row. So the fetch reports refusals rather than only throwing them, and the caller decides what
+   * that means. The reason travels with it, because "an agent was refused" without which address and
+   * why is a row nobody can act on.
+   */
+  test("reports a refused hop to its caller, with the address and the reason", async () => {
+    const refusals: Array<{ address: string; reason: string }> = [];
+    const { calls, impl } = recorder([
+      redirectTo("http://169.254.169.254/latest/meta-data/"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({
+      fetchImpl: impl,
+      onRefusal: (refusal) => refusals.push(refusal),
+    });
+
+    await expect(
+      dial("https://agent.example.com/ag-ui", runRequest),
+    ).rejects.toThrow(EndpointNotAllowedError);
+
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]?.address).toBe(
+      "http://169.254.169.254/latest/meta-data/",
+    );
+    expect(refusals[0]?.reason).toMatch(/may not live there|refus/i);
+    // Reported, and still not dialled. A row about a request that went out anyway would be worse
+    // than no row at all.
+    expect(calls).toHaveLength(1);
+  });
+
+  test("reports a stored address refused before the first byte", async () => {
+    // The other refusal an operator wants counted, and the one with no person watching: this fires
+    // on every run of an agent whose stored address stopped being acceptable.
+    const refusals: Array<{ address: string; reason: string }> = [];
+    const { calls, impl } = recorder([arrived]);
+    const dial = createAgentFetch({
+      fetchImpl: impl,
+      onRefusal: (refusal) => refusals.push(refusal),
+    });
+
+    await expect(
+      dial("http://169.254.169.254/latest/meta-data/", runRequest),
+    ).rejects.toThrow(EndpointNotAllowedError);
+
+    expect(refusals).toHaveLength(1);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("says nothing when nothing was refused", async () => {
+    // The negative case, because a reporter that fires on a permitted hop would fill the trail with
+    // rows about agents that are working.
+    const refusals: unknown[] = [];
+    const { impl } = recorder([
+      redirectTo("https://agent.example.com/moved"),
+      arrived,
+    ]);
+    const dial = createAgentFetch({
+      fetchImpl: impl,
+      onRefusal: (refusal) => refusals.push(refusal),
+    });
+
+    await dial("https://agent.example.com/ag-ui", runRequest);
+
+    expect(refusals).toHaveLength(0);
   });
 
   test("a hop to another host does not take the credentials with it", async () => {

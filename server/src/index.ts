@@ -496,6 +496,22 @@ const app = createApp(
     // reading and the same one `createApp` takes.
     createAgentFetch({
       allowPrivateHosts: config.computer?.allowPrivateHosts === true,
+      // The refusal is what the run already knows; this is what the deployment knows. Written here
+      // rather than in `endpoint.ts` so that file keeps deciding and nothing else, the way the
+      // target check it reuses does.
+      onRefusal: ({ address, reason }) => {
+        void recordAuditEvent(bootAuditStore, {
+          eventType: "agent.dial_refused",
+          targetType: "agent_endpoint",
+          targetId: address,
+          payload: { address, reason },
+        }).catch((error) => {
+          // A trail that cannot be written must not take a refusal down with it: the request is
+          // already refused by the time this runs, and the alternative to a logged failure here is
+          // an unhandled rejection.
+          console.error("Could not record a refused agent dial.", error);
+        });
+      },
     }),
   ),
   // The only path to an acting call.

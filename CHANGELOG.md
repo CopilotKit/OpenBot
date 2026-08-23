@@ -55,6 +55,28 @@ host port.
 
 Nothing changes for a default deployment. `scripts/start.sh` already reached it on `localhost`.
 
+### An agent's address is checked where it ends up, not only where it starts
+
+`checkAgentEndpoint` decides whether this deployment will dial an address, and the request was then
+handed to a fetch that followed redirects. The checked address and the dialled address were the same
+address only while nobody redirected. An agent answering `307 Location: http://169.254.169.254/` put
+the server on its own cloud metadata endpoint, on every run rather than once.
+
+Every hop is now checked before it is followed, capped at three. Redirects are still followed,
+because a deployment that puts its agent behind one has done nothing wrong, and each destination has
+to be somewhere registering it directly would have been allowed to reach. The stored address is
+checked before it is dialled too, which is the one address a check reading only `Location` headers
+never looked at.
+
+A hop that leaves the host the request was authorised for arrives with nothing that proves who we
+are. The customer's key was given to us for their host, and this deployment's signed run assertion
+names the Bot and the person and can spend their grants, so both stop at that boundary and do not
+come back if the chain returns. A scheme upgrade to the same host and port keeps them.
+
+Refusals are now on the audit trail as `agent.dial_refused`, with the address and the reason. A
+refused run already told the person what happened; nothing told the deployment, and an agent that
+has quietly started redirecting somewhere it should not is worth being able to count.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
