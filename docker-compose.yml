@@ -147,7 +147,16 @@ services:
       SPIRE_AGENT_SOCKET_VOLUME: ${COMPOSE_PROJECT_NAME:-openbot}_spire-agent-socket
     ports:
       # For the server on the host to ask for a Bot's computer.
-      - "${SUPERVISOR_PORT:-4500}:4300"
+      #
+      # Loopback only, like the computer's own port and for a stronger version of the same reason.
+      # This process holds the Docker socket, so reaching it is root on the host through four verbs,
+      # and SUPERVISOR_TOKEN is a shared secret rather than a network boundary. Published without an
+      # interface in front of it this answered every address the host has.
+      #
+      # A deployment running the server inside this network does not use this mapping at all: it sets
+      # COMPUTER_NETWORK and reaches the supervisor as `supervisor:4300`, which is unaffected because
+      # the process still listens on every interface inside its own container.
+      - "127.0.0.1:${SUPERVISOR_PORT:-4500}:4300"
     volumes:
       # Read-only because this service only ever needs to ask; it is still root-equivalent, which is
       # the whole reason nothing else here gets it.

@@ -39,6 +39,39 @@ test("publishes every service on a settable port with the documented default", (
 });
 
 /**
+ * The services that answer to a secret are published to the host's loopback and no further.
+ *
+ * A published port with no interface in front of it binds every address the host has, so the
+ * service answers anything that can route to the machine. That is the wrong default for all of
+ * these and worst for the supervisor, which holds the Docker socket: reaching it is root on the
+ * host by way of four verbs, and `SUPERVISOR_TOKEN` is a shared secret rather than a network
+ * boundary. The computer says the same thing about itself in a comment beside its own port, and
+ * this is that reasoning applied to every service that has one.
+ *
+ * Named ports rather than a blanket rule, so adding a service is a decision about where it should
+ * answer rather than something this test quietly grants.
+ */
+test("publishes every service that holds a secret on loopback only", () => {
+  const compose = readFileSync(
+    join(import.meta.dir, "..", "docker-compose.yml"),
+    "utf8",
+  );
+
+  for (const name of [
+    "SUPERVISOR_PORT",
+    "COMPUTER_PORT",
+    "BOT_PORT",
+    "LANGGRAPH_PORT",
+  ]) {
+    const published = compose.match(
+      new RegExp(`^\\s*- "(.*)\\$\\{${name}:-\\d+\\}:\\d+"`, "m"),
+    );
+    expect(published).not.toBeNull();
+    expect(published?.[1]).toBe("127.0.0.1:");
+  }
+});
+
+/**
  * Both Bots are reachable at whatever `OPENAI_BASE_URL` names.
  *
  * The API server reads that variable from `.env` directly, so it moves with the deployment. The
