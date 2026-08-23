@@ -276,7 +276,12 @@ export function customUrlRefusal(raw: string): string | null {
     return "An MCP server must be reached over https.";
   }
 
-  const host = url.hostname.toLowerCase();
+  // A trailing dot is the root-anchored spelling of the same name and resolves to the same place, so
+  // they are stripped here rather than added to each comparison below. Without it "localhost."
+  // misses the equality test, "vault.internal." misses the suffix tests, and "database." picks up
+  // the dot that the single-label test keys on, so the fully qualified form of every name this
+  // function refuses walks straight through it.
+  const host = url.hostname.toLowerCase().replace(/\.+$/, "");
 
   // Bracketed IPv6 arrives with the brackets already stripped by URL, so the colon test catches it.
   if (host.includes(":") || /^[0-9.]+$/.test(host)) {
@@ -289,6 +294,9 @@ export function customUrlRefusal(raw: string): string | null {
     host.endsWith(".internal") ||
     host.endsWith(".local") ||
     host.endsWith(".localdomain") ||
+    // How a Kubernetes service is addressed from inside the cluster. It carries dots and none of
+    // the suffixes above, so without this it reads as an ordinary vendor name.
+    host.endsWith(".svc") ||
     !host.includes(".")
   ) {
     return "That address is not reachable from outside this network.";

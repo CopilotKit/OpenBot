@@ -232,6 +232,34 @@ describe("a URL an administrator typed", () => {
     expect(customUrlRefusal("https://printer.local/mcp")).not.toBeNull();
   });
 
+  test("the fully qualified spelling of those names is refused too", () => {
+    // A trailing dot is the root-anchored form of the same name and resolves to the same place, so
+    // every rule above has to see through it. It defeats them in two different ways: the suffix
+    // tests stop matching because the string now ends in the dot, and "database." acquires the dot
+    // that the single-label test keys on.
+    expect(customUrlRefusal("https://localhost./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://database./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://vault.internal./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://printer.local./mcp")).not.toBeNull();
+    expect(
+      customUrlRefusal("https://metadata.google.internal./computeMetadata/v1/"),
+    ).not.toBeNull();
+    // More than one, because stripping a single dot leaves a string that still misses every rule.
+    expect(customUrlRefusal("https://localhost../mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://vault.internal.../mcp")).not.toBeNull();
+  });
+
+  test("an in-cluster service name is refused", () => {
+    // .svc is how a Kubernetes service is addressed from inside the cluster. It has dots and none
+    // of the other suffixes, so it reads as an ordinary vendor name.
+    expect(
+      customUrlRefusal("https://kubernetes.default.svc/mcp"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://kubernetes.default.svc.cluster.local/mcp"),
+    ).not.toBeNull();
+  });
+
   test("nonsense is refused rather than thrown", () => {
     expect(customUrlRefusal("not a url")).toBe("That is not a URL.");
   });
