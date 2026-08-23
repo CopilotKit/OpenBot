@@ -115,6 +115,14 @@ export function ChannelChat({
    * already has the message that started it.
    */
   const [restoring, setRestoring] = useState(seed === null);
+  /**
+   * How many stored turns this app could not read.
+   *
+   * Held rather than derived, because the transcript is the running agent's once history is handed
+   * over: `agent.messages` is what was restored, and what was dropped on the way in is not
+   * recoverable from it.
+   */
+  const [unreadable, setUnreadable] = useState(0);
   useEffect(() => {
     if (isReady) openReadyGate.current();
   }, [isReady]);
@@ -146,9 +154,20 @@ export function ChannelChat({
           runtimeAgentId,
         );
         // Never overwrite local messages that arrived while history was loading.
-        if (current && stored.length > 0 && agent.messages.length === 0) {
-          agent.setMessages(stored);
+        if (
+          current &&
+          stored.messages.length > 0 &&
+          agent.messages.length === 0
+        ) {
+          agent.setMessages(stored.messages);
         }
+        /*
+         * Said on screen rather than only counted. A turn the history store holds and this app cannot
+         * parse is left out of the transcript, and a record people read back must not have a hole in
+         * it that nothing accounts for. Set even when nothing was restored: a thread whose every turn
+         * is unreadable is exactly the case where silence would read as "this conversation is empty".
+         */
+        if (current) setUnreadable(stored.unreadable);
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
         // never coming.
@@ -376,12 +395,26 @@ export function ChannelChat({
         disabled={!channel.active}
         messages={transcriptMessages(agent.messages, seed)}
         notice={
-          channel.active ? null : (
-            <p className="pb-2 text-sm text-muted-foreground" role="status">
-              This coworker has been deleted. The conversation stays readable,
-              but it can no longer reply.
-            </p>
-          )
+          /*
+           * Two things can be worth saying at once — a deleted coworker and a history with holes in
+           * it — and they are independent, so neither is an `else` for the other.
+           */
+          <>
+            {unreadable > 0 ? (
+              <p className="pb-2 text-sm text-muted-foreground" role="status">
+                {unreadable === 1
+                  ? "One earlier message could not be read and is not shown."
+                  : `${unreadable} earlier messages could not be read and are not shown.`}{" "}
+                The rest of this conversation is complete.
+              </p>
+            ) : null}
+            {channel.active ? null : (
+              <p className="pb-2 text-sm text-muted-foreground" role="status">
+                This coworker has been deleted. The conversation stays readable,
+                but it can no longer reply.
+              </p>
+            )}
+          </>
         }
         onSubmit={async (draft) => {
           // `draft.agentId` carries the @mentioned coworker, but nothing routes on it yet: this

@@ -203,6 +203,24 @@ points at the token field instead.
 
 A deployment that reaches its MCP servers by ordinary vendor hostnames sees no difference.
 
+### One unreadable turn no longer takes a whole conversation down
+
+Restoring a thread cast whatever the history store held straight to messages and handed it to the
+transcript. A turn stored in a different shape — a tool call written `{id, name, args}` rather than
+AG-UI's `{id, type: "function", function: …}`, which interrupted runs have produced — reached a
+renderer that read `toolCall.function.arguments` and threw, so a single bad turn made the whole
+conversation unopenable rather than that one message unreadable.
+
+Each stored turn is now parsed against the schema AG-UI ships, and one that does not parse is left
+out instead of being drawn. Checked where history enters the app rather than in one renderer, so
+every surface that reads a transcript is covered by the same check.
+
+**A turn that is left out is said out loud.** The conversation shows a line above it naming how many
+earlier messages could not be read, because a record people read back must not have a hole in it that
+nothing accounts for — a turn that silently disappears reads as one that was never sent. Multimodal
+content and every well-formed tool call are unaffected, and a history that cannot be read at all
+still opens the composer rather than blocking it.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
