@@ -221,6 +221,20 @@ nothing accounts for — a turn that silently disappears reads as one that was n
 content and every well-formed tool call are unaffected, and a history that cannot be read at all
 still opens the composer rather than blocking it.
 
+### Refreshing no longer flashes white before the theme arrives
+
+A person with the dark theme selected saw a white frame on every reload. The stored preference was
+read early enough, but it was applied one paint too late: the browser had already drawn a frame
+against the light palette by the time the app got to it. The document now decides its theme before
+anything is drawn.
+
+The browser was also drawing its own surfaces — scrollbars, form controls, the overscroll area —
+light under a dark app, for the whole session rather than for a frame. Both themes now declare which
+one they are, so those match too.
+
+No configuration changes and nothing is stored differently; a deployment that was already on the
+light theme sees no difference at all.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
