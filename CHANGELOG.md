@@ -54,6 +54,21 @@ the admin screen, which mints a token and points at the one it just made. If a d
 custom server pointing at a credential of another kind, adding it again will now be refused, and the
 answer is to give the server its own token.
 
+### A failed action is recorded the same way it was decided
+
+An action the policy allowed and the computer then failed is recorded twice, once for the decision
+and once for the outcome, so the trail can tell an action that happened from one that was permitted
+and did not. The second row was leaving out the command and the key that the first one carried.
+
+A shell command that failed part-way therefore said a Bot had run something without saying what, in
+the row somebody reading an incident reaches for first. The same omission picked the wrong element
+branch, so that row also claimed the command had been looked for in the page snapshot and not found
+— a page element a shell call never had. A failed file write kept its path throughout and is
+unchanged.
+
+Both rows now carry the same subject. Nothing about the boundary moves: the policy decided on a
+complete context before and after, and no action is permitted that was not permitted before.
+
 ### Upgrading
 
 **A deployment that sets `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true` with `NODE_ENV=production` no
