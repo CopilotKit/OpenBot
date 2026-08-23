@@ -480,6 +480,36 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   };
 }
 
+/**
+ * Whether a Bot may reach addresses inside this deployment's own network.
+ *
+ * Off unless asked for, and the asking is only allowed on a laptop. The switch exists so that a
+ * local deployment can browse the services running beside it; what it turns off is not one rule but
+ * the whole private-address floor, in navigation and in the endpoint a Bot may be registered
+ * against, so with it on a signed-in person can point a Bot at a link-local address.
+ *
+ * Refused in production for the reason the example encryption key is: the way a deployment ends up
+ * with it is not forgetting to set something, it is copying `.env.example`, which shipped it on. The
+ * cloud metadata addresses are refused underneath this either way — see `computer/target.ts` — but
+ * that floor is the last one, not the only one worth keeping.
+ */
+function privateHostsAllowed(environment: Environment): boolean {
+  if (optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") !== "true") {
+    return false;
+  }
+
+  if (environment.NODE_ENV === "production") {
+    throw new Error(
+      "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true is for local development only: it lets a Bot reach this deployment's own network. Remove it from this deployment's environment.",
+    );
+  }
+  console.warn(
+    "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true lets a Bot reach this machine's own services. Fine locally, and for local development only. Remove it before deploying.",
+  );
+
+  return true;
+}
+
 function computerConfig(environment: Environment): ComputerConfig | undefined {
   const supervisorAddress = optional(environment, "COMPUTER_SUPERVISOR_URL");
   const sharedAddress = optional(environment, "AGENT_COMPUTER_URL");
@@ -494,8 +524,7 @@ function computerConfig(environment: Environment): ComputerConfig | undefined {
    */
   const computerToken = optional(environment, "COMPUTER_TOKEN");
 
-  const allowPrivateHosts =
-    optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true";
+  const allowPrivateHosts = privateHostsAllowed(environment);
   const policy = actionPolicy(environment);
 
   const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");

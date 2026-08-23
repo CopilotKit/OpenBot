@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { describe, expect, spyOn, test } from "bun:test";
 import { configuredAuthProviders, loadConfig } from "../src/config";
 
 // Intelligence is part of the MINIMUM contract, so it belongs in the base environment every other
@@ -27,6 +28,19 @@ const baseEnvironment = {
  * The provider tests need the opposite starting point, or "Microsoft is configured" cannot be told
  * apart from "Microsoft and the Google that was already there".
  */
+/**
+ * A deployment that is actually deployed.
+ *
+ * `baseEnvironment` carries the example encryption key, which is refused under
+ * `NODE_ENV=production` — so a production case built on it fails on the key before it reaches
+ * whatever it meant to test. A real key here keeps each production test about its own subject.
+ */
+const productionEnvironment = {
+  ...baseEnvironment,
+  NODE_ENV: "production",
+  KEY_ENCRYPTION_KEY: "b3BlbmJvdC1wcm9kdWN0aW9uLXRlc3Qta2V5LTMyMzI=",
+};
+
 const {
   GOOGLE_OAUTH_CLIENT_ID: _googleId,
   GOOGLE_OAUTH_CLIENT_SECRET: _googleSecret,
@@ -417,6 +431,113 @@ describe("deployment configuration", () => {
   test("leaves computers off when no provider address is configured", () => {
     expect(loadConfig(baseEnvironment).computer).toBeUndefined();
   });
+
+  // `.env.example` used to ship AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true, and copying that file is the
+  // ordinary way a deployment gets its environment. So the way a hosted deployment ends up reaching
+  // its own network is not forgetting to set something, it is inheriting something. Refused in
+  // production for the same reason the example encryption key is: convenient locally, and an opening
+  // anywhere else.
+  test("refuses to start when a production deployment allows private hosts", () => {
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment,
+        AGENT_COMPUTER_URL: "http://localhost:4100",
+        AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS: "true",
+      }),
+    ).toThrow("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS");
+  });
+
+  // The refusal has to name the way out, because the person reading it at boot is looking at a file
+  // they copied and does not necessarily know which line is the problem.
+  test("says to remove the line, and that it is local only", () => {
+    const attempt = () =>
+      loadConfig({
+        ...productionEnvironment,
+        AGENT_COMPUTER_URL: "http://localhost:4100",
+        AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS: "true",
+      });
+
+    expect(attempt).toThrow("local development only");
+    expect(attempt).toThrow("Remove it");
+  });
+
+  // The half of the matrix that was always right and has to stay right: absent means off, including
+  // in the environment where the new refusal lives.
+  test("starts in production when nothing asked for private hosts", () => {
+    const config = loadConfig({
+      ...productionEnvironment,
+      AGENT_COMPUTER_URL: "http://localhost:4100",
+      COMPUTER_TOKEN: "computer-token",
+    });
+
+    expect(config.computer?.allowPrivateHosts).toBe(false);
+  });
+
+  // The local workflow is the reason the flag exists, so outside production it still does exactly
+  // what it did. Warned about, because a laptop is where a deployment is configured and the warning
+  // is the only chance to say this line does not travel.
+  test.each(["development", undefined])(
+    "warns and still allows private hosts under NODE_ENV=%p",
+    (nodeEnv) => {
+      const consoleWarn = spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        const config = loadConfig({
+          ...baseEnvironment,
+          ...(nodeEnv ? { NODE_ENV: nodeEnv } : {}),
+          AGENT_COMPUTER_URL: "http://localhost:4100",
+          AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS: "true",
+        });
+
+        expect(config.computer?.allowPrivateHosts).toBe(true);
+        // Searched rather than indexed: `baseEnvironment` carries the example encryption key, which
+        // warns on its own account first.
+        const warning = consoleWarn.mock.calls
+          .map(([first]) => String(first))
+          .find((line) => line.includes("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS"));
+
+        expect(warning).toBeDefined();
+        expect(warning).toContain("local development only");
+        expect(warning).toContain("Remove it before deploying");
+      } finally {
+        consoleWarn.mockRestore();
+      }
+    },
+  );
+
+  // The refusal above only helps a deployment that reads it. The reason there was anything to refuse
+  // is that the file everybody copies arrived with the switch on, so the file is worth asserting
+  // about directly: a live line here is the regression, whatever the code does afterwards.
+  test("the shipped example does not turn private hosts on", () => {
+    const example = readFileSync(
+      new URL("../../.env.example", import.meta.url),
+      "utf8",
+    );
+
+    // Commented-out mentions are wanted — that is how the switch stays discoverable for a laptop.
+    const live = example
+      .split("\n")
+      .filter((line) =>
+        /^\s*AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS\s*=/.test(line),
+      );
+
+    expect(live).toEqual([]);
+  });
+
+  // Anything that is not the exact opt-in is not an opt-in, so it is not the thing being refused
+  // either. A deployment that wrote something else has private hosts off and starts.
+  test.each(["false", "1", "yes", ""])(
+    "starts in production on AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=%p",
+    (value) => {
+      const config = loadConfig({
+        ...productionEnvironment,
+        AGENT_COMPUTER_URL: "http://localhost:4100",
+        AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS: value,
+      });
+
+      expect(config.computer?.allowPrivateHosts).toBe(false);
+    },
+  );
 
   test.each([
     ["Docker", "COMPUTER_SUPERVISOR_URL"],

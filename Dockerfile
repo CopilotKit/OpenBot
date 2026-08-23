@@ -173,10 +173,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo \
 ENV WORKSPACE_DIR=/workspace
 ENV PROFILES_DIR=/profiles
 
-# The browser is on loopback inside this container and reachable from nowhere else, which is why the
-# private-host allowance is on: the server is browsing to its own sibling process, not the internet.
+# The browser is on loopback inside this container and reachable from nowhere else.
+#
+# No private-host allowance is set for it, and none is needed. Reaching the sibling process goes
+# through `checkComputerAddress`, which decides on the protocol and the metadata floor and never
+# consults `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS`. That switch governs where a *Bot* may browse and
+# which endpoint one may be registered against, so setting it here bought nothing for this address
+# and let a Bot reach whatever this container's network reaches, which on a default bridge is the
+# host's LAN.
 ENV AGENT_COMPUTER_URL=http://127.0.0.1:4100
-ENV AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true
 
 # NOTHING THAT MATTERS RUNS AS ROOT.
 #

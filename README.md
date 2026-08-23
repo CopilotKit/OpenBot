@@ -291,7 +291,7 @@ provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
 
 - `agent-computer` drives a browser holding real logins. `docker-compose.yml` binds it to loopback; leave it there.
 - Store credentials through `/admin/credentials`, which encrypts them. Do not put credential values in tenant YAML or in committed files.
-- `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` lets a Bot reach services on this machine. Unset it if you would rather it could not.
+- `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` lets a Bot reach services on this machine. It ships commented out in `.env.example`, is for a laptop only, and a deployment running with `NODE_ENV=production` refuses to start while it is set.
 
 ## Development
 

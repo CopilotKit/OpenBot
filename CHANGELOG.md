@@ -8,6 +8,29 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Upgrading
+
+**A deployment that sets `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true` with `NODE_ENV=production` no
+longer starts.** Remove the line and it starts again. Nothing else needs changing, and a deployment
+that never set it is unaffected.
+
+The switch lets a Bot reach addresses inside the deployment's own network — `10.0.0.5`,
+`192.168.1.1`, `127.0.0.1:5432`, a link-local address — and it does that in two places, not one:
+browsing, and the endpoint a Bot may be registered against. It exists for a laptop, where the
+services a Bot is asked to look at are the ones running beside it.
+
+The reason this is a refusal rather than a warning is how a deployment came to have it. `.env.example`
+shipped the line on, and copying that file is the ordinary way an environment gets filled in, so the
+path to a hosted deployment reaching its own network was not forgetting to set something, it was
+inheriting something. It now ships commented out, which means a laptop that wants the old behaviour
+uncomments it and everything else arrives without it. Under any other `NODE_ENV` the switch works
+exactly as before, with a warning at boot saying it does not travel.
+
+The cloud metadata addresses — `169.254.169.254`, `metadata.google.internal`, and the IPv6 and
+NAT64 spellings of them — were refused whatever this switch said, before and after. That floor has
+not moved. What changed is that it is no longer the only thing left standing in a production
+deployment that copied the example.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
