@@ -39,6 +39,22 @@ NAT64 spellings of them — were refused whatever this switch said, before and a
 not moved. What changed is that it is no longer the only thing left standing in a production
 deployment that copied the example.
 
+### The supervisor answers on loopback, not on every address the host has
+
+The supervisor's port was published without an interface in front of it, so it bound every address
+the machine had and answered anything that could route to it. This is the service that holds the
+Docker socket, so reaching it is root on the host by way of four verbs, and `SUPERVISOR_TOKEN` is a
+shared secret rather than a network boundary. The documentation already said not to expose it
+outside the deployment network; the compose file did.
+
+It is now published on `127.0.0.1`, like the computer's own port and the two Bots'. If you reach the
+supervisor from another machine, that stops working and it was the thing worth stopping: put the
+caller on the host, or run the server inside the compose network, where it reaches the supervisor as
+`supervisor:4300` and never uses the published mapping at all. `SUPERVISOR_PORT` still chooses the
+host port.
+
+Nothing changes for a default deployment. `scripts/start.sh` already reached it on `localhost`.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused

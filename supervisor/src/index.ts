@@ -32,6 +32,13 @@ import { namesFor } from "./names";
  * processes on the same network from driving it, but even with the token the worst available action
  * is cycling a computer that already belongs to a Bot.
  *
+ * Neither is the network the boundary, but it is the layer in front of both. Compose publishes this
+ * port on `127.0.0.1` rather than on every address the host has, for the same reason the computer's
+ * own port is bound there: a secret in an environment variable is one leak away from being known,
+ * and this process holds the Docker socket. This listener stays on every interface inside its own
+ * container, which is what the published mapping forwards to and what a server running inside the
+ * compose network connects to as `supervisor:4300`.
+ *
  * Refusing to start without it matches the computer. This process holds the Docker socket, which is
  * root on the host, so missing authentication is a deployment failure.
  */
