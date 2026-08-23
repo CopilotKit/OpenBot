@@ -120,6 +120,28 @@ without a word, because the input path looks for a viewer before it looks for an
 
 A close now stops casting only when the socket closing is the one that was casting.
 
+### An MCP server address that points inside the deployment is refused in three more spellings
+
+Adding an MCP server by URL is checked before the address is stored, because that form is otherwise a
+way to point the deployment at its own network. The check compared the literal hostname, and three
+spellings of an address it means to refuse were getting through.
+
+A trailing dot is the root-anchored form of the same name and reaches the same place, but it changed
+the string enough that every rule missed it, so `https://localhost./`, `https://printer.local./` and
+`https://metadata.google.internal./` were all accepted. `kubernetes.default.svc`, which is how a
+service is addressed from inside a cluster, carries dots and none of the listed suffixes, so it read
+as an ordinary vendor name.
+
+The third is worth acting on rather than just noting. A credential typed into the address itself,
+`https://user:token@vendor.example/mcp`, was accepted, and the address is stored and named in the
+trail as given. Audit redaction works on field names and `url` is not one of the sensitive ones, so
+the token was written to `mcp_servers` and to an audit row in clear text. The trail is append-only by
+design, so that row cannot be deleted afterwards: **a deployment where somebody has done this should
+treat that credential as disclosed and rotate it.** The address field now refuses a credential and
+points at the token field instead.
+
+A deployment that reaches its MCP servers by ordinary vendor hostnames sees no difference.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
