@@ -107,6 +107,19 @@ A thread the platform does not have now reads as having no messages. A 404 and o
 a 500, because an outage answered with an empty history would tell the browser the conversation is gone
 and invite somebody to start it over.
 
+### Reconnecting a live screen no longer stops the screen you just reconnected
+
+A Bot's screen allows one viewer, and opening a second `/stream` replaces the first. The replaced
+socket is left open, because it belongs to a client that may still be using it, so on an ordinary
+reconnect, where the browser opens the new connection before dropping the old one, the old socket
+closed after the new one was already casting. Closing it stopped the session's viewer without asking
+whether the closing socket was the one casting, so it stopped the replacement.
+
+Both halves were silent. The screen stopped updating, and anything typed afterwards was dropped
+without a word, because the input path looks for a viewer before it looks for anything it can report.
+
+A close now stops casting only when the socket closing is the one that was casting.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
