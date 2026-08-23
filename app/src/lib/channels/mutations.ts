@@ -30,6 +30,25 @@ export function createChannelMutationOptions(queryClient: QueryClient) {
  *
  * Fire-and-forget on purpose: a failed preview update is a stale roster line, not a lost message.
  */
+/**
+ * Other tabs learn a channel is gone from the socket event in `use-channel-events.ts`; this tab
+ * issued the delete itself and never receives its own event, so it clears the roster and detail
+ * cache directly on success.
+ */
+export function deleteChannelMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (channelId: string) =>
+      client(`/api/channels/${channelId}`, {
+        method: "DELETE",
+        fallback: "Could not delete this conversation",
+      }),
+    onSuccess: (_data, channelId) => {
+      queryClient.invalidateQueries({ queryKey: channelKeys.all });
+      queryClient.removeQueries({ queryKey: channelKeys.detail(channelId) });
+    },
+  });
+}
+
 export function recordChannelActivityMutationOptions() {
   return mutationOptions({
     mutationFn: async (variables: {

@@ -14,6 +14,8 @@ type ChannelActivityEvent = {
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
+  /** The channel is gone. Absent on an ordinary activity event. */
+  deleted?: true;
 };
 
 const FIRST_RETRY_MS = 500;
@@ -72,6 +74,24 @@ export function useChannelEvents() {
                 (channel) => channel.id === activity.channelId,
               ),
             );
+
+            // Must run before the patch below, which spreads the event onto the existing row —
+            // reaching that first would stamp `deleted: true` on the row instead of removing it.
+            // An unknown channel here is already gone from this cache, so there is nothing to patch
+            // or invalidate for, unlike the "unknown channel" case below for an ordinary event.
+            if (activity.deleted) {
+              if (holdingPage === -1) return data;
+              const page = data.pages[holdingPage] as ChannelPage;
+              const pages = data.pages.slice();
+              pages[holdingPage] = {
+                ...page,
+                channels: page.channels.filter(
+                  (channel) => channel.id !== activity.channelId,
+                ),
+              };
+              return { ...data, pages };
+            }
+
             // An unknown channel id means the roster is stale; refetch rather than patch.
             if (holdingPage === -1) {
               void queryClient.invalidateQueries({

@@ -235,6 +235,28 @@ one they are, so those match too.
 No configuration changes and nothing is stored differently; a deployment that was already on the
 light theme sees no difference at all.
 
+### A conversation can be deleted
+
+Nothing removed a channel. Starting one was the only lever the product gave a person, and every
+conversation with every coworker sat in the roster forever, growing on every message the way
+`DEFAULT_CHANNEL_PAGE`'s own note already described: a page that was instant in a demo returns
+thousands of rows for anybody who has actually been using the product a while, one that never shrinks
+again.
+
+Deleting a channel now removes it for good. The channel row goes, and its memberships, its linked
+coworkers, and its Intelligence thread mapping go with it through the same foreign-key cascades that
+already existed for them — no migration needed, only a query that finally uses them. The deployment
+also asks Intelligence to permanently delete the thread itself, so the message history is not just
+unlisted, it is gone from the platform too.
+
+A thread the platform refuses to delete does not hold the channel hostage. The local removal already
+committed by the time that call runs, so a rejected or unreachable upstream delete leaves the channel
+gone from the roster regardless, with an audit row (`channel.deleted`) naming the thread and whether
+Intelligence actually forgot it. A channel that is gone locally with an orphaned thread still on the
+platform is a smaller, more honest failure than a channel sitting in the roster with its history
+silently wiped out from under it — and the audit trail is where an administrator finds the one that
+did not clean up completely.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused

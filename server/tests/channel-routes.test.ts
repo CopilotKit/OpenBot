@@ -65,6 +65,10 @@ function fakeStore(
       calls.push(["get", receivedActor, id]);
       return channel({ id });
     },
+    async remove(receivedActor, id) {
+      calls.push(["remove", receivedActor, id]);
+      return "thread-1";
+    },
   };
 
   return Object.assign(base, overrides, { calls });
@@ -289,6 +293,100 @@ describe("channel routes", () => {
 
     expect(response.status).toBe(599);
     expect(await json(response)).toEqual({ sentinel: "database disconnected" });
+  });
+});
+
+describe("channel delete route", () => {
+  function appWithForget(
+    store: ChannelStore,
+    forgetThread?: (params: {
+      threadId: string;
+      userId: string;
+      agentId: string;
+    }) => Promise<void>,
+  ) {
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route(
+      "/",
+      createChannelRoutes(
+        store,
+        requireUser,
+        undefined,
+        undefined,
+        forgetThread,
+      ),
+    );
+    return app;
+  }
+
+  test("returns 204 and calls store.remove with the actor and channel id", async () => {
+    const store = fakeStore();
+    const response = await appWithForget(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(store.calls).toEqual([["remove", actor, "channel-1"]]);
+  });
+
+  test("maps ChannelNotFoundError to 404", async () => {
+    const store = fakeStore({
+      remove: async () => {
+        throw new ChannelNotFoundError("channel-1");
+      },
+    });
+    const response = await appWithForget(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(404);
+    expect(await json(response)).toEqual({ error: "Channel not found." });
+  });
+
+  test("calls forgetThread with the derived channel-scoped agent id", async () => {
+    const store = fakeStore();
+    const calls: unknown[] = [];
+    const response = await appWithForget(store, async (params) => {
+      calls.push(params);
+    }).request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(response.status).toBe(204);
+    expect(calls).toEqual([
+      { threadId: "thread-1", userId: actor.id, agentId: "channel:channel-1" },
+    ]);
+  });
+
+  /*
+   * The critical ordering-decision regression test: a rejected upstream delete must not become a
+   * failure response. The local removal already committed by the time `forgetThread` runs, so this
+   * MUST fail if a later change propagates that rejection as an error status instead of swallowing
+   * it and still answering 204.
+   */
+  test("still returns 204 when forgetThread rejects", async () => {
+    const store = fakeStore();
+    const response = await appWithForget(store, async () => {
+      throw new Error("Intelligence is unreachable");
+    }).request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(response.status).toBe(204);
+  });
+
+  test("does not call forgetThread when remove found no thread to forget", async () => {
+    const store = fakeStore({
+      remove: async (receivedActor, id) => {
+        store.calls.push(["remove", receivedActor, id]);
+        return null;
+      },
+    });
+    let called = false;
+    const response = await appWithForget(store, async () => {
+      called = true;
+    }).request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(response.status).toBe(204);
+    expect(called).toBe(false);
   });
 });
 
@@ -739,6 +837,45 @@ describe("channel store integration", () => {
       expect(await channelTableSnapshot()).toEqual(before);
     },
   );
+
+  test("deletes the channel row and cascades memberships, agents, and the thread mapping", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Removable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    // Not pushed to createdChannelIds: `remove` is the thing under test, and afterEach's cleanup
+    // deleting an already-deleted row is a no-op either way.
+
+    const threadId = await persistentStore.remove(actor, created.id);
+
+    expect(threadId).toBe(created.threadId);
+    const persisted = await persistedChannel(created.id);
+    expect(persisted.channelRow).toBeUndefined();
+    expect(persisted.memberships).toEqual([]);
+    expect(persisted.linkedAgents).toEqual([]);
+    expect(persisted.mappings).toEqual([]);
+  });
+
+  test("refuses a non-member's remove and leaves the channel row untouched", async () => {
+    const owner = await createPersistentUser();
+    const outsider = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Guarded agent",
+      owner,
+    });
+    const created = await persistentStore.create(owner, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await expect(
+      persistentStore.remove(outsider, created.id),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+
+    expect((await persistedChannel(created.id)).channelRow).toMatchObject({
+      id: created.id,
+    });
+  });
 });
 
 /**

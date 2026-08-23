@@ -50,6 +50,12 @@ export const auditEventTypes = [
    * routing decision is a fact about where a conversation went, not a copy of what was said.
    */
   "channel.routed",
+  /**
+   * A channel was deleted, taking its memberships, agent links, and thread mapping with it. The
+   * channel row is already gone by the time this is written, so this is the only place left that
+   * says it ever existed. `payload.threadForgotten: false` marks a thread that outlived it.
+   */
+  "channel.deleted",
   "agent.invoked",
   /**
    * An address this deployment declined to dial for a Bot, and why.

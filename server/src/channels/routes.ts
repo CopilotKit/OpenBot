@@ -6,6 +6,7 @@ import {
   type AgentProfileStore,
 } from "../agents/profile-store";
 import type { AgentActor, AgentProfile } from "../agents/profile-types";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
 import {
@@ -102,7 +103,18 @@ export type ChannelStore = {
     channelId: string,
     activity: ChannelActivity,
   ): Promise<void>;
+  /** Deletes the channel for everyone in it. Returns the thread it owned, so the caller can forget it upstream. */
+  remove(actor: AgentActor, channelId: string): Promise<string | null>;
 };
+
+/**
+ * The local development actor, which is not a row in `users`.
+ *
+ * The audit table has a foreign key to that table, so writing this id would fail the constraint and
+ * lose the row entirely. Who it was is in the payload's target either way. Same reasoning as
+ * agents/routes.ts's constant of the same name.
+ */
+const DEV_ACTOR_EMAIL = "dev@openbot.local";
 
 const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
 const MAX_CHANNEL_NAME_CODE_POINTS = 120;
@@ -438,6 +450,64 @@ export function createChannelStore(
         { isolationLevel: "read committed" },
       );
     },
+
+    // `create` inserts exactly one membership row, so "delete" and "leave" are the same act while a
+    // channel has exactly one member. Named `remove` for the multi-member split this becomes later.
+    remove(actor, channelId) {
+      return database.transaction(
+        async (transaction) => {
+          const [membership] = await transaction
+            .select({ channelId: channelMemberships.channelId })
+            .from(channelMemberships)
+            .where(
+              and(
+                eq(channelMemberships.channelId, channelId),
+                eq(channelMemberships.userId, actor.id),
+              ),
+            );
+          // Not a member, or no such channel: the same answer either way, so belonging to a channel
+          // is not something an outsider can probe for. Same reasoning as `recordActivity` above.
+          if (!membership) throw new ChannelNotFoundError(channelId);
+
+          // Read before the delete, not after: the cascade below wipes both of these tables, and the
+          // notify payload needs the members it is telling, while the caller needs the thread id to
+          // ask Intelligence to forget it.
+          const members = await transaction
+            .select({ userId: channelMemberships.userId })
+            .from(channelMemberships)
+            .where(eq(channelMemberships.channelId, channelId));
+          const [mapping] = await transaction
+            .select({ threadId: intelligenceChannelMappings.threadId })
+            .from(intelligenceChannelMappings)
+            .where(
+              and(
+                eq(intelligenceChannelMappings.channelId, channelId),
+                eq(intelligenceChannelMappings.userId, actor.id),
+              ),
+            );
+
+          // Cascades `channel_memberships`, `channel_agents`, and `intelligence_channel_mappings`:
+          // see the `onDelete: "cascade"` on each in db/schema/core.ts. Nothing else references a
+          // channel, so this one delete is the whole local removal.
+          await transaction.delete(channels).where(eq(channels.id, channelId));
+
+          const event: ChannelActivityEvent = {
+            channelId,
+            memberIds: members.map((member) => member.userId),
+            lastMessage: null,
+            lastMessageAt: null,
+            lastMessageAgentId: null,
+            deleted: true,
+          };
+          await transaction.execute(
+            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+          );
+
+          return mapping?.threadId ?? null;
+        },
+        { isolationLevel: "read committed" },
+      );
+    },
   };
 }
 
@@ -528,8 +598,53 @@ export function createChannelRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   /** Absent in tests and wherever live updates are not wanted; the routes still work without it. */
   events?: ChannelEventHub,
+  /** Where a channel's deletion is written. Absent in tests that do not care about the trail. */
+  auditStore?: AuditStore,
+  /**
+   * Ask Intelligence to permanently delete a thread. Absent leaves a channel deletable and its
+   * thread left behind on the platform: the local removal below does not depend on this existing.
+   */
+  forgetThread?: (params: {
+    threadId: string;
+    userId: string;
+    agentId: string;
+  }) => Promise<void>,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
+
+  /**
+   * Write the one audit row this file ever writes, tolerantly.
+   *
+   * Mirrors `record` in agents/routes.ts: never fatal, because the channel is already gone and the
+   * caller has already been told so by the time this runs. A trail that is briefly unavailable is
+   * not a reason to report a failure that did not happen.
+   */
+  const recordDeleted = async (
+    context: Context<{ Variables: AppVariables }>,
+    channelId: string,
+    payload: { threadId: string | null; threadForgotten: boolean },
+  ): Promise<void> => {
+    if (!auditStore) return;
+    const actor = context.var.actor;
+    try {
+      await recordAuditEvent(auditStore, {
+        eventType: "channel.deleted",
+        targetType: "channel",
+        targetId: channelId,
+        ...(actor.email !== DEV_ACTOR_EMAIL ? { actorUserId: actor.id } : {}),
+        payload,
+      });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "channel-audit-write-failed",
+          eventType: "channel.deleted",
+          channelId,
+          error: String(error),
+        }),
+      );
+    }
+  };
 
   // Before `/:channelId`, or "events" is read as a channel id.
   if (events) {
@@ -617,6 +732,47 @@ export function createChannelRoutes(
         return context.json({ error: "Channel not found." }, 404);
       }
       return context.json({ channel: channelDto(channel) });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  // Registered unconditionally, unlike `GET /:threadId` in thread-routes.ts: removing your own
+  // channel from your own roster can always succeed locally, whether or not Intelligence is reachable.
+  routes.delete("/:channelId", requireUser, async (context) => {
+    const channelId = context.req.param("channelId");
+    try {
+      const threadId = await store.remove(context.var.actor, channelId);
+
+      // The local delete already committed above, so a failed thread deletion is non-fatal: a
+      // channel gone locally with an orphaned thread beats one still on screen with its history wiped.
+      let threadForgotten = false;
+      if (threadId && forgetThread) {
+        try {
+          await forgetThread({
+            threadId,
+            userId: context.var.actor.id,
+            // Derived here, never accepted from the caller: this is the same string
+            // channel-chat.tsx builds for the same channel, and trusting a client-supplied agentId
+            // would let a request name any thread it likes and ask the platform to delete it.
+            agentId: `channel:${channelId}`,
+          });
+          threadForgotten = true;
+        } catch {
+          console.error(
+            JSON.stringify({
+              type: "channel-thread-forget-failed",
+              note: "Could not delete the Intelligence thread for a removed channel.",
+              channelId,
+              threadId,
+            }),
+          );
+        }
+      }
+
+      await recordDeleted(context, channelId, { threadId, threadForgotten });
+
+      return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);
     }
