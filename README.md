@@ -202,7 +202,7 @@ Settings worth knowing:
 | `COMPUTER_SANDBOX`                   | Set to `on` for Chromium's own sandbox, where the host permits it.        |
 | `EMBEDDED_POSTGRES`                  | Set to `on` for a database inside the deployment container.               |
 | `AGENT_COMPUTER_POLICY`              | JSON action policy. Malformed JSON stops server startup.                  |
-| `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Lets a Bot reach this machine's own services.                             |
+| `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Lets a Bot reach this machine's own services. Local only, and refused under `NODE_ENV=production`. |
 | `TENANT_PACKAGE_DIR`                 | Directory containing tenant YAML. Defaults to `../examples/fintech`.      |
 | `DEPLOYMENT_ID`                      | Names this deployment when two share one Intelligence project.            |
 

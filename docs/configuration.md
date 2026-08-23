@@ -178,7 +178,7 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
-| `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. Cloud metadata addresses are still refused. |
+| `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. A deployment running with `NODE_ENV=production` refuses to start while it is set. Cloud metadata addresses are refused either way. |
 | `AGENT_COMPUTER_POLICY`              | JSON action policy: `{"mode":"enforce","deny":[...],"allow":[...]}`.                      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run supervised computers under gVisor.                                  |
 | `COMPUTER_SANDBOX`                   | Set to `on` to enable Chromium's own sandbox where the host permits user namespaces. Which way it went is printed at start-up. |

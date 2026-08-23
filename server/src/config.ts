@@ -498,7 +498,9 @@ function privateHostsAllowed(environment: Environment): boolean {
     return false;
   }
 
-  if (environment.NODE_ENV === "production") {
+  // Through `optional`, so the comparison trims. Read raw, `NODE_ENV="production "` out of an env
+  // file would slip past a gate that the switch beside it, which does trim, would still trip.
+  if (optional(environment, "NODE_ENV") === "production") {
     throw new Error(
       "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true is for local development only: it lets a Bot reach this deployment's own network. Remove it from this deployment's environment.",
     );

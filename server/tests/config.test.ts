@@ -447,6 +447,20 @@ describe("deployment configuration", () => {
     ).toThrow("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS");
   });
 
+  // Both sides of the comparison come out of the same env file, and the switch is read through
+  // `optional`, which trims. Comparing NODE_ENV raw would mean a trailing space typed into that file
+  // slipped past the refusal while the switch beside it still counted as set.
+  test("refuses a production deployment whose NODE_ENV carries whitespace", () => {
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment,
+        NODE_ENV: "production ",
+        AGENT_COMPUTER_URL: "http://localhost:4100",
+        AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS: "true",
+      }),
+    ).toThrow("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS");
+  });
+
   // The refusal has to name the way out, because the person reading it at boot is looking at a file
   // they copied and does not necessarily know which line is the problem.
   test("says to remove the line, and that it is local only", () => {

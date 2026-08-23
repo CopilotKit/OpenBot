@@ -26,6 +26,14 @@ inheriting something. It now ships commented out, which means a laptop that want
 uncomments it and everything else arrives without it. Under any other `NODE_ENV` the switch works
 exactly as before, with a warning at boot saying it does not travel.
 
+**The one-container image shipped with the switch on, and no longer does.** It set both
+`AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true` and `NODE_ENV=production`, so the image really did run
+with private-host browsing enabled. Two things that worked there stop: a Bot browsing a private
+address such as an intranet page, and registering a coworker at a private endpoint like
+`http://10.0.0.20:8000/ag-ui`. Because the image bakes in `NODE_ENV=production`, there is no
+override — a deployment that needs either of those wants the compose setup or its own image rather
+than the all-in-one. The image continues to start, and everything else in it is unchanged.
+
 The cloud metadata addresses — `169.254.169.254`, `metadata.google.internal`, and the IPv6 and
 NAT64 spellings of them — were refused whatever this switch said, before and after. That floor has
 not moved. What changed is that it is no longer the only thing left standing in a production
