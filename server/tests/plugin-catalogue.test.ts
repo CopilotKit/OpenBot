@@ -260,6 +260,30 @@ describe("a URL an administrator typed", () => {
     ).not.toBeNull();
   });
 
+  test("a credential in the URL is refused", () => {
+    // Userinfo is not part of the host, so every rule above passes it, and addCustomServer then
+    // writes the string it was given into mcp_servers.url and into the configuration.changed audit
+    // payload. Audit redaction keys on the field name and "url" is not sensitive, so the secret
+    // would sit in the trail in clear text.
+    expect(
+      customUrlRefusal("https://oauth:s3cret@mcp.example.com/mcp"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://token@mcp.example.com/mcp"),
+    ).not.toBeNull();
+  });
+
+  test("refusing a credential in the URL does not repeat the credential", () => {
+    // The refusal is rendered to the administrator and can reach a log, so it must not carry the
+    // thing it exists to reject.
+    const refusal = customUrlRefusal(
+      "https://oauth:s3cret@mcp.example.com/mcp",
+    );
+    expect(refusal).not.toBeNull();
+    expect(refusal).not.toContain("s3cret");
+    expect(refusal).not.toContain("oauth");
+  });
+
   test("nonsense is refused rather than thrown", () => {
     expect(customUrlRefusal("not a url")).toBe("That is not a URL.");
   });
