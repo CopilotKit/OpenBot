@@ -28,6 +28,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setStoredValue: (key, value) => window.localStorage.setItem(key, value),
       toggleRootClass: (name, force) =>
         document.documentElement.classList.toggle(name, force),
+      setRootColorScheme: (scheme) => {
+        document.documentElement.style.colorScheme = scheme;
+      },
     });
   }, [dark]);
 
