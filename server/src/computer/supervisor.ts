@@ -13,14 +13,22 @@
  * honest about being one shared computer.
  */
 
-import type { ComputerStatus } from "./schema";
 import type { ComputerLocation, ComputerProvider } from "./provider";
+import type { ComputerStatus } from "./schema";
 
 /**
  * The last container start time seen for each Bot, from the `/ensure` that located it.
  *
  * Not a cache in front of the supervisor: `locate` still calls it every time. This only carries the
  * answer the few lines to whoever needs to know which run of the computer they are talking to.
+ *
+ * PROCESS-LOCAL, AND THEREFORE NEVER THE ONLY ANSWER. On one replica the snapshot and the click that
+ * follows it are the same process, so this is always populated by the time anything asks. On several
+ * they are usually not, and a replica that has never located this Bot has nothing here. `resolve`
+ * reads an unknown session as "no opinion" and skips the generation check, so an empty map does not
+ * fail — it silently stops checking, on exactly the deployment shape the check was written for. So
+ * `sessionOf` falls back to asking, and this stays what it always was: a way to skip the round trip
+ * on the replica that just did the work.
  */
 const sessions = new Map<string, string>();
 
@@ -157,11 +165,34 @@ export function createDockerSupervisorProvider(
     async sessionOf(botId: string): Promise<string | undefined> {
       /*
        * Read from the same `/ensure` every action already makes, and remembered rather than asked
-       * for again: `locate` runs immediately before the call that needs this, so the value is as
-       * fresh as the address it was fetched with. Asking twice would double the supervisor's work on
-       * the hot path to learn something it just told us.
+       * for again: on the replica that located this Bot, `locate` ran immediately before the call
+       * that needs this, so the value is as fresh as the address it was fetched with. Asking twice
+       * would double the supervisor's work on the hot path to learn something it just told us.
        */
-      return sessions.get(botId);
+      const known = sessions.get(botId);
+      if (known) return known;
+
+      /*
+       * Nothing here means another replica did the work, not that there is nothing to know.
+       *
+       * LISTING, NOT ENSURING, and the difference is the whole feature. `/ensure` starts a computer
+       * that is not running, so answering "which run is this" with it would wake every idle Bot that
+       * anything asked about, and a deployment that suspends idle computers would quietly never
+       * suspend one. Listing is a read: a Bot with no computer answers undefined, which is the same
+       * answer as before and leaves the check exactly where it was.
+       */
+      try {
+        const computers = await listRaw();
+        const startedAt = computers.find(
+          (computer) => computer.botId === botId,
+        )?.startedAt;
+        if (startedAt) sessions.set(botId, startedAt);
+        return startedAt;
+      } catch {
+        // Unknown, not mismatched. A supervisor that cannot be reached must not turn every ref into
+        // a refusal; the generation check goes back to being skipped, which is where it started.
+        return undefined;
+      }
     },
 
     async locate(botId: string): Promise<string> {

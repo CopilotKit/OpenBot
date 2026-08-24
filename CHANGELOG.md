@@ -8,6 +8,46 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Run this on Kubernetes
+
+A Helm chart under `charts/openbot`, and the fixes that installing it for real turned up.
+
+One chart, four targets: EKS, GKE, AKS and somebody's own cluster, with nothing but values between
+them. There is no cloud branching in any template. Every place the clouds genuinely differ is a
+value whose default is what a plain self-hosted cluster does: the cluster's own default StorageClass,
+no RuntimeClass, a plain Kubernetes Secret, an Ingress. Identity is one `serviceAccount.annotations`
+map, which is all IRSA, Workload Identity and AKS workload identity are. Secrets are a plain Secret
+by default and an ExternalSecret against any backend when asked, so Secrets Manager, Secret Manager
+and Key Vault are a values block rather than three code paths. Gateway API is supported beside
+Ingress rather than instead of it. `charts/openbot/ci` holds a values file per target.
+
+Two replicas by default, because horizontal is the point and one replica hides every bug that is
+not. A bad install is refused at `helm install`, naming the value to change, rather than discovered
+in a crash loop: no database or two of them, nobody who could sign in, nobody who would be an
+administrator, a key of the wrong shape, both routers enabled, or a browser asked for inside more
+than one replica.
+
+**A Bot's computer is not in an API pod.** The image runs one beside the API so that a single
+container works on its own, and `EMBEDDED_COMPUTER=off` turns it off. A replica must not carry a
+browser: it is a few hundred megabytes holding one Bot's logins, so scaling the API would scale
+those with it.
+
+**Migrations no longer need a development tool.** `bun x drizzle-kit migrate` cannot run in the
+shipped image at all. The CLI reads a TypeScript config, which needs the esbuild that
+`bun install --production` correctly leaves out, so it printed "Reading config file", exited 1 and
+said nothing else. `EMBEDDED_POSTGRES=on` was therefore starting a container whose database was
+never migrated, and the first symptom was the API reporting that `users` does not exist.
+`server/scripts/migrate.ts` uses the migrator inside `drizzle-orm`, which is a runtime dependency
+already, and keeps the same journal, so a database migrated by either tool is migrated.
+
+**Which run of a computer this is, on more than one replica.** `sessionOf` answered from a map in
+the process that started the computer, which is right until there are two: the replica that took a
+snapshot is usually not the one handling the click, and the second had nothing to answer with. An
+unknown session means "no opinion" and skips the generation check, so on exactly the deployment
+shape it was written for, the check that stops a ref from a replaced computer resolving against a
+live one was silently absent. It now asks the supervisor when it does not know, by listing rather
+than by ensuring, so asking never starts a computer that had stopped.
+
 ### Knowledge searches instead of guessing
 
 A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the

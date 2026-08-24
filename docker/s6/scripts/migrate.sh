@@ -8,4 +8,7 @@
 set -eu
 [ "${EMBEDDED_POSTGRES:-off}" = "on" ] || exit 0
 cd /app/server
-exec s6-setuidgid pwuser /usr/local/bin/bun x drizzle-kit migrate --config=drizzle.config.ts
+# `scripts/migrate.ts`, not `drizzle-kit`. The CLI is a development dependency and needs esbuild to
+# read its TypeScript config, which `bun install --production` leaves out of this image: asked to
+# migrate here it exits 1 without printing why, and the container comes up against an empty database.
+exec s6-setuidgid pwuser /usr/local/bin/bun scripts/migrate.ts

@@ -1,0 +1,53 @@
+# EKS. RDS for the database, IRSA for identity, Secrets Manager through external-secrets.
+config:
+  initialAdminEmails: admin@example.com
+  intelligence:
+    apiUrl: https://api.cloud.copilotkit.ai
+    gatewayWsUrl: wss://gateway.cloud.copilotkit.ai
+  auth:
+    google:
+      clientId: example.apps.googleusercontent.com
+  publicUrl: https://openbot.example.com
+postgresql:
+  enabled: false
+database:
+  existingSecret: openbot-database
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::000000000000:role/openbot
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: aws-secrets-manager
+  data:
+    - secretKey: key-encryption-key
+      remoteRef:
+        key: openbot/key-encryption-key
+    - secretKey: intelligence-api-key
+      remoteRef:
+        key: openbot/intelligence-api-key
+    - secretKey: google-client-secret
+      remoteRef:
+        key: openbot/google-client-secret
+    - secretKey: license-token
+      remoteRef:
+        key: openbot/license-token
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+server:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: openbot
+          app.kubernetes.io/component: server

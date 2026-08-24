@@ -1,0 +1,32 @@
+# Somebody's own cluster, which is the shape every default is written for.
+#
+# Nothing here turns a cloud feature on, because there are none to turn on: the cluster's default
+# StorageClass, a plain Secret, the bundled database, an Ingress. If this file needs to grow, a
+# default is wrong.
+config:
+  initialAdminEmails: admin@example.com
+  intelligence:
+    apiUrl: https://api.cloud.copilotkit.ai
+    gatewayWsUrl: wss://gateway.cloud.copilotkit.ai
+  auth:
+    google:
+      clientId: example.apps.googleusercontent.com
+  publicUrl: https://openbot.internal
+postgresql:
+  enabled: true
+  auth:
+    # Yours to choose, and the same value on every upgrade. Rendering example only.
+    password: "example-for-rendering-only"
+secrets:
+  keyEncryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  intelligenceApiKey: "example-for-rendering-only"
+  googleClientSecret: "example-for-rendering-only"
+  licenseToken: "example-for-rendering-only"
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: openbot.internal
+      paths:
+        - path: /
+          pathType: Prefix

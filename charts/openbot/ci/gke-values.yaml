@@ -1,0 +1,44 @@
+# GKE. Cloud SQL, Workload Identity, Secret Manager through external-secrets, Gateway API.
+config:
+  initialAdminEmails: admin@example.com
+  intelligence:
+    apiUrl: https://api.cloud.copilotkit.ai
+    gatewayWsUrl: wss://gateway.cloud.copilotkit.ai
+  auth:
+    google:
+      clientId: example.apps.googleusercontent.com
+  publicUrl: https://openbot.example.com
+postgresql:
+  enabled: false
+database:
+  existingSecret: openbot-database
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: openbot@example-project.iam.gserviceaccount.com
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: gcp-secret-manager
+  data:
+    - secretKey: key-encryption-key
+      remoteRef:
+        key: openbot-key-encryption-key
+    - secretKey: intelligence-api-key
+      remoteRef:
+        key: openbot-intelligence-api-key
+    - secretKey: google-client-secret
+      remoteRef:
+        key: openbot/google-client-secret
+    - secretKey: license-token
+      remoteRef:
+        key: openbot-license-token
+# Gateway API rather than an Ingress, which the same chart supports without a second code path.
+ingress:
+  enabled: false
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: openbot-gateway
+      namespace: gateway-system
+  hostnames:
+    - openbot.example.com

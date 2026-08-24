@@ -1,0 +1,88 @@
+{{- if .Values.migrations.enabled }}
+{{- $component := "migrations" -}}
+{{/*
+The schema, before anything serves a request.
+
+A pre-install and pre-upgrade hook rather than an init container on the Deployment: with several
+replicas, an init container means every replica races to migrate the same database, and the
+migration that loses is a failed pod on an otherwise healthy rollout. One Job runs once.
+
+WHEN IT RUNS DEPENDS ON WHOSE DATABASE IT IS, and both wrong answers deadlock rather than slow down.
+
+A pre-install hook runs before the chart's own resources, so with the bundled database the
+StatefulSet does not exist yet and never will while the hook is running: waiting cannot help,
+because the thing being waited for is behind the wait. A post-install hook has the mirror image of
+the same problem, because `--wait` holds it until the Deployment is ready and the Deployment cannot
+be ready against a database with no schema in it.
+
+So on a first install with the bundled database this is not a hook at all. It is an ordinary Job,
+created in the same pass as the database and the Deployment, and it waits for the database while the
+replicas restart against a schema that is on its way. Nothing is ordered because nothing needs to
+be: the Job's own wait is the ordering, and a replica that starts too early is a restart rather than
+a failure.
+
+Every other case is a hook, because in every other case the database already exists. An external
+database on install, and any upgrade at all, run `pre`, where the schema is ready before a replica
+reaches a version of it that it has not seen.
+
+Deleted before the next run and on success. A failed one is kept, so the reason is still readable.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}-{{ .Release.Revision }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+  {{- if not (and .Values.postgresql.enabled .Release.IsInstall) }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  {{- end }}
+spec:
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  template:
+    metadata:
+      labels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "openbot.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "openbot.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          workingDir: /app/server
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Bounded, so a database that is never coming back fails the install rather than
+              # holding it open until somebody notices. `pg_isready` reads the same DATABASE_URL the
+              # migration is about to use, so this cannot wait on the wrong server.
+              deadline=$(( $(date +%s) + {{ .Values.migrations.waitForDatabaseSeconds }} ))
+              until pg_isready -d "$DATABASE_URL" -q; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "the database did not accept connections within {{ .Values.migrations.waitForDatabaseSeconds }}s" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+              exec /usr/local/bin/bun scripts/migrate.ts
+          env:
+{{ include "openbot.databaseUrlEnv" . | indent 12 }}
+            - name: EMBEDDED_POSTGRES
+              value: "off"
+            - name: EMBEDDED_COMPUTER
+              value: "off"
+          {{- with .Values.migrations.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+{{- end }}

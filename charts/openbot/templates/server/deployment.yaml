@@ -1,0 +1,120 @@
+{{- $component := "server" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  {{- /* Left unset when the HPA owns it, so a chart upgrade cannot undo a scale the HPA decided. */}}
+  {{- if not .Values.server.autoscaling.enabled }}
+  replicas: {{ .Values.server.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
+        {{- with .Values.server.podLabels }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+      annotations:
+        {{- /*
+          Roll the pods when configuration changes.
+
+          Without this a `helm upgrade` that only changes the ConfigMap leaves every replica running
+          the old values, and the deployment looks upgraded while behaving exactly as it did.
+        */}}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.server.podAnnotations }}
+{{ toYaml . | indent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "openbot.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- $affinity := include "openbot.podAntiAffinity" (dict "root" . "component" $component) }}
+      {{- if $affinity }}
+      affinity:
+{{ $affinity | indent 8 }}
+      {{- end }}
+      {{- with .Values.server.topologySpreadConstraints }}
+      topologySpreadConstraints:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "openbot.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.service.port }}
+              protocol: TCP
+          env:
+{{ include "openbot.databaseUrlEnv" . | indent 12 }}
+{{ include "openbot.commonEnv" . | indent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "openbot.configMapName" . }}
+            {{- with .Values.config.extraEnvFrom }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          {{- /*
+            Three probes, and the startup one is the reason the other two can be impatient.
+
+            A cold start migrates nothing but does read and validate the tenant package, so first
+            boot is slower than steady state. Without a startup probe the liveness one has to be
+            slack enough for the slowest boot, which means a wedged replica stays in the Service for
+            as long as a healthy slow one would.
+          */}}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.server.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.server.startupProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.server.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.server.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.server.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.server.readinessProbe.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.server.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.server.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.server.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.server.livenessProbe.failureThreshold }}
+          {{- with .Values.server.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}

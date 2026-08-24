@@ -21,3 +21,7 @@ app/src/lib/generated/application-config.ts
 
 # TanStack Router scratch output
 app/.tanstack/
+
+# Helm subchart tarballs, fetched by `helm dependency build`.
+charts/*/charts/
+charts/*/Chart.lock

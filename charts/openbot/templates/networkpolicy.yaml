@@ -1,0 +1,52 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $component := "server" -}}
+{{/*
+What the API may reach, and what may reach it.
+
+Off by default, because a NetworkPolicy on a cluster with no CNI that enforces one is a resource
+that silently does nothing, and on a cluster that does enforce one a wrong rule is an outage. A
+deployment that turns this on is saying it knows which of the two it has.
+
+Egress deliberately allows DNS and the database, and nothing else without being asked: a Bot's
+computer reaching the open internet is the computers' own policy, not the API's.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: {{ .Values.server.service.port }}
+          protocol: TCP
+    {{- with .Values.networkPolicy.extraIngress }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+  egress:
+    # DNS, or nothing resolves and every failure looks like the database being down.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}

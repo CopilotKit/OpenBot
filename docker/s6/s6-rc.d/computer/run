@@ -1,8 +1,21 @@
 #!/command/with-contenv sh
 # The Bot's browser. Bound to loopback: its only caller is the API beside it.
 #
+# `EMBEDDED_COMPUTER=on` is the default, because one container that just works is what this image is
+# for. Off, this service exits 0 immediately and s6 leaves it alone, the same way `postgres` does,
+# and the API reaches a computer elsewhere through `AGENT_COMPUTER_URL` or a supervisor.
+#
+# That switch is what lets this image be a stateless replica. A browser is a few hundred megabytes of
+# memory holding one Bot's logins, so an API pod carrying one is neither stateless nor cheap to run
+# several of: scaling the API would scale the browsers with it, and every replica would hold a
+# profile directory that matters to exactly one Bot.
+#
 # `with-contenv` is not decoration. Without it s6 starts a service with none of the container's
 # environment, and the failure is a config error naming a variable that is plainly set.
+set -eu
+if [ "${EMBEDDED_COMPUTER:-on}" != "on" ]; then
+  exec /bin/true
+fi
 cd /app/agent-computer
 export PORT=4100
 export WORKSPACE_DIR=/workspace

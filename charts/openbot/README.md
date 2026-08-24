@@ -1,0 +1,100 @@
+# OpenBot on Kubernetes
+
+Runs OpenBot on any Kubernetes cluster: EKS, GKE, AKS, or your own. One chart, four targets, and the
+only difference between them is values.
+
+## Install
+
+The bundled database and one administrator, which is the shortest thing that works:
+
+```sh
+helm dependency build charts/openbot
+helm upgrade --install openbot charts/openbot \
+  --namespace openbot --create-namespace \
+  --set postgresql.enabled=true \
+  --set config.initialAdminEmails=you@example.com \
+  --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)"
+```
+
+`secrets.keyEncryptionKey` encrypts the credential vault. Generate it once, keep it, and do not put
+it in a file anybody commits. The chart marks the Secret it creates `helm.sh/resource-policy: keep`,
+so an uninstall does not take the key that every stored credential was encrypted with.
+
+## What the defaults assume
+
+**A plain cluster with no cloud features.** The cluster's own default StorageClass, no RuntimeClass,
+a plain Kubernetes Secret, an Ingress. There is no cloud branching anywhere in the templates and
+there should never be. A deployment on a managed cluster turns things on; a self-hosted one changes
+nothing and still works.
+
+Two replicas by default, because horizontal is the point. Everything that has to survive a replica is
+in PostgreSQL, and one replica hides every bug that is not.
+
+**No browser in the API pod.** The image runs a Bot's computer beside the API so that one container
+works on its own. A replica must not carry one: a browser is a few hundred megabytes holding one
+Bot's logins, so scaling the API would scale those with it. `server.embeddedComputer` is off here,
+and asking for it with more than one replica is refused at install time.
+
+## Your own database
+
+```sh
+--set postgresql.enabled=false \
+--set database.existingSecret=openbot-database   # key: database-url
+```
+
+Setting both a bundled database and a URL is refused, rather than one of them silently winning.
+
+## The four targets
+
+`ci/` holds a values file per target, and each is the shortest thing that expresses what is different
+about that cluster:
+
+| File | What it shows |
+| --- | --- |
+| `self-hosted-values.yaml` | Nothing turned on. If this file needs to grow, a default is wrong. |
+| `eks-values.yaml` | IRSA, Secrets Manager, ALB, zone spread, autoscaling. |
+| `gke-values.yaml` | Workload Identity, Secret Manager, Gateway API instead of an Ingress. |
+| `aks-values.yaml` | Workload identity, Key Vault, the AKS web app routing class. |
+
+Render any of them without a cluster:
+
+```sh
+helm template openbot charts/openbot -f charts/openbot/ci/eks-values.yaml
+```
+
+### Identity, in one map
+
+IRSA on EKS, Workload Identity on GKE and workload identity on AKS are all annotations on a
+ServiceAccount, so `serviceAccount.annotations` covers all three and the chart needs no idea which
+cloud it is on.
+
+### Secrets, without a vendor
+
+A plain Kubernetes Secret is the default, because that is what a self-hosted cluster has. Setting
+`externalSecrets.enabled` turns the same keys into an ExternalSecret against whatever store the
+cluster has, so Secrets Manager, Secret Manager and Key Vault are a values block rather than three
+code paths.
+
+### Storage has gravity
+
+The API tier holds nothing on disk. When per-Bot computers arrive they will, and the ordinary block
+volume on all three clouds is **zonal**: once provisioned, every pod referencing it is scheduled into
+that zone, so a Bot's computer is pinned to a zone for as long as its profile exists. That is
+acceptable and worth stating rather than discovering. `storageClass` stays empty by default, meaning
+the cluster's default class, because naming `gp3` or `pd-balanced` here is how a chart stops
+installing on somebody's bare-metal cluster.
+
+## Refused at install, not in a crash loop
+
+The chart fails the install, naming the value to change, when: there is no database or two of them;
+nobody would be an administrator; `singleUser` is combined with a public URL; both an Ingress and an
+HTTPRoute are enabled; both `externalSecrets` and an existing Secret are named; or a browser is asked
+for inside more than one API replica.
+
+## Upgrades
+
+Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it
+has not seen. An init container would mean every replica racing to migrate the same database.
+
+Use `helm upgrade --install --atomic` so a failed upgrade rolls back rather than leaving half a
+rollout.

@@ -1,0 +1,30 @@
+{{- if .Values.server.podDisruptionBudget.enabled }}
+{{- $component := "server" -}}
+{{/*
+What a drain may take at once.
+
+Only meaningful with more than one replica: a budget of `minAvailable: 1` over a single replica means
+a node drain blocks forever rather than being safe, so this is rendered only where it can be kept.
+*/}}
+{{- $replicas := int .Values.server.replicaCount -}}
+{{- if .Values.server.autoscaling.enabled }}
+{{- $replicas = int .Values.server.autoscaling.minReplicas -}}
+{{- end }}
+{{- if gt $replicas 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+spec:
+  {{- if .Values.server.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.server.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.server.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 6 }}
+{{- end }}
+{{- end }}

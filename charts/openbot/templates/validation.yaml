@@ -1,0 +1,107 @@
+{{/*
+Refused at install time, not discovered in a crash loop.
+
+Every check here is something the API would fail on at boot, or something that is quietly wrong
+rather than loudly broken. A `helm install` that succeeds and leaves pods restarting is worse than
+one that refuses and says why, because the second names the value to change.
+
+This template renders nothing.
+*/}}
+
+{{- if and (not .Values.postgresql.enabled) (not .Values.database.url) (not .Values.database.existingSecret) }}
+{{- fail "No database. Either set postgresql.enabled=true to run the bundled one, or set database.url (or database.existingSecret) to point at your own." }}
+{{- end }}
+
+{{- /*
+  The bundled database, without a password anybody can produce again.
+
+  The subchart generates one on install and then refuses to render on upgrade without being handed
+  the current value, so a release installed without one cannot be upgraded, only reinstalled. That
+  failure arrives on the second deploy, which is the worst time to find it.
+*/}}
+{{- if and .Values.postgresql.enabled (not .Values.postgresql.auth.password) (not .Values.postgresql.auth.existingSecret) }}
+{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made. Generate one with: openssl rand -base64 24" }}
+{{- end }}
+
+{{- if and .Values.postgresql.enabled (or .Values.database.url .Values.database.existingSecret) }}
+{{- fail "Two databases. postgresql.enabled is true and database.url is also set, so it is not clear which one is meant. Pick one." }}
+{{- end }}
+
+{{- /*
+  Nobody can get in, which is two separate mistakes rather than one.
+
+  Naming administrators does not create a way to sign in, and configuring sign-in does not make
+  anybody an administrator: the server refuses to start without a provider, and grants the role to
+  nobody without the addresses. An earlier version of this check accepted admin emails alone, which
+  passed the install and then crash-looped on the first boot, so both are checked and named apart.
+*/}}
+{{- $provider := or .Values.config.auth.google.clientId .Values.config.auth.microsoft.clientId .Values.config.auth.okta.clientId -}}
+{{- if and (not .Values.config.singleUser) (not $provider) }}
+{{- fail "Nobody could sign in. Configure config.auth.google, config.auth.microsoft or config.auth.okta, or set config.singleUser=true for a local trial where every request is one fixed administrator." }}
+{{- end }}
+
+{{- if and $provider (not .Values.config.initialAdminEmails) }}
+{{- fail "Nobody would be an administrator. config.initialAdminEmails is what grants the role; nothing else does." }}
+{{- end }}
+
+{{- if and $provider (not .Values.config.publicUrl) }}
+{{- fail "Sign-in needs somewhere to come back to. Set config.publicUrl to the address people reach this deployment at, which is where the OAuth callback lands." }}
+{{- end }}
+
+{{- if and .Values.config.auth.okta.clientId (not .Values.config.auth.okta.issuer) }}
+{{- fail "config.auth.okta.issuer is required alongside the Okta client, such as https://example.okta.com/oauth2/default. It is what makes it a particular Okta rather than Okta in general." }}
+{{- end }}
+
+{{- if and .Values.config.singleUser .Values.config.publicUrl }}
+{{- fail "config.singleUser serves every visitor as one administrator, so it must not be combined with a public URL. Configure an identity provider and set config.initialAdminEmails instead." }}
+{{- end }}
+
+{{- /*
+  Intelligence, which is not optional.
+
+  All four values are required together and the server refuses to start on a partial set, so the
+  same rule is applied here: caught at install with the values named, rather than in a crash loop
+  whose message is in a log nobody has opened.
+*/}}
+{{- if or (not .Values.config.intelligence.apiUrl) (not .Values.config.intelligence.gatewayWsUrl) }}
+{{- fail "OpenBot requires CopilotKit Intelligence. Set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey and secrets.licenseToken." }}
+{{- end }}
+
+{{- if and .Values.ingress.enabled .Values.httpRoute.enabled }}
+{{- fail "ingress.enabled and httpRoute.enabled are both set. They are two ways to do the same thing; pick the one your cluster runs." }}
+{{- end }}
+
+{{- /*
+  A key of the wrong shape.
+
+  `KEY_ENCRYPTION_KEY` must decode to exactly 32 bytes, and the server refuses to start otherwise.
+  Checked here only when the chart is the one creating the Secret: a key coming from an existing
+  Secret or an external store is not readable at template time, and guessing about it would mean
+  refusing installs that are fine.
+*/}}
+{{- if and .Values.secrets.keyEncryptionKey (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- if ne (len (b64dec .Values.secrets.keyEncryptionKey)) 32 }}
+{{- fail "secrets.keyEncryptionKey must be a base64-encoded 32-byte value. Generate one with: openssl rand -base64 32" }}
+{{- end }}
+{{- end }}
+
+{{- if and .Values.externalSecrets.enabled .Values.secrets.existingSecret }}
+{{- fail "externalSecrets.enabled and secrets.existingSecret are both set. The first creates the Secret and the second says one already exists; pick one." }}
+{{- end }}
+
+{{- /*
+  A replica count that cannot survive the thing replicas are for.
+
+  One replica is a supported way to run this and not the default, so this is a note rather than a
+  refusal only when somebody has also asked for a disruption budget, where one replica means a node
+  drain blocks rather than being safe.
+*/}}
+{{- if and (not .Values.server.autoscaling.enabled) (lt (int .Values.server.replicaCount) 1) }}
+{{- fail "server.replicaCount must be at least 1." }}
+{{- end }}
+
+{{- if .Values.server.embeddedComputer }}
+{{- if gt (int .Values.server.replicaCount) 1 }}
+{{- fail "server.embeddedComputer runs a browser inside every API pod, which cannot be replicated: each replica would hold a profile directory belonging to one Bot. Either set server.replicaCount=1, or leave embeddedComputer off and give the Bots a computer of their own." }}
+{{- end }}
+{{- end }}

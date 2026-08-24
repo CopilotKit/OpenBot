@@ -1,0 +1,26 @@
+{{- if .Values.httpRoute.enabled }}
+{{/*
+Gateway API, as an alternative rather than a replacement.
+
+Where this is going, and not where every cluster is: plenty of self-hosted clusters still run an
+Ingress controller, so both exist here and neither is assumed. Turning both on is a mistake rather
+than a merge, and `validation.yaml` says so at install time.
+*/}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "openbot.fullname" . }}
+  labels:
+{{ include "openbot.labels" . | indent 4 }}
+spec:
+  parentRefs:
+{{ toYaml (required "httpRoute.parentRefs is required when httpRoute.enabled is true" .Values.httpRoute.parentRefs) | indent 4 }}
+  {{- with .Values.httpRoute.hostnames }}
+  hostnames:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  rules:
+    - backendRefs:
+        - name: {{ include "openbot.fullname" . }}-server
+          port: {{ .Values.server.service.port }}
+{{- end }}
