@@ -204,8 +204,6 @@ export function useBotThread(agentId: string): BotThread {
   const startNew = useCallback(() => {
     if (mintingRef.current) return;
     mintingRef.current = true;
-    // From here the mount-time check must not touch the thread: the person has asked for a new one.
-    startedNewRef.current = true;
     void mint().then((minted) => {
       mintingRef.current = false;
       if (!mountedRef.current) return;
@@ -213,6 +211,20 @@ export function useBotThread(agentId: string): BotThread {
       // end up worse off — mid-conversation and suddenly unable to send — than before they pressed
       // it.
       if (!minted) return;
+      /*
+       * Latched here rather than at the press, and the difference is a blank screen.
+       *
+       * Set on the press, a mint that then fails leaves the mount-time check disarmed with nothing
+       * having replaced the thread: `bot.tsx` renders the chat only when there is one, so the person
+       * is left looking at an empty pane with no message and no way back but a reload. Set here, a
+       * failed mint disarms nothing and the remembered thread is still restored.
+       *
+       * This is not a weaker guard. Assignment and the check below both run to completion on one
+       * thread, so a `checkKnown` that resolves after this sees it, and one that resolves before it
+       * has already restored a thread that this line is about to replace — which is what the person
+       * asked for.
+       */
+      startedNewRef.current = true;
       remember(agentId, minted);
       setThreadId(minted);
       setHistory("ready");
