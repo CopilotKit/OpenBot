@@ -21,20 +21,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemTitle,
-} from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
-import {
   Field,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Select,
   SelectContent,
@@ -43,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import {
   type CredentialFormValues,
   credentialFormSchema,
@@ -51,7 +51,10 @@ import {
   createCredentialMutationOptions,
   revokeCredentialMutationOptions,
 } from "@/lib/credentials/mutations";
-import { credentialListQueryOptions } from "@/lib/credentials/queries";
+import {
+  type CredentialStatus,
+  credentialListQueryOptions,
+} from "@/lib/credentials/queries";
 
 export const Route = createFileRoute("/_authed/admin/credentials")({
   component: CredentialsPage,
@@ -228,6 +231,31 @@ function CredentialsPage() {
                   }}
                 </form.Field>
               </FieldGroup>
+              {/*
+               * Said before the write, not after it.
+               *
+               * A key holds one live credential, so saving onto a key that already has one is a
+               * replacement: the old credential is revoked in the same transaction. The page calls
+               * this Add and has no rotate control, so without this line an administrator retires
+               * the credential an MCP server or an agent is currently authenticating with, and
+               * nothing on screen mentions it until something stops working.
+               */}
+              <form.Subscribe
+                selector={(state) => [
+                  state.values.kind,
+                  state.values.provider,
+                  state.values.keyId,
+                ]}
+              >
+                {([kind, provider, keyId]) =>
+                  liveCredentialFor(credentials.data, kind, provider, keyId) ? (
+                    <p className="text-amber-600 text-sm dark:text-amber-500">
+                      This key already holds a live credential. Saving replaces
+                      it, and the one it replaces is revoked.
+                    </p>
+                  ) : null
+                }
+              </form.Subscribe>
               {createCredential.error ? (
                 <p className="text-destructive text-sm" role="alert">
                   Could not save the credential. Try again.
@@ -305,5 +333,27 @@ function CredentialsPage() {
         )}
       </PageSection>
     </PageShell>
+  );
+}
+
+/**
+ * The live credential a key already holds, if it holds one.
+ *
+ * `(kind, provider, keyId)` is what `credentials_active_key_idx` is unique on, and revoked rows are
+ * outside it, so this is the same question the database asks when the save lands.
+ */
+function liveCredentialFor(
+  credentials: CredentialStatus[] | undefined,
+  kind: unknown,
+  provider: unknown,
+  keyId: unknown,
+): CredentialStatus | undefined {
+  if (!provider || !keyId) return undefined;
+  return credentials?.find(
+    (credential) =>
+      credential.revokedAt === null &&
+      credential.kind === kind &&
+      credential.provider === provider &&
+      credential.keyId === keyId,
   );
 }

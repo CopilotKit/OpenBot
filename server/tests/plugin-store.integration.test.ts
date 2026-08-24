@@ -642,7 +642,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
       `${"A".repeat(43)}=`,
       "not-read-here",
     );
-    await database.insert(credentials).values([
+    await database.insert(credentialRows).values([
       {
         id: deploymentCredentialId,
         kind: "mcp",
@@ -679,9 +679,9 @@ describe("a custom server may only be pointed at its own kind of credential", ()
       .delete(mcpServers)
       .where(like(mcpServers.id, `${customServerId}%`));
     await database
-      .delete(credentials)
+      .delete(credentialRows)
       .where(
-        inArray(credentials.id, [
+        inArray(credentialRows.id, [
           deploymentCredentialId,
           personalCredentialId,
           oauthClientCredentialId,
