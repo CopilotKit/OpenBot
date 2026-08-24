@@ -1,6 +1,18 @@
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    # Off the network the Bots are on, because a Bot's computer is on it and a Bot has a shell.
+    #
+    # With no `networks:` anywhere, Compose puts every service on one network with DNS by service
+    # name, so `agent-computer` could open `postgres:5432` and the credentials three lines below are
+    # in this file. That is the audit trail, the policy store and the agent tables, reachable from
+    # the one container whose whole job is to run what a Bot asks for. `agent-computer/src/shell.ts`
+    # says it plainly: isolation is the container's job, a shell can reach whatever the container
+    # can reach.
+    #
+    # `migrate` is the only service that reaches this by name, so the two of them are all that
+    # belongs here. Everything else that needs the database is outside this file: the API server
+    # runs on the host in local development and connects through the published port below.
     environment:
       POSTGRES_DB: openbot
       POSTGRES_USER: openbot
@@ -14,6 +26,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - data
 
   migrate:
     build:
@@ -26,6 +40,8 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
+    networks:
+      - data
 
   # The Bot's computer is long-lived so browser sessions remain signed in across turns.
   agent-computer:
@@ -232,6 +248,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+networks:
+  # The database and the one service that reaches it by name. Nothing a Bot can reach is on it.
+  #
+  # A deployment that runs the API server inside Compose rather than on the host puts that service
+  # on both this and `default`, which is the one place the two are meant to meet.
+  data:
+  # Everything else, which is where `default` already put it. Named here only so that adding a
+  # service without a `networks:` key keeps landing beside the Bots rather than beside the database.
+  default:
 
 volumes:
   postgres-data:
