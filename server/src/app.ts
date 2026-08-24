@@ -646,6 +646,9 @@ export function createApp(
         config.computer?.allowPrivateHosts ?? false,
         // A Bot's own refusal goes in the same trail as everything else it does.
         auditStore,
+        // Addresses this deployment named, which is how a hosted one reaches an agent on its own
+        // network without dropping the floor for everything else.
+        config.agentEndpointAllowedHosts,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the

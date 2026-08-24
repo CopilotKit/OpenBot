@@ -598,3 +598,45 @@ describe("accessibility", () => {
     },
   );
 });
+
+/**
+ * Naming the private addresses an agent may live at.
+ *
+ * The refusal cases matter as much as the parse: a list written as URLs or with a wildcard is a
+ * list somebody believed was working, and finding out at the first registration that silently never
+ * matches is worse than being told at boot.
+ */
+describe("AGENT_ENDPOINT_ALLOWED_HOSTS", () => {
+  // The suite's own base, so this describes only its subject rather than re-deriving a whole
+  // deployment and failing on whichever requirement it forgot.
+  const base = () => ({ ...baseEnvironment });
+
+  test("unset means none, which is the posture that shipped", () => {
+    expect(loadConfig(base()).agentEndpointAllowedHosts.size).toBe(0);
+  });
+
+  test("a comma-separated list is parsed, lower-cased and trimmed", () => {
+    const hosts = loadConfig({
+      ...base(),
+      AGENT_ENDPOINT_ALLOWED_HOSTS: " Agents.Internal , 10.0.0.42:9000 ",
+    }).agentEndpointAllowedHosts;
+    expect([...hosts].sort()).toEqual(["10.0.0.42:9000", "agents.internal"]);
+  });
+
+  test("a URL is refused, naming the entry", () => {
+    expect(() =>
+      loadConfig({
+        ...base(),
+        AGENT_ENDPOINT_ALLOWED_HOSTS: "http://agents.internal/ag-ui",
+      }),
+    ).toThrow(/must be a host/);
+  });
+
+  test("a wildcard is refused, naming the entry", () => {
+    // A pattern that widens by accident is the usual way a host check fails, so there are no
+    // patterns to get wrong.
+    expect(() =>
+      loadConfig({ ...base(), AGENT_ENDPOINT_ALLOWED_HOSTS: "*.internal" }),
+    ).toThrow(/Patterns are not accepted/);
+  });
+});

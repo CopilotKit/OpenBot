@@ -496,6 +496,8 @@ const app = createApp(
     // reading and the same one `createApp` takes.
     createAgentFetch({
       allowPrivateHosts: config.computer?.allowPrivateHosts === true,
+      // Named addresses are reachable on every hop, not only the one that was registered.
+      allowedHosts: config.agentEndpointAllowedHosts,
       // The refusal is what the run already knows; this is what the deployment knows. Written here
       // rather than in `endpoint.ts` so that file keeps deciding and nothing else, the way the
       // target check it reuses does.

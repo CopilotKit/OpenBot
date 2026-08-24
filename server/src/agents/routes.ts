@@ -42,6 +42,8 @@ type AgentInputObject = {
 export function parseAgentInput(
   input: unknown,
   allowPrivateHosts = false,
+  /** Private addresses this deployment named as acceptable. Empty is the default posture. */
+  allowedHosts: ReadonlySet<string> = new Set(),
 ): AgentInputParseResult {
   if (!isAgentInputObject(input)) {
     return { ok: false, error: "Agent input must be a JSON object." };
@@ -81,7 +83,10 @@ export function parseAgentInput(
   // goes through the same target check as navigation before it is allowed anywhere near the database.
   let endpoint: string | undefined;
   if (input.endpoint !== undefined && input.endpoint !== "") {
-    const verdict = checkAgentEndpoint(input.endpoint, { allowPrivateHosts });
+    const verdict = checkAgentEndpoint(input.endpoint, {
+      allowPrivateHosts,
+      allowedHosts,
+    });
     if (!verdict.allowed) return { ok: false, error: verdict.reason };
     endpoint = verdict.url;
   }
@@ -130,6 +135,13 @@ export function createAgentRoutes(
   allowPrivateHosts = false,
   /** Where a Bot's own refusal is recorded. Absent in tests that do not care about the trail. */
   auditStore?: AuditStore,
+  /**
+   * Private addresses this deployment named as acceptable for an agent to live at.
+   *
+   * Separate from `allowPrivateHosts` on purpose: that one opens the network, this one opens an
+   * address. A hosted deployment sets this and leaves the other off.
+   */
+  allowedHosts: ReadonlySet<string> = new Set(),
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -228,6 +240,7 @@ export function createAgentRoutes(
     const result = await testAgentConnection(body?.endpoint, {
       headers,
       allowPrivateHosts,
+      allowedHosts,
     });
     // 200 either way: the request succeeded, and the verdict is the payload. A failed connection test
     // is an answer, not an error, and a 4xx here would have the surface render it as a broken button.
@@ -278,6 +291,7 @@ export function createAgentRoutes(
     const parsed = parseAgentInput(
       await context.req.json().catch(() => null),
       allowPrivateHosts,
+      allowedHosts,
     );
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
 
@@ -303,6 +317,7 @@ export function createAgentRoutes(
     const parsed = parseAgentInput(
       await context.req.json().catch(() => null),
       allowPrivateHosts,
+      allowedHosts,
     );
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
 

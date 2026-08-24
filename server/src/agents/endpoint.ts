@@ -22,6 +22,37 @@ import { checkNavigationTarget } from "../computer/target";
  * refused.
  */
 
+/**
+ * Is this address one the deployment named, and refused only for being private?
+ *
+ * The second half is the load-bearing half. Re-running the check with the floor down separates
+ * "refused because it is inside the network", which naming may overrule, from "refused because it is
+ * the metadata address or is not a web address at all", which nothing may. Deciding that by reading
+ * the refusal text would break the first time somebody rephrased it.
+ *
+ * Matching is exact, on the host as written, and a name with a port pins that port. No suffixes and
+ * no patterns: a pattern that widened by accident is how host checks usually fail, and an operator
+ * naming three addresses can name three addresses.
+ */
+function namedAsAllowed(
+  raw: string,
+  allowedHosts: ReadonlySet<string> | undefined,
+): boolean {
+  if (!allowedHosts || allowedHosts.size === 0) return false;
+  if (!checkNavigationTarget(raw, { allowPrivateHosts: true }).allowed) {
+    return false;
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const host = url.host.toLowerCase().replace(/^\[/, "").replace(/\]/, "");
+  return allowedHosts.has(host) || allowedHosts.has(hostname);
+}
+
 export type EndpointVerdict =
   | { allowed: true; url: string }
   | { allowed: false; reason: string };
@@ -34,13 +65,36 @@ export type EndpointVerdict =
  */
 export function checkAgentEndpoint(
   raw: unknown,
-  options: { allowPrivateHosts?: boolean } = {},
+  options: {
+    allowPrivateHosts?: boolean;
+    allowedHosts?: ReadonlySet<string>;
+  } = {},
 ): EndpointVerdict {
   if (typeof raw !== "string" || !raw.trim()) {
     return { allowed: false, reason: "An agent needs a web address." };
   }
 
   const verdict = checkNavigationTarget(raw.trim(), options);
+  if (!verdict.allowed && namedAsAllowed(raw.trim(), options.allowedHosts)) {
+    /*
+     * Named, one host at a time, by whoever runs this deployment.
+     *
+     * The private-host opt-in is a floor: it permits this deployment's whole network, to browsing
+     * and to agent endpoints alike, which is why it is refused in production. But a company's own
+     * agent legitimately lives at an internal address, and telling them to drop the floor to reach
+     * it is the advice that made the opt-in dangerous in the first place. So an address may be named
+     * instead, and nothing else is opened.
+     *
+     * Only ever reached for an address the strict check refused *for being private*. Anything on the
+     * never-allowed list, and anything that is not http or https, is refused before this and cannot
+     * be named back in — see `namedAsAllowed`, which re-runs the check with the floor down to find
+     * out which kind of refusal it was rather than pattern-matching the message.
+     *
+     * Agent endpoints only. Browsing is not widened by this: a page can steer a Bot somewhere, and
+     * an operator naming an address they run is a different act from a Bot following a link to it.
+     */
+    return { allowed: true, url: new URL(raw.trim()).toString() };
+  }
   if (!verdict.allowed) {
     // The navigation wording talks about "the assistant opening" a page, which is not what is
     // happening here, so the reason is restated for the form surface.
@@ -177,6 +231,12 @@ function strippedBody(body: BodyInit | null | undefined): { body?: BodyInit } {
 export function createAgentFetch(
   options: {
     allowPrivateHosts?: boolean;
+    /**
+     * Carried to every hop, not only the first. An address the deployment named is reachable
+     * wherever it appears, and one it did not name is refused wherever it appears — a redirect must
+     * not be a way to arrive somewhere registration would have declined.
+     */
+    allowedHosts?: ReadonlySet<string>;
     fetchImpl?: typeof fetch;
     /**
      * Told about every address this refused to dial, and why.
@@ -211,6 +271,7 @@ export function createAgentFetch(
       ...(options.allowPrivateHosts !== undefined
         ? { allowPrivateHosts: options.allowPrivateHosts }
         : {}),
+      ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {}),
     });
 
   return async function guardedFetch(url: string, init?: RequestInit) {

@@ -8,6 +8,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Name the private addresses an agent may live at
+
+Refusing `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` in production closed a hole and took something with
+it: bring your own agent is a headline capability, a company's own agent legitimately lives at an
+internal address, and the only way to reach one was to lift the floor for everything. Telling people
+to set that flag is exactly the advice that made it dangerous.
+
+`AGENT_ENDPOINT_ALLOWED_HOSTS` names addresses instead. A comma-separated list of hosts, each
+optionally with a port: `agents.internal` covers any port on that host, `10.0.0.42:9000` pins that
+one. A deployment sets this and leaves the floor where it is.
+
+It is narrow on purpose:
+
+- **Agent endpoints only.** Browsing is not widened. A page can steer a Bot somewhere; an operator
+  naming an address they run is a different act from a Bot following a link to it.
+- **Exact matching.** No wildcards and no suffixes. A list written with a `*`, or written as URLs, is
+  refused at startup with the entry named, rather than quietly never matching.
+- **The never-allowed addresses stay never-allowed.** Cloud metadata is refused before the private
+  rule is reached, so naming it changes nothing.
+- **Every hop, not just the first.** A named address is reachable wherever it appears and an unnamed
+  one is refused wherever it appears, so a redirect is not a way around registration.
+
+Unset means none, which is what every deployment has today.
+
 ### Upgrading
 
 **A deployment that sets `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true` with `NODE_ENV=production` no

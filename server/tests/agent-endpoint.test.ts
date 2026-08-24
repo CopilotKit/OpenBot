@@ -590,3 +590,135 @@ describe("dialling a stored agent endpoint", () => {
     expect(third.get("authorization")).toBeNull();
   });
 });
+
+/**
+ * Naming a private address instead of opening the network.
+ *
+ * `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` is a floor: it permits this deployment's whole network, to
+ * browsing and to agent endpoints alike, and a production deployment refuses to start with it on.
+ * That left bring-your-own-agent unusable in the image people are told to deploy, because a company's
+ * own agent lives at an internal address. Naming the address is the narrow answer, and these are the
+ * cases that decide whether it stays narrow.
+ */
+describe("private addresses named one at a time", () => {
+  const named = (...hosts: string[]) => new Set(hosts);
+
+  test("an unnamed private address is still refused", () => {
+    const verdict = checkAgentEndpoint("http://10.0.0.42:9000/ag-ui", {
+      allowedHosts: named("agents.internal"),
+    });
+    expect(verdict.allowed).toBeFalse();
+  });
+
+  test("a named private address is allowed", () => {
+    const verdict = checkAgentEndpoint("http://10.0.0.42:9000/ag-ui", {
+      allowedHosts: named("10.0.0.42:9000"),
+    });
+    expect(verdict.allowed).toBeTrue();
+  });
+
+  test("naming a host without a port covers its ports", () => {
+    expect(
+      checkAgentEndpoint("http://10.0.0.42:9000/ag-ui", {
+        allowedHosts: named("10.0.0.42"),
+      }).allowed,
+    ).toBeTrue();
+  });
+
+  test("naming a host with a port pins that port", () => {
+    // The narrow reading is the point: an operator who wrote a port meant that port.
+    expect(
+      checkAgentEndpoint("http://10.0.0.42:9999/ag-ui", {
+        allowedHosts: named("10.0.0.42:9000"),
+      }).allowed,
+    ).toBeFalse();
+  });
+
+  test("the metadata address cannot be named back in", () => {
+    /*
+     * The property that makes this safe to ship. The never-allowed list is checked before the
+     * private rule, so an address on it is not "refused for being private" and naming it changes
+     * nothing. If this ever passes, the allowlist has become a way to hand a deployment's own cloud
+     * credentials to anybody who can register an agent.
+     */
+    for (const address of [
+      "http://169.254.169.254/latest/meta-data/",
+      "http://metadata.google.internal/computeMetadata/v1/",
+    ]) {
+      const verdict = checkAgentEndpoint(address, {
+        allowedHosts: named(new URL(address).host, new URL(address).hostname),
+      });
+      expect(verdict.allowed).toBeFalse();
+    }
+  });
+
+  test("a non-web address cannot be named back in either", () => {
+    expect(
+      checkAgentEndpoint("file:///etc/passwd", {
+        allowedHosts: named("", "localhost"),
+      }).allowed,
+    ).toBeFalse();
+  });
+
+  test("naming nothing is the same as before", () => {
+    expect(
+      checkAgentEndpoint("http://10.0.0.42:9000/ag-ui", {
+        allowedHosts: named(),
+      }).allowed,
+    ).toBeFalse();
+    expect(
+      checkAgentEndpoint("http://10.0.0.42:9000/ag-ui").allowed,
+    ).toBeFalse();
+  });
+
+  test("a public address is unaffected by the list", () => {
+    expect(
+      checkAgentEndpoint("https://agent.example.com/ag-ui", {
+        allowedHosts: named("10.0.0.42"),
+      }).allowed,
+    ).toBeTrue();
+  });
+});
+
+/**
+ * The named address, across a redirect.
+ *
+ * Registration and the hop go through the same check, so a name has to mean the same thing in both
+ * places. If a hop ignored the list, a legitimately named agent could not redirect at all; if a hop
+ * were more generous than registration, the redirect would be the way around it.
+ */
+describe("named addresses on a redirect hop", () => {
+  const redirectingTo = (location: string): typeof fetch =>
+    (async (input: string | URL | Request) => {
+      const target = typeof input === "string" ? input : input.toString();
+      return target.includes("/start")
+        ? new Response(null, { status: 307, headers: { location } })
+        : new Response("landed", { status: 200 });
+    }) as unknown as typeof fetch;
+
+  test("a hop to a named private address is followed", async () => {
+    const dial = createAgentFetch({
+      allowedHosts: new Set(["10.0.0.42:9000"]),
+      fetchImpl: redirectingTo("http://10.0.0.42:9000/ag-ui"),
+    });
+    const response = await dial("https://agent.example.com/start");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("landed");
+  });
+
+  test("a hop to an unnamed private address is refused", async () => {
+    const dial = createAgentFetch({
+      allowedHosts: new Set(["10.0.0.42:9000"]),
+      fetchImpl: redirectingTo("http://10.0.0.99:9000/ag-ui"),
+    });
+    await expect(dial("https://agent.example.com/start")).rejects.toThrow();
+  });
+
+  test("a hop to the metadata address is refused however the list is written", async () => {
+    const dial = createAgentFetch({
+      allowedHosts: new Set(["169.254.169.254"]),
+      fetchImpl: redirectingTo("http://169.254.169.254/latest/meta-data/"),
+    });
+    await expect(dial("https://agent.example.com/start")).rejects.toThrow();
+  });
+});

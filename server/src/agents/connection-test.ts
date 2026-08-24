@@ -90,6 +90,7 @@ export async function testAgentConnection(
   options: {
     headers?: Record<string, string>;
     allowPrivateHosts?: boolean;
+    allowedHosts?: ReadonlySet<string>;
     fetchImpl?: typeof fetch;
     timeoutMs?: number;
   } = {},
@@ -98,12 +99,14 @@ export async function testAgentConnection(
   // addresses that registration would refuse.
   const verdict = checkAgentEndpoint(rawEndpoint, {
     allowPrivateHosts: options.allowPrivateHosts,
+    ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {}),
   });
   if (!verdict.allowed) return { ok: false, reason: verdict.reason };
 
   // Wrapped rather than called directly, so the address the request finally lands on is checked too.
   // Checking only what the person typed leaves the redirect as the way around it.
   const doFetch = createAgentFetch({
+    ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {}),
     ...(options.allowPrivateHosts !== undefined
       ? { allowPrivateHosts: options.allowPrivateHosts }
       : {}),

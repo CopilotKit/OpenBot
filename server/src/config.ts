@@ -104,6 +104,20 @@ export type DeploymentConfig = {
    */
   managedAgent?: ManagedAgentConfig;
   /**
+   * Private addresses an agent may be registered at, named one at a time.
+   *
+   * WHY THIS EXISTS. `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` is a floor, not a permission: it opens this
+   * deployment's whole network, to browsing and to agent endpoints alike, which is why a production
+   * deployment refuses to start with it on. That left bring-your-own-agent — a headline capability —
+   * unusable in the image people are told to deploy, because a company's own agent legitimately lives
+   * at an internal address and the only way to reach it was to drop the floor.
+   *
+   * So the address is named instead. Nothing else is opened, browsing is not widened, and the
+   * never-allowed list is still checked first, so the metadata address cannot be named back in.
+   * Empty by default, which is the same posture as before for anybody who does not set it.
+   */
+  agentEndpointAllowedHosts: ReadonlySet<string>;
+  /**
    * What this deployment calls itself, when more than one shares an Intelligence project.
    *
    * Absent, the tenant package's id stands in, which separates deployments running different
@@ -493,6 +507,40 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
  * cloud metadata addresses are refused underneath this either way — see `computer/target.ts` — but
  * that floor is the last one, not the only one worth keeping.
  */
+/**
+ * The private addresses this deployment will let an agent be registered at.
+ *
+ * A comma-separated list of hosts, each optionally with a port: `agents.internal`,
+ * `10.0.0.42:9000`. Matching is exact, so a name with a port pins that port and a name without one
+ * covers any port on that host. No suffixes and no wildcards, because a pattern that widens by
+ * accident is the usual way a host check fails, and naming three addresses is not onerous.
+ *
+ * A scheme or a path is a mistake worth catching here rather than at the first registration that
+ * silently never matches, so both are refused with the offending entry named.
+ */
+function agentEndpointAllowedHosts(
+  environment: NodeJS.ProcessEnv,
+): ReadonlySet<string> {
+  const named = commaSeparated(environment, "AGENT_ENDPOINT_ALLOWED_HOSTS");
+  const hosts = new Set<string>();
+  for (const entry of named) {
+    const host = entry.trim().toLowerCase();
+    if (!host) continue;
+    if (host.includes("/") || host.includes("://")) {
+      throw new Error(
+        `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must be a host, optionally with a port, and not a URL.`,
+      );
+    }
+    if (host.includes("*")) {
+      throw new Error(
+        `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must name one host. Patterns are not accepted: list each address instead.`,
+      );
+    }
+    hosts.add(host.replace(/^\[/, "").replace(/\]$/, ""));
+  }
+  return hosts;
+}
+
 function privateHostsAllowed(environment: Environment): boolean {
   if (optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") !== "true") {
     return false;
@@ -645,6 +693,7 @@ export function loadConfig(
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),
+    agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     publicUrl: (
       optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
