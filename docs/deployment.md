@@ -79,14 +79,14 @@ against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when 
 reachable from this container. Unset it if your `.env` still has the laptop default
 `http://localhost:4201/ag-ui`.
 
-**Authentication is required.** With no identity provider configured the deployment refuses to start,
+**Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
 Configure Google, Microsoft or Okta, or set `OPENBOT_SINGLE_USER=true` to say you meant an open
 deployment. `NODE_ENV` does not affect this.
 
 **Put TLS in front of it.** Not only for the cookies. A page served from `http://<address>` is not a
 secure context, which removes a set of browser APIs that are present on `http://localhost` and so
-never missing on a laptop. The app no longer depends on any of them, but sign-in cookies still want
+never missing on a laptop. The app does not depend on any of them, but sign-in cookies still want
 `Secure`, and every platform below terminates TLS for you.
 
 ## Migrations
@@ -123,7 +123,7 @@ in ECR, and is what AWS points App Runner users at now that App Runner takes no 
 Plain ECS on Fargate behind an ALB is the answer if you want task definitions and fine-grained IAM.
 No shared-memory configuration is needed or possible.
 
-**Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240 second request
+**Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets
 are capped at 350 per instance on the basic tier.
 
