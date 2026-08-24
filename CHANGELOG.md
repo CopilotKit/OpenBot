@@ -32,6 +32,28 @@ It is narrow on purpose:
 
 Unset means none, which is what every deployment has today.
 
+### A custom MCP server can only be pointed at its own token
+
+Adding an MCP server by URL takes a credential id alongside the address, and the add is what spends
+it: the tool refresh that runs before the call returns decrypts whatever that id names and sends it
+to the address in the same request. Nothing checked which credential it was, so an administrator
+could name any row in the vault, including one person's connector token, and have that person's
+token delivered in clear text to an address of the administrator's choosing, before any Bot or grant
+was involved. The credentials screen lists every row's id and, for a connector token, the person it
+belongs to, so choosing one was a single read.
+
+A custom server now has to be pointed at a credential of its own kind, the deployment's token for
+that server. A person's connector token and the deployment's OAuth client are both refused, for the
+same reason `POST /api/admin/credentials` already refuses to create either by hand: spending one
+here uses a credential on behalf of somebody who never agreed to it. A credential that does not
+exist is refused in the same words as one of the wrong kind, so the endpoint cannot be used to ask
+which ids are real.
+
+The field is unchanged for the case it exists for, and nothing changes for a server added through
+the admin screen, which mints a token and points at the one it just made. If a deployment has a
+custom server pointing at a credential of another kind, adding it again will now be refused, and the
+answer is to give the server its own token.
+
 ### Upgrading
 
 **A deployment that sets `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true` with `NODE_ENV=production` no
