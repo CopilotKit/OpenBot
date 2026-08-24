@@ -111,18 +111,62 @@ holder() {
   lsof -nP -iTCP:"$1" -sTCP:LISTEN -Fcn 2>/dev/null | awk '/^c/{c=substr($0,2)} /^n/{print c" ("substr($0,2)")"; exit}' || true
 }
 
+# Does whatever holds this port answer as OpenBot, rather than merely answer?
+#
+# `curl -f` proves something is listening and returned 2xx. That is not the same claim, and the gap
+# between them is not academic: any single-page app serves its own index.html for every path it does
+# not recognise, so an unrelated dashboard sitting on a default port answers 200 to
+# `/api/capabilities` as readily as this server does.
+#
+# When that happened here the cost was not a wrong answer, it was a wrong answer three stages later.
+# `require_free_or_ours` reported "already up", the server was therefore never started, `wait_for`
+# printed a green "server ready", and the run died at stage 3 in `json.loads` on a mouthful of HTML —
+# a JSON parse error standing in for "that port belongs to something else".
+#
+# So each surface is asked for something only it can produce.
+identifies_as_openbot() {
+  local port="$1" name="$2"
+  case "$name" in
+    # A field of this server's own payload. A stray 200 does not carry it.
+    server)
+      curl -fsS --max-time 3 "http://localhost:$port/api/copilotkit/info" 2>/dev/null \
+        | grep -q '"licenseStatus"'
+      ;;
+    # The app is static HTML with nothing to interrogate, so its title is the identity available.
+    app)
+      curl -fsS --max-time 3 "http://localhost:$port/" 2>/dev/null \
+        | grep -qi '<title>[^<]*OpenBot'
+      ;;
+    # Compose services on dedicated loopback ports, answering a route named for this stack.
+    *)
+      curl -fsS --max-time 3 "http://localhost:$port/health" >/dev/null 2>&1
+      ;;
+  esac
+}
+
 require_free_or_ours() {
   local port="$1" name="$2" who
   who="$(holder "$port")"
   [ -z "$who" ] && return 0
-  if curl -fsS --max-time 3 "http://localhost:$port/health" >/dev/null 2>&1 \
-     || curl -fsS --max-time 3 "http://localhost:$port/api/capabilities" >/dev/null 2>&1 \
-     || curl -fsS --max-time 3 "http://localhost:$port/" >/dev/null 2>&1; then
+  if identifies_as_openbot "$port" "$name"; then
     info "  $name: already up on $port ($who)"
     return 0
   fi
-  red "  $name: port $port is held by something else: $who"
+  red "  $name: port $port is held by something that is not OpenBot: $who"
   red "  Re-run with ${name^^}_PORT=<free port>, or stop that process yourself."
+  exit 1
+}
+
+# As wait_for, but satisfied only by OpenBot answering, not by anything answering.
+wait_for_openbot() {
+  local port="$1" name="$2" tries="${3:-40}"
+  for _ in $(seq 1 "$tries"); do
+    identifies_as_openbot "$port" "$name" && { green "  $name ready"; return 0; }
+    sleep 1
+  done
+  red "  $name never answered as OpenBot on port $port"
+  red "  Either it failed to start, or that port belongs to another process."
+  red "  Log: $LOGS/${name}.log"
   exit 1
 }
 
@@ -214,7 +258,7 @@ if [ "$SECRETS_ROTATED" = "true" ]; then
   pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
   sleep 1
 fi
-if ! curl -fsS --max-time 3 "http://localhost:$SERVER_PORT/api/capabilities" >/dev/null 2>&1; then
+if ! identifies_as_openbot "$SERVER_PORT" server; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
     (cd server && PORT="$SERVER_PORT" \
       COMPUTER_SUPERVISOR_URL="http://localhost:$SUPERVISOR_PORT" \
@@ -225,7 +269,7 @@ if ! curl -fsS --max-time 3 "http://localhost:$SERVER_PORT/api/capabilities" >/d
     (cd server && PORT="$SERVER_PORT" bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
   fi
 fi
-wait_for "http://localhost:$SERVER_PORT/api/capabilities" "server"
+wait_for_openbot "$SERVER_PORT" server
 
 info "3/4  Runtime health"
 INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
@@ -246,10 +290,10 @@ PY
 
 info "4/4  App"
 require_free_or_ours "$APP_PORT" app
-if ! curl -fsS --max-time 3 "http://localhost:$APP_PORT/" >/dev/null 2>&1; then
+if ! identifies_as_openbot "$APP_PORT" app; then
   (cd app && bun run dev --port "$APP_PORT" --strictPort >"$LOGS/app.log" 2>&1 &)
 fi
-wait_for "http://localhost:$APP_PORT/" "app"
+wait_for_openbot "$APP_PORT" app
 
 cat <<EOF
 
