@@ -167,7 +167,17 @@ From `/agents`, create a coworker with:
 - optional AG-UI endpoint;
 - optional write-only authorization header.
 
-The server validates agent endpoints with the same target checks used for browser navigation. If no custom endpoint is set, product-created coworkers use `MANAGED_AGENT_AG_UI_URL` when it is configured, and are refused when it is not.
+The server validates agent endpoints with the same target checks used for browser navigation, at registration and again on every redirect the endpoint answers with. If no custom endpoint is set, product-created coworkers use `MANAGED_AGENT_AG_UI_URL` when it is configured, and are refused when it is not.
+
+A private address is refused unless it is listed in `AGENT_ENDPOINT_ALLOWED_HOSTS`:
+
+```sh
+AGENT_ENDPOINT_ALLOWED_HOSTS=agents.internal,10.0.0.42:9000
+```
+
+A host on its own covers any port on that host; a host with a port pins that port. Matching is exact: no wildcards, no suffixes. An entry written as a URL, or containing `*`, stops startup and names that entry.
+
+The list covers agent endpoints only. Browsing is unaffected, the addresses holding a deployment's own cloud credentials are refused whatever is listed, and listing an address permits registering an agent there rather than granting that agent anything.
 
 Tenant package agents are declared in `agents.yaml` as either:
 
@@ -203,6 +213,7 @@ Settings worth knowing:
 | `EMBEDDED_POSTGRES`                  | Set to `on` for a database inside the deployment container.               |
 | `AGENT_COMPUTER_POLICY`              | JSON action policy. Malformed JSON stops server startup.                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Lets a Bot reach this machine's own services. Local only, and refused under `NODE_ENV=production`. |
+| `AGENT_ENDPOINT_ALLOWED_HOSTS`       | Private addresses an agent may be registered at, comma separated. A host, optionally with a port. |
 | `TENANT_PACKAGE_DIR`                 | Directory containing tenant YAML. Defaults to `../examples/fintech`.      |
 | `DEPLOYMENT_ID`                      | Names this deployment when two share one Intelligence project.            |
 
@@ -292,6 +303,7 @@ provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
 - `agent-computer` drives a browser holding real logins. `docker-compose.yml` binds it to loopback; leave it there.
 - Store credentials through `/admin/credentials`, which encrypts them. Do not put credential values in tenant YAML or in committed files.
 - `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` lets a Bot reach services on this machine. It ships commented out in `.env.example`, is for a laptop only, and a deployment running with `NODE_ENV=production` refuses to start while it is set.
+- To reach an agent on your own network from a deployment, list its address in `AGENT_ENDPOINT_ALLOWED_HOSTS` instead. That permits the one address, where the switch above permits the network.
 
 ## Development
 
