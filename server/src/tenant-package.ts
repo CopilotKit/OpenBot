@@ -1,9 +1,9 @@
-import { DEPLOYMENT_ROUTES } from "./computer/deployment-routes";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { parse } from "yaml";
+import { DEPLOYMENT_ROUTES } from "./computer/deployment-routes";
 import type { Database } from "./db/client";
 import {
   agentProfiles,
@@ -11,8 +11,9 @@ import {
   channelAgents,
   channels as channelTable,
   deploymentPackages,
-  skillTools,
+  pluginGrants,
   skills as skillTable,
+  skillTools,
 } from "./db/schema";
 
 const approvedThemeVariables = new Set([
@@ -125,6 +126,14 @@ export type TenantSkill = {
   tools: string[];
 };
 
+/**
+ * The mark a grant this package made carries, in `plugin_grants.granted_by`.
+ *
+ * Every other value there is the id of the person who pressed the button, so this cannot collide
+ * with one, and it is what lets a redeploy take back only what the package gave.
+ */
+const PACKAGE_GRANT = "tenant-package";
+
 type TenantAgent = {
   id: string;
   name: string;
@@ -133,6 +142,19 @@ type TenantAgent = {
   avatarSeed?: string;
   type: "built_in" | "remote_ag_ui";
   configuration: Record<string, unknown>;
+  /**
+   * The package skills this coworker is given, by slug.
+   *
+   * SAFE TO SEED, unlike an MCP grant, and for a reason worth stating rather than assuming. A skill
+   * is an instruction and confers nothing: what a Bot may call is its grants, and the run-time offer
+   * is always the intersection of the two, so a skill naming a tool its Bot does not hold loads
+   * nothing. Seeding an MCP grant would be the opposite, since those reach a person's own account.
+   *
+   * Without this a fork boots with the skills its package ships attached to no Bot at all, and the
+   * per-run narrowing that skills exist for is switched off until somebody opens the Skills page and
+   * pairs them by hand. The pairing is the package's to state: it wrote both files.
+   */
+  skills: string[];
 };
 
 type TenantChannel = {
@@ -361,11 +383,35 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
               : {
                   endpoint: requiredString(agent.endpoint, "agent.endpoint"),
                 },
+          skills:
+            agent.skills === undefined || agent.skills === null
+              ? []
+              : stringArray(agent.skills, "agent.skills"),
         },
       ];
     },
   );
   const agentIds = new Set(agents.map((agent) => agent.id));
+  const packageSkills = parseTenantSkills(skillsYaml.skills);
+  const skillSlugs = new Set(packageSkills.map((skill) => skill.slug));
+  for (const agent of agents) {
+    for (const slug of agent.skills) {
+      /*
+       * Checked against this package's own skills and nothing else, and refused rather than dropped.
+       *
+       * The two files ship together, so a slug matching none of them is a typo, and a typo that
+       * silently attaches no skill is the kind nobody finds: the Bot simply never narrows and the
+       * deployment looks like it is working. Deliberately not checked against skills already in the
+       * deployment, because those include any a person wrote, and a package must not be able to
+       * hand its Bots somebody else's instructions by naming their slug.
+       */
+      if (!skillSlugs.has(slug)) {
+        throw new Error(
+          `agent "${agent.id}" names skill "${slug}", which this package does not ship`,
+        );
+      }
+    }
+  }
   const channels = asList(channelsYaml.channels, "channels.yaml channels").map(
     (value) => {
       const channel = asRecord(value, "channel");
@@ -427,7 +473,7 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       defaultModel: requiredString(model.default_model, "model.default_model"),
     },
     knowledgeSources: sources,
-    skills: parseTenantSkills(skillsYaml.skills),
+    skills: packageSkills,
     themeCss: files.themeCss,
   };
 }
@@ -688,6 +734,29 @@ export async function synchronizeTenantPackage(
      * of shipping it. An unknown ref sits inert until its connector exists, because the run-time
      * intersection only ever offers what the Bot was granted.
      */
+    /*
+     * Which coworkers asked for each skill, so the loop below can pair them as it seeds.
+     *
+     * Written wholesale under one marker: every grant this package made last time is removed first,
+     * so a package that stops giving a Bot a skill takes it back. Only its own, though. A grant an
+     * administrator made through the Skills page carries their id and survives, because retracting
+     * somebody's deliberate decision is not something a redeploy should do quietly.
+     */
+    const wantedBy = new Map<string, string[]>();
+    for (const agent of tenantPackage.agents) {
+      for (const slug of agent.skills) {
+        wantedBy.set(slug, [...(wantedBy.get(slug) ?? []), agent.id]);
+      }
+    }
+    await transaction
+      .delete(pluginGrants)
+      .where(
+        and(
+          eq(pluginGrants.kind, "skill"),
+          eq(pluginGrants.grantedBy, PACKAGE_GRANT),
+        ),
+      );
+
     for (const skill of tenantPackage.skills) {
       const [seeded] = await transaction
         .insert(skillTable)
@@ -747,6 +816,34 @@ export async function synchronizeTenantPackage(
             declaredBy: null,
           })),
         );
+      }
+
+      /*
+       * Paired only with the skill this package actually owns.
+       *
+       * Inside this branch on purpose: the seed above skips a slug a person had already taken, and
+       * granting there would hand the package's Bots an instruction somebody else wrote under a name
+       * the package expected to be its own. Skipped, it keeps the existing warning and grants
+       * nothing, which is the safe half of the same decision.
+       */
+      const agentIds = wantedBy.get(skill.slug) ?? [];
+      if (agentIds.length > 0) {
+        await transaction
+          .insert(pluginGrants)
+          .values(
+            agentIds.map((agentId) => ({
+              kind: "skill",
+              ref: seeded.id,
+              agentId,
+              grantedBy: PACKAGE_GRANT,
+            })),
+          )
+          .onConflictDoUpdate({
+            target: [pluginGrants.kind, pluginGrants.ref, pluginGrants.agentId],
+            // An administrator who granted this by hand keeps the credit; the package only ever
+            // adds what was missing, and the delete above already took back what it owned.
+            set: { updatedAt: new Date() },
+          });
       }
     }
 

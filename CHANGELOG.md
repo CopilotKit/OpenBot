@@ -8,6 +8,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Knowledge searches instead of guessing
+
+A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the
+four document skills it ships.
+
+Knowledge is one of three coworkers in the box, described as answering company questions and citing
+sources. The skills that would let it do that were seeded attached to nobody, so every clone started
+with them paired to no Bot: the per-run narrowing that skills exist for was switched off until
+somebody opened the Skills page and made the pairing by hand, in each deployment, again after each
+new connector. The pairing belongs with the package, which wrote both files and knows which coworker
+it meant them for.
+
+THIS GRANTS NOTHING, which is what makes it safe to seed. A skill is an instruction; what a Bot may
+call is its grants, and the offer each run is the intersection of the two. A skill naming a tool its
+Bot does not hold loads nothing. Seeding an MCP grant would be the opposite, because those reach a
+person's own account, so those stay an administrator's decision and are untouched here.
+
+A redeploy takes back only what the package gave. Grants it made carry `tenant-package`, and a grant
+an administrator made through the Skills page keeps their name and survives, because a deploy quietly
+undoing a deliberate decision is the kind of change nobody traces back to the deploy that caused it.
+A coworker naming a skill its package does not ship is refused at load rather than dropped, the same
+as a channel naming an agent that is not there: a typo that silently attaches nothing looks exactly
+like working.
+
+
 ### A Bot's computer is no longer on the same network as the database
 
 Compose declared no networks, so every service shared one and reached the others by service name.
