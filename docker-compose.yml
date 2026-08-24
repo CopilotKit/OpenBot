@@ -18,7 +18,13 @@ services:
       POSTGRES_USER: openbot
       POSTGRES_PASSWORD: openbot
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback, like every other port in this file, and for the reason the network split above
+      # exists. Published on every interface, this is reachable from the Bot's computer at the
+      # container's default gateway, which is the host: taking `postgres` off that network removes
+      # the name and leaves the address. Proven from inside `agent-computer`, where the gateway on
+      # :5432 answered and began authenticating as `openbot` on `openbot`, with the password in
+      # this file. The server on the host still reaches it, because that is what loopback is.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

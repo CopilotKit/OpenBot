@@ -24,6 +24,13 @@ server on the host, which reaches the database through the published port and ne
 network for it. **A deployment that runs the server inside Compose has to join that service to both
 networks**, which is the one place the two are meant to meet.
 
+The published port is now on loopback, as every other port in that file already was. Taking the
+database off the Bots' network removes the name, not the address: a container's default gateway is
+the host, and a port published on every interface answers there. From inside the computer container,
+the gateway on `5432` accepted a connection and began authenticating as `openbot` on `openbot`, with
+the password in the same file. **A deployment that reached the database from another machine over
+this port has to reach it another way**, which is what publishing it on every interface was doing.
+
 This does not reach back in time. A deployment that has been running with the two on one network
 should assume a Bot could have read or written the database, and look at the trail with that in
 mind.
