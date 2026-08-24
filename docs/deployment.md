@@ -86,7 +86,7 @@ deployment. `NODE_ENV` does not affect this.
 
 **Put TLS in front of it.** Not only for the cookies. A page served from `http://<address>` is not a
 secure context, which removes a set of browser APIs that are present on `http://localhost` and so
-never missing on a laptop. The app no longer depends on any of them, but sign-in cookies still want
+never missing on a laptop. The app does not depend on any of them, but sign-in cookies still want
 `Secure`, and every platform below terminates TLS for you.
 
 ## Migrations
@@ -94,7 +94,7 @@ never missing on a laptop. The app no longer depends on any of them, but sign-in
 With `EMBEDDED_POSTGRES=on` they run at start and there is nothing to do. There is exactly one
 process and no deploy pipeline, so the alternative would be a runbook.
 
-With an external database they are a release step, not a start step. Two replicas starting together
+With an external database, they are a release step, not a start step. Two replicas starting together
 would race, and a failed migration should stop a deploy rather than leave a half-migrated database
 serving traffic.
 
@@ -123,7 +123,7 @@ in ECR, and is what AWS points App Runner users at now that App Runner takes no 
 Plain ECS on Fargate behind an ALB is the answer if you want task definitions and fine-grained IAM.
 No shared-memory configuration is needed or possible.
 
-**Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240 second request
+**Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets
 are capped at 350 per instance on the basic tier.
 
