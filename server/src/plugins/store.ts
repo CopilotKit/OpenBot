@@ -667,6 +667,51 @@ export function createPluginStore(options: PluginStoreOptions) {
         );
       }
 
+      /*
+       * The pointer is checked here because the add is what dereferences it.
+       *
+       * `refreshTools` runs before this method returns, and for a custom server there is no
+       * catalogue entry, so `connectionTokenFor` decrypts whatever `credential_id` names and
+       * `listTools` sends it to the URL from this same request. An unchecked pointer therefore is
+       * not "a wrong token later", it is this call delivering that secret to an address the caller
+       * chose, before any grant, policy check or Bot exists.
+       *
+       * `mcp` is the only kind that answers "this server's own token". A `mcp_user_token` is one
+       * person's grant and a `mcp_oauth_client` identifies the deployment to a vendor; neither is
+       * this deployment's bearer token for this server, and spending either here would be using a
+       * credential on behalf of somebody who never agreed to it. `POST /api/admin/credentials`
+       * already refuses to mint those two by hand for that reason, and its comment says so; this is
+       * the same objection at the point they are referenced rather than created.
+       *
+       * One message for both "wrong kind" and "no such credential", deliberately. A caller who can
+       * tell those apart can ask this endpoint which credential ids are real.
+       */
+      const credentialId = input.credentialId?.trim() || undefined;
+      if (credentialId) {
+        /*
+         * The shape is checked before the lookup because `credentials.id` is a `uuid` column, so a
+         * value that is not one makes the query itself fail rather than return no rows, and the
+         * caller gets a database error where a refusal belongs. The same was true of the foreign key
+         * before this guard existed.
+         */
+        const looksLikeId =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            credentialId,
+          );
+        const [named] = looksLikeId
+          ? await database
+              .select({ kind: credentialRows.kind })
+              .from(credentialRows)
+              .where(eq(credentialRows.id, credentialId))
+          : [];
+
+        if (named?.kind !== "mcp") {
+          throw new CustomServerRefusedError(
+            "That is not a credential this server can use. Add the server's own token instead.",
+          );
+        }
+      }
+
       await database
         .insert(mcpServers)
         .values({
@@ -675,7 +720,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           vendor: new URL(input.url).hostname,
           url: input.url,
           provenance: "custom",
-          credentialId: input.credentialId ?? null,
+          credentialId: credentialId ?? null,
           addedBy: input.by,
         })
         .onConflictDoUpdate({
@@ -683,7 +728,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           set: {
             title: input.title,
             url: input.url,
-            credentialId: input.credentialId ?? null,
+            credentialId: credentialId ?? null,
             addedBy: input.by,
             updatedAt: new Date(),
           },

@@ -1,18 +1,24 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
+import { encryptSecret } from "../src/credentials";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
 import { TEST_POOL } from "./support/database";
 import {
   agents,
   auditEvents,
+  credentials,
   mcpServers,
   mcpTools,
   pluginGrants,
 } from "../src/db/schema";
-import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+import {
+  createPluginStore,
+  CustomServerRefusedError,
+  PluginRefusedError,
+} from "../src/plugins/store";
 
 /**
  * The two questions a tool call has to pass, and the row each answer leaves behind.
@@ -517,5 +523,210 @@ describe("a grant on a tool the vendor no longer lists", () => {
       (server) => server.id === serverId,
     );
     expect(drive?.withdrawn.map((row) => row.ref)).not.toContain(ref);
+  });
+});
+
+/**
+ * Which credential a custom server is allowed to be pointed at.
+ *
+ * `addCustomServer` takes the pointer from the request body, and the add itself dereferences it: the
+ * refresh that follows decrypts whatever it names and sends it to the URL from the same request. So
+ * the pointer is the whole control. An administrator naming somebody's `mcp_user_token` was enough
+ * to have that person's decrypted token delivered to an address the administrator chose, before any
+ * grant, policy check or Bot existed.
+ *
+ * `POST /api/admin/credentials` already refuses to *mint* a `mcp_user_token` by hand, and says why:
+ * it would be "creating a credential attributed to a person who never agreed to it". Pointing at one
+ * spends that credential on the same person's behalf, which is the same objection.
+ */
+describe("a custom server may only be pointed at its own kind of credential", () => {
+  const suffix = randomUUID().slice(0, 8);
+  const deploymentCredentialId = randomUUID();
+  const personalCredentialId = randomUUID();
+  const oauthClientCredentialId = randomUUID();
+  const customServerId = `custom-cred-${suffix}`;
+  const madeServerIds: string[] = [];
+
+  beforeAll(async () => {
+    const encrypted = await encryptSecret(
+      `${"A".repeat(43)}=`,
+      "not-read-here",
+    );
+    await database.insert(credentials).values([
+      {
+        id: deploymentCredentialId,
+        kind: "mcp",
+        provider: customServerId,
+        keyId: customServerId,
+        encryptedValue: encrypted,
+        metadata: {},
+      },
+      {
+        id: personalCredentialId,
+        kind: "mcp_user_token",
+        provider: "google-drive",
+        // For a user token the key is the person, which is what makes one pickable by name from the
+        // administrator's own credential list.
+        keyId: `user_someone_else_${suffix}`,
+        encryptedValue: encrypted,
+        metadata: {},
+      },
+      {
+        id: oauthClientCredentialId,
+        kind: "mcp_oauth_client",
+        provider: "google-drive",
+        keyId: "google-drive",
+        encryptedValue: encrypted,
+        metadata: {},
+      },
+    ]);
+  });
+
+  afterAll(async () => {
+    // By prefix, not by the ids this suite meant to make: before the fix the refused adds succeed,
+    // and a row left behind holds a foreign key onto the credentials deleted just below.
+    await database
+      .delete(mcpServers)
+      .where(like(mcpServers.id, `${customServerId}%`));
+    await database
+      .delete(credentials)
+      .where(
+        inArray(credentials.id, [
+          deploymentCredentialId,
+          personalCredentialId,
+          oauthClientCredentialId,
+        ]),
+      );
+  });
+
+  test("somebody else's connector token is refused, and no server is written", async () => {
+    const id = `${customServerId}-personal`;
+    await expect(
+      store.addCustomServer({
+        id,
+        title: "Collector",
+        url: "https://collector.example/mcp",
+        credentialId: personalCredentialId,
+        by: "admin@example.com",
+      }),
+    ).rejects.toBeInstanceOf(CustomServerRefusedError);
+
+    // The refusal has to stop the write, not merely report on it: a row here is a pointer the next
+    // refresh would dereference.
+    const rows = await database
+      .select({ id: mcpServers.id })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, id));
+    expect(rows).toHaveLength(0);
+  });
+
+  test("the deployment's OAuth client is refused too", async () => {
+    // Not a per-person secret, but not this server's token either, and handing a vendor its own
+    // client secret as a bearer token is the mistake `refreshTools` was already changed to avoid.
+    const id = `${customServerId}-client`;
+    await expect(
+      store.addCustomServer({
+        id,
+        title: "Collector",
+        url: "https://collector.example/mcp",
+        credentialId: oauthClientCredentialId,
+        by: "admin@example.com",
+      }),
+    ).rejects.toBeInstanceOf(CustomServerRefusedError);
+  });
+
+  test("a credential that does not exist is refused the same way", async () => {
+    // Same message as the wrong-kind refusal on purpose. A caller who can tell "wrong kind" from
+    // "no such row" can ask this endpoint which ids are real, which is a vault oracle.
+    const id = `${customServerId}-missing`;
+    const missing = store.addCustomServer({
+      id,
+      title: "Collector",
+      url: "https://collector.example/mcp",
+      credentialId: randomUUID(),
+      by: "admin@example.com",
+    });
+    await expect(missing).rejects.toBeInstanceOf(CustomServerRefusedError);
+
+    const wrongKind = store
+      .addCustomServer({
+        id: `${customServerId}-kind-message`,
+        title: "Collector",
+        url: "https://collector.example/mcp",
+        credentialId: personalCredentialId,
+        by: "admin@example.com",
+      })
+      .catch((error: Error) => error.message);
+    const missingMessage = await missing.catch((error: Error) => error.message);
+    expect(await wrongKind).toBe(missingMessage);
+  });
+
+  test("the server's own token still works", async () => {
+    // The case that must keep passing, so the refusal above is a rule and not a wall. The URL is
+    // unreachable and that is fine: a failed refresh is recorded on the row rather than thrown.
+    madeServerIds.push(customServerId);
+    const added = await store.addCustomServer({
+      id: customServerId,
+      title: "Collector",
+      url: "https://collector.example/mcp",
+      credentialId: deploymentCredentialId,
+      by: "admin@example.com",
+    });
+    expect(added.id).toBe(customServerId);
+
+    const [row] = await database
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, customServerId));
+    expect(row?.credentialId).toBe(deploymentCredentialId);
+  });
+
+  test("a credential id that is not an id is refused, not a database error", async () => {
+    // `credentials.id` is a uuid column, so an unshaped value makes the lookup itself fail. The
+    // route passes the body field through untouched, so this is reachable with one curl.
+    for (const notAnId of ["not-a-uuid", "' OR 1=1 --"]) {
+      await expect(
+        store.addCustomServer({
+          id: `${customServerId}-shape`,
+          title: "Collector",
+          url: "https://collector.example/mcp",
+          credentialId: notAnId,
+          by: "admin@example.com",
+        }),
+      ).rejects.toBeInstanceOf(CustomServerRefusedError);
+    }
+  });
+
+  test("an empty credential id reads as no credential", async () => {
+    // Not the same as a wrong one. An empty string used to reach the insert and break the foreign
+    // key; the honest reading is that the administrator named nothing.
+    const id = `${customServerId}-empty`;
+    madeServerIds.push(id);
+    const added = await store.addCustomServer({
+      id,
+      title: "Collector",
+      url: "https://collector.example/mcp",
+      credentialId: "",
+      by: "admin@example.com",
+    });
+    expect(added.id).toBe(id);
+
+    const [row] = await database
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, id));
+    expect(row?.credentialId).toBeNull();
+  });
+
+  test("a custom server with no credential at all still works", async () => {
+    const id = `${customServerId}-none`;
+    madeServerIds.push(id);
+    const added = await store.addCustomServer({
+      id,
+      title: "Collector",
+      url: "https://collector.example/mcp",
+      by: "admin@example.com",
+    });
+    expect(added.id).toBe(id);
   });
 });
