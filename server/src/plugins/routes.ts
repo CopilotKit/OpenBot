@@ -202,7 +202,12 @@ export function createPluginRoutes(
       });
       return context.json({ server });
     } catch (error) {
-      if (error instanceof CatalogueEntryUnknownError) {
+      // A refused credential is the administrator's mistake to correct, so it comes back as a
+      // refusal with its reason rather than as a 500 the way an unmapped throw would.
+      if (
+        error instanceof CatalogueEntryUnknownError ||
+        error instanceof CustomServerRefusedError
+      ) {
         return context.json({ error: error.message }, 400);
       }
       throw error;

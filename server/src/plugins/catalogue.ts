@@ -263,6 +263,21 @@ const PATTERNS = new Map(
   ]),
 );
 
+/**
+ * Which kind of credential this entry's server record may be pointed at, or null when it takes none
+ * from the caller.
+ *
+ * Beside the entry rather than at the call site, because it is a property of the vendor's auth and
+ * not of the request. `deployment-bearer` is the only kind that means "one token this deployment
+ * holds for this server", which is what `mcp` names in the vault. A `user-oauth` server is answered
+ * with the asker's own grant and its OAuth client is registered through its own call, which mints
+ * the credential itself, so an id offered when the server is added is never the right one whatever
+ * kind it names. A server needing no credential takes none.
+ */
+export function serverCredentialKind(entry: CatalogueEntry): "mcp" | null {
+  return entry.auth.kind === "deployment-bearer" ? "mcp" : null;
+}
+
 export function catalogueEntry(key: string): CatalogueEntry | null {
   return BY_KEY.get(key) ?? null;
 }

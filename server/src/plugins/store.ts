@@ -32,6 +32,7 @@ import {
   classifyTool,
   customUrlRefusal,
   resolveServerUrl,
+  serverCredentialKind,
 } from "./catalogue";
 import { McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
@@ -1373,6 +1374,58 @@ export function createPluginStore(options: PluginStoreOptions) {
     }
   }
 
+  /**
+   * The credential a server is being pointed at is of the kind that server can spend.
+   *
+   * Both add paths dereference the pointer before they return, so this is checked where the pointer
+   * is accepted rather than where it is used. `mcp` is the only kind that answers "this server's own
+   * token". A `mcp_user_token` is one person's grant and a `mcp_oauth_client` identifies the
+   * deployment to a vendor; spending either here uses a credential on behalf of somebody who never
+   * agreed to it, which is the same objection `POST /api/admin/credentials` already makes when it
+   * refuses to mint those two by hand.
+   *
+   * The shape is checked before the lookup because `credentials.id` is a `uuid` column, so a value
+   * that is not one makes the query itself fail rather than return no rows, and the caller gets a
+   * database error where a refusal belongs.
+   *
+   * One message for both "wrong kind" and "no such credential", deliberately. A caller who can tell
+   * those apart can ask this endpoint which credential ids are real.
+   */
+  async function requireCredentialOfKind(
+    serverTitle: string,
+    credentialId: string,
+    kind: "mcp" | null,
+  ): Promise<void> {
+    /*
+     * A server that takes no credential when it is added is refused here rather than at the caller,
+     * so that offering an id is one question with one answer wherever it is asked. The wording says
+     * what is true of both kinds that reach it: a `user-oauth` server's client arrives through the
+     * call that mints it, and a server needing no credential has nothing to be given.
+     */
+    if (!kind) {
+      throw new CustomServerRefusedError(
+        `${serverTitle} takes no credential when it is added.`,
+      );
+    }
+
+    const looksLikeId =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        credentialId,
+      );
+    const [named] = looksLikeId
+      ? await database
+          .select({ kind: credentialRows.kind })
+          .from(credentialRows)
+          .where(eq(credentialRows.id, credentialId))
+      : [];
+
+    if (named?.kind !== kind) {
+      throw new CustomServerRefusedError(
+        "That is not a credential this server can use. Add the server's own token instead.",
+      );
+    }
+  }
+
   async function requireServer(serverId: string) {
     const [row] = await database
       .select()
@@ -1411,6 +1464,26 @@ export function createPluginStore(options: PluginStoreOptions) {
       const resolved = resolveServerUrl(input.key, input.instanceHost);
       if (!resolved) throw new CatalogueEntryUnknownError(input.key);
 
+      /*
+       * The pointer is checked here for the same reason it is on the path below: the refresh that
+       * runs before this returns dereferences whatever it names.
+       *
+       * What that reaches is narrower on this path, because the URL is the catalogue's rather than
+       * the caller's, so a credential cannot be delivered to an address somebody chose. That is a
+       * property of today's catalogue rather than of this function: the one entry it holds is
+       * `user-oauth`, and the catalogue's own comment invites a fork to re-add the vendors that were
+       * taken out. The first `deployment-bearer` entry restores the full shape, so the check belongs
+       * here now rather than in the review that re-adds one.
+       */
+      const credentialId = input.credentialId?.trim() || undefined;
+      if (credentialId) {
+        await requireCredentialOfKind(
+          resolved.entry.title,
+          credentialId,
+          serverCredentialKind(resolved.entry),
+        );
+      }
+
       await database
         .insert(mcpServers)
         .values({
@@ -1418,14 +1491,24 @@ export function createPluginStore(options: PluginStoreOptions) {
           title: resolved.entry.title,
           vendor: resolved.entry.vendor,
           url: resolved.url,
-          credentialId: input.credentialId ?? null,
+          credentialId: credentialId ?? null,
           addedBy: input.by,
         })
         .onConflictDoUpdate({
           target: mcpServers.id,
           set: {
             url: resolved.url,
-            credentialId: input.credentialId ?? null,
+            /*
+             * Left alone when the caller sends none, rather than cleared.
+             *
+             * `registerOAuthClient` keeps the client it minted in this column, and adding the server
+             * again to change an instance host is not a statement about that client. Clearing it
+             * orphaned the credential row, which nothing then revokes, and told everybody who had
+             * connected that the deployment has no OAuth client registered. There is no longer a way
+             * to hand it back through this call either, since a `user-oauth` entry now refuses a
+             * credential id, so the pointer has to survive here.
+             */
+            ...(credentialId ? { credentialId } : {}),
             addedBy: input.by,
             updatedAt: new Date(),
           },
@@ -1506,28 +1589,9 @@ export function createPluginStore(options: PluginStoreOptions) {
        */
       const credentialId = input.credentialId?.trim() || undefined;
       if (credentialId) {
-        /*
-         * The shape is checked before the lookup because `credentials.id` is a `uuid` column, so a
-         * value that is not one makes the query itself fail rather than return no rows, and the
-         * caller gets a database error where a refusal belongs. The same was true of the foreign key
-         * before this guard existed.
-         */
-        const looksLikeId =
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            credentialId,
-          );
-        const [named] = looksLikeId
-          ? await database
-              .select({ kind: credentialRows.kind })
-              .from(credentialRows)
-              .where(eq(credentialRows.id, credentialId))
-          : [];
-
-        if (named?.kind !== "mcp") {
-          throw new CustomServerRefusedError(
-            "That is not a credential this server can use. Add the server's own token instead.",
-          );
-        }
+        // Always `mcp`: a server added by URL is reached with the one token the deployment holds for
+        // it, whatever the vendor is, because nothing here knows the vendor.
+        await requireCredentialOfKind(input.title, credentialId, "mcp");
       }
 
       await database

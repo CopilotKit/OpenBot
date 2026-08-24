@@ -214,6 +214,34 @@ this port has to reach it another way**, which is what publishing it on every in
 This does not reach back in time. A deployment that has been running with the two on one network
 should assume a Bot could have read or written the database, and look at the trail with that in
 mind.
+### A curated MCP server is pointed at its own kind of credential too
+
+Adding a server by URL was made to check which credential it is being pointed at. Adding one from the
+catalogue, the other half of the same screen, took the same field from the same request and stored it
+unread, so a credential of any kind could be attached to a curated server and spent by the refresh
+that runs before the add returns.
+
+Worth being plain about the reach, because it is narrower than the path beside it. The column is a
+foreign key, so an id naming nothing was already refused by the database, and the one entry in the
+catalogue is reached with each person's own Google account, whose OAuth client is registered through
+its own call and sent to an address pinned in code. Nothing could be delivered to an address a caller
+chose. What was reachable was a credential of the wrong kind being accepted and spent on behalf of
+somebody who never agreed to it, and a malformed id arriving as a database error rather than as a
+refusal.
+
+The rule now comes from the entry: a server the deployment holds one token for takes that token, and
+a server answered as the person asking takes no credential when it is added, because its client
+arrives through the call that mints it. Both add paths ask the same question in the same words, so a
+credential that does not exist and one of the wrong kind are still refused identically and the
+endpoint cannot be used to ask which ids are real. Adding a curated server the way the admin screen
+does is unchanged.
+
+Adding a curated server that is already there no longer clears the credential it points at. The
+column holds the OAuth client that registering one put there, and re-adding the server to change an
+instance host said nothing about that client, but cleared it anyway: the credential row was left
+behind with nothing pointing at it and nothing to revoke it, and everybody who had connected their
+account was told the deployment has no client registered. A re-add that names no credential now
+leaves the one that is there alone.
 
 ### Name the private addresses an agent may live at
 
