@@ -1,0 +1,105 @@
+{{- if eq .Values.computers.mode "sandbox" }}
+{{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
+{{/*
+The pod every Bot's computer is cut from.
+
+Here rather than in the server, because what image a computer runs, what volumes it keeps and what
+runtime class it uses are deployment decisions, and the three clouds disagree about the last one.
+The server only names this template; the cluster fills in the rest.
+*/}}
+apiVersion: agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: {{ $ns }}-computer
+  namespace: {{ $ns }}
+  labels:
+{{ include "openbot.labels" . | indent 4 }}
+spec:
+  podTemplate:
+    metadata:
+      labels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" "computer") | indent 8 }}
+    spec:
+      {{- with .Values.computers.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.computers.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.computers.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: computer
+          image: {{ include "openbot.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/bun", "/app/agent-computer/src/index.ts"]
+          ports:
+            - name: http
+              containerPort: 4100
+          env:
+            - name: PORT
+              value: "4100"
+            - name: WORKSPACE_DIR
+              value: /workspace
+            - name: PROFILES_DIR
+              value: /profiles
+            - name: COMPUTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "openbot.secretName" .) .Values.computers.existingTokenSecret }}
+                  key: computer-token
+            {{- with .Values.computers.extraEnv }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: profiles
+              mountPath: /profiles
+            - name: workspace
+              mountPath: /workspace
+          {{- /* Readiness only. A browser slow under load is not a browser to restart. */}}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- with .Values.computers.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+  {{- /*
+    The volumes that make a suspend worth doing.
+
+    Suspending terminates the pod and keeps these, which is the difference between a computer that
+    comes back with its logins and one that comes back signed out of everything.
+  */}}
+  volumeClaimTemplates:
+    - metadata:
+        name: profiles
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.computers.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.computers.persistence.profilesSize }}
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.computers.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.computers.persistence.workspaceSize }}
+{{- end }}

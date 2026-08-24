@@ -32,6 +32,9 @@ externalSecrets:
     - secretKey: google-client-secret
       remoteRef:
         key: openbot/google-client-secret
+    - secretKey: computer-token
+      remoteRef:
+        key: openbot/computer-token
     - secretKey: license-token
       remoteRef:
         key: openbot-license-token
@@ -43,3 +46,6 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+
+computers:
+  mode: shared

@@ -67,6 +67,26 @@ This template renders nothing.
 {{- fail "OpenBot requires CopilotKit Intelligence. Set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey and secrets.licenseToken." }}
 {{- end }}
 
+{{- /*
+  A computer nobody can reach, or one anybody can.
+
+  `agent-computer` refuses every request without `COMPUTER_TOKEN` and permits only `/health`, so a
+  chart that created one without a token would create a process that answers nothing. And a mode of
+  `external` with no address is a deployment whose Bots have no computer at all, which fails at the
+  first browser action rather than at install.
+*/}}
+{{- if and (ne .Values.computers.mode "external") (not .Values.secrets.computerToken) (not .Values.computers.existingTokenSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- fail "A computer needs a token, which is the only thing standing between it and anybody who can reach its port. Set secrets.computerToken. Generate one with: openssl rand -hex 32" }}
+{{- end }}
+
+{{- if and (eq .Values.computers.mode "external") (not .Values.computers.url) }}
+{{- fail "computers.mode is external but computers.url is empty, so no Bot would have a computer. Set the address, or use mode: shared to have this chart run one." }}
+{{- end }}
+
+{{- if not (has .Values.computers.mode (list "shared" "sandbox" "external")) }}
+{{- fail "computers.mode must be one of: shared, sandbox, external." }}
+{{- end }}
+
 {{- if and .Values.ingress.enabled .Values.httpRoute.enabled }}
 {{- fail "ingress.enabled and httpRoute.enabled are both set. They are two ways to do the same thing; pick the one your cluster runs." }}
 {{- end }}

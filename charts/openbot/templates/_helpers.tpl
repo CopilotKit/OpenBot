@@ -152,9 +152,25 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 - name: LOG_LEVEL
   value: {{ .Values.config.logLevel | quote }}
 {{- end }}
-{{- if .Values.computers.url }}
+{{- /*
+  Where this deployment's Bots find a computer, decided by the mode rather than by the operator.
+
+  `shared` addresses the StatefulSet's one pod by its stable name, which is what a headless Service
+  gives it. `external` takes the URL as written. `sandbox` sets neither: the provider asks the
+  cluster for each Bot's own computer and gets an address back, so a fixed URL would be the one
+  thing that could send every Bot to the same browser.
+*/}}
+{{- if eq .Values.computers.mode "shared" }}
+- name: AGENT_COMPUTER_URL
+  value: http://{{ include "openbot.componentName" (dict "root" . "component" "computer") }}-0.{{ include "openbot.componentName" (dict "root" . "component" "computer") }}:4100
+{{- else if and (eq .Values.computers.mode "external") .Values.computers.url }}
 - name: AGENT_COMPUTER_URL
   value: {{ .Values.computers.url | quote }}
+{{- else if eq .Values.computers.mode "sandbox" }}
+- name: COMPUTER_SANDBOX_NAMESPACE
+  value: {{ default .Release.Namespace .Values.computers.sandbox.namespace | quote }}
+- name: COMPUTER_SANDBOX_IDLE_AFTER
+  value: {{ .Values.computers.sandbox.idleAfter | quote }}
 {{- end }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
@@ -227,7 +243,7 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
     secretKeyRef:
       name: {{ default (include "openbot.secretName" .) .Values.computers.existingTokenSecret }}
       key: computer-token
-      optional: true
+      optional: {{ eq .Values.computers.mode "external" }}
 {{- with .Values.config.extraEnv }}
 {{ toYaml . }}
 {{- end }}

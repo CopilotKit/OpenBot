@@ -75,6 +75,25 @@ A plain Kubernetes Secret is the default, because that is what a self-hosted clu
 cluster has, so Secrets Manager, Secret Manager and Key Vault are a values block rather than three
 code paths.
 
+### Check for a default StorageClass first
+
+A fresh EKS cluster very often has none. `eksctl` creates `gp2`, which is not marked default and uses
+the in-tree `kubernetes.io/aws-ebs` provisioner that current Kubernetes no longer has. A volume asking
+for "the default" then never binds, the computer sits `Pending`, and nothing says why. One line tells
+you:
+
+```sh
+kubectl get sc
+```
+
+Either create a default class backed by `ebs.csi.aws.com`, or set `computers.persistence.storageClass`
+and `postgresql.primary.persistence.storageClass` to one that exists. `ci/eks-values.yaml` does the
+second.
+
+`volumeBindingMode: WaitForFirstConsumer` matters on every cloud: without it the volume is created in
+a zone chosen before the pod is scheduled, and pods stick unschedulable with a node-affinity conflict.
+That only happens in multi-zone clusters, so it passes every single-zone test.
+
 ### Storage has gravity
 
 The API tier holds nothing on disk. When per-Bot computers arrive they will, and the ordinary block
@@ -90,6 +109,33 @@ The chart fails the install, naming the value to change, when: there is no datab
 nobody would be an administrator; `singleUser` is combined with a public URL; both an Ingress and an
 HTTPRoute are enabled; both `externalSecrets` and an existing Secret are named; or a browser is asked
 for inside more than one API replica.
+
+## A computer for each Bot
+
+`computers.mode` decides how a Bot gets a browser:
+
+| Mode | What it does | Needs |
+| --- | --- | --- |
+| `shared` | One browser for every Bot, run by this chart. | Nothing. |
+| `sandbox` | A computer each, suspended when idle and resumed with its logins intact. | The `agent-sandbox` controller in the cluster. |
+| `external` | Neither; `computers.url` points at one somebody else runs. | Nothing. |
+
+`shared` is what a first install should use. Sessions, files and logins are shared between Bots in
+that mode, which is stated on the fleet page rather than hidden.
+
+`sandbox` uses `kubernetes-sigs/agent-sandbox`, whose `Sandbox` CRD is built for exactly this
+workload: an isolated, stateful, singleton pod with a stable identity and persistent storage.
+Suspending is `operatingMode: Suspended`, which terminates the pod and keeps the volumes.
+
+**What decides that a computer is idle** is the audit trail, not the browser. Asking the browser
+would wake it, so every computer anything asked about would come back up and the bill would never
+fall. That is the known, invisible way to lose scale-to-zero: everything works, nothing suspends.
+
+**A CronJob does the suspending, not a timer in the API.** Every replica would fire its own timer and
+each would decide independently to suspend the same computer. The work is claimed and leased out of
+PostgreSQL with `select ... for update skip locked`, so whichever pod runs the sweep takes what
+nobody else holds, and one that dies mid-suspend hands its work back when the lease expires. The
+decision is re-checked at the moment of acting, because somebody may have come back in between.
 
 ## Upgrades
 

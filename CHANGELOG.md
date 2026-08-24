@@ -10,7 +10,9 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ### Run this on Kubernetes
 
-A Helm chart under `charts/openbot`, and the fixes that installing it for real turned up.
+A Helm chart under `charts/openbot`, Bots and all, and the fixes that installing it for real turned
+up. Proven on a real EKS cluster: five workloads, replicas across two nodes, EBS volumes bound, and a
+Bot opening a real page from inside AWS with the decision in the audit trail.
 
 One chart, four targets: EKS, GKE, AKS and somebody's own cluster, with nothing but values between
 them. There is no cloud branching in any template. Every place the clouds genuinely differ is a
@@ -39,6 +41,22 @@ said nothing else. `EMBEDDED_POSTGRES=on` was therefore starting a container who
 never migrated, and the first symptom was the API reporting that `users` does not exist.
 `server/scripts/migrate.ts` uses the migrator inside `drizzle-orm`, which is a runtime dependency
 already, and keeps the same journal, so a database migrated by either tool is migrated.
+
+**A computer for each Bot, suspended when idle.** `computers.mode: sandbox` gives every Bot its own
+browser as a `Sandbox` from `kubernetes-sigs/agent-sandbox`, which is built for this workload: an
+isolated, stateful, singleton pod with a stable identity and persistent storage. Suspending is one
+field, and it keeps the volumes, so a computer comes back with its logins rather than signed out of
+everything. `shared` stays the default and needs nothing installed in the cluster.
+
+**What decides a computer is idle is the audit trail, not the browser.** Asking the browser would
+wake it, so every computer anything asked about would come back up and the bill would never fall.
+
+**Durable work, claimed by whichever replica gets there first.** `work_items` plus
+`select ... for update skip locked` and a lease: no coordinator, no leader election, and a replica
+added is throughput added. The idle-computer culler is its first user; scheduled routines and
+hand-offs between Bots are the other two, which is why it is written once rather than three times
+slightly differently. A CronJob runs the sweep, because a timer in the API fires in every replica and
+suspending a browser somebody just started using is not something to do five times.
 
 **Which run of a computer this is, on more than one replica.** `sessionOf` answered from a map in
 the process that started the computer, which is right until there are two: the replica that took a

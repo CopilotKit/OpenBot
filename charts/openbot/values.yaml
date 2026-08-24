@@ -148,13 +148,66 @@ config:
   extraEnv: []
   extraEnvFrom: []
 
-# How a Bot gets a computer. `shared` is one browser for every Bot, which is the only shape this
-# slice of the chart ships; per-Bot computers arrive with the Sandbox provider.
+# How a Bot gets a computer.
+#
+#   shared    One browser for every Bot, run by this chart. Needs nothing installed in the cluster,
+#             and is what a first install should use.
+#   sandbox   A computer each, as a `Sandbox` from kubernetes-sigs/agent-sandbox, suspended when
+#             idle and resumed with its logins intact. Needs that controller in the cluster.
+#   external  Neither. `url` points at a computer somebody else runs.
 computers:
   mode: shared
+  # Only for `mode: external`. The other modes derive the address from what they created.
   url: ""
   # Never a literal. See `secrets` below.
   existingTokenSecret: ""
+
+  # gVisor or Kata, where the cluster has one. Unset means an ordinary pod, because the three clouds
+  # do not agree: GKE has managed gVisor, AKS offers Kata and gVisor, and on EKS it is bring your own
+  # node configuration. A chart that assumed a RuntimeClass would fail to install without one.
+  runtimeClassName: ""
+
+  # How many browsers one computer holds at once, and how long an untouched one is kept. Empty means
+  # the process default, which is a handful and thirty minutes.
+  maxBrowsers: ""
+  browserIdleMs: ""
+
+  persistence:
+    # EMPTY MEANS THE CLUSTER'S DEFAULT CLASS. Naming `gp3` or `pd-balanced` is how a chart stops
+    # installing on a bare-metal cluster. Note that the ordinary block volume on every cloud is
+    # zonal, so a computer is pinned to the zone its profile was created in.
+    storageClass: ""
+    profilesSize: 10Gi
+    workspaceSize: 10Gi
+    # What happens to a Bot's logins when the release is deleted. `Retain` keeps them, which is the
+    # safe default; `Delete` is for a trial you want to leave no trace of.
+    whenDeleted: Retain
+
+  resources:
+    requests:
+      cpu: 500m
+      # Chromium is roughly 200-500MB headless and up to 2GB with real pages open.
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+
+  nodeSelector: {}
+  tolerations: []
+  extraEnv: []
+
+  # `mode: sandbox` only. Where the per-Bot computers are created and what may create them.
+  sandbox:
+    namespace: ""
+    # Pre-warmed sandboxes, so a Bot's first action after lunch does not wait for Chromium to boot.
+    warmPool:
+      enabled: false
+      replicas: 2
+    # Suspend a computer nobody has used for this long. The Sandbox CRD has an absolute expiry, which
+    # is not the same question, so the culler below asks this one.
+    idleAfter: 30m
+    culler:
+      enabled: true
+      schedule: "*/5 * * * *"
 
 database:
   # Used when `postgresql.enabled` is false. A URL, or a secret holding one.

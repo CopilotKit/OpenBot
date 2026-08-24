@@ -21,6 +21,7 @@ secrets:
   keyEncryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
   intelligenceApiKey: "example-for-rendering-only"
   googleClientSecret: "example-for-rendering-only"
+  computerToken: "example-for-rendering-only"
   licenseToken: "example-for-rendering-only"
 ingress:
   enabled: true
@@ -30,3 +31,6 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+
+computers:
+  mode: shared

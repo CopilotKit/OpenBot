@@ -29,6 +29,9 @@ externalSecrets:
     - secretKey: google-client-secret
       remoteRef:
         key: openbot/google-client-secret
+    - secretKey: computer-token
+      remoteRef:
+        key: openbot/computer-token
     - secretKey: license-token
       remoteRef:
         key: openbot-license-token
@@ -42,3 +45,6 @@ httpRoute:
       namespace: gateway-system
   hostnames:
     - openbot.example.com
+
+computers:
+  mode: shared

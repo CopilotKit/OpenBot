@@ -1,0 +1,19 @@
+{{- if eq .Values.computers.mode "shared" }}
+{{- $component := "computer" -}}
+{{/* Headless, because a StatefulSet wants stable per-pod names rather than a load-balanced one. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+spec:
+  clusterIP: None
+  ports:
+    - port: 4100
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 4 }}
+{{- end }}
