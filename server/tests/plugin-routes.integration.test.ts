@@ -56,7 +56,11 @@ const ADMIN = {
   image: null,
 };
 
-function request(body: unknown, role: "admin" | "user" = "admin") {
+function request(
+  body: unknown,
+  role: "admin" | "user" = "admin",
+  path = "/api/plugins/servers",
+) {
   const app = createApp(
     loadConfig(testEnvironment()),
     {
@@ -69,7 +73,7 @@ function request(body: unknown, role: "admin" | "user" = "admin") {
     store as never,
   );
 
-  return app.request("http://openbot.test/api/plugins/servers", {
+  return app.request(`http://openbot.test${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -79,6 +83,9 @@ function request(body: unknown, role: "admin" | "user" = "admin") {
 const serverId = "google-drive";
 const suffix = randomUUID().slice(0, 8);
 const personalCredentialId = randomUUID();
+const customServerId = `route-custom-${suffix}`;
+const foreignCredentialId = randomUUID();
+const ownCredentialId = randomUUID();
 
 /** What this deployment already had, so a database somebody is using is left as it was found. */
 let existing: { credentialId: string | null } | null = null;
@@ -90,14 +97,34 @@ beforeAll(async () => {
     .where(eq(mcpServers.id, serverId));
   existing = row ?? null;
 
-  await database.insert(credentials).values({
-    id: personalCredentialId,
-    kind: "mcp_user_token",
-    provider: serverId,
-    keyId: `user_someone_else_${suffix}`,
-    encryptedValue: await encryptSecret(`${"A".repeat(43)}=`, "not-read-here"),
-    metadata: {},
-  });
+  const encrypted = await encryptSecret(`${"A".repeat(43)}=`, "not-read-here");
+  await database.insert(credentials).values([
+    {
+      id: personalCredentialId,
+      kind: "mcp_user_token",
+      provider: serverId,
+      keyId: `user_someone_else_${suffix}`,
+      encryptedValue: encrypted,
+      metadata: {},
+    },
+    {
+      id: foreignCredentialId,
+      kind: "mcp",
+      // Minted for a different server, which is what makes it somebody else's to spend.
+      provider: `route-elsewhere-${suffix}`,
+      keyId: `mcp-elsewhere-${suffix}`,
+      encryptedValue: encrypted,
+      metadata: {},
+    },
+    {
+      id: ownCredentialId,
+      kind: "mcp",
+      provider: customServerId,
+      keyId: `mcp-${customServerId}`,
+      encryptedValue: encrypted,
+      metadata: {},
+    },
+  ]);
 });
 
 afterAll(async () => {
@@ -110,9 +137,17 @@ afterAll(async () => {
     await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
     await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
   }
+  await database.delete(mcpTools).where(eq(mcpTools.serverId, customServerId));
+  await database.delete(mcpServers).where(eq(mcpServers.id, customServerId));
   await database
     .delete(credentials)
-    .where(inArray(credentials.id, [personalCredentialId]));
+    .where(
+      inArray(credentials.id, [
+        personalCredentialId,
+        foreignCredentialId,
+        ownCredentialId,
+      ]),
+    );
 });
 
 async function serverRow() {
@@ -165,5 +200,69 @@ describe("adding a curated server over HTTP", () => {
     const response = await request({ key: serverId }, "user");
 
     expect(response.status).toBe(403);
+  });
+});
+
+/**
+ * The same two rules, asked over HTTP against the real store.
+ *
+ * Both are refusals an administrator has to be able to act on, so what they must never be is a 500:
+ * "something went wrong" sends somebody to look at the deployment when the answer is to pick a
+ * different token or remove the server first.
+ */
+describe("adding a server by URL over HTTP", () => {
+  const custom = "/api/plugins/servers/custom";
+
+  test("another server's token is refused rather than spent", async () => {
+    const response = await request(
+      {
+        id: customServerId,
+        title: "Collector",
+        url: "https://collector.attacker.example/mcp",
+        credentialId: foreignCredentialId,
+      },
+      "admin",
+      custom,
+    );
+
+    expect(response.status).toBe(400);
+
+    const rows = await database
+      .select({ id: mcpServers.id })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, customServerId));
+    expect(rows).toHaveLength(0);
+  });
+
+  test("re-addressing a server that holds a token is refused", async () => {
+    const added = await request(
+      {
+        id: customServerId,
+        title: "Collector",
+        url: "https://legit.vendor.example/mcp",
+        credentialId: ownCredentialId,
+      },
+      "admin",
+      custom,
+    );
+    expect(added.status).toBe(200);
+
+    const moved = await request(
+      {
+        id: customServerId,
+        title: "Collector",
+        url: "https://collector.attacker.example/mcp",
+        credentialId: ownCredentialId,
+      },
+      "admin",
+      custom,
+    );
+    expect(moved.status).toBe(400);
+
+    const [row] = await database
+      .select({ url: mcpServers.url })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, customServerId));
+    expect(row?.url).toBe("https://legit.vendor.example/mcp");
   });
 });

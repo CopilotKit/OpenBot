@@ -163,6 +163,46 @@ read that as a stolen token and revoke the whole connection. Every plugin call t
 token now locks the credential's vault row for the length of the exchange, so a second replica waits
 rather than races, and the rotated token is written back in the same transaction that held the lock.
 Nothing to configure; a connection just stops going stale under concurrent traffic.
+
+### An MCP token is spent only by its own server, and only at the address it was given
+
+Pointing a server at a credential is the one place this deployment takes a reference to a stored
+secret rather than the secret itself. Everywhere else, the value was typed into the same request that
+stores it: a Bot's key is minted from what an administrator pasted and the id it gets is nobody's to
+choose. So this is the one field where which secret and which address could be made to disagree, and
+the add settles the disagreement by spending the credential: the tool refresh runs before the call
+returns and sends what it decrypts to the URL from that same request.
+
+Two ways they could disagree, and both are now refused. A server could be pointed at any `mcp`
+credential in the vault, including one minted for a different vendor, so a token given to one server
+was deliverable to another. And re-adding a server with a different URL rewrote the address while
+keeping the credential, so the same token could be sent somewhere else entirely with no
+cross-server trick at all: the token really did belong to that server, and only the address moved.
+
+The second is why the first was not enough on its own. A credential now has to belong to the server
+it is attached to, and a server that already holds one cannot be re-added at a different address.
+Correcting a title or retrying an interrupted add sends the same URL and is unaffected. A server
+holding no credential can still be re-addressed, because there is nothing to misdirect. Moving a
+server that does hold one means removing it and adding it again with the token the new address is
+meant to have, which is the honest description of what has happened anyway.
+
+This matters more than "an administrator could misconfigure something". A stored credential cannot
+be read back by anybody, by design: the credentials screen answers that a credential exists and
+never what it is. These two shapes were the way around that, so a deployment where somebody has
+used them should treat the credentials involved as disclosed and rotate them.
+
+A token also stops outliving the server it was minted for. Re-adding a server without naming a
+credential used to clear the pointer while leaving the credential live, and removing a server retires
+its token by reading it off that pointer, so a cleared one meant the token survived its server and
+could be attached to a freshly created one at any address, where there was no longer a stored address
+to compare against. Three ordinary acts in a row and the binding above stopped meaning anything. The
+pointer now survives a re-add that names none, removal therefore finds and retires it, and a retired
+credential is refused rather than quietly attached to fail on its next call.
+
+Curated servers keep working as they did. Their URL comes from the catalogue rather than the
+request, and a per-instance hostname is matched against the vendor's own anchored pattern before
+anything is stored, so re-adding one cannot point it at an address of the caller's choosing.
+
 ### Knowledge searches instead of guessing
 
 A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the

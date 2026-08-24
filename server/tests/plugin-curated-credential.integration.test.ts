@@ -5,6 +5,7 @@ import { createAuditStore } from "../src/audit";
 import { encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { credentials, mcpServers, mcpTools } from "../src/db/schema";
+import { CATALOGUE, serverCredentialKind } from "../src/plugins/catalogue";
 import {
   CustomServerRefusedError,
   createPluginStore,
@@ -214,5 +215,47 @@ describe("a curated server may only be pointed at its own kind of credential", (
       .from(mcpServers)
       .where(eq(mcpServers.id, serverId));
     expect(row?.credentialId).toBeNull();
+  });
+});
+
+/**
+ * Every entry the catalogue actually holds, asked the same question.
+ *
+ * The shared-token branch cannot be reached today: the catalogue is frozen in code and its one entry
+ * is reached as the person asking. Rather than add a seam to this store so a test can invent an
+ * entry, the check is written over whatever the catalogue contains, so the branch starts being
+ * exercised the moment somebody re-adds one of the vendors that were taken out. That is the review
+ * where it matters, and this is the test that will be sitting there when it happens.
+ */
+describe("every curated entry is asked which credential it takes", () => {
+  test("the catalogue's own entries decide it, whatever they are", async () => {
+    expect(CATALOGUE.length).toBeGreaterThan(0);
+
+    for (const entry of CATALOGUE) {
+      const kind = serverCredentialKind(entry);
+
+      if (kind === null) {
+        // Takes none from the caller, so any id is refused, including one of the right kind.
+        await expect(
+          store.addServer({
+            key: entry.key,
+            credentialId: deploymentCredentialId,
+            by: "admin@example.com",
+          }),
+        ).rejects.toBeInstanceOf(CustomServerRefusedError);
+        continue;
+      }
+
+      // A shared-token entry takes the deployment's token for that server and nothing else. The
+      // fixture credential belongs to a different server, so it is refused on ownership, which is
+      // the branch a wrong pointer would take.
+      await expect(
+        store.addServer({
+          key: entry.key,
+          credentialId: deploymentCredentialId,
+          by: "admin@example.com",
+        }),
+      ).rejects.toBeInstanceOf(CustomServerRefusedError);
+    }
   });
 });

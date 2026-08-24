@@ -1393,6 +1393,7 @@ export function createPluginStore(options: PluginStoreOptions) {
    */
   async function requireCredentialOfKind(
     serverTitle: string,
+    serverId: string,
     credentialId: string,
     kind: "mcp" | null,
   ): Promise<void> {
@@ -1412,14 +1413,39 @@ export function createPluginStore(options: PluginStoreOptions) {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         credentialId,
       );
+    /*
+     * Live, as well as the right kind and the right owner.
+     *
+     * A revoked credential cannot be decrypted, so attaching one only ever produced a server that
+     * fails on its next call. Refusing it here says so at the moment somebody can still act on it,
+     * and it closes the case where a token was retired precisely because it should stop being used.
+     */
     const [named] = looksLikeId
       ? await database
-          .select({ kind: credentialRows.kind })
+          .select({
+            kind: credentialRows.kind,
+            provider: credentialRows.provider,
+          })
           .from(credentialRows)
-          .where(eq(credentialRows.id, credentialId))
+          .where(
+            and(
+              eq(credentialRows.id, credentialId),
+              isNull(credentialRows.revokedAt),
+            ),
+          )
       : [];
 
-    if (named?.kind !== kind) {
+    /*
+     * Whose it is, as well as what it is.
+     *
+     * `provider` is the server a token was minted for: `storeMcpToken` sets it to the server id and
+     * is the only way the plugins screen makes one. Without this, any `mcp` row in the vault could
+     * be attached to any server, and since the refresh spends it against that server's address, a
+     * token given to one vendor was deliverable to another. Reading a credential back is otherwise
+     * impossible by design, so this closes the one field that accepts a reference to a secret rather
+     * than the secret itself.
+     */
+    if (named?.kind !== kind || named.provider !== serverId) {
       throw new CustomServerRefusedError(
         "That is not a credential this server can use. Add the server's own token instead.",
       );
@@ -1479,6 +1505,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       if (credentialId) {
         await requireCredentialOfKind(
           resolved.entry.title,
+          resolved.entry.key,
           credentialId,
           serverCredentialKind(resolved.entry),
         );
@@ -1587,11 +1614,51 @@ export function createPluginStore(options: PluginStoreOptions) {
        * One message for both "wrong kind" and "no such credential", deliberately. A caller who can
        * tell those apart can ask this endpoint which credential ids are real.
        */
+      /*
+       * A credential is spent at the address it was given to, or not spent.
+       *
+       * Adding a server that is already here rewrites its URL, and the refresh that follows sends
+       * whatever credential it holds to the new one, in the same call. That is the same disclosure
+       * as naming another server's token and it needs no trick at all: the token really does belong
+       * to this server, and only the address moved. A check on whose credential it is cannot see it,
+       * which is why this rule is here and not folded into that one.
+       *
+       * Refused rather than repaired, because the two harmless readings of the request are both
+       * served by something else. Correcting a title or retrying an interrupted add sends the same
+       * URL and is unaffected, and genuinely moving a server means the vendor is at a new address,
+       * where the honest act is to remove it and add it again with the token that address is
+       * supposed to hold.
+       *
+       * Only this path. A curated server's URL comes from the catalogue rather than the request, so
+       * the most a caller can influence is an instance hostname, and that is matched against the
+       * vendor's own anchored pattern before anything is stored. Re-adding one cannot point it at an
+       * address of the caller's choosing, which is the whole of what this refuses.
+       */
       const credentialId = input.credentialId?.trim() || undefined;
+      const [existing] = await database
+        .select({ url: mcpServers.url, credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, input.id));
+
+      if (
+        existing &&
+        existing.url !== input.url &&
+        (existing.credentialId || credentialId)
+      ) {
+        throw new CustomServerRefusedError(
+          `${input.id} is already here at a different address and holds a credential. Remove it and add it again, with the token the new address is meant to have.`,
+        );
+      }
+
       if (credentialId) {
         // Always `mcp`: a server added by URL is reached with the one token the deployment holds for
         // it, whatever the vendor is, because nothing here knows the vendor.
-        await requireCredentialOfKind(input.title, credentialId, "mcp");
+        await requireCredentialOfKind(
+          input.title,
+          input.id,
+          credentialId,
+          "mcp",
+        );
       }
 
       await database
@@ -1610,7 +1677,21 @@ export function createPluginStore(options: PluginStoreOptions) {
           set: {
             title: input.title,
             url: input.url,
-            credentialId: credentialId ?? null,
+            /*
+             * Kept when the caller names none, rather than cleared, for a reason beyond tidiness.
+             *
+             * Clearing it left the credential live with nothing pointing at it, and `removeServer`
+             * retires a token by reading it off the row: with the pointer gone it revoked nothing
+             * and deleted the server, so the token outlived the server it was minted for. It could
+             * then be attached to a freshly created server at any address, because the rule above
+             * compares against a row that no longer existed. Three ordinary acts, and the address
+             * this server was entrusted to stopped meaning anything.
+             *
+             * So the pointer survives, `removeServer` finds it, and a removed server's token is
+             * dead rather than loose. Detaching a token without removing the server is not a thing
+             * this endpoint does, and nothing asks it to.
+             */
+            ...(credentialId ? { credentialId } : {}),
             addedBy: input.by,
             updatedAt: new Date(),
           },
