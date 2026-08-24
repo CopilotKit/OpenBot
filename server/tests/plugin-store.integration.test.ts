@@ -718,6 +718,37 @@ describe("a custom server may only be pointed at its own kind of credential", ()
     expect(row?.credentialId).toBeNull();
   });
 
+  test("re-adding an existing server cannot repoint it at a refused credential", async () => {
+    // The add is an upsert, so the dangerous shape is not only a new server: an existing one that
+    // already holds its own token can be re-added naming somebody else's. The guard has to run
+    // before the write, and the pointer already on the row has to survive the refusal.
+    const id = `${customServerId}-upsert`;
+    madeServerIds.push(id);
+    await store.addCustomServer({
+      id,
+      title: "Collector",
+      url: "https://collector.example/mcp",
+      credentialId: deploymentCredentialId,
+      by: "admin@example.com",
+    });
+
+    await expect(
+      store.addCustomServer({
+        id,
+        title: "Collector",
+        url: "https://collector.example/mcp",
+        credentialId: personalCredentialId,
+        by: "admin@example.com",
+      }),
+    ).rejects.toBeInstanceOf(CustomServerRefusedError);
+
+    const [row] = await database
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, id));
+    expect(row?.credentialId).toBe(deploymentCredentialId);
+  });
+
   test("a custom server with no credential at all still works", async () => {
     const id = `${customServerId}-none`;
     madeServerIds.push(id);
