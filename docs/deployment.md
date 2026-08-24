@@ -33,7 +33,7 @@ enable it for you.
 **Not in it:**
 
 **The supervisor.** It gives each Bot its own container, which needs a Docker socket, which no
-serverless container platform permits. Without it every Bot shares the one browser, exactly as they
+serverless container platform permits. Without it, every Bot shares the one browser, exactly as they
 do on a laptop with no supervisor configured. A shared browser means shared logins, shared files and
 shared session between Bots, which is fine for a deployment where one team trusts its own Bots and
 is not fine as a boundary between tenants.
@@ -79,7 +79,7 @@ against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when 
 reachable from this container. Unset it if your `.env` still has the laptop default
 `http://localhost:4201/ag-ui`.
 
-**Authentication is required.** With no identity provider configured the deployment refuses to start,
+**Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
 Configure Google, Microsoft or Okta, or set `OPENBOT_SINGLE_USER=true` to say you meant an open
 deployment. `NODE_ENV` does not affect this.
@@ -94,7 +94,7 @@ never missing on a laptop. The app does not depend on any of them, but sign-in c
 With `EMBEDDED_POSTGRES=on` they run at start and there is nothing to do. There is exactly one
 process and no deploy pipeline, so the alternative would be a runbook.
 
-With an external database they are a release step, not a start step. Two replicas starting together
+With an external database, they are a release step, not a start step. Two replicas starting together
 would race, and a failed migration should stop a deploy rather than leave a half-migrated database
 serving traffic.
 
