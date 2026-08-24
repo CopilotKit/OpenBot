@@ -118,11 +118,18 @@ export function createHermesBridge(
 
     activeRequests += 1;
     try {
-      const result = await runner.run(
-        hermesChatArgs(profile.id),
-        prompt,
-        config.timeoutMs,
-      );
+      let result: HermesCommandResult;
+      try {
+        result = await withTimeout(
+          runner.run(hermesChatArgs(profile.id), prompt, config.timeoutMs),
+          config.timeoutMs,
+        );
+      } catch (error) {
+        if (error instanceof HermesTimeoutError) {
+          return jsonError("Hermes request timed out.", 504);
+        }
+        return jsonError("Hermes profile did not answer.", 502);
+      }
       if (result.exitCode !== 0) return jsonError("Hermes profile did not answer.", 502);
 
       const text = normalizeOutput(result.stdout, config.maxOutputChars, config.authToken);
@@ -134,6 +141,27 @@ export function createHermesBridge(
   }
 
   return { ready, handle };
+}
+
+class HermesTimeoutError extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new HermesTimeoutError("Hermes command timed out.")),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 export function hermesProfileShowArgs(profileId: string): string[] {
