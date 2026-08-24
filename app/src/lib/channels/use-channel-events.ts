@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
 
@@ -29,6 +30,7 @@ function socketUrl() {
 
 export function useChannelEvents() {
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   useEffect(() => {
     let socket: WebSocket | undefined;
@@ -123,6 +125,24 @@ export function useChannelEvents() {
             return { ...data, pages };
           },
         );
+
+        /*
+         * A tab looking at the channel somebody just deleted in another tab.
+         *
+         * The tab that issued the delete moves itself before it fires the request. Every other tab
+         * only ever hears about it here, and dropping the row without moving leaves that tab on a
+         * route whose channel no longer resolves: an error, or an empty conversation, depending on
+         * which query answers first.
+         *
+         * Read off the router at event time rather than through `useParams`, so the effect does not
+         * have to be torn down and reconnected on every navigation just to keep this value fresh.
+         */
+        if (activity.deleted) {
+          const { pathname } = router.state.location;
+          if (pathname === `/channel/${activity.channelId}`) {
+            void router.navigate({ to: "/" });
+          }
+        }
       };
 
       // WebSocket needs explicit reconnect handling.
@@ -142,7 +162,7 @@ export function useChannelEvents() {
       if (socket) socket.onclose = null;
       socket?.close();
     };
-  }, [queryClient]);
+  }, [queryClient, router]);
 }
 
 /**

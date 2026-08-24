@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
@@ -9,6 +16,8 @@ import {
 } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createApp } from "../src/app";
+import type { AuditEventInput, AuditStore } from "../src/audit";
+import { DEV_ACTOR } from "../src/auth/dev-actor";
 import type { AppVariables } from "../src/auth/guards";
 import {
   type AgentChannel,
@@ -21,7 +30,6 @@ import {
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import {
   agentProfiles,
   agents,
@@ -31,6 +39,7 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
+import { TEST_POOL } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 const actor = {
@@ -297,6 +306,13 @@ describe("channel routes", () => {
 });
 
 describe("channel delete route", () => {
+  /** Rows written by the route under test, in order. */
+  let audited: AuditEventInput[] = [];
+
+  beforeEach(() => {
+    audited = [];
+  });
+
   function appWithForget(
     store: ChannelStore,
     forgetThread?: (params: {
@@ -304,6 +320,9 @@ describe("channel delete route", () => {
       userId: string;
       agentId: string;
     }) => Promise<void>,
+    auditStore: AuditStore = {
+      insert: async (event) => void audited.push(event),
+    },
   ) {
     const app = new Hono<{ Variables: AppVariables }>();
     app.route(
@@ -312,21 +331,22 @@ describe("channel delete route", () => {
         store,
         requireUser,
         undefined,
-        undefined,
+        auditStore,
         forgetThread,
       ),
     );
     return app;
   }
 
-  test("returns 204 and calls store.remove with the actor and channel id", async () => {
+  test("returns 200 and calls store.remove with the actor and channel id", async () => {
     const store = fakeStore();
-    const response = await appWithForget(store).request(
+    const response = await appWithForget(store, async () => {}).request(
       "http://openbot.test/channel-1",
       { method: "DELETE" },
     );
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(200);
+    expect(await json(response)).toEqual({ historyLeftBehind: false });
     expect(store.calls).toEqual([["remove", actor, "channel-1"]]);
   });
 
@@ -352,7 +372,7 @@ describe("channel delete route", () => {
       calls.push(params);
     }).request("http://openbot.test/channel-1", { method: "DELETE" });
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(200);
     expect(calls).toEqual([
       { threadId: "thread-1", userId: actor.id, agentId: "channel:channel-1" },
     ]);
@@ -364,13 +384,16 @@ describe("channel delete route", () => {
    * MUST fail if a later change propagates that rejection as an error status instead of swallowing
    * it and still answering 204.
    */
-  test("still returns 204 when forgetThread rejects", async () => {
+  test("still succeeds when forgetThread rejects, and says the history survived", async () => {
     const store = fakeStore();
     const response = await appWithForget(store, async () => {
       throw new Error("Intelligence is unreachable");
     }).request("http://openbot.test/channel-1", { method: "DELETE" });
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(200);
+    // The half that failed is the half a person deleting a conversation is asking about, so it has
+    // to reach them rather than being swallowed into an indistinguishable success.
+    expect(await json(response)).toEqual({ historyLeftBehind: true });
   });
 
   test("does not call forgetThread when remove found no thread to forget", async () => {
@@ -385,8 +408,94 @@ describe("channel delete route", () => {
       called = true;
     }).request("http://openbot.test/channel-1", { method: "DELETE" });
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(200);
+    // Nothing to forget is not something left behind.
+    expect(await json(response)).toEqual({ historyLeftBehind: false });
     expect(called).toBe(false);
+  });
+
+  /*
+   * The channel row is gone by the time this runs, so this row is the only thing left that says the
+   * conversation ever existed or who ended it. Untested, it is also the easiest thing to drop in a
+   * later refactor without anything going red.
+   */
+  test("writes an attributed audit row naming the thread it forgot", async () => {
+    const store = fakeStore();
+    await appWithForget(store, async () => {}).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(audited).toEqual([
+      {
+        eventType: "channel.deleted",
+        targetType: "channel",
+        targetId: "channel-1",
+        actorUserId: actor.id,
+        payload: { threadId: "thread-1", threadForgotten: true },
+      },
+    ]);
+  });
+
+  test("records a thread that outlived the channel", async () => {
+    const store = fakeStore();
+    await appWithForget(store, async () => {
+      throw new Error("Intelligence is unreachable");
+    }).request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(audited).toEqual([
+      {
+        eventType: "channel.deleted",
+        targetType: "channel",
+        targetId: "channel-1",
+        actorUserId: actor.id,
+        payload: { threadId: "thread-1", threadForgotten: false },
+      },
+    ]);
+  });
+
+  /*
+   * Single-user is the mode `.env.example` ships switched on, so this is the row a fork sees by
+   * default. The other audited surfaces drop the id here, believing `audit_events.actor_user_id`
+   * has a foreign key into `users`; it has none, and `initializeDevActorUser` writes that row at
+   * start-up regardless. An unattributed row would answer "was this conversation deleted" and not
+   * "by whom", which is the half worth keeping.
+   */
+  test("attributes the local development actor rather than dropping it", async () => {
+    const store = fakeStore();
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route(
+      "/",
+      createChannelRoutes(
+        store,
+        async (context, next) => {
+          context.set("actor", DEV_ACTOR);
+          await next();
+        },
+        undefined,
+        { insert: async (event) => void audited.push(event) },
+        async () => {},
+      ),
+    );
+
+    await app.request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(audited[0]?.actorUserId).toBe(DEV_ACTOR.id);
+  });
+
+  /*
+   * The channel is already gone and the caller has already been told so. A trail that is briefly
+   * unavailable is not a reason to report a failure that did not happen.
+   */
+  test("still answers when the audit write throws", async () => {
+    const store = fakeStore();
+    const response = await appWithForget(store, async () => {}, {
+      insert: async () => {
+        throw new Error("audit table is unreachable");
+      },
+    }).request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(response.status).toBe(200);
   });
 });
 

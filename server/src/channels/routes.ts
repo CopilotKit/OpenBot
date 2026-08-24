@@ -107,15 +107,6 @@ export type ChannelStore = {
   remove(actor: AgentActor, channelId: string): Promise<string | null>;
 };
 
-/**
- * The local development actor, which is not a row in `users`.
- *
- * The audit table has a foreign key to that table, so writing this id would fail the constraint and
- * lose the row entirely. Who it was is in the payload's target either way. Same reasoning as
- * agents/routes.ts's constant of the same name.
- */
-const DEV_ACTOR_EMAIL = "dev@openbot.local";
-
 const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
 const MAX_CHANNEL_NAME_CODE_POINTS = 120;
 const MAX_ACTIVITY_CODE_POINTS = 200;
@@ -631,7 +622,17 @@ export function createChannelRoutes(
         eventType: "channel.deleted",
         targetType: "channel",
         targetId: channelId,
-        ...(actor.email !== DEV_ACTOR_EMAIL ? { actorUserId: actor.id } : {}),
+        /*
+         * Attributed, including in single-user mode.
+         *
+         * The other audited surfaces drop this id when the actor is the local development one, on
+         * the grounds that `audit_events.actor_user_id` has a foreign key into `users` that it would
+         * violate. It has no foreign key, and `initializeDevActorUser` writes that row at start-up
+         * anyway, so neither half of the reason holds. It matters here more than most: single-user
+         * is the mode `.env.example` ships switched on, so an unattributed row is what a fork sees
+         * by default, and "somebody deleted this conversation" is the whole point of the row.
+         */
+        actorUserId: actor.id,
         payload,
       });
     } catch (error) {
@@ -772,7 +773,22 @@ export function createChannelRoutes(
 
       await recordDeleted(context, channelId, { threadId, threadForgotten });
 
-      return context.body(null, 204);
+      /*
+       * 200 with the outcome, not a bare 204.
+       *
+       * The thread deletion is the half that can fail on its own, and 204 says the whole act
+       * succeeded whichever way it went. The screen then tells somebody their message history is
+       * gone while it is still sitting on the platform, which is the one thing a person deleting a
+       * conversation is asking about.
+       *
+       * Reported as the question the caller has rather than the two facts it is derived from: no
+       * thread and a forgotten thread both mean nothing was left behind, and only a thread that
+       * survived is worth putting on a screen.
+       */
+      return context.json(
+        { historyLeftBehind: threadId !== null && !threadForgotten },
+        200,
+      );
     } catch (error) {
       return mapStoreError(context, error);
     }

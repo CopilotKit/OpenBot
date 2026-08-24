@@ -254,8 +254,9 @@ committed by the time that call runs, so a rejected or unreachable upstream dele
 gone from the roster regardless, with an audit row (`channel.deleted`) naming the thread and whether
 Intelligence actually forgot it. A channel that is gone locally with an orphaned thread still on the
 platform is a smaller, more honest failure than a channel sitting in the roster with its history
-silently wiped out from under it — and the audit trail is where an administrator finds the one that
-did not clean up completely.
+silently wiped out from under it, and the audit trail is where an administrator finds the one that
+did not clean up completely. `DELETE /api/channels/:channelId` answers with `historyLeftBehind`, so a
+screen showing the outcome does not have to guess which of the two happened.
 
 ## 0.0.4
 

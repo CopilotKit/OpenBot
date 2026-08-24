@@ -1,12 +1,11 @@
 import { IconDots } from "@tabler/icons-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { deleteChannelMutationOptions } from "@/lib/channels/mutations";
 import { ChannelAvatar } from "../channels/avatar";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -23,9 +22,15 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 
-// No longer `memo`: the delete dialog needs its own open state and the current route's channel id,
-// both independent of the props `use-channel-events` keeps stable.
-export function Channel({
+/**
+ * Memoized roster row. `use-channel-events` preserves unchanged row identity, and
+ * `content-visibility` keeps off-screen rows cheap without virtualization.
+ *
+ * State inside a row is no reason to drop the memo: `memo` compares the props it is handed and has
+ * nothing to say about a hook. Dropping it re-renders every row in the roster whenever the sidebar
+ * renders, which is the cost the identity-preserving patch in `use-channel-events` exists to avoid.
+ */
+export const Channel = memo(function Channel({
   channelId,
   participantIds,
   name,
@@ -53,7 +58,23 @@ export function Channel({
     if (openChannelId === channelId) {
       await navigate({ to: "/" });
     }
-    deleteChannel.mutate(channelId);
+    try {
+      await deleteChannel.mutateAsync(channelId);
+      /*
+       * Closed on success rather than left to the unmount.
+       *
+       * The row does go away when the roster invalidates, taking this dialog with it, but that is a
+       * side effect of a cache write and not something this component controls.
+       */
+      setDeleteDialogOpen(false);
+    } catch {
+      /*
+       * Left open, deliberately. A delete that failed leaves the row exactly where it was, so
+       * closing would return the person to a roster that still lists the conversation they just
+       * asked to be rid of, with nothing anywhere saying why. The message is rendered below;
+       * `mutateAsync` rejects rather than swallowing, which is why this catch exists at all.
+       */
+    }
   };
 
   return (
@@ -120,19 +141,34 @@ export function Channel({
               including its message history. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteChannel.isError ? (
+            <p className="text-destructive text-sm" role="alert">
+              {deleteChannel.error.message}
+            </p>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteChannel.isPending}>
               Cancel
             </AlertDialogCancel>
-            <AlertDialogAction
+            {/*
+             * A plain button, not `AlertDialogAction`.
+             *
+             * That one renders the primitive's `Close`, so it shuts the dialog the instant it is
+             * pressed, before the request it starts has been answered. Nothing then reports a
+             * delete that failed: the dialog is gone, the conversation is still in the roster, and
+             * the person is left to work out for themselves that the thing they asked for did not
+             * happen. It also means "Deleting…" below could never appear.
+             */}
+            <Button
               disabled={deleteChannel.isPending}
               onClick={() => void handleDelete()}
+              variant="destructive"
             >
               {deleteChannel.isPending ? "Deleting…" : "Delete"}
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
   );
-}
+});
