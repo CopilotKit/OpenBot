@@ -8,6 +8,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot's computer is no longer on the same network as the database
+
+Compose declared no networks, so every service shared one and reached the others by service name.
+One of those services is the container a Bot's shell runs in, and another is PostgreSQL, whose
+username and password are in the same file. A shell reaches whatever its container reaches, so a Bot
+could open `postgres:5432` and authenticate: the audit trail, the policy store and the agent tables,
+from the one container whose job is to run what a Bot asks for. The role Compose creates is the
+instance owner, so the trail's append-only trigger was no defence either, being something its owner
+can drop.
+
+PostgreSQL and `migrate`, the only service that reaches it by name, are now on a `data` network of
+their own. Everything else stays where it was. Nothing changes for a deployment that runs the API
+server on the host, which reaches the database through the published port and never used the shared
+network for it. **A deployment that runs the server inside Compose has to join that service to both
+networks**, which is the one place the two are meant to meet.
+
+This does not reach back in time. A deployment that has been running with the two on one network
+should assume a Bot could have read or written the database, and look at the trail with that in
+mind.
+
 ### Name the private addresses an agent may live at
 
 Refusing `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` in production closed a hole and took something with
