@@ -33,7 +33,7 @@ enable it for you.
 **Not in it:**
 
 **The supervisor.** It gives each Bot its own container, which needs a Docker socket, which no
-serverless container platform permits. Without it every Bot shares the one browser, exactly as they
+serverless container platform permits. Without it, every Bot shares the one browser, exactly as they
 do on a laptop with no supervisor configured. A shared browser means shared logins, shared files and
 shared session between Bots, which is fine for a deployment where one team trusts its own Bots and
 is not fine as a boundary between tenants.
@@ -86,7 +86,7 @@ deployment. `NODE_ENV` does not affect this.
 
 **Put TLS in front of it.** Not only for the cookies. A page served from `http://<address>` is not a
 secure context, which removes a set of browser APIs that are present on `http://localhost` and so
-never missing on a laptop. The app no longer depends on any of them, but sign-in cookies still want
+never missing on a laptop. The app does not depend on any of them, but sign-in cookies still want
 `Secure`, and every platform below terminates TLS for you.
 
 ## Migrations
@@ -123,7 +123,7 @@ in ECR, and is what AWS points App Runner users at now that App Runner takes no 
 Plain ECS on Fargate behind an ALB is the answer if you want task definitions and fine-grained IAM.
 No shared-memory configuration is needed or possible.
 
-**Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240 second request
+**Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets
 are capped at 350 per instance on the basic tier.
 
