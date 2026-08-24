@@ -103,6 +103,8 @@ export type DeploymentConfig = {
    * when a remote Bot is actually running.
    */
   managedAgent?: ManagedAgentConfig;
+  /** A loopback Hermes bridge serving the optional package-declared profile group. */
+  hermesBridge?: ManagedAgentConfig;
   /**
    * Private addresses an agent may be registered at, named one at a time.
    *
@@ -314,6 +316,23 @@ function managedAgentConfig(
   if (!endpoint || !token) {
     return undefined;
   }
+  return { endpoint, token };
+}
+
+function hermesBridgeConfig(
+  environment: Environment,
+): ManagedAgentConfig | undefined {
+  const endpoint = optionalHttpUrl(environment, "OPENBOT_HERMES_BRIDGE_URL");
+  const token = optional(environment, "OPENBOT_HERMES_BRIDGE_TOKEN");
+  if (endpoint && !["127.0.0.1", "localhost", "::1"].includes(endpoint.hostname)) {
+    throw new Error("OPENBOT_HERMES_BRIDGE_URL must point to loopback.");
+  }
+  if (endpoint && !token) {
+    throw new Error(
+      "OPENBOT_HERMES_BRIDGE_TOKEN must be set when OPENBOT_HERMES_BRIDGE_URL is set",
+    );
+  }
+  if (!endpoint || !token) return undefined;
   return { endpoint, token };
 }
 
@@ -688,11 +707,13 @@ export function loadConfig(
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
   const managedAgent = managedAgentConfig(environment);
+  const hermesBridge = hermesBridgeConfig(environment);
 
   return {
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),
+    ...(hermesBridge ? { hermesBridge } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     publicUrl: (

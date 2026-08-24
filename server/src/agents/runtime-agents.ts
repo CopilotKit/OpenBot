@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import type { ManagedAgentConfig } from "../config";
 import { type RegisteredAgent, registeredAgentFromRow } from "../copilot";
 import type { CredentialSecretReader } from "../credentials";
 import type { Database } from "../db/client";
@@ -24,6 +25,8 @@ export function createRuntimeAgentLoader(
   vault?: { reader: CredentialSecretReader; encryptionKey: string },
   /** Secret for the deployment-managed Bot. Never sent to customer-owned endpoints. */
   managedAgent?: { endpoint: URL; token: string },
+  /** Secret for package-declared agents whose endpoints live under the Hermes bridge. */
+  hermesBridge?: ManagedAgentConfig,
 ) {
   return async (actor: AgentActor): Promise<RegisteredAgent[]> => {
     const [active, tombstones] = await Promise.all([
@@ -57,6 +60,16 @@ export function createRuntimeAgentLoader(
           "x-openbot-agent-token": managedAgent.token,
         };
       }
+      if (
+        agent.type === "remote_ag_ui" &&
+        hermesBridge &&
+        isHermesBridgeEndpoint(agent.endpoint, hermesBridge.endpoint)
+      ) {
+        agent.headers = {
+          ...agent.headers,
+          "x-openbot-agent-token": hermesBridge.token,
+        };
+      }
       registered.set(agent.id, agent);
     }
     for (const row of tombstones) {
@@ -71,6 +84,21 @@ export function createRuntimeAgentLoader(
 
     return [...registered.values()];
   };
+}
+
+export function isHermesBridgeEndpoint(endpoint: string, bridge: URL): boolean {
+  try {
+    const candidate = new URL(endpoint);
+    const basePath = bridge.pathname.replace(/\/+$/, "");
+    const profilePrefix = `${basePath}/ag-ui/`.replace(/\/{2,}/g, "/");
+    return (
+      candidate.origin === bridge.origin &&
+      candidate.pathname.startsWith(profilePrefix) &&
+      candidate.pathname.length > profilePrefix.length
+    );
+  } catch {
+    return false;
+  }
 }
 
 function selectActiveAgents(database: Database, actor: AgentActor) {

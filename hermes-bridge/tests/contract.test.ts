@@ -120,7 +120,7 @@ test("bounded Hermes AG-UI bridge verifies its roster and serves one allowlisted
     "--quiet",
     "--query-file",
     "-",
-    "--ignore-rules",
+    "--safe-mode",
     "--source",
     "tool",
     "--max-turns",

@@ -41,3 +41,14 @@ agents:
     avatar_seed: risk-analyst
     type: remote-ag-ui
     endpoint: ${MANAGED_AGENT_AG_UI_URL:-}
+  # Optional local Hermes coworkers. When OPENBOT_HERMES_BRIDGE_URL is unset this group contributes
+  # no agents; when it is set, the server expands the explicitly supplied OPENBOT_HERMES_PROFILES
+  # roster into one remote-ag-ui coworker per verified profile.
+  - id: hermes-local
+    name: Local Hermes
+    title: MacBook Operations
+    role_description: Coordinate bounded local operations and report what each configured profile returns.
+    avatar_seed: hermes-local
+    type: hermes-bridge
+    bridge_url: ${OPENBOT_HERMES_BRIDGE_URL:-}
+    profiles_env: OPENBOT_HERMES_PROFILES

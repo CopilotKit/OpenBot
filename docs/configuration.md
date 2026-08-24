@@ -34,6 +34,31 @@ coworker without its own endpoint is refused. A leftover token with no URL is ig
 one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
 at `agent-langgraph` on a laptop.
 
+### Local Hermes bridge
+
+The MacBook pilot can expose explicitly selected local Hermes profiles as OpenBot coworkers through a
+loopback-only bridge. The bridge is optional and is enabled only when all of these are set:
+
+```sh
+OPENBOT_HERMES_BRIDGE_URL=http://127.0.0.1:4310
+OPENBOT_HERMES_BRIDGE_TOKEN=             # openssl rand -base64 32
+OPENBOT_HERMES_PROFILES='[{"id":"chief-of-staff","displayName":"Chief of Staff"}]'
+```
+
+`OPENBOT_HERMES_PROFILES` is configuration, not a request field. The bridge verifies every listed
+profile with `hermes profile show` before it reports ready. The OpenBot package expands the roster
+into one coworker per profile and supplies the bridge token only to paths under `/ag-ui/<profile>`.
+The token is never stored in tenant YAML, an agent row, an AG-UI body, or a browser response.
+
+The bridge invokes Hermes with `--toolsets safe --safe-mode --max-turns 1`. It does not expose ACP,
+raw Hermes sessions, terminal/process/file/browser tools, delegation, memory, credential stores, or
+host paths to OpenBot. Requests are authenticated, loopback-bound, timeout-bounded, size-bounded,
+serial by default, and return only normalized text events. `scripts/start.sh` starts and waits for
+bridge readiness before it starts the API server when the optional variables are configured.
+
+To change which profiles are available, edit the JSON roster locally and restart the stack. Do not
+put credentials, customer data, or Hermes session identifiers in the roster.
+
 ## General variables
 
 | Variable             | Default                            | Meaning                                                             |

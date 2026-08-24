@@ -71,6 +71,30 @@ describe("deployment configuration", () => {
     expect(config.tenantPackageDirectory).toBe("../examples/fintech");
   });
 
+  test("loads the optional loopback Hermes bridge credential separately", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      OPENBOT_HERMES_BRIDGE_URL: "http://127.0.0.1:4310",
+      OPENBOT_HERMES_BRIDGE_TOKEN: "hermes-bridge-token",
+    });
+
+    expect(config.hermesBridge).toEqual({
+      endpoint: new URL("http://127.0.0.1:4310"),
+      token: "hermes-bridge-token",
+    });
+    expect(config.managedAgent?.token).toBe("managed-agent-token");
+  });
+
+  test("rejects a Hermes bridge outside loopback", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        OPENBOT_HERMES_BRIDGE_URL: "http://bridge.internal:4310",
+        OPENBOT_HERMES_BRIDGE_TOKEN: "hermes-bridge-token",
+      }),
+    ).toThrow("OPENBOT_HERMES_BRIDGE_URL must point to loopback");
+  });
+
   test("allows deployment without an authentication provider, when asked to", () => {
     const config = loadConfig({
       DATABASE_URL: baseEnvironment.DATABASE_URL,

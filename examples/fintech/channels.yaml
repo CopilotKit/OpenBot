@@ -14,3 +14,8 @@ channels:
     description: Find authorized answers from company documents.
     permitted_agents: [knowledge]
     allowed_groups: [all]
+  - id: local-operations
+    name: Local Operations
+    description: Work with the configured local Hermes coworkers through the bounded bridge.
+    permitted_agents: [general-assistant, hermes-local]
+    allowed_groups: [all]

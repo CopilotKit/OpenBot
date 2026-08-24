@@ -186,7 +186,7 @@ export function hermesChatArgs(profileId: string): string[] {
     "--quiet",
     "--query-file",
     "-",
-    "--ignore-rules",
+    "--safe-mode",
     "--source",
     "tool",
     "--max-turns",
@@ -263,8 +263,29 @@ function matchesToken(expected: string, offered: string): boolean {
 }
 
 async function readBoundedBody(request: Request, maxChars: number): Promise<string | null> {
-  const body = await request.text();
-  return body.length <= maxChars ? body : null;
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null && /^\d+$/.test(declaredLength.trim())) {
+    const length = Number(declaredLength);
+    if (Number.isSafeInteger(length) && length > maxChars) return null;
+  }
+
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let body = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      body += decoder.decode(value, { stream: true });
+      if (body.length > maxChars) return null;
+    }
+    body += decoder.decode();
+    return body.length <= maxChars ? body : null;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function promptFromInput(input: AgentInput, maxInputChars: number): string | null {

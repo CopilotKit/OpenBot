@@ -245,6 +245,54 @@ describe("tenant YAML validation", () => {
     expect(tenantPackage.agents[1]?.avatarSeed).toBeUndefined();
   });
 
+  test("expands an explicitly configured Hermes bridge roster into remote coworkers", () => {
+    const tenantPackage = validateTenantPackage(
+      {
+        brand: "tenant: { id: fintech, product_name: Ledgerline }",
+        agents: `agents:
+  - id: hermes-local
+    name: Local Hermes
+    title: MacBook Operations
+    role_description: Coordinate bounded local operations.
+    type: hermes-bridge
+    bridge_url: http://127.0.0.1:4310
+    profiles_env: OPENBOT_HERMES_PROFILES`,
+        channels: `channels:
+  - id: ops
+    name: Operations
+    description: Local operations team
+    permitted_agents: [hermes-local]
+    allowed_groups: []`,
+        model:
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+        knowledge: "sources: []",
+        themeCss: "",
+      },
+      {
+        OPENBOT_HERMES_PROFILES: JSON.stringify([
+          { id: "chief-of-staff", displayName: "Chief of Staff" },
+          { id: "dev-lead", displayName: "Dev Lead" },
+        ]),
+      },
+    );
+
+    expect(tenantPackage.agents.map((agent) => agent.id)).toEqual([
+      "hermes-local-chief-of-staff",
+      "hermes-local-dev-lead",
+    ]);
+    expect(tenantPackage.agents[0]).toMatchObject({
+      name: "Local Hermes · Chief of Staff",
+      type: "remote_ag_ui",
+      configuration: {
+        endpoint: "http://127.0.0.1:4310/ag-ui/chief-of-staff",
+      },
+    });
+    expect(tenantPackage.channels[0]?.permittedAgents).toEqual([
+      "hermes-local-chief-of-staff",
+      "hermes-local-dev-lead",
+    ]);
+  });
+
   test("rejects an empty optional avatar seed", () => {
     expect(() =>
       validateTenantPackage({

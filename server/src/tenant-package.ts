@@ -135,6 +135,13 @@ type TenantAgent = {
   configuration: Record<string, unknown>;
 };
 
+type HermesRosterEntry = {
+  id: string;
+  displayName: string;
+};
+
+const HERMES_PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
 type TenantChannel = {
   id: string;
   name: string;
@@ -248,6 +255,71 @@ function stringArray(value: unknown, name: string): string[] {
   return value;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function parseHermesRoster(
+  environment: Record<string, string | undefined>,
+  environmentName: string,
+): HermesRosterEntry[] {
+  const raw = environment[environmentName]?.trim();
+  if (!raw) {
+    throw new Error(`${environmentName} must be set when a Hermes bridge is enabled.`);
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error(`${environmentName} must be valid JSON.`);
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${environmentName} must be a non-empty JSON array.`);
+  }
+
+  return value.map((entry, index) => {
+    if (!isPlainRecord(entry)) {
+      throw new Error(`${environmentName} entry ${index} is invalid.`);
+    }
+    const id = entry.id;
+    const displayName = entry.displayName;
+    if (
+      typeof id !== "string" ||
+      !HERMES_PROFILE_ID.test(id) ||
+      typeof displayName !== "string" ||
+      !displayName.trim()
+    ) {
+      throw new Error(`${environmentName} entry ${index} needs a safe id and displayName.`);
+    }
+    return { id, displayName: displayName.trim() };
+  });
+}
+
+function hermesBridgeBaseUrl(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    throw new Error("agent.bridge_url must be a valid HTTP(S) URL");
+  }
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error("agent.bridge_url must be a credential-free HTTP(S) base URL");
+  }
+  return parsed.toString().replace(/\/$/, "");
+}
+
 function yaml(value: string, filename: string): Record<string, unknown> {
   try {
     return asRecord(parse(value), filename);
@@ -283,7 +355,10 @@ export function expandEnvironment(
   );
 }
 
-export function validateTenantPackage(files: PackageFiles): TenantPackage {
+export function validateTenantPackage(
+  files: PackageFiles,
+  environment: Record<string, string | undefined> = process.env,
+): TenantPackage {
   if (files.themeCss.trim()) {
     validateThemeCss(files.themeCss);
   }
@@ -301,17 +376,21 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
   const skin =
     brand.skin === undefined ? undefined : asRecord(brand.skin, "brand.skin");
   const omittedAgentIds = new Set<string>();
+  const expandedAgentIds = new Map<string, string[]>();
+  const usedAgentIds = new Set<string>();
   const agents = asList(agentsYaml.agents, "agents.yaml agents").flatMap(
     (value) => {
       const agent = asRecord(value, "agent");
-      const type: TenantAgent["type"] | undefined =
+      const type: "built_in" | "remote_ag_ui" | "hermes_bridge" | undefined =
         agent.type === "built-in"
           ? "built_in"
           : agent.type === "remote-ag-ui"
             ? "remote_ag_ui"
-            : undefined;
+            : agent.type === "hermes-bridge"
+              ? "hermes_bridge"
+              : undefined;
       if (!type) {
-        throw new Error("agent.type must be built-in or remote-ag-ui");
+        throw new Error("agent.type must be built-in, remote-ag-ui, or hermes-bridge");
       }
       const id = requiredString(agent.id, "agent.id");
       /*
@@ -319,8 +398,8 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
        *
        * The computer router's bot-access guard steps aside for those names, and a request cannot
        * tell a Bot called `policy` from `/policy` itself, so such a Bot would be served to anybody
-       * who can sign in without the guard ever being asked. A package id is the only way a Bot gets
-       * a chosen id, everything created through the API being `agent_<uuid>`, so refusing it here
+       * who can sign in without the guard ever being asked. A package id is the only way a Bot gets a
+       * chosen id, everything created through the API being `agent_<uuid>`, so refusing it here
        * closes it rather than moving it.
        */
       if (DEPLOYMENT_ROUTES.has(id)) {
@@ -328,6 +407,61 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
           `agent.id "${id}" is reserved for a deployment route and cannot name a Bot`,
         );
       }
+      if (usedAgentIds.has(id)) {
+        throw new Error(`agent.id "${id}" must be unique`);
+      }
+      usedAgentIds.add(id);
+
+      const name = requiredString(agent.name, "agent.name");
+      const title = requiredString(agent.title, "agent.title");
+      const roleDescription = requiredString(
+        agent.role_description,
+        "agent.role_description",
+      );
+      const avatarSeed =
+        agent.avatar_seed === undefined
+          ? undefined
+          : requiredString(agent.avatar_seed, "agent.avatar_seed");
+
+      if (type === "hermes_bridge") {
+        const bridgeUrl = hermesBridgeBaseUrl(agent.bridge_url);
+        if (!bridgeUrl) {
+          omittedAgentIds.add(id);
+          expandedAgentIds.set(id, []);
+          return [];
+        }
+        const profilesEnvironment =
+          typeof agent.profiles_env === "string" && agent.profiles_env.trim()
+            ? agent.profiles_env.trim()
+            : "OPENBOT_HERMES_PROFILES";
+        if (!/^[A-Z_][A-Z0-9_]*$/.test(profilesEnvironment)) {
+          throw new Error("agent.profiles_env must be an environment variable name");
+        }
+        const roster = parseHermesRoster(environment, profilesEnvironment);
+        const expandedIds: string[] = [];
+        const expanded = roster.map((profile) => {
+          const expandedId = `${id}-${profile.id}`;
+          if (usedAgentIds.has(expandedId)) {
+            throw new Error(`Hermes profile expands to duplicate agent.id "${expandedId}"`);
+          }
+          usedAgentIds.add(expandedId);
+          expandedIds.push(expandedId);
+          return {
+            id: expandedId,
+            name: `${name} · ${profile.displayName}`,
+            title,
+            roleDescription: `${roleDescription}\n\nConfigured Hermes profile: ${profile.displayName}.`,
+            avatarSeed: avatarSeed ? `${avatarSeed}-${profile.id}` : undefined,
+            type: "remote_ag_ui" as const,
+            configuration: {
+              endpoint: `${bridgeUrl}/ag-ui/${encodeURIComponent(profile.id)}`,
+            },
+          };
+        });
+        expandedAgentIds.set(id, expandedIds);
+        return expanded;
+      }
+
       if (type === "remote_ag_ui") {
         const endpoint =
           typeof agent.endpoint === "string" ? agent.endpoint.trim() : "";
@@ -339,16 +473,10 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       return [
         {
           id,
-          name: requiredString(agent.name, "agent.name"),
-          title: requiredString(agent.title, "agent.title"),
-          roleDescription: requiredString(
-            agent.role_description,
-            "agent.role_description",
-          ),
-          avatarSeed:
-            agent.avatar_seed === undefined
-              ? undefined
-              : requiredString(agent.avatar_seed, "agent.avatar_seed"),
+          name,
+          title,
+          roleDescription,
+          avatarSeed,
           type,
           configuration:
             type === "built_in"
@@ -372,7 +500,10 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
       const permittedAgents = stringArray(
         channel.permitted_agents,
         "channel.permitted_agents",
-      ).filter((agentId) => !omittedAgentIds.has(agentId));
+      ).flatMap((agentId) => {
+        if (omittedAgentIds.has(agentId)) return [];
+        return expandedAgentIds.get(agentId) ?? [agentId];
+      });
       for (const agentId of permittedAgents) {
         if (!agentIds.has(agentId)) {
           throw new Error(`channel references unknown agent "${agentId}"`);

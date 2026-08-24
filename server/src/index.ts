@@ -162,6 +162,7 @@ const loadAgentsForActor = createRuntimeAgentLoader(
   database,
   agentVault,
   config.managedAgent,
+  config.hermesBridge,
 );
 await synchronizeTenantPackage(database, tenantPackage);
 /*
