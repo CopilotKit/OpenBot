@@ -286,8 +286,18 @@ function normalizeOutput(raw: string, maxChars: number, authToken: string): stri
     .split("\n")
     .filter((line) => !/^\s*session(?:_id| id)?\s*[:=]/i.test(line))
     .join("\n");
-  const redacted = withoutSessionLines.replaceAll(authToken, "[REDACTED]");
+  const redacted = redactCredentialLikeValues(
+    withoutSessionLines.replaceAll(authToken, "[REDACTED]"),
+  );
   return redacted.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim().slice(0, maxChars);
+}
+
+function redactCredentialLikeValues(value: string): string {
+  return value
+    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
+    .replace(/\b(?:sk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{8,}/gi, "[REDACTED]")
+    .replace(/\b(?:ghp|github_pat|xoxb|xoxp|glpat)-[A-Za-z0-9][A-Za-z0-9_-]{8,}/gi, "[REDACTED]")
+    .replace(/\b(?:api[_ -]?key|token|secret)\s*[:=]\s*[^\s,;]+/gi, "[REDACTED]");
 }
 
 function agUiTextResponse(threadId: string, runId: string, text: string): Response {
