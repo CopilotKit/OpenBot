@@ -74,11 +74,19 @@ export function createHermesBridge(
   }
 
   async function handle(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/health") {
+      return Response.json({ ok: true });
+    }
+    if (request.method === "GET" && url.pathname === "/health/ready") {
+      const readinessResult = await ready();
+      return Response.json({ ok: readinessResult.ok }, { status: readinessResult.ok ? 200 : 503 });
+    }
+
     if (!matchesToken(config.authToken, request.headers.get("x-openbot-agent-token") ?? "")) {
       return jsonError("Unauthorized.", 401);
     }
 
-    const url = new URL(request.url);
     const profileId = profileIdFromPath(url.pathname);
     const profile = profileId ? byId.get(profileId) : undefined;
     if (!profile) return jsonError("Not found.", 404);
