@@ -39,6 +39,20 @@ const NEVER_ALLOWED_HOSTNAMES = new Set([
   "100.100.100.200",
 ]);
 
+/**
+ * Is this the address of a cloud metadata service?
+ *
+ * Exported because the same question is asked outside browsing: an MCP server address an
+ * administrator types is refused on the same grounds, and the answer has to come from one list.
+ * Two copies drift, and the copy that misses an alias is the one that lets a credential endpoint
+ * through.
+ *
+ * Canonicalises first, so the trailing-dot and IPv6 spellings are seen through here as well.
+ */
+export function isNeverAllowedHostname(hostname: string): boolean {
+  return NEVER_ALLOWED_HOSTNAMES.has(canonicalHostname(hostname.toLowerCase()));
+}
+
 /** Hostnames inside the deployment. Reachable only when a deployment opts in. */
 const INTERNAL_HOSTNAMES = new Set([
   "localhost",
@@ -204,9 +218,7 @@ export function checkComputerAddress(raw: string): TargetVerdict {
 
   // Canonicalised for the same reason navigation is: the address reaches a fetch either way, so the
   // spellings that gate has to see through are the spellings this one has to see through.
-  if (
-    NEVER_ALLOWED_HOSTNAMES.has(canonicalHostname(url.hostname.toLowerCase()))
-  ) {
+  if (isNeverAllowedHostname(url.hostname)) {
     return {
       allowed: false,
       reason:
@@ -244,7 +256,7 @@ export function checkNavigationTarget(
   const hostname = canonicalHostname(url.hostname.toLowerCase());
 
   // Checked before the opt-in, so no configuration can reach it.
-  if (NEVER_ALLOWED_HOSTNAMES.has(hostname)) {
+  if (isNeverAllowedHostname(hostname)) {
     return {
       allowed: false,
       reason:

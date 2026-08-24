@@ -59,6 +59,32 @@ this port has to reach it another way**, which is what publishing it on every in
 This does not reach back in time. A deployment that has been running with the two on one network
 should assume a Bot could have read or written the database, and look at the trail with that in
 mind.
+### A credential in an MCP server address is refused in the query and the fragment too
+
+Refusing `https://user:token@vendor.example/mcp` closed the userinfo spelling of a credential in the
+address and left the two obvious ones open. `?token=`, `?api_key=` and their neighbours were still
+accepted, and the address is stored and named in the trail exactly as given: audit redaction keys on
+the field name, `url` is not a sensitive one, so the secret was written to `mcp_servers` and to an
+append-only audit row in clear text. That is the same disclosure the userinfo rule exists to prevent,
+one character away.
+
+A parameter whose name reads as a credential is now refused, in the query string and in the fragment,
+and the refusal points at the token field without repeating what was typed. The name is read rather
+than matched against a list, so `?auth_token=`, `?x-api-key=` and `?X-Amz-Signature=` are refused
+alongside `?token=`: a rule that only catches the spellings somebody thought of reads as a guard
+while behaving like a gap. The test is on the parameter name rather than on the presence of a query,
+because vendors route and version with parameters and a floor that refused every one of them would
+be one an operator works around instead of with. `https://mcp.example.com/mcp?workspace=acme&version=2`
+is unaffected, and so is an ordinary fragment. A credential written into the *path* is still
+accepted: it is indistinguishable from a route, and at least one hosted provider addresses servers
+that way. **A deployment where somebody has put a credential in an address should treat it as
+disclosed and rotate it**, for the same reason as before: the audit row cannot be deleted.
+
+`metadata.goog` is refused too. It is Google's own short name for the metadata server, published
+beside `metadata.google.internal`, and it carries a dot and none of the suffixes this check lists, so
+it read as an ordinary vendor name. The long spelling was only ever refused incidentally, by the
+`.internal` rule. Both are now named, so the address this check was written for is refused on purpose
+rather than by luck.
 
 ### Name the private addresses an agent may live at
 
