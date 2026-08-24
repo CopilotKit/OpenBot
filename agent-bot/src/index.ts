@@ -73,8 +73,16 @@ const BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
  * above; the model key was the one configuration that escaped the same posture. A missing key
  * should fail in front of whoever is deploying, not in front of whoever is asking.
  */
+const BUILT_IN_SMOKE_MODE = process.env.OPENBOT_BUILT_IN_SMOKE_MODE === "1";
+if (BUILT_IN_SMOKE_MODE && process.env.NODE_ENV === "production") {
+  console.error(
+    "OPENBOT_BUILT_IN_SMOKE_MODE is local-only and cannot be enabled in production.",
+  );
+  process.exit(1);
+}
+
 const API_KEY = process.env.OPENAI_API_KEY?.trim();
-if (!API_KEY) {
+if (!BUILT_IN_SMOKE_MODE && !API_KEY) {
   console.error(
     "OPENAI_API_KEY is not set. This Bot cannot answer without a model.",
   );
@@ -82,7 +90,7 @@ if (!API_KEY) {
 }
 
 const openai = new OpenAI({
-  apiKey: API_KEY,
+  apiKey: API_KEY ?? "smoke-mode-does-not-call-a-provider",
   baseURL: BASE_URL,
 });
 
@@ -114,6 +122,27 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
       } as BaseEvent);
 
       try {
+        if (BUILT_IN_SMOKE_MODE) {
+          const messageId = `msg_${input.runId}`;
+          send({
+            type: "TEXT_MESSAGE_START",
+            messageId,
+            role: "assistant",
+          } as BaseEvent);
+          send({
+            type: "TEXT_MESSAGE_CONTENT",
+            messageId,
+            delta: "OPENBOT_BUILT_IN_SAFE_SMOKE_OK",
+          } as BaseEvent);
+          send({ type: "TEXT_MESSAGE_END", messageId } as BaseEvent);
+          send({
+            type: "RUN_FINISHED",
+            threadId: input.threadId,
+            runId: input.runId,
+          } as BaseEvent);
+          return;
+        }
+
         const completion = await openai.chat.completions.create({
           model: MODEL,
           messages: toProviderMessages(input),
