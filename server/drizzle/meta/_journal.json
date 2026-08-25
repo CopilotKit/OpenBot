@@ -110,8 +110,15 @@
     {
       "idx": 15,
       "version": "7",
+      "when": 1787525879804,
+      "tag": "0015_credentials_one_live_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
       "when": 1787581516968,
-      "tag": "0015_pin_and_soft_delete_channels",
+      "tag": "0016_pin_and_soft_delete_channels",
       "breakpoints": true
     }
   ]

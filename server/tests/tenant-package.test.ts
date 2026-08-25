@@ -1,14 +1,14 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import {
   agentProfiles,
   agents,
   deploymentPackages,
-  skillTools,
+  pluginGrants,
   skills as skillsTable,
+  skillTools,
   users,
 } from "../src/db/schema";
 import {
@@ -20,6 +20,7 @@ import {
   validateTenantPackage,
   validateThemeCss,
 } from "../src/tenant-package";
+import { TEST_POOL } from "./support/database";
 
 const database = createDatabase(
   process.env.DATABASE_URL ??
@@ -64,6 +65,7 @@ function packageAgent(
     roleDescription: "Help with everyday work.",
     type: "built_in",
     configuration: { systemPrompt: "Be helpful." },
+    skills: [],
     ...overrides,
   };
 }
@@ -305,7 +307,18 @@ describe("tenant YAML validation", () => {
         systemPrompt:
           "You are a helpful general assistant. Give clear, concise, and accurate answers.",
       },
+      skills: [],
     });
+    // The pairing the shipped package makes, which is the whole reason Knowledge narrows to document
+    // tools rather than being offered everything its grants hold.
+    expect(
+      tenantPackage.agents.find((agent) => agent.id === "knowledge")?.skills,
+    ).toEqual([
+      "find-a-document",
+      "check-a-claim",
+      "whats-changed",
+      "who-owns-this",
+    ]);
     expect(tenantPackage.channels).toContainEqual({
       id: "general-assistant",
       name: "General Assistant",
@@ -1051,5 +1064,165 @@ describe("seeding the skills a package ships", () => {
     expect(row?.instructions).toBe("Do it my way.");
     expect(row?.origin).toBe("yours");
     expect(row?.ownerUserId).toBe(owner);
+  });
+});
+
+/**
+ * Pairing a package's coworkers with the skills it ships.
+ *
+ * A deployment that seeds skills attached to nobody has switched off the narrowing they exist for,
+ * so the package states the pairing. The cases below are the ones that decide whether seeding a
+ * grant is safe: it never confers a capability, it never reaches somebody else's skill, and a
+ * redeploy can take back its own without touching an administrator's.
+ */
+describe("pairing a package's coworkers with its skills", () => {
+  const createdSkillIds: string[] = [];
+
+  afterEach(async () => {
+    for (const id of createdSkillIds.splice(0)) {
+      await database.delete(pluginGrants).where(eq(pluginGrants.ref, id));
+      await database.delete(skillTools).where(eq(skillTools.skillId, id));
+      await database.delete(skillsTable).where(eq(skillsTable.id, id));
+    }
+  });
+
+  function packageGiving(slugs: string[]) {
+    const agent = packageAgent({ skills: slugs });
+    const loaded = loadedPackage(agent);
+    const skills = slugs.map((slug) => ({
+      slug,
+      title: "Find a document",
+      summary: "Search the sources and read what comes back.",
+      instructions: "Search first, then read the file you found.",
+      tools: ["google-drive/search_files"],
+    }));
+    for (const slug of slugs) createdSkillIds.push(slug);
+    createdAgentIds.push(agent.id);
+    return { ...loaded, skills };
+  }
+
+  const grantsFor = (agentId: string) =>
+    database
+      .select()
+      .from(pluginGrants)
+      .where(
+        and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.agentId, agentId)),
+      );
+
+  test("a coworker is granted the skills its package named", async () => {
+    const slug = `pkg-${randomUUID().slice(0, 8)}`;
+    const loaded = packageGiving([slug]);
+    const created = await synchronizeTenantPackage(database, loaded);
+    createdPackageIds.push(created.id);
+
+    const granted = await grantsFor(loaded.agents[0]?.id as string);
+    expect(granted.map((row) => row.ref)).toEqual([slug]);
+    // The mark is what lets a later deploy take back its own and nobody else's.
+    expect(granted[0]?.grantedBy).toBe("tenant-package");
+  });
+
+  test("a skill the package stopped naming is taken back", async () => {
+    const slug = `pkg-${randomUUID().slice(0, 8)}`;
+    const loaded = packageGiving([slug]);
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, loaded)).id,
+    );
+
+    const agentId = loaded.agents[0]?.id as string;
+    expect(await grantsFor(agentId)).toHaveLength(1);
+
+    // Same package, same skill still shipped, but the coworker no longer asks for it.
+    const withoutIt = {
+      ...loaded,
+      agents: [{ ...(loaded.agents[0] as never), skills: [] }],
+    } as typeof loaded;
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, withoutIt)).id,
+    );
+
+    expect(await grantsFor(agentId)).toHaveLength(0);
+  });
+
+  test("a grant an administrator made by hand survives a redeploy", async () => {
+    const slug = `pkg-${randomUUID().slice(0, 8)}`;
+    const loaded = packageGiving([slug]);
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, loaded)).id,
+    );
+
+    const agentId = loaded.agents[0]?.id as string;
+    // Somebody decides this Bot should keep it, through the Skills page.
+    await database
+      .update(pluginGrants)
+      .set({ grantedBy: "an-administrator" })
+      .where(
+        and(eq(pluginGrants.kind, "skill"), eq(pluginGrants.agentId, agentId)),
+      );
+
+    const withoutIt = {
+      ...loaded,
+      agents: [{ ...(loaded.agents[0] as never), skills: [] }],
+    } as typeof loaded;
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, withoutIt)).id,
+    );
+
+    /*
+     * Kept. The package retracts what it gave, not what somebody decided: a redeploy quietly undoing
+     * a deliberate grant is the kind of thing nobody connects to the deploy that caused it.
+     */
+    const granted = await grantsFor(agentId);
+    expect(granted.map((row) => row.ref)).toEqual([slug]);
+    expect(granted[0]?.grantedBy).toBe("an-administrator");
+  });
+
+  test("a slug a person already owns is never granted to the package's Bot", async () => {
+    /*
+     * The case that decides whether this is safe at all. The seed skips a slug somebody already
+     * took, so granting anyway would hand this Bot an instruction a stranger wrote, under a name the
+     * package believed was its own.
+     */
+    const slug = `pkg-${randomUUID().slice(0, 8)}`;
+    const owner = await createUser();
+    await database.insert(skillsTable).values({
+      id: slug,
+      ownerUserId: owner,
+      slug,
+      title: "Mine",
+      summary: "Mine.",
+      instructions: "Do it my way.",
+      origin: "yours",
+    });
+
+    const loaded = packageGiving([slug]);
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, loaded)).id,
+    );
+
+    expect(await grantsFor(loaded.agents[0]?.id as string)).toHaveLength(0);
+  });
+
+  test("a coworker naming a skill the package does not ship is refused at load", () => {
+    // A typo here attaches nothing and looks exactly like working, so it is refused rather than
+    // dropped, the same as a channel naming an agent that is not there.
+    expect(() =>
+      validateTenantPackage({
+        brand: "tenant: { id: fintech, product_name: Ledgerline }",
+        agents:
+          "agents: [{ id: knowledge, name: Knowledge, title: Company Knowledge, role_description: Answer., type: built-in, system_prompt: Answer., skills: [no-such-skill] }]",
+        channels: "channels: []",
+        model:
+          "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+        knowledge: "sources: []",
+        skills: `skills:
+  - slug: find-a-document
+    title: Find a document
+    summary: Search.
+    instructions: Search.`,
+        themeCss: "",
+      }),
+    ).toThrow(
+      'agent "knowledge" names skill "no-such-skill", which this package does not ship',
+    );
   });
 });

@@ -23,6 +23,58 @@ until Refresh tools has run at least once; and, like every other connector, a Bo
 its tools are granted to it. Setup is enable at `/admin/plugins/notion`, connect an account at
 `/settings/connected-accounts`, refresh tools, then grant. No migration.
 
+### Knowledge searches instead of guessing
+
+A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the
+four document skills it ships.
+
+Knowledge is one of three coworkers in the box, described as answering company questions and citing
+sources. The skills that would let it do that were seeded attached to nobody, so every clone started
+with them paired to no Bot: the per-run narrowing that skills exist for was switched off until
+somebody opened the Skills page and made the pairing by hand, in each deployment, again after each
+new connector. The pairing belongs with the package, which wrote both files and knows which coworker
+it meant them for.
+
+THIS GRANTS NOTHING, which is what makes it safe to seed. A skill is an instruction; what a Bot may
+call is its grants, and the offer each run is the intersection of the two. A skill naming a tool its
+Bot does not hold loads nothing. Seeding an MCP grant would be the opposite, because those reach a
+person's own account, so those stay an administrator's decision and are untouched here.
+
+A redeploy takes back only what the package gave. Grants it made carry `tenant-package`, and a grant
+an administrator made through the Skills page keeps their name and survives, because a deploy quietly
+undoing a deliberate decision is the kind of change nobody traces back to the deploy that caused it.
+A coworker naming a skill its package does not ship is refused at load rather than dropped, the same
+as a channel naming an agent that is not there: a typo that silently attaches nothing looks exactly
+like working.
+
+
+### A Bot's computer is no longer on the same network as the database
+
+Compose declared no networks, so every service shared one and reached the others by service name.
+One of those services is the container a Bot's shell runs in, and another is PostgreSQL, whose
+username and password are in the same file. A shell reaches whatever its container reaches, so a Bot
+could open `postgres:5432` and authenticate: the audit trail, the policy store and the agent tables,
+from the one container whose job is to run what a Bot asks for. The role Compose creates is the
+instance owner, so the trail's append-only trigger was no defence either, being something its owner
+can drop.
+
+PostgreSQL and `migrate`, the only service that reaches it by name, are now on a `data` network of
+their own. Everything else stays where it was. Nothing changes for a deployment that runs the API
+server on the host, which reaches the database through the published port and never used the shared
+network for it. **A deployment that runs the server inside Compose has to join that service to both
+networks**, which is the one place the two are meant to meet.
+
+The published port is now on loopback, as every other port in that file already was. Taking the
+database off the Bots' network removes the name, not the address: a container's default gateway is
+the host, and a port published on every interface answers there. From inside the computer container,
+the gateway on `5432` accepted a connection and began authenticating as `openbot` on `openbot`, with
+the password in the same file. **A deployment that reached the database from another machine over
+this port has to reach it another way**, which is what publishing it on every interface was doing.
+
+This does not reach back in time. A deployment that has been running with the two on one network
+should assume a Bot could have read or written the database, and look at the trail with that in
+mind.
+
 ### Name the private addresses an agent may live at
 
 Refusing `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` in production closed a hole and took something with
@@ -46,6 +98,43 @@ It is narrow on purpose:
   one is refused wherever it appears, so a redirect is not a way around registration.
 
 Unset means none, which is what every deployment has today.
+
+### A custom MCP server can only be pointed at its own token
+
+Adding an MCP server by URL takes a credential id alongside the address, and the add is what spends
+it: the tool refresh that runs before the call returns decrypts whatever that id names and sends it
+to the address in the same request. Nothing checked which credential it was, so an administrator
+could name any row in the vault, including one person's connector token, and have that person's
+token delivered in clear text to an address of the administrator's choosing, before any Bot or grant
+was involved. The credentials screen lists every row's id and, for a connector token, the person it
+belongs to, so choosing one was a single read.
+
+A custom server now has to be pointed at a credential of its own kind, the deployment's token for
+that server. A person's connector token and the deployment's OAuth client are both refused, for the
+same reason `POST /api/admin/credentials` already refuses to create either by hand: spending one
+here uses a credential on behalf of somebody who never agreed to it. A credential that does not
+exist is refused in the same words as one of the wrong kind, so the endpoint cannot be used to ask
+which ids are real.
+
+The field is unchanged for the case it exists for, and nothing changes for a server added through
+the admin screen, which mints a token and points at the one it just made. If a deployment has a
+custom server pointing at a credential of another kind, adding it again will now be refused, and the
+answer is to give the server its own token.
+
+### A failed action is recorded the same way it was decided
+
+An action the policy allowed and the computer then failed is recorded twice, once for the decision
+and once for the outcome, so the trail can tell an action that happened from one that was permitted
+and did not. The second row was leaving out the command and the key that the first one carried.
+
+A shell command that failed part-way therefore said a Bot had run something without saying what, in
+the row somebody reading an incident reaches for first. The same omission picked the wrong element
+branch, so that row also claimed the command had been looked for in the page snapshot and not found
+— a page element a shell call never had. A failed file write kept its path throughout and is
+unchanged.
+
+Both rows now carry the same subject. Nothing about the boundary moves: the policy decided on a
+complete context before and after, and no action is permitted that was not permitted before.
 
 ### Upgrading
 
@@ -173,7 +262,61 @@ survive. A channel the deployment package defines is refused, with the reason na
 is clearing `channels.deleted_at` in the database directly; there is no restore control in the
 product.
 
-The deployment gains two nullable columns, via migration `0015`.
+The deployment gains two nullable columns, via migration `0016`.
+
+### An MCP server address that points inside the deployment is refused in three more spellings
+
+Adding an MCP server by URL is checked before the address is stored, because that form is otherwise a
+way to point the deployment at its own network. The check compared the literal hostname, and three
+spellings of an address it means to refuse were getting through.
+
+A trailing dot is the root-anchored form of the same name and reaches the same place, but it changed
+the string enough that every rule missed it, so `https://localhost./`, `https://printer.local./` and
+`https://metadata.google.internal./` were all accepted. `kubernetes.default.svc`, which is how a
+service is addressed from inside a cluster, carries dots and none of the listed suffixes, so it read
+as an ordinary vendor name.
+
+The third is worth acting on rather than just noting. A credential typed into the address itself,
+`https://user:token@vendor.example/mcp`, was accepted, and the address is stored and named in the
+trail as given. Audit redaction works on field names and `url` is not one of the sensitive ones, so
+the token was written to `mcp_servers` and to an audit row in clear text. The trail is append-only by
+design, so that row cannot be deleted afterwards: **a deployment where somebody has done this should
+treat that credential as disclosed and rotate it.** The address field now refuses a credential and
+points at the token field instead.
+
+A deployment that reaches its MCP servers by ordinary vendor hostnames sees no difference.
+
+### One unreadable turn no longer takes a whole conversation down
+
+Restoring a thread cast whatever the history store held straight to messages and handed it to the
+transcript. A turn stored in a different shape — a tool call written `{id, name, args}` rather than
+AG-UI's `{id, type: "function", function: …}`, which interrupted runs have produced — reached a
+renderer that read `toolCall.function.arguments` and threw, so a single bad turn made the whole
+conversation unopenable rather than that one message unreadable.
+
+Each stored turn is now parsed against the schema AG-UI ships, and one that does not parse is left
+out instead of being drawn. Checked where history enters the app rather than in one renderer, so
+every surface that reads a transcript is covered by the same check.
+
+**A turn that is left out is said out loud.** The conversation shows a line above it naming how many
+earlier messages could not be read, because a record people read back must not have a hole in it that
+nothing accounts for — a turn that silently disappears reads as one that was never sent. Multimodal
+content and every well-formed tool call are unaffected, and a history that cannot be read at all
+still opens the composer rather than blocking it.
+
+### Refreshing no longer flashes white before the theme arrives
+
+A person with the dark theme selected saw a white frame on every reload. The stored preference was
+read early enough, but it was applied one paint too late: the browser had already drawn a frame
+against the light palette by the time the app got to it. The document now decides its theme before
+anything is drawn.
+
+The browser was also drawing its own surfaces — scrollbars, form controls, the overscroll area —
+light under a dark app, for the whole session rather than for a frame. Both themes now declare which
+one they are, so those match too.
+
+No configuration changes and nothing is stored differently; a deployment that was already on the
+light theme sees no difference at all.
 
 ## 0.0.4
 

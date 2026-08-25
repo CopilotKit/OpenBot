@@ -31,6 +31,21 @@ agents:
       used. If you have no tool for a source, or a tool tells you it is not connected or reports an
       error, say that plainly. Never answer from your own memory as though it came from a source, and
       never claim you lack access to something a tool has just returned.
+    # The document skills, which is what makes the prompt above reachable rather than aspirational.
+    #
+    # THIS GRANTS NOTHING. A skill is an instruction, and what a Bot may call is its grants: the
+    # offer each run is the intersection of the two, so until somebody connects Drive and grants
+    # these tools, naming them here loads nothing and this Bot correctly says it has no source.
+    # The moment they do, it searches instead of guessing, with no second step to remember.
+    #
+    # Stated here rather than left to the Skills page because the package wrote both files and knows
+    # which Bot it meant them for. Left to a screen, every clone starts with the skills attached to
+    # nobody, which switches off the per-run narrowing they exist for.
+    skills:
+      - find-a-document
+      - check-a-claim
+      - whats-changed
+      - who-owns-this
   # The Bot that ships in the box (agent-bot), addressed exactly the way a customer's own Bot would
   # be: an AG-UI endpoint in the registry. Names in dollar-brace form are read from the environment,
   # so the address belongs to the deployment. Replace it with your own service and nothing changes.

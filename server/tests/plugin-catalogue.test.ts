@@ -290,6 +290,58 @@ describe("a URL an administrator typed", () => {
     expect(customUrlRefusal("https://printer.local/mcp")).not.toBeNull();
   });
 
+  test("the fully qualified spelling of those names is refused too", () => {
+    // A trailing dot is the root-anchored form of the same name and resolves to the same place, so
+    // every rule above has to see through it. It defeats them in two different ways: the suffix
+    // tests stop matching because the string now ends in the dot, and "database." acquires the dot
+    // that the single-label test keys on.
+    expect(customUrlRefusal("https://localhost./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://database./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://vault.internal./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://printer.local./mcp")).not.toBeNull();
+    expect(
+      customUrlRefusal("https://metadata.google.internal./computeMetadata/v1/"),
+    ).not.toBeNull();
+    // More than one, because stripping a single dot leaves a string that still misses every rule.
+    expect(customUrlRefusal("https://localhost../mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://vault.internal.../mcp")).not.toBeNull();
+  });
+
+  test("an in-cluster service name is refused", () => {
+    // .svc is how a Kubernetes service is addressed from inside the cluster. It has dots and none
+    // of the other suffixes, so it reads as an ordinary vendor name.
+    expect(
+      customUrlRefusal("https://kubernetes.default.svc/mcp"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://kubernetes.default.svc.cluster.local/mcp"),
+    ).not.toBeNull();
+  });
+
+  test("a credential in the URL is refused", () => {
+    // Userinfo is not part of the host, so every rule above passes it, and addCustomServer then
+    // writes the string it was given into mcp_servers.url and into the configuration.changed audit
+    // payload. Audit redaction keys on the field name and "url" is not sensitive, so the secret
+    // would sit in the trail in clear text.
+    expect(
+      customUrlRefusal("https://oauth:s3cret@mcp.example.com/mcp"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://token@mcp.example.com/mcp"),
+    ).not.toBeNull();
+  });
+
+  test("refusing a credential in the URL does not repeat the credential", () => {
+    // The refusal is rendered to the administrator and can reach a log, so it must not carry the
+    // thing it exists to reject.
+    const refusal = customUrlRefusal(
+      "https://oauth:s3cret@mcp.example.com/mcp",
+    );
+    expect(refusal).not.toBeNull();
+    expect(refusal).not.toContain("s3cret");
+    expect(refusal).not.toContain("oauth");
+  });
+
   test("nonsense is refused rather than thrown", () => {
     expect(customUrlRefusal("not a url")).toBe("That is not a URL.");
   });

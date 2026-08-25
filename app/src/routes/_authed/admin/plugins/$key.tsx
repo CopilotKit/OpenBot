@@ -802,20 +802,23 @@ function RouteComponent() {
                 <p className="mb-2 font-medium text-sm">To</p>
                 <div className="space-y-2">
                   {bots.map((bot) => (
-                    <label
-                      className="flex items-center gap-2 text-sm"
-                      key={bot.id}
-                    >
+                    <div className="flex items-center gap-2" key={bot.id}>
                       <Checkbox
                         checked={selectedBots.has(bot.id)}
+                        id={`grant-bot-${bot.id}`}
                         onCheckedChange={() =>
                           setSelectedBots((previous) =>
                             toggled(previous, bot.id),
                           )
                         }
                       />
-                      {bot.name}
-                    </label>
+                      <label
+                        className="text-sm"
+                        htmlFor={`grant-bot-${bot.id}`}
+                      >
+                        {bot.name}
+                      </label>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -841,20 +844,23 @@ function RouteComponent() {
                     </div>
                     <div className="space-y-2">
                       {reads.map((tool) => (
-                        <label
-                          className="flex items-center gap-2"
-                          key={tool.ref}
-                        >
+                        <div className="flex items-center gap-2" key={tool.ref}>
                           <Checkbox
                             checked={selectedRefs.has(tool.ref)}
+                            id={`grant-tool-${tool.ref}`}
                             onCheckedChange={() =>
                               setSelectedRefs((previous) =>
                                 toggled(previous, tool.ref),
                               )
                             }
                           />
-                          <span className="font-mono text-xs">{tool.name}</span>
-                        </label>
+                          <label
+                            className="font-mono text-xs"
+                            htmlFor={`grant-tool-${tool.ref}`}
+                          >
+                            {tool.name}
+                          </label>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -882,20 +888,23 @@ function RouteComponent() {
                     </div>
                     <div className="space-y-2">
                       {writes.map((tool) => (
-                        <label
-                          className="flex items-center gap-2"
-                          key={tool.ref}
-                        >
+                        <div className="flex items-center gap-2" key={tool.ref}>
                           <Checkbox
                             checked={selectedRefs.has(tool.ref)}
+                            id={`grant-tool-${tool.ref}`}
                             onCheckedChange={() =>
                               setSelectedRefs((previous) =>
                                 toggled(previous, tool.ref),
                               )
                             }
                           />
-                          <span className="font-mono text-xs">{tool.name}</span>
-                        </label>
+                          <label
+                            className="font-mono text-xs"
+                            htmlFor={`grant-tool-${tool.ref}`}
+                          >
+                            {tool.name}
+                          </label>
+                        </div>
                       ))}
                     </div>
                   </div>

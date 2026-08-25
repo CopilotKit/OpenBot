@@ -36,6 +36,15 @@ export const auditEventTypes = [
   "configuration.changed",
   "credential.created",
   "credential.rotated",
+  /**
+   * A rotation the vault refused, and why.
+   *
+   * Recorded because the refusals are the interesting ones. A rotation aimed at a key other than the
+   * one the credential belongs to, or at a credential already revoked, is either a caller with a bug
+   * or somebody trying to retire a key they were not asked to retire, and neither left a trace while
+   * only the successes were written.
+   */
+  "credential.rotation_refused",
   "credential.revoked",
   "connector.sync_succeeded",
   "connector.sync_failed",
