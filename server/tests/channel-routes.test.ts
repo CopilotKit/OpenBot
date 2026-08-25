@@ -1250,7 +1250,7 @@ describe("channel read markers", () => {
         ),
       );
     expect(row?.lastReadAt).not.toBeNull();
-    expect((row?.lastReadAt as Date).getTime()).toBeGreaterThanOrEqual(
+    expect(row?.lastReadAt?.getTime() ?? 0).toBeGreaterThanOrEqual(
       future.getTime(),
     );
   });
