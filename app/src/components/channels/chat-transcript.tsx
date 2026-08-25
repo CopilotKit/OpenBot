@@ -409,8 +409,17 @@ const TranscriptMessage = memo(function TranscriptMessage({
     <MessageRow align={align}>
       <MessageContent>
         <Arriving delay={delay}>
-          <Bubble align={align} variant={isUser ? "muted" : "ghost"}>
-            <BubbleContent>
+          {/*
+            A Bot's message takes the whole column, not the width of its words: block content
+            inside it — a fenced code block, a table — should span the transcript rather than
+            shrink to its own text. A person's bubble keeps fitting what they said.
+          */}
+          <Bubble
+            align={align}
+            variant={isUser ? "muted" : "ghost"}
+            className={isUser ? undefined : "w-full"}
+          >
+            <BubbleContent className={isUser ? undefined : "w-full"}>
               {isUser ? (
                 // A person's own message is shown exactly as they typed it. Rendering it as markdown
                 // would silently reformat what they said, and an asterisk in a sentence is not
