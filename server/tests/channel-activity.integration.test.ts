@@ -346,3 +346,99 @@ describe("channel activity", () => {
     ).toEqual([busy.id, quiet.id]);
   });
 });
+
+/**
+ * A pin holds a channel at the top of the roster, which is a claim about the roster and not about
+ * whichever page happens to be loaded.
+ *
+ * Ordering pinned-first only in the browser sorts the rows already fetched, so a channel somebody
+ * pinned and then did not talk to for a month sits on page three and never appears at the top at
+ * all — the roster the person sees contradicts the pin they made. The order therefore belongs in the
+ * query, and the cursor has to carry the pin flag as its leading element or paging walks the same
+ * channel twice.
+ */
+describe("a pinned channel in a paged roster", () => {
+  /** Channels with explicit, minute-apart activity, newest last, so recency order is not a clock race. */
+  async function channelsWithActivity(owner: AgentActor, count: number) {
+    const agentId = await createAgent(owner);
+    const ids: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      ids.push((await createChannel(owner, [agentId])).id);
+    }
+    const base = Date.now() - count * 60_000;
+    for (const [index, id] of ids.entries()) {
+      await store.recordActivity(owner, id, {
+        agentId,
+        at: new Date(base + index * 60_000),
+        text: `Message ${index}`,
+      });
+    }
+    return ids;
+  }
+
+  /** Every channel the cursor reaches, in the order the pages hand them over. */
+  async function walk(owner: AgentActor, limit: number) {
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const result = await store.list(owner, {
+        limit,
+        ...(cursor ? { cursor } : {}),
+      });
+      seen.push(...result.channels.map((channel) => channel.id));
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+    return seen;
+  }
+
+  test("lifts a pinned channel onto the first page, however old it is", async () => {
+    const owner = await createUser();
+    const ids = await channelsWithActivity(owner, 6);
+    const oldest = ids[0] as string;
+
+    await store.setPinned(owner, oldest, true);
+
+    // Two per page, six channels: on recency alone this one is the last row of the last page.
+    const page = await store.list(owner, { limit: 2 });
+    expect(page.channels.map((channel) => channel.id)[0]).toBe(oldest);
+  });
+
+  test("walks every channel exactly once across pinned and unpinned", async () => {
+    const owner = await createUser();
+    const ids = await channelsWithActivity(owner, 6);
+    // Two pins, chosen so the group boundary does not line up with a page boundary.
+    await store.setPinned(owner, ids[0] as string, true);
+    await store.setPinned(owner, ids[3] as string, true);
+
+    const seen = await walk(owner, 2);
+
+    // Pinned first, and recency within each group: the cursor has to order pages the same way the
+    // first page is ordered, or a channel is served twice and another never at all.
+    expect(seen).toEqual([
+      ids[3] as string,
+      ids[0] as string,
+      ids[5] as string,
+      ids[4] as string,
+      ids[2] as string,
+      ids[1] as string,
+    ]);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  test("unpinning puts the channel back where recency alone would have it", async () => {
+    const owner = await createUser();
+    const ids = await channelsWithActivity(owner, 4);
+    const oldest = ids[0] as string;
+
+    await store.setPinned(owner, oldest, true);
+    await store.setPinned(owner, oldest, false);
+
+    expect(await walk(owner, 2)).toEqual([
+      ids[3] as string,
+      ids[2] as string,
+      ids[1] as string,
+      oldest,
+    ]);
+  });
+});

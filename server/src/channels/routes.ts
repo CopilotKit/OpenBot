@@ -83,14 +83,26 @@ const DEFAULT_CHANNEL_PAGE = 50;
 /** The most a caller may ask for, so the endpoint cannot be talked back into reading everything. */
 const MAX_CHANNEL_PAGE = 200;
 
-/** Where a page stopped: both halves of the sort, since two channels can share a timestamp. */
-type ChannelCursor = { recency: string; id: string };
+/**
+ * Where a page stopped: every part of the sort, in sort order.
+ *
+ * `pinned` leads, because the ordering does: a keyset cursor has to name the whole sort key or the
+ * next page is selected by a different rule than the page it follows, which serves some channels
+ * twice and others never. `recency` and `id` are both here for the same reason — two channels can
+ * share a timestamp.
+ */
+type ChannelCursor = { pinned: boolean; recency: string; id: string };
 
 function encodeChannelCursor(cursor: ChannelCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
-/** A malformed cursor reads as the first page, which is the honest answer to a stale link. */
+/**
+ * A malformed cursor reads as the first page, which is the honest answer to a stale link.
+ *
+ * A cursor minted before `pinned` existed is malformed by this definition, and deliberately: it
+ * describes a position in an ordering this query no longer has.
+ */
 function decodeChannelCursor(
   value: string | undefined,
 ): ChannelCursor | undefined {
@@ -99,13 +111,36 @@ function decodeChannelCursor(
     const parsed = JSON.parse(
       Buffer.from(value, "base64url").toString("utf8"),
     ) as ChannelCursor;
-    return typeof parsed?.id === "string" && typeof parsed?.recency === "string"
+    return typeof parsed?.id === "string" &&
+      typeof parsed?.recency === "string" &&
+      typeof parsed?.pinned === "boolean"
       ? parsed
       : undefined;
   } catch {
     return undefined;
   }
 }
+
+/**
+ * The roster's sort key, as SQL, in the order it sorts.
+ *
+ * Every part descends, which is what lets the cursor be one row comparison rather than a nest of
+ * ORs: a pin is 1 and no pin is 0, so `desc` puts pinned channels first, and both remaining parts
+ * already wanted `desc`. Starting a conversation counts as activity — a channel somebody just made
+ * has nothing said in it yet and is the one they are about to type in, so ordering on the message
+ * alone would bury it under every channel that has one.
+ *
+ * The browser repeats the recency half when the socket patches a row, and lifts pinned rows at
+ * render; both must agree with this, or the list reorders itself on the next event. See `byRecency`
+ * in use-channel-events.ts and `pinnedFirst` in app-sidebar.tsx.
+ */
+const PINNED_RANK = sql`case when ${channelMemberships.pinnedAt} is not null then 1 else 0 end`;
+const RECENCY = sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt})`;
+const ROSTER_ORDER = [
+  sql`${PINNED_RANK} desc`,
+  sql`${RECENCY} desc`,
+  desc(channels.id),
+];
 
 export type ChannelStore = {
   create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
@@ -281,7 +316,8 @@ export function createChannelStore(
       const page = await database
         .select({
           id: channels.id,
-          recency: sql<Date>`coalesce(${channels.lastMessageAt}, ${channels.createdAt})`,
+          recency: sql<Date>`${RECENCY}`,
+          pinned: sql<boolean>`${channelMemberships.pinnedAt} is not null`,
         })
         .from(channels)
         .innerJoin(
@@ -294,15 +330,14 @@ export function createChannelStore(
         .where(
           and(
             isNull(channels.deletedAt),
+            // One row comparison over the whole sort key, which only reads as "everything after the
+            // cursor" because every part of that key descends. See ROSTER_ORDER.
             cursor
-              ? sql`(coalesce(${channels.lastMessageAt}, ${channels.createdAt}), ${channels.id}) < (${cursor.recency}::timestamptz, ${cursor.id})`
+              ? sql`(${PINNED_RANK}, ${RECENCY}, ${channels.id}) < (${cursor.pinned ? 1 : 0}::int, ${cursor.recency}::timestamptz, ${cursor.id})`
               : undefined,
           ),
         )
-        .orderBy(
-          sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt}) desc`,
-          desc(channels.id),
-        )
+        .orderBy(...ROSTER_ORDER)
         // One more than asked for, so "is there another page" needs no second count query.
         .limit(limit + 1);
 
@@ -311,6 +346,7 @@ export function createChannelStore(
       const nextCursor =
         page.length > limit && last
           ? encodeChannelCursor({
+              pinned: last.pinned,
               recency: new Date(last.recency).toISOString(),
               id: last.id,
             })
@@ -351,11 +387,6 @@ export function createChannelStore(
           agentProfiles,
           eq(agentProfiles.agentId, channelAgents.agentId),
         )
-        // Most recent first, where starting a conversation counts as activity. A channel somebody
-        // just created has nothing said in it yet, and is also the one they are about to type in, // ordering on the message alone would bury it under every channel that has one.
-        //
-        // The browser repeats this when the socket patches a row. Both must agree, or the list
-        // reorders itself on the next event; see `byRecency` in use-channel-events.ts.
         .where(
           and(
             inArray(
@@ -368,11 +399,8 @@ export function createChannelStore(
             isNull(channels.deletedAt),
           ),
         )
-        .orderBy(
-          sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt}) desc`,
-          desc(channels.id),
-          asc(channelAgents.agentId),
-        );
+        // The same order the page was chosen in, since the rows below are read in order.
+        .orderBy(...ROSTER_ORDER, asc(channelAgents.agentId));
 
       // One row per channel-agent pair; the ordering above keeps each channel's rows together and
       // its agents in the same lexicographic order `get` returns.
