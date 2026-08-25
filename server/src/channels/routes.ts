@@ -422,6 +422,34 @@ export function createChannelStore(
             .update(channels)
             .set({ deletedAt: new Date(), updatedAt: new Date() })
             .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)));
+
+          // Read on this transaction, so the members told are the ones the channel had when it was
+          // hidden. Soft leaves the membership rows in place, so this reads the same list a repeat
+          // call would.
+          const members = await transaction
+            .select({ userId: channelMemberships.userId })
+            .from(channelMemberships)
+            .where(eq(channelMemberships.channelId, channelId));
+
+          /*
+           * Announced inside the transaction, so it is delivered on commit and a refused delete —
+           * a channel the package owns, or one the caller is not in — announces nothing at all.
+           *
+           * Every member is told, because the deletion hides the channel for all of them: without
+           * this, a second tab and a second replica keep rendering a row whose channel no longer
+           * resolves until something else makes them refetch.
+           */
+          const event: ChannelActivityEvent = {
+            channelId,
+            memberIds: members.map((member) => member.userId),
+            lastMessage: null,
+            lastMessageAt: null,
+            lastMessageAgentId: null,
+            deleted: true,
+          };
+          await transaction.execute(
+            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+          );
         },
         { isolationLevel: "read committed" },
       );

@@ -22,6 +22,8 @@ export type ChannelActivityEvent = {
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
+  /** The channel is hidden from every member's roster. Absent on an ordinary activity event. */
+  deleted?: true;
 };
 
 type Send = (payload: string) => void;
