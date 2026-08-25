@@ -18,6 +18,15 @@ function isBlankBrowser(shot: Screenshot): boolean {
   return url === "" || url === "about:blank";
 }
 
+/** The part of a URL worth putting on screen; the whole thing is rarely readable at this size. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 /** Default browser viewport ratio, reserved before the first screenshot arrives. */
 const DEFAULT_ASPECT_RATIO = 1280 / 800;
 
@@ -55,6 +64,15 @@ type Props = {
   aspectRatio?: number;
   minWidth?: number;
   minHeight?: number;
+  /**
+   * The page this turn left the browser on, for a turn that has finished.
+   *
+   * A conversation is a record, and a record must not change its mind. Without this, reopening a
+   * conversation made every past turn fetch the screen as it is now, so an answer about Hacker News
+   * from an hour ago sat under a picture of whatever the Bot has open today. The frame was live, the
+   * caption was not, and the turn read as though it had browsed somewhere it never went.
+   */
+  page?: { url?: string; title?: string };
 };
 
 export function ComputerView({
@@ -64,6 +82,7 @@ export function ComputerView({
   aspectRatio = DEFAULT_ASPECT_RATIO,
   minWidth = DEFAULT_MIN_WIDTH,
   minHeight = DEFAULT_MIN_HEIGHT,
+  page,
 }: Props) {
   const [shot, setShot] = useState<Screenshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -92,8 +111,22 @@ export function ComputerView({
   /** Force a short watch window after non-Bot actions such as secret entry. */
   const watchUntil = useRef(0);
 
+  /**
+   * A finished turn is history, and history is not polled.
+   *
+   * While a turn runs, the frames are that turn's own and freeze where it left them, which is right.
+   * Reopening the conversation later is the case this guards: the component mounts with no frame,
+   * and fetching one would put today's page under yesterday's answer. It shows the page that turn
+   * actually left open instead, which is the thing being remembered.
+   *
+   * `page` is what marks a turn as settled history rather than one still going, so a caller that
+   * knows nothing about the page keeps the old behaviour and nothing regresses.
+   */
+  const settled = !active && Boolean(page) && shot === null;
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {
+    if (settled) return;
     const mine = ++generation.current;
     let timer: ReturnType<typeof setTimeout>;
     // Consecutive identical frames observed during post-action settling.
@@ -141,10 +174,12 @@ export function ComputerView({
       generation.current++;
       clearTimeout(timer);
     };
-  }, [computerId, active, intervalMs, secretPending]);
+  }, [computerId, active, intervalMs, secretPending, settled]);
 
   /** Poll control state independently from screenshot polling so help/secret prompts surface. */
   useEffect(() => {
+    // Nothing is waiting on a turn that has already finished, so nothing needs asking about it.
+    if (settled) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -228,7 +263,24 @@ export function ComputerView({
                   : "text-muted-foreground"
               }`}
             >
-              {problem ? (
+              {settled ? (
+                <>
+                  {/*
+                    What this turn had open, named rather than drawn.
+                    
+                    The picture is gone: nothing stored it, and fetching one now would show a
+                    different page. Naming the page is the honest version of the same sentence, and
+                    it stays true however many times the Bot has browsed since.
+                  */}
+                  <span className="font-medium">{page?.title || "A page"}</span>
+                  {page?.url ? (
+                    <span className="break-all">{hostOf(page.url)}</span>
+                  ) : null}
+                  <span>
+                    Opened during this turn. The screen has moved on since.
+                  </span>
+                </>
+              ) : problem ? (
                 <>
                   <span className="font-medium">
                     You cannot see the screen right now

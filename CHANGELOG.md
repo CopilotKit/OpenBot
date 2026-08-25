@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A finished turn shows the page it opened, not the one open now
+
+Reopening a conversation made every past turn fetch the screen as it is now, so an answer about
+Hacker News from an hour ago sat under a picture of whatever the Bot had open since. The frame was
+live and the caption was not, and the turn read as though it had browsed somewhere it never went.
+
+A turn that has finished is history, and history is not polled. It names the page that turn actually
+left open. While a turn is running nothing changes: the frames are its own and freeze where it left
+them.
+
+It names the page rather than showing it, because nothing stored the picture and fetching one now
+would show a different page. Naming it is the honest version of the same sentence, and it stays true
+however many times the Bot has browsed since.
+
 ### A conversation keeps the browsing that produced its answers
 
 Every turn in which a Bot used a tool was disappearing from the transcript on reload. The sentence

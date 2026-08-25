@@ -126,6 +126,9 @@ type ComputerOutcome = {
   bytes?: number;
   /** A file read. Named `text` on the way back and `contents` on the way in. */
   text?: string;
+  /** Where a navigation landed, which is what a finished turn's screen tile remembers. */
+  url?: string;
+  title?: string;
 };
 
 /**
@@ -279,11 +282,32 @@ export function ComputerTools() {
           }
         : result;
     },
-    render: ({ status }) => (
-      <div className="my-2">
-        <ComputerView computerId={bot.current} active={status !== "complete"} />
-      </div>
-    ),
+    render: ({ result, status }) => {
+      /*
+       * The page this turn left open, so reopening the conversation shows what it browsed rather
+       * than what the Bot has open now. Only once the turn is finished: while it runs, the live
+       * frames are its own.
+       */
+      const outcome = status === "complete" ? outcomeOf(result) : {};
+      const page =
+        typeof outcome.url === "string"
+          ? {
+              url: outcome.url,
+              ...(typeof outcome.title === "string"
+                ? { title: outcome.title }
+                : {}),
+            }
+          : undefined;
+      return (
+        <div className="my-2">
+          <ComputerView
+            computerId={bot.current}
+            active={status !== "complete"}
+            {...(page ? { page } : {})}
+          />
+        </div>
+      );
+    },
   });
 
   useFrontendTool({
