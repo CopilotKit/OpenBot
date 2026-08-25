@@ -6,6 +6,7 @@ import {
   type AgentProfileStore,
 } from "../agents/profile-store";
 import type { AgentActor, AgentProfile } from "../agents/profile-types";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import type { Database } from "../db/client";
 import {
@@ -627,8 +628,58 @@ export function createChannelRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   /** Absent in tests and wherever live updates are not wanted; the routes still work without it. */
   events?: ChannelEventHub,
+  /** Where a channel's removal is written. Absent in tests that do not care about the trail. */
+  auditStore?: AuditStore,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
+
+  /**
+   * Write the one audit row this file ever writes, tolerantly.
+   *
+   * Mirrors `record` in agents/routes.ts: never fatal, because the channel is already hidden and the
+   * caller has already been told so by the time this runs. A trail that is briefly unavailable is
+   * not a reason to report a failure that did not happen.
+   *
+   * Reached only after `softDelete` resolves, so a refused delete — a channel the package owns, or
+   * one the caller is not in — writes nothing. The trail records acts, not attempts.
+   */
+  const recordDeleted = async (
+    context: Context<{ Variables: AppVariables }>,
+    channelId: string,
+  ): Promise<void> => {
+    if (!auditStore) return;
+    const actor = context.var.actor;
+    try {
+      await recordAuditEvent(auditStore, {
+        eventType: "channel.deleted",
+        targetType: "channel",
+        targetId: channelId,
+        /*
+         * Attributed, including in single-user mode.
+         *
+         * The other audited surfaces drop this id when the actor is the local development one, on
+         * the grounds that `audit_events.actor_user_id` has a foreign key into `users` that it would
+         * violate. It has no foreign key, and `initializeDevActorUser` writes that row at start-up
+         * anyway, so neither half of the reason holds. It matters here more than most: single-user
+         * is the mode `.env.example` ships switched on, so an unattributed row is what a fork sees
+         * by default, and "somebody deleted this conversation" is the whole point of the row.
+         */
+        actorUserId: actor.id,
+        // Named rather than implied: the channel row and its thread are still there, and a later
+        // hard delete would be a different fact about the same channel.
+        payload: { mechanism: "soft" },
+      });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          type: "channel-audit-write-failed",
+          eventType: "channel.deleted",
+          channelId,
+          error: String(error),
+        }),
+      );
+    }
+  };
 
   // Before `/:channelId`, or "events" is read as a channel id.
   if (events) {
@@ -729,8 +780,10 @@ export function createChannelRoutes(
   });
 
   routes.delete("/:channelId", requireUser, async (context) => {
+    const channelId = context.req.param("channelId");
     try {
-      await store.softDelete(context.var.actor, context.req.param("channelId"));
+      await store.softDelete(context.var.actor, channelId);
+      await recordDeleted(context, channelId);
       return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);

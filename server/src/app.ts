@@ -689,7 +689,7 @@ export function createApp(
   if (channelStore) {
     app.route(
       "/api/channels",
-      createChannelRoutes(channelStore, requireUser, channelEvents),
+      createChannelRoutes(channelStore, requireUser, channelEvents, auditStore),
     );
   }
 

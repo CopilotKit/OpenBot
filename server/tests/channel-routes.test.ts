@@ -1,4 +1,11 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
@@ -9,6 +16,8 @@ import {
 } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createApp } from "../src/app";
+import type { AuditEventInput, AuditStore } from "../src/audit";
+import { DEV_ACTOR } from "../src/auth/dev-actor";
 import type { AppVariables } from "../src/auth/guards";
 import {
   type AgentChannel,
@@ -392,6 +401,141 @@ describe("channel routes", () => {
 
     expect(response.status).toBe(401);
     expect(store.calls).toEqual([]);
+  });
+});
+
+/**
+ * The channel row survives a soft delete, but nothing on it says who hid it or when.
+ *
+ * "Where did that conversation go" is the question this answers, and the row is the only thing that
+ * can: `deleted_at` is a timestamp with no actor. Untested, it is also the easiest thing to drop in
+ * a later refactor without anything going red — which is exactly how it was lost once already.
+ */
+describe("channel delete audit", () => {
+  /** Rows written by the route under test, in order. */
+  let audited: AuditEventInput[] = [];
+
+  beforeEach(() => {
+    audited = [];
+  });
+
+  function appWithAudit(
+    store: ChannelStore,
+    auditStore: AuditStore = {
+      insert: async (event) => void audited.push(event),
+    },
+  ) {
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route(
+      "/",
+      createChannelRoutes(store, requireUser, undefined, auditStore),
+    );
+    return app;
+  }
+
+  test("writes an attributed row naming the mechanism", async () => {
+    const response = await appWithAudit(fakeStore()).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(audited).toEqual([
+      {
+        eventType: "channel.deleted",
+        targetType: "channel",
+        targetId: "channel-1",
+        actorUserId: actor.id,
+        payload: { mechanism: "soft" },
+      },
+    ]);
+  });
+
+  /* Same discipline as bot-lifecycle-audit.test.ts: the trail records acts, not attempts. */
+  test("a refused change writes nothing", async () => {
+    const store = fakeStore({
+      softDelete: async () => {
+        throw new ChannelPackageOwnedError("channel-1");
+      },
+    });
+
+    const response = await appWithAudit(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    expect(audited).toEqual([]);
+  });
+
+  test("a delete of somebody else's channel writes nothing", async () => {
+    const store = fakeStore({
+      softDelete: async () => {
+        throw new ChannelNotFoundError("channel-1");
+      },
+    });
+
+    const response = await appWithAudit(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(404);
+    expect(audited).toEqual([]);
+  });
+
+  /*
+   * Single-user is the mode `.env.example` ships switched on, so this is the row a fork sees by
+   * default. The other audited surfaces drop the id here, believing `audit_events.actor_user_id`
+   * has a foreign key into `users`; it has none, and `initializeDevActorUser` writes that row at
+   * start-up regardless. An unattributed row would answer "was this conversation deleted" and not
+   * "by whom", which is the half worth keeping.
+   */
+  test("attributes the local development actor rather than dropping it", async () => {
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route(
+      "/",
+      createChannelRoutes(
+        fakeStore(),
+        async (context, next) => {
+          context.set("actor", DEV_ACTOR);
+          await next();
+        },
+        undefined,
+        { insert: async (event) => void audited.push(event) },
+      ),
+    );
+
+    await app.request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(audited[0]?.actorUserId).toBe(DEV_ACTOR.id);
+  });
+
+  /*
+   * The channel is already hidden and the caller has already been told so by the time this runs. A
+   * trail that is briefly unavailable is not a reason to report a failure that did not happen.
+   */
+  test("still answers when the audit write throws", async () => {
+    const response = await appWithAudit(fakeStore(), {
+      insert: async () => {
+        throw new Error("audit table is unreachable");
+      },
+    }).request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(response.status).toBe(204);
+  });
+
+  test("deletes without a trail when the deployment keeps none", async () => {
+    const store = fakeStore();
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route("/", createChannelRoutes(store, requireUser));
+
+    const response = await app.request("http://openbot.test/channel-1", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(204);
+    expect(store.calls).toEqual([["softDelete", actor, "channel-1"]]);
   });
 });
 

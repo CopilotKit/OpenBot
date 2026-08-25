@@ -59,6 +59,15 @@ export const auditEventTypes = [
    * routing decision is a fact about where a conversation went, not a copy of what was said.
    */
   "channel.routed",
+  /**
+   * A channel was removed from every member's roster, and by whom.
+   *
+   * The removal is soft, so the row and its thread survive and `channels.deleted_at` records that it
+   * happened. What it cannot record is who did it: a timestamp answers "when did that conversation
+   * disappear" and not "who ended it for everybody in it", which is the half somebody asks about.
+   * `payload.mechanism` names how, so a later hard delete is distinguishable from this one.
+   */
+  "channel.deleted",
   "agent.invoked",
   /**
    * An address this deployment declined to dial for a Bot, and why.
