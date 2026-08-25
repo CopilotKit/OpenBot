@@ -74,10 +74,14 @@ function RouteComponent() {
   const isWatching = watch === true;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
-  /** Needs-you state is rendered by the screen when the screen is already open. */
+  /** Only polled while the screen is closed; the screen panel polls control itself. */
   const needsYou = useNeedsYou(agentId, !isWatching);
 
-  // Needs-you prompts auto-open the screen because the actionable prompt is rendered there.
+  /*
+   * Needs-you prompts auto-open the screen panel, because the prompt with the reason on it — the
+   * amber "the assistant needs you" row, and the masked field for a credential — is drawn on the
+   * screen card in that panel. Nothing about a stuck Bot is actionable until this pane is open.
+   */
   useEffect(() => {
     if (!needsYou) return;
     show("watch");
