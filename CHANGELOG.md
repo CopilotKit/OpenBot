@@ -8,6 +8,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Taking the wheel stops the Bot's shell, not just its clicks
+
+While a person held the wheel the Bot was refused on the page, and not in the shell. `/exec` and a
+workspace write went through, so a Bot could keep running commands and rewriting its `/workspace`
+underneath somebody who had taken the browser at a login wall. The guard existed and covered
+navigation and the four page actions; the shell arrived later and was never wired to it.
+
+Every acting path now asks the same question in one place, so the property the documentation states
+is the property the computer has. Reading is deliberately not acting: `/files/read` and
+`/files/list` still answer while a person drives, because a Bot that has just been stopped still has
+to be able to say what it was doing.
+
+Nothing to configure. A Bot that acts during a takeover gets the refusal it already got for a click,
+and the trail records the attempt and the failure the same way.
+
 ### A finished turn shows the page it opened, not the one open now
 
 Reopening a conversation made every past turn fetch the screen as it is now, so an answer about
