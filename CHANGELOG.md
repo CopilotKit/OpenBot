@@ -8,6 +8,34 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A rule can be tested against history before it is saved
+
+A boundary was written blind: an administrator typed a CEL rule, saved it, and learned what it
+actually matches from the refusals it produced in production. The trail already records every judged
+computer action with the same facts the gateway judged it on, so the question "what would this rule
+have done" had an answer nobody could ask.
+
+The Boundaries page now has **Test first** beside **Add rule**. The candidate — the current policy
+plus the drafted rule — is replayed over recent recorded actions, and the reply names each one it
+would have decided differently and the rule that would have decided it. Nothing is saved and nothing
+is decided; no audit row is written, because no action was permitted or refused.
+
+Replay, not simulation: the context is rebuilt from the audit row exactly as the gateway built it at
+decision time, through the same helpers, so a rule behaves here as it will behave live. The scan is
+bounded and biased to recency, and the reply says how many rows it covered.
+
+### A browser refusal names the element again
+
+Every browser context carries a neutral all-empty `mcp` object, so a rule naming `mcp.effect`
+evaluates to false instead of throwing. The refusal copy keyed on that object being present rather
+than on its contents, so every live browser refusal took the tool-call branch and read
+":  on  is blocked" — two empty strings where the element and the page belonged. The tests passed,
+because their contexts omitted the field the gateway always attaches.
+
+The branch now keys on the server and tool being named, which a real tool call always has. A refused
+click reads "“Submit order” on shop.example is blocked by the rule ..." again, which is what the Bot
+relays to the person asking.
+
 ### Knowledge searches instead of guessing
 
 A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the

@@ -630,6 +630,7 @@ export function createApp(
         computerPolicy,
         requireUser,
         canUseBot,
+        auditReader,
       ),
     );
   }
