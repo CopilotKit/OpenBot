@@ -163,6 +163,29 @@ read that as a stolen token and revoke the whole connection. Every plugin call t
 token now locks the credential's vault row for the length of the exchange, so a second replica waits
 rather than races, and the rotated token is written back in the same transaction that held the lock.
 Nothing to configure; a connection just stops going stale under concurrent traffic.
+
+### A configured egress proxy reaches the browser that uses it
+
+`EGRESS_PROXY_DEFAULT` and `EGRESS_PROXY_<BOT>` were documented as the way to give a Bot a stable
+outbound address, and Compose passed neither to anything. `docker-compose.yml` named no egress
+variable and had no `env_file`, so the shared computer resolved every Bot to no proxy and went out
+directly, and under the supervisor the same emptiness meant there was nothing to forward into the
+computers it creates.
+
+The failure was silent, which for a setting whose purpose is to give a security team a per-Bot
+address for network rules is the worst of the available failures. The stack started, the browser
+left by the host, and the Computers screen reported "Leaves directly" because it was reading the
+same empty environment.
+
+They now live in `egress.env`, which both the computer and the supervisor are given. A file rather
+than more `environment:` entries because `EGRESS_PROXY_<BOT>` is derived from a Bot's id and there
+is no fixed set of names to list; a file of its own rather than `.env` because that one holds the
+deployment's secrets and the container running a browser and a Bot's shell is deliberately not
+given them. It is optional, so a deployment with no proxy is unchanged, and gitignored, because a
+proxy URL can carry a password.
+
+**Move these two out of `.env` and into `egress.env`.** In `.env` they reach no process.
+
 ### Knowledge searches instead of guessing
 
 A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the
