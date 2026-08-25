@@ -8,9 +8,8 @@ import {
   takeControl,
 } from "@/lib/computers/control";
 import {
-  keepTurnFrame,
+  readPageFrame,
   readScreenshot,
-  readTurnFrame,
   type Screenshot,
 } from "@/lib/computers/screen";
 import { LiveScreen } from "./live-screen";
@@ -66,27 +65,6 @@ function rememberTurn(toolCallId: string, patch: RememberedTurn): void {
     if (oldest === undefined) break;
     REMEMBERED_TURNS.delete(oldest);
   }
-}
-
-/**
- * Whether a frame is showing the page a turn opened.
- *
- * Compared without the trailing slash a browser adds and without the fragment, which are the two
- * ways the same page reports two spellings of itself. A frame whose page cannot be read is not a
- * match: unknown is not the same as equal, and storing on unknown is how the wrong picture gets kept.
- */
-function samePage(frameUrl: string | undefined, pageUrl: string): boolean {
-  if (!frameUrl) return false;
-  const tidy = (value: string) => {
-    try {
-      const parsed = new URL(value);
-      parsed.hash = "";
-      return parsed.toString().replace(/\/$/, "");
-    } catch {
-      return value.replace(/\/$/, "");
-    }
-  };
-  return tidy(frameUrl) === tidy(pageUrl);
 }
 
 /** Default browser viewport ratio, reserved before the first screenshot arrives. */
@@ -156,8 +134,6 @@ export function ComputerView({
 }: Props) {
   const [shot, setShot] = useState<Screenshot | null>(null);
   /** Read by the keeper below without making every polled frame retrigger it. */
-  const shotRef = useRef<Screenshot | null>(null);
-  shotRef.current = shot;
   const [problem, setProblem] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [control, setControl] = useState<ControlState | null>(null);
@@ -221,79 +197,36 @@ export function ComputerView({
   const [, setFrameArrived] = useState(0);
 
   const settled = !active && Boolean(knownPage);
-  console.info(
-    "[tile]",
-    JSON.stringify({
-      toolCallId: toolCallId ?? null,
-      active,
-      pageUrl: page?.url ?? null,
-      knownUrl: knownPage?.url ?? null,
-      settled,
-      kept: keptFrame?.base64.length ?? null,
-      shot: shot?.base64.length ?? null,
-    }),
-  );
 
   /*
-   * The frame this turn ended on: whatever was filed for it, and only failing that, the screen as it
-   * is right now.
+   * The frame this turn's page was showing, fetched once and then kept.
    *
-   * ONE EFFECT, ASKED IN THAT ORDER, because two of them racing is what went wrong. A reopened tile
-   * and one that has just watched its turn end are indistinguishable from inside the component: both
-   * are inactive with a result in hand, and both render as live for one frame first. Two effects, one
-   * restoring and one capturing, therefore both ran on a reopened turn, and the capture replaced the
-   * frame the restore had just put there with a fresh screenshot of whatever the Bot has open now.
-   *
-   * Asking what is stored before capturing anything makes the difference stop mattering: a reopened
-   * turn finds a frame and never reaches for the live screen at all.
+   * A READ, AND ONLY A READ. The tile used to capture the frame itself once the turn went inactive,
+   * and it kept filing the wrong picture: a reopened turn and one that has just finished look
+   * identical from in here, the same computer is driven by other conversations between the two, and
+   * a resumed computer starts blank. The frame is now taken on the server the moment the navigation
+   * succeeds, which is the one moment the screen is certainly showing the page that was asked for,
+   * so there is nothing left here to race.
    */
   useEffect(() => {
-    if (active || !toolCallId || !knownPage?.url) return;
+    if (!toolCallId || !knownPage?.url) return;
     if (REMEMBERED_TURNS.get(toolCallId)?.frame) return;
     let current = true;
 
     void (async () => {
-      const stored = await readTurnFrame(computerId, toolCallId);
-      if (!current) return;
-      if (stored) {
-        rememberTurn(toolCallId, {
-          frame: { base64: stored.frame, url: stored.url },
-        });
-        setFrameArrived((n) => n + 1);
-        return;
-      }
-
-      /*
-       * Nothing filed, so this turn ended a moment ago and the live screen may still be its own.
-       *
-       * MAY. A short turn can finish before the tile has polled anything, and by the time this asks,
-       * the browser can already be somewhere else: another turn in another conversation drives the
-       * same computer, and a resumed one starts blank. So the frame is only this turn's if it is
-       * showing this turn's page, and a frame that is not is not stored at all. Better a turn that
-       * names the page it opened than one that shows a picture of somewhere it never went, which is
-       * what the first version of this did.
-       */
       const url = knownPage.url as string;
-      const held = shotRef.current;
-      const candidate =
-        held ?? (await readScreenshot(computerId)).frame ?? null;
-      if (!current || !candidate) return;
-      if (!samePage(candidate.url, url)) return;
-      const frame = candidate.base64;
-      await keepTurnFrame(computerId, toolCallId, {
-        frame,
-        url,
-        ...(knownPage.title ? { title: knownPage.title } : {}),
+      const stored = await readPageFrame(computerId, url);
+      if (!current || !stored) return;
+      rememberTurn(toolCallId, {
+        frame: { base64: stored.frame, url: stored.url },
       });
-      if (!current) return;
-      rememberTurn(toolCallId, { frame: { base64: frame, url } });
       setFrameArrived((n) => n + 1);
     })();
 
     return () => {
       current = false;
     };
-  }, [active, computerId, toolCallId, knownPage?.url, knownPage?.title]);
+  }, [computerId, toolCallId, knownPage?.url]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {

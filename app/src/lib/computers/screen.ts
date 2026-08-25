@@ -41,45 +41,30 @@ export async function readScreenshot(
   }
 }
 
-/** The frame a browsing turn ended on, as it was kept. */
-export type TurnFrame = { url: string; title: string | null; frame: string };
+/** The frame a page was showing when a Bot opened it. */
+export type PageFrame = { url: string; title: string | null; frame: string };
 
 /**
- * Keep the frame this turn ended on.
+ * What that page looked like when this turn opened it, or nothing if it was never kept.
  *
- * Fire and forget, and silent on failure. The turn has already happened and its answer is already on
- * screen; a conversation must not report an error because the picture of it could not be filed. A
- * turn with no stored frame falls back to naming the page, which is the same sentence with less in
- * it rather than a broken one.
+ * Nothing here writes. The frame is taken on the server at the moment the navigation succeeds, which
+ * is the only moment the screen is certainly showing the page that was asked for. Capturing it here
+ * instead meant capturing it after the turn, from a computer other conversations are also driving,
+ * and filing whatever it happened to show.
  */
-export async function keepTurnFrame(
+export async function readPageFrame(
   computerId: string,
-  toolCallId: string,
-  frame: { frame: string; url: string; title?: string },
-): Promise<void> {
-  try {
-    await tryClient(
-      `/api/computers/${computerId}/turn-frames/${encodeURIComponent(toolCallId)}`,
-      { method: "POST", body: frame },
-    );
-  } catch {
-    // See above: nothing here is worth interrupting a conversation for.
-  }
-}
-
-/** What that turn had on screen, or nothing if it was never kept. */
-export async function readTurnFrame(
-  computerId: string,
-  toolCallId: string,
-): Promise<TurnFrame | null> {
+  url: string,
+): Promise<PageFrame | null> {
   try {
     const response = await tryClient(
-      `/api/computers/${computerId}/turn-frames/${encodeURIComponent(toolCallId)}`,
+      `/api/computers/${computerId}/page-frame?url=${encodeURIComponent(url)}`,
     );
     if (!response.ok) return null;
-    const body = (await response.json()) as { frame?: TurnFrame | null };
+    const body = (await response.json()) as { frame?: PageFrame | null };
     return body.frame ?? null;
   } catch {
+    // A missing picture is a smaller sentence, not a broken conversation.
     return null;
   }
 }

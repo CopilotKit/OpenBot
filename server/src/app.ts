@@ -32,7 +32,7 @@ import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
-import type { TurnFrameStore } from "./computer/turn-frames";
+import type { PageFrameStore } from "./computer/page-frames";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createIntelligenceClient } from "./intelligence-client";
@@ -166,7 +166,7 @@ export function createApp(
    * degraded behaviour: a conversation that cannot show what it saw is better than one that shows
    * the wrong thing.
    */
-  turnFrames?: TurnFrameStore,
+  pageFrames?: PageFrameStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -642,7 +642,7 @@ export function createApp(
         computerPolicy,
         requireUser,
         canUseBot,
-        turnFrames,
+        pageFrames,
       ),
     );
   }

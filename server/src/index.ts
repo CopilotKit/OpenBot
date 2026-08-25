@@ -32,7 +32,7 @@ import {
   describeComputerIsolation,
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
-import { createTurnFrameStore } from "./computer/turn-frames";
+import { createPageFrameStore } from "./computer/page-frames";
 import { loadConfig } from "./config";
 import {
   type IdentifyActor,
@@ -543,7 +543,7 @@ const app = createApp(
   // Chooses the coworker for an untagged message, on the deployment's own model and key.
   intentRouter,
   // What a browsing turn's screen looked like when it finished, so the transcript can show it later.
-  createTurnFrameStore(database),
+  createPageFrameStore(database),
 );
 
 /**

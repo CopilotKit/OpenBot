@@ -16,8 +16,8 @@ import {
   WorkspaceRefusedError,
   WorkspaceRequestError,
 } from "./gateway";
+import type { PageFrameStore } from "./page-frames";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
-import type { TurnFrameStore } from "./turn-frames";
 
 /**
  * The Bot computer's surface, behind the same session guard as every other API route.
@@ -39,8 +39,8 @@ export function createComputerRoutes(
    * deployment cannot be wired up without an answer to it.
    */
   canUseBot: BotAccessCheck,
-  /** Where a finished turn's screenshot is kept. Absent leaves the transcript as it was. */
-  turnFrames?: TurnFrameStore,
+  /** Where the frame a page was opened on is kept. Absent leaves the transcript as it was. */
+  pageFrames?: PageFrameStore,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -102,6 +102,36 @@ export function createComputerRoutes(
     }
   });
 
+  /**
+   * Photograph the page that was just opened.
+   *
+   * Awaited rather than left running, so that a surface asking for the frame the moment the turn ends
+   * finds it there. A navigation already costs seconds; one screenshot inside the cluster does not
+   * change how the tool feels, and a frame that arrives after the reader has gone is no frame at all.
+   *
+   * Never fatal. A stored picture is a convenience for reading the conversation back, and failing the
+   * navigation the Bot was asked to do because the convenience failed would be the wrong trade every
+   * time. The reason is logged so a deployment where it always fails is visible rather than quietly
+   * frameless.
+   */
+  async function keepFrameOf(botId: string, url: string, title: string) {
+    if (!pageFrames) return;
+    try {
+      const shot = await gateway.screenshot(botId);
+      await pageFrames.save({
+        computerId: botId,
+        url,
+        title,
+        frame: shot.base64,
+      });
+    } catch (error) {
+      console.warn(
+        `[computer] could not keep a frame of ${url}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   routes.post("/:botId/navigate", async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
       url?: unknown;
@@ -111,18 +141,19 @@ export function createComputerRoutes(
     }
 
     try {
-      return context.json(
-        await gateway.navigate(
-          context.req.param("botId") ?? "default",
-          {
-            id: context.var.actor.id,
-            ...(context.var.actor.email === DEV_ACTOR_EMAIL
-              ? {}
-              : { userId: context.var.actor.id }),
-          },
-          body.url.trim(),
-        ),
+      const botId = context.req.param("botId") ?? "default";
+      const result = await gateway.navigate(
+        botId,
+        {
+          id: context.var.actor.id,
+          ...(context.var.actor.email === DEV_ACTOR_EMAIL
+            ? {}
+            : { userId: context.var.actor.id }),
+        },
+        body.url.trim(),
       );
+      await keepFrameOf(botId, result.url, result.title);
+      return context.json(result);
     } catch (error) {
       if (error instanceof ActionRefusedError) {
         return context.json({ error: error.message, rule: error.rule }, 403);
@@ -364,50 +395,22 @@ export function createComputerRoutes(
   });
 
   /** The Bot's files. Through the gateway, like every other acting call. */
-  /*
-   * The frame a browsing turn ended on, kept so the transcript can show it later.
+  /**
+   * The frame a page was showing when the Bot opened it.
    *
-   * Written by the surface rather than by the gateway, because the gateway does not know which tool
-   * call it is serving: the id belongs to the conversation. Not an acting route, so it does not go
-   * through `act`: nothing is decided and nothing reaches the computer, it only stores a picture the
-   * caller already had on screen.
+   * Read only. Nothing writes through a route: the frame is taken where the navigation happens,
+   * which is the one moment the screen is certainly showing the page that was asked for. The surface
+   * used to capture it itself, after the turn, and lost the race often enough to show the wrong page
+   * or a blank one.
+   *
+   * The address is a query parameter rather than a path segment because it is a URL, and a URL inside
+   * a path is escaping a caller has to get exactly right twice.
    */
-  routes.post("/:botId/turn-frames/:toolCallId", async (context) => {
-    if (!turnFrames) return context.json({ ok: true });
-    const botId = context.req.param("botId");
-    const toolCallId = context.req.param("toolCallId");
-    const body = await context.req.json().catch(() => null);
-    if (
-      typeof body?.frame !== "string" ||
-      typeof body?.url !== "string" ||
-      !body.frame ||
-      !body.url
-    ) {
-      return context.json({ error: "A frame and a url are required." }, 400);
-    }
-    try {
-      await turnFrames.save({
-        toolCallId,
-        computerId: botId,
-        url: body.url,
-        ...(typeof body.title === "string" ? { title: body.title } : {}),
-        frame: body.frame,
-      });
-    } catch (error) {
-      return context.json(
-        { error: error instanceof Error ? error.message : "Not stored." },
-        413,
-      );
-    }
-    return context.json({ ok: true });
-  });
-
-  routes.get("/:botId/turn-frames/:toolCallId", async (context) => {
-    if (!turnFrames) return context.json({ frame: null });
-    const stored = await turnFrames.load(
-      context.req.param("toolCallId"),
-      context.req.param("botId"),
-    );
+  routes.get("/:botId/page-frame", async (context) => {
+    if (!pageFrames) return context.json({ frame: null });
+    const url = context.req.query("url");
+    if (!url) return context.json({ frame: null });
+    const stored = await pageFrames.load(context.req.param("botId"), url);
     return context.json({ frame: stored });
   });
 
