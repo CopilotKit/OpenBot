@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A channel a Bot has spoken in unseen shows a dot
+
+The sidebar marks a channel when a Bot has said something since you last had it open: a dot beside
+the preview, the name a touch heavier. Opening the channel clears it, your own messages never set
+it, and the channel you are looking at never shows it. The marker is yours alone — per member, on
+the membership row like the pin — so one person reading does not clear anybody else's dot.
+
+The deployment gains one nullable column, via migration `0017`.
+
+
 ### A finished turn shows the page it opened, not the one open now
 
 Reopening a conversation made every past turn fetch the screen as it is now, so an answer about
