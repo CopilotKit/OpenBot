@@ -8,6 +8,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A conversation keeps the browsing that produced its answers
+
+Every turn in which a Bot used a tool was disappearing from the transcript on reload. The sentence
+the Bot wrote stayed; the browsing that produced it did not, the inline screen went with it, and the
+footer said some messages could not be read.
+
+The history store writes a tool call as `{id, name, args}`. AG-UI describes
+`{id, type: "function", function: {name, arguments}}`. The reader validated against the second,
+treated the first as damage from an interrupted run, and dropped it. It is not damage: it is how
+every tool call is stored, so what looked like a guard against one bad turn was deleting all of the
+real ones. Observed on a live thread where every browsing turn was counted unreadable and every one
+of them was well formed in the store's own dialect.
+
+The two spellings are now read as the same thing. The check stays for turns that really are
+malformed, and a mixed or unrecognised array is still refused rather than half-translated, because a
+reader that rewrites what it does not recognise is worse than one that refuses it.
+
+
 ### Run this on Kubernetes
 
 A Helm chart under `charts/openbot`, Bots and all, and the fixes that installing it for real turned
