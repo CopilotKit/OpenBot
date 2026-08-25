@@ -4,7 +4,11 @@ import type { AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import type { AgentProfileStore } from "../agents/profile-store";
-import type { IntentRouter, RoutingCandidate } from "./classify";
+import type {
+  IntentRouter,
+  RoutingCandidate,
+  RoutingUndecided,
+} from "./classify";
 
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
 
@@ -68,6 +72,14 @@ export function createRoutingRoutes(
     fallback: boolean,
     viaMention: boolean,
     candidates: readonly string[],
+    /*
+     * Why the router did not decide, when it did not.
+     *
+     * On the row rather than only in the sentence, because this is the field a deployment counts. A
+     * router that has been unreachable for a week produced rows that read like ordinary
+     * "no confident match" ones, which is how #178 went unnoticed for as long as it did.
+     */
+    undecided: RoutingUndecided | null,
   ): Promise<void> {
     if (!auditStore) return;
     await recordAuditEvent(auditStore, {
@@ -75,7 +87,7 @@ export function createRoutingRoutes(
       targetType: "agent",
       targetId: chosen,
       ...(actorUserId ? { actorUserId } : {}),
-      payload: { chosen, reason, fallback, viaMention, candidates },
+      payload: { chosen, reason, fallback, viaMention, candidates, undecided },
     });
   }
 
@@ -126,7 +138,16 @@ export function createRoutingRoutes(
        * @zopeVaibhav had this right in #134.
        */
       const reason = "named by the person asking";
-      await record(actorId(actor), chosen.id, reason, false, true, [chosen.id]);
+      // The person chose. Nothing was left to the router, so nothing about it was undecided.
+      await record(
+        actorId(actor),
+        chosen.id,
+        reason,
+        false,
+        true,
+        [chosen.id],
+        null,
+      );
       return context.json({
         agentId: chosen.id,
         name: chosen.name,
@@ -164,6 +185,7 @@ export function createRoutingRoutes(
       decision.fallback,
       false,
       candidates.map((c) => c.id),
+      decision.undecided,
     );
 
     return context.json({
@@ -171,6 +193,7 @@ export function createRoutingRoutes(
       name: decision.name,
       reason: decision.reason,
       fallback: decision.fallback,
+      undecided: decision.undecided,
       viaMention: false,
     });
   });

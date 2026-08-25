@@ -8,6 +8,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A routing trail says why a message was not routed, not only that it was not
+
+Every untagged message writes a `channel.routed` row, and that row carried `fallback: true` for two
+completely different situations: the router answering honestly that no specialist was a confident
+match, which is the feature working, and the router not answering at all, which is an endpoint that is
+down. Both read identically, so a deployment whose router had stopped working looked like one whose
+messages were simply hard to route.
+
+That is not hypothetical. The intent router spent an unknown period 404'ing on every deployment that
+set `OPENAI_BASE_URL`, because a `/v1` was appended to a URL that already had one. It was fixed in
+0.0.3, whose own note says untagged messages "silently stopped being routed and nothing said why".
+
+The row now carries `undecided`, naming the cause: `unreachable`, `unparsed`, `off-roster`,
+`unconfident`, or `one-candidate` — and `null` when the router did decide. Named values rather than a
+sentence, because the useful question is how often, and a count needs something to group by.
+
+Two smaller corrections came with it. A message routed to the only coworker that can reach the system
+it names kept that as its reason and threw the cause away, so a router that had been down for a week
+produced rows reading like reach-based routing working as intended; the cause now survives that path.
+And an answer containing no JSON at all — a model replying in prose — was recorded as the router
+naming a coworker off the roster, which sends whoever reads it to look at their roster rather than at
+the model. It is now reported as unparsed, which is what it is.
+
+Nothing changes about where a message goes. Every routing decision is the same decision it was.
+
 ### Notion joins the connector catalogue
 
 Notion is now a governed MCP connector, reached through Notion's own hosted server on the
