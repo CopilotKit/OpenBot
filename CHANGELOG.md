@@ -63,6 +63,15 @@ hand-offs between Bots are the other two, which is why it is written once rather
 slightly differently. A CronJob runs the sweep, because a timer in the API fires in every replica and
 suspending a browser somebody just started using is not something to do five times.
 
+**Which run of a computer this is, across a suspend.** A resumed browser counts snapshot
+generations from one again, so a ref the model still holds from before the suspend would match a row
+nothing has overwritten and the boundary would decide about an element on a page that no longer
+exists. The first answer here used the node and the pod address, and resuming a real computer
+disproved it: a suspended sandbox is very often rescheduled onto the same node and handed the same
+address back, so both were identical across a suspend and resume and the check would have said "same
+run" for the exact case it exists to catch. It reads the `Ready` condition's transition time instead,
+which moves every time a computer starts serving again.
+
 **Which run of a computer this is, on more than one replica.** `sessionOf` answered from a map in
 the process that started the computer, which is right until there are two: the replica that took a
 snapshot is usually not the one handling the click, and the second had nothing to answer with. An
