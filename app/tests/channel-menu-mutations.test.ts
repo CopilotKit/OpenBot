@@ -131,3 +131,44 @@ test("marking read PUTs the read route and patches lastReadAt in place", async (
   expect(patched?.pages[0]?.channels[0]?.lastReadAt).not.toBeNull();
   expect(options.onSuccess).toBeUndefined();
 });
+
+test("a message stamped by a clock ahead of ours still reads as seen after marking", async () => {
+  capturingFetch(204, undefined);
+  const queryClient = new QueryClient();
+  const futureLastMessageAt = new Date(Date.now() + 60_000).toISOString();
+  queryClient.setQueryData(channelKeys.list(), {
+    pages: [
+      {
+        channels: [
+          {
+            id: "channel-1",
+            name: "Assistant channel",
+            agentIds: ["agent-1"],
+            threadId: "thread-1",
+            active: true,
+            lastMessage: "hello",
+            lastMessageAt: futureLastMessageAt,
+            lastMessageAgentId: "agent-1",
+            createdAt: "2026-08-25T11:00:00.000Z",
+            pinned: false,
+            lastReadAt: null,
+          },
+        ],
+        nextCursor: null,
+      },
+    ],
+    pageParams: [""],
+  } satisfies InfiniteData<ChannelPage>);
+  const options = markChannelReadMutationOptions(queryClient);
+
+  options.onMutate?.("channel-1");
+
+  const patched = queryClient.getQueryData<InfiniteData<ChannelPage>>(
+    channelKeys.list(),
+  );
+  const row = patched?.pages[0]?.channels[0];
+  // A reader's clock running behind the writer's must not leave the row still reading as unseen:
+  // the patched lastReadAt has to catch up to (or pass) lastMessageAt, not just "now".
+  expect(row?.lastReadAt).not.toBeNull();
+  expect((row?.lastReadAt as string) >= futureLastMessageAt).toBe(true);
+});

@@ -87,6 +87,7 @@ export function markChannelReadMutationOptions(queryClient: QueryClient) {
       });
     },
     onMutate: (channelId) => {
+      const now = new Date().toISOString();
       queryClient.setQueryData(
         channelKeys.list(),
         (data: InfiniteData<ChannelPage> | undefined) =>
@@ -96,7 +97,18 @@ export function markChannelReadMutationOptions(queryClient: QueryClient) {
               ...page,
               channels: page.channels.map((row) =>
                 row.id === channelId
-                  ? { ...row, lastReadAt: new Date().toISOString() }
+                  ? {
+                      ...row,
+                      /*
+                       * The later of now and the row's own lastMessageAt: lastMessageAt comes from
+                       * another clock, and a marker stamped "now" by a clock running behind it
+                       * would leave the row still reading as unseen — and the dot still lit.
+                       */
+                      lastReadAt:
+                        row.lastMessageAt && row.lastMessageAt > now
+                          ? row.lastMessageAt
+                          : now,
+                    }
                   : row,
               ),
             })),

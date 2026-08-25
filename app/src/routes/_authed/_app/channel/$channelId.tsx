@@ -103,13 +103,19 @@ function RouteComponent() {
    * One effect covers both: the dep changes on navigation and on every activity patch, and the
    * unseen check keeps it from writing a row per render. No dependency on the mutation object —
    * its identity changes per render and the effect must not re-fire for that.
+   *
+   * Keyed on primitives, deliberately. The optimistic mark-read patch changes the summary OBJECT's
+   * identity without changing these values, so an object dep would re-fire the effect on its own
+   * write — and when lastMessageAt sits ahead of this browser's clock (another device wrote it),
+   * that re-fire loops into a PUT per render. Primitives hold still under the patch: one PUT.
    */
+  const unseen = summary !== undefined && hasUnseenActivity(summary);
   const markReadMutate = markRead.mutate;
   useEffect(() => {
-    if (summary && hasUnseenActivity(summary)) {
+    if (unseen) {
       markReadMutate(channelId);
     }
-  }, [channelId, summary, markReadMutate]);
+  }, [channelId, unseen, markReadMutate]);
 
   /*
    * Needs-you prompts auto-open the screen panel, because the prompt with the reason on it — the
