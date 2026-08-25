@@ -13,7 +13,12 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Link, type LinkOptions, useNavigate } from "@tanstack/react-router";
+import {
+  Link,
+  type LinkOptions,
+  useNavigate,
+  useParams,
+} from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useState } from "react";
@@ -124,6 +129,30 @@ export function pinnedFirst(channels: ChannelSummary[]): ChannelSummary[] {
 }
 
 /**
+ * Whether a Bot has said something this member has not had on screen yet.
+ *
+ * A Bot's message, and only a Bot's: your own message carries a null agent id and reading your own
+ * words needs no marker. ISO-8601 strings compare correctly as strings, which is the same bet the
+ * server's recency sort already makes.
+ */
+export function hasUnseenActivity(channel: ChannelSummary): boolean {
+  if (channel.lastMessageAgentId === null || channel.lastMessageAt === null) {
+    return false;
+  }
+  return (
+    channel.lastReadAt === null || channel.lastMessageAt > channel.lastReadAt
+  );
+}
+
+/** Unseen activity somewhere you are not looking. The open channel never shows the dot. */
+export function isUnread(
+  channel: ChannelSummary,
+  openChannelId: string | undefined,
+): boolean {
+  return channel.id !== openChannelId && hasUnseenActivity(channel);
+}
+
+/**
  * A roster row that can animate.
  *
  * Two movements only: a channel that did not exist fades in, and a channel that was just spoken in
@@ -138,6 +167,13 @@ function ChannelRow({
   animateOrder: boolean;
 }) {
   const shouldReduceMotion = useReducedMotion();
+  // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
+  // that way: navigating re-renders the rows whose answer changed, not the whole roster.
+  const unread = useParams({
+    strict: false,
+    select: (params) =>
+      isUnread(channel, (params as { channelId?: string }).channelId),
+  });
   return (
     <motion.div
       animate={{ opacity: 1, transform: "translateY(0px)" }}
@@ -160,6 +196,7 @@ function ChannelRow({
             : undefined
         }
         pinned={channel.pinned}
+        unread={unread}
       />
     </motion.div>
   );

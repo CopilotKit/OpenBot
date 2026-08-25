@@ -42,6 +42,7 @@ export const Channel = memo(function Channel({
   lastMessage,
   lastMessageAt,
   pinned,
+  unread,
 }: {
   channelId: string;
   participantIds: string[];
@@ -49,6 +50,7 @@ export const Channel = memo(function Channel({
   lastMessage?: string;
   lastMessageAt?: string;
   pinned: boolean;
+  unread: boolean;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -112,7 +114,11 @@ export const Channel = memo(function Channel({
             </div>
             <div className="flex-col min-w-0 flex-1">
               <div className="flex flex-row items-center justify-between gap-2">
-                <span className="text-[14px] tracking-[-1%] truncate">
+                <span
+                  className={`text-[14px] tracking-[-1%] truncate ${
+                    unread ? "font-medium" : ""
+                  }`}
+                >
                   {name}
                 </span>
                 <div className="text-[12px] text-muted-foreground/70">
@@ -123,6 +129,10 @@ export const Channel = memo(function Channel({
                 <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-muted-foreground">
                   {lastMessage}
                 </span>
+                {unread ? (
+                  /* State about the message beats state about the row, so it sits first. */
+                  <span className="size-2 shrink-0 rounded-full bg-primary" />
+                ) : null}
                 {pinned ? (
                   <IconPinFilled className="size-3 shrink-0 text-muted-foreground/70" />
                 ) : null}
