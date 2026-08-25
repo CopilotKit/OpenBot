@@ -14,6 +14,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogBody,
@@ -43,6 +44,7 @@ import {
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
+  setPluginGrantMutationOptions,
 } from "@/lib/plugins/mutations";
 import {
   connectionsQueryOptions,
@@ -61,8 +63,18 @@ export const Route = createFileRoute("/_authed/admin/plugins/$key")({
   component: RouteComponent,
 });
 
-/** Which of the three shapes of edit a row opens, or none. */
-type OpenDialog = "token" | "client" | "instance" | null;
+/** Which of the four dialogs is open, or none. */
+type OpenDialog = "token" | "client" | "instance" | "grant" | null;
+
+/** The set with one member toggled, as a new set so React sees the change. */
+function toggled(
+  set: ReadonlySet<string>,
+  member: string,
+): ReadonlySet<string> {
+  const next = new Set(set);
+  if (!next.delete(member)) next.add(member);
+  return next;
+}
 
 /**
  * How widely a tool is granted, in words rather than a fraction.
@@ -101,6 +113,14 @@ function RouteComponent() {
   const [token, setToken] = useState("");
   const [instanceHost, setInstanceHost] = useState("");
   const [client, setClient] = useState({ clientId: "", clientSecret: "" });
+  /** Who gets the tools, and which, while the grant dialog is open. */
+  const [selectedBots, setSelectedBots] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [selectedRefs, setSelectedRefs] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [granting, setGranting] = useState(false);
 
   /* Every write reports into one banner rather than each growing its own handler. */
   const report = { onError: (thrown: Error) => setError(thrown.message) };
@@ -118,6 +138,10 @@ function RouteComponent() {
   });
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
+    ...report,
+  });
+  const setGrant = useMutation({
+    ...setPluginGrantMutationOptions(queryClient),
     ...report,
   });
   const connectSelf = useMutation({
@@ -173,6 +197,33 @@ function RouteComponent() {
     }
   };
 
+  /*
+   * One write per grant, in selection order. The server records each grant as its own audit row, so
+   * a bulk action here is honestly N decisions; a refusal stops the rest and leaves the dialog open
+   * with the banner saying why.
+   */
+  const grantSelected = async () => {
+    setError(null);
+    setGranting(true);
+    try {
+      for (const agentId of selectedBots) {
+        for (const ref of selectedRefs) {
+          await setGrant.mutateAsync({
+            agentId,
+            granted: true,
+            kind: "mcp",
+            ref,
+          });
+        }
+      }
+      setDialog(null);
+    } catch {
+      /* Already in the banner via the mutation's own handler. */
+    } finally {
+      setGranting(false);
+    }
+  };
+
   /* Nothing rather than a placeholder, so no sentence asserts anything while the fetch is open. */
   if (plugins.isPending) {
     return <PageShell title="Plugin">{null}</PageShell>;
@@ -188,6 +239,16 @@ function RouteComponent() {
       </PageShell>
     );
   }
+
+  /* The grant dialog's two halves of the tool list, split by what a boundary would see. */
+  const reads = server?.tools.filter((tool) => tool.effect !== "write") ?? [];
+  const writes = server?.tools.filter((tool) => tool.effect === "write") ?? [];
+  const chosenWrites = writes.filter((tool) =>
+    selectedRefs.has(tool.ref),
+  ).length;
+  const chosenNames = bots
+    .filter((bot) => selectedBots.has(bot.id))
+    .map((bot) => bot.name);
 
   return (
     <PageShell
@@ -483,14 +544,35 @@ function RouteComponent() {
            * an administrator came here to do.
            */
           action={
-            <Button
-              onClick={() => refresh.mutate(key)}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Refresh tools
-            </Button>
+            <div className="flex gap-1.5">
+              <Button
+                onClick={() => refresh.mutate(key)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Refresh tools
+              </Button>
+              {/*
+               * Outline where refresh is ghost: granting is the thing an administrator came to
+               * this section to do. Hidden rather than disabled with nothing to grant — a dialog
+               * over an empty list could only explain its own emptiness.
+               */}
+              {server.tools.length > 0 && bots.length > 0 ? (
+                <Button
+                  onClick={() => {
+                    setSelectedBots(new Set());
+                    setSelectedRefs(new Set());
+                    setDialog("grant");
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Grant tools…
+                </Button>
+              ) : null}
+            </div>
           }
           description="A Bot is told about a tool only when it holds it. Every call is decided again when it happens, so removing a grant takes effect on the next one."
           title="Tools"
@@ -598,7 +680,7 @@ function RouteComponent() {
 
       <Dialog
         onOpenChange={(open) => setDialog(open ? dialog : null)}
-        open={dialog !== null}
+        open={dialog !== null && dialog !== "grant"}
       >
         <DialogContent>
           <DialogHeader>
@@ -696,6 +778,161 @@ function RouteComponent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/*
+       * Who first, then what: the decision arrives as "set this Bot up", not as a list of tools
+       * looking for an owner. Both groups get a select-all; the amber heading and the footer's
+       * "N of which change things" are what keep a bulk write grant a read decision, not a blind one.
+       */}
+      {server ? (
+        <Dialog
+          onOpenChange={(open) => setDialog(open ? dialog : null)}
+          open={dialog === "grant"}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Grant tools</DialogTitle>
+              <DialogDescription>
+                Each grant is its own entry on the audit trail, and a granted
+                write is still checked against the boundaries on every call.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody className="mt-4 space-y-5">
+              <div>
+                <p className="mb-2 font-medium text-sm">To</p>
+                <div className="space-y-2">
+                  {bots.map((bot) => (
+                    <label
+                      className="flex items-center gap-2 text-sm"
+                      key={bot.id}
+                    >
+                      <Checkbox
+                        checked={selectedBots.has(bot.id)}
+                        onCheckedChange={() =>
+                          setSelectedBots((previous) =>
+                            toggled(previous, bot.id),
+                          )
+                        }
+                      />
+                      {bot.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="max-h-64 space-y-5 overflow-y-auto">
+                {reads.length > 0 ? (
+                  <div>
+                    <div className="mb-1 flex items-center justify-between">
+                      <p className="font-medium text-sm">Reads</p>
+                      <Button
+                        onClick={() =>
+                          setSelectedRefs((previous) => {
+                            const next = new Set(previous);
+                            for (const tool of reads) next.add(tool.ref);
+                            return next;
+                          })
+                        }
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Select all
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {reads.map((tool) => (
+                        <label
+                          className="flex items-center gap-2"
+                          key={tool.ref}
+                        >
+                          <Checkbox
+                            checked={selectedRefs.has(tool.ref)}
+                            onCheckedChange={() =>
+                              setSelectedRefs((previous) =>
+                                toggled(previous, tool.ref),
+                              )
+                            }
+                          />
+                          <span className="font-mono text-xs">{tool.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {writes.length > 0 ? (
+                  <div>
+                    <div className="mb-1 flex items-center justify-between">
+                      <p className="font-medium text-amber-600 text-sm dark:text-amber-500">
+                        Changes things
+                      </p>
+                      <Button
+                        onClick={() =>
+                          setSelectedRefs((previous) => {
+                            const next = new Set(previous);
+                            for (const tool of writes) next.add(tool.ref);
+                            return next;
+                          })
+                        }
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Select all
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {writes.map((tool) => (
+                        <label
+                          className="flex items-center gap-2"
+                          key={tool.ref}
+                        >
+                          <Checkbox
+                            checked={selectedRefs.has(tool.ref)}
+                            onCheckedChange={() =>
+                              setSelectedRefs((previous) =>
+                                toggled(previous, tool.ref),
+                              )
+                            }
+                          />
+                          <span className="font-mono text-xs">{tool.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </DialogBody>
+            <DialogFooter className="mt-4 items-center">
+              {/* What is about to happen, in one sentence, before it does. */}
+              {selectedRefs.size > 0 && chosenNames.length > 0 ? (
+                <p className="flex-1 text-muted-foreground text-xs">
+                  {`Grant ${selectedRefs.size} ${
+                    selectedRefs.size === 1 ? "tool" : "tools"
+                  }${
+                    chosenWrites > 0
+                      ? `, ${chosenWrites} of which ${
+                          chosenWrites === 1 ? "changes" : "change"
+                        } things,`
+                      : ""
+                  } to ${chosenNames.join(", ")}.`}
+                </p>
+              ) : null}
+              <Button onClick={() => setDialog(null)} size="sm" variant="ghost">
+                Cancel
+              </Button>
+              <Button
+                disabled={
+                  granting || selectedBots.size === 0 || selectedRefs.size === 0
+                }
+                onClick={() => void grantSelected()}
+                size="sm"
+              >
+                Grant
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </PageShell>
   );
 }
