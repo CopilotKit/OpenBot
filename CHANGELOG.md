@@ -8,6 +8,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Notion joins the connector catalogue
+
+Notion is now a governed MCP connector, reached through Notion's own hosted server on the
+catalogue's default transport, as the person asking — the same grant, policy and audit machinery
+Google Drive already runs through. Unlike Drive, it ships both read and write tools from the start;
+the writing ones are named in the catalogue, and everything else is treated as a write until
+positively classified as a read, so nothing ungoverned falls through by default.
+
+There is no client to register: this deployment introduces itself to Notion on first connect. That
+shortens setup but does not finish it — unlike Drive, whose tool list is this codebase's own code,
+Notion's tool list is an answer from Notion's hosted server, so a deployment has recorded none of it
+until Refresh tools has run at least once; and, like every other connector, a Bot gets nothing until
+its tools are granted to it. Setup is enable at `/admin/plugins/notion`, connect an account at
+`/settings/connected-accounts`, refresh tools, then grant. No migration.
+
 ### Name the private addresses an agent may live at
 
 Refusing `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` in production closed a hole and took something with
