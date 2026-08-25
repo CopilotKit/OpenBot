@@ -348,8 +348,25 @@ export function createPluginRoutes(
       );
     }
 
-    const client = await store.oauthClientFor(serverId);
+    /*
+     * A dynamic entry introduces the deployment itself on first use; a manual one still waits
+     * for an administrator. Registration lives here, on the one handler that already refuses
+     * without OPENBOT_PUBLIC_URL — the redirect URI it registers is guaranteed to exist.
+     */
+    const client =
+      (await store.oauthClientFor(serverId)) ??
+      (entry.auth.clientRegistration === "dynamic"
+        ? await store.ensureOAuthClient(serverId, actorEmail(context))
+        : null);
     if (!client) {
+      if (entry.auth.clientRegistration === "dynamic") {
+        return context.json(
+          {
+            error: `${entry.title} refused this deployment's registration. Try again, and check the vendor's status if it persists.`,
+          },
+          502,
+        );
+      }
       return context.json(
         {
           error: `${entry.title} has no OAuth client registered yet. An administrator has to add one first.`,
