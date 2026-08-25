@@ -43,6 +43,19 @@ export type CredentialStore = {
     metadata: Record<string, unknown>;
     encryptedValue: string;
   }) => Promise<StoredCredential>;
+  /**
+   * Re-encrypt a live row in place, keeping the id everything already points at.
+   *
+   * Rotation is the one caller. A vendor that hands back a new refresh token on every exchange has
+   * already killed the old one at its end by the time it answers, so there is no second grant left
+   * to withdraw and nothing to learn from a new row — only a row per tool call, forever. A person
+   * RECONNECTING still gets a new row and a revocation of the old one, because that is the act that
+   * leaves a live grant behind for us to withdraw at our side too.
+   *
+   * A revoked or missing row is refused rather than written through: a grant somebody withdrew must
+   * not come back to life by being handed a fresh secret.
+   */
+  updateSecret: (id: string, encryptedValue: string) => Promise<void>;
   revoke: (id: string) => Promise<Date>;
 };
 
@@ -174,6 +187,23 @@ export function createCredentialStore(
         throw new Error("Credential could not be stored");
       }
       return credential;
+    },
+    updateSecret: async (id, encryptedValue) => {
+      const [credential] = await database
+        .update(credentials)
+        .set({ encryptedValue, updatedAt: new Date() })
+        .where(and(eq(credentials.id, id), isNull(credentials.revokedAt)))
+        .returning({ id: credentials.id });
+
+      /*
+       * One statement, so nothing can revoke the row between a check and the write.
+       *
+       * The cost is that "no such row" and "revoked" arrive as the same answer, hence the one
+       * message naming both. The caller acts identically on either: it refuses its call.
+       */
+      if (!credential) {
+        throw new Error("Credential was not found or is revoked");
+      }
     },
     revoke: async (id) => {
       const revokedAt = new Date();

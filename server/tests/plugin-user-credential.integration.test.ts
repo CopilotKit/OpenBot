@@ -114,6 +114,11 @@ const store = createPluginStore({
     create: async () => {
       throw new Error("this suite writes credentials directly");
     },
+    // Google does not rotate, so no exchange here ever reaches the in-place update. Loud, so that
+    // one starting to would show up rather than pass quietly.
+    updateSecret: async () => {
+      throw new Error("this suite writes credentials directly");
+    },
     /*
      * A real revocation, against this suite's own rows.
      *

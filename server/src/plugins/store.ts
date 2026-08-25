@@ -32,6 +32,7 @@ import {
   resolveServerUrl,
 } from "./catalogue";
 import { McpServerError } from "./mcp";
+import { registerDynamicClient } from "./oauth";
 import { transportFor } from "./transport";
 
 /**
@@ -92,6 +93,12 @@ export type ServerRecord = {
   toolsRefreshedAt: string | null;
   lastError: string | null;
   addedBy: string | null;
+  /**
+   * Whether the catalogue entry registers its own OAuth client (RFC 7591) rather than waiting on
+   * an administrator to paste one in. So the admin screen can hide the paste-a-client form where
+   * there is nothing for it to collect.
+   */
+  dynamicClient: boolean;
   tools: ToolRecord[];
   /**
    * Grants on tools this server no longer advertises.
@@ -183,6 +190,33 @@ export class CustomServerRefusedError extends Error {
 }
 
 /**
+ * The vendor's `error` code, when a token endpoint refuses an exchange.
+ *
+ * {@link INVALID_CLIENT} is the one code this module ACTS on rather than reports, so it has to
+ * survive as a value. It used to travel inside the sentence, which meant the recovery in
+ * {@link createPluginStore}'s `exchangeWithRetriedClient` hung on a substring of prose written for a
+ * person to read: rewording the sentence — translating it, dropping the parenthesis — would have
+ * turned self-registration off with every test still green. A field cannot be reworded by accident.
+ */
+export class TokenRefusedError extends McpServerError {
+  constructor(
+    message: string,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = "TokenRefusedError";
+  }
+}
+
+/**
+ * The vendor saying the CLIENT is the problem, rather than the grant. RFC 6749 §5.2.
+ *
+ * Told apart from every other refusal because it is the only one a deployment can do anything about
+ * on its own: a client it issued to itself, it can issue again.
+ */
+export const INVALID_CLIENT = "invalid_client";
+
+/**
  * A tool name the model can actually call.
  *
  * `<server>/<tool>` is how a grant is stored, because a slash reads correctly to a person and cannot
@@ -247,35 +281,63 @@ function effectiveUrl(
  * host does not: this request carries the deployment's client secret and somebody's refresh token,
  * so where it goes is a reviewed decision rather than a runtime one.
  *
- * The vendor's error body is deliberately not passed through. It is written for whoever registered
- * the client, not for the person who asked a Bot a question, and it can name the client id.
+ * The vendor's error body is deliberately not passed through — it is written for whoever registered
+ * the client, not for the person who asked a Bot a question, and it can name the client id. Its
+ * `error` CODE is, though, and only that: `invalid_client` is what tells a client the vendor has
+ * forgotten apart from a grant somebody withdrew, and those two have entirely different answers.
+ * It goes out as a field on {@link TokenRefusedError} as well as in the sentence, because the field
+ * is the copy the recovery reads.
  */
 async function exchangeRefreshTokenOverHttp(input: {
   tokenUrl: string;
   client: OAuthClient;
   refreshToken: string;
 }): Promise<AccessToken> {
+  const params = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: input.refreshToken,
+    client_id: input.client.clientId,
+  });
+  // A public (DCR) client proves itself without one, and some vendors refuse an unexpected empty
+  // field outright. The same guard the authorization-code redemption in `oauth.ts` uses.
+  if (input.client.clientSecret) {
+    params.set("client_secret", input.client.clientSecret);
+  }
+
   const response = await fetch(input.tokenUrl, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: input.refreshToken,
-      client_id: input.client.clientId,
-      client_secret: input.client.clientSecret,
-    }),
+    body: params,
     signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
   });
 
   if (!response.ok) {
-    throw new McpServerError(
-      `The vendor would not renew this access (${response.status}).`,
+    /*
+     * The code, when the refusal is JSON and carries one. Read defensively: a token endpoint that
+     * is refusing may be refusing with an HTML error page, and a parse failure here would replace
+     * the vendor's status — the one fact we do have — with a syntax error.
+     */
+    const refusal = (await response.json().catch(() => null)) as {
+      error?: unknown;
+    } | null;
+    /*
+     * Capped where it is read, because everything downstream of here shows it to somebody: the
+     * person who asked, the model, the connector's `lastError` on the admin page, and an audit
+     * payload. It is a short token in the protocol and vendor-controlled in fact, and nothing on
+     * those paths is a promise about length.
+     */
+    const code =
+      typeof refusal?.error === "string" ? refusal.error.slice(0, 64) : null;
+    throw new TokenRefusedError(
+      `The vendor would not renew this access (${response.status}).${code ? ` (${code})` : ""}`,
+      code,
     );
   }
 
   const body = (await response.json()) as {
     access_token?: unknown;
     expires_in?: unknown;
+    refresh_token?: unknown;
   };
   if (typeof body.access_token !== "string" || !body.access_token) {
     throw new McpServerError("The vendor renewed this access with no token.");
@@ -284,6 +346,17 @@ async function exchangeRefreshTokenOverHttp(input: {
     accessToken: body.access_token,
     expiresInSeconds:
       typeof body.expires_in === "number" ? body.expires_in : undefined,
+    /*
+     * Only when the vendor sent one, and only a non-empty one.
+     *
+     * A rotating vendor replies with a new refresh token and invalidates the one it was shown; a
+     * vendor that does not rotate sends none. Reading an absent or empty field as a rotation would
+     * repoint a working connection at nothing.
+     */
+    refreshToken:
+      typeof body.refresh_token === "string" && body.refresh_token
+        ? body.refresh_token
+        : undefined,
   };
 }
 
@@ -302,7 +375,18 @@ const TOKEN_TIMEOUT_MS = 10_000;
 export type OAuthClient = { clientId: string; clientSecret: string };
 
 /** What a vendor's token endpoint gave back for a refresh token. */
-export type AccessToken = { accessToken: string; expiresInSeconds?: number };
+export type AccessToken = {
+  accessToken: string;
+  expiresInSeconds?: number;
+  /**
+   * The refresh token to present next time, from a vendor that rotates.
+   *
+   * Absent from Google's replies and present in every one of Notion's. When it is here it is the
+   * only one that still works — the token just spent is dead at the vendor — so it has to be
+   * persisted before the access token beside it is used for anything.
+   */
+  refreshToken?: string;
+};
 
 export type PluginStoreOptions = {
   database: Database;
@@ -337,6 +421,13 @@ export type PluginStoreOptions = {
     client: OAuthClient;
     refreshToken: string;
   }) => Promise<AccessToken>;
+  /** RFC 7591 self-registration, for entries whose clientRegistration is dynamic. */
+  registerClient?: (input: {
+    registrationUrl: string;
+    redirectUri: string;
+  }) => Promise<OAuthClient | null>;
+  /** Where the vendor sends people back; needed to (re)register a dynamic client. */
+  redirectUri?: string;
 };
 
 export function createPluginStore(options: PluginStoreOptions) {
@@ -349,6 +440,32 @@ export function createPluginStore(options: PluginStoreOptions) {
   const injectedVendor = options.callVendor;
   const exchangeRefreshToken =
     options.exchangeRefreshToken ?? exchangeRefreshTokenOverHttp;
+  const registerClient = options.registerClient ?? registerDynamicClient;
+
+  /*
+   * One exchange at a time per (server, person). A rotating vendor invalidates the refresh
+   * token it was shown, so two concurrent calls that both present the old one would have the
+   * second refused through no fault of anybody's. The chain serialises them; the map entry is
+   * removed when the chain drains so the map cannot grow past the set of active connections.
+   */
+  const exchangeChains = new Map<string, Promise<unknown>>();
+  function serialized<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = exchangeChains.get(key) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(work);
+    exchangeChains.set(key, next);
+    /*
+     * The refusal belongs to the caller, who is holding `next` and will see it. This branch exists
+     * only to forget the key, so it swallows before it cleans up: `next.finally(…)` on its own
+     * derives a SECOND rejected promise that nobody is holding, and a refused call — a withdrawn
+     * credential, say — then surfaces as an unhandled rejection somewhere unrelated.
+     */
+    void next
+      .catch(() => {})
+      .finally(() => {
+        if (exchangeChains.get(key) === next) exchangeChains.delete(key);
+      });
+    return next;
+  }
 
   async function grantsFor(kind: PluginKind, refs: string[]) {
     if (refs.length === 0) return new Map<string, string[]>();
@@ -509,6 +626,12 @@ export function createPluginStore(options: PluginStoreOptions) {
       );
     }
 
+    /*
+     * Whether this person has connected at all, which is a refusal worth reaching before anything
+     * queues behind another call. WHICH credential they hold is read again inside the critical
+     * section below, because a reconnection can move it while this call waits its turn — and even
+     * when the row stays put, the secret inside it does not.
+     */
     const [held] = await database
       .select({ credentialId: mcpUserCredentials.credentialId })
       .from(mcpUserCredentials)
@@ -527,32 +650,380 @@ export function createPluginStore(options: PluginStoreOptions) {
       );
     }
 
-    const refreshToken = await secretFor(
-      held.credentialId,
-      `Your ${entry.title} access was withdrawn. Connect it again in Settings.`,
-    );
+    // Held before the critical section, because narrowing does not survive into a closure and this
+    // is where the entry is known to be a `user-oauth` one.
+    const { tokenUrl } = entry.auth;
+    const { title } = entry;
+    /*
+     * Where to register again, for a vendor that issues its own clients — and undefined for one an
+     * administrator registered with by hand, where there is nothing this deployment could do about a
+     * client the vendor no longer honours.
+     */
+    const registrationUrl =
+      entry.auth.clientRegistration === "dynamic"
+        ? entry.auth.registrationUrl
+        : undefined;
+
+    /*
+     * What to tell the person when the deployment holds no client they can be called on, in the
+     * words of whoever can actually change that.
+     *
+     * A hand-registered client is an administrator's paperwork — they pasted it in from the vendor's
+     * console, and only they can paste one in again. A self-registered one is nobody's paperwork:
+     * there is no console entry to re-create, and the deployment introduces itself again the next
+     * time somebody connects. Naming an administrator there would send the person to somebody with
+     * no step to take, which is worse than saying nothing.
+     */
+    const noClient = registrationUrl
+      ? `${title} has no OAuth client for this deployment, so this cannot be called. Connect ${title} again in Settings: the deployment registers itself with the vendor when somebody connects.`
+      : `${title} has no OAuth client registered for this deployment, so this cannot be called. An administrator has to add one.`;
+    const unusableClient = registrationUrl
+      ? `${title} has no usable OAuth client for this deployment. Connect ${title} again in Settings: the deployment registers itself with the vendor on the next connect.`
+      : `${title} has no usable OAuth client for this deployment. An administrator has to add one again.`;
 
     if (!row.credentialId) {
-      // The person did their part; the deployment has not. Said plainly, because the person cannot
-      // fix it and should not be told to try.
-      throw new PluginRefusedError(
-        `${entry.title} has no OAuth client registered for this deployment, so this cannot be called. An administrator has to add one.`,
-        null,
+      // The person did their part; the deployment has not. Refused before anything queues, because
+      // a deployment holding no client has the same answer for everybody asking.
+      throw new PluginRefusedError(noClient, null);
+    }
+
+    /**
+     * The client as the deployment holds it right now, or the refusal for holding none.
+     *
+     * Read from the server row each time rather than from the row this call came in with: a retry
+     * that registered again — this connection's own, a moment ago — replaced it, and the pointer
+     * carried in from before the queue names the evicted one.
+     */
+    async function currentClient(): Promise<OAuthClient> {
+      const [server] = await database
+        .select({ credentialId: mcpServers.credentialId })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, row.id))
+        .limit(1);
+      if (!server?.credentialId) {
+        throw new PluginRefusedError(noClient, null);
+      }
+      return JSON.parse(
+        await secretFor(server.credentialId, unusableClient),
+      ) as OAuthClient;
+    }
+
+    /*
+     * The exchange, one call at a time for this connection, reading the connection fresh inside.
+     *
+     * Both halves of what goes out are read in here rather than carried in from above, because both
+     * can move while this call waits its turn. The refresh token rotates, and the token read a
+     * moment ago is then already spent — presenting it would be refused by the vendor for no reason
+     * the person could act on. The client is replaced by a re-registration, and presenting the
+     * evicted one would have every queued call discover that separately and register around it.
+     */
+    return await serialized(`${row.id}:${actorId}`, async () => {
+      const [current] = await database
+        .select({
+          credentialId: mcpUserCredentials.credentialId,
+          scope: mcpUserCredentials.scope,
+        })
+        .from(mcpUserCredentials)
+        .where(
+          and(
+            eq(mcpUserCredentials.serverId, row.id),
+            eq(mcpUserCredentials.userId, actorId),
+          ),
+        )
+        .limit(1);
+
+      // Disconnected while this call was queued. The same sentence as above: nothing is broken, and
+      // connecting again is the thing to do.
+      if (!current) {
+        throw new PluginRefusedError(
+          `You have not connected your ${title} account. Connect it in Settings and ask again.`,
+          null,
+        );
+      }
+
+      const refreshToken = await secretFor(
+        current.credentialId,
+        `Your ${title} access was withdrawn. Connect it again in Settings.`,
+      );
+
+      const minted = await exchangeWithRetriedClient({
+        tokenUrl,
+        client: await currentClient(),
+        refreshToken,
+        registrationUrl,
+        serverId: row.id,
+      });
+
+      /*
+       * A vendor that sent nothing back, or sent back the token we presented, rotated nothing — and
+       * writing either would be inventing a rotation, at the cost of a needless re-encryption of
+       * every connection on every call.
+       */
+      if (minted.refreshToken && minted.refreshToken !== refreshToken) {
+        /*
+         * The vendor rotated the grant: the token we were just shown is now the only valid one.
+         * Persisting it is not optional bookkeeping — failing to would strand the connection on
+         * the next call — so a failure here refuses THIS call rather than returning an access
+         * token whose refresh token is already spent.
+         */
+        await rotateConnectionToken({
+          credentialId: current.credentialId,
+          refreshToken: minted.refreshToken,
+        });
+      }
+
+      return { token: minted.accessToken };
+    });
+  }
+
+  /**
+   * The exchange, registering this deployment again if the vendor has forgotten its client.
+   *
+   * `invalid_client` is the vendor saying the client is the problem, and for a client the deployment
+   * issued to itself there is nobody to tell: no console entry an administrator could re-create, so
+   * every connection to that server would sit behind a refusal nothing in the deployment can act on.
+   * Introducing itself again is the same act as the first registration, so it does that and retries.
+   *
+   * ONCE. A second refusal is the honest signal that the client was never the problem — a vendor
+   * outage answers every exchange this way — and retrying past it would meet an outage by minting a
+   * client per tool call.
+   *
+   * Called from INSIDE the per-connection critical section, deliberately, and handed a client that
+   * section read for itself. The client is per SERVER rather than per connection, so this does not
+   * make registration exclusive across a deployment: two PEOPLE's calls can each find the client
+   * evicted and each register once, which costs a spare client and is correct either way. Two calls
+   * on the SAME connection cannot, because they are serialised and the second reads the client after
+   * the first replaced it — which is why that read belongs inside the section rather than before it.
+   *
+   * The other thing the section buys is that the retry cannot interleave with the same connection's
+   * next exchange: the refresh token is presented twice here, and a second call spending it in
+   * between would be refused for a reason nobody could see.
+   */
+  async function exchangeWithRetriedClient(input: {
+    tokenUrl: string;
+    client: OAuthClient;
+    refreshToken: string;
+    registrationUrl: string | undefined;
+    serverId: string;
+  }): Promise<AccessToken> {
+    const { tokenUrl, refreshToken, registrationUrl, serverId } = input;
+    try {
+      return await exchangeRefreshToken({
+        tokenUrl,
+        client: input.client,
+        refreshToken,
+      });
+    } catch (error) {
+      /*
+       * The code, off the error itself. Never the sentence: that is written for a person, and a
+       * recovery that read it would be one rewording away from silently never running again.
+       */
+      const code = error instanceof TokenRefusedError ? error.code : null;
+      const { redirectUri } = options;
+      if (code !== INVALID_CLIENT || !registrationUrl || !redirectUri) {
+        throw error;
+      }
+
+      const fresh = await registerClient({ registrationUrl, redirectUri });
+      // The vendor would not have us either. The first refusal is the one worth reporting: it says
+      // what actually stopped the call, where this one says what stopped the recovery.
+      if (!fresh) throw error;
+
+      await persistOAuthClient({ serverId, client: fresh, by: "deployment" });
+      return await exchangeRefreshToken({
+        tokenUrl,
+        client: fresh,
+        refreshToken,
+      });
+    }
+  }
+
+  /**
+   * Point one person's connection at a new refresh token, revoking the one it replaces.
+   *
+   * For a person connecting, which is where a new row earns its keep: what they held before this is
+   * still a live grant at the vendor, and the revocation is how it stops being one. A vendor's own
+   * rotation is the other case entirely, and goes through {@link rotateConnectionToken}.
+   *
+   * Upserted on the pair, so it is the same act whether they are connecting or reconnecting. The
+   * credential the row used to point at is revoked in the same breath: a refresh token nothing
+   * points at is still a live grant at the vendor, and leaving it behind would mean somebody had two
+   * valid grants and could only ever see one of them to withdraw it.
+   *
+   * Says whether it replaced something, which is the one fact the caller writing the trail needs
+   * and cannot recover afterwards.
+   */
+  async function swapUserCredential(input: {
+    serverId: string;
+    userId: string;
+    refreshToken: string;
+    scope: string;
+  }): Promise<{ replaced: boolean }> {
+    const [previous] = await database
+      .select({ credentialId: mcpUserCredentials.credentialId })
+      .from(mcpUserCredentials)
+      .where(
+        and(
+          eq(mcpUserCredentials.serverId, input.serverId),
+          eq(mcpUserCredentials.userId, input.userId),
+        ),
+      )
+      .limit(1);
+
+    const stored = await credentials.create({
+      kind: "mcp_user_token",
+      provider: input.serverId,
+      keyId: input.userId,
+      metadata: { server: input.serverId, scope: input.scope },
+      encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
+    });
+
+    await database
+      .insert(mcpUserCredentials)
+      .values({
+        serverId: input.serverId,
+        userId: input.userId,
+        credentialId: stored.id,
+        scope: input.scope,
+      })
+      .onConflictDoUpdate({
+        target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
+        set: {
+          credentialId: stored.id,
+          scope: input.scope,
+          updatedAt: new Date(),
+        },
+      });
+
+    if (previous) {
+      await credentials.revoke(previous.credentialId).catch(() => {
+        // The pointer has moved, so this is tidiness rather than access.
+      });
+    }
+
+    return { replaced: previous !== undefined };
+  }
+
+  /**
+   * Carry a connection over to the refresh token the vendor rotated to.
+   *
+   * In place, in the vault row the connection already points at — deliberately NOT the swap
+   * {@link swapUserCredential} performs. A rotating vendor issues a new refresh token on every
+   * exchange, so a swap here would mint a row and revoke a row per tool call, forever, on the
+   * hottest path there is. And the revocation would have nothing to withdraw: the token just spent
+   * was dead at the vendor the moment it answered, so the only live grant is the one being written.
+   *
+   * Deliberately WITHOUT the `mcp.account_connected` row, for the same reason as ever: rotation is
+   * the vendor's plumbing, not a person's act, and a trail that records it as one reads as a
+   * re-consent that nobody performed.
+   *
+   * The scope and the row are left alone. Nothing about what the vendor granted has changed — only
+   * which token presents it.
+   */
+  async function rotateConnectionToken(input: {
+    credentialId: string;
+    refreshToken: string;
+  }): Promise<void> {
+    await credentials.updateSecret(
+      input.credentialId,
+      await encryptSecret(encryptionKey, input.refreshToken),
+    );
+  }
+
+  /**
+   * Store the deployment's OAuth client for a `user-oauth` server, whoever obtained it.
+   *
+   * Both halves go into one encrypted value, so a single vault read yields a usable client. The id is
+   * copied into `metadata` as well — it is not a secret, and a page listing what the deployment holds
+   * should be able to name it without decrypting anything.
+   *
+   * Replacing a client revokes the previous one rather than orphaning it, so "what does this
+   * deployment hold" keeps having one answer per server. Nobody's connection breaks: a refresh token
+   * is the person's, and it is the client that is being rotated underneath it.
+   *
+   * Shared by an administrator pasting one in and by the deployment registering its own, so `by` is
+   * the only difference between the two in the trail — which is the honest one.
+   */
+  async function persistOAuthClient(input: {
+    serverId: string;
+    client: OAuthClient;
+    by: string;
+  }): Promise<void> {
+    const { row, entry } = await requireServer(input.serverId);
+    if (entry?.auth.kind !== "user-oauth") {
+      throw new CustomServerRefusedError(
+        `${input.serverId} is not reached with an OAuth client.`,
       );
     }
-    const client = JSON.parse(
-      await secretFor(
-        row.credentialId,
-        `${entry.title} has no usable OAuth client for this deployment. An administrator has to add one again.`,
-      ),
-    ) as OAuthClient;
 
-    const minted = await exchangeRefreshToken({
-      tokenUrl: entry.auth.tokenUrl,
-      client,
-      refreshToken,
+    const stored = await credentials.create({
+      kind: "mcp_oauth_client",
+      provider: input.serverId,
+      keyId: `oauth-client-${input.serverId}`,
+      metadata: { server: input.serverId, clientId: input.client.clientId },
+      encryptedValue: await encryptSecret(
+        encryptionKey,
+        JSON.stringify(input.client),
+      ),
     });
-    return { token: minted.accessToken };
+
+    await database
+      .update(mcpServers)
+      .set({ credentialId: stored.id, updatedAt: new Date() })
+      .where(eq(mcpServers.id, input.serverId));
+
+    if (row.credentialId) {
+      await credentials.revoke(row.credentialId).catch(() => {
+        // A previous client that cannot be revoked must not stop the new one taking effect. The
+        // pointer has already moved, so nothing reaches the old row; it is a tidiness failure.
+      });
+    }
+
+    await recordAuditEvent(auditStore, {
+      eventType: "mcp.oauth_client_registered",
+      targetType: "mcp_server",
+      targetId: input.serverId,
+      payload: {
+        actor: input.by,
+        server: input.serverId,
+        // The id, never the secret. It identifies the client that was registered, which is what
+        // somebody reading the trail needs in order to check it against the vendor's console.
+        clientId: input.client.clientId,
+        replaced: row.credentialId !== null,
+      },
+    });
+  }
+
+  /**
+   * The deployment's OAuth client for a server as it stands, or null if there is none to read.
+   *
+   * Decrypted, because both halves are needed: the id to build a consent URL and the secret to
+   * redeem the code it comes back with. Held for the length of one request, like every other secret
+   * this module reads.
+   */
+  async function storedOAuthClient(
+    serverId: string,
+  ): Promise<OAuthClient | null> {
+    const [row] = await database
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId))
+      .limit(1);
+    if (!row?.credentialId) return null;
+
+    try {
+      return JSON.parse(
+        await decryptCredentialForUse(
+          encryptionKey,
+          credentials,
+          row.credentialId,
+        ),
+      ) as OAuthClient;
+    } catch {
+      // A revoked, missing or unreadable client is the same as none for every caller: there is
+      // nothing to send anybody to consent with, and the answer is to obtain one again.
+      return null;
+    }
   }
 
   async function requireServer(serverId: string) {
@@ -892,6 +1363,9 @@ export function createPluginStore(options: PluginStoreOptions) {
           toolsRefreshedAt: iso(row.toolsRefreshedAt),
           lastError: row.lastError,
           addedBy: row.addedBy,
+          dynamicClient:
+            entry?.auth.kind === "user-oauth" &&
+            entry.auth.clientRegistration === "dynamic",
           tools: tools
             .filter((tool) => tool.serverId === row.id)
             .map((tool) => {
@@ -1233,71 +1707,58 @@ export function createPluginStore(options: PluginStoreOptions) {
     /**
      * Register the deployment's OAuth client for a `user-oauth` server.
      *
-     * Both halves go into one encrypted value, so a single vault read yields a usable client. The id
-     * is copied into `metadata` as well — it is not a secret, and a page listing what the deployment
-     * holds should be able to name it without decrypting anything.
-     *
-     * Replacing a client revokes the previous one rather than orphaning it, so "what does this
-     * deployment hold" keeps having one answer per server. Nobody's connection breaks: a refresh
-     * token is the person's, and it is the client that is being rotated underneath it.
+     * An administrator pasting in what they created at the vendor. The work itself is
+     * {@link persistOAuthClient}, which self-registration goes through too — one path, so a client
+     * this deployment issued itself is stored, revoked and recorded exactly like a pasted one.
      */
-    async registerOAuthClient(input: {
-      serverId: string;
-      client: OAuthClient;
-      by: string;
-    }): Promise<void> {
-      const { row, entry } = await requireServer(input.serverId);
-      if (entry?.auth.kind !== "user-oauth") {
-        throw new CustomServerRefusedError(
-          `${input.serverId} is not reached with an OAuth client.`,
-        );
+    registerOAuthClient: persistOAuthClient,
+
+    /**
+     * The client to send somebody to the vendor with, registering one first if that is this
+     * vendor's way of getting one.
+     *
+     * A dynamically registered client is not paperwork anybody did: there is no console entry to
+     * paste, so "none yet" is the ordinary state of a server nobody has connected — and the answer
+     * is for the deployment to introduce itself, which is what it would have to do eventually
+     * anyway. Where an administrator registers by hand instead, and where the deployment has no
+     * public URL to be sent back to, the answer stays null: inventing a client at a vendor that
+     * never offered to issue one, or registering a redirect URI that resolves to nothing, would
+     * both leave behind a client that can never complete a consent flow.
+     */
+    async ensureOAuthClient(
+      serverId: string,
+      by: string,
+    ): Promise<OAuthClient | null> {
+      const stored = await storedOAuthClient(serverId);
+      if (stored) return stored;
+
+      const { entry } = await requireServer(serverId);
+      if (
+        entry?.auth.kind !== "user-oauth" ||
+        entry.auth.clientRegistration !== "dynamic" ||
+        !entry.auth.registrationUrl ||
+        !options.redirectUri
+      ) {
+        return null;
       }
 
-      const stored = await credentials.create({
-        kind: "mcp_oauth_client",
-        provider: input.serverId,
-        keyId: `oauth-client-${input.serverId}`,
-        metadata: { server: input.serverId, clientId: input.client.clientId },
-        encryptedValue: await encryptSecret(
-          encryptionKey,
-          JSON.stringify(input.client),
-        ),
+      const registered = await registerClient({
+        registrationUrl: entry.auth.registrationUrl,
+        redirectUri: options.redirectUri,
       });
+      if (!registered) return null;
 
-      await database
-        .update(mcpServers)
-        .set({ credentialId: stored.id, updatedAt: new Date() })
-        .where(eq(mcpServers.id, input.serverId));
-
-      if (row.credentialId) {
-        await credentials.revoke(row.credentialId).catch(() => {
-          // A previous client that cannot be revoked must not stop the new one taking effect. The
-          // pointer has already moved, so nothing reaches the old row; it is a tidiness failure.
-        });
-      }
-
-      await recordAuditEvent(auditStore, {
-        eventType: "mcp.oauth_client_registered",
-        targetType: "mcp_server",
-        targetId: input.serverId,
-        payload: {
-          actor: input.by,
-          server: input.serverId,
-          // The id, never the secret. It identifies the client an administrator registered, which is
-          // what somebody reading the trail needs in order to check it against the vendor's console.
-          clientId: input.client.clientId,
-          replaced: row.credentialId !== null,
-        },
-      });
+      await persistOAuthClient({ serverId, client: registered, by });
+      return registered;
     },
 
     /**
      * Record that one person connected their own account to one server.
      *
-     * Upserted on the pair, so reconnecting replaces rather than accumulating. The credential the row
-     * used to point at is revoked in the same breath: a refresh token nothing points at is still a
-     * live grant at the vendor, and leaving it behind would mean a person who reconnected had two
-     * valid grants and could only ever see one of them to disconnect it.
+     * The credential swap is {@link swapUserCredential}, and this is its only caller: a person
+     * connecting or reconnecting is exactly when there is an older grant to revoke. Rotation writes
+     * the same connection in place instead ({@link rotateConnectionToken}). What is only here is the
+     * audit row: this one IS somebody's act, and the trail should say so.
      */
     async recordConnection(input: {
       serverId: string;
@@ -1305,47 +1766,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       refreshToken: string;
       scope: string;
     }): Promise<void> {
-      const [previous] = await database
-        .select({ credentialId: mcpUserCredentials.credentialId })
-        .from(mcpUserCredentials)
-        .where(
-          and(
-            eq(mcpUserCredentials.serverId, input.serverId),
-            eq(mcpUserCredentials.userId, input.userId),
-          ),
-        )
-        .limit(1);
-
-      const stored = await credentials.create({
-        kind: "mcp_user_token",
-        provider: input.serverId,
-        keyId: input.userId,
-        metadata: { server: input.serverId, scope: input.scope },
-        encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
-      });
-
-      await database
-        .insert(mcpUserCredentials)
-        .values({
-          serverId: input.serverId,
-          userId: input.userId,
-          credentialId: stored.id,
-          scope: input.scope,
-        })
-        .onConflictDoUpdate({
-          target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
-          set: {
-            credentialId: stored.id,
-            scope: input.scope,
-            updatedAt: new Date(),
-          },
-        });
-
-      if (previous) {
-        await credentials.revoke(previous.credentialId).catch(() => {
-          // Same reasoning as above: the pointer has moved, so this is tidiness rather than access.
-        });
-      }
+      const { replaced } = await swapUserCredential(input);
 
       await recordAuditEvent(auditStore, {
         eventType: "mcp.account_connected",
@@ -1356,7 +1777,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           server: input.serverId,
           // What the vendor granted, so a later refusal for want of a scope can be explained.
           scope: input.scope,
-          reconnected: previous !== undefined,
+          reconnected: replaced,
         },
       });
     },
@@ -1364,32 +1785,9 @@ export function createPluginStore(options: PluginStoreOptions) {
     /**
      * The deployment's OAuth client for a server, or null if none is registered.
      *
-     * Decrypted, because both halves are needed: the id to build a consent URL and the secret to
-     * redeem the code it comes back with. Held for the length of one request, like every other
-     * secret this module reads.
+     * Reads only. {@link ensureOAuthClient} is the one that will go and get one.
      */
-    async oauthClientFor(serverId: string): Promise<OAuthClient | null> {
-      const [row] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
-      if (!row?.credentialId) return null;
-
-      try {
-        return JSON.parse(
-          await decryptCredentialForUse(
-            encryptionKey,
-            credentials,
-            row.credentialId,
-          ),
-        ) as OAuthClient;
-      } catch {
-        // A revoked, missing or unreadable client is the same as none for every caller: there is
-        // nothing to send anybody to consent with, and the answer is for an administrator to add one.
-        return null;
-      }
-    },
+    oauthClientFor: storedOAuthClient,
 
     /** Which `user-oauth` servers this person has connected, for their own settings page. */
     async connectionsFor(
@@ -1716,6 +2114,9 @@ export function createPluginStore(options: PluginStoreOptions) {
          * that the failure now exists in the trail, which is where somebody asking "is this connector
          * working" looks. The vendor's own sentence is kept, since for a 403 that is the sentence
          * naming which API is not enabled.
+         *
+         * Capped like the `isError` branch above, and for the same reason: parts of this sentence
+         * came from the vendor, and a failure is not a promise about length.
          */
         await recordAuditEvent(auditStore, {
           eventType: "mcp.call_failed",
@@ -1723,7 +2124,10 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetId: input.ref,
           payload: {
             ...decided,
-            failure: error instanceof Error ? error.message : String(error),
+            failure: (error instanceof Error
+              ? error.message
+              : String(error)
+            ).slice(0, 400),
           },
         });
         throw error;

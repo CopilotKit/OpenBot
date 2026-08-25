@@ -1,18 +1,42 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
+import {
+  createCredentialStore,
+  decryptSecret,
+  encryptSecret,
+} from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { TEST_POOL } from "./support/database";
 import {
   agents,
   auditEvents,
+  credentials,
   mcpServers,
   mcpTools,
+  mcpUserCredentials,
   pluginGrants,
+  users,
 } from "../src/db/schema";
-import { createPluginStore, PluginRefusedError } from "../src/plugins/store";
+import { catalogueEntry } from "../src/plugins/catalogue";
+import { redirectUriFor } from "../src/plugins/oauth";
+import {
+  type AccessToken,
+  createPluginStore,
+  INVALID_CLIENT,
+  type OAuthClient,
+  PluginRefusedError,
+  TokenRefusedError,
+} from "../src/plugins/store";
 
 /**
  * The two questions a tool call has to pass, and the row each answer leaves behind.
@@ -63,9 +87,12 @@ const store = createPluginStore({
   credentials: {
     // No credential is ever read in these tests, because every call is refused before the vault.
     readSecret: async () => null,
-    // Nor written. Loud rather than absent: a call reaching either of these would mean this file had
+    // Nor written. Loud rather than absent: a call reaching any of these would mean this file had
     // started exercising something it does not claim to, and a silent no-op would hide that.
     create: async () => {
+      throw new Error("this suite does not write credentials");
+    },
+    updateSecret: async () => {
       throw new Error("this suite does not write credentials");
     },
     revoke: async () => {
@@ -517,5 +544,1075 @@ describe("a grant on a tool the vendor no longer lists", () => {
       (server) => server.id === serverId,
     );
     expect(drive?.withdrawn.map((row) => row.ref)).not.toContain(ref);
+  });
+});
+
+/**
+ * A vendor that hands back a new refresh token every time it is asked for access.
+ *
+ * Notion does. The token it was shown is dead the moment it answers, so a deployment that keeps the
+ * old one has spent somebody's connection on a single call: the next one presents a token the vendor
+ * has already invalidated, and the person is told to connect again for no reason they can see. That
+ * makes persisting the new token part of the exchange rather than bookkeeping after it, and it makes
+ * two concurrent calls a problem — both would present the same token, and one of them would lose.
+ *
+ * This suite needs a REAL vault, unlike the store fixture above: rotation re-encrypts the row the
+ * connection already points at, and a stub that throws cannot show that happening — nor show that
+ * nothing else was written. So it builds its own store, with the vendor and its token endpoint
+ * injected and everything else genuine.
+ */
+describe("refresh token rotation", () => {
+  const rotationBotId = `agent_rotation_bot_${suite}`;
+  const rotationUserId = `user_rotation_${suite}`;
+  /** Notion, because it is the entry whose vendor actually rotates. */
+  const rotationServerId = "notion";
+  /** Suite-scoped, so it cannot collide with a name Notion really advertises. */
+  const rotationToolName = `search_${suite}`;
+  const rotationRef = `${rotationServerId}/${rotationToolName}`;
+  /**
+   * 32 zero bytes in base64.
+   *
+   * A real AES-256 key length, unlike the `"x".repeat(44)` the fixture above gets away with: every
+   * call there is refused before the vault is opened, and every call here goes through it.
+   */
+  const ROTATION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  const CLIENT = { clientId: "notion-client", clientSecret: "notion-secret" };
+  /** Notion has no scope strings; the connection stores what the vendor said, which is nothing. */
+  const SCOPE = "";
+
+  /** Every vault row this suite created, so the cleanup can take exactly those. */
+  const vaultRows: string[] = [];
+  /** Every access token the store was about to send to the vendor, in order. */
+  const sent: string[] = [];
+  /**
+   * The exchange, as a sequence of the moments it entered and left.
+   *
+   * Recorded as a log rather than as a count because the property under test is an ORDERING: two
+   * exchanges for one connection must not overlap. A log makes an overlap visible without the test
+   * having to guess when to look.
+   */
+  const log: string[] = [];
+  /** What each exchange received and what it rotated to, which is the pairing rotation is about. */
+  const exchanges: { received: string; returned?: string }[] = [];
+  /** What the vendor's token endpoint does, installed per test. */
+  let mint: (refreshToken: string) => Promise<AccessToken> = async () => {
+    throw new Error("no exchange was installed for this test");
+  };
+
+  const rotationStore = createPluginStore({
+    database,
+    auditStore: createAuditStore(database),
+    credentials: {
+      readSecret: async (id) => {
+        const [row] = await database
+          .select({
+            encryptedValue: credentials.encryptedValue,
+            revokedAt: credentials.revokedAt,
+          })
+          .from(credentials)
+          .where(eq(credentials.id, id));
+        return row ?? null;
+      },
+      create: async (value) => {
+        const [row] = await database
+          .insert(credentials)
+          .values(value)
+          .returning({ id: credentials.id, revokedAt: credentials.revokedAt });
+        if (!row) throw new Error("credential was not stored");
+        vaultRows.push(row.id);
+        return row;
+      },
+      /*
+       * The vault's own in-place update, not a stand-in for it.
+       *
+       * This is the write rotation now performs, and the suite asserts the ROW it leaves behind: the
+       * same id, re-encrypted, nothing added. A hand-rolled copy of the statement here would assert
+       * the copy rather than the vault.
+       */
+      updateSecret: createCredentialStore(database).updateSecret,
+      revoke: async (id) => {
+        const [row] = await database
+          .update(credentials)
+          .set({ revokedAt: new Date() })
+          .where(eq(credentials.id, id))
+          .returning({ revokedAt: credentials.revokedAt });
+        if (!row?.revokedAt) throw new Error("credential was not revoked");
+        return row.revokedAt;
+      },
+    },
+    encryptionKey: ROTATION_KEY,
+    policy: () => policy,
+    // Stops before the network, and records what the call would have gone out with.
+    callVendor: async (connection) => {
+      sent.push(connection.token ?? "<none>");
+      return { text: "[vendor not reached in tests]", isError: false };
+    },
+    exchangeRefreshToken: async ({ client, refreshToken }) => {
+      expect(client).toEqual(CLIENT);
+      log.push(`start:${refreshToken}`);
+      const minted = await mint(refreshToken);
+      log.push(`end:${refreshToken}`);
+      exchanges.push({ received: refreshToken, returned: minted.refreshToken });
+      return minted;
+    },
+  });
+
+  /** The deployment's OAuth client, which is what `mcp_servers.credential_id` holds. */
+  async function registerClient() {
+    const [credential] = await database
+      .insert(credentials)
+      .values({
+        kind: "mcp_oauth_client",
+        provider: rotationServerId,
+        keyId: "oauth-client",
+        metadata: { clientId: CLIENT.clientId },
+        encryptedValue: await encryptSecret(
+          ROTATION_KEY,
+          JSON.stringify(CLIENT),
+        ),
+      })
+      .returning({ id: credentials.id });
+    if (!credential) throw new Error("client was not stored");
+    vaultRows.push(credential.id);
+    await database
+      .update(mcpServers)
+      .set({ credentialId: credential.id })
+      .where(eq(mcpServers.id, rotationServerId));
+  }
+
+  /** Which vault row this person's connection points at, so a swap is observable. */
+  async function connectionCredential() {
+    const [row] = await database
+      .select({ credentialId: mcpUserCredentials.credentialId })
+      .from(mcpUserCredentials)
+      .where(
+        and(
+          eq(mcpUserCredentials.serverId, rotationServerId),
+          eq(mcpUserCredentials.userId, rotationUserId),
+        ),
+      );
+    return row?.credentialId ?? null;
+  }
+
+  /**
+   * Every vault row this person's connection has ever had, live or revoked.
+   *
+   * The count is the point. A rotating vendor issues a new refresh token on every exchange, so a
+   * rotation that minted a row would leave one row per tool call here — which is invisible to any
+   * assertion that only looks at where the connection currently points.
+   */
+  async function connectionVaultRows() {
+    return (
+      database
+        .select({
+          id: credentials.id,
+          encryptedValue: credentials.encryptedValue,
+          revokedAt: credentials.revokedAt,
+        })
+        .from(credentials)
+        .where(
+          and(
+            eq(credentials.kind, "mcp_user_token"),
+            eq(credentials.provider, rotationServerId),
+            eq(credentials.keyId, rotationUserId),
+          ),
+        )
+        // Ordered, so that comparing the whole list before and after is comparing the rows rather
+        // than whatever order the database felt like returning them in.
+        .orderBy(credentials.id)
+    );
+  }
+
+  /** How many times this person is recorded as having connected their account. */
+  async function connectedRows() {
+    return (
+      await database
+        .select({ actor: sql<string>`payload ->> 'actor'` })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.eventType, "mcp.account_connected"),
+            eq(auditEvents.targetId, rotationServerId),
+            sql`payload ->> 'actor' = ${rotationUserId}`,
+          ),
+        )
+    ).length;
+  }
+
+  /** Waiting for something the other call does, rather than for a duration. */
+  async function waitUntil(condition: () => boolean, what: string) {
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      if (condition()) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`timed out waiting for ${what}`);
+  }
+
+  /** A connection holding `rt-1`, written through the store so the vault is exercised. */
+  async function connect() {
+    await rotationStore.recordConnection({
+      serverId: rotationServerId,
+      userId: rotationUserId,
+      refreshToken: "rt-1",
+      scope: SCOPE,
+    });
+    log.length = 0;
+    exchanges.length = 0;
+    sent.length = 0;
+  }
+
+  let notionWasAlreadyConfigured = false;
+  /**
+   * The OAuth client this deployment had before the suite ran, restored afterwards.
+   *
+   * `mcp_servers.credential_id` is live configuration, and this suite repoints it. Restored
+   * unconditionally, because the delete below removes the row it would otherwise still address.
+   */
+  let clientBefore: string | null = null;
+
+  beforeAll(async () => {
+    await database
+      .insert(agents)
+      .values({
+        id: rotationBotId,
+        name: rotationBotId,
+        type: "remote_ag_ui",
+        configuration: {},
+      })
+      .onConflictDoNothing();
+    await database
+      .insert(users)
+      .values({
+        id: rotationUserId,
+        email: `${rotationUserId}@openbot.test`,
+        name: rotationUserId,
+        emailVerified: false,
+      })
+      .onConflictDoNothing();
+
+    const [existing] = await database
+      .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, rotationServerId));
+    notionWasAlreadyConfigured = existing !== undefined;
+    clientBefore = existing?.credentialId ?? null;
+
+    // Written directly, so the test needs no vendor to be reachable. What is under test is which
+    // refresh token the next exchange presents, not the listing.
+    await database
+      .insert(mcpServers)
+      .values({
+        id: rotationServerId,
+        title: "Notion",
+        vendor: "Notion",
+        url: "https://mcp.notion.com/mcp",
+        provenance: "first-party",
+      })
+      .onConflictDoNothing();
+    await database
+      .insert(mcpTools)
+      .values({
+        serverId: rotationServerId,
+        name: rotationToolName,
+        description: "Search pages.",
+      })
+      .onConflictDoNothing();
+    await rotationStore.grant(
+      "mcp",
+      rotationRef,
+      rotationBotId,
+      "admin@openbot.local",
+    );
+    await registerClient();
+  });
+
+  afterAll(async () => {
+    // This suite's own person, never every row for this vendor: the id carries the run's suffix.
+    await database
+      .delete(mcpUserCredentials)
+      .where(
+        and(
+          eq(mcpUserCredentials.serverId, rotationServerId),
+          eq(mcpUserCredentials.userId, rotationUserId),
+        ),
+      );
+    // Before the deletes, because the column addresses one of the rows they remove.
+    await database
+      .update(mcpServers)
+      .set({ credentialId: clientBefore })
+      .where(eq(mcpServers.id, rotationServerId));
+    for (const id of vaultRows) {
+      await database.delete(credentials).where(eq(credentials.id, id));
+    }
+    await database
+      .delete(pluginGrants)
+      .where(
+        and(
+          eq(pluginGrants.ref, rotationRef),
+          eq(pluginGrants.agentId, rotationBotId),
+        ),
+      );
+    await database
+      .delete(mcpTools)
+      .where(
+        and(
+          eq(mcpTools.serverId, rotationServerId),
+          eq(mcpTools.name, rotationToolName),
+        ),
+      );
+    // A server row is deployment configuration, so it goes only if this suite is what added it.
+    if (!notionWasAlreadyConfigured) {
+      await database
+        .delete(mcpTools)
+        .where(eq(mcpTools.serverId, rotationServerId));
+      await database
+        .delete(mcpServers)
+        .where(eq(mcpServers.id, rotationServerId));
+    }
+    await database.delete(agents).where(eq(agents.id, rotationBotId));
+    await database.delete(users).where(eq(users.id, rotationUserId));
+  });
+
+  test("the list says which servers register their own OAuth client", async () => {
+    // Notion is dynamic (RFC 7591, registered by this deployment on first connect); Google Drive
+    // is not — an administrator pastes its client in, so the paste-a-client form still has a job
+    // to do there. The field distinguishes the two so the admin screen can hide the form only
+    // where it would otherwise be filled in with nothing to type.
+    const servers = await store.listServers();
+    const notion = servers.find((server) => server.id === rotationServerId);
+    const drive = servers.find((server) => server.id === serverId);
+    expect(notion?.dynamicClient).toBe(true);
+    expect(drive?.dynamicClient).toBe(false);
+  });
+
+  test("the token the vendor rotated to is the one the next call presents", async () => {
+    await connect();
+    const before = await connectionCredential();
+    const rowsBefore = await connectionVaultRows();
+    const connectedBefore = await connectedRows();
+    mint = async () => ({ accessToken: "at-1", refreshToken: "rt-2" });
+
+    await rotationStore.callTool({
+      ref: rotationRef,
+      args: {},
+      botId: rotationBotId,
+      actorId: rotationUserId,
+    });
+    await rotationStore.callTool({
+      ref: rotationRef,
+      args: {},
+      botId: rotationBotId,
+      actorId: rotationUserId,
+    });
+
+    // The whole property: the second exchange presented what the first was given back.
+    expect(exchanges.map((exchange) => exchange.received)).toEqual([
+      "rt-1",
+      "rt-2",
+    ]);
+    // Both calls went out with an access token, so neither was refused on the way.
+    expect(sent).toEqual(["at-1", "at-1"]);
+
+    /*
+     * Two rotations, and the vault holds exactly what it held before: the same row, still live,
+     * carrying the latest token.
+     *
+     * This is the whole reason rotation is in place rather than a swap. Every single call to a
+     * rotating vendor rotates, so minting a row per rotation would grow the vault without bound on
+     * the hottest path there is — and would revoke a grant the vendor had already killed itself the
+     * moment it handed the new token back.
+     */
+    const after = await connectionCredential();
+    expect(after).toBe(before);
+    const rowsAfter = await connectionVaultRows();
+    expect(rowsAfter.map((row) => row.id)).toEqual(
+      rowsBefore.map((row) => row.id),
+    );
+    const live = rowsAfter.filter((row) => row.revokedAt === null);
+    expect(live.map((row) => row.id)).toEqual([before]);
+    // And the row that stayed is the one the vendor rotated to, not the one it replaced.
+    expect(
+      await decryptSecret(ROTATION_KEY, live[0]?.encryptedValue ?? ""),
+    ).toBe("rt-2");
+
+    // And nothing claims the person connected an account again. Rotation is the vendor's plumbing,
+    // not somebody's act, and a trail that says otherwise is read as a re-consent that never
+    // happened.
+    expect(await connectedRows()).toBe(connectedBefore);
+  });
+
+  test("a vendor that does not rotate leaves the connection alone", async () => {
+    await connect();
+    const before = await connectionCredential();
+    // Google's reply: an access token and nothing else. Repointing anything here would be inventing
+    // a rotation the vendor did not perform.
+    mint = async () => ({ accessToken: "at-1" });
+
+    await rotationStore.callTool({
+      ref: rotationRef,
+      args: {},
+      botId: rotationBotId,
+      actorId: rotationUserId,
+    });
+    await rotationStore.callTool({
+      ref: rotationRef,
+      args: {},
+      botId: rotationBotId,
+      actorId: rotationUserId,
+    });
+
+    expect(exchanges.map((exchange) => exchange.received)).toEqual([
+      "rt-1",
+      "rt-1",
+    ]);
+    // Said explicitly, because it is the condition the store branches on: no refresh token came
+    // back at all. A test that only checked the connection was untouched would pass just as well
+    // against a store that rotated to the token it already held.
+    expect(exchanges.map((exchange) => exchange.returned)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(await connectionCredential()).toBe(before);
+  });
+
+  test("a vendor that hands the same token back writes nothing", async () => {
+    await connect();
+    const before = await connectionVaultRows();
+    // Notion's reply when the grant did not move: a fresh access token and the refresh token we
+    // presented. Nothing rotated, so there is nothing to persist.
+    mint = async () => ({ accessToken: "at-1", refreshToken: "rt-1" });
+
+    await rotationStore.callTool({
+      ref: rotationRef,
+      args: {},
+      botId: rotationBotId,
+      actorId: rotationUserId,
+    });
+
+    /*
+     * Byte-identical, which is a stronger claim than "same row".
+     *
+     * Encryption draws a fresh IV every time, so re-encrypting the very same token would leave a
+     * different envelope in the same row. An untouched envelope is the only evidence that the write
+     * did not happen at all.
+     */
+    expect(await connectionVaultRows()).toEqual(before);
+    expect(sent).toEqual(["at-1"]);
+  });
+
+  test("two calls at once take turns, and the second spends what the first was given", async () => {
+    await connect();
+    let release: (minted: AccessToken) => void = () => {};
+    const parked = new Promise<AccessToken>((resolve) => {
+      release = resolve;
+    });
+    let asked = 0;
+    mint = async () => {
+      asked += 1;
+      // The first exchange hangs until this test lets it finish. The second must not have started.
+      return asked === 1
+        ? parked
+        : { accessToken: "at-2", refreshToken: "rt-3" };
+    };
+
+    const both = Promise.allSettled([
+      rotationStore.callTool({
+        ref: rotationRef,
+        args: {},
+        botId: rotationBotId,
+        actorId: rotationUserId,
+      }),
+      rotationStore.callTool({
+        ref: rotationRef,
+        args: {},
+        botId: rotationBotId,
+        actorId: rotationUserId,
+      }),
+    ]);
+
+    try {
+      await waitUntil(() => log.length > 0, "the first exchange to start");
+      /*
+       * Long enough for a second, unserialised call to reach the vendor on its own. Its queries are
+       * a few milliseconds against a local database, so an overlapping exchange would be in the log
+       * by now — and with the exchanges serialised, waiting changes nothing at all.
+       */
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(log).toEqual(["start:rt-1"]);
+    } finally {
+      release({ accessToken: "at-1", refreshToken: "rt-2" });
+    }
+
+    const results = await both;
+    expect(results.map((result) => result.status)).toEqual([
+      "fulfilled",
+      "fulfilled",
+    ]);
+    // One after another, never interleaved, and the second presented the first's rotated token —
+    // which is only possible because the first persisted it before answering.
+    expect(log).toEqual(["start:rt-1", "end:rt-1", "start:rt-2", "end:rt-2"]);
+    expect(exchanges).toEqual([
+      { received: "rt-1", returned: "rt-2" },
+      { received: "rt-2", returned: "rt-3" },
+    ]);
+  });
+});
+
+/**
+ * A client this deployment registered for itself, which the vendor has since forgotten.
+ *
+ * A dynamically registered client is nobody's paperwork: there is no console entry an administrator
+ * could go and re-create, so a vendor that evicts one — a pruned test client, an expired
+ * registration — would otherwise strand every connection to that server behind a refusal nobody in
+ * the deployment can act on. The one thing the deployment CAN do is introduce itself again, which is
+ * exactly what it did the first time, so it does that once and retries.
+ *
+ * Once, and only once. A retry that re-registered on every refusal would answer a vendor outage by
+ * minting clients in a loop, and the second refusal is the honest signal that the problem is not the
+ * client at all.
+ */
+describe("a dynamic client the vendor has evicted", () => {
+  const dynamicBotId = `agent_dynamic_bot_${suite}`;
+  const dynamicUserId = `user_dynamic_${suite}`;
+  /** Notion, because it is the entry that registers itself. */
+  const dynamicServerId = "notion";
+  /** Suite-scoped, so it cannot collide with a name Notion really advertises. */
+  const dynamicToolName = `search_dyn_${suite}`;
+  const dynamicRef = `${dynamicServerId}/${dynamicToolName}`;
+  /** 32 zero bytes in base64: a real AES-256 key, because every call here opens the vault. */
+  const DYNAMIC_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  /** The client the deployment registered once and the vendor has stopped honouring. */
+  const EVICTED: OAuthClient = { clientId: "dyn-1", clientSecret: "" };
+  /** What registering again gets. No secret: a DCR client proves itself with PKCE. */
+  const FRESH: OAuthClient = { clientId: "dyn-2", clientSecret: "" };
+  /** Built the way the callback route builds it, so the vendor is offered the real thing. */
+  const REDIRECT_URI = redirectUriFor("https://openbot.test");
+  /** The pinned endpoint, read from the entry rather than copied, so the two cannot drift. */
+  const REGISTRATION_URL = (() => {
+    const entry = catalogueEntry(dynamicServerId);
+    if (entry?.auth.kind !== "user-oauth" || !entry.auth.registrationUrl) {
+      throw new Error(
+        "notion is not a dynamically registered user-oauth entry",
+      );
+    }
+    return entry.auth.registrationUrl;
+  })();
+  const SCOPE = "";
+
+  /** Every vault row this suite created, so the cleanup can take exactly those. */
+  const vaultRows: string[] = [];
+  /** Which client each exchange was offered, in order. That ordering IS the retry. */
+  const offered: string[] = [];
+  /** Every registration the store asked the vendor for, with what it asked with. */
+  const registrations: { registrationUrl: string; redirectUri: string }[] = [];
+  /** Which client ids the vendor still honours. Anything else is answered `invalid_client`. */
+  let accepted = new Set<string>();
+  /** What the vendor's registration endpoint hands back, installed per test. */
+  let issue: () => OAuthClient | null = () => {
+    throw new Error("no registration was installed for this test");
+  };
+
+  /*
+   * The real vault, with every row it mints written down.
+   *
+   * Genuine rather than stubbed, because what this suite asserts is that a re-registered client is
+   * KEPT — which is a write and a read back through the encryption, not a call that was made. The
+   * one wrapper is the bookkeeping that lets the cleanup take exactly this suite's rows.
+   */
+  const realVault = createCredentialStore(database);
+  const vault = {
+    ...realVault,
+    create: async (value: Parameters<typeof realVault.create>[0]) => {
+      const row = await realVault.create(value);
+      vaultRows.push(row.id);
+      return row;
+    },
+  };
+
+  /**
+   * How the vendor refuses a client it no longer honours.
+   *
+   * Both halves of what `exchangeRefreshTokenOverHttp` builds for a reply carrying an `error` code:
+   * the sentence a person reads, and the code as a FIELD. The field is the half the retry
+   * reads, which is why it is set structurally here rather than spelled into the prose — two tests
+   * below vary each half independently to prove which one is load-bearing.
+   */
+  const evictionRefusal = () =>
+    new TokenRefusedError(
+      "The vendor would not renew this access (401). (invalid_client)",
+      INVALID_CLIENT,
+    );
+  /** The refusal in force, so a test can vary the sentence or the code. Reset before each. */
+  let refuse: () => Error = evictionRefusal;
+
+  /*
+   * The exchange, standing in for the vendor's token endpoint.
+   */
+  const seams = {
+    exchangeRefreshToken: async ({
+      client,
+      refreshToken,
+    }: {
+      tokenUrl: string;
+      client: OAuthClient;
+      refreshToken: string;
+    }): Promise<AccessToken> => {
+      offered.push(client.clientId);
+      if (!accepted.has(client.clientId)) {
+        throw refuse();
+      }
+      // The same token back, so nothing rotates: what this suite is about is the client.
+      return { accessToken: `at-${client.clientId}`, refreshToken };
+    },
+    registerClient: async (input: {
+      registrationUrl: string;
+      redirectUri: string;
+    }) => {
+      registrations.push(input);
+      return issue();
+    },
+  };
+
+  const dynamicStore = createPluginStore({
+    database,
+    auditStore: createAuditStore(database),
+    credentials: vault,
+    encryptionKey: DYNAMIC_KEY,
+    policy: () => policy,
+    callVendor: async () => ({
+      text: "[vendor not reached in tests]",
+      isError: false,
+    }),
+    ...seams,
+    redirectUri: REDIRECT_URI,
+  });
+
+  /**
+   * The same store, for a deployment with no public URL.
+   *
+   * There is nowhere for the vendor to send anybody back to, so there is nothing honest to register
+   * — and registering a redirect URI that does not resolve would leave a client that can never
+   * complete a consent flow.
+   */
+  const storeWithNoRedirect = createPluginStore({
+    database,
+    auditStore: createAuditStore(database),
+    credentials: vault,
+    encryptionKey: DYNAMIC_KEY,
+    policy: () => policy,
+    ...seams,
+  });
+
+  /** Point the server at a client, the way a registration does, without going through one. */
+  async function putClient(client: OAuthClient) {
+    const [row] = await database
+      .insert(credentials)
+      .values({
+        kind: "mcp_oauth_client",
+        provider: dynamicServerId,
+        keyId: `oauth-client-${dynamicServerId}`,
+        metadata: { clientId: client.clientId },
+        encryptedValue: await encryptSecret(
+          DYNAMIC_KEY,
+          JSON.stringify(client),
+        ),
+      })
+      .returning({ id: credentials.id });
+    if (!row) throw new Error("client was not stored");
+    vaultRows.push(row.id);
+    await database
+      .update(mcpServers)
+      .set({ credentialId: row.id })
+      .where(eq(mcpServers.id, dynamicServerId));
+  }
+
+  /** A deployment that holds no client for this server at all. */
+  async function clearClient(serverId = dynamicServerId) {
+    await database
+      .update(mcpServers)
+      .set({ credentialId: null })
+      .where(eq(mcpServers.id, serverId));
+  }
+
+  /**
+   * How many of those rows say a particular actor registered a particular client.
+   *
+   * Counted rather than "the most recent row", because these rows have no ordering finer than the
+   * second they were written in and this suite writes several of them.
+   */
+  const registeredBy = (
+    rows: { actor: string; clientId: string }[],
+    actor: string,
+    clientId: string,
+  ) =>
+    rows.filter((row) => row.actor === actor && row.clientId === clientId)
+      .length;
+
+  /** What the trail says about clients registered for this server, and by whom. */
+  async function registeredRows() {
+    return database
+      .select({
+        actor: sql<string>`payload ->> 'actor'`,
+        clientId: sql<string>`payload ->> 'clientId'`,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.eventType, "mcp.oauth_client_registered"),
+          eq(auditEvents.targetId, dynamicServerId),
+        ),
+      );
+  }
+
+  /** A connection holding `rt-1`, written through the store so the vault is exercised. */
+  async function connect() {
+    await dynamicStore.recordConnection({
+      serverId: dynamicServerId,
+      userId: dynamicUserId,
+      refreshToken: "rt-1",
+      scope: SCOPE,
+    });
+    offered.length = 0;
+    registrations.length = 0;
+  }
+
+  let notionWasAlreadyConfigured = false;
+  /** This deployment's own client, restored afterwards: the column is live configuration. */
+  let clientBefore: string | null = null;
+
+  // The vendor refuses the ordinary way unless a test says otherwise, so a test that varies the
+  // refusal cannot leave the next one asserting against somebody else's setup.
+  beforeEach(() => {
+    refuse = evictionRefusal;
+  });
+
+  beforeAll(async () => {
+    await database
+      .insert(agents)
+      .values({
+        id: dynamicBotId,
+        name: dynamicBotId,
+        type: "remote_ag_ui",
+        configuration: {},
+      })
+      .onConflictDoNothing();
+    await database
+      .insert(users)
+      .values({
+        id: dynamicUserId,
+        email: `${dynamicUserId}@openbot.test`,
+        name: dynamicUserId,
+        emailVerified: false,
+      })
+      .onConflictDoNothing();
+
+    const [existing] = await database
+      .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, dynamicServerId));
+    notionWasAlreadyConfigured = existing !== undefined;
+    clientBefore = existing?.credentialId ?? null;
+
+    await database
+      .insert(mcpServers)
+      .values({
+        id: dynamicServerId,
+        title: "Notion",
+        vendor: "Notion",
+        url: "https://mcp.notion.com/mcp",
+        provenance: "first-party",
+      })
+      .onConflictDoNothing();
+    await database
+      .insert(mcpTools)
+      .values({
+        serverId: dynamicServerId,
+        name: dynamicToolName,
+        description: "Search pages.",
+      })
+      .onConflictDoNothing();
+    await dynamicStore.grant(
+      "mcp",
+      dynamicRef,
+      dynamicBotId,
+      "admin@openbot.local",
+    );
+  });
+
+  afterAll(async () => {
+    await database
+      .delete(mcpUserCredentials)
+      .where(
+        and(
+          eq(mcpUserCredentials.serverId, dynamicServerId),
+          eq(mcpUserCredentials.userId, dynamicUserId),
+        ),
+      );
+    // Before the deletes, because the column addresses one of the rows they remove.
+    await database
+      .update(mcpServers)
+      .set({ credentialId: clientBefore })
+      .where(eq(mcpServers.id, dynamicServerId));
+    for (const id of vaultRows) {
+      await database.delete(credentials).where(eq(credentials.id, id));
+    }
+    await database
+      .delete(pluginGrants)
+      .where(
+        and(
+          eq(pluginGrants.ref, dynamicRef),
+          eq(pluginGrants.agentId, dynamicBotId),
+        ),
+      );
+    await database
+      .delete(mcpTools)
+      .where(
+        and(
+          eq(mcpTools.serverId, dynamicServerId),
+          eq(mcpTools.name, dynamicToolName),
+        ),
+      );
+    if (!notionWasAlreadyConfigured) {
+      await database
+        .delete(mcpTools)
+        .where(eq(mcpTools.serverId, dynamicServerId));
+      await database
+        .delete(mcpServers)
+        .where(eq(mcpServers.id, dynamicServerId));
+    }
+    await database.delete(agents).where(eq(agents.id, dynamicBotId));
+    await database.delete(users).where(eq(users.id, dynamicUserId));
+  });
+
+  test("the deployment registers again, once, and the call goes through", async () => {
+    await putClient(EVICTED);
+    await connect();
+    const registeredBefore = await registeredRows();
+    accepted = new Set([FRESH.clientId]);
+    issue = () => FRESH;
+
+    const result = await dynamicStore.callTool({
+      ref: dynamicRef,
+      args: {},
+      botId: dynamicBotId,
+      actorId: dynamicUserId,
+    });
+
+    // The call the person asked for happened, on the client the vendor had never heard of until now.
+    expect(result.isError).toBe(false);
+    expect(offered).toEqual([EVICTED.clientId, FRESH.clientId]);
+
+    // Registered exactly once, with the pinned endpoint and the deployment's own redirect URI —
+    // never a URL from the request, which is the property `redirectUriFor` exists for.
+    expect(registrations).toEqual([
+      { registrationUrl: REGISTRATION_URL, redirectUri: REDIRECT_URI },
+    ]);
+
+    // And kept, so the next call starts from the client that works rather than repeating this.
+    expect(await dynamicStore.oauthClientFor(dynamicServerId)).toEqual(FRESH);
+
+    /*
+     * With a row in the trail saying the deployment did it to itself.
+     *
+     * `deployment` rather than the person whose call triggered it: they consented to nothing here,
+     * and a trail naming them would read as an administrator having registered a client.
+     */
+    const registered = await registeredRows();
+    expect(registered.length).toBe(registeredBefore.length + 1);
+    expect(registeredBy(registered, "deployment", FRESH.clientId)).toBe(
+      registeredBy(registeredBefore, "deployment", FRESH.clientId) + 1,
+    );
+  });
+
+  test("a second refusal in a row is surfaced rather than registered around", async () => {
+    await putClient(EVICTED);
+    await connect();
+    // The vendor honours nothing, which is what an outage looks like from here.
+    accepted = new Set<string>();
+    issue = () => ({ clientId: "dyn-3", clientSecret: "" });
+
+    await expect(
+      dynamicStore.callTool({
+        ref: dynamicRef,
+        args: {},
+        botId: dynamicBotId,
+        actorId: dynamicUserId,
+      }),
+    ).rejects.toThrow("invalid_client");
+
+    // One registration and two exchanges: the retry is bounded, so a vendor refusing everything
+    // costs one new client rather than one per call forever.
+    expect(registrations.length).toBe(1);
+    expect(offered).toEqual([EVICTED.clientId, "dyn-3"]);
+  });
+
+  /**
+   * The code decides, not the sentence.
+   *
+   * The sentence is written for a person and will be reworded — shortened, translated, given a
+   * different parenthesis. When the recovery hung on a substring of it, any of those edits would
+   * have switched self-registration off with every test in this file still passing, and the symptom
+   * would have been every Notion connection in the deployment stranded behind a refusal.
+   */
+  test("a refusal that words it differently still re-registers", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([FRESH.clientId]);
+    issue = () => FRESH;
+    // Not one character of the code anywhere in the prose.
+    refuse = () =>
+      new TokenRefusedError(
+        "Le fournisseur a refusé de renouveler cet accès (401).",
+        INVALID_CLIENT,
+      );
+
+    const result = await dynamicStore.callTool({
+      ref: dynamicRef,
+      args: {},
+      botId: dynamicBotId,
+      actorId: dynamicUserId,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(offered).toEqual([EVICTED.clientId, FRESH.clientId]);
+    expect(registrations.length).toBe(1);
+  });
+
+  /** And the other way round: prose that says the word, over a code that does not. */
+  test("a refusal whose code is another one is not registered around", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set<string>();
+    issue = () => FRESH;
+    refuse = () =>
+      new TokenRefusedError(
+        "The vendor would not renew this access (400). (invalid_grant, not an invalid_client problem)",
+        "invalid_grant",
+      );
+
+    await expect(
+      dynamicStore.callTool({
+        ref: dynamicRef,
+        args: {},
+        botId: dynamicBotId,
+        actorId: dynamicUserId,
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    // A withdrawn grant is the person's to fix by connecting again. Minting a client for it would
+    // leave a spare client behind and still refuse.
+    expect(registrations).toEqual([]);
+    expect(offered).toEqual([EVICTED.clientId]);
+  });
+
+  /**
+   * Two calls queued on one connection, and one registration between them.
+   *
+   * The client is read INSIDE the per-connection critical section, so the second call reads it after
+   * the first has replaced it. Read before the queue instead, both calls would carry the evicted
+   * client in, both would be refused, and both would register — a client minted per queued call, on
+   * a connection the deployment already fixed.
+   */
+  test("two calls queued on one connection register once between them", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([FRESH.clientId]);
+    issue = () => FRESH;
+
+    const call = () =>
+      dynamicStore.callTool({
+        ref: dynamicRef,
+        args: {},
+        botId: dynamicBotId,
+        actorId: dynamicUserId,
+      });
+    const results = await Promise.all([call(), call()]);
+
+    expect(results.map((result) => result.isError)).toEqual([false, false]);
+    // The evicted client was offered once, by whichever call got there first.
+    expect(offered).toEqual([EVICTED.clientId, FRESH.clientId, FRESH.clientId]);
+    expect(registrations.length).toBe(1);
+  });
+
+  test("a client the deployment already holds is handed back untouched", async () => {
+    await putClient(EVICTED);
+    registrations.length = 0;
+
+    expect(
+      await dynamicStore.ensureOAuthClient(
+        dynamicServerId,
+        "someone@openbot.test",
+      ),
+    ).toEqual(EVICTED);
+    // Nothing was asked of the vendor: this is the path every connect takes once, and it must not
+    // mint a client on top of the working one.
+    expect(registrations).toEqual([]);
+  });
+
+  test("a dynamic entry with no client gets one, kept and recorded", async () => {
+    await clearClient();
+    registrations.length = 0;
+    const registeredBefore = await registeredRows();
+    issue = () => FRESH;
+
+    expect(
+      await dynamicStore.ensureOAuthClient(
+        dynamicServerId,
+        "someone@openbot.test",
+      ),
+    ).toEqual(FRESH);
+    expect(registrations).toEqual([
+      { registrationUrl: REGISTRATION_URL, redirectUri: REDIRECT_URI },
+    ]);
+    expect(await dynamicStore.oauthClientFor(dynamicServerId)).toEqual(FRESH);
+
+    const registered = await registeredRows();
+    expect(registered.length).toBe(registeredBefore.length + 1);
+    // Whoever pressed Connect, because for a first registration that IS the act that caused it.
+    expect(
+      registeredBy(registered, "someone@openbot.test", FRESH.clientId),
+    ).toBe(
+      registeredBy(registeredBefore, "someone@openbot.test", FRESH.clientId) +
+        1,
+    );
+  });
+
+  test("an entry an administrator registers by hand is left alone", async () => {
+    /*
+     * Drive, whose client is pasted in from Google's console. Registering one for it would be
+     * inventing a client at a vendor that never offered to issue one — the honest answer is none,
+     * and the 409 an administrator sees is the instruction to go and paste one.
+     */
+    const [before] = await database
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId));
+    await clearClient(serverId);
+    registrations.length = 0;
+
+    try {
+      expect(
+        await dynamicStore.ensureOAuthClient(serverId, "someone@openbot.test"),
+      ).toBeNull();
+      expect(registrations).toEqual([]);
+    } finally {
+      await database
+        .update(mcpServers)
+        .set({ credentialId: before?.credentialId ?? null })
+        .where(eq(mcpServers.id, serverId));
+    }
+  });
+
+  test("a deployment with no public URL registers nothing", async () => {
+    await clearClient();
+    registrations.length = 0;
+
+    expect(
+      await storeWithNoRedirect.ensureOAuthClient(
+        dynamicServerId,
+        "someone@openbot.test",
+      ),
+    ).toBeNull();
+    expect(registrations).toEqual([]);
   });
 });
