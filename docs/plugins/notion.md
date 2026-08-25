@@ -22,19 +22,20 @@ There is deliberately no endpoint for an administrator to connect an account on 
 
 At `/admin/plugins/notion`, turn on **Enable for this deployment**. There is no client to register
 and no secret to paste: this deployment introduces itself to Notion on first connect, over RFC 7591
-dynamic client registration. The only prerequisite is `OPENBOT_PUBLIC_URL`, which is what the
-registration request derives its redirect URI from — nothing needs to be registered at Notion ahead
-of time.
+dynamic client registration. The prerequisite is a public URL the redirect URI can be derived from —
+`OPENBOT_PUBLIC_URL` if it is set, or the auth base URL it falls back to otherwise — nothing needs to
+be registered at Notion ahead of time.
 
 ### 2. Connect your own account
 
 On the same page, use **Your account** to connect your own Notion account before doing anything
 else here. Unlike Google Drive's tool list, which is OpenBot's own code and needs no credential to
 read, this connector's tool list is an answer from Notion's hosted server: refreshing it takes a
-credential, and the refresh in the next step mints one from whichever account is connected on this
-page at the time. That is a personal grant like anybody else's, reaching only what your own account
-can see — not deployment configuration — but it has to come first, because nothing else here has a
-Notion credential behind it yet.
+credential, and the refresh in the next step mints one from the connection belonging to whoever
+presses the button — not whichever account happens to be connected here. That is a personal grant
+like anybody else's, reaching only what your own account can see — not deployment configuration —
+but it has to come first, because an administrator who presses Refresh tools without having
+connected their own account is refused, not lent someone else's.
 
 ### 3. Press Refresh tools
 

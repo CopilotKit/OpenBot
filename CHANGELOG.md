@@ -13,15 +13,28 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 Notion is now a governed MCP connector, reached through Notion's own hosted server on the
 catalogue's default transport, as the person asking — the same grant, policy and audit machinery
 Google Drive already runs through. Unlike Drive, it ships both read and write tools from the start;
-the writing ones are named in the catalogue, and everything else is treated as a write until
-positively classified as a read, so nothing ungoverned falls through by default.
+the writing ones are named in the catalogue, and an advertised tool absent from that list classifies
+as a read — so reconciling the write-tool names against what Notion's hosted server actually calls
+them, on the first Refresh tools, is required, not cosmetic. A tool the server never advertised at
+all still classifies as a write, same as any other connector.
 
 There is no client to register: this deployment introduces itself to Notion on first connect. That
 shortens setup but does not finish it — unlike Drive, whose tool list is this codebase's own code,
 Notion's tool list is an answer from Notion's hosted server, so a deployment has recorded none of it
 until Refresh tools has run at least once; and, like every other connector, a Bot gets nothing until
 its tools are granted to it. Setup is enable at `/admin/plugins/notion`, connect an account at
-`/settings/connected-accounts`, refresh tools, then grant. No migration.
+`/settings/connected-accounts`, refresh tools, then grant — a bulk **Grant tools…** dialog on
+`/admin/plugins/notion` grants a batch of tools to a batch of Bots in one pass, one grant and one
+audit row per Bot per tool. No migration.
+
+### Refresh tokens rotate in place, and replicas take turns spending them
+
+A vendor that rotates refresh tokens invalidates the one it just handed out, so two replicas racing
+to use a stale token would have the loser refused, or worse: a rotating vendor's reuse detection can
+read that as a stolen token and revoke the whole connection. Every plugin call that mints an access
+token now locks the credential's vault row for the length of the exchange, so a second replica waits
+rather than races, and the rotated token is written back in the same transaction that held the lock.
+Nothing to configure; a connection just stops going stale under concurrent traffic.
 
 ### Knowledge searches instead of guessing
 
@@ -258,9 +271,11 @@ roster — newest first among pinned channels — and leaves every other member'
 
 Delete is confirmed in a dialog first, and it is soft. The channel disappears from every member's
 roster and from a direct fetch of it, while the row, its transcript, and its Intelligence thread all
-survive. A channel the deployment package defines is refused, with the reason named. Recovery today
-is clearing `channels.deleted_at` in the database directly; there is no restore control in the
-product.
+survive. That disappearance is live, not just on next load: every member's open tabs drop the row as
+the delete lands, and a tab parked on the channel itself is sent home. The deletion is audited as its
+own `channel.deleted` row. A channel the deployment package defines is refused, with the reason
+named. Recovery today is clearing `channels.deleted_at` in the database directly; there is no restore
+control in the product.
 
 The deployment gains two nullable columns, via migration `0016`.
 
