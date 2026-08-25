@@ -54,7 +54,7 @@ Not everything crossing the wire is cached state, and the shape follows from whi
    success.
 3. **Everything else is a plain exported function**, living beside the factories for its entity.
    A verdict about this moment (`decideComponent`, `testAgentConnection`), a tool call during a
-   Bot's turn (`callPluginTool`, the computer control surface), a frame of a screen, a step inside
+   Bot's turn (`callPluginTool`, the computer control surface), a frame of a screen, or a step inside
    another write (`storeMcpToken`). These fail closed and return a value rather than throwing,
    because a refusal is usually the answer. Giving one a cache key would create a key nothing reads
    and an invalidation nothing triggers.
