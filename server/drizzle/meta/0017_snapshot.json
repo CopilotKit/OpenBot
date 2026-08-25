@@ -1,6 +1,6 @@
 {
-  "id": "a62449fa-67a9-4ece-a79c-f8990de606f9",
-  "prevId": "0333e21d-0b63-4aac-9234-6ba46382f2b2",
+  "id": "eab681f3-28cb-4ef4-a5f0-5e82f53a6f42",
+  "prevId": "8e5982ba-c8e3-4634-a05c-68a90e066dac",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -441,6 +441,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "pinned_at": {
+          "name": "pinned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -544,6 +550,12 @@
         "last_message_agent_id": {
           "name": "last_message_agent_id",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -1244,55 +1256,6 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.computer_page_frame": {
-      "name": "computer_page_frame",
-      "schema": "",
-      "columns": {
-        "computer_id": {
-          "name": "computer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "frame": {
-          "name": "frame",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "captured_at": {
-          "name": "captured_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "computer_page_frame_computer_id_url_pk": {
-          "name": "computer_page_frame_computer_id_url_pk",
-          "columns": ["computer_id", "url"]
-        }
-      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -2430,6 +2393,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "payload": {
           "name": "payload",

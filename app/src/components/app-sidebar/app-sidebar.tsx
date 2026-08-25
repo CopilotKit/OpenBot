@@ -110,6 +110,20 @@ function matchingChannels(
 }
 
 /**
+ * Pinned channels first, everything else after, newest activity first within each group.
+ *
+ * The mirror of a server rule, not the rule itself: the roster query orders pinned-first and its
+ * cursor carries the pin, so a pinned channel arrives on page one however long ago it was last
+ * spoken in. Sorting here as well is for what happens between refetches — the socket patches a pin
+ * onto a loaded row without moving it, and re-sorts a page by recency alone — which is the same
+ * reason `byRecency` in use-channel-events.ts mirrors the recency rule. A stable partition, so the
+ * recency order inside each group is whatever arrived.
+ */
+export function pinnedFirst(channels: ChannelSummary[]): ChannelSummary[] {
+  return [...channels].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+}
+
+/**
  * A roster row that can animate.
  *
  * Two movements only: a channel that did not exist fades in, and a channel that was just spoken in
@@ -145,6 +159,7 @@ function ChannelRow({
             ? relativeTime(channel.lastMessageAt)
             : undefined
         }
+        pinned={channel.pinned}
       />
     </motion.div>
   );
@@ -160,7 +175,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   useChannelEvents();
   const [search, setSearch] = useState("");
   const searching = search.trim().length > 0;
-  const visibleChannels = matchingChannels(channels.data, search);
+  const visibleChannels = pinnedFirst(matchingChannels(channels.data, search));
   /*
    * FILTERING DOES NOT ANIMATE. Rows exit and relayout on every keystroke otherwise, which is a
    * list thrashing under somebody who is still typing — and the moving target is the very thing

@@ -46,6 +46,7 @@ import {
 } from "./credentials";
 import { createDatabase } from "./db/client";
 import { createPeopleStore } from "./people/store";
+import { redirectUriFor } from "./plugins/oauth";
 import { createPluginStore } from "./plugins/store";
 import { grantedSkills, grantedTools } from "./plugins/tools";
 import { createIntentRouter } from "./routing/classify";
@@ -275,6 +276,15 @@ const pluginStore = createPluginStore({
   credentials: credentialStore,
   encryptionKey: config.keyEncryptionKey,
   policy: () => policyStore.get(),
+  /*
+   * Where a vendor sends people back, for a vendor whose client this deployment registers itself.
+   *
+   * The same value the connect and callback routes build, from the same config field, because it has
+   * to match what was registered character for character. Undefined without a public URL, which is
+   * the honest state: there is nowhere for a consent flow to come back to, so there is nothing worth
+   * registering.
+   */
+  redirectUri: config.publicUrl ? redirectUriFor(config.publicUrl) : undefined,
 });
 
 void recordAuditEvent(bootAuditStore, {

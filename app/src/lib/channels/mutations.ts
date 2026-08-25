@@ -23,35 +23,6 @@ export function createChannelMutationOptions(queryClient: QueryClient) {
 }
 
 /**
- * Delete a channel, and ask the platform to forget the thread behind it.
- *
- * Other tabs learn a channel is gone from the socket event in `use-channel-events.ts`; this tab
- * issued the delete itself and never receives its own event, so it clears the roster and detail
- * cache directly on success.
- *
- * Resolves to whether the message history outlived the channel. The local delete commits first and
- * the thread deletion can fail on its own, so this is not a failure to throw on: the conversation
- * is gone either way, and the caller shows the residue rather than reporting an error that did not
- * happen.
- */
-export function deleteChannelMutationOptions(queryClient: QueryClient) {
-  return mutationOptions({
-    mutationFn: async (channelId: string): Promise<boolean> => {
-      const response = await client(`/api/channels/${channelId}`, {
-        method: "DELETE",
-        fallback: "Could not delete this conversation",
-      });
-      const body = (await response.json()) as { historyLeftBehind?: boolean };
-      return body.historyLeftBehind === true;
-    },
-    onSuccess: (_data, channelId) => {
-      queryClient.invalidateQueries({ queryKey: channelKeys.all });
-      queryClient.removeQueries({ queryKey: channelKeys.detail(channelId) });
-    },
-  });
-}
-
-/**
  * Report the last thing said in a channel.
  *
  * The client that ran the agent already has the message before platform replay can return it; the
@@ -77,5 +48,37 @@ export function recordChannelActivityMutationOptions() {
         },
       });
     },
+  });
+}
+
+/** Pin or unpin a channel for this member. A marker, not a reorder, so no optimistic sort. */
+export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: { channelId: string; pinned: boolean }) => {
+      await client(`/api/channels/${variables.channelId}/pin`, {
+        method: "PUT",
+        body: { pinned: variables.pinned },
+        fallback: "Could not pin this channel",
+      });
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+  });
+}
+
+/** Soft-delete a channel for everyone in it. The server keeps the transcript; the roster forgets. */
+export function deleteChannelMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (channelId: string) => {
+      await client(`/api/channels/${channelId}`, {
+        method: "DELETE",
+        fallback: "Could not delete this channel",
+      });
+    },
+    // The roster only. The open channel's detail query would refetch into the fresh 404 and
+    // flash an error before the navigate-home lands; left alone, it keeps its cache and the
+    // navigation happens with nothing to complain about.
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
   });
 }

@@ -5,6 +5,8 @@ CREATE TABLE "work_items" (
 	"claimed_by" text,
 	"lease_until" timestamp with time zone,
 	"attempts" integer DEFAULT 0 NOT NULL,
+	"finished_at" timestamp with time zone,
+	"last_error" text,
 	"payload" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,

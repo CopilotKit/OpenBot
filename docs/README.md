@@ -8,6 +8,7 @@ Start with the root [README](../README.md), then use these references:
 - [Coworkers](coworkers.md): durable Bot profiles, channels, visibility, deletion, and external AG-UI registration.
 - Plugins, one connector per page — what an administrator registers, what each person consents to, and what the failures mean:
   - [Google Drive](plugins/google-drive.md)
+  - [Notion](plugins/notion.md)
 - [Deployment](deployment.md): the container, what is in the image, minimum sizes, and the platform notes.
 - [Releasing](releasing.md): how a release is proposed, reviewed and published.
 

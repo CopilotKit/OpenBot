@@ -6,9 +6,11 @@ import {
   type PolicyContext,
 } from "../computer/policy";
 import {
+  type CredentialExecutor,
   type CredentialSecretReader,
   type CredentialStore,
   decryptCredentialForUse,
+  decryptSecret,
   encryptSecret,
 } from "../credentials";
 import type { Database } from "../db/client";
@@ -32,6 +34,7 @@ import {
   resolveServerUrl,
 } from "./catalogue";
 import { McpServerError } from "./mcp";
+import { registerDynamicClient } from "./oauth";
 import { transportFor } from "./transport";
 
 /**
@@ -92,6 +95,12 @@ export type ServerRecord = {
   toolsRefreshedAt: string | null;
   lastError: string | null;
   addedBy: string | null;
+  /**
+   * Whether the catalogue entry registers its own OAuth client (RFC 7591) rather than waiting on
+   * an administrator to paste one in. So the admin screen can hide the paste-a-client form where
+   * there is nothing for it to collect.
+   */
+  dynamicClient: boolean;
   tools: ToolRecord[];
   /**
    * Grants on tools this server no longer advertises.
@@ -183,6 +192,43 @@ export class CustomServerRefusedError extends Error {
 }
 
 /**
+ * The vendor's `error` code, when a token endpoint refuses an exchange.
+ *
+ * {@link INVALID_CLIENT} is the one code this module ACTS on rather than reports, so it has to
+ * survive as a value. It used to travel inside the sentence, which meant the recovery in
+ * {@link createPluginStore}'s `refuseAndReplaceEvictedClient` hung on a substring of prose written for a
+ * person to read: rewording the sentence — translating it, dropping the parenthesis — would have
+ * turned self-registration off with every test still green. A field cannot be reworded by accident.
+ */
+export class TokenRefusedError extends McpServerError {
+  constructor(
+    message: string,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = "TokenRefusedError";
+  }
+}
+
+/**
+ * The vendor saying the CLIENT is the problem, rather than the grant. RFC 6749 §5.2.
+ *
+ * Told apart from every other refusal because it is the only one a deployment can do anything about
+ * on its own: a client it issued to itself, it can issue again.
+ */
+export const INVALID_CLIENT = "invalid_client";
+
+/**
+ * A transaction, as the writes in this module hand one to each other.
+ *
+ * Named because two writes here are one decision — a secret in the vault, and the pointer that says
+ * what it is for — and the only way to say that is to run both on the same executor. `select`,
+ * `insert` and `update` alone would do for {@link CredentialExecutor}; this needs `execute` too, for
+ * the advisory lock that serialises the client path.
+ */
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
  * A tool name the model can actually call.
  *
  * `<server>/<tool>` is how a grant is stored, because a slash reads correctly to a person and cannot
@@ -197,6 +243,39 @@ export function refFromToolName(toolName: string): string | null {
   const separator = rest.indexOf("__");
   if (separator <= 0) return null;
   return `${rest.slice(0, separator)}/${rest.slice(separator + 2)}`;
+}
+
+/**
+ * Advertised tool names this deployment's write list does not name, where that list is the whole
+ * barrier.
+ *
+ * WHY THIS IS WORTH A ROW. {@link classifyTool} reads an advertised name absent from `writeTools` as
+ * a READ. So under-inclusion is the failure mode of that list, and it is silent: a write the vendor
+ * offers and the entry forgot is offered to a model as a read, and nothing anywhere says so. Notion's
+ * entry says reconciling its list against the live tool list "is required, not cosmetic" — this is
+ * the mechanical half of that, so the reconciliation is somebody reading a trail rather than somebody
+ * remembering.
+ *
+ * Only where the list stands alone. A vendor that expresses SCOPES has something behind the list: a
+ * tool missing from Drive's `writeTools` still cannot write, because `drive.readonly` refuses it at
+ * the vendor. Naming those would be noise in front of the one case that has no second barrier at all
+ * — Notion, whose access is per-page on a consent screen and whose `scopes` are therefore empty.
+ *
+ * A server with no catalogue entry is not reconciled either, and for the opposite reason: nothing
+ * reviewed says any tool of theirs only reads, so all of them are already writes.
+ *
+ * Sorted, so two readings of the same listing produce the same row.
+ */
+export function unlistedAdvertisedTools(
+  entry: CatalogueEntry | null,
+  advertised: readonly string[],
+): string[] {
+  if (!entry || entry.writeTools.length === 0) return [];
+  if (entry.auth.kind !== "user-oauth" || entry.auth.scopes.length > 0) {
+    return [];
+  }
+  const writes = new Set(entry.writeTools);
+  return advertised.filter((name) => !writes.has(name)).sort();
 }
 
 const iso = (value: Date | string | null): string | null =>
@@ -247,36 +326,83 @@ function effectiveUrl(
  * host does not: this request carries the deployment's client secret and somebody's refresh token,
  * so where it goes is a reviewed decision rather than a runtime one.
  *
- * The vendor's error body is deliberately not passed through. It is written for whoever registered
- * the client, not for the person who asked a Bot a question, and it can name the client id.
+ * The vendor's error body is deliberately not passed through — it is written for whoever registered
+ * the client, not for the person who asked a Bot a question, and it can name the client id. Its
+ * `error` CODE is, though, and only that: `invalid_client` is what tells a client the vendor has
+ * forgotten apart from a grant somebody withdrew, and those two have entirely different answers.
+ * It goes out as a field on {@link TokenRefusedError} as well as in the sentence, because the field
+ * is the copy the recovery reads.
+ *
+ * Exported for its own tests rather than for a caller. Every path through the store reaches it as
+ * the default `exchangeRefreshToken`, and the store's own suites inject a stub in its place — which
+ * leaves what this function does with a REAL vendor reply, honest or garbled, untested unless it can
+ * be called directly.
  */
-async function exchangeRefreshTokenOverHttp(input: {
+export async function exchangeRefreshTokenOverHttp(input: {
   tokenUrl: string;
   client: OAuthClient;
   refreshToken: string;
 }): Promise<AccessToken> {
+  const params = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: input.refreshToken,
+    client_id: input.client.clientId,
+  });
+  // A public (DCR) client proves itself without one, and some vendors refuse an unexpected empty
+  // field outright. The same guard the authorization-code redemption in `oauth.ts` uses.
+  if (input.client.clientSecret) {
+    params.set("client_secret", input.client.clientSecret);
+  }
+
   const response = await fetch(input.tokenUrl, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: input.refreshToken,
-      client_id: input.client.clientId,
-      client_secret: input.client.clientSecret,
-    }),
+    body: params,
     signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
   });
 
   if (!response.ok) {
-    throw new McpServerError(
-      `The vendor would not renew this access (${response.status}).`,
+    /*
+     * The code, when the refusal is JSON and carries one. Read defensively: a token endpoint that
+     * is refusing may be refusing with an HTML error page, and a parse failure here would replace
+     * the vendor's status — the one fact we do have — with a syntax error.
+     */
+    const refusal = (await response.json().catch(() => null)) as {
+      error?: unknown;
+    } | null;
+    /*
+     * Capped where it is read, because everything downstream of here shows it to somebody: the
+     * person who asked, the model, the connector's `lastError` on the admin page, and an audit
+     * payload. It is a short token in the protocol and vendor-controlled in fact, and nothing on
+     * those paths is a promise about length.
+     */
+    const code =
+      typeof refusal?.error === "string" ? refusal.error.slice(0, 64) : null;
+    throw new TokenRefusedError(
+      `The vendor would not renew this access (${response.status}).${code ? ` (${code})` : ""}`,
+      code,
     );
   }
 
-  const body = (await response.json()) as {
+  /*
+   * A 200 is not a promise of JSON, and this branch used to read it as one.
+   *
+   * The refusal above already parses defensively; the success branch did not, so a CDN interstitial
+   * or a maintenance page answering 200 with HTML threw a SyntaxError from here — out through
+   * `callTool`, which records the failure with the thrower's message, and the parser's message
+   * quotes the body it choked on. So a vendor's HTML reached an audit payload and the person who
+   * asked, as a crash rather than as the refusal every other unusable reply produces.
+   */
+  const body = (await response.json().catch(() => null)) as {
     access_token?: unknown;
     expires_in?: unknown;
-  };
+    refresh_token?: unknown;
+  } | null;
+  if (!body) {
+    throw new McpServerError(
+      "The vendor answered this renewal with something other than a token.",
+    );
+  }
   if (typeof body.access_token !== "string" || !body.access_token) {
     throw new McpServerError("The vendor renewed this access with no token.");
   }
@@ -284,6 +410,17 @@ async function exchangeRefreshTokenOverHttp(input: {
     accessToken: body.access_token,
     expiresInSeconds:
       typeof body.expires_in === "number" ? body.expires_in : undefined,
+    /*
+     * Only when the vendor sent one, and only a non-empty one.
+     *
+     * A rotating vendor replies with a new refresh token and invalidates the one it was shown; a
+     * vendor that does not rotate sends none. Reading an absent or empty field as a rotation would
+     * repoint a working connection at nothing.
+     */
+    refreshToken:
+      typeof body.refresh_token === "string" && body.refresh_token
+        ? body.refresh_token
+        : undefined,
   };
 }
 
@@ -301,8 +438,39 @@ const TOKEN_TIMEOUT_MS = 10_000;
  */
 export type OAuthClient = { clientId: string; clientSecret: string };
 
+/**
+ * The client and when the vault row holding it was written.
+ *
+ * The date is not about the client: it is how long ago this deployment last introduced itself, which
+ * is the one thing that distinguishes a client the vendor has evicted from one a re-registration
+ * minted moments ago. Null only for a row that has since disappeared, which the read refuses first.
+ */
+type StoredClient = { client: OAuthClient; registeredAt: Date | null };
+
+/**
+ * How long a freshly stored OAuth client is left alone after `invalid_client`.
+ *
+ * Re-registering once per refusal is right for one call and wrong for a deployment: a vendor that is
+ * simply down answers every exchange `invalid_client`, and every tool call anywhere then mints a
+ * client of its own, because each of them is the first refusal IT has seen. A client younger than
+ * this was already the product of a re-registration, so registering again inside the window is
+ * amplification rather than recovery — the honest answer is the vendor's refusal, unedited.
+ */
+const CLIENT_REREGISTRATION_BACKOFF_MS = 5 * 60_000;
+
 /** What a vendor's token endpoint gave back for a refresh token. */
-export type AccessToken = { accessToken: string; expiresInSeconds?: number };
+export type AccessToken = {
+  accessToken: string;
+  expiresInSeconds?: number;
+  /**
+   * The refresh token to present next time, from a vendor that rotates.
+   *
+   * Absent from Google's replies and present in every one of Notion's. When it is here it is the
+   * only one that still works — the token just spent is dead at the vendor — so it has to be
+   * persisted before the access token beside it is used for anything.
+   */
+  refreshToken?: string;
+};
 
 export type PluginStoreOptions = {
   database: Database;
@@ -342,6 +510,13 @@ export type PluginStoreOptions = {
     client: OAuthClient;
     refreshToken: string;
   }) => Promise<AccessToken>;
+  /** RFC 7591 self-registration, for entries whose clientRegistration is dynamic. */
+  registerClient?: (input: {
+    registrationUrl: string;
+    redirectUri: string;
+  }) => Promise<OAuthClient | null>;
+  /** Where the vendor sends people back; needed to (re)register a dynamic client. */
+  redirectUri?: string;
 };
 
 export function createPluginStore(options: PluginStoreOptions) {
@@ -354,6 +529,32 @@ export function createPluginStore(options: PluginStoreOptions) {
   const injectedVendor = options.callVendor;
   const exchangeRefreshToken =
     options.exchangeRefreshToken ?? exchangeRefreshTokenOverHttp;
+  const registerClient = options.registerClient ?? registerDynamicClient;
+
+  /*
+   * One exchange at a time per (server, person). A rotating vendor invalidates the refresh
+   * token it was shown, so two concurrent calls that both present the old one would have the
+   * second refused through no fault of anybody's. The chain serialises them; the map entry is
+   * removed when the chain drains so the map cannot grow past the set of active connections.
+   */
+  const exchangeChains = new Map<string, Promise<unknown>>();
+  function serialized<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = exchangeChains.get(key) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(work);
+    exchangeChains.set(key, next);
+    /*
+     * The refusal belongs to the caller, who is holding `next` and will see it. This branch exists
+     * only to forget the key, so it swallows before it cleans up: `next.finally(…)` on its own
+     * derives a SECOND rejected promise that nobody is holding, and a refused call — a withdrawn
+     * credential, say — then surfaces as an unhandled rejection somewhere unrelated.
+     */
+    void next
+      .catch(() => {})
+      .finally(() => {
+        if (exchangeChains.get(key) === next) exchangeChains.delete(key);
+      });
+    return next;
+  }
 
   async function grantsFor(kind: PluginKind, refs: string[]) {
     if (refs.length === 0) return new Map<string, string[]>();
@@ -514,6 +715,12 @@ export function createPluginStore(options: PluginStoreOptions) {
       );
     }
 
+    /*
+     * Whether this person has connected at all, which is a refusal worth reaching before anything
+     * queues behind another call. WHICH credential they hold is read again inside the critical
+     * section below, because a reconnection can move it while this call waits its turn — and even
+     * when the row stays put, the secret inside it does not.
+     */
     const [held] = await database
       .select({ credentialId: mcpUserCredentials.credentialId })
       .from(mcpUserCredentials)
@@ -532,32 +739,638 @@ export function createPluginStore(options: PluginStoreOptions) {
       );
     }
 
-    const refreshToken = await secretFor(
-      held.credentialId,
-      `Your ${entry.title} access was withdrawn. Connect it again in Settings.`,
-    );
+    // Held before the critical section, because narrowing does not survive into a closure and this
+    // is where the entry is known to be a `user-oauth` one.
+    const { tokenUrl } = entry.auth;
+    const { title } = entry;
+    /*
+     * Where to register again, for a vendor that issues its own clients — and undefined for one an
+     * administrator registered with by hand, where there is nothing this deployment could do about a
+     * client the vendor no longer honours.
+     */
+    const registrationUrl =
+      entry.auth.clientRegistration === "dynamic"
+        ? entry.auth.registrationUrl
+        : undefined;
+
+    /*
+     * What to tell the person when the deployment holds no client they can be called on, in the
+     * words of whoever can actually change that.
+     *
+     * A hand-registered client is an administrator's paperwork — they pasted it in from the vendor's
+     * console, and only they can paste one in again. A self-registered one is nobody's paperwork:
+     * there is no console entry to re-create, and the deployment introduces itself again the next
+     * time somebody connects. Naming an administrator there would send the person to somebody with
+     * no step to take, which is worse than saying nothing.
+     */
+    const noClient = registrationUrl
+      ? `${title} has no OAuth client for this deployment, so this cannot be called. Connect ${title} again in Settings: the deployment registers itself with the vendor when somebody connects.`
+      : `${title} has no OAuth client registered for this deployment, so this cannot be called. An administrator has to add one.`;
+    const unusableClient = registrationUrl
+      ? `${title} has no usable OAuth client for this deployment. Connect ${title} again in Settings: the deployment registers itself with the vendor on the next connect.`
+      : `${title} has no usable OAuth client for this deployment. An administrator has to add one again.`;
+    /**
+     * What to say when the vendor has forgotten the client this person's grant was issued under.
+     *
+     * The same register as the two above, and the same instruction, because it is the same situation
+     * from the person's side: nothing they can be called on. What is different is that the
+     * deployment CAN do its half — introduce itself again — and has, by the time this is thrown. So
+     * the sentence says that too, otherwise "connect again" reads as a thing to keep trying.
+     *
+     * Their refresh token is not carried across. A grant belongs to the client it was issued to (RFC
+     * 6749 §6, §10.4), so re-presenting it under the new client is a request a conforming vendor
+     * refuses — and one that only ever appears to work against a vendor whose acceptance would
+     * itself be the vulnerability. A new consent is the only thing that produces a usable grant.
+     */
+    const clientReplaced = `${title} no longer recognises this deployment's OAuth client, so this cannot be called. The deployment has registered itself again — connect ${title} again in Settings.`;
 
     if (!row.credentialId) {
-      // The person did their part; the deployment has not. Said plainly, because the person cannot
-      // fix it and should not be told to try.
-      throw new PluginRefusedError(
-        `${entry.title} has no OAuth client registered for this deployment, so this cannot be called. An administrator has to add one.`,
-        null,
+      // The person did their part; the deployment has not. Refused before anything queues, because
+      // a deployment holding no client has the same answer for everybody asking.
+      throw new PluginRefusedError(noClient, null);
+    }
+
+    /**
+     * The client as the deployment holds it right now, or the refusal for holding none.
+     *
+     * Read from the server row each time rather than from the row this call came in with: a retry
+     * that registered again — this connection's own, a moment ago — replaced it, and the pointer
+     * carried in from before the queue names the evicted one.
+     */
+    async function currentClient(): Promise<StoredClient> {
+      /*
+       * When the client was stored comes back with it, from the vault row itself rather than from a
+       * column of our own. It is what the retry below measures its backoff against, and a left join
+       * keeps it one query: a server pointing at nothing is the refusal on the next line, and a
+       * pointer to a row that is no longer there is `secretFor`'s to refuse.
+       */
+      const [server] = await database
+        .select({
+          credentialId: mcpServers.credentialId,
+          registeredAt: credentialRows.createdAt,
+        })
+        .from(mcpServers)
+        .leftJoin(
+          credentialRows,
+          eq(credentialRows.id, mcpServers.credentialId),
+        )
+        .where(eq(mcpServers.id, row.id))
+        .limit(1);
+      if (!server?.credentialId) {
+        throw new PluginRefusedError(noClient, null);
+      }
+      return {
+        client: JSON.parse(
+          await secretFor(server.credentialId, unusableClient),
+        ) as OAuthClient,
+        registeredAt: server.registeredAt,
+      };
+    }
+
+    /*
+     * The exchange, one call at a time for this connection, reading the connection fresh inside.
+     *
+     * Both halves of what goes out are read in here rather than carried in from above, because both
+     * can move while this call waits its turn. The refresh token rotates, and the token read a
+     * moment ago is then already spent — presenting it would be refused by the vendor for no reason
+     * the person could act on. The client is replaced by a re-registration, and presenting the
+     * evicted one would have every queued call discover that separately and register around it.
+     *
+     * TWO things serialise this, and they are not redundant. The map above queues calls made in THIS
+     * process; the row lock below serialises the whole deployment. Only the lock is a correctness
+     * property — a second replica has a map of its own and is not in ours — and the map is what
+     * keeps a burst of calls on one connection from piling N transactions onto that one row lock,
+     * each of them holding a pooled connection while it waits its turn.
+     *
+     * An evicted client is handled AFTER the transaction rather than inside it. Nothing about
+     * re-registering needs this person's lock — the client is per server — and doing it inside would
+     * have a second pooled connection opened while this one holds a row lock, which is the shape the
+     * pool note in `db/client.ts` is about.
+     */
+    return await serialized(`${row.id}:${actorId}`, async () => {
+      /*
+       * The client, read before the transaction opens rather than inside it.
+       *
+       * It is per SERVER and is not what the lock protects, and reading it here keeps the vault read
+       * off a second pooled connection while this call holds one open for the whole exchange. Still
+       * inside the critical section, so the ordering that matters is unchanged: a queued call reads
+       * the client after whatever ran before it replaced it.
+       */
+      const stored = await currentClient();
+
+      /*
+       * The vault row, locked for as long as the token it holds is being spent.
+       *
+       * A rotating vendor kills the refresh token it was shown, so two replicas that both read the
+       * stored token and both present it do not merely race: the second presentation looks to the
+       * vendor like a stolen token being replayed, and refresh-token-reuse detection answers it by
+       * revoking the whole token family. The connection is then bricked, and nobody did anything
+       * wrong. `SELECT … FOR UPDATE` is what makes the second replica wait for the first, exactly as
+       * a person reconnecting already waits (`credentials.rotate`).
+       *
+       * Yes, the lock is held across an HTTP call to the vendor — bounded by the exchange's own
+       * timeout. That is the point rather than an oversight: the lock IS the cross-replica
+       * serialisation, and a lock released before the exchange would serialise nothing.
+       *
+       * The read comes AFTER the lock, never before. A replica that woke from the lock and used a
+       * token it had read on the way in would present the one the first replica just spent, which is
+       * the very double-spend this exists to prevent.
+       */
+      try {
+        return await database.transaction(async (transaction) => {
+          const [current] = await transaction
+            .select({
+              credentialId: mcpUserCredentials.credentialId,
+              scope: mcpUserCredentials.scope,
+            })
+            .from(mcpUserCredentials)
+            .where(
+              and(
+                eq(mcpUserCredentials.serverId, row.id),
+                eq(mcpUserCredentials.userId, actorId),
+              ),
+            )
+            .limit(1);
+
+          // Disconnected while this call was queued. The same sentence as above: nothing is broken,
+          // and connecting again is the thing to do.
+          if (!current) {
+            throw new PluginRefusedError(
+              `You have not connected your ${title} account. Connect it in Settings and ask again.`,
+              null,
+            );
+          }
+
+          const [locked] = await transaction
+            .select({
+              encryptedValue: credentialRows.encryptedValue,
+              revokedAt: credentialRows.revokedAt,
+            })
+            .from(credentialRows)
+            .where(eq(credentialRows.id, current.credentialId))
+            .for("update");
+          /*
+           * A row that is gone or revoked, said the way `secretFor` says it: withdrawn access is
+           * nobody's fault and connecting again is the step. Reached by a replica that waited here
+           * while somebody disconnected, as well as by one that was told after the fact.
+           */
+          if (!locked || locked.revokedAt) {
+            throw new PluginRefusedError(
+              `Your ${title} access was withdrawn. Connect it again in Settings.`,
+              null,
+            );
+          }
+          const refreshToken = await decryptSecret(
+            encryptionKey,
+            locked.encryptedValue,
+          );
+
+          const minted = await exchangeRefreshToken({
+            tokenUrl,
+            client: stored.client,
+            refreshToken,
+          });
+
+          /*
+           * A vendor that sent nothing back, or sent back the token we presented, rotated nothing —
+           * and writing either would be inventing a rotation, at the cost of a needless
+           * re-encryption of every connection on every call.
+           */
+          if (minted.refreshToken && minted.refreshToken !== refreshToken) {
+            /*
+             * The vendor rotated the grant: the token we were just shown is now the only valid one.
+             * Persisting it is not optional bookkeeping — failing to would strand the connection on
+             * the next call — so a failure here refuses THIS call rather than returning an access
+             * token whose refresh token is already spent.
+             *
+             * In this transaction, so it commits with the lock that made the exchange ours: written
+             * outside it, the next replica in line would wake to the token this one just spent.
+             */
+            await rotateConnectionToken(
+              {
+                credentialId: current.credentialId,
+                refreshToken: minted.refreshToken,
+              },
+              transaction,
+            );
+          }
+
+          return { token: minted.accessToken };
+        });
+      } catch (error) {
+        /*
+         * Outside the transaction, so the row lock is already released and the vault read this does
+         * is not a second connection held behind this one's.
+         *
+         * Rethrows anything that is not the vendor disowning our client, which is every ordinary
+         * failure: a withdrawn grant, a vendor being down, a disconnect mid-queue.
+         */
+        return await refuseAndReplaceEvictedClient({
+          error,
+          clientRegisteredAt: stored.registeredAt,
+          registrationUrl,
+          serverId: row.id,
+          refusal: clientReplaced,
+        });
+      }
+    });
+  }
+
+  /**
+   * The vendor has disowned this deployment's client: fix the deployment, refuse the call.
+   *
+   * `invalid_client` is the vendor saying the CLIENT is the problem, and for a client the deployment
+   * issued to itself there is nobody to tell — no console entry an administrator could re-create, so
+   * every connection to that server would otherwise sit behind a refusal nothing here can act on.
+   * Introducing itself again is the same act as the first registration, and it is worth doing: it is
+   * what makes the next CONSENT possible.
+   *
+   * IT DOES NOT MAKE THIS CALL POSSIBLE, and this function used to pretend otherwise. It registered a
+   * new client and re-presented the same refresh token under it. A refresh token is bound to the
+   * client it was issued to — RFC 6749 §6 has the token endpoint verify exactly that, and §10.4 is
+   * why — so a conforming vendor refuses the retry, and the only vendor it can work against is one
+   * whose acceptance would itself be the vulnerability. So the grant is never carried across, and the
+   * person is told the one thing that helps: connect again.
+   *
+   * The re-registration is still bounded by {@link CLIENT_REREGISTRATION_BACKOFF_MS}, and that bound
+   * is the whole protection here rather than a nicety. This runs for any non-admin's tool call, and
+   * it REPLACES the client every other connection in the deployment is bound to; a vendor that is
+   * simply down answers every exchange `invalid_client`, so without the window one outage would have
+   * each call in turn rotate the deployment-wide client. A client younger than the window is the
+   * product of the last refusal's re-registration, and is left exactly alone.
+   *
+   * Always throws. The refusal it raises when it did register is the caller's answer; anything it
+   * cannot act on is rethrown untouched, because the vendor's own words are better than ours.
+   */
+  async function refuseAndReplaceEvictedClient(input: {
+    error: unknown;
+    /** When the client that was just refused was stored. */
+    clientRegisteredAt: Date | null;
+    registrationUrl: string | undefined;
+    serverId: string;
+    /** What to tell the person once the deployment has registered itself again. */
+    refusal: string;
+  }): Promise<never> {
+    const { error, registrationUrl, serverId } = input;
+    /*
+     * The code, off the error itself. Never the sentence: that is written for a person, and a
+     * recovery that read it would be one rewording away from silently never running again.
+     */
+    const code = error instanceof TokenRefusedError ? error.code : null;
+    const { redirectUri } = options;
+    if (code !== INVALID_CLIENT || !registrationUrl || !redirectUri) {
+      throw error;
+    }
+
+    const registeredAt = input.clientRegisteredAt;
+    if (
+      registeredAt &&
+      Date.now() - registeredAt.getTime() < CLIENT_REREGISTRATION_BACKOFF_MS
+    ) {
+      throw error;
+    }
+
+    const fresh = await registerClient({ registrationUrl, redirectUri });
+    // The vendor would not have us either. The first refusal is the one worth reporting: it says
+    // what actually stopped the call, where this one says what stopped the recovery.
+    if (!fresh) throw error;
+
+    await persistOAuthClient({ serverId, client: fresh, by: "deployment" });
+    throw new PluginRefusedError(input.refusal, null);
+  }
+
+  /**
+   * Point one person's connection at a new refresh token, revoking the one it replaces.
+   *
+   * For a person connecting, which is where a new row earns its keep: what they held before this is
+   * still a live grant at the vendor, and the revocation is how it stops being one. A vendor's own
+   * rotation is the other case entirely, and goes through {@link rotateConnectionToken}.
+   *
+   * Upserted on the pair, so it is the same act whether they are connecting or reconnecting. The
+   * credential the row used to point at is revoked in the same breath: a refresh token nothing
+   * points at is still a live grant at the vendor, and leaving it behind would mean somebody had two
+   * valid grants and could only ever see one of them to withdraw it.
+   *
+   * Says whether it replaced something, which is the one fact the caller writing the trail needs
+   * and cannot recover afterwards.
+   *
+   * ONE TRANSACTION, because these are two writes and one decision. The secret goes into the vault
+   * and the connection row is pointed at it; separately, a failure between them leaves the pointer
+   * naming the credential the rotation had just revoked — a connection that reads as live on the
+   * settings page and refuses every call, with the person's actual grant retired and no way back to
+   * it. `credentials.rotate` and `credentials.create` already accept the caller's executor for
+   * exactly this, and the pointer write runs on the same one.
+   */
+  async function swapUserCredential(input: {
+    serverId: string;
+    userId: string;
+    refreshToken: string;
+    scope: string;
+  }): Promise<{ replaced: boolean }> {
+    const key = {
+      kind: "mcp_user_token" as const,
+      provider: input.serverId,
+      keyId: input.userId,
+    };
+    const value = {
+      ...key,
+      metadata: { server: input.serverId, scope: input.scope },
+      // Encrypted before the transaction opens: it is arithmetic, and it has no business happening
+      // while a pooled connection is held open behind row locks.
+      encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
+    };
+
+    return await database.transaction(async (transaction) => {
+      /*
+       * `credentials_active_key_idx` holds one live credential per key, so a second insert for the
+       * same person and server would be refused. Asked of the key rather than of the connection row,
+       * because the row can name a credential that has already been revoked while the key itself is
+       * free, and it is the key the index constrains.
+       */
+      const live = await credentials.findLiveByKey(key, transaction);
+      const stored = live
+        ? await credentials.rotate(
+            { ...value, previousCredentialId: live.id },
+            transaction,
+          )
+        : await credentials.create(value, transaction);
+
+      await transaction
+        .insert(mcpUserCredentials)
+        .values({
+          serverId: input.serverId,
+          userId: input.userId,
+          credentialId: stored.id,
+          scope: input.scope,
+        })
+        .onConflictDoUpdate({
+          target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
+          set: {
+            credentialId: stored.id,
+            scope: input.scope,
+            updatedAt: new Date(),
+          },
+        });
+
+      return { replaced: live !== null };
+    });
+  }
+
+  /**
+   * Carry a connection over to the refresh token the vendor rotated to.
+   *
+   * In place, in the vault row the connection already points at — deliberately NOT the swap
+   * {@link swapUserCredential} performs. A rotating vendor issues a new refresh token on every
+   * exchange, so a swap here would mint a row and revoke a row per tool call, forever, on the
+   * hottest path there is. And the revocation would have nothing to withdraw: the token just spent
+   * was dead at the vendor the moment it answered, so the only live grant is the one being written.
+   *
+   * Deliberately WITHOUT the `mcp.account_connected` row, for the same reason as ever: rotation is
+   * the vendor's plumbing, not a person's act, and a trail that records it as one reads as a
+   * re-consent that nobody performed.
+   *
+   * The scope and the row are left alone. Nothing about what the vendor granted has changed — only
+   * which token presents it.
+   */
+  async function rotateConnectionToken(
+    input: {
+      credentialId: string;
+      refreshToken: string;
+    },
+    /**
+     * The transaction the caller spent the token in, and this write belongs to it.
+     *
+     * The caller holds a `FOR UPDATE` lock on the very row being written. On its own pooled
+     * connection this write would be a second session waiting for a lock only the caller can
+     * release, and the caller cannot release it while awaiting this — so it would hang to the
+     * statement timeout rather than rotate.
+     */
+    executor?: CredentialExecutor,
+  ): Promise<void> {
+    await credentials.updateSecret(
+      input.credentialId,
+      await encryptSecret(encryptionKey, input.refreshToken),
+      executor,
+    );
+  }
+
+  /** The one vault key a server's OAuth client is ever stored under. */
+  const oauthClientKey = (serverId: string) => ({
+    kind: "mcp_oauth_client" as const,
+    provider: serverId,
+    keyId: `oauth-client-${serverId}`,
+  });
+
+  /**
+   * One writer at a time for one server's OAuth client, across the whole deployment.
+   *
+   * Everything that stores a client reads "is there a live one" and then writes accordingly, and the
+   * gap between those two used to be unserialised. `POST /connect` is `requireUser`, so two people
+   * pressing Connect on a fresh connector is not a rare interleaving: both read no live client, and
+   * then the second `create` meets the first on `credentials_active_key_idx` as a raw 23505 — a 500
+   * where a consent URL belonged — or, when there was a client to replace, the second `rotate` finds
+   * its own predecessor already revoked and says so.
+   *
+   * An ADVISORY lock rather than a row lock, because the thing being protected is the ABSENCE of a
+   * row as much as a row: there is nothing to lock `FOR UPDATE` on a first registration. Held for
+   * the transaction, so it is released by the commit or the rollback and never by us forgetting.
+   *
+   * `hashtext` collisions are harmless here. Two servers sharing a hash would take turns registering
+   * clients, which is slower and not wrong.
+   */
+  async function withOAuthClientLock<T>(
+    serverId: string,
+    work: (transaction: Transaction) => Promise<T>,
+  ): Promise<T> {
+    return await database.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`oauth-client-${serverId}`}))`,
+      );
+      return await work(transaction);
+    });
+  }
+
+  /**
+   * {@link storedOAuthClient}'s question, asked on the caller's own transaction.
+   *
+   * The same question deliberately — the server row's pointer, and the row it names being live —
+   * because the callback redeems against `oauthClientFor`, which reads exactly that. A read that
+   * accepted a live client the server row does NOT name would hand somebody a consent screen for a
+   * client the callback then cannot find, and the connect would fail after the vendor said yes.
+   *
+   * On the transaction rather than through `storedOAuthClient` because the caller is inside
+   * {@link withOAuthClientLock} and holding a pooled connection: a read on a second connection would
+   * be a session queueing behind sessions that cannot finish until it returns.
+   */
+  async function heldOAuthClient(
+    transaction: Transaction,
+    serverId: string,
+  ): Promise<OAuthClient | null> {
+    const [server] = await transaction
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId))
+      .limit(1);
+    if (!server?.credentialId) return null;
+
+    const [held] = await transaction
+      .select({
+        encryptedValue: credentialRows.encryptedValue,
+        revokedAt: credentialRows.revokedAt,
+      })
+      .from(credentialRows)
+      .where(eq(credentialRows.id, server.credentialId))
+      .limit(1);
+    if (!held || held.revokedAt) return null;
+
+    try {
+      return JSON.parse(
+        await decryptSecret(encryptionKey, held.encryptedValue),
+      ) as OAuthClient;
+    } catch {
+      // Unreadable is the same as none: there is nothing to send anybody to consent with.
+      return null;
+    }
+  }
+
+  /**
+   * The two writes that store a client, on one transaction: the vault row, and the pointer to it.
+   *
+   * One transaction because they are one decision. Separately, a failure between them leaves
+   * `mcp_servers.credential_id` naming the credential the rotation had just revoked — a connector
+   * that looks configured on every screen and cannot complete a consent flow.
+   *
+   * The caller is expected to hold {@link withOAuthClientLock}, which is what makes the read below
+   * safe to act on.
+   */
+  async function writeOAuthClient(
+    input: { serverId: string; client: OAuthClient },
+    transaction: Transaction,
+  ): Promise<{ replaced: boolean }> {
+    const key = oauthClientKey(input.serverId);
+    const value = {
+      ...key,
+      metadata: { server: input.serverId, clientId: input.client.clientId },
+      encryptedValue: await encryptSecret(
+        encryptionKey,
+        JSON.stringify(input.client),
+      ),
+    };
+
+    const live = await credentials.findLiveByKey(key, transaction);
+    const stored = live
+      ? await credentials.rotate(
+          { ...value, previousCredentialId: live.id },
+          transaction,
+        )
+      : await credentials.create(value, transaction);
+
+    await transaction
+      .update(mcpServers)
+      .set({ credentialId: stored.id, updatedAt: new Date() })
+      .where(eq(mcpServers.id, input.serverId));
+
+    return { replaced: live !== null };
+  }
+
+  /**
+   * The trail row for a client this deployment now holds.
+   *
+   * Written AFTER the transaction that stored it, not inside. The audit store has its own handle on
+   * the database, so writing from inside would open a second pooled connection while the first is
+   * held — the shape the pool note in `db/client.ts` warns about, and the one that turns a busy
+   * deployment into a hang. A trail row lost to a crash in that window is a worse trade than a
+   * deadlock, but only just, and this way round the client is at least the thing that is certain.
+   */
+  async function recordClientRegistered(
+    input: { serverId: string; client: OAuthClient; by: string },
+    replaced: boolean,
+  ): Promise<void> {
+    await recordAuditEvent(auditStore, {
+      eventType: "mcp.oauth_client_registered",
+      targetType: "mcp_server",
+      targetId: input.serverId,
+      payload: {
+        actor: input.by,
+        server: input.serverId,
+        // The id, never the secret. It identifies the client that was registered, which is what
+        // somebody reading the trail needs in order to check it against the vendor's console.
+        clientId: input.client.clientId,
+        replaced,
+      },
+    });
+  }
+
+  /**
+   * Store the deployment's OAuth client for a `user-oauth` server, whoever obtained it.
+   *
+   * Both halves go into one encrypted value, so a single vault read yields a usable client. The id is
+   * copied into `metadata` as well — it is not a secret, and a page listing what the deployment holds
+   * should be able to name it without decrypting anything.
+   *
+   * Replacing a client revokes the previous one rather than orphaning it, so "what does this
+   * deployment hold" keeps having one answer per server. Nobody's connection breaks in the sense that
+   * matters here — a refresh token is the person's — but nobody's connection SURVIVES either: a grant
+   * belongs to the client it was issued to, so replacing the client is asking everybody to connect
+   * again. That is why the two callers that replace one both say so to whoever is listening.
+   *
+   * Shared by an administrator pasting one in and by the deployment registering its own, so `by` is
+   * the only difference between the two in the trail — which is the honest one.
+   */
+  async function persistOAuthClient(input: {
+    serverId: string;
+    client: OAuthClient;
+    by: string;
+  }): Promise<void> {
+    const { entry } = await requireServer(input.serverId);
+    if (entry?.auth.kind !== "user-oauth") {
+      throw new CustomServerRefusedError(
+        `${input.serverId} is not reached with an OAuth client.`,
       );
     }
-    const client = JSON.parse(
-      await secretFor(
-        row.credentialId,
-        `${entry.title} has no usable OAuth client for this deployment. An administrator has to add one again.`,
-      ),
-    ) as OAuthClient;
 
-    const minted = await exchangeRefreshToken({
-      tokenUrl: entry.auth.tokenUrl,
-      client,
-      refreshToken,
-    });
-    return { token: minted.accessToken };
+    const { replaced } = await withOAuthClientLock(
+      input.serverId,
+      (transaction) =>
+        writeOAuthClient(
+          { serverId: input.serverId, client: input.client },
+          transaction,
+        ),
+    );
+
+    await recordClientRegistered(input, replaced);
+  }
+
+  /**
+   * The deployment's OAuth client for a server as it stands, or null if there is none to read.
+   *
+   * Decrypted, because both halves are needed: the id to build a consent URL and the secret to
+   * redeem the code it comes back with. Held for the length of one request, like every other secret
+   * this module reads.
+   */
+  async function storedOAuthClient(
+    serverId: string,
+  ): Promise<OAuthClient | null> {
+    const [row] = await database
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId))
+      .limit(1);
+    if (!row?.credentialId) return null;
+
+    try {
+      return JSON.parse(
+        await decryptCredentialForUse(
+          encryptionKey,
+          credentials,
+          row.credentialId,
+        ),
+      ) as OAuthClient;
+    } catch {
+      // A revoked, missing or unreadable client is the same as none for every caller: there is
+      // nothing to send anybody to consent with, and the answer is to obtain one again.
+      return null;
+    }
   }
 
   async function requireServer(serverId: string) {
@@ -763,19 +1576,26 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     /**
-     * Remove a server, and stop its token being live.
+     * Remove a server, and stop every secret it was reached with being live.
      *
-     * The token is keyed `mcp-<serverId>` and nothing else revokes it, so
-     * leaving it behind means re-adding the same server meets its own
-     * abandoned row on `credentials_active_key_idx`. It is revoked rather
-     * than deleted, because the vault keeps revoked rows for audit.
+     * TWO KINDS OF SECRET, and both have to go. The server's own credential is whatever
+     * `mcp_servers.credential_id` names — a `mcp` bearer token an administrator added, or, for a
+     * `user-oauth` vendor, the deployment's OAuth client, keyed `oauth-client-<serverId>`. Nothing
+     * else revokes it, so leaving it behind means re-adding the same server meets its own abandoned
+     * row on `credentials_active_key_idx`.
      *
-     * The revoke goes first. These are two writes on two tables and the
-     * store exposes no transaction that spans both, so the order decides
-     * what a failure between them leaves: revoke-then-delete leaves a server
-     * whose token no longer works and which removing again will finish off,
-     * while delete-then-revoke leaves a live token no server references and
-     * no operation can reach.
+     * The other kind is every PERSON'S grant for this server, keyed `mcp_user_token` on the server id.
+     * `mcp_user_credentials` cascades on the server row, so removing the connector used to delete
+     * every pointer and leave every refresh token live and unreferenced: reachable from no screen,
+     * revoked by no operation, and still a usable grant at the vendor. "We removed the connector" has
+     * to be true of the thing that matters, which is the token sitting at the vendor.
+     *
+     * Revoked rather than deleted, because the vault keeps revoked rows for audit.
+     *
+     * The revokes go first. These are writes on two tables and the store exposes no transaction that
+     * spans both, so the order decides what a failure between them leaves: revoke-then-delete leaves
+     * a server whose secrets no longer work and which removing again will finish off, while
+     * delete-then-revoke leaves live secrets no server references and no operation can reach.
      */
     async removeServer(serverId: string, by: string): Promise<void> {
       const [existing] = await database
@@ -815,6 +1635,50 @@ export function createPluginStore(options: PluginStoreOptions) {
             actor: by,
             reason: "mcp_server_removed",
             server: serverId,
+          },
+        });
+      }
+
+      /*
+       * Every person's grant for this server, read out of the VAULT rather than through the join
+       * table.
+       *
+       * `credentials.provider` holds the server id for an `mcp_user_token`, so the vault can be asked
+       * directly — which matters because the join row is the thing about to be cascaded away, and a
+       * grant whose pointer has already gone (a person removed earlier) would otherwise be invisible
+       * here too. The same argument `retireConnectionsFor` makes from the other direction.
+       */
+      const held = await database
+        .select({ id: credentialRows.id, keyId: credentialRows.keyId })
+        .from(credentialRows)
+        .where(
+          and(
+            eq(credentialRows.kind, "mcp_user_token"),
+            eq(credentialRows.provider, serverId),
+            isNull(credentialRows.revokedAt),
+          ),
+        )
+        .orderBy(asc(credentialRows.keyId));
+
+      for (const grant of held) {
+        await credentials.revoke(grant.id);
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.account_disconnected",
+          targetType: "mcp_server",
+          targetId: serverId,
+          payload: {
+            actor: by,
+            server: serverId,
+            // Whose it was. `key_id` holds the user id for this kind, and it is the only place left
+            // to read it from once the join row has been cascaded away.
+            owner: grant.keyId,
+            /*
+             * Not "they disconnected" and not "they were removed": an administrator took the whole
+             * connector away, and the person did nothing. An auditor asking what happened to their
+             * access should see which of the three this was.
+             */
+            reason: "mcp_server_removed",
+            vendorRevoked: false,
           },
         });
       }
@@ -938,6 +1802,34 @@ export function createPluginStore(options: PluginStoreOptions) {
           });
         }
 
+        /*
+         * Tools the vendor advertises that this deployment's write list does not name.
+         *
+         * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
+         * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
+         * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
+         * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
+         *
+         * `configuration.changed` rather than a type of its own, the same as the stranded grants
+         * above and for the same reason: nothing was denied and the refresh succeeded. What changed
+         * is that the deployment now knows a name it had not classified.
+         */
+        const unlisted = unlistedAdvertisedTools(entry, [...advertised]);
+        if (unlisted.length > 0) {
+          await recordAuditEvent(auditStore, {
+            eventType: "configuration.changed",
+            targetType: "mcp_server",
+            targetId: serverId,
+            payload: {
+              actor: actorId,
+              change: "unlisted_tools_advertised",
+              server: serverId,
+              tools: unlisted,
+              note: "Advertised by this server and not named in its reviewed write list, so each is offered to models as a read. This vendor has no read-only scope behind that list, so anything here that writes should be added to the entry.",
+            },
+          });
+        }
+
         return { tools: tools.length };
       } catch (error) {
         const message =
@@ -950,7 +1842,17 @@ export function createPluginStore(options: PluginStoreOptions) {
         // unreachable is not a reason to revoke what Bots are using.
         await database
           .update(mcpServers)
-          .set({ lastError: message, updatedAt: new Date() })
+          .set({
+            /*
+             * Capped at the same 400 characters `callTool` caps its recorded failure at.
+             *
+             * Parts of this sentence come from a vendor, and it is drawn on the admin page — neither
+             * is a promise about length, and the two paths that show a vendor's words to an operator
+             * should not disagree about how much of them to keep.
+             */
+            lastError: message.slice(0, 400),
+            updatedAt: new Date(),
+          })
           .where(eq(mcpServers.id, serverId));
         return { tools: 0 };
       }
@@ -998,6 +1900,9 @@ export function createPluginStore(options: PluginStoreOptions) {
           toolsRefreshedAt: iso(row.toolsRefreshedAt),
           lastError: row.lastError,
           addedBy: row.addedBy,
+          dynamicClient:
+            entry?.auth.kind === "user-oauth" &&
+            entry.auth.clientRegistration === "dynamic",
           tools: tools
             .filter((tool) => tool.serverId === row.id)
             .map((tool) => {
@@ -1339,81 +2244,99 @@ export function createPluginStore(options: PluginStoreOptions) {
     /**
      * Register the deployment's OAuth client for a `user-oauth` server.
      *
-     * Both halves go into one encrypted value, so a single vault read yields a usable client. The id
-     * is copied into `metadata` as well — it is not a secret, and a page listing what the deployment
-     * holds should be able to name it without decrypting anything.
-     *
-     * Replacing a client revokes the previous one rather than orphaning it, so "what does this
-     * deployment hold" keeps having one answer per server. Nobody's connection breaks: a refresh
-     * token is the person's, and it is the client that is being rotated underneath it.
+     * An administrator pasting in what they created at the vendor. The work itself is
+     * {@link persistOAuthClient}, which self-registration goes through too — one path, so a client
+     * this deployment issued itself is stored, revoked and recorded exactly like a pasted one.
      */
-    async registerOAuthClient(input: {
-      serverId: string;
-      client: OAuthClient;
-      by: string;
-    }): Promise<void> {
-      const { row, entry } = await requireServer(input.serverId);
-      if (entry?.auth.kind !== "user-oauth") {
-        throw new CustomServerRefusedError(
-          `${input.serverId} is not reached with an OAuth client.`,
+    registerOAuthClient: persistOAuthClient,
+
+    /**
+     * The client to send somebody to the vendor with, registering one first if that is this
+     * vendor's way of getting one.
+     *
+     * A dynamically registered client is not paperwork anybody did: there is no console entry to
+     * paste, so "none yet" is the ordinary state of a server nobody has connected — and the answer
+     * is for the deployment to introduce itself, which is what it would have to do eventually
+     * anyway. Where an administrator registers by hand instead, and where the deployment has no
+     * public URL to be sent back to, the answer stays null: inventing a client at a vendor that
+     * never offered to issue one, or registering a redirect URI that resolves to nothing, would
+     * both leave behind a client that can never complete a consent flow.
+     *
+     * ONE CLIENT PER DEPLOYMENT EVEN WHEN TWO PEOPLE ASK AT ONCE. This is `requireUser`'s handler, so
+     * two first connects racing is the ordinary first hour of a connector. Registering twice is not
+     * merely wasteful: the loser's consent screen names a client the vault no longer holds, so that
+     * person consents and their callback then redeems the code against the client that replaced it —
+     * a connect that fails after the vendor already said yes. So the registration happens under
+     * {@link withOAuthClientLock}, with the "do we hold one" question asked AGAIN inside it, and the
+     * second caller finds the first one's client and is handed the same one.
+     *
+     * The lock is held across the registration request to the vendor, deliberately. It is one round
+     * trip with its own timeout, and a lock released before it would serialise nothing.
+     */
+    async ensureOAuthClient(
+      serverId: string,
+      by: string,
+    ): Promise<OAuthClient | null> {
+      const stored = await storedOAuthClient(serverId);
+      if (stored) return stored;
+
+      const { entry } = await requireServer(serverId);
+      if (
+        entry?.auth.kind !== "user-oauth" ||
+        entry.auth.clientRegistration !== "dynamic" ||
+        !entry.auth.registrationUrl ||
+        !options.redirectUri
+      ) {
+        return null;
+      }
+      // Held before the lock, because narrowing does not survive into the closure below.
+      const { registrationUrl } = entry.auth;
+      const { redirectUri } = options;
+
+      const outcome = await withOAuthClientLock(
+        serverId,
+        async (transaction) => {
+          /*
+           * Asked again, under the lock. The read above was a fast path taken without one, and by now
+           * the caller we were racing has committed a client of its own — which is the one this
+           * deployment holds, so it is the one to consent against.
+           */
+          const held = await heldOAuthClient(transaction, serverId);
+          if (held) return { client: held, registered: false, replaced: false };
+
+          const registered = await registerClient({
+            registrationUrl,
+            redirectUri,
+          });
+          if (!registered) return null;
+
+          const { replaced } = await writeOAuthClient(
+            { serverId, client: registered },
+            transaction,
+          );
+          return { client: registered, registered: true, replaced };
+        },
+      );
+
+      if (!outcome) return null;
+      // Only what this call actually did. A trail row for handing back somebody else's client would
+      // claim a registration that never happened.
+      if (outcome.registered) {
+        await recordClientRegistered(
+          { serverId, client: outcome.client, by },
+          outcome.replaced,
         );
       }
-
-      const key = {
-        kind: "mcp_oauth_client" as const,
-        provider: input.serverId,
-        keyId: `oauth-client-${input.serverId}`,
-      };
-      const value = {
-        ...key,
-        metadata: { server: input.serverId, clientId: input.client.clientId },
-        encryptedValue: await encryptSecret(
-          encryptionKey,
-          JSON.stringify(input.client),
-        ),
-      };
-
-      /*
-       * Re-registering a client replaces the one before it, in one transaction.
-       *
-       * A key holds at most one live credential, so inserting a second for this server would be
-       * refused by `credentials_active_key_idx` rather than leaving the orphan it used to leave.
-       * The question is asked of the key and not of `row.credentialId`, because the server row keeps
-       * naming a credential an administrator has revoked from the Credentials page: the pointer can
-       * be stale where the key is not, and it is the key the index constrains.
-       */
-      const live = await credentials.findLiveByKey(key);
-      const stored = live
-        ? await credentials.rotate({ ...value, previousCredentialId: live.id })
-        : await credentials.create(value);
-
-      await database
-        .update(mcpServers)
-        .set({ credentialId: stored.id, updatedAt: new Date() })
-        .where(eq(mcpServers.id, input.serverId));
-
-      await recordAuditEvent(auditStore, {
-        eventType: "mcp.oauth_client_registered",
-        targetType: "mcp_server",
-        targetId: input.serverId,
-        payload: {
-          actor: input.by,
-          server: input.serverId,
-          // The id, never the secret. It identifies the client an administrator registered, which is
-          // what somebody reading the trail needs in order to check it against the vendor's console.
-          clientId: input.client.clientId,
-          replaced: row.credentialId !== null,
-        },
-      });
+      return outcome.client;
     },
 
     /**
      * Record that one person connected their own account to one server.
      *
-     * Upserted on the pair, so reconnecting replaces rather than accumulating. The credential the row
-     * used to point at is revoked in the same breath: a refresh token nothing points at is still a
-     * live grant at the vendor, and leaving it behind would mean a person who reconnected had two
-     * valid grants and could only ever see one of them to disconnect it.
+     * The credential swap is {@link swapUserCredential}, and this is its only caller: a person
+     * connecting or reconnecting is exactly when there is an older grant to revoke. Rotation writes
+     * the same connection in place instead ({@link rotateConnectionToken}). What is only here is the
+     * audit row: this one IS somebody's act, and the trail should say so.
      */
     async recordConnection(input: {
       serverId: string;
@@ -1421,56 +2344,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       refreshToken: string;
       scope: string;
     }): Promise<void> {
-      const [previous] = await database
-        .select({ credentialId: mcpUserCredentials.credentialId })
-        .from(mcpUserCredentials)
-        .where(
-          and(
-            eq(mcpUserCredentials.serverId, input.serverId),
-            eq(mcpUserCredentials.userId, input.userId),
-          ),
-        )
-        .limit(1);
-
-      const key = {
-        kind: "mcp_user_token" as const,
-        provider: input.serverId,
-        keyId: input.userId,
-      };
-      /*
-       * Reconnecting replaces this person's token for this server, in one transaction.
-       *
-       * `credentials_active_key_idx` holds one live credential per key, so a second insert for the
-       * same person and server would be refused. Asked of the key rather than of `previous`, because
-       * the connection row can name a credential that has already been revoked while the key itself
-       * is free, and it is the key the index constrains.
-       */
-      const live = await credentials.findLiveByKey(key);
-      const value = {
-        ...key,
-        metadata: { server: input.serverId, scope: input.scope },
-        encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
-      };
-      const stored = live
-        ? await credentials.rotate({ ...value, previousCredentialId: live.id })
-        : await credentials.create(value);
-
-      await database
-        .insert(mcpUserCredentials)
-        .values({
-          serverId: input.serverId,
-          userId: input.userId,
-          credentialId: stored.id,
-          scope: input.scope,
-        })
-        .onConflictDoUpdate({
-          target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
-          set: {
-            credentialId: stored.id,
-            scope: input.scope,
-            updatedAt: new Date(),
-          },
-        });
+      const { replaced } = await swapUserCredential(input);
 
       await recordAuditEvent(auditStore, {
         eventType: "mcp.account_connected",
@@ -1481,7 +2355,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           server: input.serverId,
           // What the vendor granted, so a later refusal for want of a scope can be explained.
           scope: input.scope,
-          reconnected: previous !== undefined,
+          reconnected: replaced,
         },
       });
     },
@@ -1489,32 +2363,9 @@ export function createPluginStore(options: PluginStoreOptions) {
     /**
      * The deployment's OAuth client for a server, or null if none is registered.
      *
-     * Decrypted, because both halves are needed: the id to build a consent URL and the secret to
-     * redeem the code it comes back with. Held for the length of one request, like every other
-     * secret this module reads.
+     * Reads only. {@link ensureOAuthClient} is the one that will go and get one.
      */
-    async oauthClientFor(serverId: string): Promise<OAuthClient | null> {
-      const [row] = await database
-        .select({ credentialId: mcpServers.credentialId })
-        .from(mcpServers)
-        .where(eq(mcpServers.id, serverId))
-        .limit(1);
-      if (!row?.credentialId) return null;
-
-      try {
-        return JSON.parse(
-          await decryptCredentialForUse(
-            encryptionKey,
-            credentials,
-            row.credentialId,
-          ),
-        ) as OAuthClient;
-      } catch {
-        // A revoked, missing or unreadable client is the same as none for every caller: there is
-        // nothing to send anybody to consent with, and the answer is for an administrator to add one.
-        return null;
-      }
-    },
+    oauthClientFor: storedOAuthClient,
 
     /** Which `user-oauth` servers this person has connected, for their own settings page. */
     async connectionsFor(
@@ -1841,6 +2692,9 @@ export function createPluginStore(options: PluginStoreOptions) {
          * that the failure now exists in the trail, which is where somebody asking "is this connector
          * working" looks. The vendor's own sentence is kept, since for a 403 that is the sentence
          * naming which API is not enabled.
+         *
+         * Capped like the `isError` branch above, and for the same reason: parts of this sentence
+         * came from the vendor, and a failure is not a promise about length.
          */
         await recordAuditEvent(auditStore, {
           eventType: "mcp.call_failed",
@@ -1848,7 +2702,10 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetId: input.ref,
           payload: {
             ...decided,
-            failure: error instanceof Error ? error.message : String(error),
+            failure: (error instanceof Error
+              ? error.message
+              : String(error)
+            ).slice(0, 400),
           },
         });
         throw error;

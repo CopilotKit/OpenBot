@@ -13,18 +13,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 Reopening a conversation made every past turn fetch the screen as it is now, so an answer about
 Hacker News from an hour ago sat under a picture of whatever the Bot had open since.
 
-A browsing turn now keeps the frame it ended on, in `computer_turn_frame`, filed under the tool call
-it belongs to and written once: a turn that has happened does not happen differently later. Reopening
-the conversation shows that frame rather than the live screen, and a turn with nothing kept names the
-page instead of drawing the wrong one.
+A page is now photographed where it is opened. The server takes the frame the moment a navigation
+succeeds and keeps it in `computer_page_frame` under the computer and the address, which is the one
+moment the screen is certainly showing the page that was asked for. Reopening the conversation shows
+that frame rather than the live screen, and a turn with nothing kept names the page instead of
+drawing the wrong one.
 
-Three things had to be true together, and each was wrong on its own first. The frame is read at the
-moment the turn ends, because a short turn finishes before the tile has polled anything and having no
-picture in hand is the ordinary case. Restoring a kept frame must not make the turn look live again,
-which the first version did: it counted a turn as history only while it had no picture, so restoring
-one restarted the polling that then replaced it. And a turn is over when it has a result, not when its
-status says so, because a restored tool call arrives with its result already in hand and a status
-that is briefly something else.
+The surface used to capture it itself once the turn went quiet, and that is a race it cannot win: a
+reopened turn and one that has just finished are indistinguishable from inside the component, the
+same computer is driven by other conversations in between, and a resumed computer starts blank. It
+filed pictures of pages the turn never opened, or none at all. It only reads now.
+
+Two things followed from making a past turn a record. Its placeholder is decided by the turn being
+over rather than by whether a live frame happens to be in hand, because a tile that was live a moment
+ago keeps its last screenshot and used to fall through to "Waiting for the assistant's screen…" and
+wait there for ever. And opening one full size shows that same kept frame, with no live stream and no
+wheel: zooming a past turn used to mount the socket and offer Take control, so the one gesture for
+looking closer at what a turn did replaced it with whatever the Bot has open now.
 
 ### A conversation keeps the browsing that produced its answers
 
@@ -122,7 +127,33 @@ unknown session means "no opinion" and skips the generation check, so on exactly
 shape it was written for, the check that stops a ref from a replaced computer resolving against a
 live one was silently absent. It now asks the supervisor when it does not know, by listing rather
 than by ensuring, so asking never starts a computer that had stopped.
+### Notion joins the connector catalogue
 
+Notion is now a governed MCP connector, reached through Notion's own hosted server on the
+catalogue's default transport, as the person asking — the same grant, policy and audit machinery
+Google Drive already runs through. Unlike Drive, it ships both read and write tools from the start;
+the writing ones are named in the catalogue, and an advertised tool absent from that list classifies
+as a read — so reconciling the write-tool names against what Notion's hosted server actually calls
+them, on the first Refresh tools, is required, not cosmetic. A tool the server never advertised at
+all still classifies as a write, same as any other connector.
+
+There is no client to register: this deployment introduces itself to Notion on first connect. That
+shortens setup but does not finish it — unlike Drive, whose tool list is this codebase's own code,
+Notion's tool list is an answer from Notion's hosted server, so a deployment has recorded none of it
+until Refresh tools has run at least once; and, like every other connector, a Bot gets nothing until
+its tools are granted to it. Setup is enable at `/admin/plugins/notion`, connect an account at
+`/settings/connected-accounts`, refresh tools, then grant — a bulk **Grant tools…** dialog on
+`/admin/plugins/notion` grants a batch of tools to a batch of Bots in one pass, one grant and one
+audit row per Bot per tool. No migration.
+
+### Refresh tokens rotate in place, and replicas take turns spending them
+
+A vendor that rotates refresh tokens invalidates the one it just handed out, so two replicas racing
+to use a stale token would have the loser refused, or worse: a rotating vendor's reuse detection can
+read that as a stolen token and revoke the whole connection. Every plugin call that mints an access
+token now locks the credential's vault row for the length of the exchange, so a second replica waits
+rather than races, and the rotated token is written back in the same transaction that held the lock.
+Nothing to configure; a connection just stops going stale under concurrent traffic.
 ### Knowledge searches instead of guessing
 
 A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the
@@ -348,6 +379,24 @@ without a word, because the input path looks for a viewer before it looks for an
 
 A close now stops casting only when the socket closing is the one that was casting.
 
+### A sidebar channel row can be pinned or deleted
+
+Right-click on a channel in the sidebar and a menu opens with two entries: Pin channel and Delete
+channel.
+
+Pin is held per member rather than per channel, so pinning one holds it at the top of your own
+roster — newest first among pinned channels — and leaves every other member's roster unaffected.
+
+Delete is confirmed in a dialog first, and it is soft. The channel disappears from every member's
+roster and from a direct fetch of it, while the row, its transcript, and its Intelligence thread all
+survive. That disappearance is live, not just on next load: every member's open tabs drop the row as
+the delete lands, and a tab parked on the channel itself is sent home. The deletion is audited as its
+own `channel.deleted` row. A channel the deployment package defines is refused, with the reason
+named. Recovery today is clearing `channels.deleted_at` in the database directly; there is no restore
+control in the product.
+
+The deployment gains two nullable columns, via migration `0016`.
+
 ### An MCP server address that points inside the deployment is refused in three more spellings
 
 Adding an MCP server by URL is checked before the address is stored, because that form is otherwise a
@@ -401,29 +450,6 @@ one they are, so those match too.
 
 No configuration changes and nothing is stored differently; a deployment that was already on the
 light theme sees no difference at all.
-
-### A conversation can be deleted
-
-Nothing removed a channel. Starting one was the only lever the product gave a person, and every
-conversation with every coworker sat in the roster forever, growing on every message the way
-`DEFAULT_CHANNEL_PAGE`'s own note already described: a page that was instant in a demo returns
-thousands of rows for anybody who has actually been using the product a while, one that never shrinks
-again.
-
-Deleting a channel now removes it for good. The channel row goes, and its memberships, its linked
-coworkers, and its Intelligence thread mapping go with it through the same foreign-key cascades that
-already existed for them — no migration needed, only a query that finally uses them. The deployment
-also asks Intelligence to permanently delete the thread itself, so the message history is not just
-unlisted, it is gone from the platform too.
-
-A thread the platform refuses to delete does not hold the channel hostage. The local removal already
-committed by the time that call runs, so a rejected or unreachable upstream delete leaves the channel
-gone from the roster regardless, with an audit row (`channel.deleted`) naming the thread and whether
-Intelligence actually forgot it. A channel that is gone locally with an orphaned thread still on the
-platform is a smaller, more honest failure than a channel sitting in the roster with its history
-silently wiped out from under it, and the audit trail is where an administrator finds the one that
-did not clean up completely. `DELETE /api/channels/:channelId` answers with `historyLeftBehind`, so a
-screen showing the outcome does not have to guess which of the two happened.
 
 ## 0.0.4
 

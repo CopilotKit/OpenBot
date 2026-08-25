@@ -71,6 +71,17 @@ export type ComposerProps = {
    */
   pending?: boolean;
   /**
+   * Put the caret in the editor the first moment it can take one, and then leave it alone. For the
+   * screens where typing is the next thing a person does — choosing a coworker answers the "to"
+   * field, and the message is what remains.
+   *
+   * Once, not on every change: it used to re-claim the caret whenever the editor became interactive
+   * again, so a person who had clicked into something else — a search box, another channel's row —
+   * had the cursor yanked back the moment a turn finished. A send of their own still returns the
+   * caret, because that one they asked for.
+   */
+  autoFocus?: boolean;
+  /**
    * There is a run on the wire for Stop to reach.
    *
    * Not the same question as `pending`, and telling them apart is the whole reason this exists. A
@@ -95,6 +106,7 @@ export function Composer({
   onStop,
   disabled = false,
   pending = false,
+  autoFocus = false,
   stoppable,
 }: ComposerProps) {
   const [value, setValue] = useState<Segment[]>([]);
@@ -103,6 +115,8 @@ export function Composer({
   const promptAreaRef = useRef<PromptAreaHandle>(null);
   /** A send has completed and the caret is owed back, as soon as the editor will take it. */
   const wantsFocus = useRef(false);
+  /** `autoFocus` has been honoured once, and is not owed again for the life of this composer. */
+  const claimedAutoFocus = useRef(false);
 
   const isBusy = pending || isSubmitting;
   const triggers = useMemo(
@@ -191,14 +205,24 @@ export function Composer({
    * Keyed off the editor becoming interactive rather than off the send resolving, so it survives
    * whatever the parent does with `pending` in between — and it runs after the commit, which is the
    * only point at which the element is enabled and focusable.
+   *
+   * Two different debts, and only one of them recurs. A finished send owes the caret back every
+   * time. `autoFocus` owes it exactly once, at the start: it used to be re-owed on every
+   * disabled/busy transition, so every completed turn stole the caret back from wherever the person
+   * had moved it, and a composer that had never been sent from would grab focus mid-conversation.
    */
   useEffect(() => {
-    if (!wantsFocus.current || disabled || isBusy) {
+    if (disabled || isBusy) {
+      return;
+    }
+    const owed = wantsFocus.current || (autoFocus && !claimedAutoFocus.current);
+    if (!owed) {
       return;
     }
     wantsFocus.current = false;
+    claimedAutoFocus.current = true;
     promptAreaRef.current?.focus();
-  }, [disabled, isBusy]);
+  }, [autoFocus, disabled, isBusy]);
 
   const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

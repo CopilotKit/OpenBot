@@ -1,6 +1,6 @@
 {
-  "id": "3a06a915-afd8-4b91-8f53-8168b5979c43",
-  "prevId": "a62449fa-67a9-4ece-a79c-f8990de606f9",
+  "id": "2658b550-2ffc-449e-97ae-84cadaa1b858",
+  "prevId": "eab681f3-28cb-4ef4-a5f0-5e82f53a6f42",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -441,6 +441,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "pinned_at": {
+          "name": "pinned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -544,6 +550,12 @@
         "last_message_agent_id": {
           "name": "last_message_agent_id",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

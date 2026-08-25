@@ -46,9 +46,25 @@ export type CatalogueAuth =
       revokeUrl: string;
       /**
        * What to ask a person to consent to. Narrow on purpose: a scope granted by everybody who
-       * connects and used by nothing is a permission nobody remembers agreeing to.
+       * connects and used by nothing is a permission nobody remembers agreeing to. Empty for a
+       * vendor whose consent screen itself is the scoping (Notion), where scope strings would
+       * assert a control that does not exist.
        */
       scopes: readonly string[];
+      /**
+       * How the deployment gets its OAuth client. Absent means an administrator registers one at
+       * the vendor and pastes it in. `dynamic` means the deployment registers ITSELF (RFC 7591)
+       * on first connect — no admin step, no client secret; PKCE carries the proof instead.
+       */
+      clientRegistration?: "dynamic";
+      /** The RFC 7591 endpoint. Pinned https, required when `clientRegistration` is `dynamic`. */
+      registrationUrl?: string;
+      /**
+       * Vendor-specific consent-URL parameters. Google's offline/consent pair lives HERE rather
+       * than in `authorizationUrlFor`, so one vendor's requirements are never sent to another —
+       * an unknown parameter is a thing a strict vendor may refuse the whole request over.
+       */
+      authorizationParams?: Readonly<Record<string, string>>;
     };
 
 export type CatalogueEntry = {
@@ -88,8 +104,11 @@ export type CatalogueEntry = {
    *
    * Kept so the policy can be written about effect rather than about tool names a rule author would
    * have to look up. Known-incomplete for some vendors, which is why {@link classifyTool} treats an
-   * unknown tool as a write rather than as a read: a missed write that gets extra scrutiny is safer
-   * than a write classified as a read.
+   * unknown tool as a write rather than as a read: a tool the server never advertised, so nothing
+   * here could have named it, is safe to over-scrutinize as a write. The opposite direction is the
+   * one that matters for this list: a tool the server DOES advertise but that is missing from here
+   * classifies as a read, so an incomplete list is the failure mode, not a safe default — this list
+   * has to lean over-inclusive.
    */
   writeTools: readonly string[];
   /**
@@ -105,7 +124,7 @@ export type CatalogueEntry = {
 };
 
 /**
- * One entry, deliberately.
+ * A short list, deliberately.
  *
  * Atlassian, Box, Slack, Salesforce and ServiceNow were here and were removed: each was a reviewed
  * source contract for a vendor nobody had connected, and a screen offering five untried connectors
@@ -157,6 +176,15 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
       revokeUrl: "https://oauth2.googleapis.com/revoke",
       // Read-only, because nothing in this slice writes to anybody's Drive.
       scopes: Object.freeze(["https://www.googleapis.com/auth/drive.readonly"]),
+      /*
+       * `offline` and `consent` are both load bearing FOR GOOGLE. Without `access_type=offline`
+       * Google returns no refresh token; without `prompt=consent` a reconnect returns none either.
+       * They are Google parameters, so they live on Google's entry.
+       */
+      authorizationParams: Object.freeze({
+        access_type: "offline",
+        prompt: "consent",
+      }),
     },
     /*
      * Named writes even though the scope above makes Google refuse them.
@@ -168,6 +196,60 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     writeTools: Object.freeze(["create_file", "copy_file"]),
     docsUrl:
       "https://developers.google.com/workspace/guides/configure-mcp-servers",
+  },
+  {
+    key: "notion",
+    title: "Notion",
+    vendor: "Notion",
+    summary: "Pages and databases of whoever is asking.",
+    /*
+     * The hosted MCP server Notion runs, on the default MCP transport — the first entry to use
+     * it. Drive's REST adapter is a workaround for a preview-gated vendor; Notion's server is
+     * generally available, so this entry is the shape the catalogue was designed for.
+     */
+    host: "https://mcp.notion.com",
+    path: "/mcp",
+    auth: {
+      kind: "user-oauth",
+      // From https://mcp.notion.com/.well-known/oauth-authorization-server, verified live.
+      authorizationUrl: "https://mcp.notion.com/authorize",
+      tokenUrl: "https://mcp.notion.com/token",
+      // Notion's published revocation_endpoint IS its token endpoint — not a copy-paste mistake.
+      revokeUrl: "https://mcp.notion.com/token",
+      /*
+       * Notion has no scope strings and no read-only scope: access is per-page, chosen on the
+       * consent screen. `writeTools` below plus the action policy are the ENTIRE write barrier —
+       * there is no vendor-side scope backing them up.
+       */
+      scopes: Object.freeze([]),
+      clientRegistration: "dynamic",
+      registrationUrl: "https://mcp.notion.com/register",
+    },
+    /*
+     * The writing tools as the hosted server advertises them today. The hosted server advertises
+     * its tools, so a name here that does not match an advertised tool is not the risk — an
+     * advertised tool that is missing from this list is: {@link classifyTool} reads an unlisted
+     * but advertised name as a read, never as a write. That makes under-inclusion the failure
+     * mode, so this list has to lean over-inclusive rather than minimal, and reconciling it
+     * against the live tool list on the first Refresh tools is required, not cosmetic.
+     */
+    writeTools: Object.freeze([
+      "notion-convert-page-to-skill",
+      "notion-create-attachment",
+      "notion-create-comment",
+      "notion-create-database",
+      "notion-create-file-upload",
+      "notion-create-folder",
+      "notion-create-pages",
+      "notion-create-view",
+      "notion-duplicate-page",
+      "notion-move-pages",
+      "notion-update-data-source",
+      "notion-update-folder",
+      "notion-update-page",
+      "notion-update-view",
+    ]),
+    docsUrl: "https://developers.notion.com/guides/mcp/build-mcp-client",
   },
 ]);
 
@@ -227,11 +309,10 @@ export function resolveServerUrl(
 /**
  * What this tool does, in the only two categories a policy author cares about.
  *
- * Unknown counts as a write, in both directions it can be unknown. A tool named in
- * {@link CatalogueEntry.writeTools} is a write. A tool the server advertised and this file has never
- * heard of is a write, because these lists are a verified subset for several vendors rather than the
- * complete surface. A tool the server never advertised at all is a write, because the only thing
- * that produced the name was a model.
+ * Unknown counts as a write. A tool named in {@link CatalogueEntry.writeTools} is a write. A tool
+ * the server never advertised at all is a write, because the only thing that produced the name was
+ * a model. A server with no catalogue entry behind it is a write throughout, because nothing
+ * reviewed says any tool of theirs only reads.
  *
  * Only a tool the server itself listed AND that is absent from the write list is treated as a read.
  * That is the one case where both sources agree, and it is the only one where guessing permissively

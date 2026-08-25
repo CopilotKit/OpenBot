@@ -127,7 +127,6 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | `/bot`               | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/skills`            | Create and enable personal skills.                                 |
 | `/settings`          | User preferences.                                                  |
-| `/admin/connectors`  | Configure deployment knowledge sources.                            |
 | `/admin/credentials` | Store write-only encrypted credentials.                            |
 | `/admin/computers`   | View, stop, and reset Bot computers.                               |
 | `/admin/boundaries`  | Configure browser/file/MCP action policy.                          |
@@ -147,7 +146,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 - **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand-written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
 - **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
-- **Governed MCP**: Google Drive ships in the catalogue, reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks, and any tool not positively classified as a read is treated as a write. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
+- **Governed MCP**: Google Drive and Notion ship in the catalogue, reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks; unknown tools and custom-server tools are treated as writes, and a catalogue tool the server advertises but does not name as a write classifies as a read. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
 - **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer.
 - **Sign in with what your company already has**: Google, Microsoft or Okta from the environment, or a company's own SAML or OpenID Connect provider registered while the deployment runs and routed by email domain. Any one turns sign-in on; several may be configured at once.
 - **Decide who gets in**: `/admin/people` lists everybody who has signed in, promotes and demotes them, and removes access, which ends the session they are using and stops the next sign-in. Every change is on the audit trail.

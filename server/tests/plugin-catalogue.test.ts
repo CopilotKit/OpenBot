@@ -118,8 +118,15 @@ describe("whose credential a server uses", () => {
       expect(entry.auth.tokenUrl.startsWith("https://")).toBe(true);
       expect(entry.auth.revokeUrl.startsWith("https://")).toBe(true);
       // No scopes means consent to nothing, which would fail at the vendor with a message that
-      // does not name us.
-      expect(entry.auth.scopes.length).toBeGreaterThan(0);
+      // does not name us — except for a vendor whose consent screen itself is the scoping
+      // (Notion, with dynamic client registration), where a scope string would assert a control
+      // that does not exist.
+      if (entry.auth.clientRegistration !== "dynamic") {
+        expect(entry.auth.scopes.length).toBeGreaterThan(0);
+      }
+      if (entry.auth.clientRegistration === "dynamic") {
+        expect(entry.auth.registrationUrl?.startsWith("https://")).toBe(true);
+      }
     }
   });
 
@@ -175,6 +182,57 @@ describe("Google Drive", () => {
     expect(classifyTool(drive, "copy_file", true)).toBe("write");
     expect(classifyTool(drive, "search_files", true)).toBe("read");
     expect(classifyTool(drive, "read_file_content", true)).toBe("read");
+  });
+});
+
+describe("Notion", () => {
+  const entry = catalogueEntry("notion");
+
+  test("is in the catalogue with the MCP transport", () => {
+    expect(entry).not.toBeNull();
+    // Transport omitted means MCP, which is the point: Drive's REST adapter is the exception.
+    expect(entry?.transport).toBeUndefined();
+    expect(entry?.host).toBe("https://mcp.notion.com");
+    expect(entry?.path).toBe("/mcp");
+  });
+
+  test("registers its client dynamically, with every endpoint pinned to https", () => {
+    if (entry?.auth.kind !== "user-oauth") throw new Error("wrong auth kind");
+    expect(entry.auth.clientRegistration).toBe("dynamic");
+    expect(entry.auth.registrationUrl?.startsWith("https://")).toBe(true);
+    expect(entry.auth.authorizationUrl.startsWith("https://")).toBe(true);
+    expect(entry.auth.tokenUrl.startsWith("https://")).toBe(true);
+    // Notion MCP scoping is the consent screen; scope strings would assert control that
+    // does not exist.
+    expect(entry.auth.scopes).toEqual([]);
+  });
+
+  test("pins the exact write list, so a dropped or renamed entry fails here", () => {
+    // Copied from the catalogue's Notion entry, in its declared order. This list is the
+    // entire write barrier for Notion (see the comment above writeTools in catalogue.ts) —
+    // asserting membership against itself would never catch a silently dropped or renamed
+    // tool, so the fix is to pin the literal names.
+    expect(entry?.writeTools).toEqual([
+      "notion-convert-page-to-skill",
+      "notion-create-attachment",
+      "notion-create-comment",
+      "notion-create-database",
+      "notion-create-file-upload",
+      "notion-create-folder",
+      "notion-create-pages",
+      "notion-create-view",
+      "notion-duplicate-page",
+      "notion-move-pages",
+      "notion-update-data-source",
+      "notion-update-folder",
+      "notion-update-page",
+      "notion-update-view",
+    ]);
+    for (const name of entry?.writeTools ?? []) {
+      expect(classifyTool(entry, name, true)).toBe("write");
+    }
+    expect(classifyTool(entry, "notion-search", true)).toBe("read");
+    expect(classifyTool(entry, "brand-new-tool", false)).toBe("write");
   });
 });
 

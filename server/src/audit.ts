@@ -60,9 +60,12 @@ export const auditEventTypes = [
    */
   "channel.routed",
   /**
-   * A channel was deleted, taking its memberships, agent links, and thread mapping with it. The
-   * channel row is already gone by the time this is written, so this is the only place left that
-   * says it ever existed. `payload.threadForgotten: false` marks a thread that outlived it.
+   * A channel was removed from every member's roster, and by whom.
+   *
+   * The removal is soft, so the row and its thread survive and `channels.deleted_at` records that it
+   * happened. What it cannot record is who did it: a timestamp answers "when did that conversation
+   * disappear" and not "who ended it for everybody in it", which is the half somebody asks about.
+   * `payload.mechanism` names how, so a later hard delete is distinguishable from this one.
    */
   "channel.deleted",
   "agent.invoked",

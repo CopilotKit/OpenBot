@@ -42,6 +42,11 @@ export type PluginServer = {
   toolsRefreshedAt: string | null;
   lastError: string | null;
   addedBy: string | null;
+  /**
+   * Whether this server registers its own OAuth client (RFC 7591) rather than waiting on an
+   * administrator to paste one in.
+   */
+  dynamicClient: boolean;
   tools: PluginTool[];
   /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
   withdrawn: WithdrawnGrant[];

@@ -59,6 +59,13 @@ describe("credential encryption", () => {
             stored.push(value);
             return { id: "credential-1", revokedAt: null };
           },
+          // An administrator's credential is replaced by a new row, never edited in place, so a
+          // call here would mean this path had changed shape.
+          updateSecret: async () => {
+            throw new Error(
+              "administrator credentials are not updated in place",
+            );
+          },
           rotate: async () => {
             throw new Error("nothing live to replace, so create is the path");
           },
@@ -114,6 +121,9 @@ describe("credential encryption", () => {
       encryptionKey: key,
       store: {
         create: async () => ({ id: "credential-unused", revokedAt: null }),
+        updateSecret: async () => {
+          throw new Error("administrator credentials are not updated in place");
+        },
         rotate: async (input: { previousCredentialId: string }) => {
           rotated.push(input);
           return { id: "credential-new", revokedAt: null };
@@ -584,6 +594,96 @@ describe("one live credential per key", () => {
       "credential.created",
       "credential.rotated",
     ]);
+  });
+});
+
+/**
+ * The in-place write, which exists for one caller: a connector whose vendor rotates its refresh
+ * token on every exchange. Everything else replaces a credential by writing a new row and revoking
+ * the old one, because that is the act that has an old grant to withdraw.
+ */
+describe("credential secret update", () => {
+  /** A live `mcp_user_token` row, which is the only kind of row this write is for. */
+  async function liveCredential(plaintext: string, revoked = false) {
+    const id = randomUUID();
+    credentialIds.push(id);
+    await database.insert(credentials).values({
+      id,
+      kind: "mcp_user_token",
+      provider: "notion",
+      keyId: `user-${id}`,
+      encryptedValue: await encryptSecret(key, plaintext),
+      metadata: {},
+      revokedAt: revoked ? new Date("2026-03-01T00:00:00.000Z") : null,
+    });
+    return id;
+  }
+
+  test("re-encrypts a live row without moving it", async () => {
+    const store = createCredentialStore(database);
+    const id = await liveCredential("rt-1");
+
+    await store.updateSecret(id, await encryptSecret(key, "rt-2"));
+
+    // The same row, addressed by the same id everything else already holds, now carrying the new
+    // token — and still live, because nothing about the grant changed.
+    const stored = await store.readSecret(id);
+    expect(stored?.revokedAt).toBeNull();
+    await expect(
+      decryptSecret(key, stored?.encryptedValue ?? ""),
+    ).resolves.toBe("rt-2");
+  });
+
+  test("refuses a revoked row rather than bringing it back to life", async () => {
+    const store = createCredentialStore(database);
+    const id = await liveCredential("rt-1", true);
+
+    await expect(
+      store.updateSecret(id, await encryptSecret(key, "rt-2")),
+    ).rejects.toThrow("Credential was not found or is revoked");
+    // Untouched: a withdrawn grant must not become usable again by being written through.
+    const stored = await store.readSecret(id);
+    await expect(
+      decryptSecret(key, stored?.encryptedValue ?? ""),
+    ).resolves.toBe("rt-1");
+  });
+
+  test("refuses a row that is not there", async () => {
+    await expect(
+      createCredentialStore(database).updateSecret(
+        randomUUID(),
+        await encryptSecret(key, "rt-2"),
+      ),
+    ).rejects.toThrow("Credential was not found or is revoked");
+  });
+
+  /**
+   * The write joins the caller's transaction when it is handed one.
+   *
+   * A rotating vendor is spent under a row lock the caller took, and the re-encryption has to be
+   * part of that transaction: on its own connection it would commit whether or not the caller's
+   * transaction did, and — with every pooled connection inside such a transaction — would wait for a
+   * connection that only the caller could release.
+   */
+  test("joins a caller's transaction, so a rollback takes the new secret with it", async () => {
+    const store = createCredentialStore(database);
+    const id = await liveCredential("rt-1");
+
+    await expect(
+      database.transaction(async (transaction) => {
+        await store.updateSecret(
+          id,
+          await encryptSecret(key, "rt-2"),
+          transaction,
+        );
+        throw new Error("the caller changed its mind");
+      }),
+    ).rejects.toThrow("the caller changed its mind");
+
+    const stored = await store.readSecret(id);
+    await expect(
+      decryptSecret(key, stored?.encryptedValue ?? ""),
+    ).resolves.toBe("rt-1");
   });
 });
 

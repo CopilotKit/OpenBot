@@ -1,5 +1,6 @@
 import {
   IconBrandGoogleDrive,
+  IconBrandNotion,
   IconChevronRight,
   IconPlug,
 } from "@tabler/icons-react";
@@ -52,6 +53,7 @@ export const Route = createFileRoute("/_authed/settings/connected-accounts/")({
 /** The same marks the admin connector list uses: these are the same vendors seen from your side. */
 const MARKS: Record<string, React.ComponentType<{ className?: string }>> = {
   "google-drive": IconBrandGoogleDrive,
+  notion: IconBrandNotion,
 };
 
 const markFor = (key: string) => MARKS[key] ?? IconPlug;
