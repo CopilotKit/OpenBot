@@ -194,6 +194,20 @@ This template renders nothing.
 {{- if and (not .Values.secrets.managedAgentToken) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
 {{- fail "config.managedAgent.url is set without secrets.managedAgentToken. Every call to your Bot carries that token, and an endpoint that accepts unauthenticated calls is an open door to whatever the Bot can reach." }}
 {{- end }}
+{{- /*
+  The same requirement, for a deployment whose secrets come from a store.
+
+  The value is not readable at template time, but the LIST of keys is, and a store that never
+  mentions this key cannot be holding one. Without this the refusal simply went dark on every cloud
+  target, which is where a Bot endpoint is most likely to be pointed at something real.
+*/}}
+{{- if .Values.externalSecrets.enabled }}
+{{- $named := list }}
+{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
+{{- if not (has "managed-agent-token" $named) }}
+{{- fail "config.managedAgent.url is set but externalSecrets.data does not name managed-agent-token. Every call to your Bot carries that token, and an endpoint that accepts unauthenticated calls is an open door to whatever the Bot can reach." }}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{- /*

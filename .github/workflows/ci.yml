@@ -142,7 +142,8 @@ jobs:
           else
             echo "skipped: the example-key refusal is not armed when the secret comes from a store"
           fi
-          # A Bot endpoint with nothing on the request that says who is calling.
+          # A Bot endpoint with nothing on the request that says who is calling. Armed whether the
+          # secret is this chart's or a store's, because the key list is readable either way.
           refuses "a managed agent URL with no token" \
             --set-string config.managedAgent.url=http://agent.default:8000/ag-ui
           # A browser inside every replica of a replicated API.
