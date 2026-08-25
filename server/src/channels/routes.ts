@@ -384,18 +384,42 @@ export function createChannelStore(
     },
 
     async setPinned(actor, channelId, pinned) {
-      const updated = await database
-        .update(channelMemberships)
-        .set({ pinnedAt: pinned ? new Date() : null })
-        .where(
-          and(
-            eq(channelMemberships.channelId, channelId),
-            eq(channelMemberships.userId, actor.id),
-          ),
-        )
-        .returning({ channelId: channelMemberships.channelId });
-      // Not a member, or no such channel: the same answer either way, matching recordActivity.
-      if (updated.length === 0) throw new ChannelNotFoundError(channelId);
+      await database.transaction(
+        async (transaction) => {
+          const updated = await transaction
+            .update(channelMemberships)
+            .set({ pinnedAt: pinned ? new Date() : null })
+            .where(
+              and(
+                eq(channelMemberships.channelId, channelId),
+                eq(channelMemberships.userId, actor.id),
+              ),
+            )
+            .returning({ channelId: channelMemberships.channelId });
+          // Not a member, or no such channel: the same answer either way, matching recordActivity.
+          if (updated.length === 0) throw new ChannelNotFoundError(channelId);
+
+          /*
+           * Announced to this member alone.
+           *
+           * A pin is a fact about one membership row, so `memberIds` holds the person who made it
+           * and nobody else. The hub delivers by that list, which is what carries the pin across
+           * this person's own tabs and replicas without putting it on anybody else's roster.
+           */
+          const event: ChannelActivityEvent = {
+            channelId,
+            memberIds: [actor.id],
+            lastMessage: null,
+            lastMessageAt: null,
+            lastMessageAgentId: null,
+            pinned,
+          };
+          await transaction.execute(
+            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+          );
+        },
+        { isolationLevel: "read committed" },
+      );
     },
 
     async softDelete(actor, channelId) {

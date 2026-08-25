@@ -17,6 +17,13 @@ export type ChannelActivityEvent = {
   lastMessageAgentId: string | null;
   /** The channel is gone from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
+  /**
+   * This member's pin, changed. Absent on an ordinary activity event.
+   *
+   * The server scopes a pin to the member who made it, so one arriving here is the reader's own,
+   * made in another tab or on another replica.
+   */
+  pinned?: boolean;
 };
 
 /** The infinite query's cache, which holds pages rather than one array. */
@@ -64,6 +71,22 @@ export function applyChannelEvent(
   );
   const previous = page.channels[index];
   if (!previous) return data;
+
+  /*
+   * A pin patches the one field it is about.
+   *
+   * The spread below would carry this event's null message onto the row and wipe the preview the
+   * roster renders. No re-sort either: a pin is not activity, and pinned rows are lifted at render
+   * time by `pinnedFirst`, not by the order they sit in here.
+   */
+  if (activity.pinned !== undefined) {
+    if (previous.pinned === activity.pinned) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, pinned: activity.pinned };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
 
   // Preserve object identity for unchanged rows so memoized rows do not re-render.
   const next = page.channels.slice();

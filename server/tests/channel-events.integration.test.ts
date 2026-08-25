@@ -265,10 +265,11 @@ function within5s(arrived: Promise<void>) {
 }
 
 /**
- * A change a roster has to hear about that is not a message: the channel is gone.
+ * Two changes a roster has to hear about that are not a message: a channel that is gone, and a pin.
  *
- * A deletion hides the channel for everybody in it, so every member's tabs are owed the news. The
- * tab that issued the delete already knows; the rest learn it here or not at all.
+ * They differ in who is owed the news. A deletion hides the channel for everybody in it, so every
+ * member's tabs need telling; a pin belongs to one member's own membership row, so telling anybody
+ * else would show them a pin they did not make.
  */
 describe("channel change delivery", () => {
   test("announces a deleted channel to every member, exactly once", async () => {
@@ -341,5 +342,61 @@ describe("channel change delivery", () => {
 
     // The channel is still there for everybody, so telling a roster it is gone would be a lie.
     expect(watched.of(owner.id)).toEqual([]);
+  });
+
+  test("tells the pinning member's own tabs and nobody else's", async () => {
+    const owner = await createTestUser("Pinning Member");
+    const other = await createTestUser("Other Member");
+    const channel = await createSharedChannel(owner, other);
+
+    const hub = createChannelEventHub();
+    const watched = watch(hub, [owner.id, other.id]);
+    const listener = await startChannelActivityListener(databaseUrl, hub);
+
+    try {
+      await store.setPinned(owner, channel.id, true);
+      await within5s(watched.anything);
+    } finally {
+      await listener.stop();
+    }
+
+    expect(watched.of(owner.id)).toHaveLength(1);
+    expect(watched.of(owner.id)[0]).toMatchObject({
+      channelId: channel.id,
+      pinned: true,
+      memberIds: [owner.id],
+    });
+    /*
+     * The half worth having a test for. A pin lives on one membership row, and the hub delivers by
+     * `memberIds`, so naming anybody else here would put a pin on their roster that they did not
+     * make. Both members are watching the same hub through the same notify, so an event that
+     * included the other member would already be in this array.
+     */
+    expect(watched.of(other.id)).toEqual([]);
+  });
+
+  test("announces an unpin the same way", async () => {
+    const owner = await createTestUser("Unpinning Member");
+    const other = await createTestUser("Other Member");
+    const channel = await createSharedChannel(owner, other);
+    await store.setPinned(owner, channel.id, true);
+
+    const hub = createChannelEventHub();
+    const watched = watch(hub, [owner.id, other.id]);
+    const listener = await startChannelActivityListener(databaseUrl, hub);
+
+    try {
+      await store.setPinned(owner, channel.id, false);
+      await within5s(watched.anything);
+    } finally {
+      await listener.stop();
+    }
+
+    expect(watched.of(owner.id)).toHaveLength(1);
+    expect(watched.of(owner.id)[0]).toMatchObject({
+      channelId: channel.id,
+      pinned: false,
+    });
+    expect(watched.of(other.id)).toEqual([]);
   });
 });

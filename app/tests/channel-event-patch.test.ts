@@ -119,3 +119,53 @@ describe("a deleted channel", () => {
     ).toBe(data);
   });
 });
+
+/**
+ * A pin this person made in one of their own tabs.
+ *
+ * Scoped to them by the server, so arriving here means it is the reader's own pin.
+ */
+describe("a pin", () => {
+  test("patches only the pinned flag, leaving the last message alone", () => {
+    const data = cache([
+      channel("a", {
+        lastMessage: "Said something.",
+        lastMessageAt: "2024-04-01T00:00:00.000Z",
+        lastMessageAgentId: "agent-1",
+      }),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({ channelId: "a", pinned: true }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]).toEqual({
+      ...(data.pages[0]?.channels[0] as ChannelSummary),
+      pinned: true,
+    });
+  });
+
+  test("unpins the same way", () => {
+    const patched = applyChannelEvent(
+      cache([channel("a", { pinned: true })]),
+      event({ channelId: "a", pinned: false }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]?.pinned).toBe(false);
+  });
+
+  test("returns the same cache when the row already says so", () => {
+    const data = cache([channel("a", { pinned: true })]);
+
+    // A duplicate, or the tab that made the pin hearing its own event back. Identity preserved, so
+    // React re-renders nothing at all.
+    expect(
+      applyChannelEvent(data, event({ channelId: "a", pinned: true })),
+    ).toBe(data);
+  });
+});

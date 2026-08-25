@@ -24,6 +24,13 @@ export type ChannelActivityEvent = {
   lastMessageAgentId: string | null;
   /** The channel is hidden from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
+  /**
+   * One member's pin, changed. Absent on an ordinary activity event.
+   *
+   * A pin lives on one membership row, so the writer names that member alone in `memberIds` and the
+   * hub's delivery rule does the rest: nobody else in the channel hears a pin they did not make.
+   */
+  pinned?: boolean;
 };
 
 type Send = (payload: string) => void;
