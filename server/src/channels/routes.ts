@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -346,9 +357,15 @@ export function createChannelStore(
         // The browser repeats this when the socket patches a row. Both must agree, or the list
         // reorders itself on the next event; see `byRecency` in use-channel-events.ts.
         .where(
-          inArray(
-            channels.id,
-            wanted.map((row) => row.id),
+          and(
+            inArray(
+              channels.id,
+              wanted.map((row) => row.id),
+            ),
+            // Repeated, not inherited from the query that chose the page: these are two statements
+            // on two snapshots, so a delete that commits between them would otherwise hand back a
+            // channel this person can no longer see.
+            isNull(channels.deletedAt),
           ),
         )
         .orderBy(
@@ -393,10 +410,25 @@ export function createChannelStore(
               and(
                 eq(channelMemberships.channelId, channelId),
                 eq(channelMemberships.userId, actor.id),
+                // A deleted channel is not there to pin. Without this, pinning one succeeds and
+                // announces, and the announcement sends this person's tabs to refetch a roster that
+                // cannot show the row. `get` and `list` filter the same way.
+                exists(
+                  transaction
+                    .select({ one: sql`1` })
+                    .from(channels)
+                    .where(
+                      and(
+                        eq(channels.id, channelId),
+                        isNull(channels.deletedAt),
+                      ),
+                    ),
+                ),
               ),
             )
             .returning({ channelId: channelMemberships.channelId });
-          // Not a member, or no such channel: the same answer either way, matching recordActivity.
+          // Not a member, no such channel, or a deleted one: the same answer every way, matching
+          // recordActivity and `get`.
           if (updated.length === 0) throw new ChannelNotFoundError(channelId);
 
           /*
@@ -486,14 +518,25 @@ export function createChannelStore(
           const [membership] = await transaction
             .select({ channelId: channelMemberships.channelId })
             .from(channelMemberships)
+            // Joined rather than checked on the membership alone, so a deleted channel is refused
+            // too. `get` and `list` filter on `deleted_at`, so without this a client holding a stale
+            // roster row can bump `last_message` on a channel nobody can see and announce it to
+            // every member, each of whom refetches their roster for an invisible row.
+            .innerJoin(
+              channels,
+              and(
+                eq(channels.id, channelMemberships.channelId),
+                isNull(channels.deletedAt),
+              ),
+            )
             .where(
               and(
                 eq(channelMemberships.channelId, channelId),
                 eq(channelMemberships.userId, actor.id),
               ),
             );
-          // Not a member, or no such channel: the same answer either way, so belonging to a channel
-          // is not something an outsider can probe for.
+          // Not a member, no such channel, or a deleted one: the same answer every way, so belonging
+          // to a channel is not something an outsider can probe for.
           if (!membership) throw new ChannelNotFoundError(channelId);
 
           if (activity.agentId !== null) {

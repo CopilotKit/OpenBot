@@ -1204,6 +1204,74 @@ describe("channel soft delete", () => {
     ).rejects.toBeInstanceOf(ChannelNotFoundError);
   });
 
+  /*
+   * A deleted channel is gone as far as every other path is concerned.
+   *
+   * `get` and `list` filter on `deleted_at`, so a member who still has a stale roster row, or a
+   * client that reports the reply to a message sent moments before the delete, would otherwise be
+   * writing to and announcing a channel nobody can see: every member's browser refetches its roster
+   * for a row that resolves to nothing.
+   */
+  test("refuses activity on a deleted channel and leaves the last message alone", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Silenced agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+    await persistentStore.recordActivity(actor, created.id, {
+      agentId,
+      at: new Date(Date.now() - 60_000),
+      text: "Said before the delete.",
+    });
+    await persistentStore.softDelete(actor, created.id);
+
+    await expect(
+      persistentStore.recordActivity(actor, created.id, {
+        agentId,
+        at: new Date(),
+        text: "Said after the delete.",
+      }),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+
+    // Same answer `get` gives, and the row the roster would have shown is untouched.
+    const [row] = await database
+      .select({
+        lastMessage: channels.lastMessage,
+        lastMessageAt: channels.lastMessageAt,
+      })
+      .from(channels)
+      .where(eq(channels.id, created.id));
+    expect(row?.lastMessage).toBe("Said before the delete.");
+  });
+
+  test("refuses to pin a deleted channel and leaves the membership alone", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Unpinnable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+    await persistentStore.softDelete(actor, created.id);
+
+    await expect(
+      persistentStore.setPinned(actor, created.id, true),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+
+    const [row] = await database
+      .select({ pinnedAt: channelMemberships.pinnedAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, created.id),
+          eq(channelMemberships.userId, actor.id),
+        ),
+      );
+    expect(row?.pinnedAt).toBeNull();
+  });
+
   test("refuses to delete a package-defined channel", async () => {
     const actor = await createPersistentUser();
     const [pkg] = await database

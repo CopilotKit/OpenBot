@@ -10,6 +10,7 @@ import {
   startChannelActivityListener,
 } from "../src/channels/events";
 import {
+  ChannelNotFoundError,
   ChannelPackageOwnedError,
   createChannelStore,
 } from "../src/channels/routes";
@@ -373,6 +374,66 @@ describe("channel change delivery", () => {
      * included the other member would already be in this array.
      */
     expect(watched.of(other.id)).toEqual([]);
+  });
+
+  /*
+   * A write refused because the channel is deleted announces nothing either.
+   *
+   * The listener is attached after the delete, so the delete's own announcement is not what these
+   * observe: what is being asserted is that a later report about a hidden channel is silent. A notify
+   * here would send every member's browser off to refetch a roster for a row it cannot show.
+   */
+  test("announces nothing for activity reported on a deleted channel", async () => {
+    const owner = await createTestUser("Deleted Channel Member");
+    const other = await createTestUser("Other Member");
+    const channel = await createSharedChannel(owner, other);
+    await store.softDelete(owner, channel.id);
+
+    const hub = createChannelEventHub();
+    const watched = watch(hub, [owner.id, other.id]);
+    const listener = await startChannelActivityListener(databaseUrl, hub);
+
+    try {
+      await expect(
+        store.recordActivity(owner, channel.id, {
+          agentId: null,
+          at: new Date(),
+          text: "Said into a channel that is gone.",
+        }),
+      ).rejects.toBeInstanceOf(ChannelNotFoundError);
+      // The refusal rolls back, so there is nothing to wait for; the window is what makes an empty
+      // assertion mean something.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } finally {
+      await listener.stop();
+    }
+
+    expect(watched.of(owner.id)).toEqual([]);
+    expect(watched.of(other.id)).toEqual([]);
+  });
+
+  test("announces nothing for a pin on a deleted channel", async () => {
+    const owner = await createTestUser("Pinning Member");
+    const channel = await createSharedChannel(
+      owner,
+      await createTestUser("Other Member"),
+    );
+    await store.softDelete(owner, channel.id);
+
+    const hub = createChannelEventHub();
+    const watched = watch(hub, [owner.id]);
+    const listener = await startChannelActivityListener(databaseUrl, hub);
+
+    try {
+      await expect(
+        store.setPinned(owner, channel.id, true),
+      ).rejects.toBeInstanceOf(ChannelNotFoundError);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } finally {
+      await listener.stop();
+    }
+
+    expect(watched.of(owner.id)).toEqual([]);
   });
 
   test("announces an unpin the same way", async () => {
