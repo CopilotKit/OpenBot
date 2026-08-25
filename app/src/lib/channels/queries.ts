@@ -26,6 +26,8 @@ export type ChannelSummary = AgentChannel & {
   createdAt: string;
   /** Whether this member pinned the channel. Pinned channels sort first in the roster. */
   pinned: boolean;
+  /** ISO-8601 when this member last had the channel open, or null for never. The caller's, only. */
+  lastReadAt: string | null;
 };
 
 export const channelKeys = {

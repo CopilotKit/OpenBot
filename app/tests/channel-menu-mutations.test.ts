@@ -1,9 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import type { QueryClient } from "@tanstack/react-query";
+import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import {
   deleteChannelMutationOptions,
+  markChannelReadMutationOptions,
   setChannelPinnedMutationOptions,
 } from "../src/lib/channels/mutations";
+import { channelKeys, type ChannelPage } from "../src/lib/channels/queries";
 
 const realFetch = globalThis.fetch;
 
@@ -85,4 +87,47 @@ test("a refused delete surfaces the server's sentence", async () => {
   await expect(options.mutationFn?.("channel-1")).rejects.toThrow(
     "This channel is defined by the deployment package, so it cannot be deleted here.",
   );
+});
+
+test("marking read PUTs the read route and patches lastReadAt in place", async () => {
+  const seen = capturingFetch(204, undefined);
+  const queryClient = new QueryClient();
+  queryClient.setQueryData(channelKeys.list(), {
+    pages: [
+      {
+        channels: [
+          {
+            id: "channel-1",
+            name: "Assistant channel",
+            agentIds: ["agent-1"],
+            threadId: "thread-1",
+            active: true,
+            lastMessage: "hello",
+            lastMessageAt: "2026-08-25T12:00:00.000Z",
+            lastMessageAgentId: "agent-1",
+            createdAt: "2026-08-25T11:00:00.000Z",
+            pinned: false,
+            lastReadAt: null,
+          },
+        ],
+        nextCursor: null,
+      },
+    ],
+    pageParams: [""],
+  } satisfies InfiniteData<ChannelPage>);
+  const options = markChannelReadMutationOptions(queryClient);
+
+  options.onMutate?.("channel-1");
+  await options.mutationFn?.("channel-1");
+
+  expect(seen).toHaveLength(1);
+  expect(seen[0]?.url).toBe("/api/channels/channel-1/read");
+  expect(seen[0]?.init?.method).toBe("PUT");
+  const patched = queryClient.getQueryData<InfiniteData<ChannelPage>>(
+    channelKeys.list(),
+  );
+  // The dot clears from the cache before the wire answered, and nothing was invalidated:
+  // there is no onSuccess to queue a refetch that would race the socket's own patches.
+  expect(patched?.pages[0]?.channels[0]?.lastReadAt).not.toBeNull();
+  expect(options.onSuccess).toBeUndefined();
 });

@@ -15,6 +15,7 @@ function channel(id: string, pinned: boolean): ChannelSummary {
     lastMessageAgentId: null,
     createdAt: "2024-01-01T00:00:00.000Z",
     pinned,
+    lastReadAt: null,
   };
 }
 

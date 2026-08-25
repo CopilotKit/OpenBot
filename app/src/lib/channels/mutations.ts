@@ -1,6 +1,10 @@
-import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  mutationOptions,
+  type InfiniteData,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { client, tryClient } from "@/lib/client";
-import { type AgentChannel, channelKeys } from "./queries";
+import { type AgentChannel, type ChannelPage, channelKeys } from "./queries";
 
 /**
  * Start a new channel with one or more coworkers.
@@ -63,6 +67,42 @@ export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+  });
+}
+
+/**
+ * Stamp a channel read for this member, patching the cache before the wire answers.
+ *
+ * Patched in onMutate rather than refetched on success: the dot must clear the instant the channel
+ * opens, not a round-trip later. No rollback on failure and no invalidation — a mark-read that did
+ * not land is a dot that returns on the next refetch, which is the truth reasserting itself, and a
+ * refetch here would race the socket's own patches for nothing.
+ */
+export function markChannelReadMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (channelId: string) => {
+      await client(`/api/channels/${channelId}/read`, {
+        method: "PUT",
+        fallback: "Could not mark this channel read",
+      });
+    },
+    onMutate: (channelId) => {
+      queryClient.setQueryData(
+        channelKeys.list(),
+        (data: InfiniteData<ChannelPage> | undefined) =>
+          data && {
+            ...data,
+            pages: data.pages.map((page) => ({
+              ...page,
+              channels: page.channels.map((row) =>
+                row.id === channelId
+                  ? { ...row, lastReadAt: new Date().toISOString() }
+                  : row,
+              ),
+            })),
+          },
+      );
+    },
   });
 }
 
