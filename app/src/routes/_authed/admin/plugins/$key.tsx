@@ -41,10 +41,11 @@ import { storeMcpToken } from "@/lib/credentials/mutations";
 import {
   addCuratedServerMutationOptions,
   connectAccountMutationOptions,
+  grantPlugin,
+  invalidatePlugins,
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
-  setPluginGrantMutationOptions,
 } from "@/lib/plugins/mutations";
 import {
   connectionsQueryOptions,
@@ -120,7 +121,17 @@ function RouteComponent() {
   const [selectedRefs, setSelectedRefs] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [granting, setGranting] = useState(false);
+  /**
+   * How far through a batch of grants we are, or null when none is running.
+   *
+   * A count rather than a boolean because a bulk grant is honestly N writes: a Bot times twelve
+   * tools is twelve requests, and a button that says only "Granting…" for the length of them gives
+   * an administrator no way to tell a slow batch from a stuck one.
+   */
+  const [granting, setGranting] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   /* Every write reports into one banner rather than each growing its own handler. */
   const report = { onError: (thrown: Error) => setError(thrown.message) };
@@ -138,10 +149,6 @@ function RouteComponent() {
   });
   const remove = useMutation({
     ...removePluginServerMutationOptions(queryClient),
-    ...report,
-  });
-  const setGrant = useMutation({
-    ...setPluginGrantMutationOptions(queryClient),
     ...report,
   });
   const connectSelf = useMutation({
@@ -201,26 +208,32 @@ function RouteComponent() {
    * One write per grant, in selection order. The server records each grant as its own audit row, so
    * a bulk action here is honestly N decisions; a refusal stops the rest and leaves the dialog open
    * with the banner saying why.
+   *
+   * One refetch for the batch, at the end. Going through the grant mutation invalidated every plugin
+   * query after each write and awaited it, so a batch of twenty grants was twenty round trips
+   * interleaved with twenty refetches of a list nobody could see behind the dialog — most of the
+   * wait, for nothing anybody read. It is invalidated even when a grant is refused, because the ones
+   * before it landed and the screen behind is now stale about them.
    */
   const grantSelected = async () => {
     setError(null);
-    setGranting(true);
+    const total = selectedBots.size * selectedRefs.size;
+    setGranting({ done: 0, total });
+    let done = 0;
     try {
       for (const agentId of selectedBots) {
         for (const ref of selectedRefs) {
-          await setGrant.mutateAsync({
-            agentId,
-            granted: true,
-            kind: "mcp",
-            ref,
-          });
+          await grantPlugin({ agentId, kind: "mcp", ref });
+          done += 1;
+          setGranting({ done, total });
         }
       }
       setDialog(null);
-    } catch {
-      /* Already in the banner via the mutation's own handler. */
+    } catch (thrown) {
+      setError((thrown as Error).message);
     } finally {
-      setGranting(false);
+      await invalidatePlugins(queryClient);
+      setGranting(null);
     }
   };
 
@@ -798,8 +811,21 @@ function RouteComponent() {
               </DialogDescription>
             </DialogHeader>
             <DialogBody className="mt-4 space-y-5">
-              <div>
-                <p className="mb-2 font-medium text-sm">To</p>
+              {/*
+               * Each set of tickboxes is a group named by its own heading, so a screen reader
+               * reaching a bare tool name is told which list it is in. "Changes things" is the whole
+               * warning on those, and it is a heading a sighted reader cannot miss and a listener
+               * would otherwise never hear.
+               *
+               * A `fieldset` because that is what a group of tickboxes is, named by the heading
+               * already on screen rather than by a `legend` duplicating it. `min-w-0` undoes the
+               * one thing a fieldset brings that a div did not: a min-content floor that a long
+               * tool name would push the dialog out to.
+               */}
+              <fieldset aria-labelledby="grant-to-heading" className="min-w-0">
+                <p className="mb-2 font-medium text-sm" id="grant-to-heading">
+                  To
+                </p>
                 <div className="space-y-2">
                   {bots.map((bot) => (
                     <div className="flex items-center gap-2" key={bot.id}>
@@ -821,12 +847,20 @@ function RouteComponent() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </fieldset>
               <div className="max-h-64 space-y-5 overflow-y-auto">
                 {reads.length > 0 ? (
-                  <div>
+                  <fieldset
+                    aria-labelledby="grant-reads-heading"
+                    className="min-w-0"
+                  >
                     <div className="mb-1 flex items-center justify-between">
-                      <p className="font-medium text-sm">Reads</p>
+                      <p
+                        className="font-medium text-sm"
+                        id="grant-reads-heading"
+                      >
+                        Reads
+                      </p>
                       <Button
                         onClick={() =>
                           setSelectedRefs((previous) => {
@@ -863,12 +897,18 @@ function RouteComponent() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </fieldset>
                 ) : null}
                 {writes.length > 0 ? (
-                  <div>
+                  <fieldset
+                    aria-labelledby="grant-writes-heading"
+                    className="min-w-0"
+                  >
                     <div className="mb-1 flex items-center justify-between">
-                      <p className="font-medium text-amber-600 text-sm dark:text-amber-500">
+                      <p
+                        className="font-medium text-amber-600 text-sm dark:text-amber-500"
+                        id="grant-writes-heading"
+                      >
                         Changes things
                       </p>
                       <Button
@@ -907,7 +947,7 @@ function RouteComponent() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </fieldset>
                 ) : null}
               </div>
             </DialogBody>
@@ -931,12 +971,17 @@ function RouteComponent() {
               </Button>
               <Button
                 disabled={
-                  granting || selectedBots.size === 0 || selectedRefs.size === 0
+                  granting !== null ||
+                  selectedBots.size === 0 ||
+                  selectedRefs.size === 0
                 }
                 onClick={() => void grantSelected()}
                 size="sm"
               >
-                Grant
+                {/* The one in flight, not the ones finished: a count that starts at zero of twelve reads as nothing happening. */}
+                {granting
+                  ? `Granting ${Math.min(granting.done + 1, granting.total)} of ${granting.total}…`
+                  : "Grant"}
               </Button>
             </DialogFooter>
           </DialogContent>
