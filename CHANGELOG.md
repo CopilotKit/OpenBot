@@ -48,6 +48,13 @@ isolated, stateful, singleton pod with a stable identity and persistent storage.
 field, and it keeps the volumes, so a computer comes back with its logins rather than signed out of
 everything. `shared` stays the default and needs nothing installed in the cluster.
 
+**The NetworkPolicy would have fenced the API off from its own work.** Its egress named DNS and the
+bundled database and nothing else, so on a cluster that enforces policy the API could not have
+reached a Bot's computer or, with a managed database, the database. Both are allowed now, and turning
+the policy on with an external database and no rule for it is refused rather than shipped. Worth
+knowing either way: EKS runs its CNI with `--enable-network-policy=false`, so a policy there installs,
+looks right, and does nothing at all.
+
 **A cluster with no controller is refused at install.** `computers.mode: sandbox` needs the
 agent-sandbox CRD, and without it the install succeeds, every pod is healthy, and the deployment
 looks finished until the first Bot asks for a browser. The chart reads the cluster and refuses,

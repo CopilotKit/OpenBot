@@ -165,6 +165,25 @@ PostgreSQL with `select ... for update skip locked`, so whichever pod runs the s
 nobody else holds, and one that dies mid-suspend hands its work back when the lease expires. The
 decision is re-checked at the moment of acting, because somebody may have come back in between.
 
+## NetworkPolicy, and whether your cluster enforces one
+
+Off by default, because a NetworkPolicy on a cluster whose CNI does not enforce one is a resource
+that silently does nothing, and on a cluster that does enforce one a wrong rule is an outage.
+
+**On EKS it does nothing unless you turn it on.** The VPC CNI ships with
+`--enable-network-policy=false`, so the policy installs, looks right, and is never applied. Check
+before trusting it:
+
+```sh
+kubectl -n kube-system get ds aws-node -o yaml | grep enable-network-policy
+```
+
+The egress rules allow DNS, a Bot's computer on 4100, the API server when computers are Sandboxes,
+and the bundled database. **A managed database is an address this chart cannot know**, so turning
+the policy on with an external database and no `networkPolicy.extraEgress` is refused: on an
+enforcing cluster it would fence the API off from its own database, which reads as the database
+being down.
+
 ## Upgrades
 
 Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it

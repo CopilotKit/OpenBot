@@ -46,6 +46,30 @@ spec:
         - port: 5432
           protocol: TCP
     {{- end }}
+    {{- if ne .Values.computers.mode "external" }}
+    {{- /*
+      A Bot's computer, which the API has to reach for every browser action.
+      
+      Easy to forget, because nothing about the API looks like it talks to another pod: the browser is
+      behind a Service and reads like an outside address. On a cluster that enforces policy, leaving
+      this out means every Bot action fails and the API looks broken rather than fenced.
+    */}}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: computer
+      ports:
+        - port: 4100
+          protocol: TCP
+    {{- end }}
+    {{- if eq .Values.computers.mode "sandbox" }}
+    {{- /* The API server, which is where a per-Bot computer is asked for. */}}
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- end }}
     {{- with .Values.networkPolicy.extraEgress }}
 {{ toYaml . | indent 4 }}
     {{- end }}

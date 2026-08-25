@@ -116,6 +116,21 @@ This template renders nothing.
 {{- fail "computers.mode must be one of: shared, sandbox, external." }}
 {{- end }}
 
+{{- /*
+  A policy that would fence the deployment off from its own database.
+
+  The egress rules name DNS, the computers and, when it is bundled, the database. A managed database
+  is an address this chart cannot know, so on a cluster that enforces policy the API would resolve it
+  and then be unable to reach it, which reads as the database being down rather than as a rule.
+
+  Worth knowing either way: a NetworkPolicy on a cluster whose CNI does not enforce one is a resource
+  that silently does nothing. EKS needs the VPC CNI started with `--enable-network-policy=true`, and
+  it is off by default, so this can look like it is working when it is not doing anything at all.
+*/}}
+{{- if and .Values.networkPolicy.enabled (not .Values.postgresql.enabled) (not .Values.networkPolicy.extraEgress) }}
+{{- fail "networkPolicy.enabled with an external database, but nothing lets the API reach it. Add the database to networkPolicy.extraEgress, for example a `to: [{ipBlock: {cidr: 10.0.0.0/16}}]` with port 5432." }}
+{{- end }}
+
 {{- if and .Values.ingress.enabled .Values.httpRoute.enabled }}
 {{- fail "ingress.enabled and httpRoute.enabled are both set. They are two ways to do the same thing; pick the one your cluster runs." }}
 {{- end }}
