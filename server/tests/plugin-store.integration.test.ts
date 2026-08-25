@@ -7,6 +7,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { MCPMock } from "@copilotkit/aimock/mcp";
 import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
@@ -40,6 +41,7 @@ import {
   type OAuthClient,
   PluginRefusedError,
   TokenRefusedError,
+  unlistedAdvertisedTools,
 } from "../src/plugins/store";
 
 /**
@@ -521,6 +523,90 @@ describe("removing an MCP server", () => {
     );
     // Audit is append-only in Postgres; leaving the row is fine because
     // `credentialId` is suite-scoped, so re-runs never collide.
+  });
+
+  /**
+   * The people's grants go too, not only the server's own token.
+   *
+   * `mcp_user_credentials` cascades on the server row, so removing a `user-oauth` connector used to
+   * delete every pointer and leave every refresh token in the vault live and unreferenced: reachable
+   * from no screen, revoked by no operation, and still a usable grant at the vendor. "We removed the
+   * connector" has to be true of the thing that matters, which is the token sitting at Notion.
+   */
+  test("revokes every person's grant for the server it removes", async () => {
+    const removalServerId = `removal-target-people-${suite}`;
+    const connectedUserId = `user_removal_${suite}`;
+    revokedCredentialIds.length = 0;
+
+    await database
+      .insert(users)
+      .values({
+        id: connectedUserId,
+        email: `${connectedUserId}@openbot.test`,
+        name: connectedUserId,
+        emailVerified: false,
+      })
+      .onConflictDoNothing();
+
+    const [grant] = await database
+      .insert(credentialRows)
+      .values({
+        kind: "mcp_user_token",
+        provider: removalServerId,
+        keyId: connectedUserId,
+        encryptedValue: "{}",
+        metadata: {},
+      })
+      .returning({ id: credentialRows.id });
+    const grantId = grant?.id;
+    if (!grantId) throw new Error("grant row was not created");
+    issuedCredentialIds.push(grantId);
+
+    await database.insert(mcpServers).values({
+      id: removalServerId,
+      title: "removal target with people",
+      vendor: "test",
+      url: "https://example.invalid/mcp",
+      provenance: "custom",
+    });
+    await database.insert(mcpUserCredentials).values({
+      serverId: removalServerId,
+      userId: connectedUserId,
+      credentialId: grantId,
+      scope: "",
+    });
+
+    try {
+      await store.removeServer(removalServerId, "admin@openbot.local");
+
+      expect(revokedCredentialIds).toEqual([grantId]);
+      const [row] = await database
+        .select({ revokedAt: credentialRows.revokedAt })
+        .from(credentialRows)
+        .where(eq(credentialRows.id, grantId));
+      expect(row?.revokedAt).not.toBeNull();
+
+      // And the trail says whose access ended and why, which is the row an auditor reaches for.
+      const trail = await database
+        .select({
+          eventType: auditEvents.eventType,
+          owner: sql<string>`payload ->> 'owner'`,
+          reason: sql<string>`payload ->> 'reason'`,
+        })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.targetType, "mcp_server"),
+            eq(auditEvents.targetId, removalServerId),
+            eq(auditEvents.eventType, "mcp.account_disconnected"),
+          ),
+        );
+      expect(trail).toHaveLength(1);
+      expect(trail[0]?.owner).toBe(connectedUserId);
+      expect(trail[0]?.reason).toBe("mcp_server_removed");
+    } finally {
+      await database.delete(users).where(eq(users.id, connectedUserId));
+    }
   });
 
   test("does not call revoke when the server had no credential", async () => {
@@ -2000,6 +2086,145 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   /**
+   * A refresh naming the advertised tools this deployment's write list does not cover.
+   *
+   * Notion has no scope strings and no read-only scope: access is per-page, chosen on the consent
+   * screen, so `writeTools` plus the action policy are the ENTIRE write barrier. The entry's own
+   * comment says reconciling that list against the live tool list "is required, not cosmetic" — and
+   * until this row existed, nothing mechanical did it. An advertised tool missing from the list
+   * classifies as a READ ({@link classifyTool}), so under-inclusion is the failure mode and it is
+   * silent.
+   *
+   * The vendor here is a real MCP server on localhost, reached by pointing the pinned host at it for
+   * the length of this test. The host is pinned for good reasons and nothing in the store will take a
+   * URL from a caller, so the seam is fetch — which is also the honest one: what is under test is
+   * what a real listing over the real protocol produces.
+   */
+  test("a refresh names the advertised tools no write list covers", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    /** Suite-scoped, so it cannot be a name Notion really advertises, nor a name in `writeTools`. */
+    const unlistedName = `notion-invent-${suite}`;
+    const mock = new MCPMock();
+    mock
+      .addTool({
+        name: "notion-create-pages",
+        description: "A write the list already names.",
+        inputSchema: { type: "object", properties: {} },
+      })
+      .addTool({
+        name: unlistedName,
+        description: "Advertised, and named by no write list.",
+        inputSchema: { type: "object", properties: {} },
+      });
+    const mockUrl = await mock.start();
+
+    // What the deployment currently advertises for this server, because a refresh replaces the list
+    // wholesale and this one is pointing the vendor at a mock.
+    const advertisedBefore = await database
+      .select()
+      .from(mcpTools)
+      .where(eq(mcpTools.serverId, dynamicServerId));
+    const [stampBefore] = await database
+      .select({
+        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+        lastError: mcpServers.lastError,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, dynamicServerId));
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input instanceof Request ? input.url : input);
+      return realFetch(
+        target.startsWith("https://mcp.notion.com") ? mockUrl : input,
+        init,
+      );
+    }) as typeof fetch;
+
+    try {
+      expect(
+        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+      ).toEqual({ tools: 2 });
+    } finally {
+      globalThis.fetch = realFetch;
+      await mock.stop?.();
+      await database
+        .delete(mcpTools)
+        .where(eq(mcpTools.serverId, dynamicServerId));
+      if (advertisedBefore.length > 0) {
+        await database.insert(mcpTools).values(advertisedBefore);
+      }
+      await database
+        .update(mcpServers)
+        .set({
+          toolsRefreshedAt: stampBefore?.toolsRefreshedAt ?? null,
+          lastError: stampBefore?.lastError ?? null,
+        })
+        .where(eq(mcpServers.id, dynamicServerId));
+    }
+
+    const named = (
+      await database
+        .select({ payload: auditEvents.payload })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.eventType, "configuration.changed"),
+            eq(auditEvents.targetId, dynamicServerId),
+            sql`payload ->> 'change' = 'unlisted_tools_advertised'`,
+          ),
+        )
+    ).flatMap((row) => (row.payload as { tools?: string[] }).tools ?? []);
+
+    // The one the list does not name, and never the one it does.
+    expect(named).toContain(unlistedName);
+    expect(named).not.toContain("notion-create-pages");
+  });
+
+  /**
+   * What a failed refresh writes into `lastError`, and how much of it.
+   *
+   * The column is drawn on the admin page and parts of the sentence come from a vendor, so it is not
+   * a promise about length — the same reasoning `callTool` already applies to the failure it records.
+   * Capped at the same 400 characters, so the two agree.
+   */
+  test("a refusal written to lastError is capped like every other vendor sentence", async () => {
+    await putClient(EVICTED);
+    await connect();
+    // A refusal the retry cannot act on — no code at all — so it arrives unedited and long.
+    accepted = new Set<string>();
+    refuse = () => new Error(`vendor said: ${"y".repeat(1_000)}`);
+
+    const [before] = await database
+      .select({ lastError: mcpServers.lastError })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, dynamicServerId));
+
+    try {
+      // Zero tools and no throw: a refresh records its failure rather than raising it.
+      expect(
+        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+      ).toEqual({ tools: 0 });
+
+      const [row] = await database
+        .select({ lastError: mcpServers.lastError })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, dynamicServerId));
+      expect(row?.lastError?.length).toBe(400);
+      expect(row?.lastError?.startsWith("vendor said: ")).toBe(true);
+    } finally {
+      // The column is live configuration an operator reads, so this suite puts back what it found.
+      await database
+        .update(mcpServers)
+        .set({ lastError: before?.lastError ?? null })
+        .where(eq(mcpServers.id, dynamicServerId));
+    }
+  });
+
+  /**
    * The vault row and the pointer that names it commit together, or neither does.
    *
    * They were two transactions, so a failure between them left `mcp_user_credentials` naming a
@@ -2269,6 +2494,54 @@ describe("a custom server may only be pointed at its own kind of credential", ()
       by: "admin@example.com",
     });
     expect(added.id).toBe(id);
+  });
+});
+
+/**
+ * Which advertised names a vendor's write list does not cover, as a rule on its own.
+ *
+ * Unit-tested here as well as through a refresh, because the rule is the part that decides whether
+ * anybody ever hears about an under-inclusive write list, and it has two branches a live listing
+ * cannot show side by side: a vendor whose consent screen is the whole barrier, and one whose own
+ * scope is read-only. The entries are the real ones, so a catalogue edit that removed Drive's
+ * read-only scope would fail here rather than start filing rows about Drive.
+ */
+describe("advertised tools a write list does not name", () => {
+  test("a Notion tool absent from the write list is named, sorted", () => {
+    expect(
+      unlistedAdvertisedTools(catalogueEntry("notion"), [
+        "notion-search",
+        "notion-create-pages",
+        "notion-fetch",
+      ]),
+    ).toEqual(["notion-fetch", "notion-search"]);
+  });
+
+  test("a write the list already names is not", () => {
+    expect(
+      unlistedAdvertisedTools(catalogueEntry("notion"), [
+        "notion-create-pages",
+      ]),
+    ).toEqual([]);
+  });
+
+  /*
+   * Drive's grant is `drive.readonly`, so a tool missing from its write list cannot write whatever
+   * this deployment believes about it — the vendor refuses. Filing rows about it would be noise
+   * standing between somebody and the vendor where it is the only barrier.
+   */
+  test("a vendor whose own scope is read-only is not reconciled here", () => {
+    expect(
+      unlistedAdvertisedTools(catalogueEntry("google-drive"), [
+        "search_files",
+        "made_up_tool",
+      ]),
+    ).toEqual([]);
+  });
+
+  /** A server an administrator added by URL: every tool of theirs is already a write. */
+  test("a server nobody reviewed is not reconciled here either", () => {
+    expect(unlistedAdvertisedTools(null, ["anything"])).toEqual([]);
   });
 });
 

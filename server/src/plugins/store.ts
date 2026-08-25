@@ -245,6 +245,39 @@ export function refFromToolName(toolName: string): string | null {
   return `${rest.slice(0, separator)}/${rest.slice(separator + 2)}`;
 }
 
+/**
+ * Advertised tool names this deployment's write list does not name, where that list is the whole
+ * barrier.
+ *
+ * WHY THIS IS WORTH A ROW. {@link classifyTool} reads an advertised name absent from `writeTools` as
+ * a READ. So under-inclusion is the failure mode of that list, and it is silent: a write the vendor
+ * offers and the entry forgot is offered to a model as a read, and nothing anywhere says so. Notion's
+ * entry says reconciling its list against the live tool list "is required, not cosmetic" — this is
+ * the mechanical half of that, so the reconciliation is somebody reading a trail rather than somebody
+ * remembering.
+ *
+ * Only where the list stands alone. A vendor that expresses SCOPES has something behind the list: a
+ * tool missing from Drive's `writeTools` still cannot write, because `drive.readonly` refuses it at
+ * the vendor. Naming those would be noise in front of the one case that has no second barrier at all
+ * — Notion, whose access is per-page on a consent screen and whose `scopes` are therefore empty.
+ *
+ * A server with no catalogue entry is not reconciled either, and for the opposite reason: nothing
+ * reviewed says any tool of theirs only reads, so all of them are already writes.
+ *
+ * Sorted, so two readings of the same listing produce the same row.
+ */
+export function unlistedAdvertisedTools(
+  entry: CatalogueEntry | null,
+  advertised: readonly string[],
+): string[] {
+  if (!entry || entry.writeTools.length === 0) return [];
+  if (entry.auth.kind !== "user-oauth" || entry.auth.scopes.length > 0) {
+    return [];
+  }
+  const writes = new Set(entry.writeTools);
+  return advertised.filter((name) => !writes.has(name)).sort();
+}
+
 const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
 
@@ -1543,19 +1576,26 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     /**
-     * Remove a server, and stop its token being live.
+     * Remove a server, and stop every secret it was reached with being live.
      *
-     * The token is keyed `mcp-<serverId>` and nothing else revokes it, so
-     * leaving it behind means re-adding the same server meets its own
-     * abandoned row on `credentials_active_key_idx`. It is revoked rather
-     * than deleted, because the vault keeps revoked rows for audit.
+     * TWO KINDS OF SECRET, and both have to go. The server's own credential is whatever
+     * `mcp_servers.credential_id` names — a `mcp` bearer token an administrator added, or, for a
+     * `user-oauth` vendor, the deployment's OAuth client, keyed `oauth-client-<serverId>`. Nothing
+     * else revokes it, so leaving it behind means re-adding the same server meets its own abandoned
+     * row on `credentials_active_key_idx`.
      *
-     * The revoke goes first. These are two writes on two tables and the
-     * store exposes no transaction that spans both, so the order decides
-     * what a failure between them leaves: revoke-then-delete leaves a server
-     * whose token no longer works and which removing again will finish off,
-     * while delete-then-revoke leaves a live token no server references and
-     * no operation can reach.
+     * The other kind is every PERSON'S grant for this server, keyed `mcp_user_token` on the server id.
+     * `mcp_user_credentials` cascades on the server row, so removing the connector used to delete
+     * every pointer and leave every refresh token live and unreferenced: reachable from no screen,
+     * revoked by no operation, and still a usable grant at the vendor. "We removed the connector" has
+     * to be true of the thing that matters, which is the token sitting at the vendor.
+     *
+     * Revoked rather than deleted, because the vault keeps revoked rows for audit.
+     *
+     * The revokes go first. These are writes on two tables and the store exposes no transaction that
+     * spans both, so the order decides what a failure between them leaves: revoke-then-delete leaves
+     * a server whose secrets no longer work and which removing again will finish off, while
+     * delete-then-revoke leaves live secrets no server references and no operation can reach.
      */
     async removeServer(serverId: string, by: string): Promise<void> {
       const [existing] = await database
@@ -1595,6 +1635,50 @@ export function createPluginStore(options: PluginStoreOptions) {
             actor: by,
             reason: "mcp_server_removed",
             server: serverId,
+          },
+        });
+      }
+
+      /*
+       * Every person's grant for this server, read out of the VAULT rather than through the join
+       * table.
+       *
+       * `credentials.provider` holds the server id for an `mcp_user_token`, so the vault can be asked
+       * directly — which matters because the join row is the thing about to be cascaded away, and a
+       * grant whose pointer has already gone (a person removed earlier) would otherwise be invisible
+       * here too. The same argument `retireConnectionsFor` makes from the other direction.
+       */
+      const held = await database
+        .select({ id: credentialRows.id, keyId: credentialRows.keyId })
+        .from(credentialRows)
+        .where(
+          and(
+            eq(credentialRows.kind, "mcp_user_token"),
+            eq(credentialRows.provider, serverId),
+            isNull(credentialRows.revokedAt),
+          ),
+        )
+        .orderBy(asc(credentialRows.keyId));
+
+      for (const grant of held) {
+        await credentials.revoke(grant.id);
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.account_disconnected",
+          targetType: "mcp_server",
+          targetId: serverId,
+          payload: {
+            actor: by,
+            server: serverId,
+            // Whose it was. `key_id` holds the user id for this kind, and it is the only place left
+            // to read it from once the join row has been cascaded away.
+            owner: grant.keyId,
+            /*
+             * Not "they disconnected" and not "they were removed": an administrator took the whole
+             * connector away, and the person did nothing. An auditor asking what happened to their
+             * access should see which of the three this was.
+             */
+            reason: "mcp_server_removed",
+            vendorRevoked: false,
           },
         });
       }
@@ -1718,6 +1802,34 @@ export function createPluginStore(options: PluginStoreOptions) {
           });
         }
 
+        /*
+         * Tools the vendor advertises that this deployment's write list does not name.
+         *
+         * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
+         * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
+         * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
+         * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
+         *
+         * `configuration.changed` rather than a type of its own, the same as the stranded grants
+         * above and for the same reason: nothing was denied and the refresh succeeded. What changed
+         * is that the deployment now knows a name it had not classified.
+         */
+        const unlisted = unlistedAdvertisedTools(entry, [...advertised]);
+        if (unlisted.length > 0) {
+          await recordAuditEvent(auditStore, {
+            eventType: "configuration.changed",
+            targetType: "mcp_server",
+            targetId: serverId,
+            payload: {
+              actor: actorId,
+              change: "unlisted_tools_advertised",
+              server: serverId,
+              tools: unlisted,
+              note: "Advertised by this server and not named in its reviewed write list, so each is offered to models as a read. This vendor has no read-only scope behind that list, so anything here that writes should be added to the entry.",
+            },
+          });
+        }
+
         return { tools: tools.length };
       } catch (error) {
         const message =
@@ -1730,7 +1842,17 @@ export function createPluginStore(options: PluginStoreOptions) {
         // unreachable is not a reason to revoke what Bots are using.
         await database
           .update(mcpServers)
-          .set({ lastError: message, updatedAt: new Date() })
+          .set({
+            /*
+             * Capped at the same 400 characters `callTool` caps its recorded failure at.
+             *
+             * Parts of this sentence come from a vendor, and it is drawn on the admin page — neither
+             * is a promise about length, and the two paths that show a vendor's words to an operator
+             * should not disagree about how much of them to keep.
+             */
+            lastError: message.slice(0, 400),
+            updatedAt: new Date(),
+          })
           .where(eq(mcpServers.id, serverId));
         return { tools: 0 };
       }
