@@ -6,9 +6,11 @@ import {
   type PolicyContext,
 } from "../computer/policy";
 import {
+  type CredentialExecutor,
   type CredentialSecretReader,
   type CredentialStore,
   decryptCredentialForUse,
+  decryptSecret,
   encryptSecret,
 } from "../credentials";
 import type { Database } from "../db/client";
@@ -721,63 +723,125 @@ export function createPluginStore(options: PluginStoreOptions) {
      * moment ago is then already spent — presenting it would be refused by the vendor for no reason
      * the person could act on. The client is replaced by a re-registration, and presenting the
      * evicted one would have every queued call discover that separately and register around it.
+     *
+     * TWO things serialise this, and they are not redundant. The map above queues calls made in THIS
+     * process; the row lock below serialises the whole deployment. Only the lock is a correctness
+     * property — a second replica has a map of its own and is not in ours — and the map is what
+     * keeps a burst of calls on one connection from piling N transactions onto that one row lock,
+     * each of them holding a pooled connection while it waits its turn.
      */
     return await serialized(`${row.id}:${actorId}`, async () => {
-      const [current] = await database
-        .select({
-          credentialId: mcpUserCredentials.credentialId,
-          scope: mcpUserCredentials.scope,
-        })
-        .from(mcpUserCredentials)
-        .where(
-          and(
-            eq(mcpUserCredentials.serverId, row.id),
-            eq(mcpUserCredentials.userId, actorId),
-          ),
-        )
-        .limit(1);
-
-      // Disconnected while this call was queued. The same sentence as above: nothing is broken, and
-      // connecting again is the thing to do.
-      if (!current) {
-        throw new PluginRefusedError(
-          `You have not connected your ${title} account. Connect it in Settings and ask again.`,
-          null,
-        );
-      }
-
-      const refreshToken = await secretFor(
-        current.credentialId,
-        `Your ${title} access was withdrawn. Connect it again in Settings.`,
-      );
-
-      const minted = await exchangeWithRetriedClient({
-        tokenUrl,
-        client: await currentClient(),
-        refreshToken,
-        registrationUrl,
-        serverId: row.id,
-      });
+      /*
+       * The client, read before the transaction opens rather than inside it.
+       *
+       * It is per SERVER and is not what the lock protects, and reading it here keeps the vault read
+       * — and the re-registration the retry may perform — off a second pooled connection while this
+       * call holds one open for the whole exchange. Still inside the critical section, so the
+       * ordering that matters is unchanged: a queued call reads the client after whatever ran before
+       * it replaced it.
+       */
+      const client = await currentClient();
 
       /*
-       * A vendor that sent nothing back, or sent back the token we presented, rotated nothing — and
-       * writing either would be inventing a rotation, at the cost of a needless re-encryption of
-       * every connection on every call.
+       * The vault row, locked for as long as the token it holds is being spent.
+       *
+       * A rotating vendor kills the refresh token it was shown, so two replicas that both read the
+       * stored token and both present it do not merely race: the second presentation looks to the
+       * vendor like a stolen token being replayed, and refresh-token-reuse detection answers it by
+       * revoking the whole token family. The connection is then bricked, and nobody did anything
+       * wrong. `SELECT … FOR UPDATE` is what makes the second replica wait for the first, exactly as
+       * a person reconnecting already waits (`credentials.rotate`).
+       *
+       * Yes, the lock is held across an HTTP call to the vendor — bounded by the exchange's own
+       * timeout. That is the point rather than an oversight: the lock IS the cross-replica
+       * serialisation, and a lock released before the exchange would serialise nothing.
+       *
+       * The read comes AFTER the lock, never before. A replica that woke from the lock and used a
+       * token it had read on the way in would present the one the first replica just spent, which is
+       * the very double-spend this exists to prevent.
        */
-      if (minted.refreshToken && minted.refreshToken !== refreshToken) {
-        /*
-         * The vendor rotated the grant: the token we were just shown is now the only valid one.
-         * Persisting it is not optional bookkeeping — failing to would strand the connection on
-         * the next call — so a failure here refuses THIS call rather than returning an access
-         * token whose refresh token is already spent.
-         */
-        await rotateConnectionToken({
-          credentialId: current.credentialId,
-          refreshToken: minted.refreshToken,
-        });
-      }
+      return await database.transaction(async (transaction) => {
+        const [current] = await transaction
+          .select({
+            credentialId: mcpUserCredentials.credentialId,
+            scope: mcpUserCredentials.scope,
+          })
+          .from(mcpUserCredentials)
+          .where(
+            and(
+              eq(mcpUserCredentials.serverId, row.id),
+              eq(mcpUserCredentials.userId, actorId),
+            ),
+          )
+          .limit(1);
 
-      return { token: minted.accessToken };
+        // Disconnected while this call was queued. The same sentence as above: nothing is broken,
+        // and connecting again is the thing to do.
+        if (!current) {
+          throw new PluginRefusedError(
+            `You have not connected your ${title} account. Connect it in Settings and ask again.`,
+            null,
+          );
+        }
+
+        const [locked] = await transaction
+          .select({
+            encryptedValue: credentialRows.encryptedValue,
+            revokedAt: credentialRows.revokedAt,
+          })
+          .from(credentialRows)
+          .where(eq(credentialRows.id, current.credentialId))
+          .for("update");
+        /*
+         * A row that is gone or revoked, said the way `secretFor` says it: withdrawn access is
+         * nobody's fault and connecting again is the step. Reached by a replica that waited here
+         * while somebody disconnected, as well as by one that was told after the fact.
+         */
+        if (!locked || locked.revokedAt) {
+          throw new PluginRefusedError(
+            `Your ${title} access was withdrawn. Connect it again in Settings.`,
+            null,
+          );
+        }
+        const refreshToken = await decryptSecret(
+          encryptionKey,
+          locked.encryptedValue,
+        );
+
+        const minted = await exchangeWithRetriedClient({
+          tokenUrl,
+          client,
+          refreshToken,
+          registrationUrl,
+          serverId: row.id,
+        });
+
+        /*
+         * A vendor that sent nothing back, or sent back the token we presented, rotated nothing —
+         * and writing either would be inventing a rotation, at the cost of a needless re-encryption
+         * of every connection on every call.
+         */
+        if (minted.refreshToken && minted.refreshToken !== refreshToken) {
+          /*
+           * The vendor rotated the grant: the token we were just shown is now the only valid one.
+           * Persisting it is not optional bookkeeping — failing to would strand the connection on
+           * the next call — so a failure here refuses THIS call rather than returning an access
+           * token whose refresh token is already spent.
+           *
+           * In this transaction, so it commits with the lock that made the exchange ours: written
+           * outside it, the next replica in line would wake to the token this one just spent.
+           */
+          await rotateConnectionToken(
+            {
+              credentialId: current.credentialId,
+              refreshToken: minted.refreshToken,
+            },
+            transaction,
+          );
+        }
+
+        return { token: minted.accessToken };
+      });
     });
   }
 
@@ -921,13 +985,25 @@ export function createPluginStore(options: PluginStoreOptions) {
    * The scope and the row are left alone. Nothing about what the vendor granted has changed — only
    * which token presents it.
    */
-  async function rotateConnectionToken(input: {
-    credentialId: string;
-    refreshToken: string;
-  }): Promise<void> {
+  async function rotateConnectionToken(
+    input: {
+      credentialId: string;
+      refreshToken: string;
+    },
+    /**
+     * The transaction the caller spent the token in, and this write belongs to it.
+     *
+     * The caller holds a `FOR UPDATE` lock on the very row being written. On its own pooled
+     * connection this write would be a second session waiting for a lock only the caller can
+     * release, and the caller cannot release it while awaiting this — so it would hang to the
+     * statement timeout rather than rotate.
+     */
+    executor?: CredentialExecutor,
+  ): Promise<void> {
     await credentials.updateSecret(
       input.credentialId,
       await encryptSecret(encryptionKey, input.refreshToken),
+      executor,
     );
   }
 

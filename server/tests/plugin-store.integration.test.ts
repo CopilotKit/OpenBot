@@ -12,6 +12,7 @@ import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
   createCredentialStore,
+  type CredentialStoreValue,
   decryptSecret,
   encryptSecret,
 } from "../src/credentials";
@@ -692,58 +693,71 @@ describe("refresh token rotation", () => {
     throw new Error("no exchange was installed for this test");
   };
 
+  /**
+   * The vault, wired once and shared by every store this describe builds.
+   *
+   * Shared deliberately: a second replica of this deployment reads and writes the same rows through
+   * the same code, and a per-store copy of the wiring would be a second place for the fixture to
+   * drift from what production does.
+   */
+  const vault = {
+    readSecret: async (id: string) => {
+      const [row] = await database
+        .select({
+          encryptedValue: credentials.encryptedValue,
+          revokedAt: credentials.revokedAt,
+        })
+        .from(credentials)
+        .where(eq(credentials.id, id));
+      return row ?? null;
+    },
+    create: async (value: CredentialStoreValue) => {
+      const [row] = await database
+        .insert(credentials)
+        .values(value)
+        .returning({ id: credentials.id, revokedAt: credentials.revokedAt });
+      if (!row) throw new Error("credential was not stored");
+      vaultRows.push(row.id);
+      return row;
+    },
+    /*
+     * The vault's own in-place update, not a stand-in for it.
+     *
+     * This is the write rotation now performs, and the suite asserts the ROW it leaves behind: the
+     * same id, re-encrypted, nothing added. A hand-rolled copy of the statement here would assert
+     * the copy rather than the vault — and would not join the caller's transaction, which is the
+     * whole of what keeps two replicas from spending one refresh token twice.
+     */
+    updateSecret: createCredentialStore(database).updateSecret,
+    /*
+     * The real swap and the real key lookup too: `credentials_active_key_idx` holds one live row
+     * per key, so a reconnect in this suite replaces its previous token through the same
+     * transaction production uses. A stand-in would dodge the index the test data must obey.
+     */
+    rotate: async (
+      value: CredentialStoreValue & { previousCredentialId: string },
+    ) => {
+      const stored = await createCredentialStore(database).rotate(value);
+      vaultRows.push(stored.id);
+      return stored;
+    },
+    findLiveByKey: createCredentialStore(database).findLiveByKey,
+    isLive: createCredentialStore(database).isLive,
+    revoke: async (id: string) => {
+      const [row] = await database
+        .update(credentials)
+        .set({ revokedAt: new Date() })
+        .where(eq(credentials.id, id))
+        .returning({ revokedAt: credentials.revokedAt });
+      if (!row?.revokedAt) throw new Error("credential was not revoked");
+      return row.revokedAt;
+    },
+  };
+
   const rotationStore = createPluginStore({
     database,
     auditStore: createAuditStore(database),
-    credentials: {
-      readSecret: async (id) => {
-        const [row] = await database
-          .select({
-            encryptedValue: credentials.encryptedValue,
-            revokedAt: credentials.revokedAt,
-          })
-          .from(credentials)
-          .where(eq(credentials.id, id));
-        return row ?? null;
-      },
-      create: async (value) => {
-        const [row] = await database
-          .insert(credentials)
-          .values(value)
-          .returning({ id: credentials.id, revokedAt: credentials.revokedAt });
-        if (!row) throw new Error("credential was not stored");
-        vaultRows.push(row.id);
-        return row;
-      },
-      /*
-       * The vault's own in-place update, not a stand-in for it.
-       *
-       * This is the write rotation now performs, and the suite asserts the ROW it leaves behind: the
-       * same id, re-encrypted, nothing added. A hand-rolled copy of the statement here would assert
-       * the copy rather than the vault.
-       */
-      updateSecret: createCredentialStore(database).updateSecret,
-      /*
-       * The real swap and the real key lookup too: `credentials_active_key_idx` holds one live row
-       * per key, so a reconnect in this suite replaces its previous token through the same
-       * transaction production uses. A stand-in would dodge the index the test data must obey.
-       */
-      rotate: async (value) => {
-        const stored = await createCredentialStore(database).rotate(value);
-        vaultRows.push(stored.id);
-        return stored;
-      },
-      findLiveByKey: createCredentialStore(database).findLiveByKey,
-      revoke: async (id) => {
-        const [row] = await database
-          .update(credentials)
-          .set({ revokedAt: new Date() })
-          .where(eq(credentials.id, id))
-          .returning({ revokedAt: credentials.revokedAt });
-        if (!row?.revokedAt) throw new Error("credential was not revoked");
-        return row.revokedAt;
-      },
-    },
+    credentials: vault,
     encryptionKey: ROTATION_KEY,
     policy: () => policy,
     // Stops before the network, and records what the call would have gone out with.
@@ -760,6 +774,29 @@ describe("refresh token rotation", () => {
       return minted;
     },
   });
+
+  /**
+   * A second replica of this deployment, over the same database.
+   *
+   * The point of building the store again rather than calling the same one twice is what is NOT
+   * shared: the in-process map that queues one connection's exchanges belongs to a store instance,
+   * so two instances are as unserialised as two containers behind a load balancer. Whatever keeps
+   * them from spending one refresh token twice has to live in the database.
+   */
+  function replica(exchange: (refreshToken: string) => Promise<AccessToken>) {
+    return createPluginStore({
+      database,
+      auditStore: createAuditStore(database),
+      credentials: vault,
+      encryptionKey: ROTATION_KEY,
+      policy: () => policy,
+      callVendor: async () => ({
+        text: "[vendor not reached in tests]",
+        isError: false,
+      }),
+      exchangeRefreshToken: async ({ refreshToken }) => exchange(refreshToken),
+    });
+  }
 
   /** The deployment's OAuth client, which is what `mcp_servers.credential_id` holds. */
   async function registerClient() {
@@ -1159,6 +1196,56 @@ describe("refresh token rotation", () => {
       { received: "rt-1", returned: "rt-2" },
       { received: "rt-2", returned: "rt-3" },
     ]);
+  });
+
+  /**
+   * Two replicas, one connection, and the vendor shown each refresh token exactly once.
+   *
+   * This is the case the in-process queue cannot reach. Each replica has its own map, so both read
+   * the stored token, both present it, and a vendor with refresh-token-reuse detection reads the
+   * second presentation as a stolen token and revokes the whole family — bricking a connection that
+   * nobody did anything wrong with. The row lock is what makes the second replica wait and then read
+   * what the first rotated to.
+   */
+  test("two replicas take turns at the row, and neither spends a token twice", async () => {
+    await connect();
+    /** Every refresh token the vendor was shown, by either replica, in order. */
+    const presented: string[] = [];
+    let issued = 1;
+    const exchange = async (refreshToken: string) => {
+      presented.push(refreshToken);
+      /*
+       * Long enough that an unlocked second replica has read the vault and presented what it found
+       * there before this exchange answers. With the lock held it changes nothing except how long
+       * the other replica waits for its turn.
+       */
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      issued += 1;
+      return { accessToken: `at-${issued}`, refreshToken: `rt-${issued}` };
+    };
+    const first = replica(exchange);
+    const second = replica(exchange);
+
+    const call = (store: ReturnType<typeof replica>) =>
+      store.callTool({
+        ref: rotationRef,
+        args: {},
+        botId: rotationBotId,
+        actorId: rotationUserId,
+      });
+    const results = await Promise.all([call(first), call(second)]);
+
+    expect(results.map((result) => result.isError)).toEqual([false, false]);
+    // The whole property. `["rt-1", "rt-1"]` is the double-spend: two replicas presenting one token.
+    expect(presented).toEqual(["rt-1", "rt-2"]);
+    // And the row the connection points at carries the last token issued, so a third call would
+    // present that rather than something either replica had already spent.
+    const live = (await connectionVaultRows()).filter(
+      (row) => row.revokedAt === null,
+    );
+    expect(
+      await decryptSecret(ROTATION_KEY, live[0]?.encryptedValue ?? ""),
+    ).toBe("rt-3");
   });
 });
 

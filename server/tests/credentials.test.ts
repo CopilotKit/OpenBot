@@ -656,6 +656,35 @@ describe("credential secret update", () => {
       ),
     ).rejects.toThrow("Credential was not found or is revoked");
   });
+
+  /**
+   * The write joins the caller's transaction when it is handed one.
+   *
+   * A rotating vendor is spent under a row lock the caller took, and the re-encryption has to be
+   * part of that transaction: on its own connection it would commit whether or not the caller's
+   * transaction did, and — with every pooled connection inside such a transaction — would wait for a
+   * connection that only the caller could release.
+   */
+  test("joins a caller's transaction, so a rollback takes the new secret with it", async () => {
+    const store = createCredentialStore(database);
+    const id = await liveCredential("rt-1");
+
+    await expect(
+      database.transaction(async (transaction) => {
+        await store.updateSecret(
+          id,
+          await encryptSecret(key, "rt-2"),
+          transaction,
+        );
+        throw new Error("the caller changed its mind");
+      }),
+    ).rejects.toThrow("the caller changed its mind");
+
+    const stored = await store.readSecret(id);
+    await expect(
+      decryptSecret(key, stored?.encryptedValue ?? ""),
+    ).resolves.toBe("rt-1");
+  });
 });
 
 describe("admin credential API", () => {

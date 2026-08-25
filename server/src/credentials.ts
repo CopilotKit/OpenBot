@@ -75,8 +75,16 @@ export type CredentialStore = {
    *
    * A revoked or missing row is refused rather than written through: a grant somebody withdrew must
    * not come back to life by being handed a fresh secret.
+   *
+   * Without an executor this writes on its own connection. With one it joins the caller's
+   * transaction, which is how the caller that has locked this row spends the token under that lock:
+   * the write has to commit with the lock rather than beside it.
    */
-  updateSecret: (id: string, encryptedValue: string) => Promise<void>;
+  updateSecret: (
+    id: string,
+    encryptedValue: string,
+    executor?: CredentialExecutor,
+  ) => Promise<void>;
   /**
    * Replace one credential with another, atomically.
    *
@@ -237,8 +245,8 @@ export function createCredentialStore(
       }
       return credential;
     },
-    updateSecret: async (id, encryptedValue) => {
-      const [credential] = await database
+    updateSecret: async (id, encryptedValue, executor = database) => {
+      const [credential] = await executor
         .update(credentials)
         .set({ encryptedValue, updatedAt: new Date() })
         .where(and(eq(credentials.id, id), isNull(credentials.revokedAt)))
