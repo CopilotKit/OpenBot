@@ -308,6 +308,11 @@ export const channelMemberships = pgTable(
      * one person's marker, and the membership row is already the per-member half of a channel.
      */
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+    /**
+     * When this member last had the channel open, or null for never. On the membership like the
+     * pin: reading is one person's act, and the unread marker it feeds is that person's alone.
+     */
+    lastReadAt: timestamp("last_read_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [primaryKey({ columns: [table.channelId, table.userId] })],

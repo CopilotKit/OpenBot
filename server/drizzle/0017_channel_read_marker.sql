@@ -1,0 +1,1 @@
+ALTER TABLE "channel_memberships" ADD COLUMN "last_read_at" timestamp with time zone;
