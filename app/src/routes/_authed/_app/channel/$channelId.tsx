@@ -1,10 +1,16 @@
 import { IconDeviceDesktop, IconSettings } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
+import { hasUnseenActivity } from "@/components/app-sidebar/app-sidebar";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ActivityLog } from "@/components/computer/activity-log";
@@ -12,7 +18,12 @@ import { ComputerView } from "@/components/computer/computer-view";
 import { useNeedsYou } from "@/components/computer/needs-you";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { Button } from "@/components/ui/button";
-import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
+import { markChannelReadMutationOptions } from "@/lib/channels/mutations";
+import {
+  type AgentChannel,
+  channelListQueryOptions,
+  channelQueryOptions,
+} from "@/lib/channels/queries";
 import { onComputerActivity } from "@/lib/copilot/computer-activity";
 
 const chatSearchSchema = z.object({
@@ -76,6 +87,29 @@ function RouteComponent() {
   const agentId = channel.data?.agentIds[0];
   /** Only polled while the screen is closed; the screen panel polls control itself. */
   const needsYou = useNeedsYou(agentId, !isWatching);
+
+  const queryClient = useQueryClient();
+  const markRead = useMutation(markChannelReadMutationOptions(queryClient));
+  /*
+   * This channel's roster summary, read out of the same infinite query the sidebar renders.
+   * The detail query deliberately knows nothing about activity; the roster is where the socket
+   * keeps lastMessageAt live, so it is the one honest source for "has something new been said".
+   */
+  const roster = useInfiniteQuery(channelListQueryOptions());
+  const summary = roster.data?.find((row) => row.id === channelId);
+
+  /*
+   * Opening the channel marks it read; the Bot replying while it is open marks it read again.
+   * One effect covers both: the dep changes on navigation and on every activity patch, and the
+   * unseen check keeps it from writing a row per render. No dependency on the mutation object —
+   * its identity changes per render and the effect must not re-fire for that.
+   */
+  const markReadMutate = markRead.mutate;
+  useEffect(() => {
+    if (summary && hasUnseenActivity(summary)) {
+      markReadMutate(channelId);
+    }
+  }, [channelId, summary, markReadMutate]);
 
   /*
    * Needs-you prompts auto-open the screen panel, because the prompt with the reason on it — the
