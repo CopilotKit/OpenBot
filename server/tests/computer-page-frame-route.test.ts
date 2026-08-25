@@ -35,6 +35,7 @@ function harness(options?: {
   screenshot?: () => Promise<{ base64: string; url?: string }>;
   navigate?: () => Promise<{ url: string; title: string }>;
   status?: (botId: string) => Promise<{ botId: string; state: string }>;
+  isolation?: "per-bot" | "shared";
 }) {
   const saved: Array<{
     computerId: string;
@@ -43,6 +44,7 @@ function harness(options?: {
     frame: string;
   }> = [];
   const gateway = {
+    provider: { isolation: options?.isolation ?? "per-bot" },
     navigate:
       options?.navigate ??
       (async () => ({
@@ -232,6 +234,36 @@ describe("the frame a page was opened on", () => {
     );
 
     expect(asked).toBe(false);
+    expect(saved).toEqual([]);
+  });
+
+  /*
+   * A computer built before screenshots said which page they were of.
+   *
+   * Refusing on a missing url did not fail safe, it failed silently and completely: a fleet part-way
+   * through a rollout kept no frames at all. With a computer each there is nobody to race with, so
+   * the picture can only be this turn's.
+   */
+  test("an old computer's unlabelled frame is kept when the Bot has its own", async () => {
+    const { routes, saved } = harness({
+      isolation: "per-bot",
+      screenshot: async () => ({ base64: "PNGBYTES" }),
+    });
+
+    await navigate(routes, "https://example.com/story");
+
+    expect(saved).toHaveLength(1);
+  });
+
+  /* And on one shared browser it cannot be told apart from another Bot's, so it is refused. */
+  test("an old computer's unlabelled frame is refused when the computer is shared", async () => {
+    const { routes, saved } = harness({
+      isolation: "shared",
+      screenshot: async () => ({ base64: "PNGBYTES" }),
+    });
+
+    await navigate(routes, "https://example.com/story");
+
     expect(saved).toEqual([]);
   });
 

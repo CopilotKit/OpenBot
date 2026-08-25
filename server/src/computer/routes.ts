@@ -106,11 +106,9 @@ export function createComputerRoutes(
    * Whether the same page is on both, ignoring the two ways one page spells itself.
    *
    * The trailing slash a browser adds and the fragment it keeps are not different pages. A URL that
-   * cannot be parsed is compared as written, and an absent one never matches: unknown is not equal,
-   * and treating it as equal is how the wrong picture gets kept.
+   * cannot be parsed is compared as written.
    */
-  function samePage(a: string | undefined, b: string | undefined): boolean {
-    if (!a || !b) return false;
+  function samePage(a: string, b: string): boolean {
     const tidy = (value: string) => {
       try {
         const parsed = new URL(value);
@@ -121,6 +119,37 @@ export function createComputerRoutes(
       }
     };
     return tidy(a) === tidy(b);
+  }
+
+  /**
+   * Whether a screenshot can be trusted to be of the page this turn opened.
+   *
+   * A SCREENSHOT THAT DOES NOT SAY WHAT IT IS OF IS THE ORDINARY CASE ON AN OLD COMPUTER. The url on
+   * a screenshot was added after the first computers shipped, so an `agent-computer` that has not
+   * been redeployed sends none. Refusing on a missing url therefore did not fail safe, it failed
+   * silently and completely: on a fleet part-way through a rollout the feature kept no frames at all
+   * and said nothing about why.
+   *
+   * So the question is asked where it means something. With a computer each there is no second Bot
+   * to race with, nothing can have moved the page between the navigation and the picture, and an
+   * unknown page is this turn's page. On one shared computer another Bot's navigation lands in
+   * exactly that gap, which is the case this guard exists for, and there an unknown page is refused.
+   */
+  function frameIsOfThisPage(
+    shotUrl: string | undefined,
+    pageUrl: string,
+  ): { ok: true } | { ok: false; why: string } {
+    if (shotUrl === undefined) {
+      if (gateway.provider.isolation === "per-bot") return { ok: true };
+      return {
+        ok: false,
+        why: "this computer is shared and the screenshot did not say which page it is of, so it cannot be told apart from another Bot's",
+      };
+    }
+    if (!samePage(shotUrl, pageUrl)) {
+      return { ok: false, why: `the screen showed ${shotUrl}` };
+    }
+    return { ok: true };
   }
 
   /**
@@ -138,7 +167,8 @@ export function createComputerRoutes(
    *
    * Never fatal. A stored picture is a convenience for reading a conversation back, and failing the
    * navigation the Bot was asked to do because the convenience failed would be the wrong trade every
-   * time. Every refusal is logged, so a deployment that never keeps a frame can find out why.
+   * time. EVERY REFUSAL SAYS SO, including the two that used to return quietly: a deployment that
+   * keeps no frames has to be able to find out why from its own logs rather than by reading this file.
    */
   async function keepFrameOf(
     botId: string,
@@ -146,7 +176,13 @@ export function createComputerRoutes(
     url: string,
     title: string,
   ) {
-    if (!pageFrames || !toolCallId) return;
+    if (!pageFrames) return;
+    if (!toolCallId) {
+      console.warn(
+        `[computer] not keeping a frame of ${url}: the caller did not say which turn it was for.`,
+      );
+      return;
+    }
     try {
       /*
        * Only if the computer is already up. `screenshot` goes through `locate`, which resumes a
@@ -154,11 +190,17 @@ export function createComputerRoutes(
        * sleep and hold a navigation open for the length of a pod schedule while it did.
        */
       const status = await gateway.status(botId);
-      if (status.state !== "ready") return;
-      const shot = await gateway.screenshot(botId);
-      if (!samePage(shot.url, url)) {
+      if (status.state !== "ready") {
         console.warn(
-          `[computer] not keeping a frame for ${toolCallId}: the screen showed ${shot.url ?? "an unknown page"} rather than ${url}.`,
+          `[computer] not keeping a frame for ${toolCallId}: the computer is ${status.state}, and photographing it would wake it.`,
+        );
+        return;
+      }
+      const shot = await gateway.screenshot(botId);
+      const verdict = frameIsOfThisPage(shot.url, url);
+      if (!verdict.ok) {
+        console.warn(
+          `[computer] not keeping a frame for ${toolCallId}: ${verdict.why} rather than ${url}.`,
         );
         return;
       }

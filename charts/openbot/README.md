@@ -146,6 +146,18 @@ Left empty, this deployment has the Bots its tenant package declares as built-in
 package entry pointing at an endpoint that resolves to nothing is dropped rather than registered as a
 coworker nobody can talk to.
 
+## Upgrading the server without the computers
+
+`computers.mode: shared` runs one browser for every Bot, and on that shape the transcript's kept
+screenshots need the computer image to be as new as the server's. A screenshot only says which page
+it is of on a computer built after that field was added, and on a shared browser a picture that
+cannot be told apart from another Bot's is refused rather than filed under the wrong turn. The
+conversation still names the page it opened; it just does not show it, and the server log says why
+each time.
+
+With `computers.mode: sandbox` or `external`, each Bot has a computer of its own, there is nobody to
+race with, and this does not arise.
+
 ## A computer for each Bot
 
 `computers.mode` decides how a Bot gets a browser:

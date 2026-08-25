@@ -24,6 +24,15 @@ reopened turn and one that has just finished are indistinguishable from inside t
 same computer is driven by other conversations in between, and a resumed computer starts blank. It
 filed pictures of pages the turn never opened, or none at all. It only reads now.
 
+**Redeploy the computers with the server.** A screenshot only says which page it is of on an
+`agent-computer` built after that field was added, and this is what decides whether a frame is kept.
+Where each Bot has a computer of its own there is nobody to race with, so an old computer's picture is
+accepted and the feature works through a rollout. On ONE SHARED COMPUTER it cannot be: another Bot's
+navigation lands between the navigation and the picture, and a frame that cannot be told apart from
+theirs is refused. So a shared-computer deployment that updates the server and not the computer keeps
+no frames until it does, and says so in the server log each time rather than leaving somebody to
+wonder.
+
 Two things followed from making a past turn a record. Its placeholder is decided by the turn being
 over rather than by whether a live frame happens to be in hand, because a tile that was live a moment
 ago keeps its last screenshot and used to fall through to "Waiting for the assistant's screen…" and
