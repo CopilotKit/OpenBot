@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import { workItems } from "../src/db/schema";
 import { createWorkQueue } from "../src/work/queue";
@@ -14,7 +14,11 @@ import { TEST_POOL } from "./support/database";
  * the database makes about two transactions racing, and a stub that returns rows in order would pass
  * every test below while the real thing handed one item to two replicas.
  */
-const database = createDatabase(TEST_POOL);
+const database = createDatabase(
+  process.env.DATABASE_URL ??
+    "postgres://openbot:openbot@localhost:5432/openbot",
+  TEST_POOL,
+);
 const queue = createWorkQueue(database);
 const kind = `test.${randomUUID().slice(0, 8)}`;
 
@@ -162,26 +166,161 @@ describe("claiming durable work", () => {
     ).toHaveLength(0);
   });
 
-  test("finishing removes the item, so the same key can be offered again", async () => {
+  /*
+   * The idempotence this table promises has to survive completion.
+   *
+   * Finishing used to delete the row, so the insert a re-offer was supposed to collide with had
+   * nothing left to collide with: a routine due at 07:00 that had already run was handed straight
+   * back to the next replica to wake late, and ran twice. Every recovery path was a duplicate-run
+   * path.
+   */
+  test("a finished item stays, so re-offering the same key runs nothing", async () => {
     await queue.offer({ kind, key: "bot-a" });
     await queue.claim({ kind, owner: "replica-1", leaseMs: 30_000 });
-    await queue.finish({ kind, key: "bot-a" });
+    expect(await queue.finish({ kind, key: "bot-a", owner: "replica-1" })).toBe(
+      true,
+    );
 
-    const rows = await database
-      .select({ key: workItems.key })
-      .from(workItems)
-      .where(and(eq(workItems.kind, kind), inArray(workItems.key, ["bot-a"])));
-    expect(rows).toHaveLength(0);
+    await queue.offer({ kind, key: "bot-a" });
+
+    expect(
+      await queue.claim({ kind, owner: "replica-2", leaseMs: 30_000 }),
+    ).toHaveLength(0);
+  });
+
+  test("finished rows are swept once they are past their retention", async () => {
+    await queue.offer({ kind, key: "bot-a" });
+    await queue.claim({ kind, owner: "replica-1", leaseMs: 30_000 });
+    await queue.finish({ kind, key: "bot-a", owner: "replica-1" });
+
+    expect(await queue.purge({ kind, olderThanMs: 60_000 })).toBe(0);
+    expect(await queue.purge({ kind, olderThanMs: 0 })).toBe(1);
   });
 
   test("releasing frees the item and holds it back for a while", async () => {
     await queue.offer({ kind, key: "bot-a" });
     await queue.claim({ kind, owner: "replica-1", leaseMs: 30_000 });
-    await queue.release({ kind, key: "bot-a", delayMs: 60_000 });
+    await queue.release({
+      kind,
+      key: "bot-a",
+      owner: "replica-1",
+      delayMs: 60_000,
+    });
 
     // Free, but not yet due, so nobody picks it straight back up and spins on it.
     expect(
       await queue.claim({ kind, owner: "replica-2", leaseMs: 30_000 }),
     ).toHaveLength(0);
+  });
+
+  /*
+   * Both of these are the same bug from two ends: the lease says who may act on an item, and only
+   * `renew` used to ask. A replica whose lease had quietly gone could delete or reschedule work
+   * another replica was in the middle of doing.
+   */
+  test("a replica that lost its lease cannot finish somebody else's work", async () => {
+    await queue.offer({ kind, key: "bot-a" });
+    await queue.claim({ kind, owner: "replica-1", leaseMs: 1 });
+    await Bun.sleep(30);
+    await queue.claim({ kind, owner: "replica-2", leaseMs: 30_000 });
+
+    expect(await queue.finish({ kind, key: "bot-a", owner: "replica-1" })).toBe(
+      false,
+    );
+
+    const [row] = await database
+      .select({ by: workItems.claimedBy, done: workItems.finishedAt })
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "bot-a")));
+    expect(row?.by).toBe("replica-2");
+    expect(row?.done).toBeNull();
+  });
+
+  test("a replica that lost its lease cannot reschedule somebody else's work", async () => {
+    await queue.offer({ kind, key: "bot-a" });
+    await queue.claim({ kind, owner: "replica-1", leaseMs: 1 });
+    await Bun.sleep(30);
+    await queue.claim({ kind, owner: "replica-2", leaseMs: 30_000 });
+
+    expect(
+      await queue.release({
+        kind,
+        key: "bot-a",
+        owner: "replica-1",
+        delayMs: 60_000,
+      }),
+    ).toBe(false);
+
+    const [row] = await database
+      .select({ by: workItems.claimedBy })
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "bot-a")));
+    expect(row?.by).toBe("replica-2");
+  });
+
+  /*
+   * Two clocks pretending to be one.
+   *
+   * The lease was computed as `Date.now() + leaseMs` on the replica and compared against `now()` in
+   * Postgres. A node behind the database wrote a live lease that arrived already expired, and the
+   * next replica to look took the item out from under it. Both ran it. Every moment is named in SQL
+   * now, so a wrong local clock cannot produce one.
+   */
+  test("a replica whose clock is behind still holds a real lease", async () => {
+    await queue.offer({ kind, key: "bot-a" });
+
+    const realNow = Date.now;
+    Date.now = () => realNow() - 90_000;
+    try {
+      await queue.claim({ kind, owner: "replica-1", leaseMs: 60_000 });
+    } finally {
+      Date.now = realNow;
+    }
+
+    expect(
+      await queue.claim({ kind, owner: "replica-2", leaseMs: 60_000 }),
+    ).toHaveLength(0);
+  });
+
+  /*
+   * A permanently failing item has to stop somewhere a person can see, rather than retrying until
+   * somebody notices, which on a queue with no dashboard is never.
+   */
+  test("an item stops being offered once it runs out of attempts", async () => {
+    await queue.offer({ kind, key: "bot-a" });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const [item] = await queue.claim({
+        kind,
+        owner: "replica-1",
+        leaseMs: 30_000,
+        maxAttempts: 3,
+      });
+      expect(item?.attempts).toBe(attempt + 1);
+      await queue.release({
+        kind,
+        key: "bot-a",
+        owner: "replica-1",
+        delayMs: 0,
+        reason: "the cluster said no",
+      });
+    }
+
+    expect(
+      await queue.claim({
+        kind,
+        owner: "replica-1",
+        leaseMs: 30_000,
+        maxAttempts: 3,
+      }),
+    ).toHaveLength(0);
+
+    // Still here, with its count and its reason, which is the terminal state rather than a silence.
+    const [row] = await database
+      .select({ attempts: workItems.attempts, why: workItems.lastError })
+      .from(workItems)
+      .where(and(eq(workItems.kind, kind), eq(workItems.key, "bot-a")));
+    expect(row?.attempts).toBe(3);
+    expect(row?.why).toBe("the cluster said no");
   });
 });

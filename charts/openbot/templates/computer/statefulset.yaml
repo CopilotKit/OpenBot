@@ -66,6 +66,15 @@ spec:
       labels:
 {{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
     spec:
+      {{- /*
+        No cluster credential in the one pod running a browser and a shell.
+        
+        A pod carries a service account token unless it says otherwise, so the container that opens
+        pages a person named and runs commands a model chose was carrying one. It could not do much
+        with it, which is not the point: this is the last pod in the deployment that should be able
+        to address the API server, and the default is the wrong way round.
+      */}}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
 {{ toYaml . | indent 8 }}

@@ -18,7 +18,12 @@ postgresql:
     # Yours to choose, and the same value on every upgrade. Rendering example only.
     password: "example-for-rendering-only"
 secrets:
-  keyEncryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  # Sessions are signed with this. Rendering example only; generate one with: openssl rand -base64 32
+  betterAuthSecret: "example-for-rendering-only-at-least-32-chars"
+  # NOT SET HERE, AND THAT IS THE POINT. This file used to carry the public example key from
+  # `.env.example`, which the server refuses to start with in production: the target rendered, and
+  # the deployment it described could never run. Supply a real one:
+  #   --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)"
   intelligenceApiKey: "example-for-rendering-only"
   googleClientSecret: "example-for-rendering-only"
   computerToken: "example-for-rendering-only"

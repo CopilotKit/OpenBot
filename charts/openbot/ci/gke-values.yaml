@@ -23,6 +23,11 @@ externalSecrets:
     - secretKey: key-encryption-key
       remoteRef:
         key: openbot-key-encryption-key
+    # Sessions are signed with this. The server refuses to start when sign-in is configured and it
+    # is missing, so every provider store has to carry it.
+    - secretKey: better-auth-secret
+      remoteRef:
+        key: openbot-better-auth-secret
     - secretKey: intelligence-api-key
       remoteRef:
         key: openbot-intelligence-api-key

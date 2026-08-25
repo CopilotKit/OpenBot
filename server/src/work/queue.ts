@@ -8,8 +8,14 @@
  * A claim carries a lease. While the work runs its owner renews; one that stops being renewed is
  * free again the moment anything looks, so recovery needs no process to notice a death, only the
  * next claim to read the clock.
+ *
+ * WHOSE CLOCK. The database's, everywhere, and this is the load-bearing part. Leases used to be
+ * computed as `Date.now() + leaseMs` on the replica and compared against `now()` in Postgres, which
+ * is two clocks pretending to be one: a node ninety seconds behind wrote a sixty-second lease that
+ * Postgres considered expired on arrival, and the next replica to look took the item straight out
+ * from under the first. Both then ran it. Every time this file names a moment it names it in SQL.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema";
 
@@ -28,6 +34,15 @@ export type WorkItem = {
   attempts: number;
 };
 
+/**
+ * How many times one item may be handed out before it stops being offered.
+ *
+ * Without a cap a permanently failing item is retried until somebody notices, which on a queue with
+ * no dashboard is never. At the cap it stops being claimed and stays in the table with its count and
+ * its last error, which is a terminal state a person can query rather than a silence.
+ */
+export const DEFAULT_MAX_ATTEMPTS = 5;
+
 export type WorkQueue = {
   /** Put work on the queue, or leave what is there. Idempotent on (kind, key). */
   offer: (item: {
@@ -42,6 +57,7 @@ export type WorkQueue = {
     owner: string;
     leaseMs: number;
     limit?: number;
+    maxAttempts?: number;
   }) => Promise<WorkItem[]>;
   /** Keep a claim alive while the work runs. False means it was already taken away. */
   renew: (input: {
@@ -50,17 +66,47 @@ export type WorkQueue = {
     owner: string;
     leaseMs: number;
   }) => Promise<boolean>;
-  /** Done. The row goes, so the same key can be offered again later. */
-  finish: (input: { kind: string; key: string }) => Promise<void>;
-  /** Not done, and worth another go after `delayMs`. */
+  /**
+   * Done. False means the lease had already gone to somebody else, so this was not ours to finish.
+   */
+  finish: (input: {
+    kind: string;
+    key: string;
+    owner: string;
+  }) => Promise<boolean>;
+  /** Not done, and worth another go after `delayMs`. False means it was no longer ours. */
   release: (input: {
     kind: string;
     key: string;
+    owner: string;
     delayMs: number;
-  }) => Promise<void>;
+    reason?: string;
+  }) => Promise<boolean>;
+  /** Drop finished rows older than the retention window. Returns how many went. */
+  purge: (input: { kind: string; olderThanMs: number }) => Promise<number>;
 };
 
+/** A moment `ms` from now, named in SQL so it is the database's clock and not the caller's. */
+function fromNow(ms: number) {
+  return sql`now() + make_interval(secs => ${ms / 1000})`;
+}
+
 export function createWorkQueue(database: Database): WorkQueue {
+  /**
+   * Still ours, and still wanting doing.
+   *
+   * `finish` and `release` used to match on the key alone, so a replica whose lease had quietly
+   * expired could delete or reschedule an item another replica was in the middle of executing. Only
+   * `renew` got this right; all three ask the same question now.
+   */
+  const ours = (kind: string, key: string, owner: string) =>
+    and(
+      eq(workItems.kind, kind),
+      eq(workItems.key, key),
+      eq(workItems.claimedBy, owner),
+      isNull(workItems.finishedAt),
+    );
+
   return {
     async offer({ kind, key, payload = {}, runAt }) {
       await database
@@ -71,12 +117,20 @@ export function createWorkQueue(database: Database): WorkQueue {
          *
          * The key is the identity of the work, so a second offer of the same thing is the same
          * thing, not a new one. For a routine the key carries the minute it was due, which is what
-         * makes "three replicas woke at 07:00" produce one run instead of three.
+         * makes "three replicas woke at 07:00" produce one run instead of three. A finished row
+         * still counts as a conflict, which is what makes that true after the run as well as during
+         * it.
          */
         .onConflictDoNothing();
     },
 
-    async claim({ kind, owner, leaseMs, limit = 1 }) {
+    async claim({
+      kind,
+      owner,
+      leaseMs,
+      limit = 1,
+      maxAttempts = DEFAULT_MAX_ATTEMPTS,
+    }) {
       return database.transaction(async (transaction) => {
         /*
          * `skip locked` is what makes this concurrent rather than merely correct. Without it a
@@ -87,6 +141,8 @@ export function createWorkQueue(database: Database): WorkQueue {
           select "kind", "key"
           from "work_items"
           where "kind" = ${kind}
+            and "finished_at" is null
+            and "attempts" < ${maxAttempts}
             and "run_at" <= now()
             and ("lease_until" is null or "lease_until" <= now())
           order by "run_at" asc
@@ -108,9 +164,9 @@ export function createWorkQueue(database: Database): WorkQueue {
             .update(workItems)
             .set({
               claimedBy: owner,
-              leaseUntil: new Date(Date.now() + leaseMs),
+              leaseUntil: fromNow(leaseMs),
               attempts: sql`${workItems.attempts} + 1`,
-              updatedAt: new Date(),
+              updatedAt: sql`now()`,
             })
             .where(
               and(eq(workItems.kind, row.kind), eq(workItems.key, row.key)),
@@ -137,44 +193,65 @@ export function createWorkQueue(database: Database): WorkQueue {
     async renew({ kind, key, owner, leaseMs }) {
       const [renewed] = await database
         .update(workItems)
-        .set({
-          leaseUntil: new Date(Date.now() + leaseMs),
-          updatedAt: new Date(),
-        })
+        .set({ leaseUntil: fromNow(leaseMs), updatedAt: sql`now()` })
         /*
          * Only while still ours. A lease that expired and was taken by somebody else must not be
          * renewed back out from under them, which would put two replicas on one item believing they
          * each held it.
          */
-        .where(
-          and(
-            eq(workItems.kind, kind),
-            eq(workItems.key, key),
-            eq(workItems.claimedBy, owner),
-          ),
-        )
+        .where(ours(kind, key, owner))
         .returning({ key: workItems.key });
       return Boolean(renewed);
     },
 
-    async finish({ kind, key }) {
-      await database
-        .delete(workItems)
-        .where(and(eq(workItems.kind, kind), eq(workItems.key, key)));
+    async finish({ kind, key, owner }) {
+      const [finished] = await database
+        .update(workItems)
+        /*
+         * Marked, not deleted. The row is what a later offer of the same key collides with, and
+         * deleting it handed that key back to anybody who re-offered it: the recovery path was also
+         * a duplicate-run path. Swept later by `purge`.
+         */
+        .set({
+          finishedAt: sql`now()`,
+          claimedBy: null,
+          leaseUntil: null,
+          updatedAt: sql`now()`,
+        })
+        .where(ours(kind, key, owner))
+        .returning({ key: workItems.key });
+      return Boolean(finished);
     },
 
-    async release({ kind, key, delayMs }) {
-      // Freed and pushed out, rather than deleted: the work still wants doing, just not immediately
-      // and not by whoever just gave up on it.
-      await database
+    async release({ kind, key, owner, delayMs, reason }) {
+      // Freed and pushed out, rather than finished: the work still wants doing, just not immediately
+      // and not by whoever just gave up on it. The reason stays on the row so an item that runs out
+      // of attempts says why rather than simply stopping.
+      const [released] = await database
         .update(workItems)
         .set({
           claimedBy: null,
           leaseUntil: null,
-          runAt: new Date(Date.now() + delayMs),
-          updatedAt: new Date(),
+          runAt: fromNow(delayMs),
+          updatedAt: sql`now()`,
+          ...(reason === undefined ? {} : { lastError: reason }),
         })
-        .where(and(eq(workItems.kind, kind), eq(workItems.key, key)));
+        .where(ours(kind, key, owner))
+        .returning({ key: workItems.key });
+      return Boolean(released);
+    },
+
+    async purge({ kind, olderThanMs }) {
+      const gone = await database
+        .delete(workItems)
+        .where(
+          and(
+            eq(workItems.kind, kind),
+            lt(workItems.finishedAt, fromNow(-olderThanMs)),
+          ),
+        )
+        .returning({ key: workItems.key });
+      return gone.length;
     },
   };
 }

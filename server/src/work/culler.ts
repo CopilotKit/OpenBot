@@ -133,6 +133,31 @@ export async function suspendClaimedComputers(
 
   for (const item of claimed) {
     const botId = String(item.payload.botId ?? item.key);
+    /*
+     * Renewed before each one, because the batch is twenty and the lease is one.
+     *
+     * Twenty suspensions is twenty calls to an API server, and nothing renewed while they ran: on a
+     * slow cluster the lease expired part-way down the list and another replica claimed the tail
+     * this one was still working through. A lease nobody renews is a timer, and a timer is what this
+     * queue exists not to be.
+     *
+     * False means it is already somebody else's. Stopping is then the correct answer, not an error:
+     * the item is being handled, just not here.
+     */
+    if (
+      !(await options.queue.renew({
+        kind: CULL_KIND,
+        key: item.key,
+        owner: options.owner,
+        leaseMs,
+      }))
+    ) {
+      report.skipped.push({
+        botId,
+        reason: "the lease went to another replica",
+      });
+      continue;
+    }
     try {
       const now = options.now?.() ?? new Date();
       const used = await lastActedAt(options.database, [botId]);
@@ -140,7 +165,11 @@ export async function suspendClaimedComputers(
       if (since && now.getTime() - since.getTime() < options.idleAfterMs) {
         // Somebody came back. Drop the item rather than releasing it, because the next sweep will
         // offer it again if it goes quiet, and a released one would just be reclaimed and re-checked.
-        await options.queue.finish({ kind: CULL_KIND, key: item.key });
+        await options.queue.finish({
+          kind: CULL_KIND,
+          key: item.key,
+          owner: options.owner,
+        });
         report.skipped.push({
           botId,
           reason: "used again before it was suspended",
@@ -149,7 +178,11 @@ export async function suspendClaimedComputers(
       }
 
       await options.provider.stop(botId);
-      await options.queue.finish({ kind: CULL_KIND, key: item.key });
+      await options.queue.finish({
+        kind: CULL_KIND,
+        key: item.key,
+        owner: options.owner,
+      });
       report.suspended.push(botId);
     } catch (error) {
       /*
@@ -157,16 +190,16 @@ export async function suspendClaimedComputers(
        * refused this once will probably refuse it again in the next second, and a computer left
        * running costs money rather than losing anything.
        */
+      const reason =
+        error instanceof Error ? error.message : "could not be suspended";
       await options.queue.release({
         kind: CULL_KIND,
         key: item.key,
+        owner: options.owner,
         delayMs: 5 * 60_000,
+        reason,
       });
-      report.skipped.push({
-        botId,
-        reason:
-          error instanceof Error ? error.message : "could not be suspended",
-      });
+      report.skipped.push({ botId, reason });
     }
   }
 

@@ -1,4 +1,11 @@
 {
   "extends": "../tsconfig.base.json",
-  "include": ["src"]
+  // `scripts` too: the migration runner and the culler entrypoint ship in the image, so they are
+  // product code that happens to live outside `src`.
+  //
+  // `tests` is NOT here yet, and that is a known gap rather than a decision: the suite has never been
+  // type-checked and turning it on surfaces a few hundred years of accumulated `any`. It is what let
+  // a test pass an options object where a connection string belongs and hear nothing back. Its own
+  // change, because it is a sweep and not a fix.
+  "include": ["src", "scripts"]
 }

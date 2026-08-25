@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import type {
   ComputerLocation,
   ComputerProvider,
@@ -23,7 +23,11 @@ import { TEST_POOL } from "./support/database";
  * computer nothing is known about. Suspending either takes a person's session away mid-task, and
  * both are easy to get wrong in a way no error ever reports.
  */
-const database = createDatabase(TEST_POOL);
+const database = createDatabase(
+  process.env.DATABASE_URL ??
+    "postgres://openbot:openbot@localhost:5432/openbot",
+  TEST_POOL,
+);
 const queue = createWorkQueue(database);
 const suite = randomUUID().slice(0, 8);
 const botOf = (name: string) => `cull-${suite}-${name}`;
@@ -53,13 +57,23 @@ const ran = (botId: string, when: Date) => ({
   createdAt: when,
 });
 
+/*
+ * This suite's own rows and nobody else's.
+ *
+ * The kind is fixed by the culler, so scoping on it alone deleted every queued suspension in the
+ * database. Against a shared development database that is somebody's real work, thrown away by a
+ * test run. The keys are this suite's Bot ids, so that is what the sweep matches.
+ */
+const mine = () =>
+  and(eq(workItems.kind, CULL_KIND), like(workItems.key, `cull-${suite}-%`));
+
 afterAll(async () => {
-  await database.delete(workItems).where(eq(workItems.kind, CULL_KIND));
+  await database.delete(workItems).where(mine());
   await database.$client.end({ timeout: 5 });
 });
 
 beforeEach(async () => {
-  await database.delete(workItems).where(eq(workItems.kind, CULL_KIND));
+  await database.delete(workItems).where(mine());
 });
 
 const idleAfterMs = 30 * 60_000;

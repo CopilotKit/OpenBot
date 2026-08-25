@@ -62,7 +62,16 @@ export type SandboxProviderOptions = {
   /** How long a computer may go untouched before the culler suspends it. */
   idleAfterMs: number;
   apiServer?: string;
-  token?: string;
+  /**
+   * How this pod proves who it is, or a way to ask for the current one.
+   *
+   * A FUNCTION IS THE HONEST SHAPE, because a projected service account token is not a constant. The
+   * kubelet rewrites the file well before the token expires, and the expiry is the cluster's to set:
+   * an hour on a hardened cluster, a day by default. Read once and held for the life of the process,
+   * it works right up until the first rotation and then every sandbox call returns 401, which reads
+   * like the cluster broke rather than like a credential going stale.
+   */
+  token?: string | (() => Promise<string>);
   ca?: string;
   fetchImpl?: typeof fetch;
   /** How long `locate` waits for a suspended computer to come back before giving up. */
@@ -103,9 +112,12 @@ export async function readSandboxTemplate(
   return parsed;
 }
 
+/** How long a read token is reused before the file is consulted again. */
+const TOKEN_MEMO_MS = 30_000;
+
 export async function inClusterConfig(): Promise<{
   apiServer: string;
-  token: string;
+  token: () => Promise<string>;
   ca: string;
 }> {
   const host = process.env.KUBERNETES_SERVICE_HOST;
@@ -115,11 +127,27 @@ export async function inClusterConfig(): Promise<{
       "COMPUTER_PROVIDER=sandbox needs to run inside a cluster: KUBERNETES_SERVICE_HOST is not set, so there is no API server to ask for a Bot's computer.",
     );
   }
-  const [token, ca] = await Promise.all([
-    readFile(`${SERVICE_ACCOUNT}/token`, "utf8"),
-    readFile(`${SERVICE_ACCOUNT}/ca.crt`, "utf8"),
-  ]);
-  return { apiServer: `https://${host}:${port}`, token: token.trim(), ca };
+  /*
+   * The CA is read once and the token is not.
+   *
+   * A cluster CA changes when the cluster is rebuilt, which is not a thing that happens under a
+   * running pod. The token changes on a schedule the cluster chooses, so it is re-read, with a short
+   * memo so an ordinary burst of sandbox calls does not become a burst of disk reads. Half a minute
+   * is far inside any rotation window and far outside any burst.
+   */
+  const ca = await readFile(`${SERVICE_ACCOUNT}/ca.crt`, "utf8");
+  let cached: { value: string; readAt: number } | undefined;
+  const token = async () => {
+    if (cached && Date.now() - cached.readAt < TOKEN_MEMO_MS)
+      return cached.value;
+    const value = (await readFile(`${SERVICE_ACCOUNT}/token`, "utf8")).trim();
+    cached = { value, readAt: Date.now() };
+    return value;
+  };
+  // Read once here so a missing or unreadable token is an error at start-up rather than on the
+  // first Bot to ask for a computer.
+  await token();
+  return { apiServer: `https://${host}:${port}`, token, ca };
 }
 
 /**
@@ -172,6 +200,10 @@ export function createSandboxComputerProvider(
     init: RequestInit & { contentType?: string } = {},
   ): Promise<unknown> {
     const { contentType, ...rest } = init;
+    const token =
+      typeof options.token === "function"
+        ? await options.token()
+        : options.token;
     const response = await doFetch(`${base()}${path}`, {
       ...rest,
       /*
@@ -184,7 +216,7 @@ export function createSandboxComputerProvider(
        */
       ...(options.ca ? { tls: { ca: options.ca } } : {}),
       headers: {
-        ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...(contentType ? { "content-type": contentType } : {}),
         accept: "application/json",
         ...(rest.headers ?? {}),

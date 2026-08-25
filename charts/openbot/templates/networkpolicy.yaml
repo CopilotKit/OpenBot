@@ -73,4 +73,68 @@ spec:
     {{- with .Values.networkPolicy.extraEgress }}
 {{ toYaml . | indent 4 }}
     {{- end }}
+---
+{{- $computer := "computer" -}}
+{{/*
+What a Bot's computer may reach.
+
+THE ONE POD THAT RUNS A BROWSER AND A SHELL. It opens pages a person named and runs commands a model
+chose, which makes it the pod most likely to be doing something nobody intended, and it was the only
+one with no policy at all: on a cluster that enforces them it could open a socket to anything in the
+namespace, the deployment's own database included. Compose has kept the database off the Bot's
+network since the beginning, and this is that same boundary, said in the other deployment's words.
+
+Egress is the open internet minus the cluster's own private space, because browsing is the job. The
+private ranges are cut out by exception rather than by listing what is allowed: a Bot has no business
+addressing another pod, a node, or a cloud metadata endpoint, and naming the exceptions is the only
+way to say that without also saying which websites exist.
+
+Ingress is the API server and nothing else. The gateway is the only thing that may drive it.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $computer) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $computer) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $computer) | indent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" "server") | indent 14 }}
+      ports:
+        - port: 4100
+          protocol: TCP
+  egress:
+    # DNS, or every address a Bot is asked to open fails as if the site were down.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # The cluster and everything else on the private network, including the database.
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              # Link-local, which is where every cloud keeps the endpoint that hands out credentials.
+              - 169.254.0.0/16
+      ports:
+        - port: 80
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+    {{- with .Values.networkPolicy.computerExtraEgress }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
 {{- end }}

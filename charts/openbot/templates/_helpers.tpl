@@ -295,6 +295,11 @@ The pod and volumes every Bot's computer is cut from, as JSON.
 
 One definition, used by the ConfigMap the server reads and by the SandboxTemplate a warm pool cuts
 from, so a pre-warmed computer and one created on demand cannot drift into being different things.
+
+NO CLUSTER CREDENTIAL. Every pod gets a service account token mounted unless it says otherwise, so
+the container that opens pages a person named and runs commands a model chose was carrying one. It
+could not do much with it, which is not the point: this is the last pod in the deployment that should
+be able to address the API server at all, and the default is the wrong way round.
 */}}
 {{- define "openbot.sandboxPodTemplate" -}}
 {{- $spec := dict
@@ -305,6 +310,7 @@ from, so a pre-warmed computer and one created on demand cannot drift into being
       "app.kubernetes.io/component" "computer"))
     "spec" (dict
       "terminationGracePeriodSeconds" 30
+      "automountServiceAccountToken" false
       "containers" (list (dict
         "name" "computer"
         "image" (include "openbot.image" .)

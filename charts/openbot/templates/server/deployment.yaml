@@ -21,6 +21,17 @@ spec:
     metadata:
       labels:
 {{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
+        {{- if .Values.postgresql.enabled }}
+        {{- /*
+          The bundled database's own policy admits pods carrying this label and nothing else.
+          
+          Its shipped default is `allowExternal: true`, which renders an ingress rule with no `from`
+          at all: any pod in any namespace may open 5432, the Bot's browser container included. That
+          is pinned off in this chart's values, which makes this label the thing that lets the API in,
+          and the reason a Bot's computer is now refused.
+        */}}
+        {{ .Release.Name }}-postgresql-client: "true"
+        {{- end }}
         {{- with .Values.server.podLabels }}
 {{ toYaml . | indent 8 }}
         {{- end }}

@@ -147,6 +147,18 @@ This template renders nothing.
 {{- if ne (len (b64dec .Values.secrets.keyEncryptionKey)) 32 }}
 {{- fail "secrets.keyEncryptionKey must be a base64-encoded 32-byte value. Generate one with: openssl rand -base64 32" }}
 {{- end }}
+{{- /*
+  The right length and no secret in it.
+
+  The example key in `.env.example` is thirty-two zero bytes, which passes every shape check and is
+  public. The server refuses to start on it in production and this chart shipped a values file
+  carrying it, so the target rendered and the deployment it described could never run. Checked as a
+  property rather than by copying the value, which would mean writing a key-shaped literal into a
+  template to forbid a key-shaped literal.
+*/}}
+{{- if not (regexMatch "[^\\x00]" (b64dec .Values.secrets.keyEncryptionKey)) }}
+{{- fail "secrets.keyEncryptionKey is the public example key from .env.example. The server refuses to start with it. Generate one with: openssl rand -base64 32" }}
+{{- end }}
 {{- end }}
 
 {{- if and .Values.externalSecrets.enabled .Values.secrets.existingSecret }}
@@ -181,5 +193,43 @@ This template renders nothing.
 {{- if .Values.config.managedAgent.url }}
 {{- if and (not .Values.secrets.managedAgentToken) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
 {{- fail "config.managedAgent.url is set without secrets.managedAgentToken. Every call to your Bot carries that token, and an endpoint that accepts unauthenticated calls is an open door to whatever the Bot can reach." }}
+{{- end }}
+{{- end }}
+
+{{- /*
+  Sign-in configured with nothing to sign sessions with.
+
+  The server throws "Sign-in requires BETTER_AUTH_SECRET" and the pod crash-loops, which is a slow
+  and confusing way to be told about a value that was missing before anything was created. Every
+  shipped `ci/` values file was in exactly this state, which is what happens when nothing renders the
+  chart. Checked only when this chart holds the secret: from an existing Secret or an external store
+  it is not readable at template time, and refusing on a guess would refuse installs that are fine.
+*/}}
+{{- if or .Values.config.auth.google.clientId .Values.config.auth.microsoft.clientId .Values.config.auth.okta.clientId }}
+{{- if and (not .Values.secrets.betterAuthSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- fail "An identity provider is configured but secrets.betterAuthSecret is not. Sessions are signed with it and the server refuses to start without it. Generate one with: openssl rand -base64 32" }}
+{{- end }}
+{{- if and .Values.secrets.betterAuthSecret (lt (len .Values.secrets.betterAuthSecret) 32) }}
+{{- fail "secrets.betterAuthSecret must be at least 32 characters. Generate one with: openssl rand -base64 32" }}
+{{- end }}
+{{- if not .Values.config.publicUrl }}
+{{- fail "An identity provider is configured but config.publicUrl is not. Sign-in redirects come back to that address, so the server refuses to start without it." }}
+{{- end }}
+{{- end }}
+
+{{- /*
+  The same requirement, for a deployment whose secrets come from a store.
+
+  The value itself is not readable at template time, but the LIST of keys is, and a store that never
+  mentions `better-auth-secret` cannot be holding one. Every shipped cloud `ci/` file was in this
+  state, so the refusal above passed and the pod still crash-looped.
+*/}}
+{{- if .Values.externalSecrets.enabled }}
+{{- if or .Values.config.auth.google.clientId .Values.config.auth.microsoft.clientId .Values.config.auth.okta.clientId }}
+{{- $named := list }}
+{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
+{{- if not (has "better-auth-secret" $named) }}
+{{- fail "An identity provider is configured but externalSecrets.data does not name better-auth-secret. Sessions are signed with it and the server refuses to start without it." }}
+{{- end }}
 {{- end }}
 {{- end }}

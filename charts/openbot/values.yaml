@@ -284,6 +284,19 @@ postgresql:
   image:
     repository: bitnamilegacy/postgresql
   primary:
+    # PINNED, BECAUSE THE SHIPPED DEFAULT ADMITS EVERYTHING.
+    #
+    # The subchart renders its NetworkPolicy whether or not this chart's own is enabled, and with
+    # `allowExternal: true` its ingress rule carries no `from` at all: any pod in any namespace may
+    # open 5432. That includes a Bot's computer, the one pod running a browser on pages a person
+    # named and a shell on commands a model chose. Compose has kept the database off the Bot's
+    # network since the beginning; this is the same boundary in the other deployment's words.
+    #
+    # With this off, the database admits pods labelled `<release>-postgresql-client`, which the API
+    # server carries and nothing else does.
+    networkPolicy:
+      allowExternal: false
+      allowExternalEgress: false
     persistence:
       enabled: true
       # EMPTY MEANS THE CLUSTER'S DEFAULT CLASS, and that is deliberate. Naming `gp3` or
@@ -350,6 +363,9 @@ networkPolicy:
   # Where the API may reach out to. A deployment with a managed database adds its CIDR here.
   extraEgress: []
   extraIngress: []
+  # Where a Bot's computer may reach beyond the public internet. A deployment whose Bots must reach
+  # an internal site adds it here, one address at a time, rather than reopening the private ranges.
+  computerExtraEgress: []
 
 podSecurityContext:
   runAsNonRoot: false

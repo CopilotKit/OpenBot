@@ -123,3 +123,37 @@ describe("naming a Bot's computer in a cluster", () => {
     expect(sandboxNameFor("knowledge")).toBe(sandboxNameFor("knowledge"));
   });
 });
+
+/**
+ * A projected service account token is not a constant.
+ *
+ * The kubelet rewrites the file well before the token expires, and how long that is belongs to the
+ * cluster: an hour where somebody hardened it, a day by default. Read once and held for the life of
+ * the process, sandbox calls work right up to the first rotation and then every one returns 401,
+ * which reads like the cluster broke rather than like a credential going stale.
+ */
+describe("the credential a sandbox call carries", () => {
+  test("is asked for again rather than captured once", async () => {
+    const sent: string[] = [];
+    let current = "first";
+    const provider = createSandboxComputerProvider({
+      namespace: "openbot",
+      idleAfterMs: 60_000,
+      template: { podTemplate: {} },
+      apiServer: "https://cluster.test",
+      token: async () => current,
+      fetchImpl: (async (_url: string, init: RequestInit) => {
+        sent.push(
+          String((init.headers as Record<string, string>).authorization),
+        );
+        return new Response("null", { status: 404 });
+      }) as unknown as typeof fetch,
+    });
+
+    await provider.status("bot-1");
+    current = "rotated";
+    await provider.status("bot-1");
+
+    expect(sent).toEqual(["Bearer first", "Bearer rotated"]);
+  });
+});

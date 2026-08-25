@@ -1,4 +1,6 @@
-# EKS. RDS for the database, IRSA for identity, Secrets Manager through external-secrets.
+# EKS, with a computer each rather than one shared browser.
+#
+# Needs the agent-sandbox controller installed; CI renders it with --api-versions instead.
 #
 # CHECK THE CLUSTER HAS A DEFAULT STORAGECLASS BEFORE INSTALLING, because a fresh EKS cluster very
 # often does not. `eksctl` creates `gp2`, which is not marked default and uses the in-tree
@@ -77,7 +79,10 @@ server:
           app.kubernetes.io/component: server
 
 computers:
-  mode: shared
+  # A computer each, which is the mode the rest of this chart exists for and the one nothing rendered
+  # until now. `shared` and `sandbox` produce different Deployments, different RBAC and a different
+  # pod template, so a target that only ever renders one of them checks half the chart.
+  mode: sandbox
   persistence:
     # Named here rather than in the chart, which is the whole point of a per-target values file: the
     # chart must not name `gp3`, and a deployment on EKS should.

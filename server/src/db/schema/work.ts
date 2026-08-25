@@ -66,6 +66,25 @@ export const workItems = pgTable(
      * tell those apart, so it is a number here rather than a state folded into failure.
      */
     attempts: integer("attempts").notNull().default(0),
+    /**
+     * When it was done, or null while it still wants doing.
+     *
+     * KEPT RATHER THAN DELETED, because the idempotence this table promises has to survive
+     * completion. Finishing used to remove the row, so a routine due at 07:00 that ran and finished
+     * was re-offered cleanly by the next replica to wake late and ran a second time: the insert that
+     * was supposed to collide had nothing left to collide with. A finished row is the collision.
+     *
+     * Swept on a retention window rather than kept forever, because a queue is not an archive.
+     */
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /**
+     * Why the last attempt gave up.
+     *
+     * An item that has run out of attempts stops being handed out and stays here with its count and
+     * its reason. That is the terminal state: visible in the table somebody can query rather than a
+     * row that quietly retries until the end of time.
+     */
+    lastError: text("last_error"),
     /** Anything the work needs that is not in the key. */
     payload: jsonb("payload").notNull().default({}),
     createdAt: createdAt(),
@@ -73,7 +92,7 @@ export const workItems = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.kind, table.key] }),
-    // The claim's own query: due, unclaimed or expired, oldest first.
+    // The claim's own query: due, unclaimed or expired, not yet finished, oldest first.
     index("work_items_claimable_idx").on(table.kind, table.runAt),
   ],
 );

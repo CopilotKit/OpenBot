@@ -15,6 +15,7 @@ import { createComputerProvider } from "../src/computer/provider";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import {
+  CULL_KIND,
   offerIdleComputers,
   suspendClaimedComputers,
 } from "../src/work/culler";
@@ -49,12 +50,24 @@ try {
   };
   const { offered } = await offerIdleComputers(options);
   const report = await suspendClaimedComputers(options);
+  /*
+   * Sweep what has been done for a day.
+   *
+   * A finished row is what stops the same key being run twice, so it has to outlive the run by long
+   * enough for any late replica to collide with it. It does not have to outlive that by a week: a
+   * queue is not an archive, and the audit trail is where "what happened" lives.
+   */
+  const purged = await queue.purge({
+    kind: CULL_KIND,
+    olderThanMs: 24 * 60 * 60 * 1000,
+  });
   console.info(
     JSON.stringify({
       type: "computer-cull",
       offered,
       suspended: report.suspended,
       skipped: report.skipped,
+      purged,
     }),
   );
 } finally {

@@ -379,7 +379,7 @@ export function ComputerView({
                   : "text-muted-foreground"
               }`}
             >
-              {settled && !shot ? (
+              {settled ? (
                 <>
                   {/*
                     What this turn had open, named rather than drawn.
@@ -387,6 +387,12 @@ export function ComputerView({
                     The picture is gone: nothing stored it, and fetching one now would show a
                     different page. Naming the page is the honest version of the same sentence, and
                     it stays true however many times the Bot has browsed since.
+                    
+                    GATED ON THE TURN BEING OVER, not on whether a live frame happens to be in hand.
+                    A tile that was live a moment ago keeps its last screenshot in state after it
+                    settles, and this used to check for that: with one held and no frame stored, it
+                    fell through to "Waiting for the assistant's screen…" and waited there for ever,
+                    because the poll that would have ended the wait stops the moment a turn settles.
                   */}
                   <span className="font-medium">{page?.title || "A page"}</span>
                   {knownPage?.url ? (
@@ -471,7 +477,7 @@ export function ComputerView({
           </form>
         ) : null}
 
-        {driving ? (
+        {driving && !settled ? (
           <div className="flex items-center justify-between gap-3 border-t bg-muted/40 px-3 py-2 text-sm">
             <span>You have control of this browser.</span>
             <span className="flex shrink-0 gap-2">
@@ -507,7 +513,13 @@ export function ComputerView({
          * The amber row stays the Bot ASKING, which is a different thing and still worth its own
          * colour and its reason. Without a request this is a quiet control that says who is driving.
          */}
-        {!driving ? (
+        {/*
+         * NOT ON A TURN THAT IS OVER. Every past turn in a transcript used to carry "The assistant is
+         * driving. You can take over whenever you want." under a picture of a page it opened an hour
+         * ago, offering control of whatever the Bot has open now. The sentence is about the present
+         * and the tile is a record; a record does not get a steering wheel.
+         */}
+        {!driving && !settled ? (
           <div
             className={`flex items-start justify-between gap-3 border-t px-3 py-2 text-sm ${
               control?.requested ? "bg-amber-500/10" : "bg-muted/40"
@@ -566,7 +578,22 @@ export function ComputerView({
               />
               <div className="relative mb-3 flex items-center justify-between gap-4 text-sm text-white">
                 <span className="pointer-events-none">
-                  {driving ? (
+                  {settled ? (
+                    /*
+                     * A record, opened larger. Not a window on the browser.
+                     *
+                     * Zooming a past turn used to mount the live stream and offer Take control, so
+                     * the one gesture for looking closer at what a turn did was also the one that
+                     * replaced it with whatever the Bot has open now. The kept frame exists to stop
+                     * exactly that; its own zoom control was undoing it.
+                     */
+                    <>
+                      <strong className="font-medium">
+                        {knownPage?.title || "What this turn had open"}
+                      </strong>{" "}
+                      {knownPage?.url ? hostOf(knownPage.url) : null}
+                    </>
+                  ) : driving ? (
                     <>
                       <strong className="font-medium">You have control.</strong>{" "}
                       Click and type on the page as you normally would.
@@ -577,7 +604,7 @@ export function ComputerView({
                   )}
                 </span>
                 <span className="flex shrink-0 items-center gap-3">
-                  {driving ? (
+                  {settled ? null : driving ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -608,13 +635,31 @@ export function ComputerView({
                   </span>
                 </span>
               </div>
-              {/* Overlay uses the live socket; the inline card keeps low-cost polling. */}
+              {/*
+                A turn that is over shows the frame it was kept with; a live one uses the socket.
+                The inline card keeps low-cost polling either way.
+              */}
               <div className="relative min-h-0 flex-1 overflow-auto rounded-lg bg-black">
-                <LiveScreen
-                  computerId={computerId}
-                  driving={driving}
-                  onProblem={setProblem}
-                />
+                {settled ? (
+                  drawn ? (
+                    <img
+                      src={`data:image/png;base64,${drawn.base64}`}
+                      alt="What this turn had open"
+                      className="absolute inset-0 h-full w-full object-contain"
+                    />
+                  ) : (
+                    <span className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-white/70">
+                      No picture was kept of this turn. It opened{" "}
+                      {knownPage?.url ? hostOf(knownPage.url) : "a page"}.
+                    </span>
+                  )
+                ) : (
+                  <LiveScreen
+                    computerId={computerId}
+                    driving={driving}
+                    onProblem={setProblem}
+                  />
+                )}
               </div>
             </div>,
             document.body,

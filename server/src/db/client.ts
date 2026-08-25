@@ -12,6 +12,20 @@ export function createDatabase(
   databaseUrl: string,
   options: { max?: number } = {},
 ) {
+  /*
+   * Loud rather than silent when the arguments are the wrong way round.
+   *
+   * Bun's `SQL` takes either a URL or an options object as its one argument, so a caller passing the
+   * pool options where the address belongs gets a working database from `$DATABASE_URL` and no
+   * complaint. Two tests were doing exactly that, green for a reason that had nothing to do with
+   * what they were checking, and the test tree is not type-checked so nothing else was going to say
+   * so. A connection string is a string.
+   */
+  if (typeof databaseUrl !== "string" || databaseUrl.trim() === "") {
+    throw new TypeError(
+      "createDatabase needs a connection string as its first argument. Pool options go second.",
+    );
+  }
   const client =
     options.max === undefined
       ? new SQL(databaseUrl)
