@@ -491,7 +491,15 @@ export function createChannelStore(
     async markRead(actor, channelId) {
       const updated = await database
         .update(channelMemberships)
-        .set({ lastReadAt: new Date() })
+        .set({
+          /*
+           * The later of this clock and the channel's own last-message stamp. last_message_at is
+           * written from the reporting browser's clock and is not bounded; a marker stamped
+           * plainly "now" by a server running behind it would leave the row reading as unseen for
+           * every member, re-lighting the dot on each refetch until wall clock catches up.
+           */
+          lastReadAt: sql`greatest(now(), coalesce((select ${channels.lastMessageAt} from ${channels} where ${channels.id} = ${channelMemberships.channelId}), now()))`,
+        })
         .where(
           and(
             eq(channelMemberships.channelId, channelId),

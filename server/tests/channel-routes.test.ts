@@ -1227,6 +1227,54 @@ describe("channel read markers", () => {
       persistentStore.markRead(outsider, channelId),
     ).rejects.toBeInstanceOf(ChannelNotFoundError);
   });
+
+  test("stamps a read no earlier than the channel's own last-message clock", async () => {
+    const { reader, channelId } = await sharedChannel();
+    // last_message_at is written from the reporting browser's clock and is not bounded; simulate
+    // one running ahead of the server so a plain "now" stamp would still read as unseen.
+    const future = new Date(Date.now() + 60_000);
+    await database
+      .update(channels)
+      .set({ lastMessageAt: future })
+      .where(eq(channels.id, channelId));
+
+    await persistentStore.markRead(reader, channelId);
+
+    const [row] = await database
+      .select({ lastReadAt: channelMemberships.lastReadAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, channelId),
+          eq(channelMemberships.userId, reader.id),
+        ),
+      );
+    expect(row?.lastReadAt).not.toBeNull();
+    expect((row?.lastReadAt as Date).getTime()).toBeGreaterThanOrEqual(
+      future.getTime(),
+    );
+  });
+
+  test("still stamps a read on a soft-deleted channel, mirroring setPinned", async () => {
+    const { reader, channelId } = await sharedChannel();
+
+    await persistentStore.softDelete(reader, channelId);
+
+    await expect(
+      persistentStore.markRead(reader, channelId),
+    ).resolves.toBeUndefined();
+
+    const [row] = await database
+      .select({ lastReadAt: channelMemberships.lastReadAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, channelId),
+          eq(channelMemberships.userId, reader.id),
+        ),
+      );
+    expect(row?.lastReadAt).not.toBeNull();
+  });
 });
 
 describe("channel soft delete", () => {
