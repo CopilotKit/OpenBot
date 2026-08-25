@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seal } from "../src/auth/signed-value";
 import type { CatalogueAuth } from "../src/plugins/catalogue";
 import {
   authorizationUrlFor,
@@ -9,7 +10,7 @@ import {
   redirectUriFor,
   registerDynamicClient,
   connectedAccountsUrlFor,
-  signConnectState,
+  sealConnectState,
 } from "../src/plugins/oauth";
 
 /**
@@ -18,7 +19,7 @@ import {
  * Everything here exists because the browser is in the middle of it. An authorization code arrives
  * on a URL somebody else's server sent the person to, so nothing on that request can be believed on
  * its own: not who is connecting, not which server they meant, and not that they ever asked. The
- * signed state is what carries those facts across, and the PKCE verifier is what proves the code
+ * sealed state is what carries those facts across, and the PKCE verifier is what proves the code
  * being redeemed belongs to the request that started it.
  *
  * So these tests are almost entirely about refusal. A state that was tampered with, replayed after
@@ -31,13 +32,13 @@ const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const NOW = 1_770_000_000_000;
 
 describe("the state that travels through the vendor", () => {
-  test("carries who, which server, and the verifier, and reads back exactly", () => {
-    const signed = signConnectState(
+  test("carries who, which server, and the verifier, and reads back exactly", async () => {
+    const sealed = await sealConnectState(
       { userId: "user-1", serverId: "google-drive", verifier: "v-1" },
       KEY,
       NOW,
     );
-    expect(readConnectState(signed, KEY, NOW)).toEqual({
+    expect(await readConnectState(sealed, KEY, NOW)).toEqual({
       userId: "user-1",
       serverId: "google-drive",
       verifier: "v-1",
@@ -47,8 +48,8 @@ describe("the state that travels through the vendor", () => {
     });
   });
 
-  test("the screen to return to survives the round trip", () => {
-    const signed = signConnectState(
+  test("the screen to return to survives the round trip", async () => {
+    const sealed = await sealConnectState(
       {
         userId: "user-1",
         serverId: "google-drive",
@@ -58,7 +59,7 @@ describe("the state that travels through the vendor", () => {
       KEY,
       NOW,
     );
-    expect(readConnectState(signed, KEY, NOW)?.returnTo).toBe("admin");
+    expect((await readConnectState(sealed, KEY, NOW))?.returnTo).toBe("admin");
   });
 
   /*
@@ -68,17 +69,17 @@ describe("the state that travels through the vendor", () => {
    *
    * The defence is that the field cannot express another origin at all. Only "admin" is recognised;
    * everything else — a URL, a protocol-relative host, a path traversal — reads back as the default.
-   * Asserted through a SIGNED state, because a valid signature is exactly what an attacker would not
-   * have, and the point is that the narrowing does not depend on the signature to hold.
+   * Asserted through a state this deployment actually sealed, because a state it will open at all is
+   * exactly what an attacker does not have, and the point is that the narrowing holds regardless.
    */
-  test("a destination that names anywhere else reads back as the default", () => {
+  test("a destination that names anywhere else reads back as the default", async () => {
     for (const hostile of [
       "https://evil.test",
       "//evil.test",
       "/admin/plugins/../../evil",
       "ADMIN",
     ]) {
-      const signed = signConnectState(
+      const sealed = await sealConnectState(
         {
           userId: "user-1",
           serverId: "google-drive",
@@ -88,57 +89,123 @@ describe("the state that travels through the vendor", () => {
         KEY,
         NOW,
       );
-      expect(readConnectState(signed, KEY, NOW)?.returnTo).toBe("settings");
+      expect((await readConnectState(sealed, KEY, NOW))?.returnTo).toBe(
+        "settings",
+      );
     }
   });
 
-  test("is refused once a character of it changes", () => {
-    const signed = signConnectState(
+  test("is refused once a character of it changes", async () => {
+    const sealed = await sealConnectState(
       { userId: "user-1", serverId: "google-drive", verifier: "v-1" },
       KEY,
       NOW,
     );
-    // The payload is base64url, so flipping a character inside it is the realistic tamper: somebody
-    // trying to have the callback attach their Google account to another person's row.
-    const tampered = `${signed.slice(0, 4)}${signed[4] === "A" ? "B" : "A"}${signed.slice(5)}`;
-    expect(readConnectState(tampered, KEY, NOW)).toBeNull();
+    /*
+     * Every character of a sealed state is the envelope, the nonce or the ciphertext, so one flipped
+     * character anywhere is the realistic tamper: somebody trying to have the callback attach their
+     * account to another person's row. AES-GCM authenticates as well as encrypts, so an altered
+     * state fails to open rather than opening as something else — no separate signature catches it.
+     */
+    for (const at of [0, Math.floor(sealed.length / 2), sealed.length - 1]) {
+      const tampered = `${sealed.slice(0, at)}${sealed[at] === "A" ? "B" : "A"}${sealed.slice(at + 1)}`;
+      expect(await readConnectState(tampered, KEY, NOW)).toBeNull();
+    }
   });
 
-  test("is refused when signed with a different key", () => {
-    const signed = signConnectState(
+  test("is refused when sealed with a different key", async () => {
+    const sealed = await sealConnectState(
       { userId: "user-1", serverId: "google-drive", verifier: "v-1" },
       "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
       NOW,
     );
-    expect(readConnectState(signed, KEY, NOW)).toBeNull();
+    expect(await readConnectState(sealed, KEY, NOW)).toBeNull();
   });
 
-  test("expires, so a stale consent screen cannot be redeemed later", () => {
-    const signed = signConnectState(
+  test("expires, so a stale consent screen cannot be redeemed later", async () => {
+    // The expiry rides INSIDE the sealed value, where nobody can move it — but it still has to be
+    // checked on the way out, which is the half that encrypting does not do for you.
+    const sealed = await sealConnectState(
       { userId: "user-1", serverId: "google-drive", verifier: "v-1" },
       KEY,
       NOW,
     );
-    expect(readConnectState(signed, KEY, NOW + 60_000)).not.toBeNull();
-    expect(readConnectState(signed, KEY, NOW + 60 * 60_000)).toBeNull();
+    expect(await readConnectState(sealed, KEY, NOW + 60_000)).not.toBeNull();
+    expect(await readConnectState(sealed, KEY, NOW + 60 * 60_000)).toBeNull();
   });
 
-  test("cannot be a run assertion wearing a different hat", () => {
-    // Signed under its own label, so a signature valid for one kind of statement is not valid as
-    // another. Without that, any signed value this deployment ever hands out is a candidate state.
-    const signed = signConnectState(
-      { userId: "user-1", serverId: "google-drive", verifier: "v-1" },
+  test("cannot be a run assertion wearing a different hat", async () => {
+    /*
+     * Sealed under its own label, and the label derives the key — so a value this deployment sealed
+     * for another purpose is not merely rejected here, it cannot be opened here at all. Without
+     * that, anything the deployment ever sealed under this key would be a candidate state.
+     */
+    const elsewhere = await seal(
+      JSON.stringify({
+        userId: "user-1",
+        serverId: "google-drive",
+        verifier: "v-1",
+        exp: NOW + 60_000,
+      }),
+      KEY,
+      "agent-callback",
+    );
+    expect(await readConnectState(elsewhere, KEY, NOW)).toBeNull();
+  });
+
+  /**
+   * THE PROPERTY THIS FORMAT EXISTS FOR: the state says nothing to anybody without the key.
+   *
+   * The state and the authorization code travel on the SAME callback URL, and a dynamically
+   * registered client is public — PKCE is the only thing binding that code to this deployment. So
+   * every reader of that URL, and there are several nobody chose (a CDN log, a proxy log, browser
+   * history, the vendor's own logs), used to hold everything needed to redeem the code: a state that
+   * was base64url JSON with an HMAC after it is authenticated, and perfectly readable.
+   *
+   * Asserted by decoding rather than by eye, because the failure being guarded against is a value
+   * that LOOKS opaque and is not.
+   */
+  test("does not carry the PKCE verifier where a reader without the key can find it", async () => {
+    const verifier = createVerifier();
+    const state = await sealConnectState(
+      { userId: "user-1", serverId: "notion", verifier },
       KEY,
       NOW,
     );
-    const [payload] = signed.split(".");
-    expect(readConnectState(payload ?? "", KEY, NOW)).toBeNull();
+    expect(state).not.toContain(verifier);
+    // Opaque as far as a URL is concerned, too: one token, nothing in it to escape.
+    expect(state).toMatch(/^[A-Za-z0-9\-_]+$/);
+    for (const segment of state.split(".")) {
+      for (const encoding of ["base64url", "base64", "hex"] as const) {
+        expect(Buffer.from(segment, encoding).toString("utf8")).not.toContain(
+          verifier,
+        );
+      }
+    }
   });
 
-  test("is refused when it is not a state at all", () => {
-    expect(readConnectState("", KEY, NOW)).toBeNull();
-    expect(readConnectState("nonsense", KEY, NOW)).toBeNull();
-    expect(readConnectState("a.b", KEY, NOW)).toBeNull();
+  test("still fits in a query parameter", async () => {
+    // Sealing costs size, and the state has to survive a round trip through somebody else's URL
+    // handling. A real-shaped one — a UUID for the person, a live verifier — is well inside it.
+    const state = await sealConnectState(
+      {
+        userId: crypto.randomUUID(),
+        serverId: "google-drive",
+        verifier: createVerifier(),
+      },
+      KEY,
+      NOW,
+    );
+    expect(state.length).toBeLessThan(1_024);
+  });
+
+  test("is refused when it is not a state at all", async () => {
+    expect(await readConnectState("", KEY, NOW)).toBeNull();
+    expect(await readConnectState("nonsense", KEY, NOW)).toBeNull();
+    expect(await readConnectState("a.b", KEY, NOW)).toBeNull();
+    // A real envelope, sealed with the right key under the right label, carrying no state at all.
+    const empty = await seal("{}", KEY, "mcp-oauth-connect");
+    expect(await readConnectState(empty, KEY, NOW)).toBeNull();
   });
 });
 

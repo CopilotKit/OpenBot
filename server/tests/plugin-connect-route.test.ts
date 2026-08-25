@@ -18,7 +18,8 @@ import {
  * never attempted for it.
  */
 
-const ENCRYPTION_KEY = "a".repeat(32);
+/** A real key shape: base64 over 32 bytes, which is what the deployment's own check demands. */
+const ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 function signedIn(): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (context, next) => {

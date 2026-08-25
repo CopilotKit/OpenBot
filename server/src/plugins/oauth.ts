@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { sign, verify } from "../auth/signed-value";
+import { seal, unseal } from "../auth/signed-value";
 import type { CatalogueAuth } from "./catalogue";
 
 /**
@@ -8,8 +8,16 @@ import type { CatalogueAuth } from "./catalogue";
  * The browser is in the middle of this, which is the whole difficulty. An authorization code arrives
  * on a request that somebody else's server sent the person to, so nothing on it can be believed on
  * its own — not who is connecting, not which server they meant, not that they ever asked. Two things
- * carry the truth across: a signed state, which is this deployment's own statement about the request
+ * carry the truth across: a sealed state, which is this deployment's own statement about the request
  * it started, and a PKCE verifier, which proves the code being redeemed belongs to that request.
+ *
+ * SEALED, not signed, and that distinction is the reason this comment exists. The state carries the
+ * PKCE verifier, and the callback URL carries the verifier's state and the authorization code
+ * TOGETHER. A dynamically registered client is public — it proves itself with PKCE and no secret —
+ * so the verifier is the only thing binding that code to this deployment. A signed state is readable
+ * by anybody holding it, and a callback URL is held by every CDN log, proxy log, browser history and
+ * vendor log it passes through: any one of those readers could redeem the code. Encrypted, the state
+ * says nothing to anybody but this deployment.
  *
  * Everything here fails closed. A state that was tampered with, replayed after it expired, or minted
  * for some other purpose reads back as nothing, because the alternative is attaching one person's
@@ -17,10 +25,10 @@ import type { CatalogueAuth } from "./catalogue";
  */
 
 /**
- * The label this deployment's connect states are signed under.
+ * The label this deployment's connect states are sealed under.
  *
- * Its own, so a signature valid here can never be replayed as a run assertion and vice versa. Every
- * signed value the deployment hands out would otherwise be a candidate state.
+ * Its own, so a state cannot be opened as a run assertion and vice versa. Every value the deployment
+ * hands out under this key would otherwise be a candidate state.
  */
 const CONNECT_LABEL = "mcp-oauth-connect";
 
@@ -46,7 +54,7 @@ const CALLBACK_PATH = "/api/plugins/oauth/callback";
  * one falls back instead of being followed, so the worst a tampered state achieves is the wrong page
  * of this app.
  *
- * It lives in the SIGNED state rather than on the callback URL because the callback is a request
+ * It lives in the SEALED state rather than on the callback URL because the callback is a request
  * somebody else's server sent the browser on. Nothing on it is believable by itself.
  */
 export type ConnectOrigin = "settings" | "admin";
@@ -56,13 +64,24 @@ export type ConnectState = {
   userId: string;
   /** Which server they are connecting. Prevents a code for one vendor landing on another's row. */
   serverId: string;
-  /** The PKCE verifier, held here rather than in a table because it is single-use and short-lived. */
+  /**
+   * The PKCE verifier, held here rather than in a table because it is single-use and short-lived.
+   *
+   * It is also why the state is sealed rather than signed: this is a secret travelling beside the
+   * code it unlocks, so a state anybody could read would be a code anybody could redeem.
+   */
   verifier: string;
   /** Where to go back to. Absent reads as `settings`, which is where every flow used to end. */
   returnTo?: ConnectOrigin;
 };
 
-type SignedState = ConnectState & { exp: number };
+/**
+ * What is actually sealed: the state, plus when it stops being one.
+ *
+ * The expiry travels inside the sealed value because sealing says nothing about freshness. Nobody
+ * can move it without the key, and this deployment checks it on the way out.
+ */
+type SealedState = ConnectState & { exp: number };
 
 /**
  * Where the vendor sends somebody back to.
@@ -148,35 +167,39 @@ export function challengeFor(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-export function signConnectState(
+/**
+ * The state to send a person to the vendor with.
+ *
+ * Async because sealing is: the encryption goes through WebCrypto, like every other secret this
+ * deployment writes down. It is one call on a path that already makes a network request or two.
+ */
+export async function sealConnectState(
   state: ConnectState,
   encryptionKey: string,
   now: number = Date.now(),
-): string {
-  const payload: SignedState = { ...state, exp: now + STATE_TTL_MS };
-  const value = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return sign(value, encryptionKey, CONNECT_LABEL);
+): Promise<string> {
+  const payload: SealedState = { ...state, exp: now + STATE_TTL_MS };
+  return seal(JSON.stringify(payload), encryptionKey, CONNECT_LABEL);
 }
 
 /**
  * What a state says, or nothing at all.
  *
- * One return for every way of being unacceptable — bad signature, wrong label, expired, malformed,
- * missing a field — because a caller that has to tell those apart is a caller that can get one of
- * them wrong. There is exactly one thing to do with an unusable state, so there is one answer.
+ * One return for every way of being unacceptable — altered, sealed by another key, sealed for
+ * another purpose, expired, malformed, missing a field — because a caller that has to tell those
+ * apart is a caller that can get one of them wrong. There is exactly one thing to do with an
+ * unusable state, so there is one answer.
  */
-export function readConnectState(
-  signed: string,
+export async function readConnectState(
+  sealed: string,
   encryptionKey: string,
   now: number = Date.now(),
-): ConnectState | null {
-  const value = verify(signed, encryptionKey, CONNECT_LABEL);
+): Promise<ConnectState | null> {
+  const value = await unseal(sealed, encryptionKey, CONNECT_LABEL);
   if (!value) return null;
 
   try {
-    const payload = JSON.parse(
-      Buffer.from(value, "base64url").toString("utf8"),
-    ) as Partial<SignedState>;
+    const payload = JSON.parse(value) as Partial<SealedState>;
 
     if (
       typeof payload.userId !== "string" ||
@@ -205,7 +228,7 @@ export function readConnectState(
 
 /**
  * The six keys that carry this flow's own security: who is asking (`client_id`), where the vendor
- * answers (`redirect_uri`), the grant shape (`response_type`), the signed state (`state`), and the
+ * answers (`redirect_uri`), the grant shape (`response_type`), the sealed state (`state`), and the
  * PKCE proof (`code_challenge`, `code_challenge_method`). A catalogue entry's `authorizationParams`
  * must never rewrite one of these — an entry setting `code_challenge_method: "plain"` would defeat
  * PKCE with nothing here to catch it. The catalogue is frozen, reviewed code today, so nothing can

@@ -12,7 +12,7 @@ import {
   redeemAuthorizationCode,
   redirectUriFor,
   connectedAccountsUrlFor,
-  signConnectState,
+  sealConnectState,
 } from "./oauth";
 import {
   CatalogueEntryUnknownError,
@@ -48,7 +48,7 @@ export function createPluginRoutes(
    */
   canUseBot: BotAccessCheck,
   /**
-   * What the connect flow needs that the store does not hold: the key its state is signed with, and
+   * What the connect flow needs that the store does not hold: the key its state is sealed with, and
    * the address a vendor sends people back to.
    *
    * Optional, so a deployment with no public URL configured simply cannot start a connect flow and
@@ -403,7 +403,7 @@ export function createPluginRoutes(
      * Where to come back to, as one of two names rather than a URL the caller chose.
      *
      * Read from the query and narrowed immediately, so an unrecognised value is the default rather
-     * than something carried into a signed state. See {@link ConnectOrigin}: a destination that could
+     * than something carried into a sealed state. See {@link ConnectOrigin}: a destination that could
      * name another origin is an open redirect with a consent screen in front of it.
      */
     const returnTo =
@@ -415,7 +415,7 @@ export function createPluginRoutes(
         auth: entry.auth,
         clientId: client.clientId,
         redirectUri: redirectUriFor(connect.publicUrl),
-        state: signConnectState(
+        state: await sealConnectState(
           { userId: context.var.actor.id, serverId, verifier, returnTo },
           connect.encryptionKey,
         ),
@@ -428,7 +428,7 @@ export function createPluginRoutes(
    * Where the vendor sends somebody back.
    *
    * Deliberately not behind `requireUser`. The person arrives on a redirect from another company's
-   * server, and whose connection this is comes from the signed state rather than from whatever
+   * server, and whose connection this is comes from the sealed state rather than from whatever
    * session the browser happens to be carrying — which is what stops a callback delivered to the
    * wrong browser from attaching one person's Google account to another person's row.
    *
@@ -443,7 +443,7 @@ export function createPluginRoutes(
     if (!connect?.publicUrl) return context.redirect(failed);
 
     const code = context.req.query("code");
-    const state = readConnectState(
+    const state = await readConnectState(
       context.req.query("state") ?? "",
       connect.encryptionKey,
     );
@@ -476,7 +476,7 @@ export function createPluginRoutes(
       connectedAccountsUrlFor(
         connect.appUrl,
         { serverId: state.serverId },
-        // From the signed state, so the destination is one this deployment chose, not the browser.
+        // From the sealed state, so the destination is one this deployment chose, not the browser.
         state.returnTo,
       ),
     );
