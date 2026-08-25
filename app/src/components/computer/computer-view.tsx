@@ -45,6 +45,8 @@ function hostOf(url: string): string {
 type RememberedTurn = {
   page?: { url?: string; title?: string };
   frame?: { base64: string; url: string };
+  /** Whether the server has already been asked, so a turn with no frame is not asked again. */
+  asked?: boolean;
 };
 const REMEMBERED_TURNS = new Map<string, RememberedTurn>();
 const MAX_REMEMBERED_TURNS = 40;
@@ -132,11 +134,21 @@ function NothingToSee({
             for the assistant's screen…" and waited there for ever, because the poll that would have
             ended the wait stops the moment a turn settles.
           */}
-          <span className="font-medium">{page?.title || "A page"}</span>
           {page?.url ? (
-            <span className="break-all">{hostOf(page.url)}</span>
-          ) : null}
-          <span>Opened during this turn. The screen has moved on since.</span>
+            <>
+              <span className="font-medium">{page.title || "A page"}</span>
+              <span className="break-all">{hostOf(page.url)}</span>
+              <span>
+                Opened during this turn. The screen has moved on since.
+              </span>
+            </>
+          ) : (
+            /*
+             * A turn that ended without getting anywhere: refused by a boundary, stopped, or failed.
+             * Saying "opened during this turn" here would describe something that did not happen.
+             */
+            <span>This turn did not open a page.</span>
+          )}
         </>
       ) : problem ? (
         <>
@@ -180,6 +192,14 @@ type Props = {
    */
   page?: { url?: string; title?: string };
   /**
+   * Whether the turn this tile belongs to has ended.
+   *
+   * SEPARATE FROM HAVING A PAGE. A navigation that was refused, failed or stopped ends without one,
+   * and a tile that decided history by "do I have a page" left exactly those turns polling the live
+   * screen for ever, under an answer that had nothing to do with what was on it.
+   */
+  finished?: boolean;
+  /**
    * The tool call this tile belongs to, which is what a kept frame is filed under.
    *
    * Without it the tile can still name the page; with it, it can show the page. Optional because the
@@ -197,6 +217,7 @@ export function ComputerView({
   minHeight = DEFAULT_MIN_HEIGHT,
   name,
   page,
+  finished,
   toolCallId,
 }: Props) {
   const [shot, setShot] = useState<Screenshot | null>(null);
@@ -255,7 +276,7 @@ export function ComputerView({
   /** Bumped when a frame arrives, because the store it lands in is not React state. */
   const [, setFrameArrived] = useState(0);
 
-  const settled = !active && Boolean(knownPage);
+  const settled = !active && (finished || Boolean(knownPage));
 
   /*
    * The frame this turn's page was showing, fetched once and then kept.
@@ -268,24 +289,30 @@ export function ComputerView({
    * so there is nothing left here to race.
    */
   useEffect(() => {
-    if (!toolCallId || !knownPage?.url) return;
-    if (REMEMBERED_TURNS.get(toolCallId)?.frame) return;
+    if (!toolCallId || !settled) return;
+    const remembered = REMEMBERED_TURNS.get(toolCallId);
+    /*
+     * Asked once per turn, answer or not. Without remembering the empty answer, every turn from
+     * before this shipped refetched nothing on every remount, which on a long transcript is one
+     * pointless request per turn per scroll.
+     */
+    if (remembered?.frame || remembered?.asked) return;
     let current = true;
 
     void (async () => {
-      const url = knownPage.url as string;
-      const stored = await readPageFrame(computerId, url);
-      if (!current || !stored) return;
+      const stored = await readPageFrame(computerId, toolCallId);
+      if (!current) return;
       rememberTurn(toolCallId, {
-        frame: { base64: stored.frame, url: stored.url },
+        asked: true,
+        ...(stored ? { frame: { base64: stored.frame, url: stored.url } } : {}),
       });
-      setFrameArrived((n) => n + 1);
+      if (stored) setFrameArrived((n) => n + 1);
     })();
 
     return () => {
       current = false;
     };
-  }, [computerId, toolCallId, knownPage?.url]);
+  }, [computerId, toolCallId, settled]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {
@@ -403,6 +430,16 @@ export function ComputerView({
    * about the page and a placeholder over it would be the view arguing with them.
    */
   const showLiveScreen = !settled && (showScreen || driving);
+  /**
+   * Whether the wheel in somebody's hands is the wheel THIS tile is showing.
+   *
+   * A person can take control mid-navigation, and the turn then settles under them. `driving` stays
+   * true, because it is true: they are driving the browser. It is just not the browser in this
+   * picture any more. Left ungated, the frozen tile asserted "You have control" over a page from an
+   * hour ago, with the hand-back footer already gone and the backdrop refusing to close because it
+   * believed somebody was driving it.
+   */
+  const wheelHere = driving && !settled;
 
   const polledScreen = showScreen ? (
     <img
@@ -434,7 +471,7 @@ export function ComputerView({
           {polledScreen}
 
           {/* Whose computer this is — and whose hands are on it — said on the picture itself. */}
-          {name || driving ? (
+          {name || wheelHere ? (
             <span className="absolute right-2 bottom-2 flex items-center gap-1.5">
               {name ? (
                 <span className="flex items-center gap-1.5 rounded-full bg-black/60 py-1 pr-2.5 pl-1.5 font-medium text-white text-xs backdrop-blur-sm">
@@ -442,7 +479,7 @@ export function ComputerView({
                   {name}
                 </span>
               ) : null}
-              {driving ? (
+              {wheelHere ? (
                 <span className="rounded-full bg-white px-2.5 py-1 font-medium text-black text-xs shadow-sm">
                   You have control
                 </span>
@@ -564,14 +601,17 @@ export function ComputerView({
               aria-label="The assistant's screen"
               className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 sm:p-8"
             >
-              {/* Backdrop closes only while read-only; during driving, Escape remains the exit. */}
+              {/*
+                Backdrop closes only while read-only; during driving, Escape remains the exit. A
+                turn that is over is always read-only, whoever is holding the live browser.
+              */}
               <button
                 type="button"
-                onClick={() => !driving && setExpanded(false)}
+                onClick={() => !wheelHere && setExpanded(false)}
                 aria-label="Close the assistant's screen"
-                aria-hidden={driving}
-                tabIndex={driving ? -1 : 0}
-                className={`absolute inset-0 bg-black/80 ${driving ? "cursor-default" : "cursor-zoom-out"}`}
+                aria-hidden={wheelHere}
+                tabIndex={wheelHere ? -1 : 0}
+                className={`absolute inset-0 bg-black/80 ${wheelHere ? "cursor-default" : "cursor-zoom-out"}`}
               />
               {/* A card holding the screen, with who and the wheel centered beneath it. */}
               <div className="relative flex w-full max-w-[70vw] min-w-0 flex-col rounded-2xl bg-background p-4 shadow-2xl">

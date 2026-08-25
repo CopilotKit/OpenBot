@@ -260,6 +260,15 @@ function createLazySandboxProvider(
   let built: Promise<ComputerProvider> | undefined;
 
   const provider = async (): Promise<ComputerProvider> => {
+    /*
+     * A FAILURE IS NOT REMEMBERED, only a success.
+     *
+     * `??=` holds whatever the first call produced, and a rejected promise is something. One
+     * unreadable token file or one blip reading the template at the wrong moment, and every computer
+     * request for the rest of the pod's life failed with that same stale error: no probe notices,
+     * because the pod is serving happily, and nothing recovers short of a restart. Clearing the memo
+     * on rejection makes the next request try again, which is what a transient failure deserves.
+     */
     built ??= (async () => {
       const [cluster, template] = await Promise.all([
         inClusterConfig(),
@@ -273,7 +282,10 @@ function createLazySandboxProvider(
         token: cluster.token,
         ca: cluster.ca,
       });
-    })();
+    })().catch((error: unknown) => {
+      built = undefined;
+      throw error;
+    });
     return built;
   };
 

@@ -237,12 +237,21 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
     secretKeyRef:
       name: {{ include "openbot.secretName" . }}
       key: key-encryption-key
+{{- /*
+  Optional only while it genuinely is.
+  
+  With no identity provider there is no sign-in and nothing to sign, so an absent key is correct.
+  With one configured the server refuses to start without it, and `optional: true` turned that into a
+  crash loop rather than a container that says which key is missing. It also hid the whole path from
+  the render check, which skips optional keys: a deployment supplying its own Secret without this in
+  it rendered clean and then never came up.
+*/}}
 - name: BETTER_AUTH_SECRET
   valueFrom:
     secretKeyRef:
       name: {{ include "openbot.secretName" . }}
       key: better-auth-secret
-      optional: true
+      optional: {{ not (or .Values.config.auth.google.clientId .Values.config.auth.microsoft.clientId .Values.config.auth.okta.clientId) }}
 - name: OPENAI_API_KEY
   valueFrom:
     secretKeyRef:

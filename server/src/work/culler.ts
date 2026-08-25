@@ -16,7 +16,7 @@ import { and, inArray, like, sql } from "drizzle-orm";
 import type { ComputerProvider } from "../computer/provider";
 import type { Database } from "../db/client";
 import { auditEvents } from "../db/schema";
-import type { WorkQueue } from "./queue";
+import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "./queue";
 
 export const CULL_KIND = "computer.suspend";
 
@@ -29,6 +29,8 @@ export type CullerOptions = {
   /** Who this replica is, for the lease. */
   owner: string;
   leaseMs?: number;
+  /** How many goes an item gets before it stops being offered. */
+  maxAttempts?: number;
   now?: () => Date;
 };
 
@@ -123,6 +125,9 @@ export async function suspendClaimedComputers(
     owner: options.owner,
     leaseMs,
     limit: 20,
+    ...(options.maxAttempts === undefined
+      ? {}
+      : { maxAttempts: options.maxAttempts }),
   });
 
   const report: CullReport = {
@@ -199,6 +204,23 @@ export async function suspendClaimedComputers(
         delayMs: 5 * 60_000,
         reason,
       });
+      /*
+       * Said out loud when it gives up, because otherwise it stops silently.
+       *
+       * At the cap the item is no longer claimed, so this loop simply never sees that Bot again and
+       * every sweep looks clean while one computer stays awake indefinitely. The row carries the
+       * count and the reason for anybody who queries it; this is for the person reading the logs.
+       */
+      if (item.attempts >= (options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS)) {
+        console.warn(
+          JSON.stringify({
+            type: "computer-cull-gave-up",
+            botId,
+            attempts: item.attempts,
+            reason,
+          }),
+        );
+      }
       report.skipped.push({ botId, reason });
     }
   }

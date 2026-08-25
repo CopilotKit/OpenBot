@@ -22,6 +22,7 @@ app/src/lib/generated/application-config.ts
 # TanStack Router scratch output
 app/.tanstack/
 
-# Helm subchart tarballs, fetched by `helm dependency build`.
+# Helm subchart tarballs, fetched by `helm dependency build`. The lock beside them is NOT ignored:
+# it is what makes that fetch reproducible, and ignoring it meant every build resolved the dependency
+# afresh, so CI and a customer install could take different subchart versions with no diff to show it.
 charts/*/charts/
-charts/*/Chart.lock

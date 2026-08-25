@@ -35,6 +35,7 @@ export {
   WorkspaceRequestError,
 } from "./client";
 
+import type { PageFrameStore } from "./page-frames";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
@@ -112,6 +113,13 @@ export type ComputerGatewayOptions = {
    * is correct in one process and is what a unit test wants. See snapshot-store.ts.
    */
   snapshots?: SnapshotStore;
+  /**
+   * Where the frame a page was opened on is kept, so a reset can take them with the profile.
+   *
+   * Absent, a reset clears the profile and leaves the pictures, which is the wrong half of a promise
+   * this deployment makes in as many words.
+   */
+  pageFrames?: PageFrameStore;
 };
 
 export interface ComputerGateway {
@@ -231,6 +239,7 @@ export function createComputerGateway(
    * ref from a superseded page from resolving to whatever now holds it. See snapshot-store.ts.
    */
   const snapshots = options.snapshots ?? createInMemorySnapshotStore();
+  const pageFrames = options.pageFrames;
 
   /**
    * Where this Bot's computer is, checked before anything is sent to it.
@@ -667,6 +676,15 @@ export function createComputerGateway(
       // The refs the last snapshot handed out describe a page that no longer exists, and a fresh
       // computer counts generations from one again, so the row has to go with the profile.
       await snapshots.clear(botId);
+      /*
+       * And the pictures, which are the part that made the promise above untrue.
+       *
+       * "Every login the Bot had is gone" was said while screenshots of the signed-in pages stayed
+       * in the database: an inbox, an admin console, a bank statement, still readable from the
+       * transcript by anybody who could reach that Bot. A reset that leaves those has not reset
+       * anything a person would recognise as private.
+       */
+      await pageFrames?.clear(botId);
       await writeControlEvent(auditStore, "computer.reset", {
         botId,
         actor,

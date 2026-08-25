@@ -1,5 +1,5 @@
 {
-  "id": "2658b550-2ffc-449e-97ae-84cadaa1b858",
+  "id": "aa5ec39b-170c-495b-b4a9-e08ed0fd643d",
   "prevId": "eab681f3-28cb-4ef4-a5f0-5e82f53a6f42",
   "version": "7",
   "dialect": "postgresql",
@@ -1271,6 +1271,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "tool_call_id": {
+          "name": "tool_call_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "url": {
           "name": "url",
           "type": "text",
@@ -1297,12 +1303,28 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "computer_page_frame_captured_idx": {
+          "name": "computer_page_frame_captured_idx",
+          "columns": [
+            {
+              "expression": "captured_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "computer_page_frame_computer_id_url_pk": {
-          "name": "computer_page_frame_computer_id_url_pk",
-          "columns": ["computer_id", "url"]
+        "computer_page_frame_computer_id_tool_call_id_pk": {
+          "name": "computer_page_frame_computer_id_tool_call_id_pk",
+          "columns": ["computer_id", "tool_call_id"]
         }
       },
       "uniqueConstraints": {},

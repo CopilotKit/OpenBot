@@ -103,23 +103,68 @@ export function createComputerRoutes(
   });
 
   /**
-   * Photograph the page that was just opened.
+   * Whether the same page is on both, ignoring the two ways one page spells itself.
    *
-   * Awaited rather than left running, so that a surface asking for the frame the moment the turn ends
+   * The trailing slash a browser adds and the fragment it keeps are not different pages. A URL that
+   * cannot be parsed is compared as written, and an absent one never matches: unknown is not equal,
+   * and treating it as equal is how the wrong picture gets kept.
+   */
+  function samePage(a: string | undefined, b: string | undefined): boolean {
+    if (!a || !b) return false;
+    const tidy = (value: string) => {
+      try {
+        const parsed = new URL(value);
+        parsed.hash = "";
+        return parsed.toString().replace(/\/$/, "");
+      } catch {
+        return value.replace(/\/$/, "");
+      }
+    };
+    return tidy(a) === tidy(b);
+  }
+
+  /**
+   * Photograph the page this turn just opened.
+   *
+   * Awaited rather than left running, so a surface asking for the frame the moment the turn ends
    * finds it there. A navigation already costs seconds; one screenshot inside the cluster does not
    * change how the tool feels, and a frame that arrives after the reader has gone is no frame at all.
    *
-   * Never fatal. A stored picture is a convenience for reading the conversation back, and failing the
+   * CHECKED AGAINST THE PAGE THE NAVIGATION REPORTED, because the screenshot is a second round trip
+   * and nothing holds the browser still between them. With one computer shared by every Bot, another
+   * Bot's navigation lands in that gap and this would file its page under this turn. The guard used
+   * to live in the browser and was deleted when the capture moved here; it belongs on whichever side
+   * does the capturing.
+   *
+   * Never fatal. A stored picture is a convenience for reading a conversation back, and failing the
    * navigation the Bot was asked to do because the convenience failed would be the wrong trade every
-   * time. The reason is logged so a deployment where it always fails is visible rather than quietly
-   * frameless.
+   * time. Every refusal is logged, so a deployment that never keeps a frame can find out why.
    */
-  async function keepFrameOf(botId: string, url: string, title: string) {
-    if (!pageFrames) return;
+  async function keepFrameOf(
+    botId: string,
+    toolCallId: string,
+    url: string,
+    title: string,
+  ) {
+    if (!pageFrames || !toolCallId) return;
     try {
+      /*
+       * Only if the computer is already up. `screenshot` goes through `locate`, which resumes a
+       * suspended computer, so a convenience picture could wake a machine the culler had just put to
+       * sleep and hold a navigation open for the length of a pod schedule while it did.
+       */
+      const status = await gateway.status(botId);
+      if (status.state !== "ready") return;
       const shot = await gateway.screenshot(botId);
+      if (!samePage(shot.url, url)) {
+        console.warn(
+          `[computer] not keeping a frame for ${toolCallId}: the screen showed ${shot.url ?? "an unknown page"} rather than ${url}.`,
+        );
+        return;
+      }
       await pageFrames.save({
         computerId: botId,
+        toolCallId,
         url,
         title,
         frame: shot.base64,
@@ -135,10 +180,17 @@ export function createComputerRoutes(
   routes.post("/:botId/navigate", async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
       url?: unknown;
+      toolCallId?: unknown;
     } | null;
     if (typeof body?.url !== "string" || !body.url.trim()) {
       return context.json({ error: "A web address is required." }, 400);
     }
+    /*
+     * Which turn asked, so the picture can be filed under it. Optional: a caller that does not know
+     * (the side panel, a script) still navigates, and simply keeps no frame.
+     */
+    const toolCallId =
+      typeof body.toolCallId === "string" ? body.toolCallId : "";
 
     try {
       const botId = context.req.param("botId") ?? "default";
@@ -152,7 +204,7 @@ export function createComputerRoutes(
         },
         body.url.trim(),
       );
-      await keepFrameOf(botId, result.url, result.title);
+      await keepFrameOf(botId, toolCallId, result.url, result.title);
       return context.json(result);
     } catch (error) {
       if (error instanceof ActionRefusedError) {
@@ -396,21 +448,19 @@ export function createComputerRoutes(
 
   /** The Bot's files. Through the gateway, like every other acting call. */
   /**
-   * The frame a page was showing when the Bot opened it.
+   * The frame this turn was showing when it opened its page.
    *
    * Read only. Nothing writes through a route: the frame is taken where the navigation happens,
    * which is the one moment the screen is certainly showing the page that was asked for. The surface
    * used to capture it itself, after the turn, and lost the race often enough to show the wrong page
    * or a blank one.
-   *
-   * The address is a query parameter rather than a path segment because it is a URL, and a URL inside
-   * a path is escaping a caller has to get exactly right twice.
    */
-  routes.get("/:botId/page-frame", async (context) => {
+  routes.get("/:botId/page-frame/:toolCallId", async (context) => {
     if (!pageFrames) return context.json({ frame: null });
-    const url = context.req.query("url");
-    if (!url) return context.json({ frame: null });
-    const stored = await pageFrames.load(context.req.param("botId"), url);
+    const stored = await pageFrames.load(
+      context.req.param("botId"),
+      context.req.param("toolCallId"),
+    );
     return context.json({ frame: stored });
   });
 

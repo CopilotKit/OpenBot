@@ -252,7 +252,10 @@ export function ComputerTools() {
     handler: async (
       { url }: { url: string },
       // Context is optional in the SDK.
-      { signal }: { signal?: AbortSignal } = {},
+      {
+        signal,
+        toolCall,
+      }: { signal?: AbortSignal; toolCall?: { id?: string } } = {},
     ) => {
       const computerId = bot.current;
       const result = await callComputer(
@@ -260,7 +263,15 @@ export function ComputerTools() {
         "/navigate",
         {
           method: "POST",
-          body: { url },
+          /*
+           * Which turn is asking, so the server can file the picture under it.
+           *
+           * The handler's context carries the tool call, which is worth saying because assuming it
+           * did not is how the frame ended up keyed on the page instead: two visits to one address
+           * then collided, and resolving that by letting the newer win made a past turn's picture
+           * change under the person reading it.
+           */
+          body: { url, ...(toolCall?.id ? { toolCallId: toolCall.id } : {}) },
         },
         signal,
       );
@@ -312,6 +323,14 @@ export function ComputerTools() {
           <ComputerView
             computerId={bot.current}
             active={!finished}
+            /*
+             * FINISHED, NOT "GOT SOMEWHERE". The tile used to count a turn as history only once it
+             * had a page, so a navigation that was refused, failed or stopped never settled: it kept
+             * polling the live screen under a turn that was over, and offered control of it. Those
+             * are the turns most worth freezing, because the thing on screen has nothing to do with
+             * what the person is reading.
+             */
+            finished={finished}
             {...(page ? { page } : {})}
             {...(toolCallId ? { toolCallId } : {})}
           />

@@ -87,3 +87,20 @@ computers:
     # Named here rather than in the chart, which is the whole point of a per-target values file: the
     # chart must not name `gp3`, and a deployment on EKS should.
     storageClass: gp3
+
+# On, so these render in CI at all. They were written, reviewed and shipped without a single target
+# producing one, which means nothing had ever checked they were valid YAML, let alone right. Off is
+# still the chart's default: a policy on a cluster whose CNI ignores it does nothing, and on one that
+# enforces it a wrong rule is an outage, so turning it on stays a deployment's decision.
+networkPolicy:
+  enabled: true
+  # This target's database is RDS rather than a pod, so egress to it has to be named. The chart
+  # refuses to render without this, which is how the omission was found: rendering the policies in CI
+  # at all is what exercised the refusal.
+  extraEgress:
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/16
+      ports:
+        - port: 5432
+          protocol: TCP

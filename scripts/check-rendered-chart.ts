@@ -58,11 +58,48 @@ for (const document of documents) {
  */
 const demands = [
   ...text.matchAll(
-    /secretKeyRef:\s*\n\s*name:\s*(\S+)\s*\n\s*key:\s*(\S+)(?:\s*\n\s*optional:\s*(true|false))?/g,
+    /secretKeyRef:\s*\n\s*name:\s*(\S+)\s*\n\s*key:\s*([A-Za-z0-9._-]+)(?:\s*\n\s*optional:\s*(true|false))?/g,
   ),
 ];
+
+/*
+ * A check that finds nothing is not a check that passed.
+ *
+ * Every one of these questions is asked by matching text, and text moves: rename a field, reindent a
+ * template, and the pattern quietly stops matching. The result is a green tick that means "I looked
+ * at nothing", which is worse than no check at all because somebody trusts it. Every target this
+ * chart has renders a Deployment that reads secrets, so zero is always wrong.
+ */
+if (demands.length === 0) {
+  console.error(
+    "::error::This check found no secretKeyRef at all, which cannot be right. Its patterns have stopped matching the rendered output.",
+  );
+  process.exit(1);
+}
+/*
+ * Unless the Secret is somebody else's. A deployment pointing at an existing Secret, or at a store
+ * through an ExternalSecret, renders none of its own, and there is nothing here to compare against.
+ * That is a legitimate shape, not a broken pattern.
+ */
+const secretComesFromOutside =
+  text.includes("kind: ExternalSecret") || text.includes("existingSecret");
+if (written.size === 0 && !secretComesFromOutside) {
+  console.error(
+    "::error::This check found no rendered Secret to compare against. Its patterns have stopped matching the rendered output.",
+  );
+  process.exit(1);
+}
+let skippedOptional = 0;
 for (const [, rawName, rawKey, optional] of demands) {
-  if (optional === "true") continue;
+  /*
+   * An optional key absent from the Secret is the deployment saying it does not need it, which is a
+   * legitimate shape rather than a fault. It is worth counting out loud: a key that is optional when
+   * it should not be is exactly how a required value went missing and was invisible here.
+   */
+  if (optional === "true") {
+    skippedOptional += 1;
+    continue;
+  }
   const name = rawName.replace(/^["']|["']$/g, "");
   const key = rawKey.replace(/^["']|["']$/g, "");
   const keys = written.get(name);
@@ -96,5 +133,8 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `${documents.length} objects, and every secret key they need is written.`,
+  `${documents.length} objects, ${demands.length} secret keys demanded, and every required one is written.` +
+    (skippedOptional > 0
+      ? ` ${skippedOptional} optional key${skippedOptional === 1 ? " was" : "s were"} not checked.`
+      : ""),
 );

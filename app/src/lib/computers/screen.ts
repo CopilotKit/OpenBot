@@ -45,7 +45,7 @@ export async function readScreenshot(
 export type PageFrame = { url: string; title: string | null; frame: string };
 
 /**
- * What that page looked like when this turn opened it, or nothing if it was never kept.
+ * What this turn had on screen when it opened its page, or nothing if it was never kept.
  *
  * Nothing here writes. The frame is taken on the server at the moment the navigation succeeds, which
  * is the only moment the screen is certainly showing the page that was asked for. Capturing it here
@@ -54,11 +54,11 @@ export type PageFrame = { url: string; title: string | null; frame: string };
  */
 export async function readPageFrame(
   computerId: string,
-  url: string,
+  toolCallId: string,
 ): Promise<PageFrame | null> {
   try {
     const response = await tryClient(
-      `/api/computers/${computerId}/page-frame?url=${encodeURIComponent(url)}`,
+      `/api/computers/${computerId}/page-frame/${encodeURIComponent(toolCallId)}`,
     );
     if (!response.ok) return null;
     const body = (await response.json()) as { frame?: PageFrame | null };

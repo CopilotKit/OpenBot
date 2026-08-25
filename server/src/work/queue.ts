@@ -15,7 +15,7 @@
  * Postgres considered expired on arrival, and the next replica to look took the item straight out
  * from under the first. Both then ran it. Every time this file names a moment it names it in SQL.
  */
-import { and, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema";
 
@@ -82,8 +82,17 @@ export type WorkQueue = {
     delayMs: number;
     reason?: string;
   }) => Promise<boolean>;
-  /** Drop finished rows older than the retention window. Returns how many went. */
-  purge: (input: { kind: string; olderThanMs: number }) => Promise<number>;
+  /**
+   * Drop what is done with, older than the retention window. Returns how many went.
+   *
+   * Both kinds of done: finished, and given up on. An item at its attempt cap is not finished and was
+   * reaped by nothing, so its key stayed occupied for ever and the work could never be offered again.
+   */
+  purge: (input: {
+    kind: string;
+    olderThanMs: number;
+    maxAttempts?: number;
+  }) => Promise<number>;
 };
 
 /** A moment `ms` from now, named in SQL so it is the database's clock and not the caller's. */
@@ -241,13 +250,33 @@ export function createWorkQueue(database: Database): WorkQueue {
       return Boolean(released);
     },
 
-    async purge({ kind, olderThanMs }) {
+    async purge({ kind, olderThanMs, maxAttempts = DEFAULT_MAX_ATTEMPTS }) {
+      const cutoff = fromNow(-olderThanMs);
       const gone = await database
         .delete(workItems)
         .where(
           and(
             eq(workItems.kind, kind),
-            lt(workItems.finishedAt, fromNow(-olderThanMs)),
+            or(
+              lt(workItems.finishedAt, cutoff),
+              /*
+               * AND THE ONES THAT GAVE UP, which is the half this forgot.
+               *
+               * An item at its attempt cap is not finished, so it was reaped by nothing: `claim`
+               * skipped it, `purge` did not match it, and `offer` cannot replace a row that is still
+               * there. Its key was wedged for good. The culler keys on the Bot id, so five failed
+               * suspends meant that Bot never scaled to zero again, silently and for ever.
+               *
+               * Reaped on the same window rather than kept, because the window is also how long it
+               * waits before anything tries again: whatever was broken has had a day to be fixed,
+               * and the next sweep offers the work afresh. The audit trail is where "this failed"
+               * lives; this table is what still wants doing.
+               */
+              and(
+                gte(workItems.attempts, maxAttempts),
+                lt(workItems.updatedAt, cutoff),
+              ),
+            ),
           ),
         )
         .returning({ key: workItems.key });

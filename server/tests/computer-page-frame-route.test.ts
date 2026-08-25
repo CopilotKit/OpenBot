@@ -32,10 +32,16 @@ const asActor: MiddlewareHandler<{ Variables: AppVariables }> = async (
 };
 
 function harness(options?: {
-  screenshot?: () => Promise<{ base64: string }>;
+  screenshot?: () => Promise<{ base64: string; url?: string }>;
   navigate?: () => Promise<{ url: string; title: string }>;
+  status?: (botId: string) => Promise<{ botId: string; state: string }>;
 }) {
-  const saved: Array<{ computerId: string; url: string; frame: string }> = [];
+  const saved: Array<{
+    computerId: string;
+    toolCallId: string;
+    url: string;
+    frame: string;
+  }> = [];
   const gateway = {
     navigate:
       options?.navigate ??
@@ -46,22 +52,34 @@ function harness(options?: {
         truncated: false,
         elapsedMs: 1,
       })),
-    screenshot: options?.screenshot ?? (async () => ({ base64: "PNGBYTES" })),
+    status:
+      options?.status ??
+      (async (botId: string) => ({ botId, state: "ready" as const })),
+    screenshot:
+      options?.screenshot ??
+      (async () => ({ base64: "PNGBYTES", url: "https://example.com/story" })),
   } as unknown as ComputerGateway;
 
   const pageFrames: PageFrameStore = {
     async save(frame) {
       saved.push({
         computerId: frame.computerId,
+        toolCallId: frame.toolCallId,
         url: frame.url,
         frame: frame.frame,
       });
     },
-    async load(computerId, url) {
-      const found = saved.findLast(
-        (row) => row.computerId === computerId && row.url === url,
+    async load(computerId, toolCallId) {
+      const found = saved.find(
+        (row) => row.computerId === computerId && row.toolCallId === toolCallId,
       );
       return found ? { url: found.url, title: null, frame: found.frame } : null;
+    },
+    async clear() {
+      return saved.splice(0).length;
+    },
+    async purge() {
+      return 0;
     },
   };
 
@@ -75,11 +93,16 @@ function harness(options?: {
   return { routes, saved };
 }
 
-function navigate(routes: ReturnType<typeof harness>["routes"], url: string) {
+function navigate(
+  routes: ReturnType<typeof harness>["routes"],
+  url: string,
+  // `null` means "send no turn at all". `undefined` would take the default, which is the opposite.
+  toolCallId: string | null = "call-1",
+) {
   return routes.request("http://openbot.test/bot-9/navigate", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, ...(toolCallId ? { toolCallId } : {}) }),
   });
 }
 
@@ -94,6 +117,7 @@ describe("the frame a page was opened on", () => {
     expect(saved).toEqual([
       {
         computerId: "bot-9",
+        toolCallId: "call-1",
         url: "https://example.com/story",
         frame: "PNGBYTES",
       },
@@ -111,6 +135,10 @@ describe("the frame a page was opened on", () => {
         url: "https://www.example.com/story/",
         title: "A story",
       }),
+      screenshot: async () => ({
+        base64: "PNGBYTES",
+        url: "https://www.example.com/story/",
+      }),
     });
 
     await navigate(routes, "https://example.com/story");
@@ -123,7 +151,7 @@ describe("the frame a page was opened on", () => {
     await navigate(routes, "https://example.com/story");
 
     const response = await routes.request(
-      `http://openbot.test/bot-9/page-frame?url=${encodeURIComponent("https://example.com/story")}`,
+      "http://openbot.test/bot-9/page-frame/call-1",
     );
 
     expect(await response.json()).toEqual({
@@ -135,11 +163,11 @@ describe("the frame a page was opened on", () => {
     });
   });
 
-  test("a page nobody opened reads back as no frame", async () => {
+  test("a turn nobody photographed reads back as no frame", async () => {
     const { routes } = harness();
 
     const response = await routes.request(
-      "http://openbot.test/bot-9/page-frame?url=https%3A%2F%2Fnever.example",
+      "http://openbot.test/bot-9/page-frame/call-never",
     );
 
     expect(await response.json()).toEqual({ frame: null });
@@ -166,11 +194,65 @@ describe("the frame a page was opened on", () => {
   });
 
   /*
+   * The screenshot is a second round trip and nothing holds the browser still between them. With one
+   * computer shared by every Bot, another Bot's navigation lands in that gap, and this used to file
+   * its page under this turn.
+   */
+  test("a frame of a different page than the one opened is refused", async () => {
+    const { routes, saved } = harness({
+      screenshot: async () => ({
+        base64: "SOMEBODY-ELSES-PAGE",
+        url: "https://payroll.example/salaries",
+      }),
+    });
+
+    expect((await navigate(routes, "https://example.com/story")).status).toBe(
+      200,
+    );
+
+    expect(saved).toEqual([]);
+  });
+
+  /*
+   * A convenience picture must not wake a machine the culler has just put to sleep, nor hold a
+   * navigation open for the length of a pod schedule while it does.
+   */
+  test("a suspended computer is not resumed to photograph it", async () => {
+    let asked = false;
+    const { routes, saved } = harness({
+      status: async (botId: string) => ({ botId, state: "suspended" }),
+      screenshot: async () => {
+        asked = true;
+        return { base64: "PNGBYTES", url: "https://example.com/story" };
+      },
+    });
+
+    expect((await navigate(routes, "https://example.com/story")).status).toBe(
+      200,
+    );
+
+    expect(asked).toBe(false);
+    expect(saved).toEqual([]);
+  });
+
+  /* A caller that does not know which turn it is still navigates, and simply keeps no frame. */
+  test("a navigation with no turn named keeps no frame", async () => {
+    const { routes, saved } = harness();
+
+    expect(
+      (await navigate(routes, "https://example.com/story", null)).status,
+    ).toBe(200);
+
+    expect(saved).toEqual([]);
+  });
+
+  /*
    * The store is optional so a deployment can be wired without one. Navigation must not notice.
    */
   test("a deployment keeping no frames still navigates", async () => {
     const gateway = {
       navigate: async () => ({ url: "https://example.com/story", title: "T" }),
+      status: async (botId: string) => ({ botId, state: "ready" as const }),
       screenshot: async () => {
         throw new Error("should not be asked");
       },
@@ -187,7 +269,7 @@ describe("the frame a page was opened on", () => {
     );
     expect(
       await (
-        await routes.request("http://openbot.test/bot-9/page-frame?url=x")
+        await routes.request("http://openbot.test/bot-9/page-frame/call-1")
       ).json(),
     ).toEqual({ frame: null });
   });

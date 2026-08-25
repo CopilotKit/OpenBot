@@ -96,6 +96,9 @@ jobs:
       # unable to start were shipped and stayed shipped. Rendering is the cheap half; the refusals in
       # validation.yaml are the half that catches a missing value before a cluster does.
       - run: helm dependency build charts/openbot
+      # Structure only. `helm lint` reports a template `fail` as an INFO line and exits 0 even under
+      # `--strict`, which was driven and confirmed, so it cannot gate the refusals below. Rendering
+      # does: `helm template` exits non-zero on one.
       - run: helm lint charts/openbot --values charts/openbot/ci/${{ matrix.target }}-values.yaml
       # A key encryption key is a real 32 bytes rather than a placeholder, because the chart checks
       # its shape. Generated here so no example key is ever a literal in this repository.
@@ -111,6 +114,34 @@ jobs:
       # question: every secret key a container demands has to be one the chart actually writes.
       # Getting that wrong is invisible until a pod starts, and every shipped target had it wrong.
       - run: bun scripts/check-rendered-chart.ts rendered.yaml
+      # And that the refusals are load-bearing rather than decorative. A chart full of `fail`
+      # messages nothing ever triggers is a chart that has never been shown to refuse anything, and
+      # every one of these describes a state that shipped in a values file at some point.
+      - name: Refusals fire
+        run: |
+          set -uo pipefail
+          refuses() {
+            local why="$1"; shift
+            if helm template ci charts/openbot \
+                 --values charts/openbot/ci/${{ matrix.target }}-values.yaml \
+                 --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)" \
+                 --api-versions agents.x-k8s.io/v1beta1/Sandbox \
+                 --api-versions extensions.agents.x-k8s.io/v1beta1/SandboxTemplate \
+                 "$@" >/dev/null 2>&1; then
+              echo "::error::The chart rendered $why, which it is supposed to refuse."
+              return 1
+            fi
+            echo "refused: $why"
+          }
+          # The public example key, which the server will not start with.
+          refuses "the public example encryption key" \
+            --set-string secrets.keyEncryptionKey="$(head -c 32 /dev/zero | base64)"
+          # A Bot endpoint with nothing on the request that says who is calling.
+          refuses "a managed agent URL with no token" \
+            --set-string config.managedAgent.url=http://agent.default:8000/ag-ui
+          # A browser inside every replica of a replicated API.
+          refuses "an embedded browser across several replicas" \
+            --set server.embeddedComputer=true --set server.replicaCount=2
 
   test:
     name: tests

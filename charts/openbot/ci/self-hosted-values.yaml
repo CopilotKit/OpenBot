@@ -39,3 +39,10 @@ ingress:
 
 computers:
   mode: shared
+
+# On, so these render in CI at all. They were written, reviewed and shipped without a single target
+# producing one, which means nothing had ever checked they were valid YAML, let alone right. Off is
+# still the chart's default: a policy on a cluster whose CNI ignores it does nothing, and on one that
+# enforces it a wrong rule is an outage, so turning it on stays a deployment's decision.
+networkPolicy:
+  enabled: true

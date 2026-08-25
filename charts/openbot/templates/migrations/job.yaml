@@ -46,6 +46,15 @@ spec:
     metadata:
       labels:
 {{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
+        {{- if .Values.postgresql.enabled }}
+        {{- /*
+          The bundled database admits pods carrying this label and nothing else, which this chart pins on.
+          Anything that opens the database needs it, and only the API server had it: this would have been
+          refused on any cluster that actually enforces a NetworkPolicy. Not caught by hand, because the
+          cluster it was driven on ships enforcement switched off.
+        */}}
+        {{ .Release.Name }}-postgresql-client: "true"
+        {{- end }}
     spec:
       restartPolicy: Never
       {{- /*

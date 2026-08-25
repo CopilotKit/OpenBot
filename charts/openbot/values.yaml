@@ -282,7 +282,11 @@ postgresql:
     password: ""
     existingSecret: ""
   image:
+    # Bitnami moved its unsupported images to this frozen mirror. Nothing new lands here, so the tag
+    # is named rather than inherited from the subchart: with it inherited, bumping the subchart
+    # silently asks for an image the mirror does not have, and the chart still renders perfectly.
     repository: bitnamilegacy/postgresql
+    tag: 17.6.0-debian-12-r4
   primary:
     # PINNED, BECAUSE THE SHIPPED DEFAULT ADMITS EVERYTHING.
     #

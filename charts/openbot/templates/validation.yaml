@@ -20,7 +20,7 @@ This template renders nothing.
   failure arrives on the second deploy, which is the worst time to find it.
 */}}
 {{- if and .Values.postgresql.enabled (not .Values.postgresql.auth.password) (not .Values.postgresql.auth.existingSecret) }}
-{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made. Generate one with: openssl rand -base64 24" }}
+{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made. Generate one with: openssl rand -hex 24" }}
 {{- end }}
 
 {{- if and .Values.postgresql.enabled (or .Values.database.url .Values.database.existingSecret) }}
