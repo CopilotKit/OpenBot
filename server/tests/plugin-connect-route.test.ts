@@ -3,7 +3,10 @@ import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../src/auth/guards";
 import { createPluginRoutes } from "../src/plugins/routes";
-import type { OAuthClient } from "../src/plugins/store";
+import {
+  CatalogueEntryUnknownError,
+  type OAuthClient,
+} from "../src/plugins/store";
 
 /**
  * `POST /servers/:id/connect`, for a dynamically registered vendor.
@@ -120,5 +123,36 @@ describe("connecting a manually registered vendor (regression pin)", () => {
     expect(ensureCalls).toEqual([]);
     const body = (await response.json()) as { error: string };
     expect(body.error).toContain("no OAuth client registered");
+  });
+});
+
+/**
+ * Connecting a catalogue vendor that nobody has added to this deployment.
+ *
+ * The entry exists, so the handler gets past every check it makes about the vendor, and then asks the
+ * store for a client — which cannot answer, because there is no server row to hold one. That is an
+ * administrator's missing step and the person pressing Connect can do nothing about it, so it is the
+ * same 409 as a vendor whose client an administrator has not pasted in yet. It used to be a 500: an
+ * unhandled `CatalogueEntryUnknownError` out of `ensureOAuthClient`.
+ */
+describe("connecting a vendor this deployment has not added", () => {
+  test("is the 409 an administrator can act on, not a 500", async () => {
+    const hono = app({
+      oauthClientFor: async () => null,
+      ensureOAuthClient: async (serverId) => {
+        throw new CatalogueEntryUnknownError(serverId);
+      },
+    });
+
+    const response = await hono.request(
+      "http://t/api/plugins/servers/notion/connect",
+      { method: "POST" },
+    );
+
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe(
+      "Notion has not been added to this deployment yet. An administrator has to add it first.",
+    );
   });
 });

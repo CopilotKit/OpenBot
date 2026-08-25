@@ -17,6 +17,7 @@ import {
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
+  type OAuthClient,
   PluginRefusedError,
   type PluginStore,
 } from "./store";
@@ -353,11 +354,34 @@ export function createPluginRoutes(
      * for an administrator. Registration lives here, on the one handler that already refuses
      * without OPENBOT_PUBLIC_URL — the redirect URI it registers is guaranteed to exist.
      */
-    const client =
-      (await store.oauthClientFor(serverId)) ??
-      (entry.auth.clientRegistration === "dynamic"
-        ? await store.ensureOAuthClient(serverId, actorEmail(context))
-        : null);
+    /*
+     * A vendor in the catalogue that nobody has added to this deployment reaches here, gets past
+     * every check above — the entry is real — and then asks the store for a client it cannot have,
+     * because there is no server row to hold one. `ensureOAuthClient` says so by throwing, and
+     * unhandled that was a 500 on the one path where a person is trying to connect their account.
+     *
+     * The same 409 as a vendor whose client an administrator has not pasted in yet, because it is
+     * the same situation: the person pressing Connect has no step to take, and an administrator has
+     * one. The sentence names the step rather than the exception.
+     */
+    let client: OAuthClient | null;
+    try {
+      client =
+        (await store.oauthClientFor(serverId)) ??
+        (entry.auth.clientRegistration === "dynamic"
+          ? await store.ensureOAuthClient(serverId, actorEmail(context))
+          : null);
+    } catch (error) {
+      if (error instanceof CatalogueEntryUnknownError) {
+        return context.json(
+          {
+            error: `${entry.title} has not been added to this deployment yet. An administrator has to add it first.`,
+          },
+          409,
+        );
+      }
+      throw error;
+    }
     if (!client) {
       if (entry.auth.clientRegistration === "dynamic") {
         return context.json(

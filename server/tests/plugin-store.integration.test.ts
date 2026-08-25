@@ -1325,8 +1325,20 @@ describe("a dynamic client the vendor has evicted", () => {
   const realVault = createCredentialStore(database);
   const vault = {
     ...realVault,
-    create: async (value: Parameters<typeof realVault.create>[0]) => {
-      const row = await realVault.create(value);
+    /*
+     * The executor is FORWARDED, and dropping it is not a detail.
+     *
+     * The store hands its own transaction to the vault so that a secret and the pointer that names it
+     * commit together. A wrapper that swallows it has the insert run on a second pooled connection
+     * instead — which, with the caller holding the first and a sibling holding the second, is not a
+     * slower write but a deadlock: the insert waits for a connection only a transaction that is
+     * waiting for the insert can release.
+     */
+    create: async (
+      value: Parameters<typeof realVault.create>[0],
+      executor?: Parameters<typeof realVault.create>[1],
+    ) => {
+      const row = await realVault.create(value, executor);
       vaultRows.push(row.id);
       return row;
     },
@@ -1909,6 +1921,118 @@ describe("a dynamic client the vendor has evicted", () => {
       ),
     ).toBeNull();
     expect(registrations).toEqual([]);
+  });
+
+  /**
+   * Two people pressing Connect at the same moment, on a deployment holding no client yet.
+   *
+   * `POST /connect` is `requireUser`, not `requireAdmin`, so this is not a rare interleaving — it is
+   * the ordinary first hour of a connector nobody has used. Unserialised, the two runs read "no live
+   * client" and then both write one: the second `create` meets the first on
+   * `credentials_active_key_idx` as a raw 23505, which reaches the person as a 500 where a consent
+   * URL belonged, and a `rotate` racing the same way fails with "Previous credential is already
+   * revoked" instead.
+   *
+   * One client, not two, and that part is not only about the error. Two clients means one of the two
+   * consent screens names a client the vault no longer holds, so that person consents and their
+   * callback then redeems the code against the other client — a connect that fails after the vendor
+   * said yes, which is the hardest possible place to fail.
+   */
+  test("two first connects race to one client, and both callers get it", async () => {
+    await clearClient();
+    // No live row for the key either, so this really is a deployment holding nothing: `clearClient`
+    // only drops the pointer, and it is the KEY the index constrains.
+    await database
+      .update(credentials)
+      .set({ revokedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(credentials.kind, "mcp_oauth_client"),
+          eq(credentials.provider, dynamicServerId),
+          eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
+          sql`${credentials.revokedAt} IS NULL`,
+        ),
+      );
+    registrations.length = 0;
+    // A distinct client per registration, so two registrations cannot be mistaken for one.
+    let issued = 0;
+    issue = () => {
+      issued += 1;
+      return { clientId: `dyn-race-${issued}`, clientSecret: "" };
+    };
+
+    const [first, second] = await Promise.all([
+      dynamicStore.ensureOAuthClient(dynamicServerId, "one@openbot.test"),
+      dynamicStore.ensureOAuthClient(dynamicServerId, "two@openbot.test"),
+    ]);
+
+    // Neither raised, and neither got null: both people can be sent to consent.
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    // The same client, so both consent screens name the client the deployment actually holds.
+    expect(first).toEqual(second);
+    expect(registrations.length).toBe(1);
+
+    /*
+     * One live row for the key, and the server row naming exactly it.
+     *
+     * The pair is the assertion, not either half: the vault write and the pointer write are one
+     * transaction now, so a reader can never see a live client the server row does not name, nor a
+     * server row naming a client the vault retired.
+     */
+    const live = await database
+      .select({ id: credentials.id })
+      .from(credentials)
+      .where(
+        and(
+          eq(credentials.kind, "mcp_oauth_client"),
+          eq(credentials.provider, dynamicServerId),
+          eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
+          sql`${credentials.revokedAt} IS NULL`,
+        ),
+      );
+    expect(live.length).toBe(1);
+    const [server] = await database
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, dynamicServerId));
+    expect(server?.credentialId).toBe(live[0]?.id);
+  });
+
+  /**
+   * The vault row and the pointer that names it commit together, or neither does.
+   *
+   * They were two transactions, so a failure between them left `mcp_user_credentials` naming a
+   * credential that had just been revoked — a connection that reads as live on the settings page and
+   * refuses every call. The pointer write is the one that can fail on its own: `user_id` is a real
+   * foreign key, so a person who is no longer in `users` is a genuine 23503 at exactly that
+   * statement, which is the injection this test uses rather than a spy.
+   */
+  test("a pointer write that fails leaves no live grant behind", async () => {
+    const ghost = `user_ghost_${suite}`;
+
+    await expect(
+      dynamicStore.recordConnection({
+        serverId: dynamicServerId,
+        userId: ghost,
+        refreshToken: "rt-ghost",
+        scope: SCOPE,
+      }),
+    ).rejects.toThrow();
+
+    // Nothing in the vault, live or otherwise: the insert that minted it was rolled back with the
+    // pointer write that failed. Asked of the key, because that is what a later connect collides on.
+    const rows = await database
+      .select({ id: credentials.id })
+      .from(credentials)
+      .where(
+        and(
+          eq(credentials.kind, "mcp_user_token"),
+          eq(credentials.provider, dynamicServerId),
+          eq(credentials.keyId, ghost),
+        ),
+      );
+    expect(rows).toEqual([]);
   });
 });
 

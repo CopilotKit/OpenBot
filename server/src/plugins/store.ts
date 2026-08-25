@@ -219,6 +219,16 @@ export class TokenRefusedError extends McpServerError {
 export const INVALID_CLIENT = "invalid_client";
 
 /**
+ * A transaction, as the writes in this module hand one to each other.
+ *
+ * Named because two writes here are one decision — a secret in the vault, and the pointer that says
+ * what it is for — and the only way to say that is to run both on the same executor. `select`,
+ * `insert` and `update` alone would do for {@link CredentialExecutor}; this needs `execute` too, for
+ * the advisory lock that serialises the client path.
+ */
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
  * A tool name the model can actually call.
  *
  * `<server>/<tool>` is how a grant is stored, because a slash reads correctly to a person and cannot
@@ -1010,6 +1020,13 @@ export function createPluginStore(options: PluginStoreOptions) {
    *
    * Says whether it replaced something, which is the one fact the caller writing the trail needs
    * and cannot recover afterwards.
+   *
+   * ONE TRANSACTION, because these are two writes and one decision. The secret goes into the vault
+   * and the connection row is pointed at it; separately, a failure between them leaves the pointer
+   * naming the credential the rotation had just revoked — a connection that reads as live on the
+   * settings page and refuses every call, with the person's actual grant retired and no way back to
+   * it. `credentials.rotate` and `credentials.create` already accept the caller's executor for
+   * exactly this, and the pointer write runs on the same one.
    */
   async function swapUserCredential(input: {
     serverId: string;
@@ -1022,40 +1039,48 @@ export function createPluginStore(options: PluginStoreOptions) {
       provider: input.serverId,
       keyId: input.userId,
     };
-    /*
-     * `credentials_active_key_idx` holds one live credential per key, so a second insert for the
-     * same person and server would be refused. Asked of the key rather than of the connection row,
-     * because the row can name a credential that has already been revoked while the key itself is
-     * free, and it is the key the index constrains.
-     */
-    const live = await credentials.findLiveByKey(key);
     const value = {
       ...key,
       metadata: { server: input.serverId, scope: input.scope },
+      // Encrypted before the transaction opens: it is arithmetic, and it has no business happening
+      // while a pooled connection is held open behind row locks.
       encryptedValue: await encryptSecret(encryptionKey, input.refreshToken),
     };
-    const stored = live
-      ? await credentials.rotate({ ...value, previousCredentialId: live.id })
-      : await credentials.create(value);
 
-    await database
-      .insert(mcpUserCredentials)
-      .values({
-        serverId: input.serverId,
-        userId: input.userId,
-        credentialId: stored.id,
-        scope: input.scope,
-      })
-      .onConflictDoUpdate({
-        target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
-        set: {
+    return await database.transaction(async (transaction) => {
+      /*
+       * `credentials_active_key_idx` holds one live credential per key, so a second insert for the
+       * same person and server would be refused. Asked of the key rather than of the connection row,
+       * because the row can name a credential that has already been revoked while the key itself is
+       * free, and it is the key the index constrains.
+       */
+      const live = await credentials.findLiveByKey(key, transaction);
+      const stored = live
+        ? await credentials.rotate(
+            { ...value, previousCredentialId: live.id },
+            transaction,
+          )
+        : await credentials.create(value, transaction);
+
+      await transaction
+        .insert(mcpUserCredentials)
+        .values({
+          serverId: input.serverId,
+          userId: input.userId,
           credentialId: stored.id,
           scope: input.scope,
-          updatedAt: new Date(),
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: [mcpUserCredentials.serverId, mcpUserCredentials.userId],
+          set: {
+            credentialId: stored.id,
+            scope: input.scope,
+            updatedAt: new Date(),
+          },
+        });
 
-    return { replaced: live !== null };
+      return { replaced: live !== null };
+    });
   }
 
   /**
@@ -1096,37 +1121,100 @@ export function createPluginStore(options: PluginStoreOptions) {
     );
   }
 
-  /**
-   * Store the deployment's OAuth client for a `user-oauth` server, whoever obtained it.
-   *
-   * Both halves go into one encrypted value, so a single vault read yields a usable client. The id is
-   * copied into `metadata` as well — it is not a secret, and a page listing what the deployment holds
-   * should be able to name it without decrypting anything.
-   *
-   * Replacing a client revokes the previous one rather than orphaning it, so "what does this
-   * deployment hold" keeps having one answer per server. Nobody's connection breaks: a refresh token
-   * is the person's, and it is the client that is being rotated underneath it.
-   *
-   * Shared by an administrator pasting one in and by the deployment registering its own, so `by` is
-   * the only difference between the two in the trail — which is the honest one.
-   */
-  async function persistOAuthClient(input: {
-    serverId: string;
-    client: OAuthClient;
-    by: string;
-  }): Promise<void> {
-    const { row, entry } = await requireServer(input.serverId);
-    if (entry?.auth.kind !== "user-oauth") {
-      throw new CustomServerRefusedError(
-        `${input.serverId} is not reached with an OAuth client.`,
-      );
-    }
+  /** The one vault key a server's OAuth client is ever stored under. */
+  const oauthClientKey = (serverId: string) => ({
+    kind: "mcp_oauth_client" as const,
+    provider: serverId,
+    keyId: `oauth-client-${serverId}`,
+  });
 
-    const key = {
-      kind: "mcp_oauth_client" as const,
-      provider: input.serverId,
-      keyId: `oauth-client-${input.serverId}`,
-    };
+  /**
+   * One writer at a time for one server's OAuth client, across the whole deployment.
+   *
+   * Everything that stores a client reads "is there a live one" and then writes accordingly, and the
+   * gap between those two used to be unserialised. `POST /connect` is `requireUser`, so two people
+   * pressing Connect on a fresh connector is not a rare interleaving: both read no live client, and
+   * then the second `create` meets the first on `credentials_active_key_idx` as a raw 23505 — a 500
+   * where a consent URL belonged — or, when there was a client to replace, the second `rotate` finds
+   * its own predecessor already revoked and says so.
+   *
+   * An ADVISORY lock rather than a row lock, because the thing being protected is the ABSENCE of a
+   * row as much as a row: there is nothing to lock `FOR UPDATE` on a first registration. Held for
+   * the transaction, so it is released by the commit or the rollback and never by us forgetting.
+   *
+   * `hashtext` collisions are harmless here. Two servers sharing a hash would take turns registering
+   * clients, which is slower and not wrong.
+   */
+  async function withOAuthClientLock<T>(
+    serverId: string,
+    work: (transaction: Transaction) => Promise<T>,
+  ): Promise<T> {
+    return await database.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`oauth-client-${serverId}`}))`,
+      );
+      return await work(transaction);
+    });
+  }
+
+  /**
+   * {@link storedOAuthClient}'s question, asked on the caller's own transaction.
+   *
+   * The same question deliberately — the server row's pointer, and the row it names being live —
+   * because the callback redeems against `oauthClientFor`, which reads exactly that. A read that
+   * accepted a live client the server row does NOT name would hand somebody a consent screen for a
+   * client the callback then cannot find, and the connect would fail after the vendor said yes.
+   *
+   * On the transaction rather than through `storedOAuthClient` because the caller is inside
+   * {@link withOAuthClientLock} and holding a pooled connection: a read on a second connection would
+   * be a session queueing behind sessions that cannot finish until it returns.
+   */
+  async function heldOAuthClient(
+    transaction: Transaction,
+    serverId: string,
+  ): Promise<OAuthClient | null> {
+    const [server] = await transaction
+      .select({ credentialId: mcpServers.credentialId })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, serverId))
+      .limit(1);
+    if (!server?.credentialId) return null;
+
+    const [held] = await transaction
+      .select({
+        encryptedValue: credentialRows.encryptedValue,
+        revokedAt: credentialRows.revokedAt,
+      })
+      .from(credentialRows)
+      .where(eq(credentialRows.id, server.credentialId))
+      .limit(1);
+    if (!held || held.revokedAt) return null;
+
+    try {
+      return JSON.parse(
+        await decryptSecret(encryptionKey, held.encryptedValue),
+      ) as OAuthClient;
+    } catch {
+      // Unreadable is the same as none: there is nothing to send anybody to consent with.
+      return null;
+    }
+  }
+
+  /**
+   * The two writes that store a client, on one transaction: the vault row, and the pointer to it.
+   *
+   * One transaction because they are one decision. Separately, a failure between them leaves
+   * `mcp_servers.credential_id` naming the credential the rotation had just revoked — a connector
+   * that looks configured on every screen and cannot complete a consent flow.
+   *
+   * The caller is expected to hold {@link withOAuthClientLock}, which is what makes the read below
+   * safe to act on.
+   */
+  async function writeOAuthClient(
+    input: { serverId: string; client: OAuthClient },
+    transaction: Transaction,
+  ): Promise<{ replaced: boolean }> {
+    const key = oauthClientKey(input.serverId);
     const value = {
       ...key,
       metadata: { server: input.serverId, clientId: input.client.clientId },
@@ -1136,25 +1224,35 @@ export function createPluginStore(options: PluginStoreOptions) {
       ),
     };
 
-    /*
-     * Re-registering a client replaces the one before it, in one transaction.
-     *
-     * A key holds at most one live credential, so inserting a second for this server would be
-     * refused by `credentials_active_key_idx` rather than leaving the orphan it used to leave.
-     * The question is asked of the key and not of `row.credentialId`, because the server row keeps
-     * naming a credential an administrator has revoked from the Credentials page: the pointer can
-     * be stale where the key is not, and it is the key the index constrains.
-     */
-    const live = await credentials.findLiveByKey(key);
+    const live = await credentials.findLiveByKey(key, transaction);
     const stored = live
-      ? await credentials.rotate({ ...value, previousCredentialId: live.id })
-      : await credentials.create(value);
+      ? await credentials.rotate(
+          { ...value, previousCredentialId: live.id },
+          transaction,
+        )
+      : await credentials.create(value, transaction);
 
-    await database
+    await transaction
       .update(mcpServers)
       .set({ credentialId: stored.id, updatedAt: new Date() })
       .where(eq(mcpServers.id, input.serverId));
 
+    return { replaced: live !== null };
+  }
+
+  /**
+   * The trail row for a client this deployment now holds.
+   *
+   * Written AFTER the transaction that stored it, not inside. The audit store has its own handle on
+   * the database, so writing from inside would open a second pooled connection while the first is
+   * held — the shape the pool note in `db/client.ts` warns about, and the one that turns a busy
+   * deployment into a hang. A trail row lost to a crash in that window is a worse trade than a
+   * deadlock, but only just, and this way round the client is at least the thing that is certain.
+   */
+  async function recordClientRegistered(
+    input: { serverId: string; client: OAuthClient; by: string },
+    replaced: boolean,
+  ): Promise<void> {
     await recordAuditEvent(auditStore, {
       eventType: "mcp.oauth_client_registered",
       targetType: "mcp_server",
@@ -1165,9 +1263,49 @@ export function createPluginStore(options: PluginStoreOptions) {
         // The id, never the secret. It identifies the client that was registered, which is what
         // somebody reading the trail needs in order to check it against the vendor's console.
         clientId: input.client.clientId,
-        replaced: row.credentialId !== null,
+        replaced,
       },
     });
+  }
+
+  /**
+   * Store the deployment's OAuth client for a `user-oauth` server, whoever obtained it.
+   *
+   * Both halves go into one encrypted value, so a single vault read yields a usable client. The id is
+   * copied into `metadata` as well — it is not a secret, and a page listing what the deployment holds
+   * should be able to name it without decrypting anything.
+   *
+   * Replacing a client revokes the previous one rather than orphaning it, so "what does this
+   * deployment hold" keeps having one answer per server. Nobody's connection breaks in the sense that
+   * matters here — a refresh token is the person's — but nobody's connection SURVIVES either: a grant
+   * belongs to the client it was issued to, so replacing the client is asking everybody to connect
+   * again. That is why the two callers that replace one both say so to whoever is listening.
+   *
+   * Shared by an administrator pasting one in and by the deployment registering its own, so `by` is
+   * the only difference between the two in the trail — which is the honest one.
+   */
+  async function persistOAuthClient(input: {
+    serverId: string;
+    client: OAuthClient;
+    by: string;
+  }): Promise<void> {
+    const { entry } = await requireServer(input.serverId);
+    if (entry?.auth.kind !== "user-oauth") {
+      throw new CustomServerRefusedError(
+        `${input.serverId} is not reached with an OAuth client.`,
+      );
+    }
+
+    const { replaced } = await withOAuthClientLock(
+      input.serverId,
+      (transaction) =>
+        writeOAuthClient(
+          { serverId: input.serverId, client: input.client },
+          transaction,
+        ),
+    );
+
+    await recordClientRegistered(input, replaced);
   }
 
   /**
@@ -2001,6 +2139,17 @@ export function createPluginStore(options: PluginStoreOptions) {
      * public URL to be sent back to, the answer stays null: inventing a client at a vendor that
      * never offered to issue one, or registering a redirect URI that resolves to nothing, would
      * both leave behind a client that can never complete a consent flow.
+     *
+     * ONE CLIENT PER DEPLOYMENT EVEN WHEN TWO PEOPLE ASK AT ONCE. This is `requireUser`'s handler, so
+     * two first connects racing is the ordinary first hour of a connector. Registering twice is not
+     * merely wasteful: the loser's consent screen names a client the vault no longer holds, so that
+     * person consents and their callback then redeems the code against the client that replaced it —
+     * a connect that fails after the vendor already said yes. So the registration happens under
+     * {@link withOAuthClientLock}, with the "do we hold one" question asked AGAIN inside it, and the
+     * second caller finds the first one's client and is handed the same one.
+     *
+     * The lock is held across the registration request to the vendor, deliberately. It is one round
+     * trip with its own timeout, and a lock released before it would serialise nothing.
      */
     async ensureOAuthClient(
       serverId: string,
@@ -2018,15 +2167,45 @@ export function createPluginStore(options: PluginStoreOptions) {
       ) {
         return null;
       }
+      // Held before the lock, because narrowing does not survive into the closure below.
+      const { registrationUrl } = entry.auth;
+      const { redirectUri } = options;
 
-      const registered = await registerClient({
-        registrationUrl: entry.auth.registrationUrl,
-        redirectUri: options.redirectUri,
-      });
-      if (!registered) return null;
+      const outcome = await withOAuthClientLock(
+        serverId,
+        async (transaction) => {
+          /*
+           * Asked again, under the lock. The read above was a fast path taken without one, and by now
+           * the caller we were racing has committed a client of its own — which is the one this
+           * deployment holds, so it is the one to consent against.
+           */
+          const held = await heldOAuthClient(transaction, serverId);
+          if (held) return { client: held, registered: false, replaced: false };
 
-      await persistOAuthClient({ serverId, client: registered, by });
-      return registered;
+          const registered = await registerClient({
+            registrationUrl,
+            redirectUri,
+          });
+          if (!registered) return null;
+
+          const { replaced } = await writeOAuthClient(
+            { serverId, client: registered },
+            transaction,
+          );
+          return { client: registered, registered: true, replaced };
+        },
+      );
+
+      if (!outcome) return null;
+      // Only what this call actually did. A trail row for handing back somebody else's client would
+      // claim a registration that never happened.
+      if (outcome.registered) {
+        await recordClientRegistered(
+          { serverId, client: outcome.client, by },
+          outcome.replaced,
+        );
+      }
+      return outcome.client;
     },
 
     /**
