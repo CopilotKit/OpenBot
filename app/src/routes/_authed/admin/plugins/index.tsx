@@ -1,5 +1,6 @@
 import {
   IconBrandGoogleDrive,
+  IconBrandNotion,
   IconChevronRight,
   IconPlug,
 } from "@tabler/icons-react";
@@ -54,6 +55,7 @@ export const Route = createFileRoute("/_authed/admin/plugins/")({
  */
 const MARKS: Record<string, React.ComponentType<{ className?: string }>> = {
   "google-drive": IconBrandGoogleDrive,
+  notion: IconBrandNotion,
 };
 
 const markFor = (key: string) => MARKS[key] ?? IconPlug;

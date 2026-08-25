@@ -22,9 +22,9 @@ import type { ComponentProps } from "react";
  * a connector that answers from a live system. It also survives the model's phrasing: whether it
  * writes "I found it in X" or lists three files, each one is drawn the same way.
  *
- * Recognition is by URL, and only Google's own document hosts. Anything else is an ordinary link,
- * because a chip asserts "this is a file in a system you have connected" and that is not something
- * to claim about a URL a model wrote.
+ * Recognition is by URL, and only document hosts this deployment knows about. Anything else is an
+ * ordinary link, because a chip asserts "this is a file in a system you have connected" and that
+ * is not something to claim about a URL a model wrote.
  */
 const DRIVE_KINDS = [
   { match: "/document/", icon: IconFileText, label: "Doc" },
@@ -32,14 +32,14 @@ const DRIVE_KINDS = [
   { match: "/presentation/", icon: IconPresentation, label: "Slides" },
 ] as const;
 
-function driveKind(href: string | undefined) {
+export function documentChipKind(href: string | undefined) {
   if (!href) return null;
 
   let url: URL;
   try {
     url = new URL(href);
   } catch {
-    // A relative or malformed href is not a Drive document, and is not worth throwing over.
+    // A relative or malformed href is not a recognised document, and is not worth throwing over.
     return null;
   }
 
@@ -59,12 +59,19 @@ function driveKind(href: string | undefined) {
   if (url.hostname === "drive.google.com") {
     return { match: "", icon: IconFile, label: "Drive" };
   }
+  /*
+   * Same exact-host rule as Drive: a chip asserts "this is a document in a system you have
+   * connected", and notion.so.evil.test is somebody else's domain wearing the name.
+   */
+  if (url.hostname === "notion.so" || url.hostname === "www.notion.so") {
+    return { match: "", icon: IconFileText, label: "Notion" };
+  }
   return null;
 }
 
 export const markdownComponents = {
   a: ({ href, children, ...rest }: ComponentProps<"a">) => {
-    const kind = driveKind(href);
+    const kind = documentChipKind(href);
 
     if (kind) {
       const Icon = kind.icon;

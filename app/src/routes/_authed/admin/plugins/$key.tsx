@@ -251,10 +251,15 @@ function RouteComponent() {
           title="Connection"
         >
           {/*
-           * Rows that DO something, and nothing else. The layout skill's third row kind — a value
-           * with no chevron and nothing to click — earns its place on a screen full of them, but
-           * among four actionable rows a dead one reads as a control that has stopped working. The
-           * redirect URI is prose under the card instead.
+           * Rows that DO something, and nothing else — with one admitted exception. The layout
+           * skill's third row kind — a value with no chevron and nothing to click — earns its
+           * place on a screen full of them, but among four actionable rows a dead one reads as a
+           * control that has stopped working. The redirect URI is prose under the card instead.
+           *
+           * The exception is the OAuth client row for a vendor with a dynamic client: there is a
+           * real fact to state — this deployment registers itself, nobody configures it — right
+           * where the actionable client row would otherwise sit. Leaving that slot empty would
+           * read as a missing setup step, not as nothing to do.
            */}
           <PageRows>
             {auth === "deployment-bearer" ? (
@@ -279,7 +284,29 @@ function RouteComponent() {
               </Item>
             ) : null}
 
-            {auth === "user-oauth" ? (
+            {auth === "user-oauth" && server?.dynamicClient ? (
+              /*
+               * Nothing to click. This deployment registers its own OAuth client with the
+               * vendor (RFC 7591) the first time anybody connects, so there is no client id
+               * or secret for an administrator to hold, let alone paste.
+               */
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>OAuth client</ItemTitle>
+                  <ItemDescription>
+                    This deployment registers itself with the vendor on first
+                    connect. There is nothing to paste.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    Self-registered
+                  </span>
+                </ItemActions>
+              </Item>
+            ) : null}
+
+            {auth === "user-oauth" && !server?.dynamicClient ? (
               <Item
                 render={
                   <button onClick={() => setDialog("client")} type="button" />
@@ -314,10 +341,13 @@ function RouteComponent() {
              * It is NOT part of setup. The connector is fully configured without it, which is why it
              * sits below the client and says so rather than reading as the next required step.
              *
-             * Shown only once a client exists, because there is nothing to consent against before
-             * that: a Connect button with no OAuth client behind it can only fail.
+             * Shown once a client exists, because there is nothing to consent against before
+             * that: a Connect button with no OAuth client behind it can only fail. A vendor with a
+             * dynamic client is the exception — there is no client to register in advance, so
+             * Connect is shown right away and is itself what creates one.
              */}
-            {auth === "user-oauth" && server?.hasCredential ? (
+            {auth === "user-oauth" &&
+            (server?.hasCredential || server?.dynamicClient) ? (
               <>
                 <Separator />
                 <Item size="sm">
@@ -325,7 +355,7 @@ function RouteComponent() {
                     <ItemTitle>Your account</ItemTitle>
                     <ItemDescription>
                       {youConnected
-                        ? "Connected, so a Bot granted these tools reads your Drive as you. Everybody else connects their own."
+                        ? `Connected, so a Bot granted these tools uses your ${title} as you. Everybody else connects their own.`
                         : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
                     </ItemDescription>
                   </ItemContent>
@@ -416,21 +446,28 @@ function RouteComponent() {
 
           {auth === "user-oauth" ? (
             <div className="mt-3 p-3">
-              <p className="text-muted-foreground text-sm">
-                Add this to the client's authorised redirect URIs at the vendor,
-                exactly as written. A single wrong character fails there, with a
-                message that does not mention OpenBot.
-              </p>
-              {plugins.data?.redirectUri ? (
-                /* Selectable and monospaced: it is copied by hand into somebody else's console. */
-                <code className="mt-3 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
-                  {plugins.data.redirectUri}
-                </code>
+              {server?.dynamicClient ? (
+                <p className="text-muted-foreground text-sm">
+                  The deployment registers its redirect URI itself, so there is
+                  nothing to add at the vendor.
+                </p>
               ) : (
+                <p className="text-muted-foreground text-sm">
+                  Add this to the client's authorised redirect URIs at the
+                  vendor, exactly as written. A single wrong character fails
+                  there, with a message that does not mention OpenBot.
+                </p>
+              )}
+              {!plugins.data?.redirectUri ? (
                 <p className="mt-3 text-destructive text-sm" role="alert">
                   This deployment has no public URL, so nobody can complete a
                   consent flow. Set OPENBOT_PUBLIC_URL.
                 </p>
+              ) : server?.dynamicClient ? null : (
+                /* Selectable and monospaced: it is copied by hand into somebody else's console. */
+                <code className="mt-3 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {plugins.data.redirectUri}
+                </code>
               )}
             </div>
           ) : null}
