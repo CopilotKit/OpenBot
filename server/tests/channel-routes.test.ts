@@ -1115,6 +1115,78 @@ describe("channel pinning", () => {
   });
 });
 
+describe("channel read markers", () => {
+  // Two members of one channel, which is what a per-member marker has to be tested against.
+  async function sharedChannel() {
+    const reader = await createPersistentUser();
+    const other = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Shared readable agent",
+      owner: reader,
+      visibility: "public",
+    });
+    const created = await persistentStore.create(reader, [agentId]);
+    createdChannelIds.push(created.id);
+    // The store only creates the creator's membership; give the other user one directly,
+    // plus the thread mapping the list join requires.
+    await database.insert(channelMemberships).values({
+      channelId: created.id,
+      userId: other.id,
+    });
+    await database.insert(intelligenceChannelMappings).values({
+      userId: other.id,
+      channelId: created.id,
+      // thread_id is globally unique; the reader's own mapping row already claimed
+      // created.threadId, so the other member's row needs one of its own.
+      threadId: randomUUID(),
+    });
+    return { reader, other, channelId: created.id };
+  }
+
+  test("stamps last_read_at on the caller's own membership only", async () => {
+    const { reader, other, channelId } = await sharedChannel();
+
+    await persistentStore.markRead(reader, channelId);
+
+    const rows = await database
+      .select({
+        userId: channelMemberships.userId,
+        lastReadAt: channelMemberships.lastReadAt,
+      })
+      .from(channelMemberships)
+      .where(eq(channelMemberships.channelId, channelId));
+    expect(
+      rows.find((row) => row.userId === reader.id)?.lastReadAt,
+    ).not.toBeNull();
+    expect(rows.find((row) => row.userId === other.id)?.lastReadAt).toBeNull();
+  });
+
+  test("the list carries the caller's lastReadAt and nobody else's", async () => {
+    const { reader, other, channelId } = await sharedChannel();
+
+    await persistentStore.markRead(reader, channelId);
+
+    const forReader = await persistentStore.list(reader);
+    const forOther = await persistentStore.list(other);
+    expect(
+      forReader.channels.find((channel) => channel.id === channelId)
+        ?.lastReadAt,
+    ).not.toBeNull();
+    expect(
+      forOther.channels.find((channel) => channel.id === channelId)?.lastReadAt,
+    ).toBeNull();
+  });
+
+  test("refuses to mark read a channel the caller is not a member of", async () => {
+    const { channelId } = await sharedChannel();
+    const outsider = await createPersistentUser();
+
+    await expect(
+      persistentStore.markRead(outsider, channelId),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+});
+
 describe("channel soft delete", () => {
   test("hides a deleted channel from list and get", async () => {
     const actor = await createPersistentUser();

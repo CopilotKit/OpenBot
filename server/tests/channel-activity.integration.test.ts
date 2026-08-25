@@ -228,6 +228,7 @@ describe("channel activity", () => {
         lastMessageAt: at,
         createdAt: expect.any(Date),
         pinned: false,
+        lastReadAt: null,
       },
     ]);
   });
