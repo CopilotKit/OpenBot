@@ -267,6 +267,12 @@ export const channels = pgTable(
         onDelete: "set null",
       },
     ),
+    /**
+     * When this channel was deleted, or null. Soft: the row, the transcript, and the Intelligence
+     * thread stay intact, and every read path filters on this instead. Channel grain, because
+     * deleting is for everyone — per-member hiding would be a membership fact instead.
+     */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -297,6 +303,11 @@ export const channelMemberships = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * When this member pinned the channel, or null. On the membership, not the channel: a pin is
+     * one person's marker, and the membership row is already the per-member half of a channel.
+     */
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [primaryKey({ columns: [table.channelId, table.userId] })],

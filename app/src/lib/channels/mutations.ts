@@ -50,3 +50,35 @@ export function recordChannelActivityMutationOptions() {
     },
   });
 }
+
+/** Pin or unpin a channel for this member. A marker, not a reorder, so no optimistic sort. */
+export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: { channelId: string; pinned: boolean }) => {
+      await client(`/api/channels/${variables.channelId}/pin`, {
+        method: "PUT",
+        body: { pinned: variables.pinned },
+        fallback: "Could not pin this channel",
+      });
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+  });
+}
+
+/** Soft-delete a channel for everyone in it. The server keeps the transcript; the roster forgets. */
+export function deleteChannelMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (channelId: string) => {
+      await client(`/api/channels/${channelId}`, {
+        method: "DELETE",
+        fallback: "Could not delete this channel",
+      });
+    },
+    // The roster only. The open channel's detail query would refetch into the fresh 404 and
+    // flash an error before the navigate-home lands; left alone, it keeps its cache and the
+    // navigation happens with nothing to complain about.
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: channelKeys.list() }),
+  });
+}

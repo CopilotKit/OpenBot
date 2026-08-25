@@ -24,6 +24,8 @@ export type ChannelSummary = AgentChannel & {
   lastMessageAgentId: string | null;
   /** ISO-8601. Ordering falls back to this, so a channel just created sorts to the top. */
   createdAt: string;
+  /** Whether this member pinned the channel. Pinned channels sort first in the roster. */
+  pinned: boolean;
 };
 
 export const channelKeys = {

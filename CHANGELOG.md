@@ -144,6 +144,22 @@ without a word, because the input path looks for a viewer before it looks for an
 
 A close now stops casting only when the socket closing is the one that was casting.
 
+### A sidebar channel row can be pinned or deleted
+
+Right-click on a channel in the sidebar and a menu opens with two entries: Pin channel and Delete
+channel.
+
+Pin is held per member rather than per channel, so pinning one holds it at the top of your own
+roster — newest first among pinned channels — and leaves every other member's roster unaffected.
+
+Delete is confirmed in a dialog first, and it is soft. The channel disappears from every member's
+roster and from a direct fetch of it, while the row, its transcript, and its Intelligence thread all
+survive. A channel the deployment package defines is refused, with the reason named. Recovery today
+is clearing `channels.deleted_at` in the database directly; there is no restore control in the
+product.
+
+The deployment gains two nullable columns, via migration `0015`.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused

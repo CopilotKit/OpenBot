@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -13,6 +13,7 @@ import type { AppVariables } from "../src/auth/guards";
 import {
   type AgentChannel,
   ChannelNotFoundError,
+  ChannelPackageOwnedError,
   type ChannelStore,
   createChannelRoutes,
   createChannelStore,
@@ -28,6 +29,7 @@ import {
   channelAgents,
   channelMemberships,
   channels,
+  deploymentPackages,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
@@ -64,6 +66,12 @@ function fakeStore(
     async get(receivedActor, id) {
       calls.push(["get", receivedActor, id]);
       return channel({ id });
+    },
+    async setPinned(receivedActor, id, pinned) {
+      calls.push(["setPinned", receivedActor, id, pinned]);
+    },
+    async softDelete(receivedActor, id) {
+      calls.push(["softDelete", receivedActor, id]);
     },
   };
 
@@ -290,6 +298,101 @@ describe("channel routes", () => {
     expect(response.status).toBe(599);
     expect(await json(response)).toEqual({ sentinel: "database disconnected" });
   });
+
+  test("pins through the authenticated actor and reports the new state", async () => {
+    const store = fakeStore();
+    const app = appFor(store);
+
+    const response = await app.request("http://openbot.test/channel-1/pin", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pinned: true }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toEqual({ pinned: true });
+    expect(store.calls).toEqual([["setPinned", actor, "channel-1", true]]);
+  });
+
+  test.each([
+    ["{", "Pin input must be a JSON object."],
+    [JSON.stringify([]), "Pin input must be a JSON object."],
+    [JSON.stringify({}), "Pinned must be true or false."],
+    [JSON.stringify({ pinned: "yes" }), "Pinned must be true or false."],
+  ])("rejects malformed pin bodies: %p", async (body, error) => {
+    const store = fakeStore();
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1/pin",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body,
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await json(response)).toEqual({ error });
+    expect(store.calls).toEqual([]);
+  });
+
+  test("keeps authentication in front of pinning", async () => {
+    const store = fakeStore();
+    const denied: MiddlewareHandler<{ Variables: AppVariables }> = (context) =>
+      Promise.resolve(context.json({ error: "denied" }, 401));
+    const app = appFor(store, denied);
+
+    const response = await app.request("http://openbot.test/channel-1/pin", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pinned: true }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(store.calls).toEqual([]);
+  });
+
+  test("deletes through the authenticated actor and answers 204", async () => {
+    const store = fakeStore();
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(store.calls).toEqual([["softDelete", actor, "channel-1"]]);
+  });
+
+  test("maps a package-owned refusal to 409", async () => {
+    const store = fakeStore({
+      softDelete: async () => {
+        throw new ChannelPackageOwnedError("channel-1");
+      },
+    });
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await json(response)).toEqual({
+      error:
+        "This channel is defined by the deployment package, so it cannot be deleted here.",
+    });
+  });
+
+  test("keeps authentication in front of deleting", async () => {
+    const store = fakeStore();
+    const denied: MiddlewareHandler<{ Variables: AppVariables }> = (context) =>
+      Promise.resolve(context.json({ error: "denied" }, 401));
+    const app = appFor(store, denied);
+
+    const response = await app.request("http://openbot.test/channel-1", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(401);
+    expect(store.calls).toEqual([]);
+  });
 });
 
 describe("channel route composition", () => {
@@ -378,6 +481,7 @@ const testPrefix = `channel-store-${randomUUID()}`;
 const createdUserIds: string[] = [];
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
+const createdPackageIds: string[] = [];
 
 afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
@@ -385,6 +489,11 @@ afterEach(async () => {
       .delete(intelligenceChannelMappings)
       .where(eq(intelligenceChannelMappings.channelId, channelId));
     await database.delete(channels).where(eq(channels.id, channelId));
+  }
+  for (const packageId of createdPackageIds.splice(0)) {
+    await database
+      .delete(deploymentPackages)
+      .where(eq(deploymentPackages.id, packageId));
   }
   for (const agentId of createdAgentIds.splice(0)) {
     await database
@@ -739,6 +848,247 @@ describe("channel store integration", () => {
       expect(await channelTableSnapshot()).toEqual(before);
     },
   );
+});
+
+describe("channel pinning", () => {
+  test("stamps and clears pinned_at on the caller's own membership", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Pinnable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.setPinned(actor, created.id, true);
+    let [row] = await database
+      .select({ pinnedAt: channelMemberships.pinnedAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, created.id),
+          eq(channelMemberships.userId, actor.id),
+        ),
+      );
+    expect(row?.pinnedAt).not.toBeNull();
+
+    await persistentStore.setPinned(actor, created.id, false);
+    [row] = await database
+      .select({ pinnedAt: channelMemberships.pinnedAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, created.id),
+          eq(channelMemberships.userId, actor.id),
+        ),
+      );
+    expect(row?.pinnedAt).toBeNull();
+  });
+
+  test("refuses to pin a channel the caller is not a member of", async () => {
+    const member = await createPersistentUser();
+    const outsider = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Members-only agent",
+      owner: member,
+    });
+    const created = await persistentStore.create(member, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await expect(
+      persistentStore.setPinned(outsider, created.id, true),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+
+  test("pins and unpins through the caller's own membership", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Pinnable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.setPinned(actor, created.id, true);
+    let page = await persistentStore.list(actor);
+    expect(
+      page.channels.find((channel) => channel.id === created.id)?.pinned,
+    ).toBe(true);
+
+    await persistentStore.setPinned(actor, created.id, false);
+    page = await persistentStore.list(actor);
+    expect(
+      page.channels.find((channel) => channel.id === created.id)?.pinned,
+    ).toBe(false);
+  });
+
+  test("one member's pin is invisible to another member", async () => {
+    const pinner = await createPersistentUser();
+    const other = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Shared pinnable agent",
+      owner: pinner,
+      visibility: "public",
+    });
+    const created = await persistentStore.create(pinner, [agentId]);
+    createdChannelIds.push(created.id);
+    // The store only creates the creator's membership; give the other user one directly,
+    // plus the thread mapping the list join requires.
+    await database.insert(channelMemberships).values({
+      channelId: created.id,
+      userId: other.id,
+    });
+    await database.insert(intelligenceChannelMappings).values({
+      userId: other.id,
+      channelId: created.id,
+      // thread_id is globally unique; the pinner's own mapping row already claimed
+      // created.threadId, so the other member's row needs one of its own.
+      threadId: randomUUID(),
+    });
+
+    await persistentStore.setPinned(pinner, created.id, true);
+
+    const otherPage = await persistentStore.list(other);
+    expect(
+      otherPage.channels.find((channel) => channel.id === created.id)?.pinned,
+    ).toBe(false);
+  });
+
+  test("reports pinned false for a channel nobody pinned", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Unpinned agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    expect(
+      (await persistentStore.list(actor)).channels.find(
+        (channel) => channel.id === created.id,
+      )?.pinned,
+    ).toBe(false);
+  });
+});
+
+describe("channel soft delete", () => {
+  test("hides a deleted channel from list and get", async () => {
+    const actor = await createPersistentUser();
+    const other = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Deletable agent",
+      owner: actor,
+      visibility: "public",
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+    // The store only creates the creator's membership; give the other user one directly,
+    // plus the thread mapping the list join requires.
+    await database.insert(channelMemberships).values({
+      channelId: created.id,
+      userId: other.id,
+    });
+    await database.insert(intelligenceChannelMappings).values({
+      userId: other.id,
+      channelId: created.id,
+      // thread_id is globally unique; the actor's own mapping row already claimed
+      // created.threadId, so the other member's row needs one of its own.
+      threadId: randomUUID(),
+    });
+
+    await persistentStore.softDelete(actor, created.id);
+
+    expect(await persistentStore.get(actor, created.id)).toBeNull();
+    const page = await persistentStore.list(actor);
+    expect(
+      page.channels.find((channel) => channel.id === created.id),
+    ).toBeUndefined();
+
+    expect(await persistentStore.get(other, created.id)).toBeNull();
+    const otherPage = await persistentStore.list(other);
+    expect(
+      otherPage.channels.find((channel) => channel.id === created.id),
+    ).toBeUndefined();
+  });
+
+  test("stamps deleted_at on the channel", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Deletable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.softDelete(actor, created.id);
+
+    // Soft: the row is still there, stamped rather than gone.
+    const [row] = await database
+      .select({ deletedAt: channels.deletedAt })
+      .from(channels)
+      .where(eq(channels.id, created.id));
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  test("deleting again is a no-op, not an error", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Twice-deleted agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.softDelete(actor, created.id);
+    await expect(
+      persistentStore.softDelete(actor, created.id),
+    ).resolves.toBeUndefined();
+  });
+
+  test("refuses to delete a channel the caller is not a member of", async () => {
+    const member = await createPersistentUser();
+    const outsider = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Guarded agent",
+      owner: member,
+    });
+    const created = await persistentStore.create(member, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await expect(
+      persistentStore.softDelete(outsider, created.id),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+
+  test("refuses to delete a package-defined channel", async () => {
+    const actor = await createPersistentUser();
+    const [pkg] = await database
+      .insert(deploymentPackages)
+      .values({
+        tenantId: persistentId("tenant"),
+        sourcePath: "/tmp/none",
+        checksum: "0",
+      })
+      .returning({ id: deploymentPackages.id });
+    if (!pkg) throw new Error("package row was not created");
+    createdPackageIds.push(pkg.id);
+    const channelId = persistentId("package-channel");
+    await database.insert(channels).values({
+      id: channelId,
+      name: "Package channel",
+      description: "Defined by the tenant package.",
+      packageId: pkg.id,
+    });
+    createdChannelIds.push(channelId);
+    await database.insert(channelMemberships).values({
+      channelId,
+      userId: actor.id,
+    });
+
+    await expect(
+      persistentStore.softDelete(actor, channelId),
+    ).rejects.toBeInstanceOf(ChannelPackageOwnedError);
+  });
 });
 
 /**

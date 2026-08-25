@@ -37,6 +37,8 @@ export type ChannelSummary = AgentChannel & {
   lastMessageAt: Date | null;
   lastMessageAgentId: string | null;
   createdAt: Date;
+  /** Whether the caller pinned this channel. A pin is per-member, so this is the caller's, only. */
+  pinned: boolean;
 };
 
 /** What a client that ran an agent reports back about the message it just saw. */
@@ -97,6 +99,18 @@ export type ChannelStore = {
   create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
   get(actor: AgentActor, channelId: string): Promise<AgentChannel | null>;
   list(actor: AgentActor, query?: ChannelQuery): Promise<ChannelPage>;
+  /** Pin or unpin the caller's own membership. Throws ChannelNotFoundError for a non-member. */
+  setPinned(
+    actor: AgentActor,
+    channelId: string,
+    pinned: boolean,
+  ): Promise<void>;
+  /**
+   * Hide the channel for every member. Soft: the row and the thread survive, every read filters.
+   * Throws ChannelNotFoundError for a non-member and ChannelPackageOwnedError for a channel the
+   * tenant package defines, which configuration owns rather than any member.
+   */
+  softDelete(actor: AgentActor, channelId: string): Promise<void>;
   recordActivity(
     actor: AgentActor,
     channelId: string,
@@ -223,7 +237,7 @@ export function createChannelStore(
           agentProfiles,
           eq(agentProfiles.agentId, channelAgents.agentId),
         )
-        .where(eq(channels.id, channelId))
+        .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
         .orderBy(asc(channelAgents.agentId));
 
       const first = rows[0];
@@ -266,9 +280,12 @@ export function createChannelStore(
           ),
         )
         .where(
-          cursor
-            ? sql`(coalesce(${channels.lastMessageAt}, ${channels.createdAt}), ${channels.id}) < (${cursor.recency}::timestamptz, ${cursor.id})`
-            : undefined,
+          and(
+            isNull(channels.deletedAt),
+            cursor
+              ? sql`(coalesce(${channels.lastMessageAt}, ${channels.createdAt}), ${channels.id}) < (${cursor.recency}::timestamptz, ${cursor.id})`
+              : undefined,
+          ),
         )
         .orderBy(
           sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt}) desc`,
@@ -300,6 +317,7 @@ export function createChannelStore(
           lastMessageAt: channels.lastMessageAt,
           lastMessageAgentId: channels.lastMessageAgentId,
           createdAt: channels.createdAt,
+          pinnedAt: channelMemberships.pinnedAt,
         })
         .from(channels)
         .innerJoin(
@@ -358,9 +376,55 @@ export function createChannelStore(
           lastMessageAt: row.lastMessageAt,
           lastMessageAgentId: row.lastMessageAgentId,
           createdAt: row.createdAt,
+          pinned: row.pinnedAt !== null,
         });
       }
       return { channels: [...summaries.values()], nextCursor };
+    },
+
+    async setPinned(actor, channelId, pinned) {
+      const updated = await database
+        .update(channelMemberships)
+        .set({ pinnedAt: pinned ? new Date() : null })
+        .where(
+          and(
+            eq(channelMemberships.channelId, channelId),
+            eq(channelMemberships.userId, actor.id),
+          ),
+        )
+        .returning({ channelId: channelMemberships.channelId });
+      // Not a member, or no such channel: the same answer either way, matching recordActivity.
+      if (updated.length === 0) throw new ChannelNotFoundError(channelId);
+    },
+
+    async softDelete(actor, channelId) {
+      await database.transaction(
+        async (transaction) => {
+          const [row] = await transaction
+            .select({ packageId: channels.packageId })
+            .from(channels)
+            .innerJoin(
+              channelMemberships,
+              and(
+                eq(channelMemberships.channelId, channels.id),
+                eq(channelMemberships.userId, actor.id),
+              ),
+            )
+            .where(eq(channels.id, channelId));
+          // Not a member, or no such channel: the same answer either way.
+          if (!row) throw new ChannelNotFoundError(channelId);
+          // Package channels are configuration; the sync that wrote them owns them.
+          if (row.packageId !== null) {
+            throw new ChannelPackageOwnedError(channelId);
+          }
+          // The guard on deletedAt is what makes a repeat call a no-op rather than a new stamp.
+          await transaction
+            .update(channels)
+            .set({ deletedAt: new Date(), updatedAt: new Date() })
+            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)));
+        },
+        { isolationLevel: "read committed" },
+      );
     },
 
     recordActivity(actor, channelId, activity) {
@@ -445,6 +509,13 @@ export class ChannelNotFoundError extends Error {
   constructor(id: string) {
     super(`Channel ${id} was not found.`);
     this.name = "ChannelNotFoundError";
+  }
+}
+
+export class ChannelPackageOwnedError extends Error {
+  constructor(id: string) {
+    super(`Channel ${id} is defined by the deployment package.`);
+    this.name = "ChannelPackageOwnedError";
   }
 }
 
@@ -607,6 +678,37 @@ export function createChannelRoutes(
     }
   });
 
+  routes.put("/:channelId/pin", requireUser, async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isChannelInputObject(body)) {
+      return context.json({ error: "Pin input must be a JSON object." }, 400);
+    }
+    const { pinned } = body as { pinned?: unknown };
+    if (typeof pinned !== "boolean") {
+      return context.json({ error: "Pinned must be true or false." }, 400);
+    }
+
+    try {
+      await store.setPinned(
+        context.var.actor,
+        context.req.param("channelId"),
+        pinned,
+      );
+      return context.json({ pinned });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.delete("/:channelId", requireUser, async (context) => {
+    try {
+      await store.softDelete(context.var.actor, context.req.param("channelId"));
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   routes.get("/:channelId", requireUser, async (context) => {
     try {
       const channel = await store.get(
@@ -643,6 +745,7 @@ function channelSummaryDto(channel: ChannelSummary) {
     lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,
     lastMessageAgentId: channel.lastMessageAgentId,
     createdAt: channel.createdAt.toISOString(),
+    pinned: channel.pinned,
   };
 }
 
@@ -652,6 +755,15 @@ function mapStoreError(context: Context, error: unknown): Response {
   }
   if (error instanceof ChannelNotFoundError) {
     return context.json({ error: "Channel not found." }, 404);
+  }
+  if (error instanceof ChannelPackageOwnedError) {
+    return context.json(
+      {
+        error:
+          "This channel is defined by the deployment package, so it cannot be deleted here.",
+      },
+      409,
+    );
   }
   throw error;
 }
