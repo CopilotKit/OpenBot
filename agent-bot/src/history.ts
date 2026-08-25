@@ -63,16 +63,7 @@ export function toProviderMessages(
       const toolCalls = message.toolCalls?.map((call) => ({
         id: call.id,
         type: "function" as const,
-        function: {
-          /*
-           * A name is required by the provider and is not always present: read back from the thread
-           * store these arrive undefined, and a payload carrying `"name": undefined` is rejected
-           * outright. The call still has to be shown, or the model repeats an action it already
-           * took, so it keeps its id and is named as something the model can read.
-           */
-          name: call.function?.name ?? "tool",
-          arguments: call.function?.arguments ?? "{}",
-        },
+        function: callDetails(call),
       }));
       messages.push({
         role: "assistant",
@@ -108,4 +99,37 @@ export function toProviderMessages(
   }
 
   return messages;
+}
+
+/**
+ * A tool call's name and arguments, in whichever dialect it arrived in.
+ *
+ * TWO SPELLINGS, ONE CALL. AG-UI describes `{id, type: "function", function: {name, arguments}}` and
+ * the history store writes `{id, name, args}`. Read back from a thread, every call arrives in the
+ * second, so code reaching straight for `call.function` finds nothing there.
+ *
+ * That was diagnosed here as "the name is not always present" and papered over with a default, which
+ * turned every restored call into a tool named `tool` with no arguments. The model is then shown a
+ * call it cannot recognise as the one it made, so it makes it again: the exact repetition the
+ * fallback was written to prevent.
+ */
+function callDetails(call: {
+  function?: { name?: unknown; arguments?: unknown };
+  name?: unknown;
+  args?: unknown;
+}): { name: string; arguments: string } {
+  const name = call.function?.name ?? call.name;
+  const args = call.function?.arguments ?? call.args;
+  return {
+    // Still defaulted, because a call with no name at all is rejected outright by the provider and
+    // showing the model something is better than losing the turn. It is now the last resort it was
+    // meant to be rather than the ordinary path.
+    name: typeof name === "string" && name ? name : "tool",
+    arguments:
+      typeof args === "string"
+        ? args
+        : args === undefined || args === null
+          ? "{}"
+          : JSON.stringify(args),
+  };
 }

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isPlainBotId } from "../src/bot-id";
+import { botIdsIn } from "../src/profile-listing";
 
 /**
  * Which directories under the profiles root are Bots.
@@ -17,11 +18,14 @@ import { isPlainBotId } from "../src/bot-id";
  */
 async function knownIn(root: string): Promise<string[]> {
   const onDisk = await readdir(root, { withFileTypes: true }).catch(() => []);
-  return onDisk
-    .filter((entry) => entry.isDirectory())
-    .filter((entry) => isPlainBotId(entry.name))
-    .map((entry) => entry.name)
-    .sort();
+  /*
+   * THE SHIPPED PREDICATE, imported rather than restated.
+   *
+   * This test used to carry its own copy of the filter, which meant it proved the copy rather than
+   * the product: deleting the real one left the suite green and the fleet page listing `lost+found`
+   * as a Bot again.
+   */
+  return botIdsIn(onDisk);
 }
 
 describe("listing the Bots that have a computer", () => {

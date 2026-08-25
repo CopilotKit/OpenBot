@@ -36,10 +36,11 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
-import { isPlainBotId, profileDirectoryFor } from "./bot-id";
+import { profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv } from "./env";
+import { botIdsIn } from "./profile-listing";
 
 // Re-exported so callers that already import it from here do not change, while the test imports it
 // from the playwright-free `./env` instead of pulling this module's browser driver in with it.
@@ -368,28 +369,11 @@ export function createProfiles(root: string) {
       const onDisk = await readdir(root, { withFileTypes: true }).catch(
         () => [],
       );
-      return [
-        ...new Set([
-          ...onDisk
-            .filter((e) => e.isDirectory())
-            /*
-             * ONLY DIRECTORIES THIS CODE COULD HAVE MADE.
-             *
-             * The root is a mounted volume, and a volume is not an empty directory: a real disk
-             * formatted ext4 arrives with `lost+found` already in it, so on a cloud the fleet page
-             * listed a Bot by that name, offered to reset it, and nobody could say where it came
-             * from. Never seen locally, because a bind mount and kind's local-path volumes have no
-             * such directory, which is exactly the shape of bug that ships.
-             *
-             * `isPlainBotId` is the same allow-list that stops a hostile id becoming a path, used
-             * here for the other half of the question: an entry it would refuse to create is not one
-             * of ours to list. `lost+found` fails it on the `+`.
-             */
-            .filter((e) => isPlainBotId(e.name))
-            .map((e) => e.name),
-          ...live.keys(),
-        ]),
-      ].sort();
+      /*
+       * The rule lives in its own module, so the test that covers it imports the same one this uses.
+       * It had a copy before, which meant deleting this filter left the suite green.
+       */
+      return [...new Set([...botIdsIn(onDisk), ...live.keys()])].sort();
     },
 
     /** What the admin surface lists. Running or not, because a Bot that has a profile has a computer. */

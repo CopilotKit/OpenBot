@@ -63,7 +63,9 @@ export function readableTurns(stored: readonly unknown[]): StoredThread {
   let unreadable = 0;
 
   for (const turn of stored) {
-    const candidate = withNormalisedToolCalls(turn);
+    const candidate = withNormalisedToolCalls(
+      withoutNullAssistantContent(turn),
+    );
     if (MessageSchema.safeParse(candidate).success) {
       messages.push(candidate as Message);
     } else {
@@ -72,6 +74,26 @@ export function readableTurns(stored: readonly unknown[]): StoredThread {
   }
 
   return { messages, unreadable };
+}
+
+/**
+ * An assistant turn whose content is `null`, read as one that simply has no content.
+ *
+ * The schema makes an assistant's content optional and does not allow it to be null, so the two say
+ * the same thing and only one parses. A turn that called a tool and said nothing alongside it is
+ * written exactly that way, so this dropped the browsing and kept nothing in its place: the same
+ * loss the tool-call dialect caused, arriving by a different route.
+ *
+ * ASSISTANT ONLY. A user turn's content is required, and `content: null` there is not a message
+ * somebody sent; it used to reach a projection and draw as a blank line, which is why it is refused
+ * and counted rather than quietly shown. That decision stands.
+ */
+function withoutNullAssistantContent(turn: unknown): unknown {
+  if (typeof turn !== "object" || turn === null) return turn;
+  const record = turn as Record<string, unknown>;
+  if (record.role !== "assistant" || record.content !== null) return turn;
+  const { content: _dropped, ...rest } = record;
+  return rest;
 }
 
 /** A tool call as the history store writes one. */
@@ -106,9 +128,35 @@ function withNormalisedToolCalls(turn: unknown): unknown {
     toolCalls: calls.map((call) => ({
       id: call.id,
       type: "function",
-      function: { name: call.name, arguments: call.args },
+      function: { name: call.name, arguments: argumentsOf(call.args) },
     })),
   };
+}
+
+/**
+ * The arguments, as a string, because that is what the protocol says they are.
+ *
+ * AG-UI types `arguments` as a string and the store is under no such obligation: it holds whatever
+ * the run put there, which for a tool called with structured input is an object. Passing that through
+ * produced a call that looked translated and still failed validation, so the turn was dropped anyway.
+ * That is this whole function's bug one layer down, which is a good reason to be explicit here rather
+ * than to trust the shapes to line up.
+ *
+ * A string is already right and is left exactly as it is, down to its whitespace: it may be a
+ * fragment of a stream that was never valid JSON, and re-encoding it would change what the model
+ * actually said. Anything else is encoded. `undefined` becomes `"{}"`, which is what a call with no
+ * arguments means and what every reader of this field expects to parse.
+ */
+function argumentsOf(args: unknown): string {
+  if (typeof args === "string") return args;
+  if (args === undefined || args === null) return "{}";
+  try {
+    return JSON.stringify(args);
+  } catch {
+    // Circular, or something else that cannot be encoded. An empty object is a call the reader can
+    // parse; a throw here would lose the whole conversation over one malformed argument list.
+    return "{}";
+  }
 }
 
 export async function readThreadMessages(
