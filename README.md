@@ -289,7 +289,7 @@ provider's discovery document listed in `TRUSTED_ORIGINS`, not only the issuer.
   sign-in is refused and the reason is logged: add `email` as an optional claim, or use your
   directory GUID here.
 - A half-configured provider is refused at start-up rather than at somebody's first attempt to sign
-  in: a client id with no secret, a secret shorter than 32 characters, or an Okta issuer with no
+  in: a client ID with no secret, a secret shorter than 32 characters, or an Okta issuer with no
   credentials behind it.
 - **SAML and OIDC** are registered while the deployment runs rather than configured here. Sign in as
   an administrator and go to Admin → Identity providers with the metadata your identity team gave
