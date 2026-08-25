@@ -36,7 +36,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
-import { profileDirectoryFor } from "./bot-id";
+import { isPlainBotId, profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv } from "./env";
@@ -370,7 +370,23 @@ export function createProfiles(root: string) {
       );
       return [
         ...new Set([
-          ...onDisk.filter((e) => e.isDirectory()).map((e) => e.name),
+          ...onDisk
+            .filter((e) => e.isDirectory())
+            /*
+             * ONLY DIRECTORIES THIS CODE COULD HAVE MADE.
+             *
+             * The root is a mounted volume, and a volume is not an empty directory: a real disk
+             * formatted ext4 arrives with `lost+found` already in it, so on a cloud the fleet page
+             * listed a Bot by that name, offered to reset it, and nobody could say where it came
+             * from. Never seen locally, because a bind mount and kind's local-path volumes have no
+             * such directory, which is exactly the shape of bug that ships.
+             *
+             * `isPlainBotId` is the same allow-list that stops a hostile id becoming a path, used
+             * here for the other half of the question: an entry it would refuse to create is not one
+             * of ours to list. `lost+found` fails it on the `+`.
+             */
+            .filter((e) => isPlainBotId(e.name))
+            .map((e) => e.name),
           ...live.keys(),
         ]),
       ].sort();

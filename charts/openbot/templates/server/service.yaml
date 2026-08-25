@@ -11,6 +11,10 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.server.service.type }}
+  {{- with .Values.server.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+{{ toYaml . | indent 4 }}
+  {{- end }}
   ports:
     - port: {{ .Values.server.service.port }}
       targetPort: http

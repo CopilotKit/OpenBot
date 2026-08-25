@@ -44,7 +44,14 @@ type Sandbox = {
 export type SandboxProviderOptions = {
   /** Where the Bots' computers live. The provider is scoped to exactly this namespace. */
   namespace: string;
-  /** The pod template every computer is cut from, as YAML-derived JSON from the chart. */
+  /**
+   * The pod and volumes every computer is cut from.
+   *
+   * `Sandbox` carries its pod inline and has no template reference, so this has to come from
+   * somewhere. It comes from a file the chart mounts, which means the server needs no permission to
+   * read ConfigMaps and the shape of a computer stays a deployment decision rather than a constant
+   * in this file.
+   */
   template: Record<string, unknown>;
   /** How long a computer may go untouched before the culler suspends it. */
   idleAfterMs: number;
@@ -63,6 +70,33 @@ export type SandboxProviderOptions = {
  * this provider when a deployment configured it, and a clear message about a missing token beats a
  * connection refused to an address nobody set.
  */
+/**
+ * Read the pod template the chart mounted.
+ *
+ * A missing file is a deployment that asked for per-Bot computers without saying what one looks
+ * like, which is worth failing on by name rather than creating a Sandbox the API server rejects for
+ * a missing required field.
+ */
+export async function readSandboxTemplate(
+  path: string,
+): Promise<Record<string, unknown>> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    throw new SandboxError(
+      `COMPUTER_SANDBOX_TEMPLATE_FILE points at ${path}, which cannot be read. That file is what a Bot's computer is cut from; the chart mounts it when computers.mode is sandbox.`,
+    );
+  }
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  if (!parsed.podTemplate) {
+    throw new SandboxError(
+      `${path} has no podTemplate, so there is nothing to make a computer from.`,
+    );
+  }
+  return parsed;
+}
+
 export async function inClusterConfig(): Promise<{
   apiServer: string;
   token: string;
@@ -134,13 +168,22 @@ export function createSandboxComputerProvider(
     const { contentType, ...rest } = init;
     const response = await doFetch(`${base()}${path}`, {
       ...rest,
+      /*
+       * The cluster's own CA, which is the only thing that signs the API server's certificate.
+       *
+       * It is not in any public trust store, so without this every call fails with "unable to verify
+       * the first certificate" and a Bot simply never gets a computer. The alternative some reach for
+       * is to stop verifying, which would leave the token in every one of these requests open to
+       * anything that can answer on that address.
+       */
+      ...(options.ca ? { tls: { ca: options.ca } } : {}),
       headers: {
         ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
         ...(contentType ? { "content-type": contentType } : {}),
         accept: "application/json",
         ...(rest.headers ?? {}),
       },
-    });
+    } as RequestInit);
     if (response.status === 404) return undefined;
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -170,7 +213,12 @@ export function createSandboxComputerProvider(
         // rather than trying to reverse the slug.
         annotations: { "openbot.dev/bot-id": botId },
       },
-      spec: { operatingMode: "Running", ...options.template },
+      spec: {
+        operatingMode: "Running",
+        // `podTemplate` is required and `volumeClaimTemplates` is what makes a suspend worth doing,
+        // and both arrive together from the mounted template.
+        ...options.template,
+      },
     };
   }
 

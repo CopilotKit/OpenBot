@@ -48,8 +48,16 @@ spec:
 {{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ include "openbot.serviceAccountName" . }}
-      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- /*
+        NO SERVICE ACCOUNT, WHICH IS BOTH CORRECT AND NECESSARY.
+        
+        Correct because this Job talks to a database and never to the cluster, so a cluster
+        credential in it is one nothing needs. Necessary because as a pre-install hook it runs before
+        the chart's own resources exist, and naming the ServiceAccount the API pods use fails with
+        "serviceaccount not found" and a Job that can never schedule. The default account, with no
+        token mounted, is what a migration actually requires.
+      */}}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
 {{ toYaml . | indent 8 }}

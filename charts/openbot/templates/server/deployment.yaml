@@ -32,12 +32,23 @@ spec:
           the old values, and the deployment looks upgraded while behaving exactly as it did.
         */}}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if eq .Values.computers.mode "sandbox" }}
+        {{- /*
+          The shape of a computer, which the server reads once and keeps.
+
+          A mounted ConfigMap does update in place, but the file is read on the first computer request
+          and the provider built from it is held for the life of the process. Without this the
+          template can change under a running server and every Sandbox it creates is still cut from
+          the old one, which is a rollout that looks like it worked and changes nothing.
+        */}}
+        checksum/computer-template: {{ include (print $.Template.BasePath "/computer/pod-template.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.server.podAnnotations }}
 {{ toYaml . | indent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "openbot.serviceAccountName" . }}
-      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      automountServiceAccountToken: {{ include "openbot.automountToken" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
 {{ toYaml . | indent 8 }}
@@ -114,7 +125,20 @@ spec:
             periodSeconds: {{ .Values.server.livenessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.server.livenessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.server.livenessProbe.failureThreshold }}
+          {{- if eq .Values.computers.mode "sandbox" }}
+          {{- /* The shape of a Bot's computer, as a file rather than as a permission to read one. */}}
+          volumeMounts:
+            - name: sandbox-template
+              mountPath: /etc/openbot
+              readOnly: true
+          {{- end }}
           {{- with .Values.server.resources }}
           resources:
 {{ toYaml . | indent 12 }}
           {{- end }}
+      {{- if eq .Values.computers.mode "sandbox" }}
+      volumes:
+        - name: sandbox-template
+          configMap:
+            name: {{ include "openbot.componentName" (dict "root" . "component" "computer-template") }}
+      {{- end }}

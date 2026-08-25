@@ -1,5 +1,9 @@
 import type { ComputerConfig } from "../config";
-import { createSandboxComputerProvider, inClusterConfig } from "./sandbox";
+import {
+  createSandboxComputerProvider,
+  inClusterConfig,
+  readSandboxTemplate,
+} from "./sandbox";
 import type { ComputerStatus } from "./schema";
 import {
   createDockerSupervisorProvider,
@@ -257,11 +261,14 @@ function createLazySandboxProvider(
 
   const provider = async (): Promise<ComputerProvider> => {
     built ??= (async () => {
-      const cluster = await inClusterConfig();
+      const [cluster, template] = await Promise.all([
+        inClusterConfig(),
+        readSandboxTemplate(config.templateFile),
+      ]);
       return createSandboxComputerProvider({
         namespace: config.namespace,
         idleAfterMs: config.idleAfterMs,
-        template: sandboxPodTemplate(config),
+        template,
         apiServer: cluster.apiServer,
         token: cluster.token,
         ca: cluster.ca,
@@ -280,17 +287,4 @@ function createLazySandboxProvider(
     list: async () => (await provider()).list(),
     sessionOf: async (botId) => (await provider()).sessionOf?.(botId),
   };
-}
-
-/**
- * The pod every Bot's computer is cut from.
- *
- * Read from the `SandboxTemplate` the chart installs rather than written here: what image a computer
- * runs, what volumes it keeps and what runtime class it uses are deployment decisions, and the three
- * clouds disagree about the last one. The server only needs to know that a template exists.
- */
-function sandboxPodTemplate(
-  config: Extract<ComputerConfig, { provider: "sandbox" }>,
-): Record<string, unknown> {
-  return { sandboxTemplateRef: { name: `${config.namespace}-computer` } };
 }

@@ -35,14 +35,30 @@ works on its own. A replica must not carry one: a browser is a few hundred megab
 Bot's logins, so scaling the API would scale those with it. `server.embeddedComputer` is off here,
 and asking for it with more than one replica is refused at install time.
 
-## Your own database
+## Your own database, which is what a real deployment uses
 
 ```sh
 --set postgresql.enabled=false \
 --set database.existingSecret=openbot-database   # key: database-url
 ```
 
-Setting both a bundled database and a URL is refused, rather than one of them silently winning.
+`postgresql.enabled` is **off by default and not production-grade**. A database on a pod goes away
+when the pod does: a rollout, a node drain or an eviction is a restart, and while the volume survives,
+nothing about that shape gives you backups, failover or point-in-time recovery. It is there so
+somebody can try OpenBot in one command.
+
+Point it at RDS, Cloud SQL, Azure Database or your own server, and keep the URL in a Secret rather
+than in a values file. Setting both a bundled database and a URL is refused, rather than one of them
+silently winning.
+
+**Put `?sslmode=require` on the URL.** Every managed database refuses an unencrypted connection:
+RDS has `rds.force_ssl` on by default, and Cloud SQL and Azure Database do the same. Without it the
+migration fails with `no pg_hba.conf entry for host ... no encryption`, which names the host and the
+user and not the actual problem.
+
+**The migrating role has to be able to create and drop the `vector` extension.** The first migration
+creates it and a later one drops it again. On a managed database, create it once as the
+administrative role; `CREATE EXTENSION IF NOT EXISTS` then passes for an ordinary user.
 
 ## The four targets
 
@@ -126,6 +142,18 @@ that mode, which is stated on the fleet page rather than hidden.
 `sandbox` uses `kubernetes-sigs/agent-sandbox`, whose `Sandbox` CRD is built for exactly this
 workload: an isolated, stateful, singleton pod with a stable identity and persistent storage.
 Suspending is `operatingMode: Suspended`, which terminates the pod and keeps the volumes.
+
+**That controller is not installed by this chart, and the chart refuses to install without it.**
+The check reads the cluster, so it is a real answer rather than a value somebody has to remember:
+
+```sh
+kubectl apply --server-side -f \
+  https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v0.5.6/sandbox-with-extensions.yaml
+```
+
+Without that refusal the install succeeds, every pod is healthy, and the deployment looks finished
+until the first Bot asks for a browser and the API server answers 404. Rendering offline? Pass
+`--api-versions agents.x-k8s.io/v1beta1/Sandbox`.
 
 **What decides that a computer is idle** is the audit trail, not the browser. Asking the browser
 would wake it, so every computer anything asked about would come back up and the bill would never

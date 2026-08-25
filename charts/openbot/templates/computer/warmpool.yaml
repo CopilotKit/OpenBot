@@ -8,7 +8,7 @@ from the old node first. That is a real wait, and this is the upstream mechanism
 of it rather than something to reinvent. Off by default, because a pool is browsers nobody is using
 yet, which is exactly the cost the suspend is here to remove.
 */}}
-apiVersion: agents.x-k8s.io/v1beta1
+apiVersion: extensions.agents.x-k8s.io/v1beta1
 kind: SandboxWarmPool
 metadata:
   name: {{ $ns }}-computer

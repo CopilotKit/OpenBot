@@ -23,7 +23,8 @@ rules:
     resources: ["sandboxes/status"]
     verbs: ["get"]
   {{- if .Values.computers.sandbox.warmPool.enabled }}
-  - apiGroups: ["agents.x-k8s.io"]
+  {{- /* The extension kinds are in their own API group, which a Role must name exactly. */}}
+  - apiGroups: ["extensions.agents.x-k8s.io"]
     resources: ["sandboxclaims"]
     verbs: ["get", "list", "create", "delete"]
   {{- end }}

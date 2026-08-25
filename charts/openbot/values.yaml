@@ -63,6 +63,11 @@ server:
     type: ClusterIP
     port: 3001
     annotations: {}
+    # WHO MAY REACH IT, when the type is LoadBalancer. Empty means everybody, which is what a cloud
+    # load balancer does by default and almost never what somebody wants for an internal tool. Narrow
+    # it to the addresses your people come from. Not every cloud honours this on every load balancer
+    # type, so treat it as one layer rather than the only one.
+    loadBalancerSourceRanges: []
 
   # Probes hit the API's own health route.
   livenessProbe:
@@ -197,6 +202,10 @@ computers:
 
   # `mode: sandbox` only. Where the per-Bot computers are created and what may create them.
   sandbox:
+    # Refuse to install when the cluster has no Sandbox CRD, rather than succeeding and failing at
+    # the first browser action. Turn it off only where the CRD arrives after this chart does, such as
+    # a GitOps run that applies both together.
+    requireController: true
     namespace: ""
     # Pre-warmed sandboxes, so a Bot's first action after lunch does not wait for Chromium to boot.
     warmPool:
@@ -211,11 +220,29 @@ computers:
 
 database:
   # Used when `postgresql.enabled` is false. A URL, or a secret holding one.
+  #
+  # PUT `?sslmode=require` ON IT. Every managed database refuses an unencrypted connection: RDS has
+  # `rds.force_ssl` on by default, and Cloud SQL and Azure Database do the same. Without it the
+  # migration fails with `no pg_hba.conf entry for host ... no encryption`, which names the host and
+  # the user and not the actual problem.
+  #
+  #   postgres://user:password@host:5432/openbot?sslmode=require
+  #
+  # Keep it in a Secret rather than here: `url` is readable by anybody who can read the release.
   url: ""
   existingSecret: ""
   existingSecretKey: "database-url"
 
 # The bundled database. Off by default in favour of a managed one.
+# The bundled database.
+#
+# NOT PRODUCTION-GRADE, AND OFF FOR THAT REASON. A database on a pod is a database that goes away
+# when the pod does: a rollout, a node drain or an evicted pod is a restart, and while the volume
+# survives, nothing about this shape gives you backups, failover, point-in-time recovery or a
+# connection that outlives the release. It exists so somebody can try OpenBot in one command.
+#
+# A REAL DEPLOYMENT POINTS `database` ABOVE AT A MANAGED DATABASE: RDS, Cloud SQL, Azure Database, or
+# your own server. That is the same line the Intelligence chart draws, and for the same reason.
 postgresql:
   enabled: false
   auth:

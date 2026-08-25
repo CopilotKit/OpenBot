@@ -171,6 +171,8 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   value: {{ default .Release.Namespace .Values.computers.sandbox.namespace | quote }}
 - name: COMPUTER_SANDBOX_IDLE_AFTER
   value: {{ .Values.computers.sandbox.idleAfter | quote }}
+- name: COMPUTER_SANDBOX_TEMPLATE_FILE
+  value: /etc/openbot/sandbox-template.json
 {{- end }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
@@ -277,4 +279,85 @@ podAntiAffinity:
           matchLabels:
 {{ include "openbot.componentSelectorLabels" (dict "root" $root "component" $component) | indent 12 }}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The pod and volumes every Bot's computer is cut from, as JSON.
+
+One definition, used by the ConfigMap the server reads and by the SandboxTemplate a warm pool cuts
+from, so a pre-warmed computer and one created on demand cannot drift into being different things.
+*/}}
+{{- define "openbot.sandboxPodTemplate" -}}
+{{- $spec := dict
+  "podTemplate" (dict
+    "metadata" (dict "labels" (dict
+      "app.kubernetes.io/name" (include "openbot.name" .)
+      "app.kubernetes.io/instance" .Release.Name
+      "app.kubernetes.io/component" "computer"))
+    "spec" (dict
+      "terminationGracePeriodSeconds" 30
+      "containers" (list (dict
+        "name" "computer"
+        "image" (include "openbot.image" .)
+        "imagePullPolicy" .Values.image.pullPolicy
+        "command" (list "/usr/local/bin/bun" "/app/agent-computer/src/index.ts")
+        "ports" (list (dict "name" "http" "containerPort" 4100))
+        "env" (concat
+          (list
+            (dict "name" "PORT" "value" "4100")
+            (dict "name" "WORKSPACE_DIR" "value" "/workspace")
+            (dict "name" "PROFILES_DIR" "value" "/profiles")
+            (dict "name" "COMPUTER_TOKEN" "valueFrom" (dict "secretKeyRef" (dict
+              "name" (default (include "openbot.secretName" .) .Values.computers.existingTokenSecret)
+              "key" "computer-token"))))
+          .Values.computers.extraEnv)
+        "volumeMounts" (list
+          (dict "name" "profiles" "mountPath" "/profiles")
+          (dict "name" "workspace" "mountPath" "/workspace"))
+        "readinessProbe" (dict
+          "httpGet" (dict "path" "/health" "port" "http")
+          "periodSeconds" 10
+          "failureThreshold" 6)
+        "resources" .Values.computers.resources)))) -}}
+{{- $pod := index $spec "podTemplate" -}}
+{{- $podSpec := index $pod "spec" -}}
+{{- with .Values.computers.runtimeClassName }}{{- $_ := set $podSpec "runtimeClassName" . }}{{- end }}
+{{- with .Values.imagePullSecrets }}{{- $_ := set $podSpec "imagePullSecrets" . }}{{- end }}
+{{- with .Values.computers.nodeSelector }}{{- $_ := set $podSpec "nodeSelector" . }}{{- end }}
+{{- with .Values.computers.tolerations }}{{- $_ := set $podSpec "tolerations" . }}{{- end }}
+{{- $claim := dict
+  "accessModes" (list "ReadWriteOnce")
+  "resources" (dict "requests" (dict "storage" .Values.computers.persistence.profilesSize)) -}}
+{{- $work := dict
+  "accessModes" (list "ReadWriteOnce")
+  "resources" (dict "requests" (dict "storage" .Values.computers.persistence.workspaceSize)) -}}
+{{- with .Values.computers.persistence.storageClass }}
+{{- $_ := set $claim "storageClassName" . }}{{- $_ := set $work "storageClassName" . }}
+{{- end }}
+{{- /*
+  A Service, which is the whole reason a computer has a stable address.
+
+  Without it the controller creates the pod and reports no `serviceFQDN`, so the sandbox is Ready and
+  unreachable: `locate` waits for an address that is never coming and times out. A pod IP would be
+  the wrong answer anyway, because it changes on every resume, which is exactly what a suspended
+  computer does.
+*/}}
+{{- $_ := set $spec "service" true -}}
+{{- $_ := set $spec "volumeClaimTemplates" (list
+  (dict "metadata" (dict "name" "profiles") "spec" $claim)
+  (dict "metadata" (dict "name" "workspace") "spec" $work)) -}}
+{{ toPrettyJson $spec }}
+{{- end -}}
+
+{{/*
+Whether the API pod gets a Kubernetes token.
+
+FALSE UNLESS IT ACTUALLY NEEDS ONE. The API talks to a database and to Bots, not to the cluster, so a
+mounted token is a credential sitting in a pod that has no use for it. `computers.mode: sandbox` is
+the exception and the only one: there the server asks the API server to create, resume and suspend a
+Sandbox per Bot, and without a token it fails on the first browser action with a missing file rather
+than anything that names the cause.
+*/}}
+{{- define "openbot.automountToken" -}}
+{{- or .Values.serviceAccount.automountServiceAccountToken (eq .Values.computers.mode "sandbox") -}}
 {{- end -}}

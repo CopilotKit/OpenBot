@@ -48,6 +48,11 @@ isolated, stateful, singleton pod with a stable identity and persistent storage.
 field, and it keeps the volumes, so a computer comes back with its logins rather than signed out of
 everything. `shared` stays the default and needs nothing installed in the cluster.
 
+**A cluster with no controller is refused at install.** `computers.mode: sandbox` needs the
+agent-sandbox CRD, and without it the install succeeds, every pod is healthy, and the deployment
+looks finished until the first Bot asks for a browser. The chart reads the cluster and refuses,
+naming the one command that fixes it.
+
 **What decides a computer is idle is the audit trail, not the browser.** Asking the browser would
 wake it, so every computer anything asked about would come back up and the bill would never fall.
 

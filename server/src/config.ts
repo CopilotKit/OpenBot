@@ -49,6 +49,8 @@ export type SandboxComputerConfig = {
   provider: "sandbox";
   namespace: string;
   idleAfterMs: number;
+  /** Where the chart mounted the shape of a computer. */
+  templateFile: string;
   token?: string;
   allowPrivateHosts: boolean;
   policy?: ActionPolicy;
@@ -637,6 +639,9 @@ function computerConfig(environment: Environment): ComputerConfig | undefined {
       idleAfterMs: durationMs(
         optional(environment, "COMPUTER_SANDBOX_IDLE_AFTER") ?? "30m",
       ),
+      templateFile:
+        optional(environment, "COMPUTER_SANDBOX_TEMPLATE_FILE") ??
+        "/etc/openbot/sandbox-template.json",
       allowPrivateHosts,
       ...(computerToken ? { token: computerToken } : {}),
       ...(policy ? { policy } : {}),

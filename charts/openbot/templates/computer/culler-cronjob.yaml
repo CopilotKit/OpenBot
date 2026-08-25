@@ -50,10 +50,19 @@ spec:
               env:
 {{ include "openbot.databaseUrlEnv" . | indent 16 }}
 {{ include "openbot.commonEnv" . | indent 16 }}
+              {{- /* The same shape of computer the server uses, so the two cannot disagree. */}}
+              volumeMounts:
+                - name: sandbox-template
+                  mountPath: /etc/openbot
+                  readOnly: true
               resources:
                 requests:
                   cpu: 50m
                   memory: 128Mi
                 limits:
                   memory: 512Mi
+          volumes:
+            - name: sandbox-template
+              configMap:
+                name: {{ include "openbot.componentName" (dict "root" . "component" "computer-template") }}
 {{- end }}

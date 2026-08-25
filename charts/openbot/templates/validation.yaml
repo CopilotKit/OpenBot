@@ -52,6 +52,17 @@ This template renders nothing.
 {{- fail "config.auth.okta.issuer is required alongside the Okta client, such as https://example.okta.com/oauth2/default. It is what makes it a particular Okta rather than Okta in general." }}
 {{- end }}
 
+{{- /*
+  Every visitor as one administrator, on an address the internet can reach.
+
+  `singleUser` is a local trial mode, and a LoadBalancer with no source ranges is the open internet.
+  Together they are a deployment where anybody who finds the address is an administrator, which is
+  the exact failure the server refuses to start into when nobody has said they meant it.
+*/}}
+{{- if and .Values.config.singleUser (eq .Values.server.service.type "LoadBalancer") (not .Values.server.service.loadBalancerSourceRanges) }}
+{{- fail "config.singleUser treats every visitor as an administrator, so it must not be put behind a LoadBalancer that anybody can reach. Set server.service.loadBalancerSourceRanges, or configure an identity provider." }}
+{{- end }}
+
 {{- if and .Values.config.singleUser .Values.config.publicUrl }}
 {{- fail "config.singleUser serves every visitor as one administrator, so it must not be combined with a public URL. Configure an identity provider and set config.initialAdminEmails instead." }}
 {{- end }}
@@ -81,6 +92,24 @@ This template renders nothing.
 
 {{- if and (eq .Values.computers.mode "external") (not .Values.computers.url) }}
 {{- fail "computers.mode is external but computers.url is empty, so no Bot would have a computer. Set the address, or use mode: shared to have this chart run one." }}
+{{- end }}
+
+{{- /*
+  Asking for per-Bot computers on a cluster that cannot make them.
+
+  `computers.mode: sandbox` creates `Sandbox` objects, which only exist once the agent-sandbox
+  controller is installed. Without it the install succeeds, every pod is healthy, and the deployment
+  looks finished right up until the first Bot asks for a browser and gets a 404 from the API server.
+  That is the worst time to learn it, so it is a refusal here instead, with the command to run.
+
+  Read from the cluster, so it is a real check rather than a value somebody has to remember to set.
+  `helm template` with no cluster has no way to know, which is what `--api-versions` is for and what
+  the chart's own render tests pass.
+*/}}
+{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.requireController }}
+{{- if not (.Capabilities.APIVersions.Has "agents.x-k8s.io/v1beta1/Sandbox") }}
+{{- fail "computers.mode is sandbox, which gives every Bot its own computer, but this cluster has no Sandbox CRD. Install the controller first:\n\n  kubectl apply --server-side -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v0.5.6/sandbox-with-extensions.yaml\n\nOr use computers.mode: shared, which needs nothing installed. Rendering without a cluster? Pass --api-versions agents.x-k8s.io/v1beta1/Sandbox, or set computers.sandbox.requireController=false." }}
+{{- end }}
 {{- end }}
 
 {{- if not (has .Values.computers.mode (list "shared" "sandbox" "external")) }}
