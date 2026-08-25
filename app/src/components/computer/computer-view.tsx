@@ -32,6 +32,63 @@ function hostOf(url: string): string {
   }
 }
 
+/**
+ * What each finished turn opened, and the frame it ended on, kept outside any component.
+ *
+ * MODULE SCOPE, BECAUSE THE TILE DOES NOT SURVIVE. A transcript re-renders freely and remounts the
+ * tiles in it, and anything held in component state goes with it: the fresh mount has no page yet,
+ * behaves for one render like a live turn, and reaches for the live screen. Keyed on the tool call,
+ * which is the identity of the turn rather than of the component drawing it.
+ *
+ * Bounded, because a long conversation is a lot of screenshots. Oldest out first, and a turn whose
+ * frame has been dropped falls back to naming its page.
+ */
+type RememberedTurn = {
+  page?: { url?: string; title?: string };
+  frame?: { base64: string; url: string };
+};
+const REMEMBERED_TURNS = new Map<string, RememberedTurn>();
+const MAX_REMEMBERED_TURNS = 40;
+
+function rememberTurn(toolCallId: string, patch: RememberedTurn): void {
+  const existing = REMEMBERED_TURNS.get(toolCallId) ?? {};
+  /*
+   * A FRAME IS WRITTEN ONCE, which is what the server's own insert says and what this has to agree
+   * with. Letting a later write win is exactly what went wrong: the tile restored the right frame and
+   * then replaced it, one render later, with a screenshot of whatever the Bot had open by then.
+   */
+  const merged: RememberedTurn = { ...existing, ...patch };
+  if (existing.frame) merged.frame = existing.frame;
+  REMEMBERED_TURNS.delete(toolCallId);
+  REMEMBERED_TURNS.set(toolCallId, merged);
+  while (REMEMBERED_TURNS.size > MAX_REMEMBERED_TURNS) {
+    const oldest = REMEMBERED_TURNS.keys().next().value;
+    if (oldest === undefined) break;
+    REMEMBERED_TURNS.delete(oldest);
+  }
+}
+
+/**
+ * Whether a frame is showing the page a turn opened.
+ *
+ * Compared without the trailing slash a browser adds and without the fragment, which are the two
+ * ways the same page reports two spellings of itself. A frame whose page cannot be read is not a
+ * match: unknown is not the same as equal, and storing on unknown is how the wrong picture gets kept.
+ */
+function samePage(frameUrl: string | undefined, pageUrl: string): boolean {
+  if (!frameUrl) return false;
+  const tidy = (value: string) => {
+    try {
+      const parsed = new URL(value);
+      parsed.hash = "";
+      return parsed.toString().replace(/\/$/, "");
+    } catch {
+      return value.replace(/\/$/, "");
+    }
+  };
+  return tidy(frameUrl) === tidy(pageUrl);
+}
+
 /** Default browser viewport ratio, reserved before the first screenshot arrives. */
 const DEFAULT_ASPECT_RATIO = 1280 / 800;
 
@@ -143,78 +200,100 @@ export function ComputerView({
    * restarted the polling this exists to prevent, which replaced the restored picture with the live
    * one. The turn being over is the fact; whether a picture has arrived yet is not.
    */
-  const settled = !active && Boolean(page);
-
-  /**
-   * Whether this tile ever watched the turn it belongs to.
+  /*
+   * The page this turn opened, remembered rather than re-derived.
    *
-   * The difference between a turn finishing in front of somebody and a conversation being reopened
-   * later. Both render an inactive tile; only the first may take the live screen as its own, because
-   * only in the first is the live screen still the page that turn was on.
+   * The prop is rebuilt from the tool result on every render, and a restored turn's result flickers
+   * in and out of hand while the transcript settles, so the tile kept deciding it was live again. A
+   * turn that has opened a page has opened it; nothing later makes that untrue.
    */
-  const watchedItRun = useRef(false);
-  if (active) watchedItRun.current = true;
+  if (toolCallId && page?.url) rememberTurn(toolCallId, { page });
+  const knownPage =
+    page?.url !== undefined
+      ? page
+      : toolCallId
+        ? REMEMBERED_TURNS.get(toolCallId)?.page
+        : undefined;
+  const keptFrame = toolCallId
+    ? (REMEMBERED_TURNS.get(toolCallId)?.frame ?? null)
+    : null;
+  /** Bumped when a frame arrives, because the store it lands in is not React state. */
+  const [, setFrameArrived] = useState(0);
+
+  const settled = !active && Boolean(knownPage);
+  console.info(
+    "[tile]",
+    JSON.stringify({
+      toolCallId: toolCallId ?? null,
+      active,
+      pageUrl: page?.url ?? null,
+      knownUrl: knownPage?.url ?? null,
+      settled,
+      kept: keptFrame?.base64.length ?? null,
+      shot: shot?.base64.length ?? null,
+    }),
+  );
 
   /*
-   * The frame this turn ended on, filed at the moment it ended and read back when somebody reopens
-   * the conversation.
+   * The frame this turn ended on: whatever was filed for it, and only failing that, the screen as it
+   * is right now.
    *
-   * A short turn can finish before the tile has polled anything, so having no frame in hand is the
-   * ordinary case rather than the exception: one is read at completion, which is the last moment the
-   * live screen and this turn's screen are the same thing.
+   * ONE EFFECT, ASKED IN THAT ORDER, because two of them racing is what went wrong. A reopened tile
+   * and one that has just watched its turn end are indistinguishable from inside the component: both
+   * are inactive with a result in hand, and both render as live for one frame first. Two effects, one
+   * restoring and one capturing, therefore both ran on a reopened turn, and the capture replaced the
+   * frame the restore had just put there with a fresh screenshot of whatever the Bot has open now.
    *
-   * Kept once and never rewritten. A turn that has happened does not happen differently later, so a
-   * second visit must not overwrite the picture with whatever the Bot has open by then, which is
-   * also why this refuses to run at all for a tile that never saw its turn.
+   * Asking what is stored before capturing anything makes the difference stop mattering: a reopened
+   * turn finds a frame and never reaches for the live screen at all.
    */
   useEffect(() => {
-    if (active || !watchedItRun.current || !toolCallId || !page?.url) return;
+    if (active || !toolCallId || !knownPage?.url) return;
+    if (REMEMBERED_TURNS.get(toolCallId)?.frame) return;
     let current = true;
+
     void (async () => {
-      const held = shotRef.current?.base64;
-      const frame =
-        held ?? (await readScreenshot(computerId)).frame?.base64 ?? null;
-      if (!current || !frame) return;
+      const stored = await readTurnFrame(computerId, toolCallId);
+      if (!current) return;
+      if (stored) {
+        rememberTurn(toolCallId, {
+          frame: { base64: stored.frame, url: stored.url },
+        });
+        setFrameArrived((n) => n + 1);
+        return;
+      }
+
+      /*
+       * Nothing filed, so this turn ended a moment ago and the live screen may still be its own.
+       *
+       * MAY. A short turn can finish before the tile has polled anything, and by the time this asks,
+       * the browser can already be somewhere else: another turn in another conversation drives the
+       * same computer, and a resumed one starts blank. So the frame is only this turn's if it is
+       * showing this turn's page, and a frame that is not is not stored at all. Better a turn that
+       * names the page it opened than one that shows a picture of somewhere it never went, which is
+       * what the first version of this did.
+       */
+      const url = knownPage.url as string;
+      const held = shotRef.current;
+      const candidate =
+        held ?? (await readScreenshot(computerId)).frame ?? null;
+      if (!current || !candidate) return;
+      if (!samePage(candidate.url, url)) return;
+      const frame = candidate.base64;
       await keepTurnFrame(computerId, toolCallId, {
         frame,
-        url: page.url as string,
-        ...(page.title ? { title: page.title } : {}),
+        url,
+        ...(knownPage.title ? { title: knownPage.title } : {}),
       });
-      // Shown as well as kept, so the tile that just watched the turn does not fall back to naming
-      // the page it is holding a picture of.
-      if (current && !held) {
-        setShot({
-          base64: frame,
-          width: 0,
-          height: 0,
-          capturedAt: "",
-          url: page.url,
-        });
-      }
+      if (!current) return;
+      rememberTurn(toolCallId, { frame: { base64: frame, url } });
+      setFrameArrived((n) => n + 1);
     })();
-    return () => {
-      current = false;
-    };
-  }, [active, computerId, toolCallId, page?.url, page?.title]);
 
-  /** On reopening, the kept frame rather than the live screen. */
-  useEffect(() => {
-    if (!settled || !toolCallId) return;
-    let current = true;
-    void readTurnFrame(computerId, toolCallId).then((kept) => {
-      if (!current || !kept) return;
-      setShot({
-        base64: kept.frame,
-        width: 0,
-        height: 0,
-        capturedAt: "",
-        url: kept.url,
-      });
-    });
     return () => {
       current = false;
     };
-  }, [settled, computerId, toolCallId]);
+  }, [active, computerId, toolCallId, knownPage?.url, knownPage?.title]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {
@@ -299,7 +378,7 @@ export function ComputerView({
   }, [expanded]);
 
   // Always render the card frame; help/secret controls live below the conditional picture.
-  const blankBrowser = shot ? isBlankBrowser(shot) : false;
+  const blankBrowser = !settled && shot ? isBlankBrowser(shot) : false;
 
   /*
    * Sized from the ratio, never from the payload, so the frame is identical while a screen is
@@ -314,12 +393,24 @@ export function ComputerView({
   const frameStyle = blankBrowser
     ? { minWidth }
     : { aspectRatio, minWidth, minHeight };
+  /*
+   * What this tile draws: the kept frame for a turn that is over, the live one while it runs.
+   *
+   * A finished turn never draws `shot`. It may hold one, caught in the render between mounting and
+   * its result arriving, and that frame is of whatever the Bot has open now rather than of this turn.
+   */
+  const drawn = settled
+    ? keptFrame
+    : shot
+      ? { base64: shot.base64, url: shot.url ?? "" }
+      : null;
+
   /** Blank browser placeholders should not be opened as readable screens. */
-  const showScreen = shot !== null && !blankBrowser;
+  const showScreen = drawn !== null && !blankBrowser;
 
   const polledScreen = showScreen ? (
     <img
-      src={`data:image/png;base64,${shot.base64}`}
+      src={`data:image/png;base64,${drawn.base64}`}
       alt="What the assistant is looking at"
       // Keep unexpected screenshot dimensions inside the reserved frame.
       className="absolute inset-0 h-full w-full object-contain opacity-100 transition-opacity duration-300 starting:opacity-0"
@@ -365,8 +456,8 @@ export function ComputerView({
                     it stays true however many times the Bot has browsed since.
                   */}
                   <span className="font-medium">{page?.title || "A page"}</span>
-                  {page?.url ? (
-                    <span className="break-all">{hostOf(page.url)}</span>
+                  {knownPage?.url ? (
+                    <span className="break-all">{hostOf(knownPage.url)}</span>
                   ) : null}
                   <span>
                     Opened during this turn. The screen has moved on since.
