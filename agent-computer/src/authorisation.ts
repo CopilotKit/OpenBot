@@ -47,3 +47,30 @@ export function offeredToken(headers: Headers, url: URL): string {
 export function isOpenPath(pathname: string): boolean {
   return pathname === "/health";
 }
+
+/**
+ * Which paths act on the computer, and so are refused while a person holds the wheel.
+ *
+ * One list, asked once per request, rather than a check inside each handler. The shell is the reason:
+ * `/exec` arrived after the wheel existed and was never given the guard the page paths had, so a Bot
+ * could keep running commands and writing files underneath somebody who had taken the browser at a
+ * login wall. A per-handler check is exactly the thing the next endpoint forgets, which is how that
+ * happened; a list the dispatcher consults is one an endpoint has to be added to.
+ *
+ * Reading is not acting. `/files/read` and `/files/list` stay open so a Bot that has been stopped can
+ * still read its own notes and explain what it was doing, which is the answer the person handing the
+ * wheel back usually wants.
+ */
+const ACTING_PATHS = new Set([
+  "/navigate",
+  "/click",
+  "/type",
+  "/key",
+  "/scroll",
+  "/exec",
+  "/files/write",
+]);
+
+export function actsOnTheComputer(pathname: string): boolean {
+  return ACTING_PATHS.has(pathname);
+}
