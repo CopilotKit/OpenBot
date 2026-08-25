@@ -133,9 +133,15 @@ jobs:
             fi
             echo "refused: $why"
           }
-          # The public example key, which the server will not start with.
-          refuses "the public example encryption key" \
-            --set-string secrets.keyEncryptionKey="$(head -c 32 /dev/zero | base64)"
+          # The public example key, which the server will not start with. Only where this chart
+          # holds the secret: with a store, the value is not readable at template time, so the
+          # refusal is deliberately not armed and asserting it here would be asserting a bug.
+          if ! grep -qE '^ *enabled: true' <(sed -n '/^externalSecrets:/,/^[a-z]/p' charts/openbot/ci/${{ matrix.target }}-values.yaml); then
+            refuses "the public example encryption key" \
+              --set-string secrets.keyEncryptionKey="$(head -c 32 /dev/zero | base64)"
+          else
+            echo "skipped: the example-key refusal is not armed when the secret comes from a store"
+          fi
           # A Bot endpoint with nothing on the request that says who is calling.
           refuses "a managed agent URL with no token" \
             --set-string config.managedAgent.url=http://agent.default:8000/ag-ui
