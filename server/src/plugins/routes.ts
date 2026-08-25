@@ -23,6 +23,19 @@ import {
 } from "./store";
 
 /**
+ * Whether the person a consent was started for still has access to this deployment.
+ *
+ * A seam rather than an import, because these routes have no business knowing what a person is or
+ * where the deny list lives — and because the answer has to come from the deployment as it is when
+ * the callback lands, not from what was true when the flow started.
+ *
+ * False for somebody who was removed while they were away at the vendor's consent screen, and false
+ * for a user id that names nobody at all. Both are the same refusal: there is no live person for
+ * this grant to belong to.
+ */
+export type ConnectingPersonCheck = (userId: string) => Promise<boolean>;
+
+/**
  * The Plugins surface: what this deployment has added, and which Bots may use it.
  *
  * What a Bot can reach is an administrator's; what it is told is not. Adding an MCP server stores a
@@ -48,8 +61,8 @@ export function createPluginRoutes(
    */
   canUseBot: BotAccessCheck,
   /**
-   * What the connect flow needs that the store does not hold: the key its state is sealed with, and
-   * the address a vendor sends people back to.
+   * What the connect flow needs that the store does not hold: the key its state is sealed with, the
+   * address a vendor sends people back to, and who still has access when they come back.
    *
    * Optional, so a deployment with no public URL configured simply cannot start a connect flow and
    * says so, rather than building a redirect URI out of a request header and failing at the vendor.
@@ -61,6 +74,16 @@ export function createPluginRoutes(
    */
   connect?: {
     encryptionKey: string;
+    /**
+     * Whether the person a state names may still connect an account here.
+     *
+     * Required rather than optional, unlike everything else that arrived on this object as "one more
+     * parameter". The callback is sessionless on purpose, so this is the ONLY thing asking whether
+     * the identity in the state is still one this deployment recognises — and a deployment that
+     * forgot to pass it would complete a consent for somebody who was removed ten minutes ago and
+     * write a live refresh token nothing will ever revoke.
+     */
+    personHasAccess: ConnectingPersonCheck;
     /**
      * Whether this deployment holds a shared secret a Bot may present when calling a tool back.
      *
@@ -432,6 +455,9 @@ export function createPluginRoutes(
    * session the browser happens to be carrying — which is what stops a callback delivered to the
    * wrong browser from attaching one person's Google account to another person's row.
    *
+   * Having no session is what makes the access check below necessary. Every other route asks the
+   * question by being behind a guard; this one has to ask it out loud.
+   *
    * Every failure ends the same way: back at Settings with a word about what happened, and nothing
    * written. There is no useful distinction here for the person between a forged state and an expired
    * one, and spelling out which is which tells anybody probing this endpoint how far they got.
@@ -448,6 +474,23 @@ export function createPluginRoutes(
       connect.encryptionKey,
     );
     if (!code || !state) return context.redirect(failed);
+
+    /*
+     * Is the person in the state still somebody here?
+     *
+     * Asked here, before the code is redeemed and before anything is written, because a state is
+     * good for ten minutes and access can end inside them. Removing somebody deny-lists their
+     * address, deletes their sessions and retires the credentials they had already granted — and
+     * none of that reaches a consent already in flight at the vendor. Without this, that consent
+     * comes back and writes a fresh, live refresh token belonging to somebody who no longer has
+     * access, which nothing downstream will ever revoke because nothing knows it was created.
+     *
+     * The same anonymous failure as an unreadable state. Whether an address is deny-listed is not a
+     * fact this endpoint owes an unauthenticated caller.
+     */
+    if (!(await connect.personHasAccess(state.userId))) {
+      return context.redirect(failed);
+    }
 
     const entry = catalogueEntry(state.serverId);
     if (entry?.auth.kind !== "user-oauth") return context.redirect(failed);

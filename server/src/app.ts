@@ -705,6 +705,24 @@ export function createApp(
       "/api/plugins",
       createPluginRoutes(pluginStore, requireUser, canUseBot, {
         encryptionKey: config.keyEncryptionKey,
+        /*
+         * Whether the person a consent was started for still has access, asked when the callback
+         * lands rather than when the flow began.
+         *
+         * The callback carries no session — identity comes from the state — so this is where the
+         * question gets asked at all. `find` answers both halves of it: no row means a user id that
+         * names nobody, and `revoked` means an administrator removed them while they were away at
+         * the vendor. Either way there is no live person for a fresh refresh token to belong to.
+         *
+         * No people store means this deployment cannot answer the question, so it refuses rather
+         * than assuming yes. It also cannot remove anybody, which is exactly why guessing here
+         * would be a hole nothing else closes.
+         */
+        personHasAccess: async (userId) => {
+          if (!peopleStore) return false;
+          const person = await peopleStore.find(userId);
+          return person !== undefined && !person.revoked;
+        },
         // The deployment-wide fallback a Bot may present, as a yes or no. The secret itself stays
         // in config and is checked in `/api/agent-tools/call`; the surface only needs to know
         // whether a Bot without its own credential has any way to call back.

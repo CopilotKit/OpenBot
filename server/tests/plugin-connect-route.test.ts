@@ -47,6 +47,8 @@ function app(store: {
       publicUrl: "https://openbot.example",
       appUrl: "https://app.example",
       encryptionKey: ENCRYPTION_KEY,
+      // Only the callback asks this. Every test here stops at the authorization URL.
+      personHasAccess: async () => true,
     },
   );
   return new Hono().route("/api/plugins", routes);
