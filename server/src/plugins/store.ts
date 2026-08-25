@@ -196,7 +196,7 @@ export class CustomServerRefusedError extends Error {
  *
  * {@link INVALID_CLIENT} is the one code this module ACTS on rather than reports, so it has to
  * survive as a value. It used to travel inside the sentence, which meant the recovery in
- * {@link createPluginStore}'s `exchangeWithRetriedClient` hung on a substring of prose written for a
+ * {@link createPluginStore}'s `refuseAndReplaceEvictedClient` hung on a substring of prose written for a
  * person to read: rewording the sentence — translating it, dropping the parenthesis — would have
  * turned self-registration off with every test still green. A field cannot be reworded by accident.
  */
@@ -726,6 +726,20 @@ export function createPluginStore(options: PluginStoreOptions) {
     const unusableClient = registrationUrl
       ? `${title} has no usable OAuth client for this deployment. Connect ${title} again in Settings: the deployment registers itself with the vendor on the next connect.`
       : `${title} has no usable OAuth client for this deployment. An administrator has to add one again.`;
+    /**
+     * What to say when the vendor has forgotten the client this person's grant was issued under.
+     *
+     * The same register as the two above, and the same instruction, because it is the same situation
+     * from the person's side: nothing they can be called on. What is different is that the
+     * deployment CAN do its half — introduce itself again — and has, by the time this is thrown. So
+     * the sentence says that too, otherwise "connect again" reads as a thing to keep trying.
+     *
+     * Their refresh token is not carried across. A grant belongs to the client it was issued to (RFC
+     * 6749 §6, §10.4), so re-presenting it under the new client is a request a conforming vendor
+     * refuses — and one that only ever appears to work against a vendor whose acceptance would
+     * itself be the vulnerability. A new consent is the only thing that produces a usable grant.
+     */
+    const clientReplaced = `${title} no longer recognises this deployment's OAuth client, so this cannot be called. The deployment has registered itself again — connect ${title} again in Settings.`;
 
     if (!row.credentialId) {
       // The person did their part; the deployment has not. Refused before anything queues, because
@@ -784,16 +798,20 @@ export function createPluginStore(options: PluginStoreOptions) {
      * property — a second replica has a map of its own and is not in ours — and the map is what
      * keeps a burst of calls on one connection from piling N transactions onto that one row lock,
      * each of them holding a pooled connection while it waits its turn.
+     *
+     * An evicted client is handled AFTER the transaction rather than inside it. Nothing about
+     * re-registering needs this person's lock — the client is per server — and doing it inside would
+     * have a second pooled connection opened while this one holds a row lock, which is the shape the
+     * pool note in `db/client.ts` is about.
      */
     return await serialized(`${row.id}:${actorId}`, async () => {
       /*
        * The client, read before the transaction opens rather than inside it.
        *
        * It is per SERVER and is not what the lock protects, and reading it here keeps the vault read
-       * — and the re-registration the retry may perform — off a second pooled connection while this
-       * call holds one open for the whole exchange. Still inside the critical section, so the
-       * ordering that matters is unchanged: a queued call reads the client after whatever ran before
-       * it replaced it.
+       * off a second pooled connection while this call holds one open for the whole exchange. Still
+       * inside the critical section, so the ordering that matters is unchanged: a queued call reads
+       * the client after whatever ran before it replaced it.
        */
       const stored = await currentClient();
 
@@ -815,172 +833,167 @@ export function createPluginStore(options: PluginStoreOptions) {
        * token it had read on the way in would present the one the first replica just spent, which is
        * the very double-spend this exists to prevent.
        */
-      return await database.transaction(async (transaction) => {
-        const [current] = await transaction
-          .select({
-            credentialId: mcpUserCredentials.credentialId,
-            scope: mcpUserCredentials.scope,
-          })
-          .from(mcpUserCredentials)
-          .where(
-            and(
-              eq(mcpUserCredentials.serverId, row.id),
-              eq(mcpUserCredentials.userId, actorId),
-            ),
-          )
-          .limit(1);
+      try {
+        return await database.transaction(async (transaction) => {
+          const [current] = await transaction
+            .select({
+              credentialId: mcpUserCredentials.credentialId,
+              scope: mcpUserCredentials.scope,
+            })
+            .from(mcpUserCredentials)
+            .where(
+              and(
+                eq(mcpUserCredentials.serverId, row.id),
+                eq(mcpUserCredentials.userId, actorId),
+              ),
+            )
+            .limit(1);
 
-        // Disconnected while this call was queued. The same sentence as above: nothing is broken,
-        // and connecting again is the thing to do.
-        if (!current) {
-          throw new PluginRefusedError(
-            `You have not connected your ${title} account. Connect it in Settings and ask again.`,
-            null,
+          // Disconnected while this call was queued. The same sentence as above: nothing is broken,
+          // and connecting again is the thing to do.
+          if (!current) {
+            throw new PluginRefusedError(
+              `You have not connected your ${title} account. Connect it in Settings and ask again.`,
+              null,
+            );
+          }
+
+          const [locked] = await transaction
+            .select({
+              encryptedValue: credentialRows.encryptedValue,
+              revokedAt: credentialRows.revokedAt,
+            })
+            .from(credentialRows)
+            .where(eq(credentialRows.id, current.credentialId))
+            .for("update");
+          /*
+           * A row that is gone or revoked, said the way `secretFor` says it: withdrawn access is
+           * nobody's fault and connecting again is the step. Reached by a replica that waited here
+           * while somebody disconnected, as well as by one that was told after the fact.
+           */
+          if (!locked || locked.revokedAt) {
+            throw new PluginRefusedError(
+              `Your ${title} access was withdrawn. Connect it again in Settings.`,
+              null,
+            );
+          }
+          const refreshToken = await decryptSecret(
+            encryptionKey,
+            locked.encryptedValue,
           );
-        }
 
-        const [locked] = await transaction
-          .select({
-            encryptedValue: credentialRows.encryptedValue,
-            revokedAt: credentialRows.revokedAt,
-          })
-          .from(credentialRows)
-          .where(eq(credentialRows.id, current.credentialId))
-          .for("update");
+          const minted = await exchangeRefreshToken({
+            tokenUrl,
+            client: stored.client,
+            refreshToken,
+          });
+
+          /*
+           * A vendor that sent nothing back, or sent back the token we presented, rotated nothing —
+           * and writing either would be inventing a rotation, at the cost of a needless
+           * re-encryption of every connection on every call.
+           */
+          if (minted.refreshToken && minted.refreshToken !== refreshToken) {
+            /*
+             * The vendor rotated the grant: the token we were just shown is now the only valid one.
+             * Persisting it is not optional bookkeeping — failing to would strand the connection on
+             * the next call — so a failure here refuses THIS call rather than returning an access
+             * token whose refresh token is already spent.
+             *
+             * In this transaction, so it commits with the lock that made the exchange ours: written
+             * outside it, the next replica in line would wake to the token this one just spent.
+             */
+            await rotateConnectionToken(
+              {
+                credentialId: current.credentialId,
+                refreshToken: minted.refreshToken,
+              },
+              transaction,
+            );
+          }
+
+          return { token: minted.accessToken };
+        });
+      } catch (error) {
         /*
-         * A row that is gone or revoked, said the way `secretFor` says it: withdrawn access is
-         * nobody's fault and connecting again is the step. Reached by a replica that waited here
-         * while somebody disconnected, as well as by one that was told after the fact.
+         * Outside the transaction, so the row lock is already released and the vault read this does
+         * is not a second connection held behind this one's.
+         *
+         * Rethrows anything that is not the vendor disowning our client, which is every ordinary
+         * failure: a withdrawn grant, a vendor being down, a disconnect mid-queue.
          */
-        if (!locked || locked.revokedAt) {
-          throw new PluginRefusedError(
-            `Your ${title} access was withdrawn. Connect it again in Settings.`,
-            null,
-          );
-        }
-        const refreshToken = await decryptSecret(
-          encryptionKey,
-          locked.encryptedValue,
-        );
-
-        const minted = await exchangeWithRetriedClient({
-          tokenUrl,
-          client: stored.client,
+        return await refuseAndReplaceEvictedClient({
+          error,
           clientRegisteredAt: stored.registeredAt,
-          refreshToken,
           registrationUrl,
           serverId: row.id,
+          refusal: clientReplaced,
         });
-
-        /*
-         * A vendor that sent nothing back, or sent back the token we presented, rotated nothing —
-         * and writing either would be inventing a rotation, at the cost of a needless re-encryption
-         * of every connection on every call.
-         */
-        if (minted.refreshToken && minted.refreshToken !== refreshToken) {
-          /*
-           * The vendor rotated the grant: the token we were just shown is now the only valid one.
-           * Persisting it is not optional bookkeeping — failing to would strand the connection on
-           * the next call — so a failure here refuses THIS call rather than returning an access
-           * token whose refresh token is already spent.
-           *
-           * In this transaction, so it commits with the lock that made the exchange ours: written
-           * outside it, the next replica in line would wake to the token this one just spent.
-           */
-          await rotateConnectionToken(
-            {
-              credentialId: current.credentialId,
-              refreshToken: minted.refreshToken,
-            },
-            transaction,
-          );
-        }
-
-        return { token: minted.accessToken };
-      });
+      }
     });
   }
 
   /**
-   * The exchange, registering this deployment again if the vendor has forgotten its client.
+   * The vendor has disowned this deployment's client: fix the deployment, refuse the call.
    *
-   * `invalid_client` is the vendor saying the client is the problem, and for a client the deployment
-   * issued to itself there is nobody to tell: no console entry an administrator could re-create, so
-   * every connection to that server would sit behind a refusal nothing in the deployment can act on.
-   * Introducing itself again is the same act as the first registration, so it does that and retries.
+   * `invalid_client` is the vendor saying the CLIENT is the problem, and for a client the deployment
+   * issued to itself there is nobody to tell — no console entry an administrator could re-create, so
+   * every connection to that server would otherwise sit behind a refusal nothing here can act on.
+   * Introducing itself again is the same act as the first registration, and it is worth doing: it is
+   * what makes the next CONSENT possible.
    *
-   * ONCE. A second refusal is the honest signal that the client was never the problem — a vendor
-   * outage answers every exchange this way — and retrying past it would meet an outage by minting a
-   * client per tool call.
+   * IT DOES NOT MAKE THIS CALL POSSIBLE, and this function used to pretend otherwise. It registered a
+   * new client and re-presented the same refresh token under it. A refresh token is bound to the
+   * client it was issued to — RFC 6749 §6 has the token endpoint verify exactly that, and §10.4 is
+   * why — so a conforming vendor refuses the retry, and the only vendor it can work against is one
+   * whose acceptance would itself be the vulnerability. So the grant is never carried across, and the
+   * person is told the one thing that helps: connect again.
    *
-   * Called from INSIDE the per-connection critical section, deliberately, and handed a client that
-   * section read for itself. The client is per SERVER rather than per connection, so this does not
-   * make registration exclusive across a deployment: two PEOPLE's calls can each find the client
-   * evicted and each register once, which costs a spare client and is correct either way. Two calls
-   * on the SAME connection cannot, because they are serialised and the second reads the client after
-   * the first replaced it — which is why that read belongs inside the section rather than before it.
+   * The re-registration is still bounded by {@link CLIENT_REREGISTRATION_BACKOFF_MS}, and that bound
+   * is the whole protection here rather than a nicety. This runs for any non-admin's tool call, and
+   * it REPLACES the client every other connection in the deployment is bound to; a vendor that is
+   * simply down answers every exchange `invalid_client`, so without the window one outage would have
+   * each call in turn rotate the deployment-wide client. A client younger than the window is the
+   * product of the last refusal's re-registration, and is left exactly alone.
    *
-   * The other thing the section buys is that the retry cannot interleave with the same connection's
-   * next exchange: the refresh token is presented twice here, and a second call spending it in
-   * between would be refused for a reason nobody could see.
+   * Always throws. The refusal it raises when it did register is the caller's answer; anything it
+   * cannot act on is rethrown untouched, because the vendor's own words are better than ours.
    */
-  async function exchangeWithRetriedClient(input: {
-    tokenUrl: string;
-    client: OAuthClient;
-    /** When the client being offered was stored. See {@link CLIENT_REREGISTRATION_BACKOFF_MS}. */
+  async function refuseAndReplaceEvictedClient(input: {
+    error: unknown;
+    /** When the client that was just refused was stored. */
     clientRegisteredAt: Date | null;
-    refreshToken: string;
     registrationUrl: string | undefined;
     serverId: string;
-  }): Promise<AccessToken> {
-    const { tokenUrl, refreshToken, registrationUrl, serverId } = input;
-    try {
-      return await exchangeRefreshToken({
-        tokenUrl,
-        client: input.client,
-        refreshToken,
-      });
-    } catch (error) {
-      /*
-       * The code, off the error itself. Never the sentence: that is written for a person, and a
-       * recovery that read it would be one rewording away from silently never running again.
-       */
-      const code = error instanceof TokenRefusedError ? error.code : null;
-      const { redirectUri } = options;
-      if (code !== INVALID_CLIENT || !registrationUrl || !redirectUri) {
-        throw error;
-      }
-
-      /*
-       * A client this deployment stored moments ago is not replaced again.
-       *
-       * The once-per-call bound above is per call, and a vendor-side outage has every call in the
-       * deployment spend its one registration. The stored client's age is the only state the calls
-       * share, and it says which of the two this is: a client older than the window has been working
-       * until now and may really have been evicted, while a young one is what the last refusal
-       * already registered. Surfacing the vendor's refusal is the whole action here — there is
-       * nothing left to recover with.
-       */
-      const registeredAt = input.clientRegisteredAt;
-      if (
-        registeredAt &&
-        Date.now() - registeredAt.getTime() < CLIENT_REREGISTRATION_BACKOFF_MS
-      ) {
-        throw error;
-      }
-
-      const fresh = await registerClient({ registrationUrl, redirectUri });
-      // The vendor would not have us either. The first refusal is the one worth reporting: it says
-      // what actually stopped the call, where this one says what stopped the recovery.
-      if (!fresh) throw error;
-
-      await persistOAuthClient({ serverId, client: fresh, by: "deployment" });
-      return await exchangeRefreshToken({
-        tokenUrl,
-        client: fresh,
-        refreshToken,
-      });
+    /** What to tell the person once the deployment has registered itself again. */
+    refusal: string;
+  }): Promise<never> {
+    const { error, registrationUrl, serverId } = input;
+    /*
+     * The code, off the error itself. Never the sentence: that is written for a person, and a
+     * recovery that read it would be one rewording away from silently never running again.
+     */
+    const code = error instanceof TokenRefusedError ? error.code : null;
+    const { redirectUri } = options;
+    if (code !== INVALID_CLIENT || !registrationUrl || !redirectUri) {
+      throw error;
     }
+
+    const registeredAt = input.clientRegisteredAt;
+    if (
+      registeredAt &&
+      Date.now() - registeredAt.getTime() < CLIENT_REREGISTRATION_BACKOFF_MS
+    ) {
+      throw error;
+    }
+
+    const fresh = await registerClient({ registrationUrl, redirectUri });
+    // The vendor would not have us either. The first refusal is the one worth reporting: it says
+    // what actually stopped the call, where this one says what stopped the recovery.
+    if (!fresh) throw error;
+
+    await persistOAuthClient({ serverId, client: fresh, by: "deployment" });
+    throw new PluginRefusedError(input.refusal, null);
   }
 
   /**

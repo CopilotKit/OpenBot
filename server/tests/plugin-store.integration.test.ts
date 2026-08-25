@@ -1293,8 +1293,19 @@ describe("a dynamic client the vendor has evicted", () => {
 
   /** Every vault row this suite created, so the cleanup can take exactly those. */
   const vaultRows: string[] = [];
-  /** Which client each exchange was offered, in order. That ordering IS the retry. */
+  /** Which client each exchange was offered, in order. One entry per call, never two. */
   const offered: string[] = [];
+  /**
+   * Every exchange as the pair it really is: which client presented which grant.
+   *
+   * The pair is the property, not either half. A refresh token belongs to the client it was issued
+   * to — RFC 6749 §6 has the token endpoint check exactly that, and §10.4 says why — so a pair
+   * naming a token under a client it was never issued to is this deployment attempting to spend one
+   * client's grant as another's. No call may ever produce one.
+   */
+  const exchanges: { clientId: string; refreshToken: string }[] = [];
+  /** Which client the vendor issued each refresh token to, so the stub can enforce the binding. */
+  const issuedTo = new Map<string, string>();
   /** Every registration the store asked the vendor for, with what it asked with. */
   const registrations: { registrationUrl: string; redirectUri: string }[] = [];
   /** Which client ids the vendor still honours. Anything else is answered `invalid_client`. */
@@ -1350,8 +1361,24 @@ describe("a dynamic client the vendor has evicted", () => {
       refreshToken: string;
     }): Promise<AccessToken> => {
       offered.push(client.clientId);
+      exchanges.push({ clientId: client.clientId, refreshToken });
       if (!accepted.has(client.clientId)) {
         throw refuse();
+      }
+      /*
+       * A grant belongs to one client, and this stub enforces it.
+       *
+       * It did not, and that omission is what made the old "register again and re-present the same
+       * refresh token" retry look like it worked. It only ever worked against a vendor that skipped
+       * the check RFC 6749 §6 requires — so the mechanism was pinned by a fixture whose behaviour
+       * would itself have been the vulnerability.
+       */
+      const owner = issuedTo.get(refreshToken);
+      if (owner !== undefined && owner !== client.clientId) {
+        throw new TokenRefusedError(
+          "The vendor would not renew this access (400). (invalid_grant)",
+          "invalid_grant",
+        );
       }
       // The same token back, so nothing rotates: what this suite is about is the client.
       return { accessToken: `at-${client.clientId}`, refreshToken };
@@ -1482,17 +1509,34 @@ describe("a dynamic client the vendor has evicted", () => {
       );
   }
 
-  /** A connection holding `rt-1`, written through the store so the vault is exercised. */
-  async function connect() {
+  /**
+   * A connection holding `rt-1`, written through the store so the vault is exercised.
+   *
+   * `issuedBy` is which client the vendor issued that grant to, which is the fact the stub above
+   * enforces. It is the evicted one in every test here, because that is what an eviction means: the
+   * grant somebody holds was obtained under the client the vendor has since stopped honouring.
+   */
+  async function connect(issuedBy: OAuthClient = EVICTED) {
     await dynamicStore.recordConnection({
       serverId: dynamicServerId,
       userId: dynamicUserId,
       refreshToken: "rt-1",
       scope: SCOPE,
     });
+    issuedTo.set("rt-1", issuedBy.clientId);
     offered.length = 0;
+    exchanges.length = 0;
     registrations.length = 0;
   }
+
+  /** One tool call by the connected person, which is every call this suite makes. */
+  const call = () =>
+    dynamicStore.callTool({
+      ref: dynamicRef,
+      args: {},
+      botId: dynamicBotId,
+      actorId: dynamicUserId,
+    });
 
   let notionWasAlreadyConfigured = false;
   /** This deployment's own client, restored afterwards: the column is live configuration. */
@@ -1602,23 +1646,35 @@ describe("a dynamic client the vendor has evicted", () => {
     await database.delete(users).where(eq(users.id, dynamicUserId));
   });
 
-  test("the deployment registers again, once, and the call goes through", async () => {
+  test("the deployment registers again, once, and refuses this call", async () => {
     await putClient(EVICTED);
     await connect();
     const registeredBefore = await registeredRows();
+    // The vendor honours the fresh client, so a retry under it is exactly what would have LOOKED
+    // like a recovery. The point of this test is that it is not attempted.
     accepted = new Set([FRESH.clientId]);
     issue = () => FRESH;
 
-    const result = await dynamicStore.callTool({
-      ref: dynamicRef,
-      args: {},
-      botId: dynamicBotId,
-      actorId: dynamicUserId,
-    });
+    /*
+     * The person is told to connect again, because that is the only thing that can help them.
+     *
+     * Their refresh token was issued to the client the vendor has forgotten, and a grant belongs to
+     * the client it was issued to. There is no arrangement of stored secrets that turns it into a
+     * usable one — only a new consent under the client that now exists.
+     */
+    await expect(call()).rejects.toThrow(
+      "Notion no longer recognises this deployment's OAuth client",
+    );
 
-    // The call the person asked for happened, on the client the vendor had never heard of until now.
-    expect(result.isError).toBe(false);
-    expect(offered).toEqual([EVICTED.clientId, FRESH.clientId]);
+    /*
+     * One exchange, on the client the deployment held. The old grant is never presented to the new
+     * client: a conforming vendor refuses that (RFC 6749 §6), so the retry that used to be here
+     * could only ever have succeeded against a vendor whose acceptance was itself the bug.
+     */
+    expect(offered).toEqual([EVICTED.clientId]);
+    expect(exchanges).toEqual([
+      { clientId: EVICTED.clientId, refreshToken: "rt-1" },
+    ]);
 
     // Registered exactly once, with the pinned endpoint and the deployment's own redirect URI —
     // never a URL from the request, which is the property `redirectUriFor` exists for.
@@ -1626,7 +1682,7 @@ describe("a dynamic client the vendor has evicted", () => {
       { registrationUrl: REGISTRATION_URL, redirectUri: REDIRECT_URI },
     ]);
 
-    // And kept, so the next call starts from the client that works rather than repeating this.
+    // And kept, so the connect this refusal sends somebody to uses the client that works.
     expect(await dynamicStore.oauthClientFor(dynamicServerId)).toEqual(FRESH);
 
     /*
@@ -1642,26 +1698,31 @@ describe("a dynamic client the vendor has evicted", () => {
     );
   });
 
-  test("a second refusal in a row is surfaced rather than registered around", async () => {
+  test("a vendor refusing everything costs one registration, not one per call", async () => {
     await putClient(EVICTED);
     await connect();
     // The vendor honours nothing, which is what an outage looks like from here.
     accepted = new Set<string>();
     issue = () => ({ clientId: "dyn-3", clientSecret: "" });
 
-    await expect(
-      dynamicStore.callTool({
-        ref: dynamicRef,
-        args: {},
-        botId: dynamicBotId,
-        actorId: dynamicUserId,
-      }),
-    ).rejects.toThrow("invalid_client");
-
-    // One registration and two exchanges: the retry is bounded, so a vendor refusing everything
-    // costs one new client rather than one per call forever.
+    await expect(call()).rejects.toThrow(
+      "Notion no longer recognises this deployment's OAuth client",
+    );
     expect(registrations.length).toBe(1);
-    expect(offered).toEqual([EVICTED.clientId, "dyn-3"]);
+    expect(exchanges).toEqual([
+      { clientId: EVICTED.clientId, refreshToken: "rt-1" },
+    ]);
+
+    /*
+     * The next call is a NEW call, not a retry: it reads the client the deployment now holds, offers
+     * it once, and is refused. What it must not do is register a second one — dyn-3 was stored
+     * moments ago, so it is inside the re-registration window and is left alone. That is the
+     * difference between an outage costing one client and costing one per tool call.
+     */
+    exchanges.length = 0;
+    await expect(call()).rejects.toThrow("invalid_client");
+    expect(registrations.length).toBe(1);
+    expect(exchanges).toEqual([{ clientId: "dyn-3", refreshToken: "rt-1" }]);
   });
 
   /**
@@ -1674,24 +1735,20 @@ describe("a dynamic client the vendor has evicted", () => {
    * younger than the window is already the product of somebody's re-registration.
    */
   test("a client registered moments ago is refused rather than replaced", async () => {
-    // Written now, the way the retry itself would have written it a moment ago.
+    // Written now, the way a re-registration would have written it a moment ago.
     await putClient(EVICTED, new Date());
     await connect();
     accepted = new Set<string>();
     issue = () => FRESH;
 
     // The vendor's own refusal, surfaced as it stands: nothing here can improve on it.
-    await expect(
-      dynamicStore.callTool({
-        ref: dynamicRef,
-        args: {},
-        botId: dynamicBotId,
-        actorId: dynamicUserId,
-      }),
-    ).rejects.toThrow("invalid_client");
+    await expect(call()).rejects.toThrow("invalid_client");
 
     expect(registrations).toEqual([]);
     expect(offered).toEqual([EVICTED.clientId]);
+    expect(exchanges).toEqual([
+      { clientId: EVICTED.clientId, refreshToken: "rt-1" },
+    ]);
   });
 
   /**
@@ -1714,16 +1771,13 @@ describe("a dynamic client the vendor has evicted", () => {
         INVALID_CLIENT,
       );
 
-    const result = await dynamicStore.callTool({
-      ref: dynamicRef,
-      args: {},
-      botId: dynamicBotId,
-      actorId: dynamicUserId,
-    });
+    await expect(call()).rejects.toThrow(
+      "Notion no longer recognises this deployment's OAuth client",
+    );
 
-    expect(result.isError).toBe(false);
-    expect(offered).toEqual([EVICTED.clientId, FRESH.clientId]);
+    expect(offered).toEqual([EVICTED.clientId]);
     expect(registrations.length).toBe(1);
+    expect(await dynamicStore.oauthClientFor(dynamicServerId)).toEqual(FRESH);
   });
 
   /** And the other way round: prose that says the word, over a code that does not. */
@@ -1738,14 +1792,7 @@ describe("a dynamic client the vendor has evicted", () => {
         "invalid_grant",
       );
 
-    await expect(
-      dynamicStore.callTool({
-        ref: dynamicRef,
-        args: {},
-        botId: dynamicBotId,
-        actorId: dynamicUserId,
-      }),
-    ).rejects.toThrow("invalid_grant");
+    await expect(call()).rejects.toThrow("invalid_grant");
 
     // A withdrawn grant is the person's to fix by connecting again. Minting a client for it would
     // leave a spare client behind and still refuse.
@@ -1759,7 +1806,11 @@ describe("a dynamic client the vendor has evicted", () => {
    * The client is read INSIDE the per-connection critical section, so the second call reads it after
    * the first has replaced it. Read before the queue instead, both calls would carry the evicted
    * client in, both would be refused, and both would register — a client minted per queued call, on
-   * a connection the deployment already fixed.
+   * a deployment whose client the first call already replaced.
+   *
+   * Both calls fail, and they fail differently, which is the honest outcome. The first found the
+   * client evicted; the second offered the client that now exists and was refused because the grant
+   * it holds was issued to the old one. Only a new consent fixes that, and both refusals say so.
    */
   test("two calls queued on one connection register once between them", async () => {
     await putClient(EVICTED);
@@ -1767,18 +1818,14 @@ describe("a dynamic client the vendor has evicted", () => {
     accepted = new Set([FRESH.clientId]);
     issue = () => FRESH;
 
-    const call = () =>
-      dynamicStore.callTool({
-        ref: dynamicRef,
-        args: {},
-        botId: dynamicBotId,
-        actorId: dynamicUserId,
-      });
-    const results = await Promise.all([call(), call()]);
+    const results = await Promise.allSettled([call(), call()]);
 
-    expect(results.map((result) => result.isError)).toEqual([false, false]);
-    // The evicted client was offered once, by whichever call got there first.
-    expect(offered).toEqual([EVICTED.clientId, FRESH.clientId, FRESH.clientId]);
+    expect(results.map((result) => result.status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
+    // One exchange per call, and never a token offered twice inside one of them.
+    expect(offered).toEqual([EVICTED.clientId, FRESH.clientId]);
     expect(registrations.length).toBe(1);
   });
 
