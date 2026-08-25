@@ -8,6 +8,45 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### `start.sh` refuses a port that answers but is not OpenBot
+
+The startup checks asked whether a port answered, and treated that as proof the port belonged to this
+stack. Those are not the same claim. Any single-page app serves its index.html for every path it does
+not recognise, so an unrelated dashboard on a default port answers `200` to `/api/capabilities` as
+readily as this server does.
+
+The cost was not a wrong answer, it was a wrong answer three stages later. `require_free_or_ours`
+reported "already up", so the server was never started; `wait_for` then printed a green
+"server ready"; and the run failed at stage 3 inside `json.loads`, parsing that stranger's HTML. The
+error names `char 0`, which reads like an empty response rather than a `<`, so the visible symptom
+pointed nowhere near the port.
+
+Each surface is now asked for something only it can produce: a `licenseStatus` field for the server,
+its own `<title>` for the app, `/health` for the compose services. When a check gives up it says
+whether the process failed to start or the port belongs to something else.
+
+The root cause was in `.env.example`, and is fixed there too. The server reads `PORT`, this script
+reads `SERVER_PORT`, `docs/configuration.md` documents `SERVER_PORT` as the setting, and only `PORT`
+shipped. Moving the server by editing that one line left the script still looking at 3001. Both names
+are now present, next to each other, saying they have to agree.
+
+**A run may now stop where it used to continue.** That is the point: it stops at the port that is
+wrong, naming it, rather than several steps later on a parse error.
+
+### `docker compose up -d` configures the same stack `scripts/start.sh` does
+
+`SUPERVISOR_TOKEN` and `COMPUTER_TOKEN` defaulted to the empty string in `docker-compose.yml`, so
+which stack you got depended on how you brought it up. `scripts/start.sh` resolves both to their
+`openbot-dev-*` defaults and exports them before calling compose. A plain `docker compose up -d` —
+which this project's own shutdown notes tell you to use — passed an empty string instead.
+
+`agent-computer` refuses to start without one, so that half failed loudly. The supervisor half was
+the quiet one: the server kept the token it started with while the supervisor held an empty string,
+and every call between them was refused at the door.
+
+Both now carry the same defaults `start.sh` applies, as `COMPUTER_IMAGE` already did two lines down.
+A value set in `.env` still wins, and a deployment should set one.
+
 ## 0.0.4
 
 ### A click citing a ref this deployment cannot resolve is refused
