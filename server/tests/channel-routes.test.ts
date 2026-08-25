@@ -79,6 +79,9 @@ function fakeStore(
     async setPinned(receivedActor, id, pinned) {
       calls.push(["setPinned", receivedActor, id, pinned]);
     },
+    async markRead(receivedActor, id) {
+      calls.push(["markRead", receivedActor, id]);
+    },
     async softDelete(receivedActor, id) {
       calls.push(["softDelete", receivedActor, id]);
     },
@@ -355,6 +358,45 @@ describe("channel routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ pinned: true }),
     });
+
+    expect(response.status).toBe(401);
+    expect(store.calls).toEqual([]);
+  });
+
+  test("marks read through the authenticated actor and answers 204", async () => {
+    const store = fakeStore();
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1/read",
+      { method: "PUT" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(store.calls).toEqual([["markRead", actor, "channel-1"]]);
+  });
+
+  test("maps an unknown channel to 404 for marking read", async () => {
+    const store = fakeStore({
+      markRead: async () => {
+        throw new ChannelNotFoundError("channel-1");
+      },
+    });
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1/read",
+      { method: "PUT" },
+    );
+
+    expect(response.status).toBe(404);
+    expect(await json(response)).toEqual({ error: "Channel not found." });
+  });
+
+  test("keeps authentication in front of marking read", async () => {
+    const store = fakeStore();
+    const denied: MiddlewareHandler<{ Variables: AppVariables }> = (context) =>
+      Promise.resolve(context.json({ error: "denied" }, 401));
+    const response = await appFor(store, denied).request(
+      "http://openbot.test/channel-1/read",
+      { method: "PUT" },
+    );
 
     expect(response.status).toBe(401);
     expect(store.calls).toEqual([]);

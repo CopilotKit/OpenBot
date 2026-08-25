@@ -895,6 +895,15 @@ export function createChannelRoutes(
     }
   });
 
+  routes.put("/:channelId/read", requireUser, async (context) => {
+    try {
+      await store.markRead(context.var.actor, context.req.param("channelId"));
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   routes.delete("/:channelId", requireUser, async (context) => {
     const channelId = context.req.param("channelId");
     try {
