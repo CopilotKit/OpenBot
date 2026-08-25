@@ -71,6 +71,12 @@ export type ComposerProps = {
    */
   pending?: boolean;
   /**
+   * Put the caret in the editor the moment it can take one: on mount when already interactive,
+   * and again whenever `disabled` lifts. For the screens where typing is the next thing a person
+   * does — choosing a coworker answers the "to" field, and the message is what remains.
+   */
+  autoFocus?: boolean;
+  /**
    * There is a run on the wire for Stop to reach.
    *
    * Not the same question as `pending`, and telling them apart is the whole reason this exists. A
@@ -95,6 +101,7 @@ export function Composer({
   onStop,
   disabled = false,
   pending = false,
+  autoFocus = false,
   stoppable,
 }: ComposerProps) {
   const [value, setValue] = useState<Segment[]>([]);
@@ -193,12 +200,12 @@ export function Composer({
    * only point at which the element is enabled and focusable.
    */
   useEffect(() => {
-    if (!wantsFocus.current || disabled || isBusy) {
+    if ((!wantsFocus.current && !autoFocus) || disabled || isBusy) {
       return;
     }
     wantsFocus.current = false;
     promptAreaRef.current?.focus();
-  }, [disabled, isBusy]);
+  }, [autoFocus, disabled, isBusy]);
 
   const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
