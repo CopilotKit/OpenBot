@@ -204,13 +204,30 @@ export function readConnectState(
 }
 
 /**
+ * The six keys that carry this flow's own security: who is asking (`client_id`), where the vendor
+ * answers (`redirect_uri`), the grant shape (`response_type`), the signed state (`state`), and the
+ * PKCE proof (`code_challenge`, `code_challenge_method`). A catalogue entry's `authorizationParams`
+ * must never rewrite one of these — an entry setting `code_challenge_method: "plain"` would defeat
+ * PKCE with nothing here to catch it. The catalogue is frozen, reviewed code today, so nothing can
+ * reach this, but a future entry that tried would fail at first connect rather than quietly winning.
+ */
+const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
+  "client_id",
+  "redirect_uri",
+  "response_type",
+  "state",
+  "code_challenge",
+  "code_challenge_method",
+]);
+
+/**
  * The vendor's consent screen, as a URL to send somebody to.
  *
- * `offline` and `consent` are both load bearing. Without `access_type=offline` Google returns an
- * access token and no refresh token, so the connection would appear to work and then stop about an
- * hour later with nothing to renew it. Without `prompt=consent` a second connect returns no refresh
- * token at all, because the person already agreed once — which turns reconnecting after a disconnect
- * into a silent no-op.
+ * Vendor-specific parameters — Google's `offline`/`consent` pair, or nothing at all for a vendor
+ * like Notion whose consent screen is itself the scoping — come from the catalogue entry's own
+ * `authorizationParams`, never hardcoded here. The rationale for any one vendor's requirements lives
+ * on that vendor's entry, because a parameter this function adds for everybody is a parameter an
+ * unrelated vendor never asked for and may refuse the whole request over.
  */
 export function authorizationUrlFor(input: {
   auth: Extract<CatalogueAuth, { kind: "user-oauth" }>;
@@ -220,17 +237,34 @@ export function authorizationUrlFor(input: {
   codeChallenge: string;
 }): string {
   const url = new URL(input.auth.authorizationUrl);
-  url.search = new URLSearchParams({
+  const params = new URLSearchParams({
     client_id: input.clientId,
     redirect_uri: input.redirectUri,
     response_type: "code",
-    scope: input.auth.scopes.join(" "),
-    access_type: "offline",
-    prompt: "consent",
     state: input.state,
     code_challenge: input.codeChallenge,
     code_challenge_method: "S256",
-  }).toString();
+  });
+  // Empty means the consent screen itself is the scoping; an empty scope= is not "no scope".
+  if (input.auth.scopes.length > 0) {
+    params.set("scope", input.auth.scopes.join(" "));
+  }
+  // The vendor's own requirements, from its reviewed entry — never another vendor's.
+  for (const [name, value] of Object.entries(
+    input.auth.authorizationParams ?? {},
+  )) {
+    // Applied last, so a reserved name here would quietly rewrite the flow's own security instead
+    // of the vendor's. That is a bad entry, and it must fail at first connect, not win silently.
+    if (RESERVED_AUTHORIZATION_PARAMS.has(name)) {
+      throw new Error(
+        `authorizationParams may not set "${name}": it is one of the flow's own security ` +
+          "parameters (client_id, redirect_uri, response_type, state, code_challenge, " +
+          "code_challenge_method) and must never be rewritten by a catalogue entry.",
+      );
+    }
+    params.set(name, value);
+  }
+  url.search = params.toString();
   return url.toString();
 }
 
@@ -256,17 +290,20 @@ export async function redeemAuthorizationCode(input: {
   redirectUri: string;
   verifier: string;
 }): Promise<RedeemedGrant | null> {
+  const params = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: input.code,
+    client_id: input.clientId,
+    redirect_uri: input.redirectUri,
+    code_verifier: input.verifier,
+  });
+  // A public (DCR) client proves itself with PKCE, and some vendors refuse an unexpected empty field.
+  if (input.clientSecret) params.set("client_secret", input.clientSecret);
+
   const response = await fetch(input.tokenUrl, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code: input.code,
-      client_id: input.clientId,
-      client_secret: input.clientSecret,
-      redirect_uri: input.redirectUri,
-      code_verifier: input.verifier,
-    }),
+    body: params,
     signal: AbortSignal.timeout(15_000),
   });
 
@@ -290,5 +327,43 @@ export async function redeemAuthorizationCode(input: {
   return {
     refreshToken: body.refresh_token,
     scope: typeof body.scope === "string" ? body.scope : "",
+  };
+}
+
+/**
+ * Register this deployment as an OAuth client, at the vendor's own registration endpoint.
+ *
+ * RFC 7591, the shape Notion's hosted MCP expects: a public client (`token_endpoint_auth_method:
+ * "none"`) whose proof is PKCE rather than a secret. Null on refusal rather than a throw, for the
+ * same reason `redeemAuthorizationCode` refuses quietly: the vendor's error body is written for a
+ * developer console and can be surfaced by the caller that knows who is listening.
+ */
+export async function registerDynamicClient(input: {
+  registrationUrl: string;
+  redirectUri: string;
+}): Promise<{ clientId: string; clientSecret: string } | null> {
+  const response = await fetch(input.registrationUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      redirect_uris: [input.redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      client_name: "OpenBot",
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) return null;
+  const body = (await response.json()) as {
+    client_id?: unknown;
+    client_secret?: unknown;
+  };
+  if (typeof body.client_id !== "string" || !body.client_id) return null;
+  return {
+    clientId: body.client_id,
+    // A public client has none; a vendor that issues one anyway gets it stored and sent back.
+    clientSecret:
+      typeof body.client_secret === "string" ? body.client_secret : "",
   };
 }

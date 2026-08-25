@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { catalogueEntry } from "../src/plugins/catalogue";
+import type { CatalogueAuth } from "../src/plugins/catalogue";
 import {
   authorizationUrlFor,
   challengeFor,
   createVerifier,
   readConnectState,
+  redeemAuthorizationCode,
   redirectUriFor,
+  registerDynamicClient,
   connectedAccountsUrlFor,
   signConnectState,
 } from "../src/plugins/oauth";
@@ -25,11 +27,6 @@ import {
  */
 
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-const drive = catalogueEntry("google-drive");
-if (drive?.auth.kind !== "user-oauth") {
-  throw new Error("google-drive must be a user-oauth entry for these tests");
-}
-const driveAuth = drive.auth;
 
 const NOW = 1_770_000_000_000;
 
@@ -169,9 +166,20 @@ describe("PKCE", () => {
 });
 
 describe("the address the person is sent to", () => {
+  // A literal fixture, not the live Google Drive entry: this pins Google's behavior through the
+  // params-from-the-entry refactor without the test depending on the catalogue's own shape.
+  const googleAuth: Extract<CatalogueAuth, { kind: "user-oauth" }> = {
+    kind: "user-oauth",
+    authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    revokeUrl: "https://oauth2.googleapis.com/revoke",
+    scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+    authorizationParams: { access_type: "offline", prompt: "consent" },
+  };
+
   const url = new URL(
     authorizationUrlFor({
-      auth: driveAuth,
+      auth: googleAuth,
       clientId: "client-id",
       redirectUri: "https://openbot.example/api/plugins/oauth/callback",
       state: "signed-state",
@@ -180,7 +188,7 @@ describe("the address the person is sent to", () => {
   );
 
   test("is the vendor's own, from the catalogue", () => {
-    expect(`${url.origin}${url.pathname}`).toBe(driveAuth.authorizationUrl);
+    expect(`${url.origin}${url.pathname}`).toBe(googleAuth.authorizationUrl);
   });
 
   test("asks for a refresh token that consent is granted for once", () => {
@@ -193,13 +201,87 @@ describe("the address the person is sent to", () => {
   });
 
   test("asks only for the scopes the entry pins", () => {
-    expect(url.searchParams.get("scope")).toBe(driveAuth.scopes.join(" "));
+    expect(url.searchParams.get("scope")).toBe(googleAuth.scopes.join(" "));
   });
 
   test("carries the state and the challenge, and names the method", () => {
     expect(url.searchParams.get("state")).toBe("signed-state");
     expect(url.searchParams.get("code_challenge")).toBe("challenge");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+  });
+
+  test("a vendor with no authorization params and no scopes sends neither, nor an empty scope", () => {
+    // Notion's shape: no authorizationParams, and scopes: [] because the consent screen itself is
+    // the scoping. An empty `scope=` would be a malformed request to some vendors, so the key must
+    // be entirely absent, not present-and-empty.
+    const notionAuth: Extract<CatalogueAuth, { kind: "user-oauth" }> = {
+      kind: "user-oauth",
+      authorizationUrl: "https://mcp.notion.com/authorize",
+      tokenUrl: "https://mcp.notion.com/token",
+      revokeUrl: "https://mcp.notion.com/revoke",
+      scopes: [],
+    };
+    const bare = new URL(
+      authorizationUrlFor({
+        auth: notionAuth,
+        clientId: "client-id",
+        redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+        state: "signed-state",
+        codeChallenge: "challenge",
+      }),
+    );
+    expect(bare.searchParams.has("access_type")).toBe(false);
+    expect(bare.searchParams.has("prompt")).toBe(false);
+    expect(bare.searchParams.has("scope")).toBe(false);
+  });
+
+  /*
+   * DEFENSE IN DEPTH, NOT REACHABILITY TODAY. The catalogue is frozen, reviewed code, so nothing in
+   * it can set this now — but `authorizationParams` is applied LAST, after the six keys that carry
+   * this flow's own security (who is asking, where the vendor answers, and the PKCE proof). An entry
+   * that names one of them would quietly win, and a future entry setting `code_challenge_method:
+   * "plain"` would defeat PKCE with no test catching it. Throwing at URL-build time turns that into a
+   * fail-at-first-connect instead of a silent downgrade.
+   */
+  test("an entry that names one of the flow's own keys throws rather than winning", () => {
+    const hostileAuth: Extract<CatalogueAuth, { kind: "user-oauth" }> = {
+      kind: "user-oauth",
+      authorizationUrl: "https://vendor.example/authorize",
+      tokenUrl: "https://vendor.example/token",
+      revokeUrl: "https://vendor.example/revoke",
+      scopes: [],
+      authorizationParams: { code_challenge_method: "plain" },
+    };
+    expect(() =>
+      authorizationUrlFor({
+        auth: hostileAuth,
+        clientId: "client-id",
+        redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+        state: "signed-state",
+        codeChallenge: "challenge",
+      }),
+    ).toThrow(/code_challenge_method/);
+  });
+
+  test("an entry's harmless extra parameter still passes through", () => {
+    const audienceAuth: Extract<CatalogueAuth, { kind: "user-oauth" }> = {
+      kind: "user-oauth",
+      authorizationUrl: "https://vendor.example/authorize",
+      tokenUrl: "https://vendor.example/token",
+      revokeUrl: "https://vendor.example/revoke",
+      scopes: [],
+      authorizationParams: { audience: "x" },
+    };
+    const withAudience = new URL(
+      authorizationUrlFor({
+        auth: audienceAuth,
+        clientId: "client-id",
+        redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+        state: "signed-state",
+        codeChallenge: "challenge",
+      }),
+    );
+    expect(withAudience.searchParams.get("audience")).toBe("x");
   });
 });
 
@@ -302,5 +384,104 @@ describe("where the callback sends somebody afterwards", () => {
     ).toBe(
       "http://localhost:3010/settings/connected-accounts?connected=failed",
     );
+  });
+});
+
+describe("registering this deployment as an OAuth client", () => {
+  test("registers a dynamic client with the redirect URI and no secret", async () => {
+    const seen: { url: string; body: unknown }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      seen.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({ client_id: "dyn-123" }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const client = await registerDynamicClient({
+        registrationUrl: "https://vendor.example/register",
+        redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+      });
+      expect(client).toEqual({ clientId: "dyn-123", clientSecret: "" });
+      expect(seen[0]?.url).toBe("https://vendor.example/register");
+      expect(seen[0]?.body).toEqual({
+        redirect_uris: ["https://openbot.example/api/plugins/oauth/callback"],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+        client_name: "OpenBot",
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test("a refused registration returns null rather than a client", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("no", { status: 400 })) as unknown as typeof fetch;
+    try {
+      expect(
+        await registerDynamicClient({
+          registrationUrl: "https://vendor.example/register",
+          redirectUri: "https://openbot.example/cb",
+        }),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe("redeeming an authorization code", () => {
+  test("an empty client secret sends no client_secret field", async () => {
+    const seen: { params: URLSearchParams }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen.push({ params: new URLSearchParams(String(init?.body)) });
+      return new Response(
+        JSON.stringify({ refresh_token: "rt-1", scope: "" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      await redeemAuthorizationCode({
+        tokenUrl: "https://vendor.example/token",
+        clientId: "client-id",
+        clientSecret: "",
+        code: "code-1",
+        redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+        verifier: "verifier-1",
+      });
+      expect(seen[0]?.params.has("client_secret")).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test("a non-empty client secret still sends the field", async () => {
+    const seen: { params: URLSearchParams }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen.push({ params: new URLSearchParams(String(init?.body)) });
+      return new Response(
+        JSON.stringify({ refresh_token: "rt-1", scope: "" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      await redeemAuthorizationCode({
+        tokenUrl: "https://vendor.example/token",
+        clientId: "client-id",
+        clientSecret: "secret-1",
+        code: "code-1",
+        redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+        verifier: "verifier-1",
+      });
+      expect(seen[0]?.params.get("client_secret")).toBe("secret-1");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
