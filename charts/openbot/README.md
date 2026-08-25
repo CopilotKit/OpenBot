@@ -123,8 +123,28 @@ installing on somebody's bare-metal cluster.
 
 The chart fails the install, naming the value to change, when: there is no database or two of them;
 nobody would be an administrator; `singleUser` is combined with a public URL; both an Ingress and an
-HTTPRoute are enabled; both `externalSecrets` and an existing Secret are named; or a browser is asked
-for inside more than one API replica.
+HTTPRoute are enabled; both `externalSecrets` and an existing Secret are named; a Bot endpoint is
+named with no token to call it with; or a browser is asked for inside more than one API replica.
+
+## Your own Bot
+
+OpenBot is a shell for somebody else's agent, and `config.managedAgent.url` is where that agent goes:
+an AG-UI endpoint the server pod can reach, so a Service in this cluster rather than localhost.
+
+```yaml
+config:
+  managedAgent:
+    url: http://my-agent.my-namespace:8000/ag-ui
+secrets:
+  managedAgentToken: <a long random value>
+```
+
+The token travels on every call and is required whenever a url is set. With an existing Secret or an
+external store, the key is `managed-agent-token`.
+
+Left empty, this deployment has the Bots its tenant package declares as built-in and no others. A
+package entry pointing at an endpoint that resolves to nothing is dropped rather than registered as a
+coworker nobody can talk to.
 
 ## A computer for each Bot
 

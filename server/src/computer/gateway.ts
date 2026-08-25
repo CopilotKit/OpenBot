@@ -1037,19 +1037,26 @@ async function write(
        * is the file body of this pair, and stays out.
        */
       ...(entry.command ? { command: entry.command } : {}),
+      /*
+       * The element, where the action named one.
+       *
+       * KEYED ON THE REF, not on the kind of action. An unresolved element is worth recording
+       * plainly rather than as an absent field that reads like a logging gap, but that only applies
+       * when the Bot pointed at something and the server could not say what: a ref it holds and the
+       * snapshot no longer does. Deciding it by elimination instead put "not in the current
+       * snapshot" on every navigation, every file read and every command, which is the reverse of
+       * the intent. Those actions did not fail to identify an element; they never had one, and a
+       * trail that says otherwise sends a reader looking for a snapshot that was never taken.
+       */
       element: entry.element
         ? {
             role: entry.element.role,
             name: entry.element.name,
             ...(entry.element.type ? { type: entry.element.type } : {}),
           }
-        : entry.filePath || entry.command
-          ? // A file or command action has no element and never will. Those rows leave the element
-            // field absent rather than describing a browser snapshot.
-            undefined
-          : // An action on an element the server cannot identify is worth recording plainly, rather
-            // than as an absent field that reads like a logging gap.
-            "not in the current snapshot",
+        : entry.ref
+          ? "not in the current snapshot"
+          : undefined,
       ...(entry.failure ? { failure: entry.failure } : {}),
       decision: {
         allowed: entry.decision.allowed,

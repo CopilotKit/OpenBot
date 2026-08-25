@@ -169,3 +169,17 @@ This template renders nothing.
 {{- fail "server.embeddedComputer runs a browser inside every API pod, which cannot be replicated: each replica would hold a profile directory belonging to one Bot. Either set server.replicaCount=1, or leave embeddedComputer off and give the Bots a computer of their own." }}
 {{- end }}
 {{- end }}
+
+{{- /*
+  A Bot endpoint with nothing on the request that says who is calling.
+
+  The server refuses to start in this state, and it is better to hear it from `helm install` than
+  from a pod's third crash loop. Only checked when the chart holds the token: a value in an existing
+  Secret or an external store is not readable at template time, so an install that gets it from
+  there is left alone rather than refused on a guess.
+*/}}
+{{- if .Values.config.managedAgent.url }}
+{{- if and (not .Values.secrets.managedAgentToken) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- fail "config.managedAgent.url is set without secrets.managedAgentToken. Every call to your Bot carries that token, and an endpoint that accepts unauthenticated calls is an open door to whatever the Bot can reach." }}
+{{- end }}
+{{- end }}

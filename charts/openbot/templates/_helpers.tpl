@@ -188,6 +188,15 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
     secretKeyRef:
       name: {{ include "openbot.secretName" . }}
       key: license-token
+{{- with .Values.config.managedAgent.url }}
+- name: MANAGED_AGENT_AG_UI_URL
+  value: {{ . | quote }}
+- name: MANAGED_AGENT_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" $ }}
+      key: managed-agent-token
+{{- end }}
 {{- with .Values.config.auth.google.clientId }}
 - name: GOOGLE_OAUTH_CLIENT_ID
   value: {{ . | quote }}

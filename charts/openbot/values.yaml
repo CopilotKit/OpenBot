@@ -148,6 +148,20 @@ config:
     apiUrl: ""
     gatewayWsUrl: ""
     # The two secret halves live under `secrets` below, never here.
+  # Your own Bot, over AG-UI.
+  #
+  # OpenBot is a shell for somebody else's agent, so this is the seam that matters: point it at a
+  # service you run and coworkers created here reach it. Left empty, this deployment has only the
+  # Bots its tenant package declares as built-in, and a package entry whose endpoint resolves to
+  # nothing is dropped rather than registered as a coworker nobody can talk to.
+  #
+  # The address must be reachable from the server pod, so a Service in this cluster is named as
+  # `http://my-agent.my-namespace:8000/ag-ui`, not as localhost.
+  managedAgent:
+    url: ""
+    # The token travels in `secrets.managedAgentToken`. Required whenever a url is set: the server
+    # refuses to start with one and not the other, because an unauthenticated Bot endpoint is an
+    # open door to whatever that Bot can reach.
   logLevel: ""
   # Free-form additions, for anything this chart has no opinion about.
   extraEnv: []
@@ -295,6 +309,8 @@ secrets:
   supervisorToken: ""
   intelligenceApiKey: ""
   licenseToken: ""
+  # Sent to `config.managedAgent.url` on every call. Required when that url is set.
+  managedAgentToken: ""
   # The client secret for whichever provider is configured above.
   googleClientSecret: ""
   microsoftClientSecret: ""
