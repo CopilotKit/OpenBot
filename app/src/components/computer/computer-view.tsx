@@ -7,7 +7,12 @@ import {
   supplySecret,
   takeControl,
 } from "@/lib/computers/control";
-import { readScreenshot, type Screenshot } from "@/lib/computers/screen";
+import {
+  keepTurnFrame,
+  readScreenshot,
+  readTurnFrame,
+  type Screenshot,
+} from "@/lib/computers/screen";
 import { LiveScreen } from "./live-screen";
 import { ComputerPlaceholder } from "./placeholder";
 
@@ -73,6 +78,13 @@ type Props = {
    * caption was not, and the turn read as though it had browsed somewhere it never went.
    */
   page?: { url?: string; title?: string };
+  /**
+   * The tool call this tile belongs to, which is what a kept frame is filed under.
+   *
+   * Without it the tile can still name the page; with it, it can show the page. Optional because the
+   * side panel is not a turn and has nothing to remember.
+   */
+  toolCallId?: string;
 };
 
 export function ComputerView({
@@ -83,8 +95,12 @@ export function ComputerView({
   minWidth = DEFAULT_MIN_WIDTH,
   minHeight = DEFAULT_MIN_HEIGHT,
   page,
+  toolCallId,
 }: Props) {
   const [shot, setShot] = useState<Screenshot | null>(null);
+  /** Read by the keeper below without making every polled frame retrigger it. */
+  const shotRef = useRef<Screenshot | null>(null);
+  shotRef.current = shot;
   const [problem, setProblem] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [control, setControl] = useState<ControlState | null>(null);
@@ -121,8 +137,84 @@ export function ComputerView({
    *
    * `page` is what marks a turn as settled history rather than one still going, so a caller that
    * knows nothing about the page keeps the old behaviour and nothing regresses.
+   *
+   * DELIBERATELY NOT "AND WE HAVE NO FRAME YET". That is what this said first, and it undid itself:
+   * restoring the kept frame set the frame, which made the turn stop counting as history, which
+   * restarted the polling this exists to prevent, which replaced the restored picture with the live
+   * one. The turn being over is the fact; whether a picture has arrived yet is not.
    */
-  const settled = !active && Boolean(page) && shot === null;
+  const settled = !active && Boolean(page);
+
+  /**
+   * Whether this tile ever watched the turn it belongs to.
+   *
+   * The difference between a turn finishing in front of somebody and a conversation being reopened
+   * later. Both render an inactive tile; only the first may take the live screen as its own, because
+   * only in the first is the live screen still the page that turn was on.
+   */
+  const watchedItRun = useRef(false);
+  if (active) watchedItRun.current = true;
+
+  /*
+   * The frame this turn ended on, filed at the moment it ended and read back when somebody reopens
+   * the conversation.
+   *
+   * A short turn can finish before the tile has polled anything, so having no frame in hand is the
+   * ordinary case rather than the exception: one is read at completion, which is the last moment the
+   * live screen and this turn's screen are the same thing.
+   *
+   * Kept once and never rewritten. A turn that has happened does not happen differently later, so a
+   * second visit must not overwrite the picture with whatever the Bot has open by then, which is
+   * also why this refuses to run at all for a tile that never saw its turn.
+   */
+  useEffect(() => {
+    if (active || !watchedItRun.current || !toolCallId || !page?.url) return;
+    let current = true;
+    void (async () => {
+      const held = shotRef.current?.base64;
+      const frame =
+        held ?? (await readScreenshot(computerId)).frame?.base64 ?? null;
+      if (!current || !frame) return;
+      await keepTurnFrame(computerId, toolCallId, {
+        frame,
+        url: page.url as string,
+        ...(page.title ? { title: page.title } : {}),
+      });
+      // Shown as well as kept, so the tile that just watched the turn does not fall back to naming
+      // the page it is holding a picture of.
+      if (current && !held) {
+        setShot({
+          base64: frame,
+          width: 0,
+          height: 0,
+          capturedAt: "",
+          url: page.url,
+        });
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [active, computerId, toolCallId, page?.url, page?.title]);
+
+  /** On reopening, the kept frame rather than the live screen. */
+  useEffect(() => {
+    if (!settled || !toolCallId) return;
+    let current = true;
+    void readTurnFrame(computerId, toolCallId).then((kept) => {
+      if (!current || !kept) return;
+      setShot({
+        base64: kept.frame,
+        width: 0,
+        height: 0,
+        capturedAt: "",
+        url: kept.url,
+      });
+    });
+    return () => {
+      current = false;
+    };
+  }, [settled, computerId, toolCallId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `secretPending` intentionally restarts settled polling.
   useEffect(() => {
@@ -193,7 +285,7 @@ export function ComputerView({
       live = false;
       clearTimeout(timer);
     };
-  }, [computerId]);
+  }, [computerId, settled]);
 
   // Input forwarding lives in LiveScreen on the socket.
   // Escape is bound to the window so it works regardless of overlay focus.
@@ -263,7 +355,7 @@ export function ComputerView({
                   : "text-muted-foreground"
               }`}
             >
-              {settled ? (
+              {settled && !shot ? (
                 <>
                   {/*
                     What this turn had open, named rather than drawn.

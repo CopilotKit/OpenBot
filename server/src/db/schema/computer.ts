@@ -80,3 +80,38 @@ export const computerSnapshot = pgTable("computer_snapshot", {
    */
   session: text("session"),
 });
+
+/**
+ * What a Bot's screen looked like when one turn finished with it.
+ *
+ * A conversation is a record, and a record must not change its mind. The transcript used to fetch
+ * the live screen for every past turn, so an answer about one page sat under a picture of whichever
+ * page the Bot had open by the time somebody read it back: the frame was true and the turn it sat in
+ * was not.
+ *
+ * KEYED ON THE TOOL CALL, not on the computer, because that is the thing being remembered. One row
+ * per browsing turn, written once when the turn ends and never updated: a turn that has happened
+ * does not happen differently later.
+ *
+ * The image and not only the address, because "here is where it went" is a weaker sentence than the
+ * page itself, and the picture is the whole reason the tile exists.
+ */
+export const computerTurnFrame = pgTable("computer_turn_frame", {
+  /** The tool call this frame belongs to, which is unique across every conversation. */
+  toolCallId: text("tool_call_id").primaryKey(),
+  /** Whose computer it was, so a frame can be removed with the Bot it belonged to. */
+  computerId: text("computer_id").notNull(),
+  /** The page, for the caption and for a frame that fails to decode. */
+  url: text("url").notNull(),
+  title: text("title"),
+  /**
+   * The frame itself, base64 PNG.
+   *
+   * Bounded by the route that writes it rather than by the column, because the useful limit is "a
+   * screenshot" and the honest failure is a refusal at the boundary rather than a database error.
+   */
+  frame: text("frame").notNull(),
+  capturedAt: timestamp("captured_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

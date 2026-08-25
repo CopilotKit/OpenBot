@@ -5,8 +5,6 @@ import { authoriseAgentCall } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
-import { createRoutingRoutes } from "./routing/routes";
-import type { IntentRouter } from "./routing/classify";
 import {
   type AuditReader,
   type AuditStore,
@@ -34,6 +32,7 @@ import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
+import type { TurnFrameStore } from "./computer/turn-frames";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createIntelligenceClient } from "./intelligence-client";
@@ -41,6 +40,8 @@ import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
+import type { IntentRouter } from "./routing/classify";
+import { createRoutingRoutes } from "./routing/routes";
 import type { PackageStatusReader } from "./tenant-package";
 
 /**
@@ -155,6 +156,17 @@ export function createApp(
    * the default coworker, which is exactly the failsafe the router itself falls back to.
    */
   intentRouter?: IntentRouter,
+  /**
+   * Where the frame a browsing turn ended on is kept.
+   *
+   * Appended last on purpose: these are positional, so inserting one anywhere else silently
+   * shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the transcript working and past turns without a picture, which is the correct
+   * degraded behaviour: a conversation that cannot show what it saw is better than one that shows
+   * the wrong thing.
+   */
+  turnFrames?: TurnFrameStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -630,6 +642,7 @@ export function createApp(
         computerPolicy,
         requireUser,
         canUseBot,
+        turnFrames,
       ),
     );
   }

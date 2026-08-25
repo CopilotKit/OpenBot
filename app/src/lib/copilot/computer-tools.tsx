@@ -282,13 +282,22 @@ export function ComputerTools() {
           }
         : result;
     },
-    render: ({ result, status }) => {
+    render: ({ result, status, toolCallId }) => {
       /*
        * The page this turn left open, so reopening the conversation shows what it browsed rather
        * than what the Bot has open now. Only once the turn is finished: while it runs, the live
        * frames are its own.
        */
-      const outcome = status === "complete" ? outcomeOf(result) : {};
+      /*
+       * A RESULT IS WHAT MAKES A TURN OVER, not the status.
+       *
+       * A restored tool call arrives with its result already in hand and a status that is briefly
+       * something other than complete, so keying on the status alone made every reopened turn look
+       * like one still running: the tile polled the live screen, put today's page under yesterday's
+       * answer, and only then restored the frame it should have shown from the start.
+       */
+      const finished = status === "complete" || result !== undefined;
+      const outcome = finished ? outcomeOf(result) : {};
       const page =
         typeof outcome.url === "string"
           ? {
@@ -302,8 +311,9 @@ export function ComputerTools() {
         <div className="my-2">
           <ComputerView
             computerId={bot.current}
-            active={status !== "complete"}
+            active={!finished}
             {...(page ? { page } : {})}
+            {...(toolCallId ? { toolCallId } : {})}
           />
         </div>
       );

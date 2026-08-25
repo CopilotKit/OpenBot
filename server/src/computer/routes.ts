@@ -3,20 +3,21 @@ import { Hono } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
   ActionRefusedError,
   type ComputerGateway,
   ComputerUnavailableError,
   ElementNotFoundError,
-  NavigationRefusedError,
   HumanHasControlError,
+  NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
 } from "./gateway";
-import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
+import type { TurnFrameStore } from "./turn-frames";
 
 /**
  * The Bot computer's surface, behind the same session guard as every other API route.
@@ -38,6 +39,8 @@ export function createComputerRoutes(
    * deployment cannot be wired up without an answer to it.
    */
   canUseBot: BotAccessCheck,
+  /** Where a finished turn's screenshot is kept. Absent leaves the transcript as it was. */
+  turnFrames?: TurnFrameStore,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -361,6 +364,53 @@ export function createComputerRoutes(
   });
 
   /** The Bot's files. Through the gateway, like every other acting call. */
+  /*
+   * The frame a browsing turn ended on, kept so the transcript can show it later.
+   *
+   * Written by the surface rather than by the gateway, because the gateway does not know which tool
+   * call it is serving: the id belongs to the conversation. Not an acting route, so it does not go
+   * through `act`: nothing is decided and nothing reaches the computer, it only stores a picture the
+   * caller already had on screen.
+   */
+  routes.post("/:botId/turn-frames/:toolCallId", async (context) => {
+    if (!turnFrames) return context.json({ ok: true });
+    const botId = context.req.param("botId");
+    const toolCallId = context.req.param("toolCallId");
+    const body = await context.req.json().catch(() => null);
+    if (
+      typeof body?.frame !== "string" ||
+      typeof body?.url !== "string" ||
+      !body.frame ||
+      !body.url
+    ) {
+      return context.json({ error: "A frame and a url are required." }, 400);
+    }
+    try {
+      await turnFrames.save({
+        toolCallId,
+        computerId: botId,
+        url: body.url,
+        ...(typeof body.title === "string" ? { title: body.title } : {}),
+        frame: body.frame,
+      });
+    } catch (error) {
+      return context.json(
+        { error: error instanceof Error ? error.message : "Not stored." },
+        413,
+      );
+    }
+    return context.json({ ok: true });
+  });
+
+  routes.get("/:botId/turn-frames/:toolCallId", async (context) => {
+    if (!turnFrames) return context.json({ frame: null });
+    const stored = await turnFrames.load(
+      context.req.param("toolCallId"),
+      context.req.param("botId"),
+    );
+    return context.json({ frame: stored });
+  });
+
   routes.post("/:botId/files/list", (context) =>
     act(context, (botId, actor, body) =>
       gateway.listFiles(botId, actor, {

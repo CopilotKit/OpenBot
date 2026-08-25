@@ -40,3 +40,46 @@ export async function readScreenshot(
     return { error: unavailable };
   }
 }
+
+/** The frame a browsing turn ended on, as it was kept. */
+export type TurnFrame = { url: string; title: string | null; frame: string };
+
+/**
+ * Keep the frame this turn ended on.
+ *
+ * Fire and forget, and silent on failure. The turn has already happened and its answer is already on
+ * screen; a conversation must not report an error because the picture of it could not be filed. A
+ * turn with no stored frame falls back to naming the page, which is the same sentence with less in
+ * it rather than a broken one.
+ */
+export async function keepTurnFrame(
+  computerId: string,
+  toolCallId: string,
+  frame: { frame: string; url: string; title?: string },
+): Promise<void> {
+  try {
+    await tryClient(
+      `/api/computers/${computerId}/turn-frames/${encodeURIComponent(toolCallId)}`,
+      { method: "POST", body: frame },
+    );
+  } catch {
+    // See above: nothing here is worth interrupting a conversation for.
+  }
+}
+
+/** What that turn had on screen, or nothing if it was never kept. */
+export async function readTurnFrame(
+  computerId: string,
+  toolCallId: string,
+): Promise<TurnFrame | null> {
+  try {
+    const response = await tryClient(
+      `/api/computers/${computerId}/turn-frames/${encodeURIComponent(toolCallId)}`,
+    );
+    if (!response.ok) return null;
+    const body = (await response.json()) as { frame?: TurnFrame | null };
+    return body.frame ?? null;
+  } catch {
+    return null;
+  }
+}

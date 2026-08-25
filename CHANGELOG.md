@@ -11,16 +11,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 ### A finished turn shows the page it opened, not the one open now
 
 Reopening a conversation made every past turn fetch the screen as it is now, so an answer about
-Hacker News from an hour ago sat under a picture of whatever the Bot had open since. The frame was
-live and the caption was not, and the turn read as though it had browsed somewhere it never went.
+Hacker News from an hour ago sat under a picture of whatever the Bot had open since.
 
-A turn that has finished is history, and history is not polled. It names the page that turn actually
-left open. While a turn is running nothing changes: the frames are its own and freeze where it left
-them.
+A browsing turn now keeps the frame it ended on, in `computer_turn_frame`, filed under the tool call
+it belongs to and written once: a turn that has happened does not happen differently later. Reopening
+the conversation shows that frame rather than the live screen, and a turn with nothing kept names the
+page instead of drawing the wrong one.
 
-It names the page rather than showing it, because nothing stored the picture and fetching one now
-would show a different page. Naming it is the honest version of the same sentence, and it stays true
-however many times the Bot has browsed since.
+Three things had to be true together, and each was wrong on its own first. The frame is read at the
+moment the turn ends, because a short turn finishes before the tile has polled anything and having no
+picture in hand is the ordinary case. Restoring a kept frame must not make the turn look live again,
+which the first version did: it counted a turn as history only while it had no picture, so restoring
+one restarted the polling that then replaced it. And a turn is over when it has a result, not when its
+status says so, because a restored tool call arrives with its result already in hand and a status
+that is briefly something else.
 
 ### A conversation keeps the browsing that produced its answers
 
