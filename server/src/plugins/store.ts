@@ -376,6 +376,26 @@ const TOKEN_TIMEOUT_MS = 10_000;
  */
 export type OAuthClient = { clientId: string; clientSecret: string };
 
+/**
+ * The client and when the vault row holding it was written.
+ *
+ * The date is not about the client: it is how long ago this deployment last introduced itself, which
+ * is the one thing that distinguishes a client the vendor has evicted from one a re-registration
+ * minted moments ago. Null only for a row that has since disappeared, which the read refuses first.
+ */
+type StoredClient = { client: OAuthClient; registeredAt: Date | null };
+
+/**
+ * How long a freshly stored OAuth client is left alone after `invalid_client`.
+ *
+ * Re-registering once per refusal is right for one call and wrong for a deployment: a vendor that is
+ * simply down answers every exchange `invalid_client`, and every tool call anywhere then mints a
+ * client of its own, because each of them is the first refusal IT has seen. A client younger than
+ * this was already the product of a re-registration, so registering again inside the window is
+ * amplification rather than recovery — the honest answer is the vendor's refusal, unedited.
+ */
+const CLIENT_REREGISTRATION_BACKOFF_MS = 5 * 60_000;
+
 /** What a vendor's token endpoint gave back for a refresh token. */
 export type AccessToken = {
   accessToken: string;
@@ -701,18 +721,34 @@ export function createPluginStore(options: PluginStoreOptions) {
      * that registered again — this connection's own, a moment ago — replaced it, and the pointer
      * carried in from before the queue names the evicted one.
      */
-    async function currentClient(): Promise<OAuthClient> {
+    async function currentClient(): Promise<StoredClient> {
+      /*
+       * When the client was stored comes back with it, from the vault row itself rather than from a
+       * column of our own. It is what the retry below measures its backoff against, and a left join
+       * keeps it one query: a server pointing at nothing is the refusal on the next line, and a
+       * pointer to a row that is no longer there is `secretFor`'s to refuse.
+       */
       const [server] = await database
-        .select({ credentialId: mcpServers.credentialId })
+        .select({
+          credentialId: mcpServers.credentialId,
+          registeredAt: credentialRows.createdAt,
+        })
         .from(mcpServers)
+        .leftJoin(
+          credentialRows,
+          eq(credentialRows.id, mcpServers.credentialId),
+        )
         .where(eq(mcpServers.id, row.id))
         .limit(1);
       if (!server?.credentialId) {
         throw new PluginRefusedError(noClient, null);
       }
-      return JSON.parse(
-        await secretFor(server.credentialId, unusableClient),
-      ) as OAuthClient;
+      return {
+        client: JSON.parse(
+          await secretFor(server.credentialId, unusableClient),
+        ) as OAuthClient,
+        registeredAt: server.registeredAt,
+      };
     }
 
     /*
@@ -740,7 +776,7 @@ export function createPluginStore(options: PluginStoreOptions) {
        * ordering that matters is unchanged: a queued call reads the client after whatever ran before
        * it replaced it.
        */
-      const client = await currentClient();
+      const stored = await currentClient();
 
       /*
        * The vault row, locked for as long as the token it holds is being spent.
@@ -810,7 +846,8 @@ export function createPluginStore(options: PluginStoreOptions) {
 
         const minted = await exchangeWithRetriedClient({
           tokenUrl,
-          client,
+          client: stored.client,
+          clientRegisteredAt: stored.registeredAt,
           refreshToken,
           registrationUrl,
           serverId: row.id,
@@ -871,6 +908,8 @@ export function createPluginStore(options: PluginStoreOptions) {
   async function exchangeWithRetriedClient(input: {
     tokenUrl: string;
     client: OAuthClient;
+    /** When the client being offered was stored. See {@link CLIENT_REREGISTRATION_BACKOFF_MS}. */
+    clientRegisteredAt: Date | null;
     refreshToken: string;
     registrationUrl: string | undefined;
     serverId: string;
@@ -890,6 +929,24 @@ export function createPluginStore(options: PluginStoreOptions) {
       const code = error instanceof TokenRefusedError ? error.code : null;
       const { redirectUri } = options;
       if (code !== INVALID_CLIENT || !registrationUrl || !redirectUri) {
+        throw error;
+      }
+
+      /*
+       * A client this deployment stored moments ago is not replaced again.
+       *
+       * The once-per-call bound above is per call, and a vendor-side outage has every call in the
+       * deployment spend its one registration. The stored client's age is the only state the calls
+       * share, and it says which of the two this is: a client older than the window has been working
+       * until now and may really have been evicted, while a young one is what the last refusal
+       * already registered. Surfacing the vendor's refusal is the whole action here — there is
+       * nothing left to recover with.
+       */
+      const registeredAt = input.clientRegisteredAt;
+      if (
+        registeredAt &&
+        Date.now() - registeredAt.getTime() < CLIENT_REREGISTRATION_BACKOFF_MS
+      ) {
         throw error;
       }
 

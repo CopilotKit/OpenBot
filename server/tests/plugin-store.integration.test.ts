@@ -1394,8 +1394,18 @@ describe("a dynamic client the vendor has evicted", () => {
     ...seams,
   });
 
-  /** Point the server at a client, the way a registration does, without going through one. */
-  async function putClient(client: OAuthClient) {
+  /**
+   * Point the server at a client, the way a registration does, without going through one.
+   *
+   * Aged an hour by default, because that is the client these tests are about: one the deployment
+   * has been using for a while and the vendor has since evicted. A row written a moment ago is
+   * inside the re-registration window and is deliberately not registered around, which is its own
+   * test below rather than the state every other test starts from.
+   */
+  async function putClient(
+    client: OAuthClient,
+    registeredAt = new Date(Date.now() - 60 * 60 * 1000),
+  ) {
     /*
      * One live client per key is law (`credentials_active_key_idx`), so planting a client the way a
      * registration would means retiring whatever live row the key still holds from an earlier test.
@@ -1422,6 +1432,7 @@ describe("a dynamic client the vendor has evicted", () => {
           DYNAMIC_KEY,
           JSON.stringify(client),
         ),
+        createdAt: registeredAt,
       })
       .returning({ id: credentials.id });
     if (!row) throw new Error("client was not stored");
@@ -1650,6 +1661,36 @@ describe("a dynamic client the vendor has evicted", () => {
     // costs one new client rather than one per call forever.
     expect(registrations.length).toBe(1);
     expect(offered).toEqual([EVICTED.clientId, "dyn-3"]);
+  });
+
+  /**
+   * A client minted moments ago is not registered around again.
+   *
+   * Once per call is right for one call and wrong for a deployment: a vendor answering every
+   * exchange `invalid_client` — an outage, not an eviction — has every tool call anywhere in the
+   * deployment mint a client of its own, because each of them is the first refusal it has seen.
+   * The age of the stored client is the one piece of shared state that says otherwise, and a client
+   * younger than the window is already the product of somebody's re-registration.
+   */
+  test("a client registered moments ago is refused rather than replaced", async () => {
+    // Written now, the way the retry itself would have written it a moment ago.
+    await putClient(EVICTED, new Date());
+    await connect();
+    accepted = new Set<string>();
+    issue = () => FRESH;
+
+    // The vendor's own refusal, surfaced as it stands: nothing here can improve on it.
+    await expect(
+      dynamicStore.callTool({
+        ref: dynamicRef,
+        args: {},
+        botId: dynamicBotId,
+        actorId: dynamicUserId,
+      }),
+    ).rejects.toThrow("invalid_client");
+
+    expect(registrations).toEqual([]);
+    expect(offered).toEqual([EVICTED.clientId]);
   });
 
   /**
