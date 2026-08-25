@@ -289,8 +289,13 @@ function effectiveUrl(
  * forgotten apart from a grant somebody withdrew, and those two have entirely different answers.
  * It goes out as a field on {@link TokenRefusedError} as well as in the sentence, because the field
  * is the copy the recovery reads.
+ *
+ * Exported for its own tests rather than for a caller. Every path through the store reaches it as
+ * the default `exchangeRefreshToken`, and the store's own suites inject a stub in its place — which
+ * leaves what this function does with a REAL vendor reply, honest or garbled, untested unless it can
+ * be called directly.
  */
-async function exchangeRefreshTokenOverHttp(input: {
+export async function exchangeRefreshTokenOverHttp(input: {
   tokenUrl: string;
   client: OAuthClient;
   refreshToken: string;
@@ -336,11 +341,25 @@ async function exchangeRefreshTokenOverHttp(input: {
     );
   }
 
-  const body = (await response.json()) as {
+  /*
+   * A 200 is not a promise of JSON, and this branch used to read it as one.
+   *
+   * The refusal above already parses defensively; the success branch did not, so a CDN interstitial
+   * or a maintenance page answering 200 with HTML threw a SyntaxError from here — out through
+   * `callTool`, which records the failure with the thrower's message, and the parser's message
+   * quotes the body it choked on. So a vendor's HTML reached an audit payload and the person who
+   * asked, as a crash rather than as the refusal every other unusable reply produces.
+   */
+  const body = (await response.json().catch(() => null)) as {
     access_token?: unknown;
     expires_in?: unknown;
     refresh_token?: unknown;
-  };
+  } | null;
+  if (!body) {
+    throw new McpServerError(
+      "The vendor answered this renewal with something other than a token.",
+    );
+  }
   if (typeof body.access_token !== "string" || !body.access_token) {
     throw new McpServerError("The vendor renewed this access with no token.");
   }

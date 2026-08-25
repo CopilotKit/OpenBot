@@ -35,6 +35,7 @@ import {
   type AccessToken,
   createPluginStore,
   CustomServerRefusedError,
+  exchangeRefreshTokenOverHttp,
   INVALID_CLIENT,
   type OAuthClient,
   PluginRefusedError,
@@ -2097,5 +2098,87 @@ describe("a custom server may only be pointed at its own kind of credential", ()
       by: "admin@example.com",
     });
     expect(added.id).toBe(id);
+  });
+});
+
+/**
+ * What the real token endpoint said, read by the real exchange.
+ *
+ * Every other suite in this file injects `exchangeRefreshToken`, because what they are about is which
+ * credential a call goes out with rather than how a reply is parsed. That leaves the parsing itself —
+ * the one part that meets a vendor's actual bytes — with nothing exercising it, and the interesting
+ * bytes are the dishonest ones: a 200 carrying a CDN interstitial rather than a token.
+ */
+describe("a vendor reply that is not a token", () => {
+  const replyClient: OAuthClient = { clientId: "c-1", clientSecret: "" };
+
+  test("a 200 that is not JSON is a refusal, not a thrown parse error", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("<html>checking your browser</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as unknown as typeof fetch;
+    try {
+      /*
+       * The refusal this module already knows how to carry, rather than a SyntaxError.
+       *
+       * An unguarded parse throws out of here into `callTool`, which records it as `mcp.call_failed`
+       * with the parser's message — and that message quotes the vendor's body, so an interstitial's
+       * HTML ends up in an audit payload and in front of the person who asked.
+       */
+      await expect(
+        exchangeRefreshTokenOverHttp({
+          tokenUrl: "https://vendor.example/token",
+          client: replyClient,
+          refreshToken: "rt-1",
+        }),
+      ).rejects.toThrow(
+        "The vendor answered this renewal with something other than a token.",
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test("a 200 with JSON and no access token is still the refusal it always was", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ token_type: "bearer" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+    try {
+      await expect(
+        exchangeRefreshTokenOverHttp({
+          tokenUrl: "https://vendor.example/token",
+          client: replyClient,
+          refreshToken: "rt-1",
+        }),
+      ).rejects.toThrow("The vendor renewed this access with no token.");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /** The error branch, which already read defensively: the status survives an unparseable body. */
+  test("a refusal that is not JSON keeps the status, which is the one fact there is", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("<html>502</html>", {
+        status: 502,
+        headers: { "content-type": "text/html" },
+      })) as unknown as typeof fetch;
+    try {
+      await expect(
+        exchangeRefreshTokenOverHttp({
+          tokenUrl: "https://vendor.example/token",
+          client: replyClient,
+          refreshToken: "rt-1",
+        }),
+      ).rejects.toThrow("The vendor would not renew this access (502).");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

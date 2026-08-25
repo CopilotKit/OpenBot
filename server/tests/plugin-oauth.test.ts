@@ -432,6 +432,65 @@ describe("registering this deployment as an OAuth client", () => {
       globalThis.fetch = realFetch;
     }
   });
+
+  /**
+   * A 200 carrying something that is not JSON.
+   *
+   * A CDN interstitial, a captive portal, a load balancer's maintenance page: all of them answer 200
+   * with HTML, and this function's contract is that a vendor which will not register us reads back
+   * as null. An unguarded `response.json()` breaks that contract in the worst available way — it
+   * throws a SyntaxError, which escapes the whole request as a 500, and the parser's message quotes
+   * the vendor's body into whatever logs it.
+   */
+  test("a 200 that is not JSON is a refusal, not a thrown parse error", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("<html>Attention Required!</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as unknown as typeof fetch;
+    try {
+      expect(
+        await registerDynamicClient({
+          registrationUrl: "https://vendor.example/register",
+          redirectUri: "https://openbot.example/cb",
+        }),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /**
+   * A redirect is a refusal, and is never followed.
+   *
+   * This request carries nothing secret, but where it goes is a reviewed decision: the registration
+   * endpoint is pinned in the catalogue, and a 302 is somebody else deciding for us. Followed, it
+   * would have this deployment register itself at whatever address the answer named — and believe
+   * the client id that came back.
+   */
+  test("a redirect is not followed, and reads back as a refusal", async () => {
+    const seen: { redirect: RequestRedirect | undefined }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen.push({ redirect: init?.redirect });
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://elsewhere.example/register" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      expect(
+        await registerDynamicClient({
+          registrationUrl: "https://vendor.example/register",
+          redirectUri: "https://openbot.example/cb",
+        }),
+      ).toBeNull();
+      expect(seen[0]?.redirect).toBe("manual");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
 });
 
 describe("redeeming an authorization code", () => {
@@ -480,6 +539,95 @@ describe("redeeming an authorization code", () => {
         verifier: "verifier-1",
       });
       expect(seen[0]?.params.get("client_secret")).toBe("secret-1");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /**
+   * A 200 carrying something that is not JSON.
+   *
+   * The documented contract is a refusal — "a refusal rather than an exception when the vendor
+   * declines" — and a CDN interstitial answering 200 with HTML is exactly the case where the
+   * unguarded parse turned that refusal into a 500. The person had consented by then, so the failure
+   * lands on the callback: it must redirect them back to Settings with a notice, not crash.
+   */
+  test("a 200 that is not JSON is a refusal, not a thrown parse error", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("<html>checking your browser</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as unknown as typeof fetch;
+    try {
+      expect(
+        await redeemAuthorizationCode({
+          tokenUrl: "https://vendor.example/token",
+          clientId: "client-id",
+          clientSecret: "",
+          code: "code-1",
+          redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+          verifier: "verifier-1",
+        }),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /** A redirect from the token endpoint is a refusal too, and is never followed. */
+  test("a redirect is not followed, and reads back as a refusal", async () => {
+    const seen: { redirect: RequestRedirect | undefined }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen.push({ redirect: init?.redirect });
+      return new Response(null, {
+        status: 307,
+        headers: { location: "https://elsewhere.example/token" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      expect(
+        await redeemAuthorizationCode({
+          tokenUrl: "https://vendor.example/token",
+          clientId: "client-id",
+          clientSecret: "",
+          code: "code-1",
+          redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+          verifier: "verifier-1",
+        }),
+      ).toBeNull();
+      expect(seen[0]?.redirect).toBe("manual");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /**
+   * The scope is capped where it is read.
+   *
+   * It is a short string in the protocol and vendor-controlled in fact, and everything downstream
+   * shows it to somebody: the connected-accounts page, an `mcp.account_connected` payload, the
+   * `mcp_user_credentials.scope` column. None of those is a promise about length, and a vendor
+   * answering with a megabyte of it should cost a truncated line rather than a stored megabyte.
+   */
+  test("a vendor's scope is capped rather than stored whole", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ refresh_token: "rt-1", scope: "s".repeat(2_000) }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as unknown as typeof fetch;
+    try {
+      const grant = await redeemAuthorizationCode({
+        tokenUrl: "https://vendor.example/token",
+        clientId: "client-id",
+        clientSecret: "",
+        code: "code-1",
+        redirectUri: "https://openbot.example/api/plugins/oauth/callback",
+        verifier: "verifier-1",
+      });
+      expect(grant?.scope.length).toBe(512);
     } finally {
       globalThis.fetch = realFetch;
     }

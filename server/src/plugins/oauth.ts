@@ -304,29 +304,52 @@ export async function redeemAuthorizationCode(input: {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: params,
+    /*
+     * A redirect is a refusal, not a detour to be followed.
+     *
+     * `tokenUrl` is pinned in the catalogue because this request carries a client secret and an
+     * authorization code, and following a 302 would hand both to whatever address the answer named.
+     * Manual leaves the 3xx as the response, which is not `ok`, so it falls into the refusal below.
+     */
+    redirect: "manual",
     signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) return null;
 
-  const body = (await response.json()) as {
+  /*
+   * Read defensively, because a 200 is not a promise of JSON.
+   *
+   * A CDN interstitial, a captive portal or a maintenance page answers 200 with HTML, and an
+   * unguarded parse would throw a SyntaxError out of a function whose whole contract is to refuse
+   * quietly — escaping the callback as a 500 instead of the redirect-with-a-notice a person who has
+   * just consented should get, and quoting the vendor's body into whatever logged the throw.
+   */
+  const body = (await response.json().catch(() => null)) as {
     refresh_token?: unknown;
     scope?: unknown;
-  };
+  } | null;
   /*
    * No refresh token is a failure, not a partial success.
    *
    * It is what a vendor returns when it believes this person already consented, and storing the
    * access token instead would produce a connection that works for an hour and then cannot be
-   * renewed — the worst of the three outcomes, because it looks like success.
+   * renewed — the worst of the three outcomes, because it looks like success. A body that was not
+   * JSON at all arrives here as nothing, which is the same answer: the vendor said something other
+   * than a token.
    */
-  if (typeof body.refresh_token !== "string" || !body.refresh_token) {
+  if (typeof body?.refresh_token !== "string" || !body.refresh_token) {
     return null;
   }
 
   return {
     refreshToken: body.refresh_token,
-    scope: typeof body.scope === "string" ? body.scope : "",
+    /*
+     * Capped where it is read. It is a short string in the protocol and vendor-controlled in fact,
+     * and everything downstream shows it to somebody — the connected-accounts page, the
+     * `mcp.account_connected` payload, the `scope` column — none of which is a promise about length.
+     */
+    scope: typeof body.scope === "string" ? body.scope.slice(0, 512) : "",
   };
 }
 
@@ -352,14 +375,19 @@ export async function registerDynamicClient(input: {
       token_endpoint_auth_method: "none",
       client_name: "OpenBot",
     }),
+    // The registration endpoint is pinned in the catalogue, so a redirect is somebody else deciding
+    // where this deployment introduces itself. Left as the response, which is not `ok`.
+    redirect: "manual",
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) return null;
-  const body = (await response.json()) as {
+  // A 200 is not a promise of JSON — see `redeemAuthorizationCode`. A body that will not parse is
+  // the vendor answering with something other than a client, which is this function's null.
+  const body = (await response.json().catch(() => null)) as {
     client_id?: unknown;
     client_secret?: unknown;
-  };
-  if (typeof body.client_id !== "string" || !body.client_id) return null;
+  } | null;
+  if (typeof body?.client_id !== "string" || !body.client_id) return null;
   return {
     clientId: body.client_id,
     // A public client has none; a vendor that issues one anyway gets it stored and sent back.
