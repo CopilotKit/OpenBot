@@ -619,3 +619,53 @@ describe("a rule about one surface does not refuse another", () => {
     expect(decision.source).toBe("deny");
   });
 });
+
+
+describe("refusal wording under the context the gateway actually builds", () => {
+  /*
+   * The gateway attaches a neutral all-empty `mcp` to every browser context so a rule naming
+   * `mcp.effect` evaluates instead of throwing. The refusal copy used to key on the object being
+   * present rather than on its contents, so every live browser refusal read ":  on  is blocked" —
+   * empty strings where the element and page belonged — while tests that omitted the field passed.
+   */
+  test("a browser refusal names the element, neutral mcp notwithstanding", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: ['contains(element.name, "Submit")'], allow: ["true"] },
+      {
+        tool: { name: "computer_click" },
+        bot: { id: "general-assistant" },
+        actor: { id: "user:dev" },
+        page: { url: "https://example.com/checkout", host: "example.com" },
+        intent: "activate",
+        key: "",
+        element: { ref: "e1", role: "button", name: "Submit order", type: "" },
+        file: { path: "", name: "", extension: "" },
+        command: "",
+        mcp: { server: "", tool: "", effect: "" },
+      },
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("Submit order");
+    expect(decision.reason).toContain("example.com");
+    expect(decision.reason).not.toContain(" on  is blocked");
+  });
+
+  test("a real tool call still reads as its server and tool", () => {
+    const decision = evaluateActionPolicy(
+      { mode: "enforce", deny: ['mcp.server == "notes"'], allow: ["true"] },
+      {
+        tool: { name: "mcp__notes__search_notes" },
+        bot: { id: "general-assistant" },
+        actor: { id: "user:dev" },
+        page: { url: "", host: "" },
+        key: "",
+        element: { ref: "", role: "", name: "", type: "" },
+        file: { path: "", name: "", extension: "" },
+        command: "",
+        mcp: { server: "notes", tool: "search_notes", effect: "read" },
+      },
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.reason).toContain("search_notes on notes");
+  });
+});

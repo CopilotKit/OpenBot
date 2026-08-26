@@ -19,12 +19,12 @@ function RouteComponent() {
   return (
     <SidebarProvider
       /*
-       * The same 340px the app and Settings use. A rail that changes width as you cross into admin
-       * makes the whole frame look like it moved.
+       * The same 300px Settings uses: these two rails hold short nav labels, not the roster's
+       * two-line previews, so they earn less width than the app shell's 340px.
        */
       style={
         {
-          "--sidebar-width": "340px",
+          "--sidebar-width": "300px",
           "--sidebar-width-mobile": "20rem",
         } as React.CSSProperties
       }

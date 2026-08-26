@@ -35,6 +35,7 @@ export {
   WorkspaceRequestError,
 } from "./client";
 
+import type { PageFrameStore } from "./page-frames";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
@@ -112,6 +113,13 @@ export type ComputerGatewayOptions = {
    * is correct in one process and is what a unit test wants. See snapshot-store.ts.
    */
   snapshots?: SnapshotStore;
+  /**
+   * Where the frame a page was opened on is kept, so a reset can take them with the profile.
+   *
+   * Absent, a reset clears the profile and leaves the pictures, which is the wrong half of a promise
+   * this deployment makes in as many words.
+   */
+  pageFrames?: PageFrameStore;
 };
 
 export interface ComputerGateway {
@@ -231,6 +239,7 @@ export function createComputerGateway(
    * ref from a superseded page from resolving to whatever now holds it. See snapshot-store.ts.
    */
   const snapshots = options.snapshots ?? createInMemorySnapshotStore();
+  const pageFrames = options.pageFrames;
 
   /**
    * Where this Bot's computer is, checked before anything is sent to it.
@@ -667,6 +676,15 @@ export function createComputerGateway(
       // The refs the last snapshot handed out describe a page that no longer exists, and a fresh
       // computer counts generations from one again, so the row has to go with the profile.
       await snapshots.clear(botId);
+      /*
+       * And the pictures, which are the part that made the promise above untrue.
+       *
+       * "Every login the Bot had is gone" was said while screenshots of the signed-in pages stayed
+       * in the database: an inbox, an admin console, a bank statement, still readable from the
+       * transcript by anybody who could reach that Bot. A reset that leaves those has not reset
+       * anything a person would recognise as private.
+       */
+      await pageFrames?.clear(botId);
       await writeControlEvent(auditStore, "computer.reset", {
         botId,
         actor,
@@ -903,7 +921,7 @@ export function createComputerGateway(
  * Lower-cased, because a rule forbidding `.env` must also catch `.ENV`; the
  * operator should have anticipated. Same reasoning as the case-insensitive `contains` in policy.ts.
  */
-function describeFile(path: string): {
+export function describeFile(path: string): {
   path: string;
   name: string;
   extension: string;
@@ -949,7 +967,7 @@ const ACTIVATING_KEYS = new Set(["Enter", "NumpadEnter", "Space", " "]);
  */
 const HUMAN_GESTURES = new Set(["click", "type", "key", "scroll"]);
 
-function intentOf(
+export function intentOf(
   toolName: string,
   key: string | undefined,
 ): PolicyContext["intent"] {
@@ -1037,19 +1055,26 @@ async function write(
        * is the file body of this pair, and stays out.
        */
       ...(entry.command ? { command: entry.command } : {}),
+      /*
+       * The element, where the action named one.
+       *
+       * KEYED ON THE REF, not on the kind of action. An unresolved element is worth recording
+       * plainly rather than as an absent field that reads like a logging gap, but that only applies
+       * when the Bot pointed at something and the server could not say what: a ref it holds and the
+       * snapshot no longer does. Deciding it by elimination instead put "not in the current
+       * snapshot" on every navigation, every file read and every command, which is the reverse of
+       * the intent. Those actions did not fail to identify an element; they never had one, and a
+       * trail that says otherwise sends a reader looking for a snapshot that was never taken.
+       */
       element: entry.element
         ? {
             role: entry.element.role,
             name: entry.element.name,
             ...(entry.element.type ? { type: entry.element.type } : {}),
           }
-        : entry.filePath || entry.command
-          ? // A file or command action has no element and never will. Those rows leave the element
-            // field absent rather than describing a browser snapshot.
-            undefined
-          : // An action on an element the server cannot identify is worth recording plainly, rather
-            // than as an absent field that reads like a logging gap.
-            "not in the current snapshot",
+        : entry.ref
+          ? "not in the current snapshot"
+          : undefined,
       ...(entry.failure ? { failure: entry.failure } : {}),
       decision: {
         allowed: entry.decision.allowed,
@@ -1109,7 +1134,7 @@ async function writeControlEvent(
   });
 }
 
-function hostOf(url: string): string {
+export function hostOf(url: string): string {
   try {
     return new URL(url).host;
   } catch {

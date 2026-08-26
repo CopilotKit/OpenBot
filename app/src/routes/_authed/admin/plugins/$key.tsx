@@ -14,6 +14,7 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogBody,
@@ -40,6 +41,8 @@ import { storeMcpToken } from "@/lib/credentials/mutations";
 import {
   addCuratedServerMutationOptions,
   connectAccountMutationOptions,
+  grantPlugin,
+  invalidatePlugins,
   refreshPluginServerMutationOptions,
   registerOAuthClientMutationOptions,
   removePluginServerMutationOptions,
@@ -61,8 +64,18 @@ export const Route = createFileRoute("/_authed/admin/plugins/$key")({
   component: RouteComponent,
 });
 
-/** Which of the three shapes of edit a row opens, or none. */
-type OpenDialog = "token" | "client" | "instance" | null;
+/** Which of the four dialogs is open, or none. */
+type OpenDialog = "token" | "client" | "instance" | "grant" | null;
+
+/** The set with one member toggled, as a new set so React sees the change. */
+function toggled(
+  set: ReadonlySet<string>,
+  member: string,
+): ReadonlySet<string> {
+  const next = new Set(set);
+  if (!next.delete(member)) next.add(member);
+  return next;
+}
 
 /**
  * How widely a tool is granted, in words rather than a fraction.
@@ -101,6 +114,24 @@ function RouteComponent() {
   const [token, setToken] = useState("");
   const [instanceHost, setInstanceHost] = useState("");
   const [client, setClient] = useState({ clientId: "", clientSecret: "" });
+  /** Who gets the tools, and which, while the grant dialog is open. */
+  const [selectedBots, setSelectedBots] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [selectedRefs, setSelectedRefs] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  /**
+   * How far through a batch of grants we are, or null when none is running.
+   *
+   * A count rather than a boolean because a bulk grant is honestly N writes: a Bot times twelve
+   * tools is twelve requests, and a button that says only "Granting…" for the length of them gives
+   * an administrator no way to tell a slow batch from a stuck one.
+   */
+  const [granting, setGranting] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   /* Every write reports into one banner rather than each growing its own handler. */
   const report = { onError: (thrown: Error) => setError(thrown.message) };
@@ -173,6 +204,39 @@ function RouteComponent() {
     }
   };
 
+  /*
+   * One write per grant, in selection order. The server records each grant as its own audit row, so
+   * a bulk action here is honestly N decisions; a refusal stops the rest and leaves the dialog open
+   * with the banner saying why.
+   *
+   * One refetch for the batch, at the end. Going through the grant mutation invalidated every plugin
+   * query after each write and awaited it, so a batch of twenty grants was twenty round trips
+   * interleaved with twenty refetches of a list nobody could see behind the dialog — most of the
+   * wait, for nothing anybody read. It is invalidated even when a grant is refused, because the ones
+   * before it landed and the screen behind is now stale about them.
+   */
+  const grantSelected = async () => {
+    setError(null);
+    const total = selectedBots.size * selectedRefs.size;
+    setGranting({ done: 0, total });
+    let done = 0;
+    try {
+      for (const agentId of selectedBots) {
+        for (const ref of selectedRefs) {
+          await grantPlugin({ agentId, kind: "mcp", ref });
+          done += 1;
+          setGranting({ done, total });
+        }
+      }
+      setDialog(null);
+    } catch (thrown) {
+      setError((thrown as Error).message);
+    } finally {
+      await invalidatePlugins(queryClient);
+      setGranting(null);
+    }
+  };
+
   /* Nothing rather than a placeholder, so no sentence asserts anything while the fetch is open. */
   if (plugins.isPending) {
     return <PageShell title="Plugin">{null}</PageShell>;
@@ -188,6 +252,16 @@ function RouteComponent() {
       </PageShell>
     );
   }
+
+  /* The grant dialog's two halves of the tool list, split by what a boundary would see. */
+  const reads = server?.tools.filter((tool) => tool.effect !== "write") ?? [];
+  const writes = server?.tools.filter((tool) => tool.effect === "write") ?? [];
+  const chosenWrites = writes.filter((tool) =>
+    selectedRefs.has(tool.ref),
+  ).length;
+  const chosenNames = bots
+    .filter((bot) => selectedBots.has(bot.id))
+    .map((bot) => bot.name);
 
   return (
     <PageShell
@@ -251,10 +325,15 @@ function RouteComponent() {
           title="Connection"
         >
           {/*
-           * Rows that DO something, and nothing else. The layout skill's third row kind — a value
-           * with no chevron and nothing to click — earns its place on a screen full of them, but
-           * among four actionable rows a dead one reads as a control that has stopped working. The
-           * redirect URI is prose under the card instead.
+           * Rows that DO something, and nothing else — with one admitted exception. The layout
+           * skill's third row kind — a value with no chevron and nothing to click — earns its
+           * place on a screen full of them, but among four actionable rows a dead one reads as a
+           * control that has stopped working. The redirect URI is prose under the card instead.
+           *
+           * The exception is the OAuth client row for a vendor with a dynamic client: there is a
+           * real fact to state — this deployment registers itself, nobody configures it — right
+           * where the actionable client row would otherwise sit. Leaving that slot empty would
+           * read as a missing setup step, not as nothing to do.
            */}
           <PageRows>
             {auth === "deployment-bearer" ? (
@@ -279,7 +358,29 @@ function RouteComponent() {
               </Item>
             ) : null}
 
-            {auth === "user-oauth" ? (
+            {auth === "user-oauth" && server?.dynamicClient ? (
+              /*
+               * Nothing to click. This deployment registers its own OAuth client with the
+               * vendor (RFC 7591) the first time anybody connects, so there is no client id
+               * or secret for an administrator to hold, let alone paste.
+               */
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>OAuth client</ItemTitle>
+                  <ItemDescription>
+                    This deployment registers itself with the vendor on first
+                    connect. There is nothing to paste.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    Self-registered
+                  </span>
+                </ItemActions>
+              </Item>
+            ) : null}
+
+            {auth === "user-oauth" && !server?.dynamicClient ? (
               <Item
                 render={
                   <button onClick={() => setDialog("client")} type="button" />
@@ -314,10 +415,13 @@ function RouteComponent() {
              * It is NOT part of setup. The connector is fully configured without it, which is why it
              * sits below the client and says so rather than reading as the next required step.
              *
-             * Shown only once a client exists, because there is nothing to consent against before
-             * that: a Connect button with no OAuth client behind it can only fail.
+             * Shown once a client exists, because there is nothing to consent against before
+             * that: a Connect button with no OAuth client behind it can only fail. A vendor with a
+             * dynamic client is the exception — there is no client to register in advance, so
+             * Connect is shown right away and is itself what creates one.
              */}
-            {auth === "user-oauth" && server?.hasCredential ? (
+            {auth === "user-oauth" &&
+            (server?.hasCredential || server?.dynamicClient) ? (
               <>
                 <Separator />
                 <Item size="sm">
@@ -325,7 +429,7 @@ function RouteComponent() {
                     <ItemTitle>Your account</ItemTitle>
                     <ItemDescription>
                       {youConnected
-                        ? "Connected, so a Bot granted these tools reads your Drive as you. Everybody else connects their own."
+                        ? `Connected, so a Bot granted these tools uses your ${title} as you. Everybody else connects their own.`
                         : "Connect your own account to try this connector. Setup is complete without it, and it reaches your documents only."}
                     </ItemDescription>
                   </ItemContent>
@@ -416,21 +520,28 @@ function RouteComponent() {
 
           {auth === "user-oauth" ? (
             <div className="mt-3 p-3">
-              <p className="text-muted-foreground text-sm">
-                Add this to the client's authorised redirect URIs at the vendor,
-                exactly as written. A single wrong character fails there, with a
-                message that does not mention OpenBot.
-              </p>
-              {plugins.data?.redirectUri ? (
-                /* Selectable and monospaced: it is copied by hand into somebody else's console. */
-                <code className="mt-3 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
-                  {plugins.data.redirectUri}
-                </code>
+              {server?.dynamicClient ? (
+                <p className="text-muted-foreground text-sm">
+                  The deployment registers its redirect URI itself, so there is
+                  nothing to add at the vendor.
+                </p>
               ) : (
+                <p className="text-muted-foreground text-sm">
+                  Add this to the client's authorised redirect URIs at the
+                  vendor, exactly as written. A single wrong character fails
+                  there, with a message that does not mention OpenBot.
+                </p>
+              )}
+              {!plugins.data?.redirectUri ? (
                 <p className="mt-3 text-destructive text-sm" role="alert">
                   This deployment has no public URL, so nobody can complete a
                   consent flow. Set OPENBOT_PUBLIC_URL.
                 </p>
+              ) : server?.dynamicClient ? null : (
+                /* Selectable and monospaced: it is copied by hand into somebody else's console. */
+                <code className="mt-3 block select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs">
+                  {plugins.data.redirectUri}
+                </code>
               )}
             </div>
           ) : null}
@@ -446,14 +557,35 @@ function RouteComponent() {
            * an administrator came here to do.
            */
           action={
-            <Button
-              onClick={() => refresh.mutate(key)}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Refresh tools
-            </Button>
+            <div className="flex gap-1.5">
+              <Button
+                onClick={() => refresh.mutate(key)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Refresh tools
+              </Button>
+              {/*
+               * Outline where refresh is ghost: granting is the thing an administrator came to
+               * this section to do. Hidden rather than disabled with nothing to grant — a dialog
+               * over an empty list could only explain its own emptiness.
+               */}
+              {server.tools.length > 0 && bots.length > 0 ? (
+                <Button
+                  onClick={() => {
+                    setSelectedBots(new Set());
+                    setSelectedRefs(new Set());
+                    setDialog("grant");
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Grant tools…
+                </Button>
+              ) : null}
+            </div>
           }
           description="A Bot is told about a tool only when it holds it. Every call is decided again when it happens, so removing a grant takes effect on the next one."
           title="Tools"
@@ -561,7 +693,7 @@ function RouteComponent() {
 
       <Dialog
         onOpenChange={(open) => setDialog(open ? dialog : null)}
-        open={dialog !== null}
+        open={dialog !== null && dialog !== "grant"}
       >
         <DialogContent>
           <DialogHeader>
@@ -659,6 +791,202 @@ function RouteComponent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/*
+       * Who first, then what: the decision arrives as "set this Bot up", not as a list of tools
+       * looking for an owner. Both groups get a select-all; the amber heading and the footer's
+       * "N of which change things" are what keep a bulk write grant a read decision, not a blind one.
+       */}
+      {server ? (
+        <Dialog
+          onOpenChange={(open) => setDialog(open ? dialog : null)}
+          open={dialog === "grant"}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Grant tools</DialogTitle>
+              <DialogDescription>
+                Each grant is its own entry on the audit trail, and a granted
+                write is still checked against the boundaries on every call.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody className="mt-4 space-y-5">
+              {/*
+               * Each set of tickboxes is a group named by its own heading, so a screen reader
+               * reaching a bare tool name is told which list it is in. "Changes things" is the whole
+               * warning on those, and it is a heading a sighted reader cannot miss and a listener
+               * would otherwise never hear.
+               *
+               * A `fieldset` because that is what a group of tickboxes is, named by the heading
+               * already on screen rather than by a `legend` duplicating it. `min-w-0` undoes the
+               * one thing a fieldset brings that a div did not: a min-content floor that a long
+               * tool name would push the dialog out to.
+               */}
+              <fieldset aria-labelledby="grant-to-heading" className="min-w-0">
+                <p className="mb-2 font-medium text-sm" id="grant-to-heading">
+                  To
+                </p>
+                <div className="space-y-2">
+                  {bots.map((bot) => (
+                    <div className="flex items-center gap-2" key={bot.id}>
+                      <Checkbox
+                        checked={selectedBots.has(bot.id)}
+                        id={`grant-bot-${bot.id}`}
+                        onCheckedChange={() =>
+                          setSelectedBots((previous) =>
+                            toggled(previous, bot.id),
+                          )
+                        }
+                      />
+                      <label
+                        className="text-sm"
+                        htmlFor={`grant-bot-${bot.id}`}
+                      >
+                        {bot.name}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </fieldset>
+              <div className="max-h-64 space-y-5 overflow-y-auto">
+                {reads.length > 0 ? (
+                  <fieldset
+                    aria-labelledby="grant-reads-heading"
+                    className="min-w-0"
+                  >
+                    <div className="mb-1 flex items-center justify-between">
+                      <p
+                        className="font-medium text-sm"
+                        id="grant-reads-heading"
+                      >
+                        Reads
+                      </p>
+                      <Button
+                        onClick={() =>
+                          setSelectedRefs((previous) => {
+                            const next = new Set(previous);
+                            for (const tool of reads) next.add(tool.ref);
+                            return next;
+                          })
+                        }
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Select all
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {reads.map((tool) => (
+                        <div className="flex items-center gap-2" key={tool.ref}>
+                          <Checkbox
+                            checked={selectedRefs.has(tool.ref)}
+                            id={`grant-tool-${tool.ref}`}
+                            onCheckedChange={() =>
+                              setSelectedRefs((previous) =>
+                                toggled(previous, tool.ref),
+                              )
+                            }
+                          />
+                          <label
+                            className="font-mono text-xs"
+                            htmlFor={`grant-tool-${tool.ref}`}
+                          >
+                            {tool.name}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
+                {writes.length > 0 ? (
+                  <fieldset
+                    aria-labelledby="grant-writes-heading"
+                    className="min-w-0"
+                  >
+                    <div className="mb-1 flex items-center justify-between">
+                      <p
+                        className="font-medium text-amber-600 text-sm dark:text-amber-500"
+                        id="grant-writes-heading"
+                      >
+                        Changes things
+                      </p>
+                      <Button
+                        onClick={() =>
+                          setSelectedRefs((previous) => {
+                            const next = new Set(previous);
+                            for (const tool of writes) next.add(tool.ref);
+                            return next;
+                          })
+                        }
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Select all
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {writes.map((tool) => (
+                        <div className="flex items-center gap-2" key={tool.ref}>
+                          <Checkbox
+                            checked={selectedRefs.has(tool.ref)}
+                            id={`grant-tool-${tool.ref}`}
+                            onCheckedChange={() =>
+                              setSelectedRefs((previous) =>
+                                toggled(previous, tool.ref),
+                              )
+                            }
+                          />
+                          <label
+                            className="font-mono text-xs"
+                            htmlFor={`grant-tool-${tool.ref}`}
+                          >
+                            {tool.name}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
+              </div>
+            </DialogBody>
+            <DialogFooter className="mt-4 items-center">
+              {/* What is about to happen, in one sentence, before it does. */}
+              {selectedRefs.size > 0 && chosenNames.length > 0 ? (
+                <p className="flex-1 text-muted-foreground text-xs">
+                  {`Grant ${selectedRefs.size} ${
+                    selectedRefs.size === 1 ? "tool" : "tools"
+                  }${
+                    chosenWrites > 0
+                      ? `, ${chosenWrites} of which ${
+                          chosenWrites === 1 ? "changes" : "change"
+                        } things,`
+                      : ""
+                  } to ${chosenNames.join(", ")}.`}
+                </p>
+              ) : null}
+              <Button onClick={() => setDialog(null)} size="sm" variant="ghost">
+                Cancel
+              </Button>
+              <Button
+                disabled={
+                  granting !== null ||
+                  selectedBots.size === 0 ||
+                  selectedRefs.size === 0
+                }
+                onClick={() => void grantSelected()}
+                size="sm"
+              >
+                {/* The one in flight, not the ones finished: a count that starts at zero of twelve reads as nothing happening. */}
+                {granting
+                  ? `Granting ${Math.min(granting.done + 1, granting.total)} of ${granting.total}…`
+                  : "Grant"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </PageShell>
   );
 }

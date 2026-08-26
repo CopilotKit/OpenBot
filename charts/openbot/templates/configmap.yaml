@@ -1,0 +1,17 @@
+{{/*
+Non-secret configuration, in a ConfigMap so a change to it rolls the pods.
+
+Everything here is readable by anybody who can read the namespace, which is the test for whether a
+value belongs in this file rather than in the Secret beside it.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openbot.configMapName" . }}
+  labels:
+{{ include "openbot.labels" . | indent 4 }}
+data:
+  OPENBOT_DEPLOYMENT: kubernetes
+  {{- if .Values.config.publicUrl }}
+  TRUSTED_ORIGINS: {{ .Values.config.publicUrl | quote }}
+  {{- end }}

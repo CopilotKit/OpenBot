@@ -1,0 +1,24 @@
+{{- if eq .Values.computers.mode "sandbox" }}
+{{/*
+What a Bot's computer looks like, handed to the server as a file.
+
+`Sandbox` takes its pod inline and has no template reference, so something has to give the server the
+shape of a computer. It belongs here rather than in the code: which image a computer runs, what
+volumes it keeps, and which RuntimeClass it uses are deployment decisions, and the three clouds do
+not agree about the last one.
+
+MOUNTED, NOT FETCHED. A ConfigMap the server reads through the API would need a credential to read
+ConfigMaps, and this needs no permission at all if the pod simply has the file. It also means the
+template cannot change under a running server without a rollout, which is what the checksum
+annotation on the Deployment already arranges.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" "computer-template") }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" "computer") | indent 4 }}
+data:
+  sandbox-template.json: |
+{{ include "openbot.sandboxPodTemplate" . | indent 4 }}
+{{- end }}

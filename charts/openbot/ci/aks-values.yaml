@@ -1,0 +1,56 @@
+# AKS. Azure Database, workload identity, Key Vault through external-secrets.
+config:
+  initialAdminEmails: admin@example.com
+  intelligence:
+    apiUrl: https://api.cloud.copilotkit.ai
+    gatewayWsUrl: wss://gateway.cloud.copilotkit.ai
+  auth:
+    google:
+      clientId: example.apps.googleusercontent.com
+  publicUrl: https://openbot.example.com
+postgresql:
+  enabled: false
+database:
+  existingSecret: openbot-database
+serviceAccount:
+  annotations:
+    azure.workload.identity/client-id: 00000000-0000-0000-0000-000000000000
+server:
+  podLabels:
+    azure.workload.identity/use: "true"
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: azure-key-vault
+  data:
+    - secretKey: key-encryption-key
+      remoteRef:
+        key: openbot-key-encryption-key
+    # Sessions are signed with this. The server refuses to start when sign-in is configured and it
+    # is missing, so every provider store has to carry it.
+    - secretKey: better-auth-secret
+      remoteRef:
+        key: openbot-better-auth-secret
+    - secretKey: intelligence-api-key
+      remoteRef:
+        key: openbot-intelligence-api-key
+    - secretKey: google-client-secret
+      remoteRef:
+        key: openbot/google-client-secret
+    - secretKey: computer-token
+      remoteRef:
+        key: openbot/computer-token
+    - secretKey: license-token
+      remoteRef:
+        key: openbot-license-token
+ingress:
+  enabled: true
+  className: webapprouting.kubernetes.azure.com
+  hosts:
+    - host: openbot.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+computers:
+  mode: shared

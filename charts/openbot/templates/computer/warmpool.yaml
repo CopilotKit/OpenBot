@@ -1,0 +1,22 @@
+{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.warmPool.enabled }}
+{{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
+{{/*
+Computers waiting, so a Bot's first action after lunch does not wait for Chromium to boot.
+
+A resume costs a pod schedule and a browser launch, and a `ReadWriteOnce` volume that has to detach
+from the old node first. That is a real wait, and this is the upstream mechanism for avoiding most
+of it rather than something to reinvent. Off by default, because a pool is browsers nobody is using
+yet, which is exactly the cost the suspend is here to remove.
+*/}}
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: {{ $ns }}-computer
+  namespace: {{ $ns }}
+  labels:
+{{ include "openbot.labels" . | indent 4 }}
+spec:
+  replicas: {{ .Values.computers.sandbox.warmPool.replicas }}
+  sandboxTemplateRef:
+    name: {{ $ns }}-computer
+{{- end }}

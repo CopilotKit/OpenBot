@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { sign, verify } from "../auth/signed-value";
+import { seal, unseal } from "../auth/signed-value";
 import type { CatalogueAuth } from "./catalogue";
 
 /**
@@ -8,8 +8,16 @@ import type { CatalogueAuth } from "./catalogue";
  * The browser is in the middle of this, which is the whole difficulty. An authorization code arrives
  * on a request that somebody else's server sent the person to, so nothing on it can be believed on
  * its own — not who is connecting, not which server they meant, not that they ever asked. Two things
- * carry the truth across: a signed state, which is this deployment's own statement about the request
+ * carry the truth across: a sealed state, which is this deployment's own statement about the request
  * it started, and a PKCE verifier, which proves the code being redeemed belongs to that request.
+ *
+ * SEALED, not signed, and that distinction is the reason this comment exists. The state carries the
+ * PKCE verifier, and the callback URL carries the verifier's state and the authorization code
+ * TOGETHER. A dynamically registered client is public — it proves itself with PKCE and no secret —
+ * so the verifier is the only thing binding that code to this deployment. A signed state is readable
+ * by anybody holding it, and a callback URL is held by every CDN log, proxy log, browser history and
+ * vendor log it passes through: any one of those readers could redeem the code. Encrypted, the state
+ * says nothing to anybody but this deployment.
  *
  * Everything here fails closed. A state that was tampered with, replayed after it expired, or minted
  * for some other purpose reads back as nothing, because the alternative is attaching one person's
@@ -17,10 +25,10 @@ import type { CatalogueAuth } from "./catalogue";
  */
 
 /**
- * The label this deployment's connect states are signed under.
+ * The label this deployment's connect states are sealed under.
  *
- * Its own, so a signature valid here can never be replayed as a run assertion and vice versa. Every
- * signed value the deployment hands out would otherwise be a candidate state.
+ * Its own, so a state cannot be opened as a run assertion and vice versa. Every value the deployment
+ * hands out under this key would otherwise be a candidate state.
  */
 const CONNECT_LABEL = "mcp-oauth-connect";
 
@@ -46,7 +54,7 @@ const CALLBACK_PATH = "/api/plugins/oauth/callback";
  * one falls back instead of being followed, so the worst a tampered state achieves is the wrong page
  * of this app.
  *
- * It lives in the SIGNED state rather than on the callback URL because the callback is a request
+ * It lives in the SEALED state rather than on the callback URL because the callback is a request
  * somebody else's server sent the browser on. Nothing on it is believable by itself.
  */
 export type ConnectOrigin = "settings" | "admin";
@@ -56,13 +64,24 @@ export type ConnectState = {
   userId: string;
   /** Which server they are connecting. Prevents a code for one vendor landing on another's row. */
   serverId: string;
-  /** The PKCE verifier, held here rather than in a table because it is single-use and short-lived. */
+  /**
+   * The PKCE verifier, held here rather than in a table because it is single-use and short-lived.
+   *
+   * It is also why the state is sealed rather than signed: this is a secret travelling beside the
+   * code it unlocks, so a state anybody could read would be a code anybody could redeem.
+   */
   verifier: string;
   /** Where to go back to. Absent reads as `settings`, which is where every flow used to end. */
   returnTo?: ConnectOrigin;
 };
 
-type SignedState = ConnectState & { exp: number };
+/**
+ * What is actually sealed: the state, plus when it stops being one.
+ *
+ * The expiry travels inside the sealed value because sealing says nothing about freshness. Nobody
+ * can move it without the key, and this deployment checks it on the way out.
+ */
+type SealedState = ConnectState & { exp: number };
 
 /**
  * Where the vendor sends somebody back to.
@@ -148,35 +167,39 @@ export function challengeFor(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-export function signConnectState(
+/**
+ * The state to send a person to the vendor with.
+ *
+ * Async because sealing is: the encryption goes through WebCrypto, like every other secret this
+ * deployment writes down. It is one call on a path that already makes a network request or two.
+ */
+export async function sealConnectState(
   state: ConnectState,
   encryptionKey: string,
   now: number = Date.now(),
-): string {
-  const payload: SignedState = { ...state, exp: now + STATE_TTL_MS };
-  const value = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return sign(value, encryptionKey, CONNECT_LABEL);
+): Promise<string> {
+  const payload: SealedState = { ...state, exp: now + STATE_TTL_MS };
+  return seal(JSON.stringify(payload), encryptionKey, CONNECT_LABEL);
 }
 
 /**
  * What a state says, or nothing at all.
  *
- * One return for every way of being unacceptable — bad signature, wrong label, expired, malformed,
- * missing a field — because a caller that has to tell those apart is a caller that can get one of
- * them wrong. There is exactly one thing to do with an unusable state, so there is one answer.
+ * One return for every way of being unacceptable — altered, sealed by another key, sealed for
+ * another purpose, expired, malformed, missing a field — because a caller that has to tell those
+ * apart is a caller that can get one of them wrong. There is exactly one thing to do with an
+ * unusable state, so there is one answer.
  */
-export function readConnectState(
-  signed: string,
+export async function readConnectState(
+  sealed: string,
   encryptionKey: string,
   now: number = Date.now(),
-): ConnectState | null {
-  const value = verify(signed, encryptionKey, CONNECT_LABEL);
+): Promise<ConnectState | null> {
+  const value = await unseal(sealed, encryptionKey, CONNECT_LABEL);
   if (!value) return null;
 
   try {
-    const payload = JSON.parse(
-      Buffer.from(value, "base64url").toString("utf8"),
-    ) as Partial<SignedState>;
+    const payload = JSON.parse(value) as Partial<SealedState>;
 
     if (
       typeof payload.userId !== "string" ||
@@ -204,13 +227,30 @@ export function readConnectState(
 }
 
 /**
+ * The six keys that carry this flow's own security: who is asking (`client_id`), where the vendor
+ * answers (`redirect_uri`), the grant shape (`response_type`), the sealed state (`state`), and the
+ * PKCE proof (`code_challenge`, `code_challenge_method`). A catalogue entry's `authorizationParams`
+ * must never rewrite one of these — an entry setting `code_challenge_method: "plain"` would defeat
+ * PKCE with nothing here to catch it. The catalogue is frozen, reviewed code today, so nothing can
+ * reach this, but a future entry that tried would fail at first connect rather than quietly winning.
+ */
+const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
+  "client_id",
+  "redirect_uri",
+  "response_type",
+  "state",
+  "code_challenge",
+  "code_challenge_method",
+]);
+
+/**
  * The vendor's consent screen, as a URL to send somebody to.
  *
- * `offline` and `consent` are both load bearing. Without `access_type=offline` Google returns an
- * access token and no refresh token, so the connection would appear to work and then stop about an
- * hour later with nothing to renew it. Without `prompt=consent` a second connect returns no refresh
- * token at all, because the person already agreed once — which turns reconnecting after a disconnect
- * into a silent no-op.
+ * Vendor-specific parameters — Google's `offline`/`consent` pair, or nothing at all for a vendor
+ * like Notion whose consent screen is itself the scoping — come from the catalogue entry's own
+ * `authorizationParams`, never hardcoded here. The rationale for any one vendor's requirements lives
+ * on that vendor's entry, because a parameter this function adds for everybody is a parameter an
+ * unrelated vendor never asked for and may refuse the whole request over.
  */
 export function authorizationUrlFor(input: {
   auth: Extract<CatalogueAuth, { kind: "user-oauth" }>;
@@ -220,17 +260,34 @@ export function authorizationUrlFor(input: {
   codeChallenge: string;
 }): string {
   const url = new URL(input.auth.authorizationUrl);
-  url.search = new URLSearchParams({
+  const params = new URLSearchParams({
     client_id: input.clientId,
     redirect_uri: input.redirectUri,
     response_type: "code",
-    scope: input.auth.scopes.join(" "),
-    access_type: "offline",
-    prompt: "consent",
     state: input.state,
     code_challenge: input.codeChallenge,
     code_challenge_method: "S256",
-  }).toString();
+  });
+  // Empty means the consent screen itself is the scoping; an empty scope= is not "no scope".
+  if (input.auth.scopes.length > 0) {
+    params.set("scope", input.auth.scopes.join(" "));
+  }
+  // The vendor's own requirements, from its reviewed entry — never another vendor's.
+  for (const [name, value] of Object.entries(
+    input.auth.authorizationParams ?? {},
+  )) {
+    // Applied last, so a reserved name here would quietly rewrite the flow's own security instead
+    // of the vendor's. That is a bad entry, and it must fail at first connect, not win silently.
+    if (RESERVED_AUTHORIZATION_PARAMS.has(name)) {
+      throw new Error(
+        `authorizationParams may not set "${name}": it is one of the flow's own security ` +
+          "parameters (client_id, redirect_uri, response_type, state, code_challenge, " +
+          "code_challenge_method) and must never be rewritten by a catalogue entry.",
+      );
+    }
+    params.set(name, value);
+  }
+  url.search = params.toString();
   return url.toString();
 }
 
@@ -256,39 +313,108 @@ export async function redeemAuthorizationCode(input: {
   redirectUri: string;
   verifier: string;
 }): Promise<RedeemedGrant | null> {
+  const params = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: input.code,
+    client_id: input.clientId,
+    redirect_uri: input.redirectUri,
+    code_verifier: input.verifier,
+  });
+  // A public (DCR) client proves itself with PKCE, and some vendors refuse an unexpected empty field.
+  if (input.clientSecret) params.set("client_secret", input.clientSecret);
+
   const response = await fetch(input.tokenUrl, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code: input.code,
-      client_id: input.clientId,
-      client_secret: input.clientSecret,
-      redirect_uri: input.redirectUri,
-      code_verifier: input.verifier,
-    }),
+    body: params,
+    /*
+     * A redirect is a refusal, not a detour to be followed.
+     *
+     * `tokenUrl` is pinned in the catalogue because this request carries a client secret and an
+     * authorization code, and following a 302 would hand both to whatever address the answer named.
+     * Manual leaves the 3xx as the response, which is not `ok`, so it falls into the refusal below.
+     */
+    redirect: "manual",
     signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) return null;
 
-  const body = (await response.json()) as {
+  /*
+   * Read defensively, because a 200 is not a promise of JSON.
+   *
+   * A CDN interstitial, a captive portal or a maintenance page answers 200 with HTML, and an
+   * unguarded parse would throw a SyntaxError out of a function whose whole contract is to refuse
+   * quietly — escaping the callback as a 500 instead of the redirect-with-a-notice a person who has
+   * just consented should get, and quoting the vendor's body into whatever logged the throw.
+   */
+  const body = (await response.json().catch(() => null)) as {
     refresh_token?: unknown;
     scope?: unknown;
-  };
+  } | null;
   /*
    * No refresh token is a failure, not a partial success.
    *
    * It is what a vendor returns when it believes this person already consented, and storing the
    * access token instead would produce a connection that works for an hour and then cannot be
-   * renewed — the worst of the three outcomes, because it looks like success.
+   * renewed — the worst of the three outcomes, because it looks like success. A body that was not
+   * JSON at all arrives here as nothing, which is the same answer: the vendor said something other
+   * than a token.
    */
-  if (typeof body.refresh_token !== "string" || !body.refresh_token) {
+  if (typeof body?.refresh_token !== "string" || !body.refresh_token) {
     return null;
   }
 
   return {
     refreshToken: body.refresh_token,
-    scope: typeof body.scope === "string" ? body.scope : "",
+    /*
+     * Capped where it is read. It is a short string in the protocol and vendor-controlled in fact,
+     * and everything downstream shows it to somebody — the connected-accounts page, the
+     * `mcp.account_connected` payload, the `scope` column — none of which is a promise about length.
+     */
+    scope: typeof body.scope === "string" ? body.scope.slice(0, 512) : "",
+  };
+}
+
+/**
+ * Register this deployment as an OAuth client, at the vendor's own registration endpoint.
+ *
+ * RFC 7591, the shape Notion's hosted MCP expects: a public client (`token_endpoint_auth_method:
+ * "none"`) whose proof is PKCE rather than a secret. Null on refusal rather than a throw, for the
+ * same reason `redeemAuthorizationCode` refuses quietly: the vendor's error body is written for a
+ * developer console and can be surfaced by the caller that knows who is listening.
+ */
+export async function registerDynamicClient(input: {
+  registrationUrl: string;
+  redirectUri: string;
+}): Promise<{ clientId: string; clientSecret: string } | null> {
+  const response = await fetch(input.registrationUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      redirect_uris: [input.redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      client_name: "OpenBot",
+    }),
+    // The registration endpoint is pinned in the catalogue, so a redirect is somebody else deciding
+    // where this deployment introduces itself. Left as the response, which is not `ok`.
+    redirect: "manual",
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) return null;
+  // A 200 is not a promise of JSON — see `redeemAuthorizationCode`. A body that will not parse is
+  // the vendor answering with something other than a client, which is this function's null.
+  const body = (await response.json().catch(() => null)) as {
+    client_id?: unknown;
+    client_secret?: unknown;
+  } | null;
+  if (typeof body?.client_id !== "string" || !body.client_id) return null;
+  return {
+    clientId: body.client_id,
+    // A public client has none; a vendor that issues one anyway gets it stored and sent back.
+    clientSecret:
+      typeof body.client_secret === "string" ? body.client_secret : "",
   };
 }

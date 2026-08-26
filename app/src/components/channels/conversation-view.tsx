@@ -26,6 +26,7 @@ export function ConversationView({
   commands,
   disabled = false,
   pending = false,
+  autoFocus = false,
   stopped,
   stoppable,
   queueWhileBusy = false,
@@ -53,6 +54,8 @@ export function ConversationView({
    * drains on this falling.
    */
   pending?: boolean;
+  /** Focus the composer the moment it can take a caret; forwarded to the composer. */
+  autoFocus?: boolean;
   /** Why the last turn ended without an answer. Drawn at the end of the transcript, not here. */
   stopped?: string;
   /**
@@ -224,6 +227,7 @@ export function ConversationView({
         {notice}
         <Composer
           agents={agents}
+          autoFocus={autoFocus}
           {...(commands ? { commands } : {})}
           className="w-full mt-auto"
           compact

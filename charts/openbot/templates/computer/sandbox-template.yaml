@@ -1,0 +1,23 @@
+{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.warmPool.enabled }}
+{{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
+{{/*
+The template a warm pool cuts pre-warmed computers from.
+
+Only rendered with a warm pool, because that is the only thing that reads it: a `Sandbox` carries its
+pod inline and has no template reference, so the on-demand path takes the same shape from the
+ConfigMap beside this file. One definition feeds both, so a pre-warmed computer and one created on
+demand cannot drift into being different things.
+
+`extensions.agents.x-k8s.io`, not `agents.x-k8s.io`. The two extension kinds sit in their own API
+group, which is easy to get wrong and fails as "no matches for kind" at install.
+*/}}
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: {{ $ns }}-computer
+  namespace: {{ $ns }}
+  labels:
+{{ include "openbot.labels" . | indent 4 }}
+spec:
+{{ include "openbot.sandboxPodTemplate" . | fromJson | toYaml | indent 2 }}
+{{- end }}

@@ -14,7 +14,12 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Link, type LinkOptions, useNavigate } from "@tanstack/react-router";
+import {
+  Link,
+  type LinkOptions,
+  useNavigate,
+  useParams,
+} from "@tanstack/react-router";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useState } from "react";
@@ -112,6 +117,44 @@ function matchingChannels(
 }
 
 /**
+ * Pinned channels first, everything else after, newest activity first within each group.
+ *
+ * The mirror of a server rule, not the rule itself: the roster query orders pinned-first and its
+ * cursor carries the pin, so a pinned channel arrives on page one however long ago it was last
+ * spoken in. Sorting here as well is for what happens between refetches — the socket patches a pin
+ * onto a loaded row without moving it, and re-sorts a page by recency alone — which is the same
+ * reason `byRecency` in use-channel-events.ts mirrors the recency rule. A stable partition, so the
+ * recency order inside each group is whatever arrived.
+ */
+export function pinnedFirst(channels: ChannelSummary[]): ChannelSummary[] {
+  return [...channels].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+}
+
+/**
+ * Whether a Bot has said something this member has not had on screen yet.
+ *
+ * A Bot's message, and only a Bot's: your own message carries a null agent id and reading your own
+ * words needs no marker. ISO-8601 strings compare correctly as strings, which is the same bet the
+ * server's recency sort already makes.
+ */
+export function hasUnseenActivity(channel: ChannelSummary): boolean {
+  if (channel.lastMessageAgentId === null || channel.lastMessageAt === null) {
+    return false;
+  }
+  return (
+    channel.lastReadAt === null || channel.lastMessageAt > channel.lastReadAt
+  );
+}
+
+/** Unseen activity somewhere you are not looking. The open channel never shows the dot. */
+export function isUnread(
+  channel: ChannelSummary,
+  openChannelId: string | undefined,
+): boolean {
+  return channel.id !== openChannelId && hasUnseenActivity(channel);
+}
+
+/**
  * A roster row that can animate.
  *
  * Two movements only: a channel that did not exist fades in, and a channel that was just spoken in
@@ -126,6 +169,13 @@ function ChannelRow({
   animateOrder: boolean;
 }) {
   const shouldReduceMotion = useReducedMotion();
+  // Whether this row is unread, as a boolean, for the same reason `Channel` computes `isOpen`
+  // that way: navigating re-renders the rows whose answer changed, not the whole roster.
+  const unread = useParams({
+    strict: false,
+    select: (params) =>
+      isUnread(channel, (params as { channelId?: string }).channelId),
+  });
   return (
     <motion.div
       animate={{ opacity: 1, transform: "translateY(0px)" }}
@@ -147,6 +197,8 @@ function ChannelRow({
             ? relativeTime(channel.lastMessageAt)
             : undefined
         }
+        pinned={channel.pinned}
+        unread={unread}
       />
     </motion.div>
   );
@@ -165,7 +217,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   useChannelEvents();
   const [search, setSearch] = useState("");
   const searching = search.trim().length > 0;
-  const visibleChannels = matchingChannels(channels.data, search);
+  const visibleChannels = pinnedFirst(matchingChannels(channels.data, search));
   /*
    * FILTERING DOES NOT ANIMATE. Rows exit and relayout on every keystroke otherwise, which is a
    * list thrashing under somebody who is still typing — and the moving target is the very thing

@@ -1,0 +1,31 @@
+apiVersion: v2
+name: openbot
+description: Run OpenBot on any Kubernetes cluster, managed or your own
+type: application
+# The chart's own version, bumped when templates or defaults change.
+version: 0.1.0
+# The OpenBot release this chart's default image tag points at.
+appVersion: "0.0.4"
+home: https://github.com/CopilotKit/OpenBot
+sources:
+  - https://github.com/CopilotKit/OpenBot
+keywords:
+  - openbot
+  - copilotkit
+  - agents
+maintainers:
+  - name: CopilotKit
+    url: https://github.com/CopilotKit
+dependencies:
+  # BUNDLED FOR SOMEBODY TRYING IT, OFF FOR ANYBODY WITH A DATABASE. A deployment with RDS, Cloud SQL
+  # or Azure Database sets `postgresql.enabled: false` and a connection URL, which is the same line
+  # the Intelligence chart draws, so somebody who has deployed that does not have to relearn it.
+  - name: postgresql
+    # EXACT, NOT A RANGE. `~16` let a subchart patch arrive on its own, and a subchart patch carries a
+    # new PostgreSQL image tag. That image comes from Bitnami's frozen `bitnamilegacy` mirror, which
+    # is not gaining new tags, so the next patch is one an install cannot pull. CI renders this chart
+    # and never pulls from it, so nothing here would have said a word: the first sign would have been
+    # somebody's install sitting in ImagePullBackOff. Bump it deliberately, with the tag below.
+    version: "16.7.27"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+    condition: postgresql.enabled

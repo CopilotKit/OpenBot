@@ -1,0 +1,277 @@
+{{/*
+Refused at install time, not discovered in a crash loop.
+
+Every check here is something the API would fail on at boot, or something that is quietly wrong
+rather than loudly broken. A `helm install` that succeeds and leaves pods restarting is worse than
+one that refuses and says why, because the second names the value to change.
+
+This template renders nothing.
+*/}}
+
+{{- if and (not .Values.postgresql.enabled) (not .Values.database.url) (not .Values.database.existingSecret) }}
+{{- fail "No database. Either set postgresql.enabled=true to run the bundled one, or set database.url (or database.existingSecret) to point at your own." }}
+{{- end }}
+
+{{- /*
+  The bundled database, without a password anybody can produce again.
+
+  The subchart generates one on install and then refuses to render on upgrade without being handed
+  the current value, so a release installed without one cannot be upgraded, only reinstalled. That
+  failure arrives on the second deploy, which is the worst time to find it.
+*/}}
+{{- if and .Values.postgresql.enabled (not .Values.postgresql.auth.password) (not .Values.postgresql.auth.existingSecret) }}
+{{- fail "The bundled database needs a password you can supply again on upgrade. Set postgresql.auth.password, or postgresql.auth.existingSecret to name one you made. Generate one with: openssl rand -hex 24" }}
+{{- end }}
+
+{{- if and .Values.postgresql.enabled (or .Values.database.url .Values.database.existingSecret) }}
+{{- fail "Two databases. postgresql.enabled is true and database.url is also set, so it is not clear which one is meant. Pick one." }}
+{{- end }}
+
+{{- /*
+  Nobody can get in, which is two separate mistakes rather than one.
+
+  Naming administrators does not create a way to sign in, and configuring sign-in does not make
+  anybody an administrator: the server refuses to start without a provider, and grants the role to
+  nobody without the addresses. An earlier version of this check accepted admin emails alone, which
+  passed the install and then crash-looped on the first boot, so both are checked and named apart.
+*/}}
+{{- $provider := or .Values.config.auth.google.clientId .Values.config.auth.microsoft.clientId .Values.config.auth.okta.clientId -}}
+{{- if and (not .Values.config.singleUser) (not $provider) }}
+{{- fail "Nobody could sign in. Configure config.auth.google, config.auth.microsoft or config.auth.okta, or set config.singleUser=true for a local trial where every request is one fixed administrator." }}
+{{- end }}
+
+{{- if and $provider (not .Values.config.initialAdminEmails) }}
+{{- fail "Nobody would be an administrator. config.initialAdminEmails is what grants the role; nothing else does." }}
+{{- end }}
+
+{{- if and $provider (not .Values.config.publicUrl) }}
+{{- fail "Sign-in needs somewhere to come back to. Set config.publicUrl to the address people reach this deployment at, which is where the OAuth callback lands." }}
+{{- end }}
+
+{{- if and .Values.config.auth.okta.clientId (not .Values.config.auth.okta.issuer) }}
+{{- fail "config.auth.okta.issuer is required alongside the Okta client, such as https://example.okta.com/oauth2/default. It is what makes it a particular Okta rather than Okta in general." }}
+{{- end }}
+
+{{- /*
+  Every visitor as one administrator, on an address the internet can reach.
+
+  `singleUser` is a local trial mode, and a LoadBalancer with no source ranges is the open internet.
+  Together they are a deployment where anybody who finds the address is an administrator, which is
+  the exact failure the server refuses to start into when nobody has said they meant it.
+*/}}
+{{- if and .Values.config.singleUser (eq .Values.server.service.type "LoadBalancer") (not .Values.server.service.loadBalancerSourceRanges) }}
+{{- fail "config.singleUser treats every visitor as an administrator, so it must not be put behind a LoadBalancer that anybody can reach. Set server.service.loadBalancerSourceRanges, or configure an identity provider." }}
+{{- end }}
+
+{{- if and .Values.config.singleUser .Values.config.publicUrl }}
+{{- fail "config.singleUser serves every visitor as one administrator, so it must not be combined with a public URL. Configure an identity provider and set config.initialAdminEmails instead." }}
+{{- end }}
+
+{{- /*
+  Intelligence, which is not optional.
+
+  All four values are required together and the server refuses to start on a partial set, so the
+  same rule is applied here: caught at install with the values named, rather than in a crash loop
+  whose message is in a log nobody has opened.
+*/}}
+{{- if or (not .Values.config.intelligence.apiUrl) (not .Values.config.intelligence.gatewayWsUrl) }}
+{{- fail "OpenBot requires CopilotKit Intelligence. Set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey and secrets.licenseToken." }}
+{{- end }}
+
+{{- /*
+  A computer nobody can reach, or one anybody can.
+
+  `agent-computer` refuses every request without `COMPUTER_TOKEN` and permits only `/health`, so a
+  chart that created one without a token would create a process that answers nothing. And a mode of
+  `external` with no address is a deployment whose Bots have no computer at all, which fails at the
+  first browser action rather than at install.
+*/}}
+{{- if and (ne .Values.computers.mode "external") (not .Values.secrets.computerToken) (not .Values.computers.existingTokenSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- fail "A computer needs a token, which is the only thing standing between it and anybody who can reach its port. Set secrets.computerToken. Generate one with: openssl rand -hex 32" }}
+{{- end }}
+
+{{- if and (eq .Values.computers.mode "external") (not .Values.computers.url) }}
+{{- fail "computers.mode is external but computers.url is empty, so no Bot would have a computer. Set the address, or use mode: shared to have this chart run one." }}
+{{- end }}
+
+{{- /*
+  Asking for per-Bot computers on a cluster that cannot make them.
+
+  `computers.mode: sandbox` creates `Sandbox` objects, which only exist once the agent-sandbox
+  controller is installed. Without it the install succeeds, every pod is healthy, and the deployment
+  looks finished right up until the first Bot asks for a browser and gets a 404 from the API server.
+  That is the worst time to learn it, so it is a refusal here instead, with the command to run.
+
+  Read from the cluster, so it is a real check rather than a value somebody has to remember to set.
+  `helm template` with no cluster has no way to know, which is what `--api-versions` is for and what
+  the chart's own render tests pass.
+*/}}
+{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.requireController }}
+{{- if not (.Capabilities.APIVersions.Has "agents.x-k8s.io/v1beta1/Sandbox") }}
+{{- fail "computers.mode is sandbox, which gives every Bot its own computer, but this cluster has no Sandbox CRD. Install the controller first:\n\n  kubectl apply --server-side -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v0.5.6/sandbox-with-extensions.yaml\n\nOr use computers.mode: shared, which needs nothing installed. Rendering without a cluster? Pass --api-versions agents.x-k8s.io/v1beta1/Sandbox, or set computers.sandbox.requireController=false." }}
+{{- end }}
+{{- end }}
+
+{{- if not (has .Values.computers.mode (list "shared" "sandbox" "external")) }}
+{{- fail "computers.mode must be one of: shared, sandbox, external." }}
+{{- end }}
+
+{{- /*
+  A policy that would fence the deployment off from its own database.
+
+  The egress rules name DNS, the computers and, when it is bundled, the database. A managed database
+  is an address this chart cannot know, so on a cluster that enforces policy the API would resolve it
+  and then be unable to reach it, which reads as the database being down rather than as a rule.
+
+  Worth knowing either way: a NetworkPolicy on a cluster whose CNI does not enforce one is a resource
+  that silently does nothing. EKS needs the VPC CNI started with `--enable-network-policy=true`, and
+  it is off by default, so this can look like it is working when it is not doing anything at all.
+*/}}
+{{- if and .Values.networkPolicy.enabled (not .Values.postgresql.enabled) (not .Values.networkPolicy.extraEgress) }}
+{{- fail "networkPolicy.enabled with an external database, but nothing lets the API reach it. Add the database to networkPolicy.extraEgress, for example a `to: [{ipBlock: {cidr: 10.0.0.0/16}}]` with port 5432." }}
+{{- end }}
+
+{{- if and .Values.ingress.enabled .Values.httpRoute.enabled }}
+{{- fail "ingress.enabled and httpRoute.enabled are both set. They are two ways to do the same thing; pick the one your cluster runs." }}
+{{- end }}
+
+{{- /*
+  A key of the wrong shape.
+
+  `KEY_ENCRYPTION_KEY` must decode to exactly 32 bytes, and the server refuses to start otherwise.
+  Checked here only when the chart is the one creating the Secret: a key coming from an existing
+  Secret or an external store is not readable at template time, and guessing about it would mean
+  refusing installs that are fine.
+*/}}
+{{- if and .Values.secrets.keyEncryptionKey (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- if ne (len (b64dec .Values.secrets.keyEncryptionKey)) 32 }}
+{{- fail "secrets.keyEncryptionKey must be a base64-encoded 32-byte value. Generate one with: openssl rand -base64 32" }}
+{{- end }}
+{{- /*
+  The right length and no secret in it.
+
+  The example key in `.env.example` is thirty-two zero bytes, which passes every shape check and is
+  public. The server refuses to start on it in production and this chart shipped a values file
+  carrying it, so the target rendered and the deployment it described could never run. Checked as a
+  property rather than by copying the value, which would mean writing a key-shaped literal into a
+  template to forbid a key-shaped literal.
+*/}}
+{{- if not (regexMatch "[^\\x00]" (b64dec .Values.secrets.keyEncryptionKey)) }}
+{{- fail "secrets.keyEncryptionKey is the public example key from .env.example. The server refuses to start with it. Generate one with: openssl rand -base64 32" }}
+{{- end }}
+{{- end }}
+
+{{- if and .Values.externalSecrets.enabled .Values.secrets.existingSecret }}
+{{- fail "externalSecrets.enabled and secrets.existingSecret are both set. The first creates the Secret and the second says one already exists; pick one." }}
+{{- end }}
+
+{{- /*
+  A replica count that cannot survive the thing replicas are for.
+
+  One replica is a supported way to run this and not the default, so this is a note rather than a
+  refusal only when somebody has also asked for a disruption budget, where one replica means a node
+  drain blocks rather than being safe.
+*/}}
+{{- if and (not .Values.server.autoscaling.enabled) (lt (int .Values.server.replicaCount) 1) }}
+{{- fail "server.replicaCount must be at least 1." }}
+{{- end }}
+
+{{- if .Values.server.embeddedComputer }}
+{{- if gt (int .Values.server.replicaCount) 1 }}
+{{- fail "server.embeddedComputer runs a browser inside every API pod, which cannot be replicated: each replica would hold a profile directory belonging to one Bot. Either set server.replicaCount=1, or leave embeddedComputer off and give the Bots a computer of their own." }}
+{{- end }}
+{{- end }}
+
+{{- /*
+  A Bot endpoint with nothing on the request that says who is calling.
+
+  The server refuses to start in this state, and it is better to hear it from `helm install` than
+  from a pod's third crash loop. Only checked when the chart holds the token: a value in an existing
+  Secret or an external store is not readable at template time, so an install that gets it from
+  there is left alone rather than refused on a guess.
+*/}}
+{{- if .Values.config.managedAgent.url }}
+{{- if and (not .Values.secrets.managedAgentToken) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- fail "config.managedAgent.url is set without secrets.managedAgentToken. Every call to your Bot carries that token, and an endpoint that accepts unauthenticated calls is an open door to whatever the Bot can reach." }}
+{{- end }}
+{{- /*
+  The same requirement, for a deployment whose secrets come from a store.
+
+  The value is not readable at template time, but the LIST of keys is, and a store that never
+  mentions this key cannot be holding one. Without this the refusal simply went dark on every cloud
+  target, which is where a Bot endpoint is most likely to be pointed at something real.
+*/}}
+{{- if .Values.externalSecrets.enabled }}
+{{- $named := list }}
+{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
+{{- if not (has "managed-agent-token" $named) }}
+{{- fail "config.managedAgent.url is set but externalSecrets.data does not name managed-agent-token. Every call to your Bot carries that token, and an endpoint that accepts unauthenticated calls is an open door to whatever the Bot can reach." }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /*
+  Sign-in configured with nothing to sign sessions with.
+
+  The server throws "Sign-in requires BETTER_AUTH_SECRET" and the pod crash-loops, which is a slow
+  and confusing way to be told about a value that was missing before anything was created. Every
+  shipped `ci/` values file was in exactly this state, which is what happens when nothing renders the
+  chart. Checked only when this chart holds the secret: from an existing Secret or an external store
+  it is not readable at template time, and refusing on a guess would refuse installs that are fine.
+*/}}
+{{- if or .Values.config.auth.google.clientId .Values.config.auth.microsoft.clientId .Values.config.auth.okta.clientId }}
+{{- if and (not .Values.secrets.betterAuthSecret) (not .Values.secrets.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- fail "An identity provider is configured but secrets.betterAuthSecret is not. Sessions are signed with it and the server refuses to start without it. Generate one with: openssl rand -base64 32" }}
+{{- end }}
+{{- if and .Values.secrets.betterAuthSecret (lt (len .Values.secrets.betterAuthSecret) 32) }}
+{{- fail "secrets.betterAuthSecret must be at least 32 characters. Generate one with: openssl rand -base64 32" }}
+{{- end }}
+{{- if not .Values.config.publicUrl }}
+{{- fail "An identity provider is configured but config.publicUrl is not. Sign-in redirects come back to that address, so the server refuses to start without it." }}
+{{- end }}
+{{- end }}
+
+{{- /*
+  The same requirement, for a deployment whose secrets come from a store.
+
+  The value itself is not readable at template time, but the LIST of keys is, and a store that never
+  mentions `better-auth-secret` cannot be holding one. Every shipped cloud `ci/` file was in this
+  state, so the refusal above passed and the pod still crash-looped.
+*/}}
+{{- if .Values.externalSecrets.enabled }}
+{{- if or .Values.config.auth.google.clientId .Values.config.auth.microsoft.clientId .Values.config.auth.okta.clientId }}
+{{- $named := list }}
+{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
+{{- if not (has "better-auth-secret" $named) }}
+{{- fail "An identity provider is configured but externalSecrets.data does not name better-auth-secret. Sessions are signed with it and the server refuses to start without it." }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /*
+  A Bot's egress proxy, against the network policy that decides whether it can be reached.
+
+  `EGRESS_PROXY_DEFAULT` and `EGRESS_PROXY_<BOT>` are how a Bot gets a stable outbound address, and
+  on Kubernetes they arrive through `computers.extraEnv`. The computer's own policy allows 80 and
+  443 to public addresses and nothing else, which is most of the internet and almost no proxies:
+  they sit on a private address, or on 3128 or 8080, or both. Setting one without opening a path to
+  it produces a Bot whose every page fails, which reads as a broken browser rather than as a network
+  rule, so it is refused here instead.
+
+  Only what the value provably shows: a port that is not 80 or 443, or a literal private address.
+  A private DNS name on 443 is blocked by the `ipBlock` rules just the same and cannot be told from
+  a public one at template time, so this misses that case rather than guessing at it. A proxy
+  supplied through `extraEnvFrom` is not readable here at all.
+*/}}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.computerExtraEgress) }}
+{{- range .Values.computers.extraEnv }}
+{{- if hasPrefix "EGRESS_PROXY" (.name | default "") }}
+{{- $value := .value | default "" | trim | trimSuffix "/" }}
+{{- $port := regexFind ":[0-9]+$" $value | trimPrefix ":" }}
+{{- $private := regexMatch "(^|//)(10\\.|127\\.|169\\.254\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)" $value }}
+{{- if or (and $port (not (has $port (list "80" "443")))) $private }}
+{{- fail (printf "%s names a proxy the computer's network policy blocks, so every page a Bot opens would fail. Name it in networkPolicy.computerExtraEgress, or turn networkPolicy.enabled off." .name) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

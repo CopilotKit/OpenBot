@@ -1,0 +1,106 @@
+# EKS, with a computer each rather than one shared browser.
+#
+# Needs the agent-sandbox controller installed; CI renders it with --api-versions instead.
+#
+# CHECK THE CLUSTER HAS A DEFAULT STORAGECLASS BEFORE INSTALLING, because a fresh EKS cluster very
+# often does not. `eksctl` creates `gp2`, which is not marked default and uses the in-tree
+# `kubernetes.io/aws-ebs` provisioner that no longer exists in current Kubernetes. A volume asking
+# for "the default" then never binds, the computer sits Pending, and nothing says why. Verified on a
+# real 1.34 cluster; `kubectl get sc` shows it in one line.
+#
+# Either create a default class:
+#
+#   provisioner: ebs.csi.aws.com, volumeBindingMode: WaitForFirstConsumer,
+#   annotated storageclass.kubernetes.io/is-default-class: "true"
+#
+# or name one here, which is what the line below does. `WaitForFirstConsumer` is not optional on any
+# cloud: without it the volume is created in a zone picked before the pod is scheduled, and pods stick
+# unschedulable with a node-affinity conflict, in multi-zone clusters only, so it passes every
+# single-zone test.
+config:
+  initialAdminEmails: admin@example.com
+  intelligence:
+    apiUrl: https://api.cloud.copilotkit.ai
+    gatewayWsUrl: wss://gateway.cloud.copilotkit.ai
+  auth:
+    google:
+      clientId: example.apps.googleusercontent.com
+  publicUrl: https://openbot.example.com
+postgresql:
+  enabled: false
+database:
+  existingSecret: openbot-database
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::000000000000:role/openbot
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: aws-secrets-manager
+  data:
+    - secretKey: key-encryption-key
+      remoteRef:
+        key: openbot/key-encryption-key
+    # Sessions are signed with this. The server refuses to start when sign-in is configured and it
+    # is missing, so every provider store has to carry it.
+    - secretKey: better-auth-secret
+      remoteRef:
+        key: openbot-better-auth-secret
+    - secretKey: intelligence-api-key
+      remoteRef:
+        key: openbot/intelligence-api-key
+    - secretKey: google-client-secret
+      remoteRef:
+        key: openbot/google-client-secret
+    - secretKey: computer-token
+      remoteRef:
+        key: openbot/computer-token
+    - secretKey: license-token
+      remoteRef:
+        key: openbot/license-token
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+server:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: openbot
+          app.kubernetes.io/component: server
+
+computers:
+  # A computer each, which is the mode the rest of this chart exists for and the one nothing rendered
+  # until now. `shared` and `sandbox` produce different Deployments, different RBAC and a different
+  # pod template, so a target that only ever renders one of them checks half the chart.
+  mode: sandbox
+  persistence:
+    # Named here rather than in the chart, which is the whole point of a per-target values file: the
+    # chart must not name `gp3`, and a deployment on EKS should.
+    storageClass: gp3
+
+# On, so these render in CI at all. They were written, reviewed and shipped without a single target
+# producing one, which means nothing had ever checked they were valid YAML, let alone right. Off is
+# still the chart's default: a policy on a cluster whose CNI ignores it does nothing, and on one that
+# enforces it a wrong rule is an outage, so turning it on stays a deployment's decision.
+networkPolicy:
+  enabled: true
+  # This target's database is RDS rather than a pod, so egress to it has to be named. The chart
+  # refuses to render without this, which is how the omission was found: rendering the policies in CI
+  # at all is what exercised the refusal.
+  extraEgress:
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/16
+      ports:
+        - port: 5432
+          protocol: TCP

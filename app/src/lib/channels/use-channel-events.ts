@@ -10,14 +10,97 @@ import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
  * list to recover events missed while disconnected.
  */
 
-type ChannelActivityEvent = {
+export type ChannelActivityEvent = {
   channelId: string;
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
-  /** The channel is gone. Absent on an ordinary activity event. */
+  /** The channel is gone from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
+  /**
+   * This member's pin, changed. Absent on an ordinary activity event.
+   *
+   * The server scopes a pin to the member who made it, so one arriving here is the reader's own,
+   * made in another tab or on another replica.
+   */
+  pinned?: boolean;
 };
+
+/** The infinite query's cache, which holds pages rather than one array. */
+type ChannelCache = { pages: ChannelPage[]; pageParams: unknown[] };
+
+/**
+ * Apply one event to the cached pages.
+ *
+ * Pure, and exported, because the patching rules are the whole of what a socket event does to the
+ * screen and they should be provable without a socket. Returns the cache it was given when nothing
+ * changed, so React re-renders nothing, and `"unknown"` when the event names a channel no page
+ * holds — which the caller answers with a refetch rather than a patch.
+ */
+export function applyChannelEvent(
+  data: ChannelCache,
+  activity: ChannelActivityEvent,
+): ChannelCache | "unknown" {
+  const holdingPage = data.pages.findIndex((page) =>
+    page.channels.some((channel) => channel.id === activity.channelId),
+  );
+
+  // Must run before the patch below, which spreads the event onto the existing row — reaching that
+  // first would stamp `deleted: true` on the row instead of removing it. An unknown channel here is
+  // already gone from this cache, so there is nothing to patch or invalidate for, unlike the
+  // "unknown channel" case below for an ordinary event.
+  if (activity.deleted) {
+    if (holdingPage === -1) return data;
+    const page = data.pages[holdingPage] as ChannelPage;
+    const pages = data.pages.slice();
+    pages[holdingPage] = {
+      ...page,
+      channels: page.channels.filter(
+        (channel) => channel.id !== activity.channelId,
+      ),
+    };
+    return { ...data, pages };
+  }
+
+  // An unknown channel id means the roster is stale; refetch rather than patch.
+  if (holdingPage === -1) return "unknown";
+
+  const page = data.pages[holdingPage] as ChannelPage;
+  const index = page.channels.findIndex(
+    (channel) => channel.id === activity.channelId,
+  );
+  const previous = page.channels[index];
+  if (!previous) return data;
+
+  /*
+   * A pin patches the one field it is about.
+   *
+   * The spread below would carry this event's null message onto the row and wipe the preview the
+   * roster renders. No re-sort either: a pin is not activity, and pinned rows are lifted at render
+   * time by `pinnedFirst`, not by the order they sit in here.
+   */
+  if (activity.pinned !== undefined) {
+    if (previous.pinned === activity.pinned) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, pinned: activity.pinned };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
+
+  // Preserve object identity for unchanged rows so memoized rows do not re-render.
+  const next = page.channels.slice();
+  next[index] = { ...previous, ...activity };
+  next.sort(byRecency);
+
+  // An event that changes nothing visible, a duplicate, or a report the server ignored as stale,
+  // returns the original object, so React re-renders nothing at all.
+  if (next.every((channel, at) => channel === page.channels[at])) return data;
+
+  const pages = data.pages.slice();
+  pages[holdingPage] = { ...page, channels: next };
+  return { ...data, pages };
+}
 
 const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
@@ -66,73 +149,25 @@ export function useChannelEvents() {
          */
         queryClient.setQueryData(
           channelKeys.list(),
-          (
-            data: { pages: ChannelPage[]; pageParams: unknown[] } | undefined,
-          ) => {
+          (data: ChannelCache | undefined) => {
             if (!data) return data;
-
-            const holdingPage = data.pages.findIndex((page) =>
-              page.channels.some(
-                (channel) => channel.id === activity.channelId,
-              ),
-            );
-
-            // Must run before the patch below, which spreads the event onto the existing row —
-            // reaching that first would stamp `deleted: true` on the row instead of removing it.
-            // An unknown channel here is already gone from this cache, so there is nothing to patch
-            // or invalidate for, unlike the "unknown channel" case below for an ordinary event.
-            if (activity.deleted) {
-              if (holdingPage === -1) return data;
-              const page = data.pages[holdingPage] as ChannelPage;
-              const pages = data.pages.slice();
-              pages[holdingPage] = {
-                ...page,
-                channels: page.channels.filter(
-                  (channel) => channel.id !== activity.channelId,
-                ),
-              };
-              return { ...data, pages };
-            }
-
+            const patched = applyChannelEvent(data, activity);
+            if (patched !== "unknown") return patched;
             // An unknown channel id means the roster is stale; refetch rather than patch.
-            if (holdingPage === -1) {
-              void queryClient.invalidateQueries({
-                queryKey: channelKeys.list(),
-              });
-              return data;
-            }
-
-            const page = data.pages[holdingPage] as ChannelPage;
-            const index = page.channels.findIndex(
-              (channel) => channel.id === activity.channelId,
-            );
-            const previous = page.channels[index];
-            if (!previous) return data;
-
-            // Preserve object identity for unchanged rows so memoized rows do not re-render.
-            const next = page.channels.slice();
-            next[index] = { ...previous, ...activity };
-            next.sort(byRecency);
-
-            // An event that changes nothing visible, a duplicate, or a report the server ignored as
-            // stale, returns the original object, so React re-renders nothing at all.
-            if (next.every((channel, at) => channel === page.channels[at])) {
-              return data;
-            }
-
-            const pages = data.pages.slice();
-            pages[holdingPage] = { ...page, channels: next };
-            return { ...data, pages };
+            void queryClient.invalidateQueries({
+              queryKey: channelKeys.list(),
+            });
+            return data;
           },
         );
 
         /*
          * A tab looking at the channel somebody just deleted in another tab.
          *
-         * The tab that issued the delete moves itself before it fires the request. Every other tab
-         * only ever hears about it here, and dropping the row without moving leaves that tab on a
-         * route whose channel no longer resolves: an error, or an empty conversation, depending on
-         * which query answers first.
+         * The tab that issued the delete moves itself once the request returns. Every other tab only
+         * ever hears about it here, and dropping the row without moving leaves that tab on a route
+         * whose channel no longer resolves: an error, or an empty conversation, depending on which
+         * query answers first.
          *
          * Read off the router at event time rather than through `useParams`, so the effect does not
          * have to be torn down and reconnected on every navigation just to keep this value fresh.

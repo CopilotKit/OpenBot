@@ -40,6 +40,7 @@ import { profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv } from "./env";
+import { botIdsIn } from "./profile-listing";
 
 // Re-exported so callers that already import it from here do not change, while the test imports it
 // from the playwright-free `./env` instead of pulling this module's browser driver in with it.
@@ -368,12 +369,11 @@ export function createProfiles(root: string) {
       const onDisk = await readdir(root, { withFileTypes: true }).catch(
         () => [],
       );
-      return [
-        ...new Set([
-          ...onDisk.filter((e) => e.isDirectory()).map((e) => e.name),
-          ...live.keys(),
-        ]),
-      ].sort();
+      /*
+       * The rule lives in its own module, so the test that covers it imports the same one this uses.
+       * It had a copy before, which meant deleting this filter left the suite green.
+       */
+      return [...new Set([...botIdsIn(onDisk), ...live.keys()])].sort();
     },
 
     /** What the admin surface lists. Running or not, because a Bot that has a profile has a computer. */

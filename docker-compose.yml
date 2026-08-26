@@ -61,9 +61,24 @@ services:
       # Loopback only. This process drives a browser holding real logins; COMPUTER_TOKEN is the
       # request control, and loopback keeps the surface off routed networks.
       - "127.0.0.1:${COMPUTER_PORT:-4100}:4100"
+    # Per-Bot egress, in a file of its own because the names are not knowable here.
+    #
+    # `EGRESS_PROXY_<BOT>` is derived from the Bot's id, so there is no fixed list to write out the
+    # way COMPUTER_TOKEN is. Not `.env`: that holds the deployment's secrets, and this container
+    # drives a browser and runs a Bot's shell, so it is given what it needs and not the rest.
+    # Optional, because going out directly is the ordinary case and must still start.
+    env_file:
+      - path: ./egress.env
+        required: false
     environment:
       # The secret every caller must present. The container refuses to start without it.
-      COMPUTER_TOKEN: ${COMPUTER_TOKEN:-}
+      #
+      # The default matches the one scripts/start.sh applies when .env leaves this blank, which
+      # .env.example does. Without it the two paths disagree: the script exports a value and brings
+      # the stack up working, while a plain `docker compose up -d` -- which this project's own
+      # shutdown notes tell you to use -- hands the container an empty string instead. Reaches only
+      # a loopback-bound port; a deployment sets a real value in .env.
+      COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
       # How many Bots may hold a running browser at once, and how long an untouched one is kept.
       # A few hundred MB each, so on a deployment with many Bots these are the difference between
       # a container that holds steady and one that is killed for memory. Defaults are 8 and 30
@@ -143,13 +158,20 @@ services:
     build:
       context: .
       dockerfile: supervisor/Dockerfile
+    # The same file, because this process does not read these itself: it forwards every EGRESS_PROXY
+    # key out of its own environment into each computer it creates, so it has to be given them first.
+    env_file:
+      - path: ./egress.env
+        required: false
     environment:
       PORT: "4300"
       # Shared with the API server. The Bot-level verb set is the boundary; this token keeps other
       # services on the network from calling those verbs.
-      SUPERVISOR_TOKEN: ${SUPERVISOR_TOKEN:-}
+      # Defaulted for the same reason as agent-computer's above: so `docker compose up -d` by hand
+      # configures the same stack scripts/start.sh does, rather than a silently unauthenticated one.
+      SUPERVISOR_TOKEN: ${SUPERVISOR_TOKEN:-openbot-dev-supervisor-token}
       # Handed to every computer this creates, so the server and the computers share one secret.
-      COMPUTER_TOKEN: ${COMPUTER_TOKEN:-}
+      COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
       COMPUTER_IMAGE: ${COMPUTER_IMAGE:-openbot-agent-computer:latest}
       # Which deployment the computers it creates belong to, so two stacks on one Docker host never
       # derive the same container and volume names for the same Bot.

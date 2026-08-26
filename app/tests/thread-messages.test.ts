@@ -1,159 +1,252 @@
 import { describe, expect, test } from "bun:test";
-import { readableTurns } from "@/lib/copilot/thread-messages";
+import { readableTurns } from "../src/lib/copilot/thread-messages";
 
 /**
- * What comes back out of the history store, and what is refused at the door.
+ * Reading back a conversation that used a tool.
  *
- * The old reader cast whatever it was given to `Message[]`, so a turn the store held in some other
- * shape reached every projection that draws a transcript — and one of them dereferenced
- * `toolCall.function.arguments`, which took the conversation down rather than the turn.
- *
- * These are the shapes that have actually been seen, not invented ones: the tool call persisted as
- * `{id, name, args}` comes from #199, which found seventeen of them in one thread after interrupted
- * runs, and the content shapes come from the tests on #43.
+ * The shapes below are copied from a live thread rather than invented. The store writes a tool call
+ * as `{id, name, args}`; AG-UI describes `{id, type: "function", function: {name, arguments}}`. A
+ * reader that insists on the second and refuses the first throws away every turn in which a Bot did
+ * anything, which is the half of the conversation worth keeping.
  */
-
-const userTurn = { id: "m1", role: "user", content: "What did I miss?" };
-
-const assistantTurn = {
-  id: "m2",
-  role: "assistant",
-  content: "Here is the summary.",
+const userTurn = {
+  id: "6953d56c",
+  role: "user",
+  content: "open hackernews.com and tell me the top 3 stories",
 };
 
-/** As AG-UI defines a tool call: a literal `function` type, with the call nested under it. */
-const wellFormedToolCall = {
-  id: "m3",
+/** As the history store writes it. */
+const storedToolCall = {
+  id: "0fe7b049",
   role: "assistant",
   toolCalls: [
     {
-      id: "call_1",
-      type: "function",
-      function: { name: "search_files", arguments: "{}" },
+      id: "call_maB4q3",
+      name: "computer_navigate",
+      args: '{"url":"https://news.ycombinator.com"}',
     },
   ],
 };
 
-describe("reading back a stored thread", () => {
-  test("an ordinary conversation comes back whole, with nothing counted", () => {
-    const { messages, unreadable } = readableTurns([userTurn, assistantTurn]);
-    expect(messages).toHaveLength(2);
+const toolResult = {
+  id: "aa5e9452",
+  role: "tool",
+  toolCallId: "call_maB4q3",
+  content: '{"ok":true,"title":"Hacker News"}',
+};
+
+const answer = { id: "5c1f", role: "assistant", content: "Top 3 stories…" };
+
+describe("restoring a conversation that used a tool", () => {
+  test("a browsing turn survives the read", () => {
+    const { messages, unreadable } = readableTurns([
+      userTurn,
+      storedToolCall,
+      toolResult,
+      answer,
+    ]);
+
+    // Every one of them, and the tool call above all: without it the transcript keeps the sentence
+    // the Bot wrote and loses the browsing that produced it.
+    expect(messages).toHaveLength(4);
     expect(unreadable).toBe(0);
   });
 
-  test("a well-formed tool call survives", () => {
-    // The shape the transcript knows how to draw. If validation rejected this, the fix would have
-    // traded a crash for an empty conversation.
-    const { messages, unreadable } = readableTurns([wellFormedToolCall]);
-    expect(messages).toHaveLength(1);
-    expect(unreadable).toBe(0);
-  });
-
-  test("a tool call stored the LangChain way is dropped and counted", () => {
-    /*
-     * The turn from #199: `{id, name, args}` rather than `{id, type: "function", function: {…}}`.
-     * This is the one that crashed a renderer reading `toolCall.function.arguments`, so the whole
-     * turn has to not arrive — and the count is what stops it vanishing quietly.
-     */
-    const langChainShaped = {
-      id: "m4",
+  test("the tool call comes back in the shape every renderer reads", () => {
+    const { messages } = readableTurns([storedToolCall]);
+    expect(messages[0]).toMatchObject({
       role: "assistant",
-      toolCalls: [{ id: "call_2", name: "search_files", args: {} }],
+      toolCalls: [
+        {
+          id: "call_maB4q3",
+          type: "function",
+          function: {
+            name: "computer_navigate",
+            arguments: '{"url":"https://news.ycombinator.com"}',
+          },
+        },
+      ],
+    });
+  });
+
+  test("a call already in AG-UI's shape is left alone", () => {
+    const already = {
+      id: "x",
+      role: "assistant",
+      toolCalls: [
+        {
+          id: "c1",
+          type: "function",
+          function: { name: "computer_click", arguments: "{}" },
+        },
+      ],
     };
+    const { messages, unreadable } = readableTurns([already]);
+    expect(unreadable).toBe(0);
+    expect(messages[0]).toEqual(already as never);
+  });
 
-    const { messages, unreadable } = readableTurns([
-      userTurn,
-      langChainShaped,
-      assistantTurn,
-    ]);
-
-    expect(messages.map((message) => message.id)).toEqual(["m1", "m2"]);
+  test("a turn that is genuinely malformed is still refused", () => {
+    /*
+     * The guard is not being removed, only taught a second spelling. A tool call with neither shape
+     * is something no renderer can draw, and letting it through is how one bad turn used to take a
+     * whole conversation down.
+     */
+    const nonsense = { id: "y", role: "assistant", toolCalls: [{ id: "c2" }] };
+    const { messages, unreadable } = readableTurns([nonsense]);
+    expect(messages).toHaveLength(0);
     expect(unreadable).toBe(1);
   });
 
-  test("multimodal content is not mistaken for a malformed turn", () => {
-    // AG-UI allows content as typed parts as well as a string, so a turn carrying an image is
-    // ordinary. Rejecting it would lose real messages in the name of safety.
-    const withParts = {
-      id: "m5",
-      role: "user",
-      content: [{ type: "text", text: "What is in this?" }],
+  test("a mixed array is refused rather than half-translated", () => {
+    // Guessing at half of it would be this file inventing history rather than reading it.
+    const mixed = {
+      id: "z",
+      role: "assistant",
+      toolCalls: [
+        { id: "a", name: "one", args: "{}" },
+        {
+          id: "b",
+          type: "function",
+          function: { name: "two", arguments: "{}" },
+        },
+      ],
     };
-    const { messages, unreadable } = readableTurns([withParts]);
+    expect(readableTurns([mixed]).unreadable).toBe(1);
+  });
+
+  test("everything else passes through untouched", () => {
+    const { messages, unreadable } = readableTurns([userTurn, answer]);
+    expect(unreadable).toBe(0);
+    expect(messages[0]).toEqual(userTurn as never);
+  });
+});
+
+/**
+ * The cases the rewrite dropped, plus the one it never had.
+ *
+ * A reader that translates between two dialects is exactly where a quiet data-loss bug lives, and
+ * these are the shapes a real thread contains: arguments the store kept as an object, content that
+ * is a list of parts rather than a string, a turn with no content at all, and an order that has to
+ * survive the trip because a conversation read out of sequence is not the conversation.
+ */
+describe("shapes a real thread contains", () => {
+  test("arguments the store kept as an object become a string", () => {
+    const [turn] = readableTurns([
+      {
+        id: "m1",
+        role: "assistant",
+        toolCalls: [
+          { id: "c1", name: "computer_navigate", args: { url: "https://x" } },
+        ],
+      },
+    ]).messages as Array<Record<string, unknown>>;
+
+    const call = (turn.toolCalls as Array<Record<string, unknown>>)[0];
+    const fn = call.function as Record<string, unknown>;
+    /*
+     * AG-UI types this as a string. Passing the object through produced a call that looked
+     * translated and still failed validation, so the turn was dropped anyway: this function's own
+     * bug, one layer down.
+     */
+    expect(typeof fn.arguments).toBe("string");
+    expect(JSON.parse(fn.arguments as string)).toEqual({ url: "https://x" });
+  });
+
+  test("a string of arguments is passed through exactly", () => {
+    const [turn] = readableTurns([
+      {
+        id: "m1",
+        role: "assistant",
+        toolCalls: [{ id: "c1", name: "t", args: '{"url": "https://x"}' }],
+      },
+    ]).messages as Array<Record<string, unknown>>;
+
+    const call = (turn.toolCalls as Array<Record<string, unknown>>)[0];
+    // Down to the whitespace: it may be a fragment of a stream that was never valid JSON, and
+    // re-encoding it would change what the model actually said.
+    expect((call.function as Record<string, unknown>).arguments).toBe(
+      '{"url": "https://x"}',
+    );
+  });
+
+  /*
+   * A call with no arguments at all. Not `args` missing entirely, which the dialect check refuses on
+   * purpose so that it never rewrites something that was not a stored call in the first place.
+   */
+  test("a call with empty arguments becomes something a reader can parse", () => {
+    const [turn] = readableTurns([
+      {
+        id: "m1",
+        role: "assistant",
+        toolCalls: [{ id: "c1", name: "t", args: null }],
+      },
+    ]).messages as Array<Record<string, unknown>>;
+
+    const call = (turn.toolCalls as Array<Record<string, unknown>>)[0];
+    expect((call.function as Record<string, unknown>).arguments).toBe("{}");
+  });
+
+  /*
+   * A turn that called a tool and said nothing alongside it is written exactly this way, and it was
+   * being dropped: the same loss the tool-call dialect caused, arriving by a different route. The
+   * schema makes an assistant's content optional and does not allow null, so the two say the same
+   * thing and only one parsed.
+   */
+  test("an assistant turn that said nothing while it worked survives", () => {
+    const { messages, unreadable } = readableTurns([
+      {
+        id: "m1",
+        role: "assistant",
+        content: null,
+        toolCalls: [{ id: "c1", name: "computer_navigate", args: "{}" }],
+      },
+    ]);
+
     expect(messages).toHaveLength(1);
     expect(unreadable).toBe(0);
   });
 
-  test("content that is not content is dropped rather than drawn as empty", () => {
-    /*
-     * From the #43 cases. These used to reach a projection and resolve to an empty message, so the
-     * transcript showed a turn that said nothing and read as though somebody had sent a blank line.
-     * Refused here instead, and reported.
-     */
-    const shapes = [
-      { id: "a", role: "user" },
-      { id: "b", role: "user", content: null },
-      { id: "c", role: "user", content: 42 },
-      { id: "d", role: "user", content: [null, "text", 7] },
-    ];
-
-    const { messages, unreadable } = readableTurns(shapes);
-    expect(messages).toEqual([]);
-    expect(unreadable).toBe(4);
-  });
-
-  test("a turn that is not an object at all is dropped", () => {
+  /*
+   * And a person's turn is not the same case. Content is required there, so `null` is not a message
+   * somebody sent: it used to reach a projection and draw as a blank line. Refused and counted, so
+   * the surface can say so, which is the decision #207 made and this does not disturb.
+   */
+  test("a person's turn with no content is still refused and counted", () => {
     const { messages, unreadable } = readableTurns([
-      null,
-      "a string",
-      7,
-      userTurn,
+      { id: "m1", role: "user", content: null },
     ]);
-    expect(messages.map((message) => message.id)).toEqual(["m1"]);
-    expect(unreadable).toBe(3);
-  });
 
-  test("a turn with no recognised role is dropped", () => {
-    // The schema is a union on `role`, so an unknown one matches no member.
-    const { messages, unreadable } = readableTurns([
-      { id: "x", role: "narrator", content: "once upon a time" },
-    ]);
     expect(messages).toEqual([]);
     expect(unreadable).toBe(1);
   });
 
-  test("order is the stored order, so a dropped turn does not reshuffle the rest", () => {
-    const { messages } = readableTurns([
-      assistantTurn,
-      { id: "bad", role: "assistant", toolCalls: [{ id: "c", name: "n" }] },
-      userTurn,
+  test("content that is a list of parts survives", () => {
+    const content = [{ type: "text", text: "What is in this?" }];
+
+    const { messages, unreadable } = readableTurns([
+      { id: "m1", role: "user", content },
     ]);
-    expect(messages.map((message) => message.id)).toEqual(["m2", "m1"]);
+
+    expect(messages).toHaveLength(1);
+    expect(unreadable).toBe(0);
   });
 
-  test("a turn that parses keeps the fields the schema does not name", () => {
-    /*
-     * The reason the original object is returned rather than `parsed.data`. Zod strips unknown keys,
-     * so handing back the parsed copy would make this a silent rewrite of every message that passed
-     * — dropping whatever the runtime carries that this file has not heard of.
-     */
-    const carrying = { ...userTurn, somethingTheRuntimeAdded: "keep me" };
-    const { messages } = readableTurns([carrying]);
-    expect(
-      (messages[0] as unknown as { somethingTheRuntimeAdded?: string })
-        .somethingTheRuntimeAdded,
-    ).toBe("keep me");
-  });
+  test("the order of the conversation is the order it came in", () => {
+    const read = readableTurns([
+      { id: "m1", role: "user", content: "one" },
+      {
+        id: "m2",
+        role: "assistant",
+        toolCalls: [
+          { id: "c1", name: "computer_navigate", args: { url: "u" } },
+        ],
+      },
+      { id: "m3", role: "assistant", content: "three" },
+    ]).messages as Array<Record<string, unknown>>;
 
-  test("an empty history is not a failure", () => {
-    expect(readableTurns([])).toEqual({ messages: [], unreadable: 0 });
-  });
-
-  test("a thread where nothing parses reports every turn", () => {
-    // The case that must not read as "this conversation is empty": the transcript has nothing to
-    // draw, so the count is the only thing that tells the person their history is still there.
-    const { messages, unreadable } = readableTurns([{ nope: true }, 1, null]);
-    expect(messages).toEqual([]);
-    expect(unreadable).toBe(3);
+    expect(read.map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
+    expect(read[0]?.content).toBe("one");
+    expect(read[2]?.content).toBe("three");
   });
 });

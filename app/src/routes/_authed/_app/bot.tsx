@@ -1,7 +1,9 @@
 import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
+import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
@@ -13,10 +15,45 @@ export const Route = createFileRoute("/_authed/_app/bot")({
   }),
 });
 
+/**
+ * Which Bot this screen is for.
+ *
+ * WHATEVER THIS DEPLOYMENT ACTUALLY HAS. The default used to be a hardcoded `risk-analyst`, a name
+ * from a tenant package this one is not: on a clone that ships anything else, opening this screen
+ * without naming a Bot took the whole page down to an unstyled error boundary, because the chat
+ * throws when asked for an agent the runtime never synced. OpenBot exists to be forked, so a Bot
+ * name written into a route is a defect on every fork but the one it came from.
+ *
+ * A named Bot that this deployment does not have is answered in a sentence rather than thrown,
+ * for the same reason: a mistyped link is not a crash.
+ */
 function RouteComponent() {
   const { agent } = Route.useSearch();
-  const agentId = agent ?? "risk-analyst";
+  const { data: agents, isPending } = useQuery(agentListQueryOptions());
+  const agentId = agent ?? agents?.[0]?.id;
+  const known = agents?.some((candidate) => candidate.id === agentId) ?? false;
 
+  if (isPending) return null;
+  if (!agentId || !known) {
+    return (
+      <div className="flex h-screen items-center justify-center p-6">
+        <p className="text-muted-foreground text-sm">
+          {agent
+            ? `This deployment has no Bot called "${agent}".`
+            : "This deployment has no Bots yet."}
+        </p>
+      </div>
+    );
+  }
+
+  /*
+   * Keyed on the Bot, so the hooks below never see it change under them. They cannot be called
+   * conditionally, and the guards above return before any of them run.
+   */
+  return <BotChat agentId={agentId} key={agentId} />;
+}
+
+function BotChat({ agentId }: { agentId: string }) {
   // Tool calls here act on this Bot's own computer.
   useActiveBot(agentId);
   /*

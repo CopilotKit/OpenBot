@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
+import { StaleSnapshotError } from "../src/computer/client";
 import {
   ActionRefusedError,
   createComputerGateway,
@@ -10,7 +11,6 @@ import type {
   ComputerLocation,
   ComputerProvider,
 } from "../src/computer/provider";
-import { StaleSnapshotError } from "../src/computer/client";
 import type { SnapshotResult } from "../src/computer/schema";
 import {
   createInMemorySnapshotStore,
@@ -598,6 +598,20 @@ describe("the computer gateway", () => {
 
     await gateway.navigate("bot-1", ACTOR, "https://example.com/");
     expect(calls).toEqual(["navigate"]);
+  });
+
+  /*
+   * "not in the current snapshot" is a statement about a ref that could not be resolved, and it used
+   * to be written on every action that never named an element at all. A reader looking at a
+   * navigation row went hunting for a snapshot that was never taken.
+   */
+  test("an action that never named an element records no element", async () => {
+    const { gateway, rows } = await gatewayWith(PERMISSIVE);
+
+    await gateway.navigate("bot-1", ACTOR, "https://example.com/");
+
+    expect(rows.at(-1)?.payload.action).toBe("computer_navigate");
+    expect(rows.at(-1)?.payload.element).toBeUndefined();
   });
 
   test("an action on an unresolvable ref is still decided and still recorded", async () => {

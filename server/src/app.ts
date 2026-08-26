@@ -5,8 +5,6 @@ import { authoriseAgentCall } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
-import { createRoutingRoutes } from "./routing/routes";
-import type { IntentRouter } from "./routing/classify";
 import {
   type AuditReader,
   type AuditStore,
@@ -36,6 +34,7 @@ import type { PolicyStore } from "./computer/policy-store";
 import { createAttentionRoutes } from "./attention/routes";
 import type { AttentionStore } from "./attention/store";
 import { createComputerRoutes } from "./computer/routes";
+import type { PageFrameStore } from "./computer/page-frames";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createIntelligenceClient } from "./intelligence-client";
@@ -43,6 +42,8 @@ import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
+import type { IntentRouter } from "./routing/classify";
+import { createRoutingRoutes } from "./routing/routes";
 import type { PackageStatusReader } from "./tenant-package";
 
 /**
@@ -163,6 +164,17 @@ export function createApp(
    * would show everything forever, and one that cannot see the trail would show a false all-quiet.
    */
   attentionStore?: AttentionStore,
+  /**
+   * Where the frame a browsing turn ended on is kept.
+   *
+   * Appended last on purpose: these are positional, so inserting one anywhere else silently
+   * shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the transcript working and past turns without a picture, which is the correct
+   * degraded behaviour: a conversation that cannot show what it saw is better than one that shows
+   * the wrong thing.
+   */
+  pageFrames?: PageFrameStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -638,6 +650,8 @@ export function createApp(
         computerPolicy,
         requireUser,
         canUseBot,
+        pageFrames,
+        auditReader,
       ),
     );
   }
@@ -706,19 +720,10 @@ export function createApp(
     }
   }
 
-  // Shared by the thread-existence check below and a deleted channel's request to forget its thread.
-  const intelligence = createIntelligenceClient(config.runtime.intelligence);
-
   if (channelStore) {
     app.route(
       "/api/channels",
-      createChannelRoutes(
-        channelStore,
-        requireUser,
-        channelEvents,
-        auditStore,
-        (params) => intelligence.deleteThread(params),
-      ),
+      createChannelRoutes(channelStore, requireUser, channelEvents, auditStore),
     );
   }
 
@@ -734,6 +739,24 @@ export function createApp(
       "/api/plugins",
       createPluginRoutes(pluginStore, requireUser, canUseBot, {
         encryptionKey: config.keyEncryptionKey,
+        /*
+         * Whether the person a consent was started for still has access, asked when the callback
+         * lands rather than when the flow began.
+         *
+         * The callback carries no session — identity comes from the state — so this is where the
+         * question gets asked at all. `find` answers both halves of it: no row means a user id that
+         * names nobody, and `revoked` means an administrator removed them while they were away at
+         * the vendor. Either way there is no live person for a fresh refresh token to belong to.
+         *
+         * No people store means this deployment cannot answer the question, so it refuses rather
+         * than assuming yes. It also cannot remove anybody, which is exactly why guessing here
+         * would be a hole nothing else closes.
+         */
+        personHasAccess: async (userId) => {
+          if (!peopleStore) return false;
+          const person = await peopleStore.find(userId);
+          return person !== undefined && !person.revoked;
+        },
         // The deployment-wide fallback a Bot may present, as a yes or no. The secret itself stays
         // in config and is checked in `/api/agent-tools/call`; the surface only needs to know
         // whether a Bot without its own credential has any way to call back.
@@ -857,9 +880,13 @@ export function createApp(
         threadIdentity,
         requireUser,
         // config.ts refuses to boot without the full Intelligence contract (see copilot.ts's
-        // header comment), so `config.runtime.intelligence` is never missing here, and the shared
-        // `intelligence` client built above is never missing either.
-        createThreadReader(intelligence),
+        // header comment), so `config.runtime.intelligence` is never missing here. Built from it
+        // rather than assumed, though: this is the one place besides the runtime mount itself that
+        // needs to reach Intelligence, and it should keep working unmodified if that guarantee ever
+        // loosens and a deployment can legitimately have no reader to build.
+        createThreadReader(
+          createIntelligenceClient(config.runtime.intelligence),
+        ),
       ),
     );
   }

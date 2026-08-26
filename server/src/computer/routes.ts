@@ -3,20 +3,26 @@ import { Hono } from "hono";
 import type { BotAccessCheck } from "../agents/profile-policy";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
   ActionRefusedError,
   type ComputerGateway,
   ComputerUnavailableError,
   ElementNotFoundError,
-  NavigationRefusedError,
   HumanHasControlError,
+  NavigationRefusedError,
   StaleSnapshotError,
   WorkspaceRefusedError,
   WorkspaceRequestError,
 } from "./gateway";
-import { DEPLOYMENT_ROUTES } from "./deployment-routes";
+import type { PageFrameStore } from "./page-frames";
+import type { AuditReader } from "../audit";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
+import {
+  dryRunAgainstHistory,
+  REPLAYABLE_EVENT_TYPES,
+} from "./policy-dry-run";
 
 /**
  * The Bot computer's surface, behind the same session guard as every other API route.
@@ -38,6 +44,14 @@ export function createComputerRoutes(
    * deployment cannot be wired up without an answer to it.
    */
   canUseBot: BotAccessCheck,
+  /** Where the frame a page was opened on is kept. Absent leaves the transcript as it was. */
+  pageFrames?: PageFrameStore,
+  /**
+   * For the policy dry-run, which replays the trail. Optional the way `auditReader` is optional in
+   * `createApp`: a deployment wired without one still governs and records actions, and the dry-run
+   * endpoint says it cannot answer rather than answering from nothing.
+   */
+  auditReader?: AuditReader,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -99,27 +113,152 @@ export function createComputerRoutes(
     }
   });
 
+  /**
+   * Whether the same page is on both, ignoring the two ways one page spells itself.
+   *
+   * The trailing slash a browser adds and the fragment it keeps are not different pages. A URL that
+   * cannot be parsed is compared as written.
+   */
+  function samePage(a: string, b: string): boolean {
+    const tidy = (value: string) => {
+      try {
+        const parsed = new URL(value);
+        parsed.hash = "";
+        return parsed.toString().replace(/\/$/, "");
+      } catch {
+        return value.replace(/\/$/, "");
+      }
+    };
+    return tidy(a) === tidy(b);
+  }
+
+  /**
+   * Whether a screenshot can be trusted to be of the page this turn opened.
+   *
+   * A SCREENSHOT THAT DOES NOT SAY WHAT IT IS OF IS THE ORDINARY CASE ON AN OLD COMPUTER. The url on
+   * a screenshot was added after the first computers shipped, so an `agent-computer` that has not
+   * been redeployed sends none. Refusing on a missing url therefore did not fail safe, it failed
+   * silently and completely: on a fleet part-way through a rollout the feature kept no frames at all
+   * and said nothing about why.
+   *
+   * So the question is asked where it means something. With a computer each there is no second Bot
+   * to race with, nothing can have moved the page between the navigation and the picture, and an
+   * unknown page is this turn's page. On one shared computer another Bot's navigation lands in
+   * exactly that gap, which is the case this guard exists for, and there an unknown page is refused.
+   */
+  function frameIsOfThisPage(
+    shotUrl: string | undefined,
+    pageUrl: string,
+  ): { ok: true } | { ok: false; why: string } {
+    if (shotUrl === undefined) {
+      if (gateway.provider.isolation === "per-bot") return { ok: true };
+      return {
+        ok: false,
+        why: "this computer is shared and the screenshot did not say which page it is of, so it cannot be told apart from another Bot's",
+      };
+    }
+    if (!samePage(shotUrl, pageUrl)) {
+      return { ok: false, why: `the screen showed ${shotUrl}` };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Photograph the page this turn just opened.
+   *
+   * Awaited rather than left running, so a surface asking for the frame the moment the turn ends
+   * finds it there. A navigation already costs seconds; one screenshot inside the cluster does not
+   * change how the tool feels, and a frame that arrives after the reader has gone is no frame at all.
+   *
+   * CHECKED AGAINST THE PAGE THE NAVIGATION REPORTED, because the screenshot is a second round trip
+   * and nothing holds the browser still between them. With one computer shared by every Bot, another
+   * Bot's navigation lands in that gap and this would file its page under this turn. The guard used
+   * to live in the browser and was deleted when the capture moved here; it belongs on whichever side
+   * does the capturing.
+   *
+   * Never fatal. A stored picture is a convenience for reading a conversation back, and failing the
+   * navigation the Bot was asked to do because the convenience failed would be the wrong trade every
+   * time. EVERY REFUSAL SAYS SO, including the two that used to return quietly: a deployment that
+   * keeps no frames has to be able to find out why from its own logs rather than by reading this file.
+   */
+  async function keepFrameOf(
+    botId: string,
+    toolCallId: string,
+    url: string,
+    title: string,
+  ) {
+    if (!pageFrames) return;
+    if (!toolCallId) {
+      console.warn(
+        `[computer] not keeping a frame of ${url}: the caller did not say which turn it was for.`,
+      );
+      return;
+    }
+    try {
+      /*
+       * Only if the computer is already up. `screenshot` goes through `locate`, which resumes a
+       * suspended computer, so a convenience picture could wake a machine the culler had just put to
+       * sleep and hold a navigation open for the length of a pod schedule while it did.
+       */
+      const status = await gateway.status(botId);
+      if (status.state !== "ready") {
+        console.warn(
+          `[computer] not keeping a frame for ${toolCallId}: the computer is ${status.state}, and photographing it would wake it.`,
+        );
+        return;
+      }
+      const shot = await gateway.screenshot(botId);
+      const verdict = frameIsOfThisPage(shot.url, url);
+      if (!verdict.ok) {
+        console.warn(
+          `[computer] not keeping a frame for ${toolCallId}: ${verdict.why} rather than ${url}.`,
+        );
+        return;
+      }
+      await pageFrames.save({
+        computerId: botId,
+        toolCallId,
+        url,
+        title,
+        frame: shot.base64,
+      });
+    } catch (error) {
+      console.warn(
+        `[computer] could not keep a frame of ${url}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   routes.post("/:botId/navigate", async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
       url?: unknown;
+      toolCallId?: unknown;
     } | null;
     if (typeof body?.url !== "string" || !body.url.trim()) {
       return context.json({ error: "A web address is required." }, 400);
     }
+    /*
+     * Which turn asked, so the picture can be filed under it. Optional: a caller that does not know
+     * (the side panel, a script) still navigates, and simply keeps no frame.
+     */
+    const toolCallId =
+      typeof body.toolCallId === "string" ? body.toolCallId : "";
 
     try {
-      return context.json(
-        await gateway.navigate(
-          context.req.param("botId") ?? "default",
-          {
-            id: context.var.actor.id,
-            ...(context.var.actor.email === DEV_ACTOR_EMAIL
-              ? {}
-              : { userId: context.var.actor.id }),
-          },
-          body.url.trim(),
-        ),
+      const botId = context.req.param("botId") ?? "default";
+      const result = await gateway.navigate(
+        botId,
+        {
+          id: context.var.actor.id,
+          ...(context.var.actor.email === DEV_ACTOR_EMAIL
+            ? {}
+            : { userId: context.var.actor.id }),
+        },
+        body.url.trim(),
       );
+      await keepFrameOf(botId, toolCallId, result.url, result.title);
+      return context.json(result);
     } catch (error) {
       if (error instanceof ActionRefusedError) {
         return context.json({ error: error.message, rule: error.rule }, 403);
@@ -361,6 +500,23 @@ export function createComputerRoutes(
   });
 
   /** The Bot's files. Through the gateway, like every other acting call. */
+  /**
+   * The frame this turn was showing when it opened its page.
+   *
+   * Read only. Nothing writes through a route: the frame is taken where the navigation happens,
+   * which is the one moment the screen is certainly showing the page that was asked for. The surface
+   * used to capture it itself, after the turn, and lost the race often enough to show the wrong page
+   * or a blank one.
+   */
+  routes.get("/:botId/page-frame/:toolCallId", async (context) => {
+    if (!pageFrames) return context.json({ frame: null });
+    const stored = await pageFrames.load(
+      context.req.param("botId"),
+      context.req.param("toolCallId"),
+    );
+    return context.json({ frame: stored });
+  });
+
   routes.post("/:botId/files/list", (context) =>
     act(context, (botId, actor, body) =>
       gateway.listFiles(botId, actor, {
@@ -466,6 +622,57 @@ export function createComputerRoutes(
     // Echoed back so a caller can see exactly what is now in force rather than assuming its request
     // was stored verbatim.
     return context.json({ policy: policyStore.get() });
+  });
+
+  /**
+   * What would this policy have decided, about actions already on the trail?
+   *
+   * A rule is otherwise written blind: saved first, understood later, from the refusals it produces
+   * in production. This answers before the save — the candidate is validated exactly as PUT
+   * validates it, replayed over recent judged actions, and the reply names each action it would have
+   * decided differently and the rule that would have decided it.
+   *
+   * A POST that writes nothing: not the policy, and no audit row either. Nothing is decided here —
+   * no action is permitted or refused, nothing runs or is stopped — and a trail row for every
+   * what-if would bury the rows that record what actually happened. Deployment-wide and named in
+   * DEPLOYMENT_ROUTES beside `/policy`, and admin-gated the same way, because history is the
+   * administrator's view.
+   */
+  routes.post("/policy-dry-run", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
+    if (!auditReader) {
+      return context.json(
+        {
+          error:
+            "This deployment records no readable trail, so there is no history to test against.",
+        },
+        501,
+      );
+    }
+
+    const body = (await context.req.json().catch(() => null)) as {
+      policy?: unknown;
+      limit?: unknown;
+    } | null;
+    const parsed = parseActionPolicy(body?.policy);
+    if (!parsed.ok) {
+      return context.json({ error: parsed.error }, 400);
+    }
+
+    // Bounded, and biased to recency: the question is what this rule does to the traffic the
+    // deployment actually has, and last week's traffic answers that better than a full scan.
+    const requested = typeof body?.limit === "number" ? body.limit : 200;
+    const limit = Math.min(Math.max(Math.trunc(requested), 1), 500);
+
+    const { events } = await auditReader.list({
+      limit,
+      eventType: REPLAYABLE_EVENT_TYPES.join(","),
+      targetType: "computer",
+    });
+
+    return context.json({ report: dryRunAgainstHistory(parsed.policy, events) });
   });
 
   return routes;

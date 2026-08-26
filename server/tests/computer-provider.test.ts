@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ComputerConfig } from "../src/config";
 import {
   createComputerProvider,
   createSharedComputerProvider,
   describeComputerIsolation,
   ProviderError,
 } from "../src/computer/provider";
+import type { ComputerConfig } from "../src/config";
 
 const servers: { stop(closeActiveConnections?: boolean): void }[] = [];
 
@@ -300,5 +300,47 @@ describe("computer provider factory", () => {
     };
 
     expect(createComputerProvider(config).name).toBe("shared");
+  });
+});
+
+/**
+ * A transient failure must not become a permanent one.
+ *
+ * The provider is built once behind a promise, and `??=` remembers whatever that first call
+ * produced. A rejected promise is something: one unreadable token file at the wrong moment and every
+ * computer request for the rest of the pod's life failed with the same stale error, while the pod
+ * served happily and no probe noticed.
+ */
+describe("building the sandbox provider", () => {
+  test("a failed first attempt is not remembered", async () => {
+    const original = process.env.KUBERNETES_SERVICE_HOST;
+    delete process.env.KUBERNETES_SERVICE_HOST;
+
+    try {
+      const provider = createComputerProvider({
+        provider: "sandbox",
+        namespace: "openbot",
+        idleAfterMs: 60_000,
+        templateFile: "/nowhere/sandbox-template.json",
+      });
+
+      const first = await provider.status("bot-1").catch((e: unknown) => e);
+      const second = await provider.status("bot-1").catch((e: unknown) => e);
+
+      expect(first).toBeInstanceOf(Error);
+      expect(second).toBeInstanceOf(Error);
+      /*
+       * DIFFERENT OBJECTS, which is the whole assertion.
+       *
+       * A memo holding the rejected promise hands back the identical Error every time, because
+       * nothing runs again. Two distinct instances mean the second call re-entered the build, so a
+       * deployment whose token file was briefly unreadable recovers on the next request instead of
+       * needing a restart.
+       */
+      expect(second).not.toBe(first);
+    } finally {
+      if (original === undefined) delete process.env.KUBERNETES_SERVICE_HOST;
+      else process.env.KUBERNETES_SERVICE_HOST = original;
+    }
   });
 });

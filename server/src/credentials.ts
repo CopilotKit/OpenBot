@@ -65,6 +65,27 @@ export type CredentialStore = {
     executor?: CredentialExecutor,
   ) => Promise<StoredCredential>;
   /**
+   * Re-encrypt a live row in place, keeping the id everything already points at.
+   *
+   * A vendor whose refresh token ROTATES is the one caller. It has already killed the old token at
+   * its end by the time it answers, so there is no second grant left to withdraw and nothing to
+   * learn from a new row — only a row per tool call, forever. A person RECONNECTING still goes
+   * through `rotate`, because that is the act that leaves a live grant behind for us to withdraw at
+   * our side too.
+   *
+   * A revoked or missing row is refused rather than written through: a grant somebody withdrew must
+   * not come back to life by being handed a fresh secret.
+   *
+   * Without an executor this writes on its own connection. With one it joins the caller's
+   * transaction, which is how the caller that has locked this row spends the token under that lock:
+   * the write has to commit with the lock rather than beside it.
+   */
+  updateSecret: (
+    id: string,
+    encryptedValue: string,
+    executor?: CredentialExecutor,
+  ) => Promise<void>;
+  /**
    * Replace one credential with another, atomically.
    *
    * Retiring the old secret and storing the new one are one decision, so they
@@ -223,6 +244,23 @@ export function createCredentialStore(
         throw new Error("Credential could not be stored");
       }
       return credential;
+    },
+    updateSecret: async (id, encryptedValue, executor = database) => {
+      const [credential] = await executor
+        .update(credentials)
+        .set({ encryptedValue, updatedAt: new Date() })
+        .where(and(eq(credentials.id, id), isNull(credentials.revokedAt)))
+        .returning({ id: credentials.id });
+
+      /*
+       * One statement, so nothing can revoke the row between a check and the write.
+       *
+       * The cost is that "no such row" and "revoked" arrive as the same answer, hence the one
+       * message naming both. The caller acts identically on either: it refuses its call.
+       */
+      if (!credential) {
+        throw new Error("Credential was not found or is revoked");
+      }
     },
     rotate: async (input, executor) => {
       const write = async (transaction: CredentialExecutor) => {

@@ -73,3 +73,24 @@ export function useActiveBotHolder(): BotHolder {
 export function useActiveBotId(): string {
   return useContext(ActiveBotValueContext)?.botId ?? DEFAULT_BOT_ID;
 }
+
+/**
+ * The active Bot when a surface has declared one, and undefined while the placeholder holds.
+ *
+ * The placeholder exists so a handler always has something to route with, but it is not a Bot: no
+ * package registers an agent by that name, and the server answers 404 for it. A grant query handed
+ * the placeholder therefore polls a guaranteed miss on its own interval — every few seconds, on
+ * every screen without a conversation — and the constant failing request is noise that would bury a
+ * real 404 the day one matters. A query given undefined instead simply does not run.
+ *
+ * The name is already reserved in practice: an agents.yaml entry called "default" would be
+ * indistinguishable from the placeholder in every handler that reads the holder.
+ */
+export function declaredBotId(botId: string): string | undefined {
+  return botId === DEFAULT_BOT_ID ? undefined : botId;
+}
+
+/** As useActiveBotId, for callers that should do nothing while the placeholder holds. */
+export function useDeclaredBotId(): string | undefined {
+  return declaredBotId(useActiveBotId());
+}

@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -38,6 +49,10 @@ export type ChannelSummary = AgentChannel & {
   lastMessageAt: Date | null;
   lastMessageAgentId: string | null;
   createdAt: Date;
+  /** Whether the caller pinned this channel. A pin is per-member, so this is the caller's, only. */
+  pinned: boolean;
+  /** When the caller last had this channel open, or null for never. The caller's, only. */
+  lastReadAt: Date | null;
 };
 
 /** What a client that ran an agent reports back about the message it just saw. */
@@ -70,14 +85,26 @@ const DEFAULT_CHANNEL_PAGE = 50;
 /** The most a caller may ask for, so the endpoint cannot be talked back into reading everything. */
 const MAX_CHANNEL_PAGE = 200;
 
-/** Where a page stopped: both halves of the sort, since two channels can share a timestamp. */
-type ChannelCursor = { recency: string; id: string };
+/**
+ * Where a page stopped: every part of the sort, in sort order.
+ *
+ * `pinned` leads, because the ordering does: a keyset cursor has to name the whole sort key or the
+ * next page is selected by a different rule than the page it follows, which serves some channels
+ * twice and others never. `recency` and `id` are both here for the same reason — two channels can
+ * share a timestamp.
+ */
+type ChannelCursor = { pinned: boolean; recency: string; id: string };
 
 function encodeChannelCursor(cursor: ChannelCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
-/** A malformed cursor reads as the first page, which is the honest answer to a stale link. */
+/**
+ * A malformed cursor reads as the first page, which is the honest answer to a stale link.
+ *
+ * A cursor minted before `pinned` existed is malformed by this definition, and deliberately: it
+ * describes a position in an ordering this query no longer has.
+ */
 function decodeChannelCursor(
   value: string | undefined,
 ): ChannelCursor | undefined {
@@ -86,7 +113,9 @@ function decodeChannelCursor(
     const parsed = JSON.parse(
       Buffer.from(value, "base64url").toString("utf8"),
     ) as ChannelCursor;
-    return typeof parsed?.id === "string" && typeof parsed?.recency === "string"
+    return typeof parsed?.id === "string" &&
+      typeof parsed?.recency === "string" &&
+      typeof parsed?.pinned === "boolean"
       ? parsed
       : undefined;
   } catch {
@@ -94,17 +123,50 @@ function decodeChannelCursor(
   }
 }
 
+/**
+ * The roster's sort key, as SQL, in the order it sorts.
+ *
+ * Every part descends, which is what lets the cursor be one row comparison rather than a nest of
+ * ORs: a pin is 1 and no pin is 0, so `desc` puts pinned channels first, and both remaining parts
+ * already wanted `desc`. Starting a conversation counts as activity — a channel somebody just made
+ * has nothing said in it yet and is the one they are about to type in, so ordering on the message
+ * alone would bury it under every channel that has one.
+ *
+ * The browser repeats the recency half when the socket patches a row, and lifts pinned rows at
+ * render; both must agree with this, or the list reorders itself on the next event. See `byRecency`
+ * in use-channel-events.ts and `pinnedFirst` in app-sidebar.tsx.
+ */
+const PINNED_RANK = sql`case when ${channelMemberships.pinnedAt} is not null then 1 else 0 end`;
+const RECENCY = sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt})`;
+const ROSTER_ORDER = [
+  sql`${PINNED_RANK} desc`,
+  sql`${RECENCY} desc`,
+  desc(channels.id),
+];
+
 export type ChannelStore = {
   create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
   get(actor: AgentActor, channelId: string): Promise<AgentChannel | null>;
   list(actor: AgentActor, query?: ChannelQuery): Promise<ChannelPage>;
+  /** Pin or unpin the caller's own membership. Throws ChannelNotFoundError for a non-member. */
+  setPinned(
+    actor: AgentActor,
+    channelId: string,
+    pinned: boolean,
+  ): Promise<void>;
+  /** Stamp the caller's own membership as read now. Throws ChannelNotFoundError for a non-member. */
+  markRead(actor: AgentActor, channelId: string): Promise<void>;
+  /**
+   * Hide the channel for every member. Soft: the row and the thread survive, every read filters.
+   * Throws ChannelNotFoundError for a non-member and ChannelPackageOwnedError for a channel the
+   * tenant package defines, which configuration owns rather than any member.
+   */
+  softDelete(actor: AgentActor, channelId: string): Promise<void>;
   recordActivity(
     actor: AgentActor,
     channelId: string,
     activity: ChannelActivity,
   ): Promise<void>;
-  /** Deletes the channel for everyone in it. Returns the thread it owned, so the caller can forget it upstream. */
-  remove(actor: AgentActor, channelId: string): Promise<string | null>;
 };
 
 const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
@@ -226,7 +288,7 @@ export function createChannelStore(
           agentProfiles,
           eq(agentProfiles.agentId, channelAgents.agentId),
         )
-        .where(eq(channels.id, channelId))
+        .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)))
         .orderBy(asc(channelAgents.agentId));
 
       const first = rows[0];
@@ -258,7 +320,8 @@ export function createChannelStore(
       const page = await database
         .select({
           id: channels.id,
-          recency: sql<Date>`coalesce(${channels.lastMessageAt}, ${channels.createdAt})`,
+          recency: sql<Date>`${RECENCY}`,
+          pinned: sql<boolean>`${channelMemberships.pinnedAt} is not null`,
         })
         .from(channels)
         .innerJoin(
@@ -269,14 +332,16 @@ export function createChannelStore(
           ),
         )
         .where(
-          cursor
-            ? sql`(coalesce(${channels.lastMessageAt}, ${channels.createdAt}), ${channels.id}) < (${cursor.recency}::timestamptz, ${cursor.id})`
-            : undefined,
+          and(
+            isNull(channels.deletedAt),
+            // One row comparison over the whole sort key, which only reads as "everything after the
+            // cursor" because every part of that key descends. See ROSTER_ORDER.
+            cursor
+              ? sql`(${PINNED_RANK}, ${RECENCY}, ${channels.id}) < (${cursor.pinned ? 1 : 0}::int, ${cursor.recency}::timestamptz, ${cursor.id})`
+              : undefined,
+          ),
         )
-        .orderBy(
-          sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt}) desc`,
-          desc(channels.id),
-        )
+        .orderBy(...ROSTER_ORDER)
         // One more than asked for, so "is there another page" needs no second count query.
         .limit(limit + 1);
 
@@ -285,6 +350,7 @@ export function createChannelStore(
       const nextCursor =
         page.length > limit && last
           ? encodeChannelCursor({
+              pinned: last.pinned,
               recency: new Date(last.recency).toISOString(),
               id: last.id,
             })
@@ -303,6 +369,8 @@ export function createChannelStore(
           lastMessageAt: channels.lastMessageAt,
           lastMessageAgentId: channels.lastMessageAgentId,
           createdAt: channels.createdAt,
+          pinnedAt: channelMemberships.pinnedAt,
+          lastReadAt: channelMemberships.lastReadAt,
         })
         .from(channels)
         .innerJoin(
@@ -324,22 +392,20 @@ export function createChannelStore(
           agentProfiles,
           eq(agentProfiles.agentId, channelAgents.agentId),
         )
-        // Most recent first, where starting a conversation counts as activity. A channel somebody
-        // just created has nothing said in it yet, and is also the one they are about to type in, // ordering on the message alone would bury it under every channel that has one.
-        //
-        // The browser repeats this when the socket patches a row. Both must agree, or the list
-        // reorders itself on the next event; see `byRecency` in use-channel-events.ts.
         .where(
-          inArray(
-            channels.id,
-            wanted.map((row) => row.id),
+          and(
+            inArray(
+              channels.id,
+              wanted.map((row) => row.id),
+            ),
+            // Repeated, not inherited from the query that chose the page: these are two statements
+            // on two snapshots, so a delete that commits between them would otherwise hand back a
+            // channel this person can no longer see.
+            isNull(channels.deletedAt),
           ),
         )
-        .orderBy(
-          sql`coalesce(${channels.lastMessageAt}, ${channels.createdAt}) desc`,
-          desc(channels.id),
-          asc(channelAgents.agentId),
-        );
+        // The same order the page was chosen in, since the rows below are read in order.
+        .orderBy(...ROSTER_ORDER, asc(channelAgents.agentId));
 
       // One row per channel-agent pair; the ordering above keeps each channel's rows together and
       // its agents in the same lexicographic order `get` returns.
@@ -361,9 +427,156 @@ export function createChannelStore(
           lastMessageAt: row.lastMessageAt,
           lastMessageAgentId: row.lastMessageAgentId,
           createdAt: row.createdAt,
+          pinned: row.pinnedAt !== null,
+          lastReadAt: row.lastReadAt,
         });
       }
       return { channels: [...summaries.values()], nextCursor };
+    },
+
+    async setPinned(actor, channelId, pinned) {
+      await database.transaction(
+        async (transaction) => {
+          const updated = await transaction
+            .update(channelMemberships)
+            .set({ pinnedAt: pinned ? new Date() : null })
+            .where(
+              and(
+                eq(channelMemberships.channelId, channelId),
+                eq(channelMemberships.userId, actor.id),
+                // A deleted channel is not there to pin. Without this, pinning one succeeds and
+                // announces, and the announcement sends this person's tabs to refetch a roster that
+                // cannot show the row. `get` and `list` filter the same way.
+                exists(
+                  transaction
+                    .select({ one: sql`1` })
+                    .from(channels)
+                    .where(
+                      and(
+                        eq(channels.id, channelId),
+                        isNull(channels.deletedAt),
+                      ),
+                    ),
+                ),
+              ),
+            )
+            .returning({ channelId: channelMemberships.channelId });
+          // Not a member, no such channel, or a deleted one: the same answer every way, matching
+          // recordActivity and `get`.
+          if (updated.length === 0) throw new ChannelNotFoundError(channelId);
+
+          /*
+           * Announced to this member alone.
+           *
+           * A pin is a fact about one membership row, so `memberIds` holds the person who made it
+           * and nobody else. The hub delivers by that list, which is what carries the pin across
+           * this person's own tabs and replicas without putting it on anybody else's roster.
+           */
+          const event: ChannelActivityEvent = {
+            channelId,
+            memberIds: [actor.id],
+            lastMessage: null,
+            lastMessageAt: null,
+            lastMessageAgentId: null,
+            pinned,
+          };
+          await transaction.execute(
+            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+          );
+        },
+        { isolationLevel: "read committed" },
+      );
+    },
+
+    async markRead(actor, channelId) {
+      const updated = await database
+        .update(channelMemberships)
+        .set({
+          /*
+           * The later of this clock and the channel's own last-message stamp. last_message_at is
+           * written from the reporting browser's clock and is not bounded; a marker stamped
+           * plainly "now" by a server running behind it would leave the row reading as unseen for
+           * every member, re-lighting the dot on each refetch until wall clock catches up.
+           */
+          lastReadAt: sql`greatest(now(), coalesce((select ${channels.lastMessageAt} from ${channels} where ${channels.id} = ${channelMemberships.channelId}), now()))`,
+        })
+        .where(
+          and(
+            eq(channelMemberships.channelId, channelId),
+            eq(channelMemberships.userId, actor.id),
+            // A deleted channel is not there to read. The same guard `setPinned` carries, for the
+            // same reason: the row is gone from every roster, so nothing about it is markable.
+            exists(
+              database
+                .select({ one: sql`1` })
+                .from(channels)
+                .where(
+                  and(eq(channels.id, channelId), isNull(channels.deletedAt)),
+                ),
+            ),
+          ),
+        )
+        .returning({ channelId: channelMemberships.channelId });
+      // Not a member, or no such channel: the same answer either way, matching setPinned.
+      if (updated.length === 0) throw new ChannelNotFoundError(channelId);
+    },
+
+    async softDelete(actor, channelId) {
+      await database.transaction(
+        async (transaction) => {
+          const [row] = await transaction
+            .select({ packageId: channels.packageId })
+            .from(channels)
+            .innerJoin(
+              channelMemberships,
+              and(
+                eq(channelMemberships.channelId, channels.id),
+                eq(channelMemberships.userId, actor.id),
+              ),
+            )
+            .where(eq(channels.id, channelId));
+          // Not a member, or no such channel: the same answer either way.
+          if (!row) throw new ChannelNotFoundError(channelId);
+          // Package channels are configuration; the sync that wrote them owns them.
+          if (row.packageId !== null) {
+            throw new ChannelPackageOwnedError(channelId);
+          }
+          // The guard on deletedAt is what makes a repeat call a no-op rather than a new stamp.
+          await transaction
+            .update(channels)
+            .set({ deletedAt: new Date(), updatedAt: new Date() })
+            .where(and(eq(channels.id, channelId), isNull(channels.deletedAt)));
+
+          // Read on this transaction, so the members told are the ones the channel had when it was
+          // hidden. Soft leaves the membership rows in place, so this reads the same list a repeat
+          // call would.
+          const members = await transaction
+            .select({ userId: channelMemberships.userId })
+            .from(channelMemberships)
+            .where(eq(channelMemberships.channelId, channelId));
+
+          /*
+           * Announced inside the transaction, so it is delivered on commit and a refused delete —
+           * a channel the package owns, or one the caller is not in — announces nothing at all.
+           *
+           * Every member is told, because the deletion hides the channel for all of them: without
+           * this, a second tab and a second replica keep rendering a row whose channel no longer
+           * resolves until something else makes them refetch.
+           */
+          const event: ChannelActivityEvent = {
+            channelId,
+            memberIds: members.map((member) => member.userId),
+            lastMessage: null,
+            lastMessageAt: null,
+            lastMessageAgentId: null,
+            deleted: true,
+          };
+          await transaction.execute(
+            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+          );
+        },
+        { isolationLevel: "read committed" },
+      );
     },
 
     recordActivity(actor, channelId, activity) {
@@ -372,14 +585,25 @@ export function createChannelStore(
           const [membership] = await transaction
             .select({ channelId: channelMemberships.channelId })
             .from(channelMemberships)
+            // Joined rather than checked on the membership alone, so a deleted channel is refused
+            // too. `get` and `list` filter on `deleted_at`, so without this a client holding a stale
+            // roster row can bump `last_message` on a channel nobody can see and announce it to
+            // every member, each of whom refetches their roster for an invisible row.
+            .innerJoin(
+              channels,
+              and(
+                eq(channels.id, channelMemberships.channelId),
+                isNull(channels.deletedAt),
+              ),
+            )
             .where(
               and(
                 eq(channelMemberships.channelId, channelId),
                 eq(channelMemberships.userId, actor.id),
               ),
             );
-          // Not a member, or no such channel: the same answer either way, so belonging to a channel
-          // is not something an outsider can probe for.
+          // Not a member, no such channel, or a deleted one: the same answer every way, so belonging
+          // to a channel is not something an outsider can probe for.
           if (!membership) throw new ChannelNotFoundError(channelId);
 
           if (activity.agentId !== null) {
@@ -441,64 +665,6 @@ export function createChannelStore(
         { isolationLevel: "read committed" },
       );
     },
-
-    // `create` inserts exactly one membership row, so "delete" and "leave" are the same act while a
-    // channel has exactly one member. Named `remove` for the multi-member split this becomes later.
-    remove(actor, channelId) {
-      return database.transaction(
-        async (transaction) => {
-          const [membership] = await transaction
-            .select({ channelId: channelMemberships.channelId })
-            .from(channelMemberships)
-            .where(
-              and(
-                eq(channelMemberships.channelId, channelId),
-                eq(channelMemberships.userId, actor.id),
-              ),
-            );
-          // Not a member, or no such channel: the same answer either way, so belonging to a channel
-          // is not something an outsider can probe for. Same reasoning as `recordActivity` above.
-          if (!membership) throw new ChannelNotFoundError(channelId);
-
-          // Read before the delete, not after: the cascade below wipes both of these tables, and the
-          // notify payload needs the members it is telling, while the caller needs the thread id to
-          // ask Intelligence to forget it.
-          const members = await transaction
-            .select({ userId: channelMemberships.userId })
-            .from(channelMemberships)
-            .where(eq(channelMemberships.channelId, channelId));
-          const [mapping] = await transaction
-            .select({ threadId: intelligenceChannelMappings.threadId })
-            .from(intelligenceChannelMappings)
-            .where(
-              and(
-                eq(intelligenceChannelMappings.channelId, channelId),
-                eq(intelligenceChannelMappings.userId, actor.id),
-              ),
-            );
-
-          // Cascades `channel_memberships`, `channel_agents`, and `intelligence_channel_mappings`:
-          // see the `onDelete: "cascade"` on each in db/schema/core.ts. Nothing else references a
-          // channel, so this one delete is the whole local removal.
-          await transaction.delete(channels).where(eq(channels.id, channelId));
-
-          const event: ChannelActivityEvent = {
-            channelId,
-            memberIds: members.map((member) => member.userId),
-            lastMessage: null,
-            lastMessageAt: null,
-            lastMessageAgentId: null,
-            deleted: true,
-          };
-          await transaction.execute(
-            sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
-          );
-
-          return mapping?.threadId ?? null;
-        },
-        { isolationLevel: "read committed" },
-      );
-    },
   };
 }
 
@@ -506,6 +672,13 @@ export class ChannelNotFoundError extends Error {
   constructor(id: string) {
     super(`Channel ${id} was not found.`);
     this.name = "ChannelNotFoundError";
+  }
+}
+
+export class ChannelPackageOwnedError extends Error {
+  constructor(id: string) {
+    super(`Channel ${id} is defined by the deployment package.`);
+    this.name = "ChannelPackageOwnedError";
   }
 }
 
@@ -589,31 +762,24 @@ export function createChannelRoutes(
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   /** Absent in tests and wherever live updates are not wanted; the routes still work without it. */
   events?: ChannelEventHub,
-  /** Where a channel's deletion is written. Absent in tests that do not care about the trail. */
+  /** Where a channel's removal is written. Absent in tests that do not care about the trail. */
   auditStore?: AuditStore,
-  /**
-   * Ask Intelligence to permanently delete a thread. Absent leaves a channel deletable and its
-   * thread left behind on the platform: the local removal below does not depend on this existing.
-   */
-  forgetThread?: (params: {
-    threadId: string;
-    userId: string;
-    agentId: string;
-  }) => Promise<void>,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
   /**
    * Write the one audit row this file ever writes, tolerantly.
    *
-   * Mirrors `record` in agents/routes.ts: never fatal, because the channel is already gone and the
+   * Mirrors `record` in agents/routes.ts: never fatal, because the channel is already hidden and the
    * caller has already been told so by the time this runs. A trail that is briefly unavailable is
    * not a reason to report a failure that did not happen.
+   *
+   * Reached only after `softDelete` resolves, so a refused delete — a channel the package owns, or
+   * one the caller is not in — writes nothing. The trail records acts, not attempts.
    */
   const recordDeleted = async (
     context: Context<{ Variables: AppVariables }>,
     channelId: string,
-    payload: { threadId: string | null; threadForgotten: boolean },
   ): Promise<void> => {
     if (!auditStore) return;
     const actor = context.var.actor;
@@ -633,7 +799,9 @@ export function createChannelRoutes(
          * by default, and "somebody deleted this conversation" is the whole point of the row.
          */
         actorUserId: actor.id,
-        payload,
+        // Named rather than implied: the channel row and its thread are still there, and a later
+        // hard delete would be a different fact about the same channel.
+        payload: { mechanism: "soft" },
       });
     } catch (error) {
       console.error(
@@ -723,6 +891,48 @@ export function createChannelRoutes(
     }
   });
 
+  routes.put("/:channelId/pin", requireUser, async (context) => {
+    const body = await context.req.json().catch(() => null);
+    if (!isChannelInputObject(body)) {
+      return context.json({ error: "Pin input must be a JSON object." }, 400);
+    }
+    const { pinned } = body as { pinned?: unknown };
+    if (typeof pinned !== "boolean") {
+      return context.json({ error: "Pinned must be true or false." }, 400);
+    }
+
+    try {
+      await store.setPinned(
+        context.var.actor,
+        context.req.param("channelId"),
+        pinned,
+      );
+      return context.json({ pinned });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.put("/:channelId/read", requireUser, async (context) => {
+    try {
+      await store.markRead(context.var.actor, context.req.param("channelId"));
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.delete("/:channelId", requireUser, async (context) => {
+    const channelId = context.req.param("channelId");
+    try {
+      await store.softDelete(context.var.actor, channelId);
+      await recordDeleted(context, channelId);
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   routes.get("/:channelId", requireUser, async (context) => {
     try {
       const channel = await store.get(
@@ -733,62 +943,6 @@ export function createChannelRoutes(
         return context.json({ error: "Channel not found." }, 404);
       }
       return context.json({ channel: channelDto(channel) });
-    } catch (error) {
-      return mapStoreError(context, error);
-    }
-  });
-
-  // Registered unconditionally, unlike `GET /:threadId` in thread-routes.ts: removing your own
-  // channel from your own roster can always succeed locally, whether or not Intelligence is reachable.
-  routes.delete("/:channelId", requireUser, async (context) => {
-    const channelId = context.req.param("channelId");
-    try {
-      const threadId = await store.remove(context.var.actor, channelId);
-
-      // The local delete already committed above, so a failed thread deletion is non-fatal: a
-      // channel gone locally with an orphaned thread beats one still on screen with its history wiped.
-      let threadForgotten = false;
-      if (threadId && forgetThread) {
-        try {
-          await forgetThread({
-            threadId,
-            userId: context.var.actor.id,
-            // Derived here, never accepted from the caller: this is the same string
-            // channel-chat.tsx builds for the same channel, and trusting a client-supplied agentId
-            // would let a request name any thread it likes and ask the platform to delete it.
-            agentId: `channel:${channelId}`,
-          });
-          threadForgotten = true;
-        } catch {
-          console.error(
-            JSON.stringify({
-              type: "channel-thread-forget-failed",
-              note: "Could not delete the Intelligence thread for a removed channel.",
-              channelId,
-              threadId,
-            }),
-          );
-        }
-      }
-
-      await recordDeleted(context, channelId, { threadId, threadForgotten });
-
-      /*
-       * 200 with the outcome, not a bare 204.
-       *
-       * The thread deletion is the half that can fail on its own, and 204 says the whole act
-       * succeeded whichever way it went. The screen then tells somebody their message history is
-       * gone while it is still sitting on the platform, which is the one thing a person deleting a
-       * conversation is asking about.
-       *
-       * Reported as the question the caller has rather than the two facts it is derived from: no
-       * thread and a forgotten thread both mean nothing was left behind, and only a thread that
-       * survived is worth putting on a screen.
-       */
-      return context.json(
-        { historyLeftBehind: threadId !== null && !threadForgotten },
-        200,
-      );
     } catch (error) {
       return mapStoreError(context, error);
     }
@@ -815,6 +969,9 @@ function channelSummaryDto(channel: ChannelSummary) {
     lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,
     lastMessageAgentId: channel.lastMessageAgentId,
     createdAt: channel.createdAt.toISOString(),
+    pinned: channel.pinned,
+    // Serialised as ISO-8601 like lastMessageAt, so the browser can compare the two as strings.
+    lastReadAt: channel.lastReadAt?.toISOString() ?? null,
   };
 }
 
@@ -824,6 +981,15 @@ function mapStoreError(context: Context, error: unknown): Response {
   }
   if (error instanceof ChannelNotFoundError) {
     return context.json({ error: "Channel not found." }, 404);
+  }
+  if (error instanceof ChannelPackageOwnedError) {
+    return context.json(
+      {
+        error:
+          "This channel is defined by the deployment package, so it cannot be deleted here.",
+      },
+      409,
+    );
   }
   throw error;
 }

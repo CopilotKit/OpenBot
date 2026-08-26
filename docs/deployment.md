@@ -135,3 +135,9 @@ which makes them the shortest path from nothing to a running deployment.
 **The image is 5.3 GB**, most of it the Playwright base, which ships Firefox and WebKit alongside the
 Chromium we use. Deleting them afterwards does not help, because the bytes still ship in the layer
 below. Building Chromium-only onto a slim base would cut this substantially and is not done yet.
+
+**A strict content-security-policy needs a hash or a nonce.** `app/index.html` runs a small inline
+script that decides the theme before the first paint. Nothing in this repo sends a CSP header, so it
+works as shipped; a deployment that adds one at its proxy has to allow that script explicitly, or
+`script-src` blocks it and the page renders with the wrong theme until the app boots. A `'sha256-'`
+hash of the script body is the version that survives a rebuild without a per-request nonce.

@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import type { AgentProfileStore } from "../src/agents/profile-store";
 import type { AuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
-import type { IntentRouter } from "../src/routing/classify";
+import type { IntentRouter, RoutingUndecided } from "../src/routing/classify";
 import { createRoutingRoutes } from "../src/routing/routes";
 
 /**
@@ -47,7 +47,7 @@ type Recorded = {
   payload: Record<string, unknown>;
 };
 
-function app(options: { routed?: string } = {}) {
+function app(options: { routed?: string; undecided?: RoutingUndecided } = {}) {
   const written: Recorded[] = [];
   /** Every call the router was asked to make, so "never asked" is an assertion and not a hope. */
   const asked: string[] = [];
@@ -72,7 +72,8 @@ function app(options: { routed?: string } = {}) {
         agentId: chosen,
         name: ROSTER.find((a) => a.id === chosen)?.name ?? chosen,
         reason: "matches what it is for",
-        fallback: false,
+        fallback: options.undecided !== undefined,
+        undecided: options.undecided ?? null,
       };
     },
   } as unknown as IntentRouter;
@@ -183,5 +184,49 @@ describe("recording which coworker a message went to", () => {
 
     expect(response.status).toBe(200);
     expect(asked).toEqual(["hello"]);
+  });
+});
+
+/**
+ * Why it was not decided, on the row rather than only in the sentence.
+ *
+ * The reason is prose for a person. This is the field a deployment counts, and counting is the point:
+ * a router that has been unreachable for a week is invisible until somebody can ask how often.
+ */
+describe("recording why a message was not routed", () => {
+  test("an unreachable router is on the row, not only in the sentence", async () => {
+    const { server, written } = app({ undecided: "unreachable" });
+
+    await post(server, { text: "what is our PTO policy" });
+
+    expect(written[0]?.payload).toMatchObject({
+      chosen: "knowledge",
+      fallback: true,
+      undecided: "unreachable",
+    });
+  });
+
+  test("a decided routing records no cause", async () => {
+    const { server, written } = app();
+
+    await post(server, { text: "what is our PTO policy" });
+
+    expect(written[0]?.payload).toMatchObject({
+      fallback: false,
+      undecided: null,
+    });
+  });
+
+  test("a coworker the person named records no cause either", async () => {
+    // Nothing was left to the router, so there is nothing about it to have failed. Recording a cause
+    // here would count a person's own choice as a routing failure.
+    const { server, written } = app();
+
+    await post(server, { text: "hello", agentId: "risk-analyst" });
+
+    expect(written[0]?.payload).toMatchObject({
+      viaMention: true,
+      undecided: null,
+    });
   });
 });

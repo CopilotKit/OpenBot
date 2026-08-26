@@ -1,0 +1,170 @@
+{{- if eq .Values.computers.mode "shared" }}
+{{- $component := "computer" -}}
+{{/*
+A Bot's computer: Chromium, a workspace, and a browser profile that has to survive a restart.
+
+A STATEFULSET, NOT A DEPLOYMENT, and not because there is more than one of them. The profile
+directory holds real logins, and a Deployment's pods get no stable volume of their own: two replicas
+would fight over one `ReadWriteOnce` claim and a rollout would hand the new pod an empty profile,
+which reads as every Bot being signed out of everything at once.
+
+`replicas: 1` on purpose in this mode. One browser for every Bot is what `shared` means, and it is
+the mode that needs no CRD in the cluster. `computers.mode: sandbox` gives each Bot its own, and is
+where the idle suspend lives; see the provider RBAC beside this file.
+
+STORAGE HAS GRAVITY. The volume below is `ReadWriteOnce`, and on all three clouds the ordinary block
+volume is zonal, so this pod is pinned to whichever zone its volume was created in for as long as
+that profile exists. That is acceptable and worth stating rather than discovering. `storageClass`
+stays empty by default, meaning the cluster's default class, because naming `gp3` or `pd-balanced`
+here is how a chart stops installing on somebody's bare-metal cluster.
+*/}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+spec:
+  serviceName: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  replicas: 1
+  selector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 6 }}
+  {{- /*
+    THE DEFAULT IS RETAIN, AND THAT IS WHAT WE WANT, SAID OUT LOUD.
+
+    `whenScaled: Delete` here would erase every Bot's logins the first time this scaled down. It is
+    written explicitly rather than inherited, so that nobody later "tidies up" a field they think is
+    missing.
+  */}}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: {{ .Values.computers.persistence.whenDeleted }}
+    whenScaled: Retain
+  volumeClaimTemplates:
+    - metadata:
+        name: profiles
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.computers.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.computers.persistence.profilesSize }}
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.computers.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.computers.persistence.workspaceSize }}
+  template:
+    metadata:
+      labels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 8 }}
+    spec:
+      {{- /*
+        No cluster credential in the one pod running a browser and a shell.
+        
+        A pod carries a service account token unless it says otherwise, so the container that opens
+        pages a person named and runs commands a model chose was carrying one. It could not do much
+        with it, which is not the point: this is the last pod in the deployment that should be able
+        to address the API server, and the default is the wrong way round.
+      */}}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- /*
+        gVisor or Kata, where the cluster has one, and an ordinary pod where it does not.
+
+        The product already has this idea: `COMPUTER_RUNTIME=runsc` runs a computer under gVisor on a
+        host that supports it. This is the same setting where Kubernetes expects it. Unset by
+        default, because a chart that assumed a RuntimeClass would fail to install on a cluster that
+        has none, and the three clouds do not agree: GKE has managed gVisor, AKS offers Kata, and on
+        EKS it is bring your own node configuration.
+      */}}
+      {{- with .Values.computers.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.computers.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.computers.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: computer
+          image: {{ include "openbot.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- /*
+            The computer alone, not the whole image.
+
+            One image serves both roles and the command decides which: this skips s6 and runs the
+            browser process directly, so a computer pod carries no API and no database.
+          */}}
+          command: ["/usr/local/bin/bun", "/app/agent-computer/src/index.ts"]
+          ports:
+            - name: http
+              containerPort: 4100
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "4100"
+            - name: WORKSPACE_DIR
+              value: /workspace
+            - name: PROFILES_DIR
+              value: /profiles
+            - name: COMPUTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "openbot.secretName" .) .Values.computers.existingTokenSecret }}
+                  key: computer-token
+            {{- with .Values.computers.maxBrowsers }}
+            - name: COMPUTER_MAX_BROWSERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.computers.browserIdleMs }}
+            - name: COMPUTER_BROWSER_IDLE_MS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.computers.extraEnv }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: profiles
+              mountPath: /profiles
+            - name: workspace
+              mountPath: /workspace
+          {{- /*
+            Readiness only, and deliberately no liveness probe.
+
+            A browser under load can be slow to answer without being broken, and a liveness probe
+            that restarts it takes every signed-in session with it. Readiness keeps traffic away
+            until it can answer; nothing kills it for being busy.
+          */}}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          {{- with .Values.computers.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+{{- end }}

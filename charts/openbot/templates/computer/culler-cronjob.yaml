@@ -1,0 +1,77 @@
+{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.culler.enabled }}
+{{- $component := "culler" -}}
+{{/*
+Suspending computers nobody is using.
+
+A CronJob rather than a timer in the API, and the difference is the whole reason this file exists.
+An interval in the server fires in every replica, so five replicas would each decide independently
+to suspend the same computer. The audit-retention sweep gets away with that because deleting old
+rows twice is the same as deleting them once; suspending a browser somebody just started using is
+not. The work is claimed and leased out of PostgreSQL, so whichever pod runs this takes what nobody
+else holds, and a pod that dies mid-suspend hands its work back when the lease expires.
+
+`concurrencyPolicy: Forbid` on top, because a schedule that overlaps itself is the same problem in
+one workload rather than across several.
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+spec:
+  schedule: {{ .Values.computers.sandbox.culler.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 12 }}
+            {{- if .Values.postgresql.enabled }}
+            {{- /*
+              The bundled database admits pods carrying this label and nothing else, which this chart pins on.
+              Anything that opens the database needs it, and only the API server had it: this would have been
+              refused on any cluster that actually enforces a NetworkPolicy. Not caught by hand, because the
+              cluster it was driven on ships enforcement switched off.
+            */}}
+            {{ .Release.Name }}-postgresql-client: "true"
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "openbot.serviceAccountName" . }}
+          {{- /* It reads the cluster's Sandboxes, so it needs the token the API pod does not. */}}
+          automountServiceAccountToken: true
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          containers:
+            - name: culler
+              image: {{ include "openbot.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              workingDir: /app/server
+              command: ["/usr/local/bin/bun", "scripts/cull-idle-computers.ts"]
+              env:
+{{ include "openbot.databaseUrlEnv" . | indent 16 }}
+{{ include "openbot.commonEnv" . | indent 16 }}
+              {{- /* The same shape of computer the server uses, so the two cannot disagree. */}}
+              volumeMounts:
+                - name: sandbox-template
+                  mountPath: /etc/openbot
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+          volumes:
+            - name: sandbox-template
+              configMap:
+                name: {{ include "openbot.componentName" (dict "root" . "component" "computer-template") }}
+{{- end }}

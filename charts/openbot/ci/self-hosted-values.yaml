@@ -1,0 +1,48 @@
+# Somebody's own cluster, which is the shape every default is written for.
+#
+# Nothing here turns a cloud feature on, because there are none to turn on: the cluster's default
+# StorageClass, a plain Secret, the bundled database, an Ingress. If this file needs to grow, a
+# default is wrong.
+config:
+  initialAdminEmails: admin@example.com
+  intelligence:
+    apiUrl: https://api.cloud.copilotkit.ai
+    gatewayWsUrl: wss://gateway.cloud.copilotkit.ai
+  auth:
+    google:
+      clientId: example.apps.googleusercontent.com
+  publicUrl: https://openbot.internal
+postgresql:
+  enabled: true
+  auth:
+    # Yours to choose, and the same value on every upgrade. Rendering example only.
+    password: "example-for-rendering-only"
+secrets:
+  # Sessions are signed with this. Rendering example only; generate one with: openssl rand -base64 32
+  betterAuthSecret: "example-for-rendering-only-at-least-32-chars"
+  # NOT SET HERE, AND THAT IS THE POINT. This file used to carry the public example key from
+  # `.env.example`, which the server refuses to start with in production: the target rendered, and
+  # the deployment it described could never run. Supply a real one:
+  #   --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)"
+  intelligenceApiKey: "example-for-rendering-only"
+  googleClientSecret: "example-for-rendering-only"
+  computerToken: "example-for-rendering-only"
+  licenseToken: "example-for-rendering-only"
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: openbot.internal
+      paths:
+        - path: /
+          pathType: Prefix
+
+computers:
+  mode: shared
+
+# On, so these render in CI at all. They were written, reviewed and shipped without a single target
+# producing one, which means nothing had ever checked they were valid YAML, let alone right. Off is
+# still the chart's default: a policy on a cluster whose CNI ignores it does nothing, and on one that
+# enforces it a wrong rule is an outage, so turning it on stays a deployment's decision.
+networkPolicy:
+  enabled: true

@@ -4,7 +4,14 @@
  * Split by owner so two people can add tables all day without touching the same lines. Add tables
  * here; never edit core.ts or coworker.ts to do it.
  */
-import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { jsonb } from "./json";
 
 /**
@@ -80,3 +87,47 @@ export const computerSnapshot = pgTable("computer_snapshot", {
    */
   session: text("session"),
 });
+
+/**
+ * What a Bot's screen looked like on the turn that opened it.
+ *
+ * A conversation is a record, and a record must not change its mind. The transcript used to fetch
+ * the live screen for every past turn, so an answer about one page sat under a picture of whichever
+ * page the Bot had open by the time somebody read it back.
+ *
+ * KEYED ON THE TURN, which is the identity of the thing being remembered. Keying on the page instead
+ * was a mistake with a plausible reason: two visits to one address collided, and letting the newer
+ * win made a past turn's picture change under it, which is the exact mutability this table exists to
+ * remove. A turn happens once and is then over for good, so the row is written once and never
+ * updated.
+ *
+ * The computer is in the key as well as the turn, so a caller who may reach one Bot cannot read
+ * another Bot's screen by naming a tool call.
+ */
+export const computerPageFrame = pgTable(
+  "computer_page_frame",
+  {
+    /** Whose computer it was. */
+    computerId: text("computer_id").notNull(),
+    /** The turn that opened it. */
+    toolCallId: text("tool_call_id").notNull(),
+    /** The page, as the browser reported it after the navigation settled. */
+    url: text("url").notNull(),
+    title: text("title"),
+    /**
+     * The frame itself, base64 PNG.
+     *
+     * Bounded by the code that writes it rather than by the column, because the useful limit is "a
+     * screenshot" and the honest failure is a refusal at the boundary rather than a database error.
+     */
+    frame: text("frame").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.computerId, table.toolCallId] }),
+    // The reaper's query: everything older than the retention window, whoever it belongs to.
+    index("computer_page_frame_captured_idx").on(table.capturedAt),
+  ],
+);

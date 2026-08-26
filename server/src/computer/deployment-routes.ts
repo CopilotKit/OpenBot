@@ -11,4 +11,4 @@
  * Nothing in the request distinguishes the two, so a Bot that really is called `policy` would be
  * indistinguishable from the deployment route and would be served without the guard being asked.
  */
-export const DEPLOYMENT_ROUTES = new Set(["policy", "fleet"]);
+export const DEPLOYMENT_ROUTES = new Set(["policy", "fleet", "policy-dry-run"]);
