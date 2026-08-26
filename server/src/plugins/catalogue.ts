@@ -104,7 +104,8 @@ export type CatalogueEntry = {
    *
    * `deployment-bearer` is a token an administrator holds on behalf of everybody. `user-oauth` is
    * the person's own grant, where the deployment holds only the OAuth client and each person
-   * consents for themselves.
+   * consents for themselves. `builtin` is neither: there is nothing to authenticate to, because the
+   * call runs in this process against this deployment's own tables as the person whose turn it is.
    */
   auth: CatalogueAuth;
   /**

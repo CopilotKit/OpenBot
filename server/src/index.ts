@@ -47,9 +47,11 @@ import {
 import { createAttentionStore } from "./attention/store";
 import { createDatabase } from "./db/client";
 import { createPeopleStore } from "./people/store";
+import { useRoutineTools } from "./plugins/builtin-routines";
 import { redirectUriFor } from "./plugins/oauth";
 import { createPluginStore } from "./plugins/store";
 import { grantedSkills, grantedTools } from "./plugins/tools";
+import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
 import {
@@ -290,6 +292,19 @@ const pluginStore = createPluginStore({
    */
   redirectUri: config.publicUrl ? redirectUriFor(config.publicUrl) : undefined,
 });
+
+/**
+ * Routines, and the one moment its tools are told what to act on.
+ *
+ * The builtin transport is reached as a MODULE — `transportFor` maps a kind to one — so there is no
+ * constructor to hand a store to and no request-time seam either: the transport registry is built at
+ * import time, long before there is a database. So the store is installed here, once, from the place
+ * that already owns building stores. Without this call the four tools are advertised and every one of
+ * them refuses, which is the honest behaviour for a deployment that never wired it, and would be a
+ * silent outage for this one.
+ */
+const routineStore = createRoutineStore(database);
+useRoutineTools(routineStore);
 
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.policy_loaded",
