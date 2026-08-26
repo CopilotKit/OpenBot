@@ -251,6 +251,21 @@ export function createHandoffDesk(options: {
            * this, so the cap keeps counting across every pod the chain touches.
            */
           depth: depth + 1,
+          /*
+           * The asking Bot's display name, resolved here against the same roster the target was.
+           *
+           * The delivery writes one line of this into the addressed Bot's conversation, and a person
+           * reading it should see "General Assistant" rather than `general-assistant`. Resolved on
+           * this side because this is the side holding the roster; the delivery runs minutes later
+           * on another replica and would have to fetch it again.
+           */
+          ...(roster.find((profile) => profile.id === from.botId)?.name
+            ? {
+                fromName: roster.find((profile) => profile.id === from.botId)
+                  ?.name,
+              }
+            : {}),
+          toName: found.name,
           task,
           ...(envelope.constraints
             ? { constraints: envelope.constraints }

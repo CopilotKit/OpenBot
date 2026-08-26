@@ -146,6 +146,18 @@ const ROSTER_ORDER = [
 
 export type ChannelStore = {
   create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
+  /**
+   * The one conversation this person has with this Bot alone, made if they have not had one yet.
+   *
+   * FOUND BEFORE IT IS MADE, because the callers that want it are called more than once for the
+   * same pair. A hop delivered to a Bot is retried when the delivery fails, and creating here would
+   * leave a fresh empty conversation behind for every attempt: the person would open the roster to
+   * five Knowledge channels, four of them empty, and no way to tell which one holds the answer.
+   *
+   * The one it finds is the one the person already talks to that Bot in, which is also where they
+   * would look for the answer.
+   */
+  direct(actor: AgentActor, agentId: string): Promise<AgentChannel>;
   get(actor: AgentActor, channelId: string): Promise<AgentChannel | null>;
   list(actor: AgentActor, query?: ChannelQuery): Promise<ChannelPage>;
   /** Pin or unpin the caller's own membership. Throws ChannelNotFoundError for a non-member. */
@@ -201,7 +213,7 @@ export function createChannelStore(
   profileStore: AgentProfileStore,
   threadIdentity: ThreadIdentity,
 ): ChannelStore {
-  return {
+  const store: ChannelStore = {
     create(actor, agentIds) {
       return database.transaction(
         async (transaction) => {
@@ -257,6 +269,47 @@ export function createChannelStore(
         },
         { isolationLevel: "read committed" },
       );
+    },
+
+    async direct(actor, agentId) {
+      /*
+       * A channel of this person's whose whole roster is this one Bot. The count is what makes it
+       * "alone": a channel holding this Bot and another one would match an agent test on its own,
+       * and delivering into it would put the answer in front of a Bot nobody had asked.
+       */
+      const [existing] = await database
+        .select({ id: channels.id })
+        .from(channels)
+        .innerJoin(
+          channelMemberships,
+          and(
+            eq(channelMemberships.channelId, channels.id),
+            eq(channelMemberships.userId, actor.id),
+          ),
+        )
+        .innerJoin(
+          channelAgents,
+          and(
+            eq(channelAgents.channelId, channels.id),
+            eq(channelAgents.agentId, agentId),
+          ),
+        )
+        .where(
+          and(
+            isNull(channels.deletedAt),
+            sql`(select count(*) from ${channelAgents} where ${channelAgents.channelId} = ${channels.id}) = 1`,
+          ),
+        )
+        .orderBy(...ROSTER_ORDER)
+        .limit(1);
+
+      if (existing) {
+        const channel = await store.get(actor, existing.id);
+        // Null only if it was deleted between the two reads, which is a reason to make a new one
+        // rather than to fail: the caller asked for a conversation, not for that row.
+        if (channel) return channel;
+      }
+      return store.create(actor, [agentId]);
     },
 
     async get(actor, channelId) {
@@ -666,6 +719,7 @@ export function createChannelStore(
       );
     },
   };
+  return store;
 }
 
 export class ChannelNotFoundError extends Error {

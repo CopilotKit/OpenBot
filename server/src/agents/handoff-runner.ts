@@ -11,7 +11,7 @@
  * hands the same hop to a second replica and bills for it twice.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
-import type { WorkQueue } from "../work/queue";
+import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import { HANDOFF_KIND } from "./handoff";
 
 /** What a hop carries, as `handoff.ts` wrote it. */
@@ -25,6 +25,18 @@ export type HandoffWork = {
   task: string;
   constraints?: string;
   expecting?: string;
+  /** The asking Bot's display name, for the line a person reads. Absent falls back to its id. */
+  fromName?: string;
+  /** The addressed Bot's display name, for the same reason. */
+  toName?: string;
+  /**
+   * Where the answer belongs, when it is not the addressed Bot's own conversation.
+   *
+   * Set on the one kind of hop that goes backwards: telling the asking Bot, in the conversation the
+   * person is actually watching, that the Bot it asked never answered. That conversation belongs to
+   * the asking Bot, which is why it can speak in it at all.
+   */
+  answerIn?: string;
 };
 
 export type HandoffDelivery = {
@@ -39,6 +51,16 @@ export type HandoffDelivery = {
     work: HandoffWork;
     /** The message the addressed Bot sees, already attributed by the deployment. */
     message: string;
+    /**
+     * The one line of it that belongs in the transcript.
+     *
+     * TWO TEXTS, because they have two readers. The model needs the envelope: who is asking, the
+     * task, its constraints, what a good answer looks like, and an instruction about who to write
+     * for. A person scrolling their conversation with the addressed Bot needs to know why it
+     * suddenly said something, in one sentence. Persisting the envelope puts a paragraph of
+     * machine instructions in their transcript, in a bubble that looks like something they wrote.
+     */
+    shown: string;
     /** The signed statement of the run it is starting, carrying its depth. */
     assertion: string;
   }) => Promise<void>;
@@ -69,6 +91,8 @@ export function createHandoffRunner(options: {
   leaseMs?: number;
   /** How many hops one sweep will take. */
   limit?: number;
+  /** After how many tries a hop is given up on. Must match what `claim` is told. */
+  maxAttempts?: number;
 }) {
   const {
     queue,
@@ -78,7 +102,36 @@ export function createHandoffRunner(options: {
     auditStore,
     leaseMs = 60_000,
     limit = 5,
+    maxAttempts = DEFAULT_MAX_ATTEMPTS,
   } = options;
+
+  /**
+   * Put the failure in front of the person, by running the Bot that asked in the conversation they
+   * are watching.
+   *
+   * THROUGH THE SAME QUEUE, not by writing a line somewhere. The asking Bot is the only thing that
+   * can speak in that conversation, and what the person needs is a sentence in its voice saying who
+   * it asked and that nothing came back. A row written past the Bot would be a message from nobody.
+   *
+   * Marked with `answerIn`, which is also what stops this recursing: a notice that fails is not
+   * itself worth a notice, and the check above skips any hop that carries one.
+   */
+  const tell = (work: HandoffWork, reason: string) =>
+    queue.offer({
+      kind: HANDOFF_KIND,
+      // Distinct from the hop's own key, or `offer` would treat this as the same work and drop it.
+      key: `${work.runId}:notice:${work.toBotId}`,
+      payload: {
+        fromBotId: work.toBotId,
+        toBotId: work.fromBotId,
+        actorId: work.actorId,
+        threadId: work.threadId,
+        runId: work.runId,
+        depth: work.depth,
+        answerIn: work.threadId,
+        task: `You asked ${work.toBotId} to help with this and it never answered: ${reason}. Tell the person plainly that it did not come back, say what you had asked it for, and offer what you can do yourself.`,
+      } as unknown as Record<string, unknown>,
+    });
 
   return {
     /** Deliver whatever this replica can claim. */
@@ -132,10 +185,17 @@ export function createHandoffRunner(options: {
             .catch(() => {});
         }, RENEW_EVERY_MS);
 
+        /*
+         * How long the hop took, recorded either way. A hop is a run nobody is watching, so the
+         * trail is the only place its duration is visible: "delivered in 4s" and "delivered in 4m"
+         * are the same row otherwise, and the second is what a person waiting was actually shown.
+         */
+        const startedAt = Date.now();
         try {
           await delivery.deliver({
             work,
             message: attribute(work),
+            shown: summarise(work),
             assertion: sign(work),
           });
           await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
@@ -150,11 +210,30 @@ export function createHandoffRunner(options: {
               to: work.toBotId,
               run: work.runId,
               depth: work.depth,
+              ms: Date.now() - startedAt,
             },
           });
         } catch (error) {
           const reason =
             error instanceof Error ? error.message : "could not be delivered";
+          /*
+           * The last try, so the person is told rather than left waiting.
+           *
+           * Enqueued before the release, because the release is what makes this attempt the last
+           * one: after it the row will never be claimed again and nothing else will ever look at
+           * this hop. A person who was told their question had been handed on, and then hears
+           * nothing for ever, has no way to tell a slow Bot from a broken one.
+           */
+          if (item.attempts >= maxAttempts && !work.answerIn) {
+            await tell(work, reason).catch((failure) => {
+              // A notice that cannot be queued must not take the release with it: leaving the row
+              // claimed would be worse than a hop nobody was told about.
+              console.warn(
+                "Could not queue the notice for a hop that failed for good.",
+                failure,
+              );
+            });
+          }
           /*
            * Released and pushed out rather than dropped. The work still wants doing, and whatever
            * refused it once will probably refuse it again in the next second.
@@ -178,6 +257,7 @@ export function createHandoffRunner(options: {
               run: work.runId,
               attempt: item.attempts,
               reason,
+              ms: Date.now() - startedAt,
             },
           });
         } finally {
@@ -202,6 +282,17 @@ export function createHandoffRunner(options: {
  * and flattening them back into prose here would throw that away at the last step.
  */
 function attribute(work: HandoffWork): string {
+  /*
+   * A notice is not a request for help, and must not read as one.
+   *
+   * This one goes to the Bot that ASKED, in the conversation it is already in, and its whole content
+   * is what became of the hop. Dressed in the wording below it would tell a Bot that the Bot it
+   * asked has now asked it for something, which is the beginning of a loop rather than the end of
+   * one.
+   */
+  if (work.answerIn) {
+    return `${work.task}\n\nSay this in your own words to the person in this conversation, in a sentence or two. Do not hand it to another Bot.`;
+  }
   const lines = [
     `${work.fromBotId} has asked you to help with this, on behalf of the person in this conversation.`,
     "",
@@ -215,4 +306,17 @@ function attribute(work: HandoffWork): string {
     "Answer in this conversation as yourself. The person can see it, so write it for them rather than for the Bot that asked.",
   );
   return lines.join("\n");
+}
+
+/**
+ * The same hop, in one line, for the person who will scroll past it.
+ *
+ * They did not send this and it is not addressed to them: their conversation with one Bot has a
+ * message in it because a different Bot asked for something. So it says exactly that, and leaves the
+ * constraints and the shape-of-answer notes out. Those are instructions to a model, and reading
+ * somebody else's instructions to a model is how a transcript stops being a conversation.
+ */
+function summarise(work: HandoffWork): string {
+  if (work.answerIn) return work.task;
+  return `${work.fromName ?? work.fromBotId} asked ${work.toName ?? work.toBotId} for this on your behalf: ${work.task}`;
 }

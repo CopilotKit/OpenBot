@@ -84,9 +84,10 @@ export function handoffTool(options: {
     ref: `bot/${HANDOFF_TOOL}`,
     description:
       "Hand a piece of work to another Bot in this workspace and let it answer for itself. " +
-      "Use this when the work needs a role you do not have. The other Bot answers in this " +
-      "conversation as a separate message, so do not wait for it or repeat what it will say: " +
-      "tell the person who you have asked and what for. If the work is yours to do, do it.",
+      "Use this when the work needs a role you do not have. The other Bot answers in its own " +
+      "conversation with this person, so do not wait for it or repeat what it will say: tell them " +
+      "who you have asked and what for. If the work is yours to do, do it, and if it needs a " +
+      "person's judgement rather than another Bot's, ask the person instead.",
     parameters,
     execute: async (args: unknown) => {
       const parsed = parameters.safeParse(args);
@@ -115,7 +116,7 @@ export function handoffTool(options: {
        * way, and the model is owed something it can say out loud.
        */
       return outcome.ok
-        ? `${HANDED_OVER}${outcome.toName}. It will answer in this conversation as its own message, so tell the person you have asked it and what for, and do not answer on its behalf.`
+        ? `${HANDED_OVER}${outcome.toName}. It will answer in its own conversation with this person, so tell them you have asked it and what for, and do not answer on its behalf.`
         : outcome.refusal;
     },
   };

@@ -31,6 +31,7 @@ function runner(options?: {
   const calls: Array<{ verb: string; key: string; owner?: string }> = [];
   const events: string[] = [];
   const delivered: Array<{ message: string; assertion: string }> = [];
+  const offered: HandoffWork[] = [];
 
   const queue = {
     claim: async () =>
@@ -46,6 +47,16 @@ function runner(options?: {
       calls.push({ verb: "release", key, owner });
       return true;
     },
+    offer: async ({
+      key,
+      payload,
+    }: {
+      key: string;
+      payload?: Record<string, unknown>;
+    }) => {
+      calls.push({ verb: "offer", key });
+      offered.push(payload as unknown as HandoffWork);
+    },
   } as unknown as WorkQueue;
 
   const auditStore: AuditStore = {
@@ -58,6 +69,7 @@ function runner(options?: {
     calls,
     events,
     delivered,
+    offered,
     runner: createHandoffRunner({
       queue,
       owner: "replica-a",
@@ -167,5 +179,80 @@ describe("delivering a hop", () => {
     expect(calls).toEqual([
       { verb: "finish", key: "run-1:junk", owner: "replica-a" },
     ]);
+  });
+});
+
+/**
+ * A hop that will not be tried again.
+ *
+ * The person was told their question had been handed on. If nothing ever comes back and nothing ever
+ * says so, they cannot tell a slow Bot from a broken one, and the conversation simply stops.
+ */
+describe("a hop that failed for good", () => {
+  test("the Bot that asked is sent back to tell the person", async () => {
+    const { runner: sweeper, offered } = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 5 },
+      ] as unknown as WorkItem[],
+      deliver: async () => {
+        throw new Error("researcher did not finish within 300s");
+      },
+    });
+
+    await sweeper.sweep();
+
+    expect(offered).toHaveLength(1);
+    // Back to the Bot that asked, in the conversation the person is watching.
+    expect(offered[0]).toMatchObject({
+      fromBotId: "researcher",
+      toBotId: "assistant",
+      answerIn: "thread-1",
+      threadId: "thread-1",
+    });
+    expect(offered[0]?.task).toContain("did not finish within 300s");
+  });
+
+  /*
+   * Otherwise a Bot nobody can reach produces a notice that cannot be delivered either, which
+   * produces a notice, for ever.
+   */
+  test("a notice that fails is not itself noticed", async () => {
+    const { runner: sweeper, offered } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:notice:researcher",
+          payload: { ...WORK, answerIn: "thread-1" },
+          attempts: 5,
+        },
+      ] as unknown as WorkItem[],
+      deliver: async () => {
+        throw new Error("nope");
+      },
+    });
+
+    await sweeper.sweep();
+
+    expect(offered).toEqual([]);
+  });
+
+  test("a hop with tries left is simply released", async () => {
+    const {
+      runner: sweeper,
+      offered,
+      calls,
+    } = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 2 },
+      ] as unknown as WorkItem[],
+      deliver: async () => {
+        throw new Error("busy");
+      },
+    });
+
+    await sweeper.sweep();
+
+    expect(offered).toEqual([]);
+    expect(calls.map((call) => call.verb)).toContain("release");
   });
 });

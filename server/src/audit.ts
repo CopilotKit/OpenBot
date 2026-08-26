@@ -363,6 +363,18 @@ export const auditEventTypes = [
   "agent.handoff_delivered",
   "agent.handoff_failed",
   "agent.handoff_retried",
+  /*
+   * A Bot asking a person instead.
+   *
+   * The counterpart to the rows above, and the one that says a chain stopped on purpose. Without it
+   * a Bot that correctly refused to guess looks identical to one that ran out of things to try: both
+   * end in a sentence to the person and neither leaves a trace of the decision.
+   *
+   * `agent.escalation_failed` is a question that reached nobody. It is the row worth finding later:
+   * the Bot stopped, the person was never asked, and nothing else anywhere says so.
+   */
+  "agent.escalated",
+  "agent.escalation_failed",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

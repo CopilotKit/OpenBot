@@ -435,11 +435,11 @@ async function buildAgent(
        * deployment's own statement rather than anything the model can edit. A request is earlier
        * than a run and knows neither.
        */
-      const passing = (await handoff?.(agent.id, input)) ?? null;
-      const tools = passing ? [...offered, passing] : offered;
+      const passing = (await handoff?.(agent.id, input)) ?? [];
+      const tools = passing.length > 0 ? [...offered, ...passing] : offered;
       // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already
       // built for this request keeps that path allocation-for-allocation what it was.
-      return tools.length === granted.length && !passing
+      return tools.length === granted.length && passing.length === 0
         ? whole
         : withTools(tools);
     },
@@ -447,18 +447,20 @@ async function buildAgent(
 }
 
 /**
- * How a run gets its tool for handing work to another Bot, or does not.
+ * The tools a run gets for reaching past itself: handing work to another Bot, and asking a person.
  *
- * Given the Bot and the run, because the answer depends on both: which Bots this one has been
- * granted, and how deep the chain it is already part of has gone. Null means this run is not offered
- * the tool at all, which is the right shape for a deployment with the capability switched off, a Bot
- * nobody granted anybody to, and a run already at the cap. A model offered a tool whose every call
- * would be refused spends attention on it and tells the person it tried.
+ * Given the Bot and the run, because the answers depend on both: which Bots this one has been
+ * granted, and how deep the chain it is already part of has gone. Empty means this run reaches
+ * nobody, which is the right shape for a deployment with the capability switched off.
+ *
+ * The two arrive together because a model chooses between them. Offering the way to hand work
+ * sideways without the way to stop and ask leaves the model one exit from a decision it cannot make,
+ * and it takes it: it asks a Bot that cannot settle the question either.
  */
 export type HandoffForRun = (
   botId: string,
   input: RunAgentInput,
-) => Promise<GrantedTool | null>;
+) => Promise<readonly GrantedTool[]>;
 
 /**
  * How a deployment narrows a Bot's tools to the ones a run is about. Absent means it does not.
@@ -954,6 +956,14 @@ class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
   }
 }
 
+/**
+ * How long a conversation's lock is held before it lapses on its own.
+ *
+ * Matches the platform's own default rather than picking a number: this is renewed while a Bot works,
+ * so what it really sets is how long a conversation stays stuck after a process dies mid-run.
+ */
+const THREAD_LOCK_TTL_SECONDS = 120;
+
 export function mountCopilotRuntime(
   config: DeploymentConfig,
   model: RuntimeModel,
@@ -1074,6 +1084,57 @@ export function mountCopilotRuntime(
       url: intelligenceClient.ɵgetRunnerWsUrl(),
       authToken: intelligenceClient.ɵgetRunnerAuthToken(),
     }),
+    /**
+     * The conversation's run lock, as the platform issues it.
+     *
+     * ONE RUN AT A TIME PER CONVERSATION. Taken before anything is streamed, because the gateway
+     * checks every event against the run the lock names: a run that skips this is claiming to be one
+     * nobody was told about, and every event is refused. That refusal reads like a platform
+     * limitation and is a missing step.
+     *
+     * A conversation somebody else is already running in refuses rather than queues, which is right:
+     * the caller waits and tries again rather than two Bots writing over each other.
+     */
+    threadLock: {
+      acquire: async (input: {
+        threadId: string;
+        runId: string;
+        userId: string;
+        agentId: string;
+      }) => {
+        try {
+          const held = await intelligenceClient.ɵacquireThreadLock(input);
+          /*
+           * The run id only. The lock also hands back a join token, which is what a browser presents
+           * to watch the conversation; the runner's socket has its own credential and passing this
+           * one in place of it means a socket that is refused and a run that never starts. See the
+           * note on `runner.run` in handoff-delivery.ts.
+           */
+          return { runId: held.runId };
+        } catch (error) {
+          /*
+           * Both mean "not now" to the caller, and they are not the same thing to a person reading
+           * the logs. A conversation somebody is already in is ordinary and self-clearing; a platform
+           * that cannot be reached is an outage, and collapsing the two silently is how an outage
+           * spends a day looking like ordinary contention.
+           */
+          console.warn(
+            `[handoff] could not take the lock on ${input.threadId}:`,
+            error instanceof Error ? error.message : error,
+          );
+          return null;
+        }
+      },
+      renew: async (input: { threadId: string; runId: string }) => {
+        await intelligenceClient.ɵrenewThreadLock({
+          ...input,
+          ttlSeconds: THREAD_LOCK_TTL_SECONDS,
+        });
+      },
+      release: async (input: { threadId: string; runId: string }) => {
+        await intelligenceClient.ɵcleanupThreadLock(input);
+      },
+    },
     agentFor,
     /**
      * A thread's messages, as the platform holds them.

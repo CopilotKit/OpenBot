@@ -3,6 +3,7 @@ import { IntelligenceAgentRunner } from "@copilotkit/runtime/v2";
 import { serve } from "bun";
 import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
+import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
 import { createHandoffDesk } from "./agents/handoff";
 import { createHandoffDelivery } from "./agents/handoff-delivery";
 import { createHandoffRunner } from "./agents/handoff-runner";
@@ -560,7 +561,7 @@ const copilotRuntime = mountCopilotRuntime(
     },
   }),
   /*
-   * The tool one Bot uses to hand work to another, made per run and per person.
+   * What a Bot may reach past itself for: another Bot, and a person. Made per run and per person.
    *
    * Per person because which Bots may be reached is decided against the roster that person can
    * see: a Bot must never be able to address one they cannot, or this becomes a way around agent
@@ -574,24 +575,25 @@ const copilotRuntime = mountCopilotRuntime(
         ?.openbotRun,
       config.keyEncryptionKey,
     );
-    return handoffTool({
+    const run = {
+      botId,
+      actorId,
+      runId: input.runId,
+      threadId: input.threadId,
+      depth: from?.depth ?? 0,
+    };
+    const passing = handoffTool({
       desk: handoffDesk,
-      from: {
-        botId,
-        actorId,
-        runId: input.runId,
-        threadId: input.threadId,
-        /*
-         * How deep this run already is, from the assertion the deployment signed when it handed
-         * this work on. A run a person started carries none, and none means zero.
-         *
-         * NOT `from.botId`. The assertion proves what this run is, and the Bot is whichever one the
-         * runtime is building right now: on a hop those agree, and taking the id from the signed
-         * value rather than from the build would let a stale assertion aim the next hop at the
-         * wrong Bot's grants.
-         */
-        depth: from?.depth ?? 0,
-      },
+      /*
+       * How deep this run already is comes from the assertion the deployment signed when it handed
+       * this work on. A run a person started carries none, and none means zero.
+       *
+       * NOT `from.botId`. The assertion proves what this run is, and the Bot is whichever one the
+       * runtime is building right now: on a hop those agree, and taking the id from the signed
+       * value rather than from the build would let a stale assertion aim the next hop at the
+       * wrong Bot's grants.
+       */
+      from: run,
       // Read now rather than at boot, so a grant made a minute ago counts and one revoked a
       // minute ago stops counting.
       hasSomebodyToAsk:
@@ -599,6 +601,20 @@ const copilotRuntime = mountCopilotRuntime(
           .length > 0,
       maxDepth: config.handoff.maxDepth,
     });
+    /*
+     * The way to stop and ask is offered whether or not there is a Bot to hand to.
+     *
+     * It is the cheaper of the two and the one a Bot should reach for first: asking the person who
+     * is already in the conversation spends nothing and cannot be aimed anywhere they cannot see.
+     * A deployment that offered only the expensive exit would push every unanswerable question
+     * sideways into another run.
+     */
+    const asking = escalationTool({
+      from: run,
+      route: askTheirOwnPerson,
+      auditStore: bootAuditStore,
+    });
+    return passing ? [passing, asking] : [asking];
   },
 );
 
@@ -636,6 +652,32 @@ if (config.handoff.maxDepth > 0) {
     delivery: createHandoffDelivery({
       agentFor: copilotRuntime.agentFor,
       history: copilotRuntime.history,
+      lock: copilotRuntime.threadLock,
+      /*
+       * A conversation of the addressed Bot's own, with the same person.
+       *
+       * An Intelligence thread has exactly one agent, so a second Bot cannot answer inside the first
+       * Bot's conversation however it asks. Rather than pretend otherwise, the answer lands where
+       * that Bot can speak and the conversation that asked says where it went.
+       */
+      answerIn: async (input) => {
+        // The conversation this person already has with that Bot, made only if they have not had
+        // one. See ChannelStore.direct: a hop is retried, and creating here left an empty channel
+        // behind for every attempt.
+        const channel = await channelStore.direct(
+          { id: input.actorId, role: "user" },
+          input.botId,
+        );
+        return { threadId: channel.threadId, channelId: channel.id };
+      },
+      // The roster is written by whoever finished a run, and for a hop that is this server rather
+      // than a browser. See ChannelStore.recordActivity.
+      announce: async (input) =>
+        channelStore.recordActivity(
+          { id: input.actorId, role: "user" },
+          input.channelId,
+          { text: input.text, agentId: input.agentId, at: new Date() },
+        ),
       newRunId: () => randomUUID(),
       // The same address and the same token the runtime uses. Assembling either from configuration
       // produced a runner every join was refused for, because the thread's active run is a lock the

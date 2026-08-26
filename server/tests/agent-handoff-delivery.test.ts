@@ -29,20 +29,50 @@ const PRIOR: Message[] = [
 function delivery(
   events: BaseEvent[],
   agent: AbstractAgent | null = {} as AbstractAgent,
+  lockHeld = true,
+  options: { history?: readonly unknown[]; deadlineMs?: number } = {},
 ) {
-  const requests: Array<{ threadId: string; input: Record<string, unknown> }> =
-    [];
+  const requests: Array<{
+    threadId: string;
+    input: Record<string, unknown>;
+    persistedInputMessages?: readonly unknown[];
+  }> = [];
+  const lockCalls: string[] = [];
+  const released: string[] = [];
   return {
     requests,
+    lockCalls,
+    released,
     delivery: createHandoffDelivery({
+      ...(options.deadlineMs === undefined
+        ? {}
+        : { deadlineMs: options.deadlineMs }),
       agentFor: async () => agent,
-      history: async () => PRIOR,
+      history: async () => options.history ?? PRIOR,
       newRunId: () => "run-2",
+      answerIn: async () => ({ threadId: "answer-thread" }),
+      lock: {
+        acquire: async () => {
+          lockCalls.push("acquire");
+          // The platform's own run id, not the one asked for.
+          return lockHeld ? { runId: "platform-run" } : null;
+        },
+        renew: async () => {
+          lockCalls.push("renew");
+        },
+        release: async (input) => {
+          lockCalls.push("release");
+          released.push(input.threadId);
+        },
+      },
       runner: {
         run: (request) => {
           requests.push({
             threadId: request.threadId,
             input: request.input as Record<string, unknown>,
+            ...(request.persistedInputMessages
+              ? { persistedInputMessages: request.persistedInputMessages }
+              : {}),
           });
           return new Observable<BaseEvent>((subscriber) => {
             for (const event of events) subscriber.next(event);
@@ -63,6 +93,7 @@ describe("turning a hop into a turn", () => {
     await deliver.deliver({
       work: WORK,
       message: "assistant has asked you to help",
+      shown: "Assistant asked Researcher for this on your behalf: find it",
       assertion: "signed",
     });
 
@@ -82,13 +113,15 @@ describe("turning a hop into a turn", () => {
     await deliver.deliver({
       work: WORK,
       message: "m",
+      shown: "s",
       assertion: "signed-assertion",
     });
 
     expect(requests[0]?.input.forwardedProps).toEqual({
       openbotRun: "signed-assertion",
     });
-    expect(requests[0]?.threadId).toBe("thread-1");
+    // The addressed Bot's own conversation, because a thread has exactly one agent.
+    expect(requests[0]?.threadId).toBe("answer-thread");
   });
 
   /*
@@ -101,7 +134,7 @@ describe("turning a hop into a turn", () => {
     ] as unknown as BaseEvent[]);
 
     await expect(
-      deliver.deliver({ work: WORK, message: "m", assertion: "s" }),
+      deliver.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
     ).rejects.toThrow("the model refused");
   });
 
@@ -109,7 +142,250 @@ describe("turning a hop into a turn", () => {
     const { delivery: deliver } = delivery(FINISHED, null);
 
     await expect(
-      deliver.deliver({ work: WORK, message: "m", assertion: "s" }),
+      deliver.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
     ).rejects.toThrow("researcher");
+  });
+});
+
+/**
+ * The conversation's run lock.
+ *
+ * ONE RUN AT A TIME, and the gateway checks every streamed event against the run the lock names. A
+ * delivery that skips this is claiming to be a run nobody was told about, so every event is refused
+ * and the refusal reads like a platform limitation rather than a missing step. It was one.
+ */
+describe("holding the conversation while a Bot answers", () => {
+  test("the lock is taken before anything is streamed, and given back after", async () => {
+    const { delivery: deliver, lockCalls } = delivery(FINISHED);
+
+    await deliver.deliver({
+      work: WORK,
+      message: "m",
+      shown: "s",
+      assertion: "s",
+    });
+
+    expect(lockCalls[0]).toBe("acquire");
+    expect(lockCalls.at(-1)).toBe("release");
+  });
+
+  test("the run uses the platform's own run id", async () => {
+    const { delivery: deliver, requests } = delivery(FINISHED);
+
+    await deliver.deliver({
+      work: WORK,
+      message: "m",
+      shown: "s",
+      assertion: "s",
+    });
+
+    // The platform's id, not the one asked for: it is what the gateway checks every event against.
+    expect(requests[0]?.input.runId).toBe("platform-run");
+  });
+
+  /*
+   * A person mid-question, or the asking Bot still finishing its own sentence, is a wait rather than
+   * a failure. The hop goes back on the queue and is tried again.
+   */
+  test("a conversation somebody else is running in is waited for, not failed", async () => {
+    const { delivery: deliver, requests } = delivery(
+      FINISHED,
+      {} as never,
+      false,
+    );
+
+    await expect(
+      deliver.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
+    ).rejects.toThrow("busy");
+    expect(requests).toEqual([]);
+  });
+
+  /*
+   * Left held, the conversation is unusable by anybody until it expires: the person cannot ask a
+   * follow-up and the next hop is refused. One failed delivery would stop the conversation working.
+   */
+  test("the lock is given back even when the run fails", async () => {
+    const { delivery: deliver, lockCalls } = delivery([
+      { type: "RUN_ERROR", message: "the model refused" },
+    ] as unknown as BaseEvent[]);
+
+    await expect(
+      deliver.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
+    ).rejects.toThrow();
+    expect(lockCalls).toContain("release");
+  });
+});
+
+/**
+ * Where an answer can land, which the platform decides rather than this code.
+ *
+ * An Intelligence thread is owned by exactly one agent. A second Bot answering inside the first
+ * Bot's conversation is refused however it asks, so the answer goes where that Bot can speak.
+ */
+describe("which conversation the answer lands in", () => {
+  test("the addressed Bot's own, not the one that asked", async () => {
+    const { delivery: deliver, requests } = delivery(FINISHED);
+
+    await deliver.deliver({
+      work: WORK,
+      message: "m",
+      shown: "s",
+      assertion: "s",
+    });
+
+    expect(requests[0]?.threadId).toBe("answer-thread");
+    expect(requests[0]?.input.threadId).toBe("answer-thread");
+  });
+
+  test("but it reads the conversation that asked", async () => {
+    const { delivery: deliver, requests } = delivery(FINISHED);
+
+    await deliver.deliver({
+      work: WORK,
+      message: "m",
+      shown: "s",
+      assertion: "s",
+    });
+
+    // Its own conversation is new and empty; reading that would tell it nothing.
+    const messages = requests[0]?.input.messages as Array<{ id: string }>;
+    expect(messages.map((m) => m.id).slice(0, 2)).toEqual(["m1", "m2"]);
+  });
+});
+
+/**
+ * What crosses a hop.
+ *
+ * A thread's stored history is what a person is shown, not a prompt: the assistant message that made
+ * a tool call is not kept, so the result of that call is stored on its own with a `toolCallId`
+ * matching nothing. The asking Bot's last act is always the call that handed the work on, so every
+ * hop carried one of these and every delivery hung on it.
+ */
+describe("the conversation that crosses a hop", () => {
+  test("the asking Bot's tool traffic is left behind", async () => {
+    const { delivery: deliver, requests } = delivery(
+      FINISHED,
+      undefined,
+      true,
+      {
+        history: [
+          { id: "m1", role: "user", content: "ask the researcher" },
+          // The orphan: a result whose call was never kept.
+          {
+            id: "m2",
+            role: "tool",
+            toolCallId: "call_1",
+            content: '"Handed to Researcher."',
+          },
+          // A tool call and nothing else, which is the other half of the same pair.
+          { id: "m3", role: "assistant", content: "" },
+          { id: "m4", role: "assistant", content: "I have asked them." },
+        ],
+      },
+    );
+
+    await deliver.deliver({
+      work: WORK,
+      message: "the ask",
+      shown: "one line",
+      assertion: "s",
+    });
+
+    const messages = requests[0]?.input.messages as Message[];
+    expect(messages.map((message) => message.id)).toEqual([
+      "m1",
+      "m4",
+      `handoff-platform-run`,
+    ]);
+  });
+});
+
+/**
+ * A hop nobody is watching.
+ *
+ * On a person's own run there is somebody who can reload the page. A hop that never finishes holds
+ * the conversation's lock and its place on the queue for as long as the process lives, and the
+ * person waits on an answer that is not coming.
+ */
+describe("a delivery that never finishes", () => {
+  test("is given up on, and says so", async () => {
+    const { delivery: deliver, lockCalls } = delivery(
+      [],
+      { runAgent: () => new Promise(() => {}) } as unknown as AbstractAgent,
+      true,
+      { deadlineMs: 20 },
+    );
+    // A run that emits nothing and never completes, which is what a stalled Bot looks like.
+    const stalled = createHandoffDelivery({
+      deadlineMs: 20,
+      agentFor: async () =>
+        ({ runAgent: async () => {} }) as unknown as AbstractAgent,
+      history: async () => PRIOR,
+      newRunId: () => "run-2",
+      answerIn: async () => ({ threadId: "answer-thread" }),
+      lock: {
+        acquire: async () => ({ runId: "platform-run" }),
+        renew: async () => {},
+        release: async () => {
+          lockCalls.push("release");
+        },
+      },
+      runner: { run: () => new Observable<BaseEvent>(() => {}) },
+    });
+
+    await expect(
+      stalled.deliver({ work: WORK, message: "m", shown: "s", assertion: "s" }),
+    ).rejects.toThrow("did not finish within");
+    // Given back, or the conversation stays unusable until the lock expires.
+    expect(lockCalls).toContain("release");
+    void deliver;
+  });
+
+  test("the lock is given back on the conversation it was taken on", async () => {
+    const { delivery: deliver, released } = delivery(FINISHED);
+
+    await deliver.deliver({
+      work: WORK,
+      message: "m",
+      shown: "s",
+      assertion: "s",
+    });
+
+    // Not `thread-1`, which is the conversation that ASKED and whose lock this run never held.
+    expect(released).toEqual(["answer-thread"]);
+  });
+});
+
+/**
+ * What the conversation keeps.
+ *
+ * The person did not send the ask and it is not addressed to them: their conversation with one Bot
+ * has a message in it because another Bot asked for something. Persisting the whole prompt puts the
+ * asking conversation's history into a second conversation, and a paragraph of instructions to a
+ * model into a bubble that looks like something they typed.
+ */
+describe("what a hop leaves in the transcript", () => {
+  test("is the one line, not the prompt", async () => {
+    const { delivery: deliver, requests } = delivery(FINISHED);
+
+    await deliver.deliver({
+      work: WORK,
+      message: "assistant has asked you to help\n\nTask: ...\nConstraints: ...",
+      shown: "Assistant asked Researcher for this on your behalf: find it",
+      assertion: "s",
+    });
+
+    expect(requests[0]?.persistedInputMessages).toEqual([
+      {
+        id: "handoff-platform-run",
+        role: "user",
+        content: "Assistant asked Researcher for this on your behalf: find it",
+      },
+    ]);
+    // The model still gets the whole envelope, and the conversation that asked.
+    const messages = requests[0]?.input.messages as Message[];
+    expect(messages.at(-1)).toMatchObject({
+      content: expect.stringContaining("Task:"),
+    });
   });
 });
