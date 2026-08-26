@@ -133,8 +133,8 @@ The shipped component data functions read the audit trail: `botActivity` and `re
 
 ## One Bot handing work to another
 
-A Bot can address another Bot, and the addressed one answers for itself in the same conversation
-rather than the first relaying text on its behalf.
+A Bot can address another Bot, and the addressed one answers for itself rather than the first
+relaying text on its behalf.
 
 `message_bot` is offered beside a Bot's granted tools, so which Bots may reach which is an ordinary
 grant: `plugin_grants` with a `bot` kind. A Bot granted nobody is offered nothing.
@@ -160,6 +160,22 @@ Four things are decided by the deployment and never by the model:
 The second Bot runs as the same person, with its own role and its own grants, so it sees what that
 person may see and no more.
 
+**The answer lands in that Bot's own conversation with the person.** Not the conversation that asked,
+and this is a property of the platform rather than a choice: an Intelligence thread is owned by
+exactly one agent. So the conversation that asked says where the work went, and the one that answers
+moves to the top of the roster with an unread mark. The person gets both halves.
+
+What the answering conversation keeps is one line saying who asked and what for, not the envelope.
+Those are two texts with two readers: the model needs the task, the constraints and the shape of a
+good answer, while a person scrolling needs to know why that Bot suddenly spoke. The asking
+conversation's history is read by the addressed Bot as context and is not repeated into the
+transcript.
+
+**A hop that fails for good is said out loud.** When one runs out of attempts, the asking Bot is sent
+back into the conversation the person is watching to say plainly that nothing came back. Otherwise a
+question handed on and never answered is indistinguishable from a slow one, and the conversation just
+stops.
+
 **A hop is claimed work, not a callback.** It is a row on the same queue the idle-computer culler
 uses: the Bot being addressed is very unlikely to be on the pod that addressed it, and a hop held in
 memory is lost the moment either is rescheduled. Every replica sweeps for hops and the queue decides
@@ -175,6 +191,23 @@ the delivery loop does not run.
 Every outcome is in the audit trail: offered, refused with which cap or missing grant stopped it,
 delivered, failed, and retried. The refused row is the one that matters most, because a hop that
 happened is visible in the transcript and one that was refused is invisible everywhere else.
+
+### Asking a person
+
+`ask_person` sits beside `message_bot` and competes with it for the same decision. A Bot that needs
+judgement it does not have should stop and ask rather than guess or hand the question sideways to a
+Bot that cannot settle it either; a model with no named way to stop takes one of the two it has.
+
+It is offered to every run whether or not that Bot has been granted anybody. Reaching a second Bot
+spends a model call, may wake a computer and can fan out; asking the person already in the
+conversation costs nothing and cannot be aimed anywhere they cannot see. A deployment able to switch
+off the safe exit and keep the expensive one would be backwards.
+
+Who "a person" is, is a seam. This template answers the person in the conversation, which is the only
+answer a template can give honestly; a company has an on-call rota or a duty desk, and that is a
+route the deployment hands in rather than a channel post written into the tool. `agent.escalated`
+records the question and why it needed a person; `agent.escalation_failed` records one that reached
+nobody, which is the row worth finding later.
 
 ## MCP and skills
 
