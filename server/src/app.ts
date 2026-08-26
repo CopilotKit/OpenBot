@@ -644,6 +644,42 @@ export function createApp(
        * differently than a deployment with a worker and a wrong key would.
        */
       if (!expected || !offered || !sameToken(offered, expected)) {
+        /*
+         * Recorded, because this is a boundary being held and every other one here leaves a row. A
+         * worker with a stale or missing secret used to fail here in total silence: every routine
+         * stopped firing and nothing anywhere said why, the same false negative `mcp.callback_refused`
+         * exists to catch on the sibling unauthenticated boundary above.
+         *
+         * The reason is short and lives only in the row, never on the wire: the response below stays
+         * byte-identical across all three causes on purpose (see the comment above), so this is the
+         * one place the distinction is allowed to exist. The offered credential itself is never
+         * recorded, not even a fragment of it.
+         */
+        if (auditStore) {
+          try {
+            await recordAuditEvent(auditStore, {
+              eventType: "routines.dispatch_refused",
+              targetType: "worker",
+              payload: {
+                reason: !expected
+                  ? "unconfigured"
+                  : !offered
+                    ? "missing-header"
+                    : "mismatch",
+                note: "A worker's bearer secret did not check out, so no routine run was dispatched.",
+              },
+            });
+          } catch (error) {
+            // Never fatal: the 401 above is already decided and sent. A trail that is briefly
+            // unavailable is not a reason to turn a refusal into a 500.
+            console.error(
+              JSON.stringify({
+                type: "routine-dispatch-audit-write-failed",
+                error: String(error),
+              }),
+            );
+          }
+        }
         return context.json({ error: "This endpoint is the worker's." }, 401);
       }
       const body = await context.req.json().catch(() => null);
