@@ -43,6 +43,7 @@ spec:
           restartPolicy: Never
           serviceAccountName: {{ include "openbot.serviceAccountName" . }}
           {{- /* This sweep reads the database and posts to the API; it never asks the cluster for anything, so it gets no token. */}}
+          automountServiceAccountToken: false
           {{- with .Values.imagePullSecrets }}
           imagePullSecrets:
 {{ toYaml . | indent 12 }}

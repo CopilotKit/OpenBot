@@ -275,3 +275,22 @@ This template renders nothing.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- /*
+  The same requirement, for the worker's shared secret.
+
+  `secret.yaml`, where `WORKER_SHARED_SECRET` would otherwise be required into existence, is skipped
+  entirely when `externalSecrets.enabled` — that Secret is the store's to create, not this chart's.
+  So a cloud operator who turns on `routines.enabled` without adding this key to
+  `externalSecrets.data` gets a clean install: the API server and the CronJob both reference a key
+  that is never coming, and every pod that mounts it fails to start. Checked the same way as
+  `managed-agent-token` and `better-auth-secret` above: the value is not readable at template time,
+  but the list of keys is, and a store that never mentions this key cannot be holding one.
+*/}}
+{{- if and .Values.routines.enabled .Values.externalSecrets.enabled }}
+{{- $named := list }}
+{{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
+{{- if not (has "worker-shared-secret" $named) }}
+{{- fail "routines.enabled but externalSecrets.data does not name worker-shared-secret. The API server reads it to recognise the worker and the CronJob reads it to be one, so every pod that mounts it fails to start." }}
+{{- end }}
+{{- end }}
