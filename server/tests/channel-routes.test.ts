@@ -1255,14 +1255,14 @@ describe("channel read markers", () => {
     );
   });
 
-  test("still stamps a read on a soft-deleted channel, mirroring setPinned", async () => {
+  test("refuses to mark a soft-deleted channel read, mirroring setPinned", async () => {
     const { reader, channelId } = await sharedChannel();
 
     await persistentStore.softDelete(reader, channelId);
 
     await expect(
       persistentStore.markRead(reader, channelId),
-    ).resolves.toBeUndefined();
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
 
     const [row] = await database
       .select({ lastReadAt: channelMemberships.lastReadAt })
@@ -1273,7 +1273,8 @@ describe("channel read markers", () => {
           eq(channelMemberships.userId, reader.id),
         ),
       );
-    expect(row?.lastReadAt).not.toBeNull();
+    // The membership row outlives the channel, but its marker was never stamped.
+    expect(row?.lastReadAt).toBeNull();
   });
 });
 

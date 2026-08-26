@@ -504,6 +504,16 @@ export function createChannelStore(
           and(
             eq(channelMemberships.channelId, channelId),
             eq(channelMemberships.userId, actor.id),
+            // A deleted channel is not there to read. The same guard `setPinned` carries, for the
+            // same reason: the row is gone from every roster, so nothing about it is markable.
+            exists(
+              database
+                .select({ one: sql`1` })
+                .from(channels)
+                .where(
+                  and(eq(channels.id, channelId), isNull(channels.deletedAt)),
+                ),
+            ),
           ),
         )
         .returning({ channelId: channelMemberships.channelId });
