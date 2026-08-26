@@ -84,11 +84,14 @@ export type RoutineSummary = {
   agentId: string;
   instruction: string;
   /**
-   * The schedule in words — "Weekdays at 09:00" — never the cron expression.
+   * The schedule in words — "Weekdays at 09:00" — for the shapes `describeCron` recognizes, and
+   * the raw five-field expression for everything else. Prose where prose is possible; never a
+   * value the client is expected to parse.
    *
-   * The client never parses a schedule. A cron string on the wire is an invitation for the browser
-   * to grow a second, disagreeing parser, and for the page to render one thing while the sweep does
-   * another.
+   * Rendering cron exhaustively in English needs a real cron-description library, which this does
+   * not carry. So a consumer must treat this as opaque display text: show it, never parse it, and
+   * never compute a time from it. The authoritative next firing is `nextRunAt`, which the store
+   * and the sweep both derive from the expression itself.
    */
   schedule: string;
   timezone: string;

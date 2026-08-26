@@ -110,6 +110,21 @@ describe("describeCron", () => {
 
   test("step minutes", () => {
     expect(describeCron("*/20 * * * *")).toBe("Every 20 minutes");
+    expect(describeCron("*/15 * * * *")).toBe("Every 15 minutes");
+  });
+
+  // Cron minute steps restart every hour, so */40 does not actually fire every 40 minutes: it
+  // fires at :00 and :40 past each hour, a 20-minute gap the second time round. "Every 40 minutes"
+  // would be false prose, so a step that does not divide the hour evenly falls back to the raw
+  // expression rather than claim a cadence the schedule does not keep.
+  test("a step that does not evenly divide the hour falls through to the raw expression", () => {
+    expect(describeCron("*/40 * * * *")).toBe("*/40 * * * *");
+  });
+
+  // */1 is reachable through the exported function even though the create-time floor refuses it,
+  // and "Every 1 minutes" is bad grammar besides. A step of 1 falls back to the raw expression.
+  test("a step of exactly 1 minute falls through to the raw expression", () => {
+    expect(describeCron("*/1 * * * *")).toBe("*/1 * * * *");
   });
 
   test("a comma list of plain minutes on one hour", () => {
@@ -118,6 +133,14 @@ describe("describeCron", () => {
 
   test("falls through to the raw expression when it is stranger than words", () => {
     expect(describeCron("*/7 3,4 * * *")).toBe("*/7 3,4 * * *");
+  });
+
+  // A comma list on the hour field (twice a day) has no narrow rendering here, and that is the
+  // contract, not a gap: cron cannot be rendered exhaustively in prose without a dedicated
+  // library, so this shape is expected to stay on the raw-expression fallback. If someone later
+  // teaches `describeCron` this shape, that is a deliberate extension, not a bug fix.
+  test("falls through to the raw expression for an hour list, by design", () => {
+    expect(describeCron("0 9,17 * * *")).toBe("0 9,17 * * *");
   });
 
   test("never throws, even on garbage", () => {

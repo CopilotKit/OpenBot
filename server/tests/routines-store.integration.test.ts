@@ -534,6 +534,11 @@ describe("changing a routine", () => {
     await expect(
       store.update(owner.id, routine.id, { timezone: "Mars/Olympus" }),
     ).rejects.toBeInstanceOf(RoutineRefusedError);
+
+    // The refusal must not have partially applied: the row still carries the timezone from the
+    // update that succeeded, not the rejected "Mars/Olympus".
+    const [summary] = await store.listFor(owner.id);
+    expect(summary?.timezone).toBe("Asia/Tokyo");
   });
 
   test("leaves the next run alone when only the instruction changes", async () => {

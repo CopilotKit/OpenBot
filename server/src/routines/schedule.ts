@@ -160,7 +160,14 @@ export function describeCron(cron: string): string {
       const stepMatch = /^\*\/(\d{1,2})$/.exec(minuteField);
       if (stepMatch) {
         const step = Number.parseInt(stepMatch[1] as string, 10);
-        if (Number.isInteger(step) && step > 0) {
+        // A minute step restarts every hour rather than counting continuously from the first
+        // firing, so it only actually recurs every N minutes when N divides the hour evenly
+        // (e.g. */20 fires at :00, :20, :40 — a steady 20-minute gap). A step like */40 fires at
+        // :00 and :40 and then wraps, a 20-minute gap the second time round, so "Every 40 minutes"
+        // would be false. `step > 1` also rules out */1, which is reachable here even though the
+        // create-time floor refuses it, and would otherwise render the ungrammatical "Every 1
+        // minutes". Anything that fails this falls back to the raw expression.
+        if (Number.isInteger(step) && step > 1 && 60 % step === 0) {
           return `Every ${step} minutes`;
         }
       }
