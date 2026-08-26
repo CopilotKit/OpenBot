@@ -849,6 +849,48 @@ describe("consuming a claimed firing", () => {
   });
 
   /**
+   * THE LEAKED RUN ROW THE ATTEMPT CAP LEFT BEHIND. `insertRun` runs before `dispatch` on every
+   * attempt, so a dispatch that throws on the very last attempt still leaves an open (`status` null)
+   * run row nothing else closes: the item stops being claimed at the cap and the queue's own
+   * machinery has nothing to do with `routine_runs`. Without closing it, `listFor` — the routines
+   * page's read — keeps showing that open row as the newest run, and a routine that never ran reads
+   * as "running now" forever.
+   */
+  test("giving up at the attempt cap also closes the run row it leaked, so the page stops reading 'running'", async () => {
+    const { owner, routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await dispatchClaimedRoutines(
+        sweepOptions({
+          now: at("2001-01-01T09:26:00Z"),
+          maxAttempts: 1,
+          dispatch: async () => {
+            throw new Error("the server answered 503");
+          },
+        }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    // No run row for this routine is left open: every attempt that opened one also got it closed.
+    const runs = await runsFor(routine.id);
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.every((run) => run.status !== null)).toBe(true);
+
+    // And the page-facing read agrees: the newest run reads "failed", not "running now".
+    const [summary] = await store.listFor(owner.id);
+    expect(summary?.lastRun?.status).toBe("failed");
+    expect(summary?.lastRun?.finishedAt).toBeInstanceOf(Date);
+  });
+
+  /**
    * BOTH KINDS OF DONE WITH, which is the half `queue.ts:262-274` documents as having been forgotten.
    *
    * A finished row has to outlive the run long enough for a late replica to collide with it, and

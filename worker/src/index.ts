@@ -101,8 +101,9 @@ async function dispatch(routineRunId: string): Promise<void> {
       "content-type": "application/json",
     },
     body: JSON.stringify({ routineRunId }),
-    // The `for(;;)` loop below has no CronJob deadline bounding this call from outside; a wedged
-    // server must not stall the only thing firing routines.
+    // The `for(;;)` loop below has no CronJob around it at all, so nothing bounds this call from
+    // outside the process the way `activeDeadlineSeconds` bounds the CronJob's job; a wedged server
+    // must not stall the only thing firing routines.
     signal: AbortSignal.timeout(30_000),
   });
   if (response.status !== 202) {

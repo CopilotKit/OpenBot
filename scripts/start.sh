@@ -35,11 +35,14 @@ ONE_COMPUTER_EACH="${OPENBOT_ONE_COMPUTER_EACH:-true}"
 export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
-# A fixed default is fine here, unlike `AGENT_TOOL_TOKEN` below: this secret is compared by the
-# server on its own loopback-bound port, never by anything a Bot publishes, so a well-known value
-# from a public repository is not a boundary anybody outside this machine could reach anyway. That is
-# also why it is generated fresh and persisted for AGENT_TOOL_TOKEN (see the SECRETS_ROTATED block)
-# but not for this one.
+# A fixed default is fine here, unlike `AGENT_TOOL_TOKEN` below, but not because of where the server
+# listens — it binds no hostname, so this port is reachable from the network like any other. It is
+# fine because this is a dev-only default on a machine's own dev stack, and the endpoint it guards
+# accepts nothing but an unguessable `routine_run_<uuid>` id: the server re-reads the routine, the
+# owner and the channel from its own tables rather than trusting anything else the caller says, so
+# the fixed default gates nothing sensitive here. That is also why it is generated fresh and
+# persisted for AGENT_TOOL_TOKEN (see the SECRETS_ROTATED block) but not for this one — production
+# must set a real WORKER_SHARED_SECRET.
 WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 
 # The secret the server sends to a managed Bot, generated and written back on first run.

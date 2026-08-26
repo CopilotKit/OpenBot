@@ -87,12 +87,15 @@ not obvious from the screen.
 
 Unlike `AGENT_TOOL_TOKEN`, `start.sh` does not generate and persist this one. It supplies a fixed
 local default, `openbot-dev-worker-secret`, the same value every clone of this repository gets. That
-is fine here because this secret is only ever compared on this machine's own loopback-bound port,
-never by anything a Bot publishes — a well-known value from a public repository is not a boundary
-anybody outside this machine could reach anyway. `AGENT_TOOL_TOKEN` is generated fresh and written to
-`.env` precisely because it is not that: it is copied into every Bot container, and a framework Bot
-holding it may be running on a machine of its own, so a fixed default there would be no boundary at
-all.
+is fine here not because of where the server listens — it binds no hostname, so the port itself is
+reachable like any other — but because this is a dev-only default on a machine's own dev stack, and
+the endpoint it guards accepts nothing but an unguessable `routine_run_<uuid>` id: the server
+re-reads the routine, the owner and the channel from its own tables rather than trusting anything
+else the caller says, so a well-known value from a public repository gates nothing sensitive here.
+`AGENT_TOOL_TOKEN` is generated fresh and written to `.env` precisely because it is not that: it is
+copied into every Bot container, and a framework Bot holding it may be running on a machine of its
+own, so a fixed default there would be no boundary at all. Production deployments must set a real
+`WORKER_SHARED_SECRET`.
 
 **`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
 above: it says where the worker's own process can reach this deployment's API, which is a fact about

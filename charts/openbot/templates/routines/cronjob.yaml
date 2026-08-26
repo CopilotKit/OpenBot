@@ -26,6 +26,10 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
+      # Under the five-minute schedule period, and load-bearing with `concurrencyPolicy: Forbid`
+      # above: without it a wedged run is never killed, so Forbid suppresses every later sweep and
+      # routines stop firing for good, with only a Running job as evidence.
+      activeDeadlineSeconds: 240
       template:
         metadata:
           labels:

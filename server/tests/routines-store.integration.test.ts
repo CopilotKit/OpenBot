@@ -907,6 +907,72 @@ describe("opening and closing a run", () => {
   });
 });
 
+/**
+ * Every dispatch attempt that goes nowhere opens a run row and leaves it open — `insertRun` runs
+ * before `dispatch`, and a dispatch that throws never reaches `finishRun`. `dueRoutines`/the sweep's
+ * attempt cap eventually stops retrying, but nothing else closes those rows: `listFor` shows the
+ * newest one, so the page reads "running now" forever for a routine that never ran at all.
+ *
+ * `failOpenRuns` is the sweep's cleanup for exactly that: close every open (`status is null`) run for
+ * one routine as "failed", not just the newest, because every one of them was a real dispatch attempt
+ * that went nowhere — closing only the newest would still leave the others open and wrong.
+ */
+describe("closing the runs a dispatch never got to finish", () => {
+  test("closes every open run for the routine, leaves a finished one untouched, and reports the count", async () => {
+    const { routine } = await makeRoutine();
+    const firstOpen = await store.insertRun(routine.id);
+    const secondOpen = await store.insertRun(routine.id);
+    const finished = await store.insertRun(routine.id);
+    await store.finishRun(finished.runId, "succeeded");
+
+    const closed = await store.failOpenRuns(
+      routine.id,
+      "the server answered 503",
+    );
+
+    expect(closed).toBe(2);
+
+    const rows = await database
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.routineId, routine.id));
+    const byId = new Map(rows.map((row) => [row.id, row]));
+
+    for (const { runId } of [firstOpen, secondOpen]) {
+      const row = byId.get(runId);
+      expect(row?.status).toBe("failed");
+      expect(row?.finishedAt).toBeInstanceOf(Date);
+      expect(row?.error).toBe("the server answered 503");
+    }
+
+    // The finished run's outcome is untouched: this cleanup closes leaked attempts, not runs that
+    // already have an outcome.
+    const finishedRow = byId.get(finished.runId);
+    expect(finishedRow?.status).toBe("succeeded");
+    expect(finishedRow?.error).toBeNull();
+  });
+
+  test("caps the error the same way finishRun does", async () => {
+    const { routine } = await makeRoutine();
+    const { runId } = await store.insertRun(routine.id);
+
+    await store.failOpenRuns(routine.id, "x".repeat(600));
+
+    const [row] = await database
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.id, runId));
+    expect(row?.error).toHaveLength(MAX_RUN_ERROR);
+  });
+
+  test("a routine with nothing open closes nothing", async () => {
+    const { routine } = await makeRoutine();
+    expect(await store.failOpenRuns(routine.id, "no attempts to close")).toBe(
+      0,
+    );
+  });
+});
+
 describe("the runner's read of one firing", () => {
   test("joins the run to its routine, owner included", async () => {
     const { owner, agentId, channel, routine } = await makeRoutine(

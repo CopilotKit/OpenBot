@@ -239,7 +239,7 @@ function asResult(text: string): McpCallResult {
     return { text, isError: false, truncated: false };
   }
   return {
-    text: `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated: the answer was ${text.length} characters]`,
+    text: `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated: the tool returned ${text.length} characters]`,
     isError: false,
     truncated: true,
   };

@@ -363,7 +363,7 @@ export async function dispatchClaimedRoutines(
          */
         console.warn(
           JSON.stringify({
-            type: "routine-fire-finish-lost",
+            type: "routine-fire-redelivery-possible",
             routineId,
             runId,
             reason:
@@ -412,6 +412,18 @@ export async function dispatchClaimedRoutines(
        * and the reason for anybody who queries the table; this is for whoever reads the logs.
        */
       if (item.attempts >= maxAttempts) {
+        /*
+         * THE ROW THIS GIVE-UP LEAKED. Every attempt opened a run row before it dispatched
+         * (`insertRun` above), and a dispatch that throws never reaches `finishRun` — so an item at
+         * the cap is not just off the queue, it is one or more `routine_runs` rows stuck open with no
+         * status. `listFor` shows the newest one, so without this the routines page reads "running
+         * now" for a routine that never ran at all, forever. Closed before the warning so the row is
+         * never left open even if the log line itself fails.
+         */
+        const closed = await options.routineStore.failOpenRuns(
+          routineId,
+          reason,
+        );
         console.warn(
           JSON.stringify({
             type: "routine-fire-gave-up",
@@ -419,6 +431,7 @@ export async function dispatchClaimedRoutines(
             key: item.key,
             attempts: item.attempts,
             reason,
+            closedRuns: closed,
           }),
         );
       } else if (!released) {

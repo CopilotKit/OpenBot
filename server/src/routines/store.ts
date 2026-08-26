@@ -203,6 +203,18 @@ export type RoutineStore = {
     status: RoutineRunOutcome,
     error?: string,
   ): Promise<void>;
+  /**
+   * Close every open (`status is null`) run for one routine as "failed", with the same error on all
+   * of them. Returns how many rows it closed.
+   *
+   * The give-up branch's cleanup, not `finishRun`'s: `insertRun` runs before `dispatch` on every
+   * attempt, so a dispatch that throws leaves an open run row behind, and the queue's attempt cap
+   * eventually stops offering that item to anybody — nothing else ever closes those rows. `listFor`
+   * shows the newest one, so without this a routine that never ran once reads "running now" forever.
+   * Closing ALL of them, not just the newest, is the more truthful shape: every open row is a real
+   * dispatch attempt that went nowhere, not just the last one.
+   */
+  failOpenRuns(routineId: string, error: string): Promise<number>;
   /** How many failures the routine has at the tail, for the fatigue rule to read. */
   consecutiveFailures(routineId: string): Promise<number>;
 };
@@ -680,6 +692,24 @@ export function createRoutineStore(database: Database): RoutineStore {
         // calls finishRun("failed") — matches no row here and is a silent no-op, rather than
         // relabeling what the first finish already recorded.
         .where(and(eq(routineRuns.id, runId), isNull(routineRuns.status)));
+    },
+
+    async failOpenRuns(routineId, error) {
+      // One UPDATE, not a select-then-loop: every row this WHERE matches is a leaked attempt, and
+      // there is nothing to decide per row that `status is null` does not already decide.
+      const closed = await database
+        .update(routineRuns)
+        .set({
+          status: "failed",
+          finishedAt: sql`now()`,
+          // Same code-point cap as `finishRun`, so a give-up reason cannot be cut mid-surrogate-pair.
+          error: Array.from(error).slice(0, MAX_RUN_ERROR).join(""),
+        })
+        .where(
+          and(eq(routineRuns.routineId, routineId), isNull(routineRuns.status)),
+        )
+        .returning({ id: routineRuns.id });
+      return closed.length;
     },
 
     async consecutiveFailures(routineId) {
