@@ -113,6 +113,12 @@ export const routines = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     /** The sweep's read target. Recomputed on every write and CAS-advanced by the sweep. */
     nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    /**
+     * The last occurrence stamp the sweep advanced past — fired OR silently drained as stale.
+     * Not "when this last ran": the run history lives in routine_runs, and everything a person
+     * sees reads that table. This is the scheduler's own bookmark, kept because a CAS needs the
+     * value it compared against recorded somewhere a human can inspect when a clock looks wrong.
+     */
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
