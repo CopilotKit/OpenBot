@@ -54,10 +54,20 @@ function desk(options?: {
     [];
 
   const queue = {
-    offer: async (item: { kind: string; key: string; payload?: unknown }) => {
+    offer: async (item: {
+      kind: string;
+      key: string;
+      payload?: unknown;
+      atMost?: { keyPrefix: string; max: number };
+    }) => {
       // Idempotent on the key, exactly as the real one is.
-      if (rows.some((row) => row.key === item.key)) return;
+      if (rows.some((row) => row.key === item.key)) return true;
+      // And the cap, counted and written as one step, exactly as the real one is.
+      if (item.atMost && (options?.offered ?? rows.length) >= item.atMost.max) {
+        return false;
+      }
       rows.push({ kind: item.kind, key: item.key, payload: item.payload });
+      return true;
     },
     count: async () => options?.offered ?? rows.length,
   } as unknown as WorkQueue;

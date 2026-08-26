@@ -44,13 +44,29 @@ export type WorkItem = {
 export const DEFAULT_MAX_ATTEMPTS = 5;
 
 export type WorkQueue = {
-  /** Put work on the queue, or leave what is there. Idempotent on (kind, key). */
+  /**
+   * Put work on the queue, or leave what is there. Idempotent on (kind, key).
+   *
+   * False only ever means `atMost` refused it. Already being on the queue is true: the caller asked
+   * for this work to be queued and it is.
+   */
   offer: (item: {
     kind: string;
     key: string;
     payload?: Record<string, unknown>;
     runAt?: Date;
-  }) => Promise<void>;
+    /**
+     * Refuse this if the prefix is already that full.
+     *
+     * COUNTED AND WRITTEN AS ONE STEP, which is the whole reason it lives here rather than in the
+     * caller. Counting first and offering second is a cap that holds only while nothing else is
+     * offering: a model that emits five tool calls in one turn runs all five at once, each reads a
+     * count taken before any of the others had written, and all five pass a cap of three. The
+     * failure needs no cluster and no unusual timing; it is what asking for several things at once
+     * looks like.
+     */
+    atMost?: { keyPrefix: string; max: number };
+  }) => Promise<boolean>;
   /** Take up to `limit` due items, leased to `owner`. */
   claim: (input: {
     kind: string;
@@ -136,20 +152,64 @@ export function createWorkQueue(database: Database): WorkQueue {
     );
 
   return {
-    async offer({ kind, key, payload = {}, runAt }) {
-      await database
-        .insert(workItems)
-        .values({ kind, key, payload, ...(runAt ? { runAt } : {}) })
+    async offer({ kind, key, payload = {}, runAt, atMost }) {
+      const write = async (transaction: Database) => {
+        await transaction
+          .insert(workItems)
+          .values({ kind, key, payload, ...(runAt ? { runAt } : {}) })
+          /*
+           * Nothing on conflict, deliberately.
+           *
+           * The key is the identity of the work, so a second offer of the same thing is the same
+           * thing, not a new one. For a routine the key carries the minute it was due, which is what
+           * makes "three replicas woke at 07:00" produce one run instead of three. A finished row
+           * still counts as a conflict, which is what makes that true after the run as well as during
+           * it.
+           */
+          .onConflictDoNothing();
+      };
+
+      if (!atMost) {
+        await write(database);
+        return true;
+      }
+
+      return database.transaction(async (transaction) => {
         /*
-         * Nothing on conflict, deliberately.
+         * Everything offered under this prefix, one at a time, across every replica.
          *
-         * The key is the identity of the work, so a second offer of the same thing is the same
-         * thing, not a new one. For a routine the key carries the minute it was due, which is what
-         * makes "three replicas woke at 07:00" produce one run instead of three. A finished row
-         * still counts as a conflict, which is what makes that true after the run as well as during
-         * it.
+         * An advisory lock rather than a stricter isolation level, because the thing being counted
+         * is rows another transaction has not committed yet: under `read committed` two concurrent
+         * offers each see a count taken before the other wrote, and both pass. The lock is held for
+         * the transaction and taken on the prefix, so it serialises one run's own hops and nothing
+         * else on the queue waits behind them.
          */
-        .onConflictDoNothing();
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`${kind}:${atMost.keyPrefix}`}))`,
+        );
+        const [row] = await transaction
+          .select({ total: sql<number>`count(*)::int` })
+          .from(workItems)
+          .where(
+            and(
+              eq(workItems.kind, kind),
+              like(workItems.key, `${escapeLike(atMost.keyPrefix)}%`),
+            ),
+          );
+        /*
+         * The same key again is not a new one. Counted as already there rather than refused, or a
+         * retried offer of work that is on the queue would report the cap as the reason it is not.
+         */
+        const already = await transaction
+          .select({ key: workItems.key })
+          .from(workItems)
+          .where(and(eq(workItems.kind, kind), eq(workItems.key, key)))
+          .limit(1);
+        if (already.length > 0) return true;
+        if ((row?.total ?? 0) >= atMost.max) return false;
+        await write(transaction as unknown as Database);
+        return true;
+      });
     },
 
     async claim({

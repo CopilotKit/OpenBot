@@ -149,23 +149,14 @@ export function createHandoffDesk(options: {
       }
 
       /*
-       * And the fan-out cap, counted from the rows rather than from a variable.
+       * The fan-out cap is enforced by the offer below rather than checked here.
        *
-       * Counting in a process counts one pod, and a run whose hops land on several pods is exactly
-       * what this exists to bound. Every hop this run has offered is a row, so the rows are the count.
+       * Checking first and offering second is a cap that holds only while nothing else is offering,
+       * and the case it has to hold in is precisely the opposite one: a model asked to do several
+       * things emits several tool calls in one turn, they run at once, and each reads a count taken
+       * before any of the others had written. Five calls passed a cap of three, every time, on a
+       * single pod. So the count and the write are one step, in the queue. See `atMost`.
        */
-      const already = await queue.count({
-        kind: HANDOFF_KIND,
-        keyPrefix: `${from.runId}:`,
-      });
-      if (already >= caps.maxPerRun) {
-        return refuse(
-          from,
-          target,
-          "fanout_cap",
-          `This turn has already asked ${already} ${already === 1 ? "Bot" : "Bots"}, which is as many as this deployment allows. Answer with what you have, or ask the person.`,
-        );
-      }
 
       /*
        * Resolved against the roster the ASKING PERSON may see, never taken from the model.
@@ -237,9 +228,15 @@ export function createHandoffDesk(options: {
         .digest("hex")
         .slice(0, 32)}`;
 
-      await queue.offer({
+      const offered = await queue.offer({
         kind: HANDOFF_KIND,
         key,
+        /*
+         * Counted from the rows rather than from a variable, because a run whose hops land on
+         * several pods is exactly what this exists to bound: every hop this run has offered is a row
+         * under its own prefix, so the rows are the count.
+         */
+        atMost: { keyPrefix: `${from.runId}:`, max: caps.maxPerRun },
         payload: {
           fromBotId: from.botId,
           toBotId: found.id,
@@ -273,6 +270,15 @@ export function createHandoffDesk(options: {
           ...(envelope.expecting ? { expecting: envelope.expecting } : {}),
         },
       });
+
+      if (!offered) {
+        return refuse(
+          from,
+          target,
+          "fanout_cap",
+          `This turn has already asked ${caps.maxPerRun} ${caps.maxPerRun === 1 ? "Bot" : "Bots"}, which is as many as this deployment allows. Answer with what you have, or ask the person.`,
+        );
+      }
 
       await recordAuditEvent(auditStore, {
         eventType: "agent.handoff_offered",

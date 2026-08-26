@@ -324,3 +324,58 @@ describe("claiming durable work", () => {
     expect(row?.why).toBe("the cluster said no");
   });
 });
+
+/**
+ * The fan-out cap, under the only conditions that matter.
+ *
+ * A model asked to do several things emits several tool calls in one turn and they run at once. A
+ * cap checked before the write holds only while nothing else is writing, so all of them pass it:
+ * each reads a count taken before any of the others had committed. This needs no cluster and no
+ * unusual timing, which is why it must be driven against a real database rather than a stub that
+ * awaits one call at a time.
+ */
+describe("offering at most so many under one prefix", () => {
+  test("five at once cannot get past a cap of three", async () => {
+    const run = `${randomUUID()}:`;
+
+    const results = await Promise.all(
+      ["one", "two", "three", "four", "five"].map((word) =>
+        queue.offer({
+          kind,
+          key: `${run}${word}`,
+          atMost: { keyPrefix: run, max: 3 },
+        }),
+      ),
+    );
+
+    expect(results.filter(Boolean)).toHaveLength(3);
+    const written = await database
+      .select({ key: workItems.key })
+      .from(workItems)
+      .where(eq(workItems.kind, kind));
+    expect(written).toHaveLength(3);
+  });
+
+  /*
+   * A retried offer of work that is already queued is not a new hop, and must not be reported as
+   * refused by the cap: the caller asked for it to be on the queue and it is.
+   */
+  test("the same key again is not counted against the cap", async () => {
+    const run = `${randomUUID()}:`;
+    const cap = { keyPrefix: run, max: 1 };
+
+    expect(await queue.offer({ kind, key: `${run}a`, atMost: cap })).toBe(true);
+    expect(await queue.offer({ kind, key: `${run}a`, atMost: cap })).toBe(true);
+    expect(await queue.offer({ kind, key: `${run}b`, atMost: cap })).toBe(
+      false,
+    );
+  });
+
+  test("without a cap nothing is refused", async () => {
+    const run = `${randomUUID()}:`;
+    const results = await Promise.all(
+      [1, 2, 3, 4, 5].map((n) => queue.offer({ kind, key: `${run}${n}` })),
+    );
+    expect(results.every(Boolean)).toBe(true);
+  });
+});
