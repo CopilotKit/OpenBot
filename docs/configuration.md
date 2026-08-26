@@ -55,6 +55,7 @@ at `agent-langgraph` on a laptop.
 | `AGENT_TOOL_TOKEN`   | unset; `start.sh` generates one    | The secret a framework Bot presents when it calls a granted tool back through this server. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
+| `WORKER_SHARED_SECRET` | unset; `start.sh` generates one  | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
 
 **`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
 show: a stream that stops producing anything. Every other audit row is something that happened, and
@@ -77,6 +78,19 @@ It is one of a pair, and they are not interchangeable: `MANAGED_AGENT_TOKEN` is 
 itself to a Bot, this is a Bot proving itself to the server. Rotating either means the process
 holding the old one refuses every call, which is why `start.sh` restarts the server and recreates the
 Bot containers on a run that mints one.
+
+**`WORKER_SHARED_SECRET`** is the same shape of secret for a different pair: it is what the routines
+worker presents to `/internal/routines/run` to prove a routine's dispatch actually came from it. The
+API server refuses a handoff without one configured, and the worker refuses to start without one at
+all. See [routines.md](routines.md) for what a deployment with no worker at all looks like — it is
+not obvious from the screen. `start.sh` generates one for a laptop, the same way it does for
+`AGENT_TOOL_TOKEN`.
+
+**`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
+above: it says where the worker's own process can reach this deployment's API, which is a fact about
+where the worker runs rather than a fact about the deployment `loadConfig` describes. `start.sh` points
+it at the server's own port on a laptop; the Helm chart's routines CronJob points it at the server's
+in-cluster Service address.
 
 ## OpenAI-compatible endpoints
 

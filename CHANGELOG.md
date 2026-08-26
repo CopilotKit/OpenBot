@@ -8,6 +8,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot can be asked to do something on a schedule
+
+"Every weekday at nine, post the standup notes here" is now something a Bot can be asked rather than
+something somebody has to remember. A routine created this way runs under its own creator's grants —
+it can do exactly what they could do in chat, and nothing more — and its reply lands in the channel as
+an ordinary Bot message: it lights the unread dot the same way any other message does, and it appears
+in the transcript rather than anywhere separate. A routine that fails posts one message about its
+first failure and, after ten in a row, switches itself off with a final one rather than failing
+forever unnoticed.
+
+The deployment gains two tables, via migration `0021`.
+
+**This needs a new process.** A worker fires due routines by calling this deployment's own API server,
+and a deployment that never starts one schedules nothing — the routine sits on the Routines page with
+a next run time like any other, and nothing on the screen says a worker is missing. `WORKER_SHARED_SECRET`
+is the credential the worker presents; a deployment without it configured refuses every handoff rather
+than accepting one it cannot attribute. `scripts/start.sh` runs the worker locally; the Helm chart
+turns it on with `routines.enabled` and takes the secret as `secrets.workerSharedSecret`. No new port
+is opened for any of this — the worker only ever calls out to the server it already trusts.
+
 ### A Bot in trouble no longer needs somebody watching
 
 A boundary refusal or a stalled run was recorded and then waited for a person to happen to look — at
@@ -23,6 +43,7 @@ It is a view over the trail, not a second record of it. Refusals and stalls are 
 transactionally by the gateway and the stall guard, so the inbox cannot miss one and nothing new
 runs on the action path. The only state it owns is the resolution, held beside the append-only trail
 rather than in it. The trail itself still keeps everything; the inbox is only what is open now.
+
 ### A channel a Bot has spoken in unseen shows a dot
 
 The sidebar marks a channel when a Bot has said something since you last had it open: a dot beside

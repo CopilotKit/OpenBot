@@ -38,6 +38,13 @@ do on a laptop with no supervisor configured. A shared browser means shared logi
 shared session between Bots, which is fine for a deployment where one team trusts its own Bots and
 is not fine as a boundary between tenants.
 
+**The routines worker.** `worker/` is not in this image, so nothing here fires a due routine — and
+nothing warns you: a routine created against this deployment is stored, its next run time is
+computed, and the Routines page shows it sitting there exactly as it would with a worker watching it.
+It simply never fires. Firing routines needs a second process, built from the repository rather than
+from this image, pointed at the same `DATABASE_URL` and at this deployment's own reachable address
+with `WORKER_SHARED_SECRET` and `SERVER_INTERNAL_URL` set. See [routines.md](routines.md).
+
 ## Minimum size
 
 Measured on the real image, one Bot, arm64.

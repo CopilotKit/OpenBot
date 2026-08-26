@@ -534,9 +534,15 @@ function RouteComponent() {
                   size="sm"
                 >
                   <ItemContent>
-                    <ItemTitle>Vendor documentation</ItemTitle>
+                    <ItemTitle>
+                      {auth === "builtin"
+                        ? "Documentation"
+                        : "Vendor documentation"}
+                    </ItemTitle>
                     <ItemDescription>
-                      What this server offers, from the people who maintain it.
+                      {auth === "builtin"
+                        ? "What these tools offer, from the people who maintain them."
+                        : "What this server offers, from the people who maintain it."}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
