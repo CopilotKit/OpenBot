@@ -128,8 +128,9 @@ named with no token to call it with; a browser is asked for inside more than one
 `routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
 `worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
 `secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
-validate is somebody else's to create — put `worker-shared-secret` in it yourself, or the CronJob's
-every run is refused with nothing at install time to say so.
+validate is somebody else's to create — put `worker-shared-secret` in it yourself, or every pod that
+mounts it fails to start — the routines CronJob, the culler, and the API server itself — with nothing
+at install time to say so.
 
 ## Your own Bot
 

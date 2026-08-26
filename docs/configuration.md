@@ -90,8 +90,9 @@ local default, `openbot-dev-worker-secret`, the same value every clone of this r
 is fine here because this secret is only ever compared on this machine's own loopback-bound port,
 never by anything a Bot publishes — a well-known value from a public repository is not a boundary
 anybody outside this machine could reach anyway. `AGENT_TOOL_TOKEN` is generated fresh and written to
-`.env` precisely because it is not that: it is presented by a Bot's own published port, so a fixed
-default there would be no boundary at all.
+`.env` precisely because it is not that: it is copied into every Bot container, and a framework Bot
+holding it may be running on a machine of its own, so a fixed default there would be no boundary at
+all.
 
 **`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
 above: it says where the worker's own process can reach this deployment's API, which is a fact about

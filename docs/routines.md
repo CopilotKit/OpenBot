@@ -58,8 +58,8 @@ stale summaries of thirty different mornings.
 A firing that is still recent enough to be worth having does still happen. A server pod that restarts
 loses at most the one occurrence that was in flight when it stopped; the next one fires on schedule,
 because the clock had already moved on before that firing was attempted. A server that stays down
-loses more than that: every occurrence whose stamp ages past the grace window while nothing is
-running to offer it is skipped, not just the one that was in flight.
+loses more than that: every occurrence whose stamp ages past the grace window while nothing can
+carry it out is skipped, not just the one that was in flight.
 
 ## The worker requirement
 
