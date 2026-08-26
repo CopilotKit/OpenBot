@@ -1,6 +1,7 @@
 import { useRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
+import { asText } from "@/lib/plugins/tool-result";
 
 /**
  * How a Bot handing work to another Bot reads in the transcript.
@@ -40,8 +41,7 @@ function refused(result: unknown): boolean {
    * Blocked, which is worse than not drawing it at all: a working boundary and a working handoff
    * looked identical, and the wrong one was the reassuring one.
    */
-  const said = result.trim().replace(/^"|"$/g, "");
-  return !said.startsWith(HANDED_OVER);
+  return !asText(result).startsWith(HANDED_OVER);
 }
 
 /**

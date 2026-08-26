@@ -2,6 +2,7 @@ import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import type { ReactNode } from "react";
 import { ActiveBotProvider } from "./active-bot";
 import { ComputerTools } from "./computer-tools";
+import { EscalationTool } from "./escalation-tool";
 import { GalleryTools } from "./gallery-tools";
 import { HandoffTool } from "./handoff-tool";
 import { SandboxedTools } from "./sandboxed-tools";
@@ -31,6 +32,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
           where the grant and the caps are. A hop that happens off-screen is the thing to avoid.
         */}
         <HandoffTool />
+        <EscalationTool />
         {/* Gallery tools are registered once; their handlers re-read the active Bot to avoid shadowing renderers. */}
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}

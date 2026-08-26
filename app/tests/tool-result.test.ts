@@ -47,3 +47,37 @@ describe("reading a tool's answer", () => {
     );
   });
 });
+
+/**
+ * The two lines a hop draws.
+ *
+ * Both read an outcome out of the tool's own prose, which is what a server-side tool leaves
+ * available, and both read it through `asText` for the reason above: matched against the raw value
+ * the prefix never matches, and every accepted hop was drawn as Blocked.
+ */
+describe("telling an accepted hop from a refused one", () => {
+  const handedOver = "Handed to ";
+  const putTo = "Put to ";
+
+  test("an accepted handoff is not a refusal, encoded or not", () => {
+    const said = `${handedOver}Knowledge. It will answer in its own conversation.`;
+    expect(asText(JSON.stringify(said)).startsWith(handedOver)).toBe(true);
+    expect(asText(said).startsWith(handedOver)).toBe(true);
+  });
+
+  test("a cap refusing a hop does not start with the marker", () => {
+    const said =
+      "This turn has already asked 3 Bots, which is as many as this deployment allows.";
+    expect(asText(JSON.stringify(said)).startsWith(handedOver)).toBe(false);
+  });
+
+  test("a question that reached somebody is not drawn as one that did not", () => {
+    const said = `${putTo}the person in this conversation. Ask it in your own words now.`;
+    expect(asText(JSON.stringify(said)).startsWith(putTo)).toBe(true);
+  });
+
+  test("a route that reached nobody does not start with the marker", () => {
+    const said = "The on-call rota is not configured.";
+    expect(asText(JSON.stringify(said)).startsWith(putTo)).toBe(false);
+  });
+});

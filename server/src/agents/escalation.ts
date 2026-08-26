@@ -26,6 +26,16 @@ import type { RunAssertion } from "./callback-token";
 export const ESCALATE_TOOL = "ask_person";
 
 /**
+ * How this answers when the question was routed.
+ *
+ * A CONSTANT BECAUSE THE TRANSCRIPT READS IT. A server-side tool's result reaches the surface as
+ * text meant for a model, so the only thing the renderer has to tell a question that reached
+ * somebody from one that reached nobody is the wording. Naming it here at least stops the two
+ * drifting apart in silence, which the handoff beside this did once already.
+ */
+export const PUT_TO = "Put to ";
+
+/**
  * Where a question for a person goes.
  *
  * Returns who was reached, in words a Bot can say out loud: "the person in this conversation", "the
@@ -135,7 +145,7 @@ export function escalationTool(options: {
       }
 
       return "reached" in outcome
-        ? `Put to ${outcome.reached}. Ask it in your own words now, plainly, and stop there: do not answer it yourself and do not hand it to another Bot.`
+        ? `${PUT_TO}${outcome.reached}. Ask it in your own words now, plainly, and stop there: do not answer it yourself and do not hand it to another Bot.`
         : outcome.refusal;
     },
   };
