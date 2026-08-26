@@ -325,6 +325,9 @@ be able to address the API server at all, and the default is the wrong way round
         "image" (include "openbot.image" .)
         "imagePullPolicy" .Values.image.pullPolicy
         "command" (list "/usr/local/bin/bun" "/app/agent-computer/src/index.ts")
+        "securityContext" (dict
+          "capabilities" (dict "drop" (list "ALL"))
+          "allowPrivilegeEscalation" false)
         "ports" (list (dict "name" "http" "containerPort" 4100))
         "env" (concat
           (list

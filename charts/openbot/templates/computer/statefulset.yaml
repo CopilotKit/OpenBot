@@ -111,6 +111,11 @@ spec:
             browser process directly, so a computer pod carries no API and no database.
           */}}
           command: ["/usr/local/bin/bun", "/app/agent-computer/src/index.ts"]
+          {{- /* The drop `supervisor/src/docker.ts` already makes for every computer it starts. */}}
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            allowPrivilegeEscalation: false
           ports:
             - name: http
               containerPort: 4100

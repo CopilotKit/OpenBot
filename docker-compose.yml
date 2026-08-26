@@ -74,6 +74,11 @@ services:
       - agent-workspace:/workspace
       # Chromium's user-data directory is volume-backed so logins survive container restarts.
       - agent-profiles:/profiles
+    # The posture `supervisor/src/docker.ts` already gives every computer it starts, for the one it does not.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     # Gives Chromium time to flush its profile after SIGTERM before Docker sends SIGKILL.
     stop_grace_period: 30s
     healthcheck:

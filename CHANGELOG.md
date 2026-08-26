@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot's computer keeps no capability it does not use
+
+The supervisor starts every per-Bot computer with `CapDrop: ["ALL"]` and `no-new-privileges`, on the
+grounds that Chromium needs none of them and each is a documented container escape route. Compose and
+the Helm chart start the same image with the same command and dropped nothing, so the process that
+renders the open internet held `cap_dac_override`, `cap_net_raw`, `cap_mknod` and `cap_setuid` among
+others, with Chromium's own sandbox off.
+
+Both now match the supervisor. Nothing about a Bot's computer changes otherwise: with no capabilities
+at all it still launches Chromium, navigates, snapshots and screenshots, which was driven before this
+was written rather than assumed.
+
 ### A channel a Bot has spoken in unseen shows a dot
 
 The sidebar marks a channel when a Bot has said something since you last had it open: a dot beside
