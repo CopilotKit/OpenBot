@@ -163,7 +163,7 @@ describe("a close that lands while the browser is still starting", () => {
 
   test("the claim is released even when the launch threw", async () => {
     // `open`'s catch closes the socket after sending an error frame. If nothing released the claim
-    // there, the slot would stay occupied forever and `forgetIdleSessions` could never sweep the
+    // there, the slot would stay occupied forever and `forgetIdle` could never sweep the
     // session, which is the unbounded growth it exists to stop.
     const slot = createViewerSlot();
     const socket = { id: "a" };
@@ -439,7 +439,7 @@ describe("what a socket may do with the screen right now", () => {
 
 describe("the session sweep asking whether anybody is watching", () => {
   test("a Bot is watched from the claim, not from the first frame", async () => {
-    // `forgetIdleSessions` drops sessions with nobody watching and no live browser. Reading occupancy
+    // `forgetIdle` drops sessions with nobody watching and no live browser. Reading occupancy
     // from an installed cast would call a Bot unwatched for the whole cold launch, and sweeping then
     // would drop the control state out from under the person who is about to be watching it.
     const slot = createViewerSlot();
