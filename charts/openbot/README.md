@@ -126,7 +126,10 @@ nobody would be an administrator; `singleUser` is combined with a public URL; bo
 HTTPRoute are enabled; both `externalSecrets` and an existing Secret are named; a Bot endpoint is
 named with no token to call it with; a browser is asked for inside more than one API replica; or
 `routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
-`worker-shared-secret` key named for it to read instead.
+`worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
+`secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
+validate is somebody else's to create — put `worker-shared-secret` in it yourself, or the CronJob's
+every run is refused with nothing at install time to say so.
 
 ## Your own Bot
 

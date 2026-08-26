@@ -55,7 +55,7 @@ at `agent-langgraph` on a laptop.
 | `AGENT_TOOL_TOKEN`   | unset; `start.sh` generates one    | The secret a framework Bot presents when it calls a granted tool back through this server. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
-| `WORKER_SHARED_SECRET` | unset; `start.sh` generates one  | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
+| `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
 
 **`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
 show: a stream that stops producing anything. Every other audit row is something that happened, and
@@ -83,8 +83,15 @@ Bot containers on a run that mints one.
 worker presents to `/internal/routines/run` to prove a routine's dispatch actually came from it. The
 API server refuses a handoff without one configured, and the worker refuses to start without one at
 all. See [routines.md](routines.md) for what a deployment with no worker at all looks like — it is
-not obvious from the screen. `start.sh` generates one for a laptop, the same way it does for
-`AGENT_TOOL_TOKEN`.
+not obvious from the screen.
+
+Unlike `AGENT_TOOL_TOKEN`, `start.sh` does not generate and persist this one. It supplies a fixed
+local default, `openbot-dev-worker-secret`, the same value every clone of this repository gets. That
+is fine here because this secret is only ever compared on this machine's own loopback-bound port,
+never by anything a Bot publishes — a well-known value from a public repository is not a boundary
+anybody outside this machine could reach anyway. `AGENT_TOOL_TOKEN` is generated fresh and written to
+`.env` precisely because it is not that: it is presented by a Bot's own published port, so a fixed
+default there would be no boundary at all.
 
 **`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
 above: it says where the worker's own process can reach this deployment's API, which is a fact about
