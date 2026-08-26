@@ -11,7 +11,7 @@
  * an answer nothing had recorded, which is the failure nobody can debug: the first Bot says it handed
  * the work over, the second says it answered, and no row anywhere agrees.
  */
-import type { AbstractAgent, BaseEvent, Message } from "@ag-ui/client";
+import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import type { Observable } from "rxjs";
 import type { HandoffDelivery } from "./handoff-runner";
 
@@ -36,8 +36,18 @@ export function createHandoffDelivery(options: {
     actorId: string;
     botId: string;
   }) => Promise<AbstractAgent | null>;
-  /** The conversation so far, so the addressed Bot is not answering out of context. */
-  history: (input: { threadId: string; actorId: string }) => Promise<Message[]>;
+  /**
+   * The conversation so far, so the addressed Bot is not answering out of context.
+   *
+   * PASSED THROUGH UNTOUCHED, which is why its shape is the reader's rather than named here. The
+   * platform holds a thread's messages in its own type and takes them back in the same one; sitting
+   * in the middle with a stricter type would mean inventing a conversion between two shapes that
+   * already agree, and a conversion is a place to lose a message.
+   */
+  history: (input: {
+    threadId: string;
+    actorId: string;
+  }) => Promise<readonly unknown[]>;
   runner: ThreadRunner;
   newRunId: () => string;
 }): HandoffDelivery {

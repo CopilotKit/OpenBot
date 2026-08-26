@@ -979,6 +979,46 @@ export function mountCopilotRuntime(
 ) {
   const { intelligence } = config.runtime;
 
+  /**
+   * The same Bot a person's run would get, built without a request.
+   *
+   * Handed out from here rather than assembled again elsewhere, because "built exactly the way a
+   * person's run builds it" is a property worth guaranteeing structurally. A hop delivering to a Bot
+   * assembled by parallel wiring would drift the first time one of these arguments changed, and the
+   * drift would be invisible: the Bot would run, and quietly hold different tools or a different
+   * role from the one the person talks to.
+   */
+  const agentFor = async (input: {
+    actorId: string;
+    botId: string;
+  }): Promise<AbstractAgent | null> => {
+    const actor: AgentActor = { id: input.actorId, role: "user" };
+    const agents = await resolveRuntimeAgents(
+      () => loadAgents(actor),
+      model,
+      resolveModelApiKey,
+      stallGuard,
+      loadToolsForActor?.(actor.id),
+      signRunForActor?.(actor.id),
+      config.computer ? COMPUTER_GUIDANCE : undefined,
+      loadVendors,
+      selectionForActor?.(actor.id),
+      agentFetch,
+      handoffForActor?.(actor.id),
+    );
+    return agents[input.botId] ?? null;
+  };
+
+  /*
+   * One client, used by the runtime and by anything reading a thread beside it, so a hop reads the
+   * history a person's run would read rather than a second view of it that could disagree.
+   */
+  const intelligenceClient = new IntelligenceKnowingANewThread({
+    apiUrl: intelligence.apiUrl,
+    wsUrl: intelligence.gatewayWsUrl,
+    apiKey: intelligence.apiKey,
+  });
+
   const runtime = new CopilotRuntime({
     // `mode` is inferred from the presence of `intelligence`; passing it is a type error.
     //
@@ -988,11 +1028,7 @@ export function mountCopilotRuntime(
     identifyUser,
     // The subclass, not the base: a thread nobody has run yet reads as empty rather than as a 500.
     // See IntelligenceKnowingANewThread.
-    intelligence: new IntelligenceKnowingANewThread({
-      apiUrl: intelligence.apiUrl,
-      wsUrl: intelligence.gatewayWsUrl,
-      apiKey: intelligence.apiKey,
-    }),
+    intelligence: intelligenceClient,
     licenseToken: intelligence.licenseToken,
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
@@ -1023,5 +1059,33 @@ export function mountCopilotRuntime(
     ) as never,
   });
 
-  return createCopilotHonoHandler({ runtime, basePath });
+  return {
+    handler: createCopilotHonoHandler({ runtime, basePath }),
+    agentFor,
+    /**
+     * A thread's messages, as the platform holds them.
+     *
+     * The same client the runtime uses, so a hop reads the history a person's run would read rather
+     * than a second view of it that could disagree.
+     */
+    history: async (input: { threadId: string; actorId: string }) => {
+      /*
+       * The platform's own message type rather than AG-UI's, inferred rather than named: the two are
+       * compatible where it matters and naming the wrong one here would mean converting a history
+       * that does not need converting.
+       */
+      type Read = Awaited<
+        ReturnType<CopilotKitIntelligence["getThreadMessages"]>
+      >;
+      const read = await historyOrEmpty<Read>(
+        () =>
+          intelligenceClient.getThreadMessages({
+            threadId: input.threadId,
+            userId: input.actorId,
+          }),
+        { messages: [] } as Read,
+      );
+      return read.messages;
+    },
+  };
 }
