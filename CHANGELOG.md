@@ -8,6 +8,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A computer that was suspended once suspends again
+
+Scale-to-zero worked once per Bot. A computer suspended, resumed, used and then left alone again was
+offered for suspension on every sweep after that and never suspended, and stayed awake until the next
+day. Nothing reported it, because a sweep that offers work and suspends nothing looks exactly like a
+fleet that is busy.
+
+The queue keys a suspension on the Bot id and keeps the finished row so that a late offer of the same
+key collides with it rather than running the work twice. Both are right. What was wrong is that the
+finished row was kept for a day, which is the window the other half of the sweep needs: a suspension
+that keeps failing is held back that long before anything tries it again. One number could not be
+both, so there are now two, and a finished suspension is kept for the idle window instead. That is
+the same clock the offer runs on, so a Bot cannot come back round as idle until its row has gone.
+
+Nothing to configure, and the sweep already runs on a schedule. A deployment where each Bot has its
+own computer stops paying for browsers that were used once.
+
 ### A finished turn shows the page it opened, not the one open now
 
 Reopening a conversation made every past turn fetch the screen as it is now, so an answer about

@@ -323,4 +323,53 @@ describe("claiming durable work", () => {
     expect(row?.attempts).toBe(3);
     expect(row?.why).toBe("the cluster said no");
   });
+
+  /*
+   * The two kinds of done, on their own clocks.
+   *
+   * They were one number, which a queue whose work repeats cannot afford: a finished row only has to
+   * outlast a sweep, and a row that gave up is kept because that window is also the backoff before
+   * anything tries the work again. Sharing it meant the culler either wedged its own key for a day
+   * or retried a broken suspension every few minutes.
+   */
+  test("a finished row and one that gave up are swept on separate windows", async () => {
+    await queue.offer({ kind, key: "done" });
+    await queue.claim({ kind, owner: "replica-1", leaseMs: 30_000 });
+    await queue.finish({ kind, key: "done", owner: "replica-1" });
+
+    await queue.offer({ kind, key: "gave-up" });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await queue.claim({
+        kind,
+        owner: "replica-1",
+        leaseMs: 30_000,
+        maxAttempts: 3,
+      });
+      await queue.release({
+        kind,
+        key: "gave-up",
+        owner: "replica-1",
+        delayMs: 0,
+        reason: "the cluster said no",
+      });
+    }
+
+    // The finished one goes on its own short window; the one that gave up keeps its long one.
+    expect(
+      await queue.purge({
+        kind,
+        olderThanMs: 60_000,
+        finishedOlderThanMs: 0,
+        maxAttempts: 3,
+      }),
+    ).toBe(1);
+    const [left] = await database
+      .select({ key: workItems.key })
+      .from(workItems)
+      .where(eq(workItems.kind, kind));
+    expect(left?.key).toBe("gave-up");
+
+    // And omitting it leaves both halves on the one window, which is what every other caller does.
+    expect(await queue.purge({ kind, olderThanMs: 0, maxAttempts: 3 })).toBe(1);
+  });
 });
