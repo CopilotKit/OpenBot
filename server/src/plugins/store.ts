@@ -47,7 +47,30 @@ import { transportFor } from "./transport";
  * mean an operator who granted a Bot a server had also, invisibly, waived every rule about it.
  */
 
-export type PluginKind = "mcp" | "skill";
+/**
+ * What a grant is a grant OF.
+ *
+ * `bot` is one Bot's permission to hand work to another, and it lives here rather than in a table of
+ * its own on purpose: an administrator already understands "this Bot may use that", a fork's policy
+ * layer already applies to grants, and reachability between Bots is the same kind of decision as
+ * reachability to a vendor's tools. A second table would be a second thing to reason about and a
+ * second thing for a fork to reimplement.
+ */
+export type PluginKind = "mcp" | "skill" | "bot";
+
+/**
+ * What an audit row about a grant is a row ABOUT.
+ *
+ * A mapping rather than a ternary, because a ternary quietly labelled everything that was not an MCP
+ * tool a skill. Adding a third kind made that wrong rather than merely terse: a grant letting one Bot
+ * address another would have been filed in the trail as a skill, which is the sort of small lie an
+ * investigation trips over months later.
+ */
+function grantTargetType(kind: PluginKind): string {
+  if (kind === "mcp") return "mcp_tool";
+  if (kind === "bot") return "agent";
+  return "skill";
+}
 
 export type ToolRecord = {
   serverId: string;
@@ -2117,7 +2140,7 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
-        targetType: kind === "mcp" ? "mcp_tool" : "skill",
+        targetType: grantTargetType(kind),
         targetId: ref,
         payload: {
           actor: by,
@@ -2147,7 +2170,7 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
-        targetType: kind === "mcp" ? "mcp_tool" : "skill",
+        targetType: grantTargetType(kind),
         targetId: ref,
         payload: {
           actor: by,

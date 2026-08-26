@@ -447,8 +447,11 @@ const app = createApp(
      * from: its own token proves which agent is calling, this proves who it is calling for, and
      * neither is read out of the request body any more.
      */
-    (actorId) => (botId, runId) =>
-      mintRunAssertion({ botId, actorId, runId }, config.keyEncryptionKey),
+    (actorId) => (botId, runId, threadId) =>
+      mintRunAssertion(
+        { botId, actorId, runId, threadId },
+        config.keyEncryptionKey,
+      ),
     undefined,
     /*
      * Which vendors this deployment connects to, held by a Bot or not.

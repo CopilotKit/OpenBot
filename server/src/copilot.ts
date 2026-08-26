@@ -596,7 +596,7 @@ function remoteAgentWithStandingRole(
          * one shared secret.
          */
         ...(signRun
-          ? { openbotRun: signRun(agent.id, input.runId) }
+          ? { openbotRun: signRun(agent.id, input.runId, input.threadId) }
           : /*
              * Absent means this deployment cannot sign, so the agent is given nothing to hand back
              * and its tool calls will be refused. That is the right direction to fail: a Bot that
@@ -769,7 +769,12 @@ export type LoadToolsForBot = (botId: string) => Promise<GrantedTool[]>;
  * configuration and this one never holds a secret. Shaped like `LoadToolsForBot` on purpose: both are
  * per-actor facts resolved once per request and asked per Bot.
  */
-export type SignRun = (botId: string, runId: string) => string;
+export type SignRun = (
+  botId: string,
+  runId: string,
+  /** Which conversation, so a Bot handing work on cannot choose where the answer lands. */
+  threadId: string,
+) => string;
 
 /** Who is asking. Agent visibility is decided per person, so a run has to know this first. */
 export type IdentifyActor = (request: Request) => Promise<AgentActor>;

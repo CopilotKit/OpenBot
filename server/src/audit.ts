@@ -337,6 +337,21 @@ export const auditEventTypes = [
   "bot.deleted",
   "bot.callback_token_issued",
   "bot.callback_token_revoked",
+
+  /*
+   * One Bot handing work to another.
+   *
+   * BOTH OUTCOMES, and the refused one is the more important of the pair. A hop that happened is
+   * visible in the transcript anyway; a hop that was refused is invisible everywhere else, and
+   * "why did this Bot not ask the specialist" is a question somebody asks about an answer that came
+   * back thin. The refusal row names which cap or which missing grant stopped it.
+   *
+   * `agent.handoff_offered` is written when the hop is accepted and made durable, not when the other
+   * Bot answers. The two are minutes apart on a busy cluster, and a trail that only recorded
+   * completion would be silent about work that was accepted and then lost.
+   */
+  "agent.handoff_offered",
+  "agent.handoff_refused",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];
