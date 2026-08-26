@@ -3,7 +3,12 @@ import { CronExpressionParser } from "cron-parser";
 /** Routines may run at most this often. A model can be talked into anything; the floor cannot. */
 export const MINIMUM_INTERVAL_MS = 15 * 60 * 1000;
 
-export class ScheduleRefusedError extends Error {}
+export class ScheduleRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScheduleRefusedError";
+  }
+}
 
 const UNREADABLE_MESSAGE = "That schedule could not be read.";
 const UNKNOWN_TIMEZONE_MESSAGE = "That is not a timezone I know.";
@@ -144,8 +149,41 @@ export function describeCron(cron: string): string {
       monthField,
       dayOfWeekField,
     ] = fields;
+
+    const wideOpen =
+      dayOfMonthField === "*" && monthField === "*" && dayOfWeekField === "*";
+
+    // "*/20 * * * *": a step under the floor's shape but at or above the floor itself, e.g. */15
+    // and up. Only when hour/day/month/weekday are all "*" — a step on any other field is stranger
+    // than this narrow rendering is meant to cover.
+    if (wideOpen && hourField === "*") {
+      const stepMatch = /^\*\/(\d{1,2})$/.exec(minuteField);
+      if (stepMatch) {
+        const step = Number.parseInt(stepMatch[1] as string, 10);
+        if (Number.isInteger(step) && step > 0) {
+          return `Every ${step} minutes`;
+        }
+      }
+    }
+
     const minute = parsePlainInt(minuteField, 0, 59);
     const hour = parsePlainInt(hourField, 0, 23);
+
+    // "0,30 9 * * *": a handful of plain minutes within one hour, every day. Only when the hour is
+    // a single plain value and day/month/weekday are all "*" — anything with its own weekday or
+    // day-of-month shape stays out of this narrow rendering.
+    if (wideOpen && hour !== null && /^\d{1,2}(,\d{1,2})+$/.test(minuteField)) {
+      const minutes = minuteField
+        .split(",")
+        .map((part) => parsePlainInt(part, 0, 59));
+      if (minutes.every((value): value is number => value !== null)) {
+        const times = [...minutes]
+          .sort((a, b) => a - b)
+          .map((value) => `${pad2(hour)}:${pad2(value)}`);
+        return `Every day at ${joinWords(times)}`;
+      }
+    }
+
     if (minute === null || hour === null) return cron;
 
     const time = `${pad2(hour)}:${pad2(minute)}`;

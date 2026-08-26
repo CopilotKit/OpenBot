@@ -207,6 +207,28 @@ describe("what the schedule has to be", () => {
       }),
     ).rejects.toBeInstanceOf(RoutineRefusedError);
   });
+
+  test("refuses a blank instruction with the sentence a model is meant to read", async () => {
+    const { owner, agentId, channel } = await setUp();
+
+    const failure = await store
+      .create({
+        ownerUserId: owner.id,
+        agentId,
+        channelId: channel.id,
+        instruction: "   ",
+        cron: DAILY,
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+    expect(failure).toBeInstanceOf(RoutineRefusedError);
+    expect((failure as Error).message).toBe(
+      "A routine needs an instruction to carry out.",
+    );
+  });
 });
 
 /**
@@ -359,6 +381,36 @@ describe("resolving the channel to post into", () => {
     expect(message).toContain(other.name);
     expect(message).toContain("Say which one.");
   });
+
+  test("names at most five channels before it gives up and says 'and others'", async () => {
+    const owner = await createUser();
+    const agentId = await createAgent(owner);
+    const sharedChannels = [];
+    for (let index = 0; index < 6; index += 1) {
+      sharedChannels.push(await createChannel(owner, [agentId]));
+    }
+
+    const failure = await store
+      .create({
+        ownerUserId: owner.id,
+        agentId,
+        instruction: "Which one?",
+        cron: DAILY,
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+    expect(failure).toBeInstanceOf(RoutineRefusedError);
+    const message = (failure as Error).message;
+    expect(message).toContain(", and others");
+    // All six channels share one agent, so they share one name; the cap names five of them, not
+    // six, so that one name appears exactly five times rather than six.
+    const name = sharedChannels[0]?.name as string;
+    const occurrences = message.split(name).length - 1;
+    expect(occurrences).toBe(5);
+  });
 });
 
 describe("reading a person's routines", () => {
@@ -383,6 +435,21 @@ describe("reading a person's routines", () => {
     expect(summary?.nextRunAt).toBeInstanceOf(Date);
     // Nothing writes routine_runs yet; the join is here for the commit that does.
     expect(summary?.lastRun).toBeNull();
+  });
+
+  test("says a step schedule in words too, never in cron", async () => {
+    const { owner, agentId, channel } = await setUp();
+    await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      instruction: "Check in often.",
+      cron: "*/20 * * * *",
+    });
+
+    const [summary] = await store.listFor(owner.id);
+
+    expect(summary?.schedule).not.toContain("*");
   });
 
   test("puts the newest first", async () => {
@@ -445,6 +512,28 @@ describe("changing a routine", () => {
 
     expect(updated.cron).toBe("30 21 * * *");
     expect(updated.nextRunAt.getTime()).not.toBe(routine.nextRunAt.getTime());
+  });
+
+  test("recomputes the next run when only the timezone changes, and refuses an unknown zone", async () => {
+    const { owner, agentId, channel } = await setUp();
+    const routine = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      instruction: "Summarise the day.",
+      cron: DAILY,
+    });
+
+    const updated = await store.update(owner.id, routine.id, {
+      timezone: "Asia/Tokyo",
+    });
+
+    expect(updated.timezone).toBe("Asia/Tokyo");
+    expect(updated.nextRunAt.getTime()).not.toBe(routine.nextRunAt.getTime());
+
+    await expect(
+      store.update(owner.id, routine.id, { timezone: "Mars/Olympus" }),
+    ).rejects.toBeInstanceOf(RoutineRefusedError);
   });
 
   test("leaves the next run alone when only the instruction changes", async () => {
@@ -524,13 +613,33 @@ describe("changing a routine", () => {
       cron: DAILY,
     });
     // A routine switched off for a month has a next run a month in the past. Enabling it must not
-    // hand the sweep a firing that was due in June.
+    // hand the sweep a firing that was due in June. Forcing the stamp into the past makes that
+    // stale state real rather than assumed: without this, `nextRunAt > now` would already have
+    // been true before the disable, and deleting the recompute branch would leave this green.
     await store.setEnabled(owner.id, routine.id, false);
+    const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    await database
+      .update(routines)
+      .set({ nextRunAt: stale })
+      .where(eq(routines.id, routine.id));
 
     const enabled = await store.update(owner.id, routine.id, { enabled: true });
 
     expect(enabled.enabled).toBe(true);
     expect(enabled.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+
+    // The mirror image: an instruction-only change on an already-enabled routine must not recompute,
+    // even when the stored stamp is one that recomputing would obviously move.
+    await database
+      .update(routines)
+      .set({ nextRunAt: stale })
+      .where(eq(routines.id, routine.id));
+
+    const untouched = await store.update(owner.id, routine.id, {
+      instruction: "Summarise the week instead.",
+    });
+
+    expect(untouched.nextRunAt.getTime()).toBe(stale.getTime());
   });
 
   test("removing one is a hard delete, and only once", async () => {

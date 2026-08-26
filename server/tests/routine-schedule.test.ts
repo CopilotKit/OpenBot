@@ -108,6 +108,14 @@ describe("describeCron", () => {
     expect(describeCron("0 9 1 * *")).toBe("On the 1st of the month at 09:00");
   });
 
+  test("step minutes", () => {
+    expect(describeCron("*/20 * * * *")).toBe("Every 20 minutes");
+  });
+
+  test("a comma list of plain minutes on one hour", () => {
+    expect(describeCron("0,30 9 * * *")).toBe("Every day at 09:00 and 09:30");
+  });
+
   test("falls through to the raw expression when it is stranger than words", () => {
     expect(describeCron("*/7 3,4 * * *")).toBe("*/7 3,4 * * *");
   });
