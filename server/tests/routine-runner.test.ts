@@ -93,6 +93,13 @@ function harness(options: {
     },
     async consecutiveFailures(routineId) {
       expect(routineId).toBe(CONTEXT.routineId);
+      // Read AFTER the failure is on the row, or the tenth failure reads as the ninth: hoisting
+      // this read above `finishRun` in the runner would keep every other assertion here green.
+      expect(recorded.finished).toHaveLength(1);
+      expect(recorded.finished[0]).toMatchObject({
+        runId: RUN_ID,
+        status: "failed",
+      });
       return options.failures ?? 0;
     },
     async setEnabled(ownerUserId, id, enabled) {
@@ -278,5 +285,54 @@ describe("createRoutineRunner", () => {
     expect(recorded.finished).toEqual([
       { runId: RUN_ID, status: "failed", error: "the model refused" },
     ]);
+  });
+
+  test("truncates a failure reason at the code-point cap without splitting an emoji", async () => {
+    // 170 code points: an ASCII run long enough to push the cut (at code point 159) into the
+    // middle of the run of astral emoji that follows, so the cut has to land between code points,
+    // never inside one of their surrogate pairs.
+    const longReason = `${"a".repeat(150)}${"\u{1F600}".repeat(20)}`;
+    const { runner, recorded } = harness({
+      runTurn: async () => {
+        throw new Error(longReason);
+      },
+      failures: 1,
+    });
+
+    await runner.run(RUN_ID);
+
+    expect(recorded.activity).toHaveLength(1);
+    const posted = recorded.activity[0]?.activity.text ?? "";
+    expect(posted.startsWith("This routine failed: ")).toBe(true);
+    const reasonPart = posted.slice("This routine failed: ".length);
+
+    // Capped at MAX_NOTIFIED_REASON (160) code points: 159 kept, plus the implementation's own
+    // ellipsis character — read runner.ts's `shorten` rather than assume a format here.
+    expect(Array.from(reasonPart)).toHaveLength(160);
+    expect(reasonPart).toBe(`${"a".repeat(150)}${"\u{1F600}".repeat(9)}…`);
+
+    // The cut is measured in code points, not UTF-16 units, so no emoji is split into a lone
+    // surrogate: the string stays well-formed and a code-point split round-trips cleanly.
+    expect(reasonPart.isWellFormed()).toBe(true);
+    expect(Array.from(reasonPart).join("")).toBe(reasonPart);
+  });
+
+  test("posts a thrown non-Error value with String(error)", async () => {
+    const { runner, recorded } = harness({
+      runTurn: async () => {
+        throw "not an Error object";
+      },
+      failures: 1,
+    });
+
+    await runner.run(RUN_ID);
+
+    expect(recorded.finished).toEqual([
+      { runId: RUN_ID, status: "failed", error: "not an Error object" },
+    ]);
+    expect(recorded.activity).toHaveLength(1);
+    expect(recorded.activity[0]?.activity.text).toBe(
+      "This routine failed: not an Error object",
+    );
   });
 });
