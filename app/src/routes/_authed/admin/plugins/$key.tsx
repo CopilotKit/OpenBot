@@ -320,22 +320,51 @@ function RouteComponent() {
           description={
             auth === "user-oauth"
               ? "This vendor answers as whoever is asking. The deployment registers an OAuth client, and each person connects their own account, so a Bot only ever sees what that person can see."
-              : "What this deployment presents to the vendor. One credential, used for everybody."
+              : auth === "builtin"
+                ? "Built into this deployment. There is no vendor to reach and no credential to hold — a call runs as whoever asked."
+                : "What this deployment presents to the vendor. One credential, used for everybody."
           }
           title="Connection"
         >
           {/*
-           * Rows that DO something, and nothing else — with one admitted exception. The layout
+           * Rows that DO something, and nothing else — with two admitted exceptions. The layout
            * skill's third row kind — a value with no chevron and nothing to click — earns its
            * place on a screen full of them, but among four actionable rows a dead one reads as a
            * control that has stopped working. The redirect URI is prose under the card instead.
            *
-           * The exception is the OAuth client row for a vendor with a dynamic client: there is a
-           * real fact to state — this deployment registers itself, nobody configures it — right
-           * where the actionable client row would otherwise sit. Leaving that slot empty would
-           * read as a missing setup step, not as nothing to do.
+           * The first exception is the OAuth client row for a vendor with a dynamic client: there
+           * is a real fact to state — this deployment registers itself, nobody configures it —
+           * right where the actionable client row would otherwise sit. Leaving that slot empty
+           * would read as a missing setup step, not as nothing to do.
+           *
+           * The second is the whole Connection card for a builtin server: there is nothing to
+           * configure, but a card of nothing under a "Connection" heading reads as a missing setup
+           * step rather than as the answer. The row states that plainly instead of leaving the
+           * card empty — and being first, it also gives the docsUrl row below something other than
+           * the card's own top border to sit its leading separator against.
            */}
           <PageRows>
+            {auth === "builtin" ? (
+              /*
+               * Nothing to click. A builtin server runs inside this deployment, on tables it
+               * already owns — there is no vendor to authenticate to and no credential to store.
+               */
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>Connection</ItemTitle>
+                  <ItemDescription>
+                    Nothing to configure. These tools run inside this
+                    deployment, on the tables it already owns.
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="text-muted-foreground text-xs">
+                    Built in
+                  </span>
+                </ItemActions>
+              </Item>
+            ) : null}
+
             {auth === "deployment-bearer" ? (
               <Item
                 render={
