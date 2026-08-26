@@ -13,7 +13,10 @@ function event(overrides: Partial<AuditEvent>): AuditEvent {
     actorUserId: null,
     eventType: overrides.eventType ?? "computer.action_refused",
     targetType: overrides.targetType ?? "computer",
-    targetId: overrides.targetId === undefined ? "general-assistant" : overrides.targetId,
+    targetId:
+      overrides.targetId === undefined
+        ? "general-assistant"
+        : overrides.targetId,
     payload: overrides.payload ?? {},
     createdAt: overrides.createdAt ?? "2026-08-25T00:00:00.000Z",
   };
@@ -33,7 +36,9 @@ describe("attentionItemsFrom", () => {
     );
     expect(items).toHaveLength(1);
     expect(items[0]?.kind).toBe("refused");
-    expect(items[0]?.sentence).toBe("“Submit order” on shop.example is blocked.");
+    expect(items[0]?.sentence).toBe(
+      "“Submit order” on shop.example is blocked.",
+    );
     expect(items[0]?.botId).toBe("general-assistant");
   });
 

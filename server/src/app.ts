@@ -664,7 +664,12 @@ export function createApp(
   if (auditReader && attentionStore) {
     app.route(
       "/api/attention",
-      createAttentionRoutes(auditReader, attentionStore, requireUser, canUseBot),
+      createAttentionRoutes(
+        auditReader,
+        attentionStore,
+        requireUser,
+        canUseBot,
+      ),
     );
   }
 

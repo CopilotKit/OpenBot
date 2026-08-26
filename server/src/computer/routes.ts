@@ -19,10 +19,7 @@ import {
 import type { PageFrameStore } from "./page-frames";
 import type { AuditReader } from "../audit";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
-import {
-  dryRunAgainstHistory,
-  REPLAYABLE_EVENT_TYPES,
-} from "./policy-dry-run";
+import { dryRunAgainstHistory, REPLAYABLE_EVENT_TYPES } from "./policy-dry-run";
 
 /**
  * The Bot computer's surface, behind the same session guard as every other API route.
@@ -672,7 +669,9 @@ export function createComputerRoutes(
       targetType: "computer",
     });
 
-    return context.json({ report: dryRunAgainstHistory(parsed.policy, events) });
+    return context.json({
+      report: dryRunAgainstHistory(parsed.policy, events),
+    });
   });
 
   return routes;

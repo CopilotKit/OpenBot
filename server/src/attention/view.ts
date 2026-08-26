@@ -47,7 +47,9 @@ const text = (value: unknown): string =>
  * "google-drive/search_files", which is not a Bot, which `canUseBot` correctly denies, which hid
  * every tool rejection from exactly the person it was for.
  */
-export function botOf(event: Pick<AuditEvent, "targetType" | "targetId" | "payload">): string {
+export function botOf(
+  event: Pick<AuditEvent, "targetType" | "targetId" | "payload">,
+): string {
   if (event.targetType === "computer" || event.targetType === "agent") {
     return event.targetId ?? text(event.payload.bot);
   }
