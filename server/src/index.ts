@@ -11,7 +11,7 @@ import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
-import { startAuditRetention } from "./audit-retention";
+import { startRetentionSweeps } from "./audit-retention";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
@@ -248,15 +248,13 @@ const policyListener = await startPolicyListener(
  * unavailable, and the row is a note for a reader rather than something the server depends on.
  */
 const bootAuditStore = createAuditStore(database);
-/*
- * Old audit rows removed on a schedule, when a deployment has asked for that.
- *
- * One server sweeps rather than all of them, decided by an advisory lock. Off unless
- * `AUDIT_RETENTION_DAYS` is set. See audit-retention.ts.
- */
-const auditRetention = startAuditRetention(
+// One store: the gateway writes through it, a route reads it, and the sweep below takes the old ones out.
+const pageFrameStore = createPageFrameStore(database);
+// Housekeeping on a schedule: audit rows when asked for, screenshots always, one timer. See audit-retention.ts.
+const retentionSweeps = startRetentionSweeps(
   config.databaseUrl,
   config.auditRetentionDays,
+  pageFrameStore,
 );
 const computerGateway = computerProvider
   ? createComputerGateway({
@@ -269,7 +267,7 @@ const computerGateway = computerProvider
       snapshots: createSnapshotStore(database),
       // So wiping a profile takes the pictures of its signed-in pages with it, which is what the
       // sentence on that button already promised.
-      pageFrames: createPageFrameStore(database),
+      pageFrames: pageFrameStore,
       allowPrivateHosts: config.computer?.allowPrivateHosts,
       token: config.computer?.token,
     })
@@ -711,7 +709,7 @@ const app = createApp(
   // Chooses the coworker for an untagged message, on the deployment's own model and key.
   intentRouter,
   // What a browsing turn's screen looked like when it finished, so the transcript can show it later.
-  createPageFrameStore(database),
+  pageFrameStore,
   // What a due routine actually does: a turn, run as its owner, into the thread they will open.
   routineRunner,
   // A person's own standing instructions: the list, and a switch to stop one.
@@ -880,7 +878,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     void Promise.allSettled([
       channelActivityListener.stop(),
       policyListener.stop(),
-      Promise.resolve(auditRetention.stop()),
+      Promise.resolve(retentionSweeps.stop()),
     ]).finally(() => process.exit(0));
   });
 }

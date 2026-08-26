@@ -28,6 +28,30 @@ than accepting one it cannot attribute. `scripts/start.sh` runs the worker local
 turns it on with `routines.enabled` and takes the secret as `secrets.workerSharedSecret`. No new port
 is opened for any of this — the worker only ever calls out to the server it already trusts.
 
+### Turn screenshots are swept in every deployment, not one
+
+A page a Bot opens is photographed and kept in `computer_page_frame`, so a conversation read back
+later shows what it was looking at. The reaper for those rows had one caller: the idle-computer
+culler, which refuses to run unless each Bot has its own computer and is scheduled only by the Helm
+chart's CronJob, which exists only when `computers.mode` is `sandbox`. On Compose, on the all-in-one
+image, and on the chart's own default of `shared`, nothing ever called it. One browsing Bot over
+ninety days is several hundred megabytes of rows that nothing was ever going to remove.
+
+The sweep now runs on the server, on the same hourly timer that removes old audit rows, and does not
+wait for a retention policy to be configured: a month of screenshots is what the store already meant
+to keep. It also removes them in batches, because one statement over that much data held its locks
+for seventeen seconds.
+
+Deployments using `computers.mode: sandbox` are unaffected in what they keep. The culler no longer
+purges frames, because the server does it there too and one owner is better than two.
+
+**On upgrade, the first sweep removes the backlog.** A deployment that has been keeping every
+screenshot since it was installed will lose the ones older than a month, about a minute after the
+server starts. That is the window the store has always documented and the one sandbox deployments
+have been enforcing, but it has never been applied anywhere else, so it is worth knowing before the
+upgrade rather than after. It is drained in batches, forty thousand rows an hour, rather than in one
+statement.
+
 ### A channel a Bot has spoken in unseen shows a dot
 
 The sidebar marks a channel when a Bot has said something since you last had it open: a dot beside
