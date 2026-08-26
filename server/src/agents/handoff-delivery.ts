@@ -274,9 +274,9 @@ export function createHandoffDelivery(options: {
              * paragraph of instructions to a model sitting in a bubble that looks like something the
              * person typed. What belongs in a transcript is the one line saying why this Bot spoke.
              */
-            persistedInputMessages: [
-              { id: `handoff-${runId}`, role: "user", content: shown },
-            ],
+            persistedInputMessages: shown
+              ? [{ id: `handoff-${runId}`, role: "user", content: shown }]
+              : [],
             /*
              * NOTHING IS PASSED FOR THE CONNECTION, and that is load-bearing.
              *
@@ -323,7 +323,7 @@ export function createHandoffDelivery(options: {
          * answer that then failed is worse than one that did not move: they open it and find
          * nothing, and nothing says why.
          */
-        if (announce && where.channelId) {
+        if (announce && where.channelId && shown) {
           await announce({
             actorId: work.actorId,
             channelId: where.channelId,

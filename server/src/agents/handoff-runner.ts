@@ -52,15 +52,19 @@ export type HandoffDelivery = {
     /** The message the addressed Bot sees, already attributed by the deployment. */
     message: string;
     /**
-     * The one line of it that belongs in the transcript.
+     * The one line of it that belongs in the transcript, if any.
      *
      * TWO TEXTS, because they have two readers. The model needs the envelope: who is asking, the
      * task, its constraints, what a good answer looks like, and an instruction about who to write
      * for. A person scrolling their conversation with the addressed Bot needs to know why it
      * suddenly said something, in one sentence. Persisting the envelope puts a paragraph of
      * machine instructions in their transcript, in a bubble that looks like something they wrote.
+     *
+     * Absent means nothing is kept, which is right for a Bot going back to its own conversation to
+     * report a failure: what it says already explains why it spoke, and the instruction that made it
+     * speak is addressed to a model.
      */
-    shown: string;
+    shown?: string;
     /** The signed statement of the run it is starting, carrying its depth. */
     assertion: string;
   }) => Promise<void>;
@@ -192,10 +196,11 @@ export function createHandoffRunner(options: {
          */
         const startedAt = Date.now();
         try {
+          const shown = summarise(work);
           await delivery.deliver({
             work,
             message: attribute(work),
-            shown: summarise(work),
+            ...(shown ? { shown } : {}),
             assertion: sign(work),
           });
           await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
@@ -316,7 +321,12 @@ function attribute(work: HandoffWork): string {
  * constraints and the shape-of-answer notes out. Those are instructions to a model, and reading
  * somebody else's instructions to a model is how a transcript stops being a conversation.
  */
-function summarise(work: HandoffWork): string {
-  if (work.answerIn) return work.task;
+function summarise(work: HandoffWork): string | null {
+  /*
+   * Nothing, for a Bot going back to its own conversation to say a hop failed. Its own sentence is
+   * the whole message; the text that prompted it is an instruction to a model, and shown here it
+   * appears as something the person typed and then had read back to them.
+   */
+  if (work.answerIn) return null;
   return `${work.fromName ?? work.fromBotId} asked ${work.toName ?? work.toBotId} for this on your behalf: ${work.task}`;
 }

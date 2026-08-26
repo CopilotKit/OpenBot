@@ -26,7 +26,11 @@ const WORK: HandoffWork = {
 
 function runner(options?: {
   claimed?: WorkItem[];
-  deliver?: (input: { work: HandoffWork; message: string }) => Promise<void>;
+  deliver?: (input: {
+    work: HandoffWork;
+    message: string;
+    shown?: string;
+  }) => Promise<void>;
 }) {
   const calls: Array<{ verb: string; key: string; owner?: string }> = [];
   const events: string[] = [];
@@ -76,9 +80,9 @@ function runner(options?: {
       sign: (work) => `signed:${work.toBotId}:${work.depth}`,
       auditStore,
       delivery: {
-        deliver: async ({ work, message, assertion }) => {
+        deliver: async ({ work, message, shown, assertion }) => {
           delivered.push({ message, assertion });
-          await options?.deliver?.({ work, message });
+          await options?.deliver?.({ work, message, shown });
         },
       },
     }),
@@ -254,5 +258,57 @@ describe("a hop that failed for good", () => {
 
     expect(offered).toEqual([]);
     expect(calls.map((call) => call.verb)).toContain("release");
+  });
+});
+
+/**
+ * What a notice leaves in the transcript.
+ *
+ * Nothing. The asking Bot's own sentence is the whole message; the text that prompted it is an
+ * instruction to a model, and kept it appears as something the person typed and had read back.
+ */
+describe("what a notice shows", () => {
+  test("the instruction that produced it is not shown to anybody", async () => {
+    const shownTexts: Array<string | undefined> = [];
+    const { runner: sweeper } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:notice:researcher",
+          payload: { ...WORK, answerIn: "thread-1" },
+          attempts: 1,
+        },
+      ] as unknown as WorkItem[],
+      deliver: async (input) => {
+        shownTexts.push(input.shown);
+      },
+    });
+
+    await sweeper.sweep();
+
+    expect(shownTexts).toEqual([undefined]);
+  });
+
+  test("an ordinary hop shows who asked and what for", async () => {
+    const shownTexts: Array<string | undefined> = [];
+    const { runner: sweeper } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:abc",
+          payload: { ...WORK, fromName: "Assistant", toName: "Researcher" },
+          attempts: 1,
+        },
+      ] as unknown as WorkItem[],
+      deliver: async (input) => {
+        shownTexts.push(input.shown);
+      },
+    });
+
+    await sweeper.sweep();
+
+    expect(shownTexts[0]).toBe(
+      "Assistant asked Researcher for this on your behalf: find the outage window",
+    );
   });
 });
