@@ -130,6 +130,21 @@ describe("the tool list", () => {
     expect(description).toContain("0 9 * * 1-5");
   });
 
+  test("tells the model how to phrase the instruction itself", async () => {
+    // A live firing did nothing and reported success because its instruction was written in
+    // schedule-speak ("Every run, append …"): the model read it as a question about scheduling,
+    // checked that the routine existed, and answered "already configured". The firing turn now says
+    // it is a firing (`routines/run-turn.ts`), and this is the other half — the authoring side, so
+    // the instruction is written as work in the first place.
+    const tools = await listTools();
+    const create = tools.find((tool) => tool.name === "create_routine");
+    const description = create?.description ?? "";
+    expect(description).toContain("restate the schedule");
+
+    const update = tools.find((tool) => tool.name === "update_routine");
+    expect(update?.description ?? "").toContain("restate the schedule");
+  });
+
   test("needs no actor, no arguments and no store", async () => {
     // The only call site is `refreshTools`, which passes `{url, token}` and never an actor. A list
     // that refused without one would store zero tools and Routines would advertise nothing.

@@ -4,6 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { EMPTY } from "rxjs";
 import {
   createTurnRunner,
+  frameFiring,
   sanitizeSeededHistory,
 } from "../src/routines/run-turn";
 
@@ -26,6 +27,13 @@ const OWNER = "user_owner";
 const AGENT_ID = "bot_helper";
 const THREAD_ID = "thread_owner_channel_1";
 const INSTRUCTION = "Post the standup summary.";
+
+/**
+ * A fragment of the firing frame that no instruction a person writes would contain by accident, and
+ * which every one of the frame's three jobs runs through. Asserted rather than the whole paragraph so
+ * the wording can be improved without rewriting the suite.
+ */
+const FRAME_MARK = "firing right now";
 
 type HistoryRow = {
   id: string;
@@ -298,10 +306,10 @@ describe("a routine's headless turn", () => {
     });
     // And a result row still points at the call it answers.
     expect(agent.messages[4]).toMatchObject({ toolCallId: "call_1" });
-    expect(agent.messages[5]).toMatchObject({
-      role: "user",
-      content: INSTRUCTION,
-    });
+    expect(agent.messages[5]).toMatchObject({ role: "user" });
+    // The turn's own message carries the instruction, framed as a firing — see the describe below.
+    expect(agent.messages[5]?.content).toContain(INSTRUCTION);
+    expect(agent.messages[5]?.content).toContain(FRAME_MARK);
   });
 
   test("a thread the platform has never heard of reads as no history", async () => {
@@ -310,6 +318,79 @@ describe("a routine's headless turn", () => {
     await run();
 
     expect(calls.runs[0]?.input.messages).toHaveLength(1);
+  });
+});
+
+/**
+ * The turn has to know it IS a firing.
+ *
+ * FOUND ON A LIVE FIRING. The instruction read "Every run, append the current date and time as a new
+ * bulleted list item to the Notion page …" and went to the model verbatim. The model read
+ * schedule-shaped prose as a request about SCHEDULING: it called `list_routines`, found a routine
+ * that already said that, replied "already configured", and appended nothing. The firing recorded
+ * `succeeded` having done nothing — a routine reporting that it works while doing nothing at all,
+ * which is worse than one that fails.
+ */
+describe("the turn's message is framed as a firing happening now", () => {
+  test("carries the instruction and the frame around it", async () => {
+    const { run, calls } = harness({ history: THREE_ROWS });
+
+    await run();
+
+    const seeded = calls.runs[0]?.input.messages ?? [];
+    const turn = seeded[seeded.length - 1] as { content?: unknown };
+    expect(typeof turn.content).toBe("string");
+    const content = String(turn.content);
+    // The instruction survives whole — the frame wraps it, it does not rewrite it.
+    expect(content).toContain(INSTRUCTION);
+    expect(content).toContain(FRAME_MARK);
+    // And the three things the bare instruction could not say.
+    expect(content.toLowerCase()).toContain("schedule");
+    expect(content.toLowerCase()).toContain("this turn");
+    expect(content).toContain("routine");
+  });
+
+  test("the framed message is what persists, so the transcript shows what was asked", async () => {
+    const { run, calls } = harness({ history: THREE_ROWS });
+
+    await run();
+
+    const [request] = calls.runs;
+    expect(request?.persistedInputMessages).toHaveLength(1);
+    const persisted = String(request?.persistedInputMessages?.[0]?.content);
+    expect(persisted).toContain(FRAME_MARK);
+    expect(persisted).toContain(INSTRUCTION);
+  });
+
+  test("a prior firing's framed message, arriving back as history, is not framed again", async () => {
+    // The framed text persists, so the NEXT firing reads it back as history. Only the new message is
+    // framed; history is seeded exactly as the platform handed it over. Without that, an instruction
+    // would grow a fresh paragraph of frame on every single firing until the turn is mostly frame.
+    const alreadyFramed = frameFiring(
+      "Append the current UTC time to the log page.",
+    );
+    const { run, calls } = harness({
+      history: [
+        { id: "m1", role: "user", content: alreadyFramed },
+        { id: "m2", role: "assistant", content: "Appended." },
+      ],
+    });
+
+    await run();
+
+    const seeded = calls.runs[0]?.input.messages ?? [];
+    expect(seeded).toHaveLength(3);
+    // Byte for byte what came out of the platform.
+    expect((seeded[0] as { content?: unknown }).content).toBe(alreadyFramed);
+    // And exactly one frame in it, not two.
+    const occurrences =
+      String((seeded[0] as { content?: unknown }).content).split(FRAME_MARK)
+        .length - 1;
+    expect(occurrences).toBe(1);
+    // The new message is the only framed one this turn added.
+    expect(String((seeded[2] as { content?: unknown }).content)).toBe(
+      frameFiring(INSTRUCTION),
+    );
   });
 });
 
@@ -464,7 +545,9 @@ describe("persistedInputMessages is the subtraction", () => {
     const [request] = calls.runs;
     expect(request?.input.messages).toHaveLength(4);
     expect(request?.persistedInputMessages).toHaveLength(1);
-    expect(request?.persistedInputMessages?.[0]?.content).toBe(INSTRUCTION);
+    expect(request?.persistedInputMessages?.[0]?.content).toContain(
+      INSTRUCTION,
+    );
     // Identified by id, not by position: none of the history's ids may appear.
     const historic = new Set(THREE_ROWS.map((row) => row.id));
     for (const message of request?.persistedInputMessages ?? []) {
@@ -494,7 +577,9 @@ describe("persistedInputMessages is the subtraction", () => {
     // Three seeded rows survive the sanitation, plus this turn's instruction.
     expect(request?.input.messages).toHaveLength(4);
     expect(request?.persistedInputMessages).toHaveLength(1);
-    expect(request?.persistedInputMessages?.[0]?.content).toBe(INSTRUCTION);
+    expect(request?.persistedInputMessages?.[0]?.content).toContain(
+      INSTRUCTION,
+    );
   });
 
   test("an empty history persists everything", async () => {

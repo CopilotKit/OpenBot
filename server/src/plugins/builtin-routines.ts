@@ -76,12 +76,24 @@ export function useRoutineTools(tools: RoutineTools | null): void {
  * minute, or into somebody else's channel. A tool a model misuses is not a failed call — it is a
  * wrong schedule that keeps being wrong on a timer. So the cron contract is written out in full,
  * with worked examples, rather than left to a field named `cron`.
+ *
+ * HOW THE INSTRUCTION IS PHRASED IS PART OF THAT CONTRACT, and it was learned the hard way: a
+ * routine stored as "Every run, append the current date and time to the Notion page …" fired, and the
+ * turn read its own schedule-shaped text as a question about SCHEDULING — it checked that the routine
+ * existed, said so, and appended nothing, successfully. `routines/run-turn.ts` now frames the firing
+ * turn as a firing; this is the other half, so the sentence is written as work to begin with.
  */
 const TOOLS: readonly McpTool[] = Object.freeze([
   {
     name: "create_routine",
     description: [
       "Set up a standing instruction that you carry out on a schedule for the person you are talking to.",
+      "",
+      "Write the `instruction` as the work of ONE firing, in the imperative, and do not restate the schedule",
+      'inside it: `Append the current UTC time to the page "Log"`, not `Every 15 minutes, append the current',
+      'UTC time to the page "Log"`. The schedule belongs in `cron`, and the instruction is handed to a turn',
+      "that has already fired on it — an instruction that describes a schedule reads as a request to set one",
+      "up, and gets answered instead of carried out.",
       "",
       "The schedule is a five-field cron expression, in the order `minute hour day-of-month month day-of-week`.",
       "`0 9 * * 1-5` is weekdays at nine in the morning. `30 18 * * *` is every day at half past six in the",
@@ -105,7 +117,7 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         instruction: {
           type: "string",
           description:
-            "What to do each time it runs, written as an instruction to yourself.",
+            'The work of one firing, imperative, with no schedule restated in it: `Append the current UTC time to the page "Log"`.',
         },
         cron: {
           type: "string",
@@ -145,6 +157,10 @@ const TOOLS: readonly McpTool[] = Object.freeze([
       "Give the id from `list_routines` and only the fields that change; anything left out stays as it is. A",
       "new `cron` follows exactly the same five-field rules as `create_routine`, and a routine switched back",
       "on is scheduled from now rather than from wherever it left off.",
+      "",
+      "A new `instruction` follows the same rule as `create_routine`'s: the work of one firing, imperative, and",
+      'do not restate the schedule inside it — `Append the current UTC time to the page "Log"`, not `Every 15',
+      'minutes, append the current UTC time to the page "Log"`.',
     ].join("\n"),
     inputSchema: {
       type: "object",
@@ -155,7 +171,8 @@ const TOOLS: readonly McpTool[] = Object.freeze([
         },
         instruction: {
           type: "string",
-          description: "A new instruction, replacing the old one entirely.",
+          description:
+            "A new instruction, replacing the old one entirely. The work of one firing, imperative, with no schedule restated in it.",
         },
         cron: {
           type: "string",
