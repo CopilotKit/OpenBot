@@ -283,7 +283,12 @@ function inWords(summary: RoutineSummary): string {
   const parts = [
     `${summary.schedule} (${summary.timezone})`,
     `in ${channelOf(summary)}`,
-    `next ${summary.nextRunAt.toISOString()}`,
+    // The store does not recompute `nextRunAt` on disable, so a switched-off routine's stored
+    // value is a stale firing time, not a fact — stating it as "next" would let a model repeat a
+    // time that will never come until somebody switches it back on.
+    summary.enabled
+      ? `next ${summary.nextRunAt.toISOString()}`
+      : "next when switched back on",
     lastRunOf(summary),
     // The model needs this to change or delete the routine later, and it cannot derive it.
     `id: ${summary.id}`,
@@ -297,20 +302,35 @@ function inWords(summary: RoutineSummary): string {
  *
  * `create` and `update` return a `Routine`, which carries a cron expression and a channel id: the
  * two things this answer must not be. The summary carries the words and the channel's name, so the
- * confirmation is a sentence rather than a row. Absent only if it vanished between the two calls,
- * where naming the id is the whole of what is still true.
+ * confirmation is a sentence rather than a row. `ownerUserId` is the connection-derived value the
+ * caller already validated — not `routine.ownerUserId` — so "identity always from the connection"
+ * holds at this call site too, not just at the write.
+ *
+ * The re-read is wrapped on its own: the write already landed by the time this runs, so a `listFor`
+ * that throws (the routine vanished, or the read itself failed) is not a write that failed, and must
+ * not be reported as one — that would tell the model to retry and duplicate the routine. Either way
+ * the id is still true, so `fallbackOpening` composes a full sentence around it rather than reusing
+ * `opening`, which does not grammatically continue into "Its id is …" for every verb.
  */
 async function describeWritten(
   tools: RoutineTools,
   routine: Routine,
+  ownerUserId: string,
   opening: string,
+  fallbackOpening: string,
 ): Promise<McpCallResult> {
-  const summaries = await tools.listFor(routine.ownerUserId);
-  const summary = summaries.find((candidate) => candidate.id === routine.id);
+  let summary: RoutineSummary | undefined;
+  try {
+    summary = (await tools.listFor(ownerUserId)).find(
+      (candidate) => candidate.id === routine.id,
+    );
+  } catch {
+    // The write landed. A confirmation that could not be read is not a write that failed.
+  }
   return asResult(
     summary
       ? `${opening} ${inWords(summary)}`
-      : `${opening} Its id is ${routine.id}.`,
+      : `${fallbackOpening} Its id is ${routine.id}.`,
   );
 }
 
@@ -372,7 +392,13 @@ export async function callTool(
         timezone: stringArg(args, "timezone"),
         channelId: stringArg(args, "channelId"),
       });
-      return await describeWritten(tools, routine, "That routine is set:");
+      return await describeWritten(
+        tools,
+        routine,
+        ownerUserId,
+        "That routine is set:",
+        "That routine is set.",
+      );
     }
 
     if (toolName === "list_routines") {
@@ -410,7 +436,13 @@ export async function callTool(
       }
 
       const routine = await tools.update(ownerUserId, id, patch);
-      return await describeWritten(tools, routine, "That routine now reads:");
+      return await describeWritten(
+        tools,
+        routine,
+        ownerUserId,
+        "That routine now reads:",
+        "That routine is updated.",
+      );
     }
 
     if (toolName === "delete_routine") {

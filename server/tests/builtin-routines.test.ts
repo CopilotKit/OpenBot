@@ -344,6 +344,153 @@ describe("attribution", () => {
   });
 });
 
+describe("a write that landed but could not be read back", () => {
+  test("create: a listFor that throws after a successful write is not reported as a failure", async () => {
+    recordingTools({
+      async listFor() {
+        throw new Error("connection reset");
+      },
+    });
+
+    const result = await callTool(CONNECTION, "create_routine", {
+      instruction: "Post the standup summary.",
+      cron: "0 9 * * 1-5",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toBe("That routine is set. Its id is routine_1.");
+  });
+
+  test("update: a listFor that throws after a successful write is not reported as a failure", async () => {
+    recordingTools({
+      async listFor() {
+        throw new Error("connection reset");
+      },
+    });
+
+    const result = await callTool(CONNECTION, "update_routine", {
+      id: "routine_1",
+      instruction: "Something else.",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toBe("That routine is updated. Its id is routine_1.");
+  });
+
+  test("create: the vanished-routine fallback reads as a sentence and names the id", async () => {
+    recordingTools({
+      async listFor() {
+        return [];
+      },
+    });
+
+    const result = await callTool(CONNECTION, "create_routine", {
+      instruction: "Post the standup summary.",
+      cron: "0 9 * * 1-5",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toBe("That routine is set. Its id is routine_1.");
+  });
+
+  test("update: the vanished-routine fallback reads as a sentence and names the id", async () => {
+    recordingTools({
+      async listFor() {
+        return [];
+      },
+    });
+
+    const result = await callTool(CONNECTION, "update_routine", {
+      id: "routine_1",
+      instruction: "Something else.",
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.text).toBe("That routine is updated. Its id is routine_1.");
+  });
+
+  test("the confirmation read is attributed to the connection's actor, not the routine's owner", async () => {
+    const calls = recordingTools();
+    await callTool(CONNECTION, "create_routine", {
+      instruction: "Post the standup summary.",
+      cron: "0 9 * * 1-5",
+    });
+
+    const reads = calls.filter((call) => call.method === "listFor");
+    expect(reads).toContainEqual({
+      method: "listFor",
+      ownerUserId: "user_asker",
+    });
+  });
+});
+
+describe("a disabled routine's rendered next-run", () => {
+  test('omits an ISO timestamp after "next" and keeps the switched-off wording', async () => {
+    recordingTools({
+      async listFor() {
+        return [{ ...SUMMARY, enabled: false }];
+      },
+    });
+
+    const result = await callTool(CONNECTION, "list_routines", {});
+
+    expect(result.isError).toBe(false);
+    expect(result.text).not.toContain(SUMMARY.nextRunAt.toISOString());
+    expect(result.text).toContain("switched off");
+    expect(result.text).toMatch(/next when switched back on/);
+  });
+});
+
+describe("beyond-spec validation refusals", () => {
+  test("create_routine without an instruction refuses without touching the store", async () => {
+    const calls = recordingTools();
+    const result = await callTool(CONNECTION, "create_routine", {
+      cron: "0 9 * * 1-5",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe("A routine needs an instruction to carry out.");
+    expect(calls).toHaveLength(0);
+  });
+
+  test("create_routine without a cron refuses without touching the store", async () => {
+    const calls = recordingTools();
+    const result = await callTool(CONNECTION, "create_routine", {
+      instruction: "Post it.",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe(
+      "A routine needs a schedule: five cron fields, `minute hour day-of-month month day-of-week`.",
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  test("update_routine without an id refuses without touching the store", async () => {
+    const calls = recordingTools();
+    const result = await callTool(CONNECTION, "update_routine", {
+      instruction: "Something else.",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe(
+      "Say which routine to change, by the id from list_routines.",
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  test("update_routine with an empty patch refuses without touching the store", async () => {
+    const calls = recordingTools();
+    const result = await callTool(CONNECTION, "update_routine", {
+      id: "routine_1",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe("Say what to change about that routine.");
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe("what the store said", () => {
   test("a refusal is carried through verbatim", async () => {
     recordingTools({
