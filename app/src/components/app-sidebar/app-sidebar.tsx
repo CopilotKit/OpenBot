@@ -2,6 +2,7 @@ import {
   IconBellRinging,
   IconBolt,
   IconBox,
+  IconClock,
   IconLogout,
   IconPlus,
   IconSearch,
@@ -392,6 +393,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <IconBolt />
               </div>
               <span className="text-sm trackint-tight">Agents</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            {/* Beside Skills and Agents rather than inside Admin: a routine is something anybody has. */}
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/routines"
+                  activeProps={{
+                    className: "bg-foreground/5",
+                  }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconClock />
+              </div>
+              <span className="text-sm trackint-tight">Routines</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

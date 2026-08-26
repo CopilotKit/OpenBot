@@ -17,6 +17,7 @@ import { Route as AuthedSettingsRouteRouteImport } from './routes/_authed/settin
 import { Route as AuthedAppIndexRouteImport } from './routes/_authed/_app/index'
 import { Route as AuthedAppAttentionRouteImport } from './routes/_authed/_app/attention'
 import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
+import { Route as AuthedAppRoutinesRouteImport } from './routes/_authed/_app/routines'
 import { Route as AuthedAppSkillsRouteImport } from './routes/_authed/_app/skills'
 import { Route as AuthedAdminIndexRouteImport } from './routes/_authed/admin/index'
 import { Route as AuthedAdminAuditRouteImport } from './routes/_authed/admin/audit'
@@ -77,6 +78,11 @@ const AuthedAppAttentionRoute = AuthedAppAttentionRouteImport.update({
 const AuthedAppBotRoute = AuthedAppBotRouteImport.update({
   id: '/bot',
   path: '/bot',
+  getParentRoute: () => AuthedAppRoute,
+} as any)
+const AuthedAppRoutinesRoute = AuthedAppRoutinesRouteImport.update({
+  id: '/routines',
+  path: '/routines',
   getParentRoute: () => AuthedAppRoute,
 } as any)
 const AuthedAppSkillsRoute = AuthedAppSkillsRouteImport.update({
@@ -211,6 +217,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/attention': typeof AuthedAppAttentionRoute
   '/bot': typeof AuthedAppBotRoute
+  '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -240,6 +247,7 @@ export interface FileRoutesByTo {
   '/sign': typeof SignRoute
   '/attention': typeof AuthedAppAttentionRoute
   '/bot': typeof AuthedAppBotRoute
+  '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
   '/admin/audit': typeof AuthedAdminAuditRoute
   '/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -273,6 +281,7 @@ export interface FileRoutesById {
   '/_authed/_app': typeof AuthedAppRouteWithChildren
   '/_authed/_app/attention': typeof AuthedAppAttentionRoute
   '/_authed/_app/bot': typeof AuthedAppBotRoute
+  '/_authed/_app/routines': typeof AuthedAppRoutinesRoute
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
   '/_authed/admin/audit': typeof AuthedAdminAuditRoute
   '/_authed/admin/boundaries': typeof AuthedAdminBoundariesRoute
@@ -307,6 +316,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/attention'
     | '/bot'
+    | '/routines'
     | '/skills'
     | '/admin/audit'
     | '/admin/boundaries'
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
     | '/sign'
     | '/attention'
     | '/bot'
+    | '/routines'
     | '/skills'
     | '/admin/audit'
     | '/admin/boundaries'
@@ -368,6 +379,7 @@ export interface FileRouteTypes {
     | '/_authed/_app'
     | '/_authed/_app/attention'
     | '/_authed/_app/bot'
+    | '/_authed/_app/routines'
     | '/_authed/_app/skills'
     | '/_authed/admin/audit'
     | '/_authed/admin/boundaries'
@@ -455,6 +467,13 @@ declare module '@tanstack/react-router' {
       path: '/bot'
       fullPath: '/bot'
       preLoaderRoute: typeof AuthedAppBotRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/routines': {
+      id: '/_authed/_app/routines'
+      path: '/routines'
+      fullPath: '/routines'
+      preLoaderRoute: typeof AuthedAppRoutinesRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/_app/skills': {
@@ -684,6 +703,7 @@ const AuthedSettingsRouteRouteWithChildren =
 interface AuthedAppRouteChildren {
   AuthedAppAttentionRoute: typeof AuthedAppAttentionRoute
   AuthedAppBotRoute: typeof AuthedAppBotRoute
+  AuthedAppRoutinesRoute: typeof AuthedAppRoutinesRoute
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
   AuthedAppIndexRoute: typeof AuthedAppIndexRoute
   AuthedAppChannelChannelIdRoute: typeof AuthedAppChannelChannelIdRoute
@@ -694,6 +714,7 @@ interface AuthedAppRouteChildren {
 const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppAttentionRoute: AuthedAppAttentionRoute,
   AuthedAppBotRoute: AuthedAppBotRoute,
+  AuthedAppRoutinesRoute: AuthedAppRoutinesRoute,
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
   AuthedAppIndexRoute: AuthedAppIndexRoute,
   AuthedAppChannelChannelIdRoute: AuthedAppChannelChannelIdRoute,

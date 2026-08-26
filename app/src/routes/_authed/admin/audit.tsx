@@ -42,9 +42,14 @@ const FILTERS = [
      * judged: a caller could not prove which Bot it was. Somebody filtering for what this deployment
      * turned away wants that in the list, and it is the one refusal with no policy behind it, so
      * leaving it out would hide the only evidence that anything was attempted.
+     *
+     * `routines.dispatch_refused` is the same shape one boundary over: the worker, not a Bot, and a
+     * stale or missing secret rather than a policy decision. The same reasoning that put
+     * `mcp.callback_refused` here applies unchanged — nobody was judged, something was still turned
+     * away, and the saved view a person clicks for "what did this deployment block" should show it.
      */
     search:
-      "?eventType=computer.action_refused,mcp.call_rejected,mcp.callback_refused,component.refused,component.function_refused",
+      "?eventType=computer.action_refused,mcp.call_rejected,mcp.callback_refused,component.refused,component.function_refused,routines.dispatch_refused",
   },
   {
     label: "Did not happen",
@@ -153,7 +158,9 @@ function Row({
      * that way here: the fallback below calls anything it does not recognise "Allowed", which for a
      * refusal is the one wrong answer. A trail that is confidently wrong is worse than a silent one.
      */
-    event.eventType === "mcp.callback_refused";
+    event.eventType === "mcp.callback_refused" ||
+    // The worker turned away at the door, same reasoning as the caller above.
+    event.eventType === "routines.dispatch_refused";
   const stalled = event.eventType === "agent.stream_stalled";
   /*
    * Three different things, and the difference is what somebody comes to this row to find out.
