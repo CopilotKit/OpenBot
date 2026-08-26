@@ -148,6 +148,19 @@ config:
     apiUrl: ""
     gatewayWsUrl: ""
     # The two secret halves live under `secrets` below, never here.
+  # How far one Bot may hand work to another.
+  #
+  # A Bot addressing another is a grant an administrator makes, and these are the ceilings on what
+  # that grant can cost. Both are deliberately mean: a hop is a whole agent turn at the other end,
+  # several Bots asked in one turn cost several full runs rather than a fraction each, and with
+  # `computers.mode: sandbox` a hop to a Bot whose browser is asleep also pays a pod resume. A chatty
+  # Bot fanning out to four others wakes four machines.
+  #
+  # `maxDepth: 0` switches the capability off entirely: no Bot is offered the tool and the delivery
+  # loop does not run.
+  handoff:
+    maxDepth: 1
+    maxPerRun: 3
   # Your own Bot, over AG-UI.
   #
   # OpenBot is a shell for somebody else's agent, so this is the seam that matters: point it at a

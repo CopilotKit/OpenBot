@@ -131,6 +131,51 @@ Governance:
 
 The shipped component data functions read the audit trail: `botActivity` and `recentRefusals`.
 
+## One Bot handing work to another
+
+A Bot can address another Bot, and the addressed one answers for itself in the same conversation
+rather than the first relaying text on its behalf.
+
+`message_bot` is offered beside a Bot's granted tools, so which Bots may reach which is an ordinary
+grant: `plugin_grants` with a `bot` kind. A Bot granted nobody is offered nothing.
+
+What it takes is typed. The asking model names the task, anything that bounds it and what a good
+answer looks like, rather than writing a paragraph. Free text is the commonest way a handoff goes
+quietly wrong: the receiving Bot infers the intent, guesses the constraints, and when it guesses
+wrong it does not fail, it answers something else confidently.
+
+Four things are decided by the deployment and never by the model:
+
+- **Who is being addressed**, resolved against the roster the asking person may see. A Bot must not
+  reach a Bot its person cannot, or this is a way around agent visibility. A Bot that does not exist
+  and one that is not theirs to see are refused in the same words, so this cannot enumerate the
+  roster.
+- **Where the answer lands**, from the signed run assertion. Otherwise a Bot could drop a turn into a
+  conversation it was never part of.
+- **Who is asking**, stamped from the row this deployment wrote. A Bot able to write its own
+  attribution could claim to be another one.
+- **How deep the chain is**, also from the assertion, which is what stops A asking B asking C asking
+  A for ever.
+
+The second Bot runs as the same person, with its own role and its own grants, so it sees what that
+person may see and no more.
+
+**A hop is claimed work, not a callback.** It is a row on the same queue the idle-computer culler
+uses: the Bot being addressed is very unlikely to be on the pod that addressed it, and a hop held in
+memory is lost the moment either is rescheduled. Every replica sweeps for hops and the queue decides
+which gets which. The lease is renewed for as long as the run takes, because a run is minutes and a
+lapsed lease hands the same hop to a second replica.
+
+`BOT_HANDOFF_MAX_DEPTH` and `BOT_HANDOFF_MAX_PER_RUN` are the ceilings, and both refuse rather than
+truncate. They are not polish: a hop is a whole agent turn at the other end, several Bots asked in one
+turn cost several full runs, and where each Bot has its own computer a fan-out wakes a machine per
+Bot. `BOT_HANDOFF_MAX_DEPTH=0` switches the capability off, and then no Bot is offered the tool and
+the delivery loop does not run.
+
+Every outcome is in the audit trail: offered, refused with which cap or missing grant stopped it,
+delivered, failed, and retried. The refused row is the one that matters most, because a hop that
+happened is visible in the transcript and one that was refused is invisible everywhere else.
+
 ## MCP and skills
 
 MCP servers and skills share the plugin grant table, but they have different ownership rules.

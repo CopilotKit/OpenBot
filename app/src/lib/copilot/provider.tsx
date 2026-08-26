@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ActiveBotProvider } from "./active-bot";
 import { ComputerTools } from "./computer-tools";
 import { GalleryTools } from "./gallery-tools";
+import { HandoffTool } from "./handoff-tool";
 import { SandboxedTools } from "./sandboxed-tools";
 
 /**
@@ -25,6 +26,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
       {/* Computer tools target the Bot declared by the mounted surface. */}
       <ActiveBotProvider>
         <ComputerTools />
+        {/*
+          Draws a Bot bringing in another Bot. Registers no tool: `message_bot` runs on the server,
+          where the grant and the caps are. A hop that happens off-screen is the thing to avoid.
+        */}
+        <HandoffTool />
         {/* Gallery tools are registered once; their handlers re-read the active Bot to avoid shadowing renderers. */}
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}

@@ -168,6 +168,19 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 
 `OPENBOT_APP_URL` is where the callback sends the person afterwards. It is a separate setting because the app and the API are separate addresses: locally the app is Vite on `3010` and the API is `3001`, so a relative redirect would land on the API, which serves no pages. A deployment serving both from one origin can leave it unset.
 
+## One Bot handing work to another
+
+| Variable                   | Meaning                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------- |
+| `BOT_HANDOFF_MAX_DEPTH`    | How many Bots deep a chain may go. `0` switches the capability off entirely. Default `1`.    |
+| `BOT_HANDOFF_MAX_PER_RUN`  | How many other Bots one run may address. Default `3`.                                        |
+
+Both refuse rather than truncate, and both are refused at start-up if they are not whole numbers of
+zero or more: a deployment that typed `two` and silently got the default would believe it had set a
+cap.
+
+Which Bots may address which is a grant, not a variable. It is made per Bot like any other grant.
+
 ## Computer and supervisor
 
 | Variable                             | Meaning                                                                                   |

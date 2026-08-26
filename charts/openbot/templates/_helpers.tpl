@@ -174,6 +174,16 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 - name: COMPUTER_SANDBOX_TEMPLATE_FILE
   value: /etc/openbot/sandbox-template.json
 {{- end }}
+{{- /*
+  How far one Bot may hand work to another.
+  
+  Always set, including the zeroes, so a deployment that has switched this off says so rather than
+  relying on the image's default staying what it is today.
+*/}}
+- name: BOT_HANDOFF_MAX_DEPTH
+  value: {{ .Values.config.handoff.maxDepth | quote }}
+- name: BOT_HANDOFF_MAX_PER_RUN
+  value: {{ .Values.config.handoff.maxPerRun | quote }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL
