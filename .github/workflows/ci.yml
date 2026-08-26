@@ -149,6 +149,13 @@ jobs:
           # A browser inside every replica of a replicated API.
           refuses "an embedded browser across several replicas" \
             --set server.embeddedComputer=true --set server.replicaCount=2
+          # A Bot's egress proxy on a port the computer's own network policy does not allow. The
+          # variables reach the computer through extraEnv, so nothing else notices that the policy
+          # then refuses to let it be reached.
+          refuses "an egress proxy the network policy blocks" \
+            --set networkPolicy.enabled=true \
+            --set computers.extraEnv[0].name=EGRESS_PROXY_DEFAULT \
+            --set-string computers.extraEnv[0].value=http://proxy.internal:3128
 
   test:
     name: tests

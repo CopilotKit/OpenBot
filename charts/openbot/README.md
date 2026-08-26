@@ -216,6 +216,32 @@ the policy on with an external database and no `networkPolicy.extraEgress` is re
 enforcing cluster it would fence the API off from its own database, which reads as the database
 being down.
 
+A Bot's computer is allowed 80 and 443 to public addresses and nothing else, which is what stops a
+browser reaching the cluster, the database, or the cloud's credential endpoint. A per-Bot egress
+proxy is therefore two settings rather than one: the variable that names it, and the rule that lets
+the computer reach it.
+
+```yaml
+computers:
+  extraEnv:
+    - name: EGRESS_PROXY_DEFAULT
+      value: http://proxy.internal:3128
+    - name: EGRESS_PROXY_SALES_BOT
+      value: http://sales.proxy.internal:3128
+networkPolicy:
+  computerExtraEgress:
+    - to:
+        - ipBlock:
+            cidr: 10.4.0.0/16
+      ports:
+        - port: 3128
+          protocol: TCP
+```
+
+`EGRESS_PROXY_DEFAULT` covers every Bot and `EGRESS_PROXY_<BOT>` names one, with the Bot's id
+upper-cased and anything unusual replaced. Naming a proxy the policy provably blocks is refused at
+install rather than found as a browser that fails on every page.
+
 ## Upgrades
 
 Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it

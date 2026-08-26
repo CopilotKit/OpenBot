@@ -247,3 +247,31 @@ This template renders nothing.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- /*
+  A Bot's egress proxy, against the network policy that decides whether it can be reached.
+
+  `EGRESS_PROXY_DEFAULT` and `EGRESS_PROXY_<BOT>` are how a Bot gets a stable outbound address, and
+  on Kubernetes they arrive through `computers.extraEnv`. The computer's own policy allows 80 and
+  443 to public addresses and nothing else, which is most of the internet and almost no proxies:
+  they sit on a private address, or on 3128 or 8080, or both. Setting one without opening a path to
+  it produces a Bot whose every page fails, which reads as a broken browser rather than as a network
+  rule, so it is refused here instead.
+
+  Only what the value provably shows: a port that is not 80 or 443, or a literal private address.
+  A private DNS name on 443 is blocked by the `ipBlock` rules just the same and cannot be told from
+  a public one at template time, so this misses that case rather than guessing at it. A proxy
+  supplied through `extraEnvFrom` is not readable here at all.
+*/}}
+{{- if and .Values.networkPolicy.enabled (not .Values.networkPolicy.computerExtraEgress) }}
+{{- range .Values.computers.extraEnv }}
+{{- if hasPrefix "EGRESS_PROXY" (.name | default "") }}
+{{- $value := .value | default "" | trim | trimSuffix "/" }}
+{{- $port := regexFind ":[0-9]+$" $value | trimPrefix ":" }}
+{{- $private := regexMatch "(^|//)(10\\.|127\\.|169\\.254\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)" $value }}
+{{- if or (and $port (not (has $port (list "80" "443")))) $private }}
+{{- fail (printf "%s names a proxy the computer's network policy blocks, so every page a Bot opens would fail. Name it in networkPolicy.computerExtraEgress, or turn networkPolicy.enabled off." .name) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
