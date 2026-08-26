@@ -71,6 +71,20 @@ try {
   const purged = await queue.purge({
     kind: CULL_KIND,
     olderThanMs: 24 * 60 * 60 * 1000,
+    /*
+     * A FINISHED SUSPENSION IS KEPT FOR THE IDLE WINDOW, NOT FOR A DAY.
+     *
+     * The key is the Bot id, so the row left behind by a suspension is what the next one collides
+     * with: a computer resumed, used, and left alone again was offered every sweep and swallowed
+     * every time, and stayed awake until the row aged out a day later. Nobody saw it, because a
+     * sweep that offers work and suspends nothing looks exactly like a fleet that is busy.
+     *
+     * The idle window is the right length because it is the same clock the offer runs on: a Bot
+     * cannot qualify as idle again until this long after its last action, by which point its row has
+     * gone. A day is still right for the other half, where the window is the backoff before a
+     * suspension that keeps failing is tried again.
+     */
+    finishedOlderThanMs: config.computer.idleAfterMs,
   });
   /*
    * And the screenshots, which had a reaper and nothing calling it.

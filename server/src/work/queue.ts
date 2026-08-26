@@ -87,10 +87,18 @@ export type WorkQueue = {
    *
    * Both kinds of done: finished, and given up on. An item at its attempt cap is not finished and was
    * reaped by nothing, so its key stayed occupied for ever and the work could never be offered again.
+   *
+   * TWO KINDS OF DONE, TWO WINDOWS. They are the same length only by coincidence. A finished row is
+   * kept so a late offer of the same key collides with it, which needs to outlast a sweep; a row that
+   * gave up is kept because the window is also the backoff before anything tries again, which wants
+   * to be long. Kept as one number, a queue whose work repeats has to choose which of those to be
+   * wrong about. `finishedOlderThanMs` defaults to `olderThanMs`, so a caller that has only one
+   * answer keeps the behaviour it had.
    */
   purge: (input: {
     kind: string;
     olderThanMs: number;
+    finishedOlderThanMs?: number;
     maxAttempts?: number;
   }) => Promise<number>;
 };
@@ -250,15 +258,21 @@ export function createWorkQueue(database: Database): WorkQueue {
       return Boolean(released);
     },
 
-    async purge({ kind, olderThanMs, maxAttempts = DEFAULT_MAX_ATTEMPTS }) {
+    async purge({
+      kind,
+      olderThanMs,
+      finishedOlderThanMs = olderThanMs,
+      maxAttempts = DEFAULT_MAX_ATTEMPTS,
+    }) {
       const cutoff = fromNow(-olderThanMs);
+      const finishedCutoff = fromNow(-finishedOlderThanMs);
       const gone = await database
         .delete(workItems)
         .where(
           and(
             eq(workItems.kind, kind),
             or(
-              lt(workItems.finishedAt, cutoff),
+              lt(workItems.finishedAt, finishedCutoff),
               /*
                * AND THE ONES THAT GAVE UP, which is the half this forgot.
                *
