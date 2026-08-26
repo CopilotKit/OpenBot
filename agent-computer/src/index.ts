@@ -1,7 +1,12 @@
 import { serve } from "bun";
 import type { Page } from "playwright";
 import { parseAriaSnapshot, type SnapshotElement } from "./aria-snapshot";
-import { isOpenPath, matchesToken, offeredToken } from "./authorisation";
+import {
+  actsOnTheComputer,
+  isOpenPath,
+  matchesToken,
+  offeredToken,
+} from "./authorisation";
 import { isPlainBotId } from "./bot-id";
 import {
   type Control,
@@ -485,6 +490,26 @@ serve<StreamData>({
     }
     const session = sessionFor(botId);
 
+    /*
+     * The wheel, asked once for everything that acts.
+     *
+     * Refused here rather than inside each handler because the handler that forgets is the whole
+     * defect: the shell shipped without this check and ran commands underneath a person who had taken
+     * the browser at a login wall. `actsOnTheComputer` is the list, and a new acting endpoint is
+     * refused by being added to it rather than by remembering to repeat this.
+     */
+    if (actsOnTheComputer(url.pathname)) {
+      try {
+        session.control.assertBotMayAct();
+      } catch (error) {
+        // A person holding the wheel is not a failure of the action; the Bot should wait and say so.
+        if (error instanceof ControlError) {
+          return json({ error: error.message, humanHasControl: true }, 409);
+        }
+        throw error;
+      }
+    }
+
     if (url.pathname === "/stream") {
       /*
        * The socket carries the Bot in the query because it cannot do it in a header. Every other call here names
@@ -696,7 +721,6 @@ serve<StreamData>({
 
       const startedAt = Date.now();
       try {
-        session.control.assertBotMayAct();
         const target = await currentPage(botId);
         await target.goto(body.url, {
           waitUntil: "domcontentloaded",
@@ -715,10 +739,6 @@ serve<StreamData>({
           elapsedMs: Date.now() - startedAt,
         });
       } catch (error) {
-        // A person holding the wheel is not a failed navigation; the Bot should wait.
-        if (error instanceof ControlError) {
-          return json({ error: error.message, humanHasControl: true }, 409);
-        }
         // The page is the Bot's working surface, so a failed navigation is reported rather than
         // thrown: the transcript needs to say what happened, and the browser stays usable.
         return json(
@@ -893,7 +913,6 @@ serve<StreamData>({
 
       const startedAt = Date.now();
       try {
-        session.control.assertBotMayAct();
         const target = await currentPage(botId);
         const detail = await performAction(
           session,
@@ -931,10 +950,6 @@ serve<StreamData>({
         // rather than a 502: the computer is fine and retrying the same call unchanged will not help.
         if (error instanceof StaleSnapshotError) {
           return json({ error: error.message, stale: true }, 409);
-        }
-        // 409 as well, and for the same reason: nothing is broken, the caller simply has to wait.
-        if (error instanceof ControlError) {
-          return json({ error: error.message, humanHasControl: true }, 409);
         }
         return json({ error: describe(error, "The action failed.") }, 502);
       }
