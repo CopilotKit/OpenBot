@@ -2279,6 +2279,12 @@ describe("a custom server may only be pointed at its own kind of credential", ()
   const deploymentCredentialId = randomUUID();
   const personalCredentialId = randomUUID();
   const oauthClientCredentialId = randomUUID();
+  /**
+   * The upsert case gets its own token, because a credential names the server it was minted for and
+   * that case adds a second server id. Sharing one row across two ids is a shape `storeMcpToken`
+   * cannot produce: it sets the provider to the server it is minting for, every time.
+   */
+  const upsertCredentialId = randomUUID();
   const customServerId = `custom-cred-${suffix}`;
   const madeServerIds: string[] = [];
 
@@ -2303,6 +2309,14 @@ describe("a custom server may only be pointed at its own kind of credential", ()
         // For a user token the key is the person, which is what makes one pickable by name from the
         // administrator's own credential list.
         keyId: `user_someone_else_${suffix}`,
+        encryptedValue: encrypted,
+        metadata: {},
+      },
+      {
+        id: upsertCredentialId,
+        kind: "mcp",
+        provider: `${customServerId}-upsert`,
+        keyId: `${customServerId}-upsert`,
         encryptedValue: encrypted,
         metadata: {},
       },
@@ -2463,7 +2477,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
       id,
       title: "Collector",
       url: "https://collector.example/mcp",
-      credentialId: deploymentCredentialId,
+      credentialId: upsertCredentialId,
       by: "admin@example.com",
     });
 
@@ -2481,7 +2495,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
       .select({ credentialId: mcpServers.credentialId })
       .from(mcpServers)
       .where(eq(mcpServers.id, id));
-    expect(row?.credentialId).toBe(deploymentCredentialId);
+    expect(row?.credentialId).toBe(upsertCredentialId);
   });
 
   test("a custom server with no credential at all still works", async () => {

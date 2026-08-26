@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   CATALOGUE,
+  type CatalogueEntry,
   catalogueEntry,
   classifyTool,
   customUrlRefusal,
   hostAdmissible,
   resolveServerUrl,
+  serverCredentialKind,
 } from "../src/plugins/catalogue";
 
 /**
@@ -452,5 +454,45 @@ describe("a URL an administrator typed", () => {
 
   test("nonsense is refused rather than thrown", () => {
     expect(customUrlRefusal("not a url")).toBe("That is not a URL.");
+  });
+});
+
+describe("which credential a curated server is given", () => {
+  /**
+   * A synthetic entry, because the catalogue holds one vendor today and it is `user-oauth`.
+   *
+   * The shared-token branch is the one a fork re-enables when it puts a removed vendor back, which
+   * is the case this rule exists for, so it is exercised here rather than left to be discovered
+   * then. The other side of the same argument is why the entry is written out in full rather than
+   * spread from a real one: what is under test is the auth kind deciding the answer.
+   */
+  const sharedToken: CatalogueEntry = {
+    key: "shared-token-vendor",
+    title: "Vendor",
+    vendor: "Vendor",
+    summary: "A server the deployment holds one token for.",
+    host: "https://mcp.vendor.example",
+    path: "/mcp",
+    auth: { kind: "deployment-bearer" },
+    writeTools: [],
+    docsUrl: "https://vendor.example/docs",
+  };
+
+  test("a shared-token server takes the deployment's own token for it", () => {
+    expect(serverCredentialKind(sharedToken)).toBe("mcp");
+  });
+
+  test("a server reached as the asker takes no credential from the caller", () => {
+    // Its OAuth client arrives through registerOAuthClient, which mints the credential itself. An id
+    // offered here is therefore never the right one, whatever kind it names.
+    const drive = catalogueEntry("google-drive");
+    expect(drive?.auth.kind).toBe("user-oauth");
+    expect(serverCredentialKind(drive as CatalogueEntry)).toBeNull();
+  });
+
+  test("a server that needs no credential takes none", () => {
+    expect(
+      serverCredentialKind({ ...sharedToken, auth: { kind: "none" } }),
+    ).toBeNull();
   });
 });

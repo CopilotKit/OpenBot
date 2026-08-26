@@ -192,6 +192,46 @@ read that as a stolen token and revoke the whole connection. Every plugin call t
 token now locks the credential's vault row for the length of the exchange, so a second replica waits
 rather than races, and the rotated token is written back in the same transaction that held the lock.
 Nothing to configure; a connection just stops going stale under concurrent traffic.
+
+### An MCP token is spent only by its own server, and only at the address it was given
+
+Pointing a server at a credential is the one place this deployment takes a reference to a stored
+secret rather than the secret itself. Everywhere else, the value was typed into the same request that
+stores it: a Bot's key is minted from what an administrator pasted and the id it gets is nobody's to
+choose. So this is the one field where which secret and which address could be made to disagree, and
+the add settles the disagreement by spending the credential: the tool refresh runs before the call
+returns and sends what it decrypts to the URL from that same request.
+
+Two ways they could disagree, and both are now refused. A server could be pointed at any `mcp`
+credential in the vault, including one minted for a different vendor, so a token given to one server
+was deliverable to another. And re-adding a server with a different URL rewrote the address while
+keeping the credential, so the same token could be sent somewhere else entirely with no
+cross-server trick at all: the token really did belong to that server, and only the address moved.
+
+The second is why the first was not enough on its own. A credential now has to belong to the server
+it is attached to, and a server that already holds one cannot be re-added at a different address.
+Correcting a title or retrying an interrupted add sends the same URL and is unaffected. A server
+holding no credential can still be re-addressed, because there is nothing to misdirect. Moving a
+server that does hold one means removing it and adding it again with the token the new address is
+meant to have, which is the honest description of what has happened anyway.
+
+This matters more than "an administrator could misconfigure something". A stored credential cannot
+be read back by anybody, by design: the credentials screen answers that a credential exists and
+never what it is. These two shapes were the way around that, so a deployment where somebody has
+used them should treat the credentials involved as disclosed and rotate them.
+
+A token also stops outliving the server it was minted for. Re-adding a server without naming a
+credential used to clear the pointer while leaving the credential live, and removing a server retires
+its token by reading it off that pointer, so a cleared one meant the token survived its server and
+could be attached to a freshly created one at any address, where there was no longer a stored address
+to compare against. Three ordinary acts in a row and the binding above stopped meaning anything. The
+pointer now survives a re-add that names none, removal therefore finds and retires it, and a retired
+credential is refused rather than quietly attached to fail on its next call.
+
+Curated servers keep working as they did. Their URL comes from the catalogue rather than the
+request, and a per-instance hostname is matched against the vendor's own anchored pattern before
+anything is stored, so re-adding one cannot point it at an address of the caller's choosing.
+
 ### Knowledge searches instead of guessing
 
 A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the
@@ -269,6 +309,34 @@ beside `metadata.google.internal`, and it carries a dot and none of the suffixes
 it read as an ordinary vendor name. The long spelling was only ever refused incidentally, by the
 `.internal` rule. Both are now named, so the address this check was written for is refused on purpose
 rather than by luck.
+### A curated MCP server is pointed at its own kind of credential too
+
+Adding a server by URL was made to check which credential it is being pointed at. Adding one from the
+catalogue, the other half of the same screen, took the same field from the same request and stored it
+unread, so a credential of any kind could be attached to a curated server and spent by the refresh
+that runs before the add returns.
+
+Worth being plain about the reach, because it is narrower than the path beside it. The column is a
+foreign key, so an id naming nothing was already refused by the database, and the one entry in the
+catalogue is reached with each person's own Google account, whose OAuth client is registered through
+its own call and sent to an address pinned in code. Nothing could be delivered to an address a caller
+chose. What was reachable was a credential of the wrong kind being accepted and spent on behalf of
+somebody who never agreed to it, and a malformed id arriving as a database error rather than as a
+refusal.
+
+The rule now comes from the entry: a server the deployment holds one token for takes that token, and
+a server answered as the person asking takes no credential when it is added, because its client
+arrives through the call that mints it. Both add paths ask the same question in the same words, so a
+credential that does not exist and one of the wrong kind are still refused identically and the
+endpoint cannot be used to ask which ids are real. Adding a curated server the way the admin screen
+does is unchanged.
+
+Adding a curated server that is already there no longer clears the credential it points at. The
+column holds the OAuth client that registering one put there, and re-adding the server to change an
+instance host said nothing about that client, but cleared it anyway: the credential row was left
+behind with nothing pointing at it and nothing to revoke it, and everybody who had connected their
+account was told the deployment has no client registered. A re-add that names no credential now
+leaves the one that is there alone.
 
 ### Name the private addresses an agent may live at
 
