@@ -35,6 +35,12 @@ ONE_COMPUTER_EACH="${OPENBOT_ONE_COMPUTER_EACH:-true}"
 export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
+# A fixed default is fine here, unlike `AGENT_TOOL_TOKEN` below: this secret is compared by the
+# server on its own loopback-bound port, never by anything a Bot publishes, so a well-known value
+# from a public repository is not a boundary anybody outside this machine could reach anyway. That is
+# also why it is generated fresh and persisted for AGENT_TOOL_TOKEN (see the SECRETS_ROTATED block)
+# but not for this one.
+WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 
 # The secret the server sends to a managed Bot, generated and written back on first run.
 #
@@ -210,7 +216,7 @@ for svc in agent-computer agent-bot agent-langgraph; do
   SERVICES+=("$svc")
 done
 
-export SUPERVISOR_TOKEN COMPUTER_TOKEN
+export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
 export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
 docker compose up -d --build "${SERVICES[@]}" >/dev/null
 if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
@@ -264,12 +270,36 @@ if ! identifies_as_openbot "$SERVER_PORT" server; then
       COMPUTER_SUPERVISOR_URL="http://localhost:$SUPERVISOR_PORT" \
       SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
       COMPUTER_TOKEN="$COMPUTER_TOKEN" \
+      WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
       bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
   else
-    (cd server && PORT="$SERVER_PORT" bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
+    (cd server && PORT="$SERVER_PORT" \
+      WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
+      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
   fi
 fi
 wait_for_openbot "$SERVER_PORT" server
+
+# The worker: a local stand-in for the routines CronJob, looping the same sweep
+# (`offerDueRoutines`/`dispatchClaimedRoutines`) a cluster would run on a schedule instead. Started
+# only now, because dispatching a claimed routine is one HTTP call to this server's own
+# /internal/routines/run, and the wait_for above is what confirms that call has somewhere to land.
+#
+# Guarded by a pgrep check rather than an HTTP health check, the same way the restart guard above
+# matches the server's own command line with `pkill -f`: the worker loop has no HTTP endpoint of its
+# own to ask, so "is a matching process already running" is the only signal a rerun of this script
+# has for "leave it alone."
+if ! pgrep -f "bun src/index.ts" >/dev/null 2>&1; then
+  WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
+  (cd worker && \
+    DATABASE_URL="$WORKER_DATABASE_URL" \
+    SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
+    WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
+    bun src/index.ts >"$LOGS/worker.log" 2>&1 &)
+  info "  worker: started (routine sweep loop)"
+else
+  info "  worker: already running"
+fi
 
 info "3/4  Runtime health"
 INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
@@ -316,6 +346,7 @@ Try:
   4. Add a deny rule in /admin/boundaries, then retry the same action.
 
 Logs: $LOGS
+  Routine sweep worker: $LOGS/worker.log
 Stop Docker services: docker compose down
   A Bot's computer is made by the supervisor rather than by compose, so it keeps running:
   docker rm -f \$(docker ps -q --filter label=openbot.supervisor=true)
