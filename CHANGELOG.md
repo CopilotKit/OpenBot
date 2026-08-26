@@ -17,6 +17,25 @@ the membership row like the pin — so one person reading does not clear anybody
 
 The deployment gains one nullable column, via migration `0019`.
 
+### The API can reach Intelligence and sign-in when a NetworkPolicy is on
+
+`networkPolicy.enabled` wrote a rule for the API server that named DNS, the database and the Bots'
+computers, and nothing on 443. On a cluster that enforces policy the server could therefore reach
+neither CopilotKit Intelligence, nor an identity provider, nor a Bot: nobody could sign in and no
+conversation ran. Two of the five shipped `ci/` targets turn the policy on, and on GKE enforcement is
+the default and cannot be switched off.
+
+Nothing said so. The pod passed every probe and stayed Ready, because `/health` answers from a
+literal, so the first evidence was a timeout to a hostname that read as the internet being down.
+
+The API now reaches HTTP and HTTPS everywhere outside the cluster's private ranges, in every
+`computers.mode` rather than only `sandbox`, cut by the same exception list the computers' own policy
+uses. It still cannot address another pod, a node, or a cloud metadata endpoint.
+
+`mode: sandbox` had been working only because a rule meant for the Kubernetes API server carried no
+destination and so permitted everything. That rule now covers the API server alone, and
+`networkPolicy.kubernetesApiCidr` narrows it to your cluster's service range; left empty it stays as
+it was, because a chart cannot know that range.
 
 ### A finished turn shows the page it opened, not the one open now
 

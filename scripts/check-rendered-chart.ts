@@ -127,6 +127,33 @@ for (const [name, keys] of written) {
   }
 }
 
+/**
+ * A policy that fences the API off from the services it cannot work without.
+ *
+ * The same question as the Secret one above, asked of the other thing a render can be internally
+ * wrong about: this chart requires CopilotKit Intelligence and an identity provider, reaches both
+ * over HTTPS at hostnames, and also writes the rule that says where the API may go. Those two had
+ * never been compared. The server's egress named DNS, the database and the computers, so on any
+ * cluster that enforces policy nobody could sign in and no conversation ran — and the pod stayed
+ * Ready throughout, because `/health` answers from a literal.
+ *
+ * Asked of the rendered object rather than the template, because the rule that covered for this was
+ * conditional on `computers.mode` and only one mode ever had it.
+ */
+const serverPolicy = documents.find(
+  (document) =>
+    /^kind:\s*NetworkPolicy\s*$/m.test(document) &&
+    /app\.kubernetes\.io\/component:\s*server/.test(document),
+);
+if (serverPolicy) {
+  const egress = serverPolicy.split(/^\s{2}egress:\s*$/m)[1] ?? "";
+  if (!/port:\s*443\b/.test(egress)) {
+    problems.push(
+      "The server's NetworkPolicy has no egress on 443, so the API cannot reach Intelligence or an identity provider. Nothing would report it: /health answers from a literal and every probe reads it.",
+    );
+  }
+}
+
 if (problems.length > 0) {
   for (const problem of problems) console.error(`::error::${problem}`);
   process.exit(1);
@@ -134,6 +161,7 @@ if (problems.length > 0) {
 
 console.log(
   `${documents.length} objects, ${demands.length} secret keys demanded, and every required one is written.` +
+    (serverPolicy ? " The server's egress reaches 443." : "") +
     (skippedOptional > 0
       ? ` ${skippedOptional} optional key${skippedOptional === 1 ? " was" : "s were"} not checked.`
       : ""),

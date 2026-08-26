@@ -7,8 +7,16 @@ Off by default, because a NetworkPolicy on a cluster with no CNI that enforces o
 that silently does nothing, and on a cluster that does enforce one a wrong rule is an outage. A
 deployment that turns this on is saying it knows which of the two it has.
 
-Egress deliberately allows DNS and the database, and nothing else without being asked: a Bot's
-computer reaching the open internet is the computers' own policy, not the API's.
+Egress allows DNS, the database, the computers, and HTTP and HTTPS to everywhere that is not the
+cluster's own private network. THAT LAST ONE IS NOT A CONCESSION, it is what this pod does: sign-in
+goes to an identity provider, every conversation goes to Intelligence, and every run goes to a Bot
+at an address somebody registered. All three are hostnames rather than CIDRs, and a NetworkPolicy
+cannot match a hostname, so there is no narrower rule to write. Leaving it out did not fence the API
+off, it stopped the product working, and only in `computers.mode: sandbox` did a rule meant for the
+Kubernetes API server quietly cover for it.
+
+The private ranges stay cut out by exception, the way the computers' policy does it, so this is
+still a pod that cannot address another pod, a node, or a cloud metadata endpoint.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -62,9 +70,43 @@ spec:
         - port: 4100
           protocol: TCP
     {{- end }}
+    {{- /*
+      Intelligence, the identity provider, and every Bot: all of them, and all outside the cluster.
+
+      Written as an exception list rather than as a destination list because the destinations are
+      hostnames the deployment configures and a NetworkPolicy matches addresses. The same shape the
+      computers' policy below already uses, for the same reason.
+    */}}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # The cluster and everything else on the private network, including the database.
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              # Link-local, which is where every cloud keeps the endpoint that hands out credentials.
+              - 169.254.0.0/16
+      ports:
+        - port: 80
+          protocol: TCP
+        - port: 443
+          protocol: TCP
     {{- if eq .Values.computers.mode "sandbox" }}
-    {{- /* The API server, which is where a per-Bot computer is asked for. */}}
-    - ports:
+    {{- /*
+      The Kubernetes API server, which is where a per-Bot computer is asked for.
+
+      Its own rule because it sits on the private network the rule above cuts out, so nothing else
+      here reaches it. Unscoped unless a deployment says otherwise: the API server answers on a
+      ClusterIP from the service range, and a chart cannot know that range at template time. Name it
+      in `networkPolicy.kubernetesApiCidr` and this narrows to it.
+    */}}
+    - {{- with .Values.networkPolicy.kubernetesApiCidr }}
+      to:
+        - ipBlock:
+            cidr: {{ . }}
+      {{- end }}
+      ports:
         - port: 443
           protocol: TCP
         - port: 6443
