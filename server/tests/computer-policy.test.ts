@@ -620,7 +620,6 @@ describe("a rule about one surface does not refuse another", () => {
   });
 });
 
-
 describe("refusal wording under the context the gateway actually builds", () => {
   /*
    * The gateway attaches a neutral all-empty `mcp` to every browser context so a rule naming
@@ -630,7 +629,11 @@ describe("refusal wording under the context the gateway actually builds", () => 
    */
   test("a browser refusal names the element, neutral mcp notwithstanding", () => {
     const decision = evaluateActionPolicy(
-      { mode: "enforce", deny: ['contains(element.name, "Submit")'], allow: ["true"] },
+      {
+        mode: "enforce",
+        deny: ['contains(element.name, "Submit")'],
+        allow: ["true"],
+      },
       {
         tool: { name: "computer_click" },
         bot: { id: "general-assistant" },

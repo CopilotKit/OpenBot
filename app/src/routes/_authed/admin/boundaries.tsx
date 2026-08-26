@@ -301,7 +301,6 @@ function BoundariesPage() {
   );
 }
 
-
 /**
  * What the tested rule would have done to actions already on the trail.
  *
