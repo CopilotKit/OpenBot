@@ -15,7 +15,7 @@ the preview, the name a touch heavier. Opening the channel clears it, your own m
 it, and the channel you are looking at never shows it. The marker is yours alone — per member, on
 the membership row like the pin — so one person reading does not clear anybody else's dot.
 
-The deployment gains one nullable column, via migration `0017`.
+The deployment gains one nullable column, via migration `0019`.
 
 
 ### A finished turn shows the page it opened, not the one open now
