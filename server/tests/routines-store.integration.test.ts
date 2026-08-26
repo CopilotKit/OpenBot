@@ -413,6 +413,57 @@ describe("resolving the channel to post into", () => {
     const occurrences = message.split(name).length - 1;
     expect(occurrences).toBe(5);
   });
+
+  test("names a colliding channel by id when its name cannot tell it apart from another", async () => {
+    // The finding this guards: a real account had six channels all named "General Assistant" with
+    // the same Bot, and the refusal read "General Assistant, General Assistant, … and others" —
+    // circular, because the person cannot answer it and the model cannot map an answer back to a
+    // channelId. Two same-named channels plus one distinctly-named one is the smallest case that
+    // proves the fix: the colliding pair gets ids, the distinct one stays bare.
+    const owner = await createUser();
+    const agentId = await createAgent(owner);
+    const twinOne = await createChannel(owner, [agentId]);
+    const twinTwo = await createChannel(owner, [agentId]);
+    // channelStore.create names channels itself, so force the collision directly rather than
+    // trusting default naming to produce two identical names.
+    await database
+      .update(channels)
+      .set({ name: "General Assistant" })
+      .where(eq(channels.id, twinOne.id));
+    await database
+      .update(channels)
+      .set({ name: "General Assistant" })
+      .where(eq(channels.id, twinTwo.id));
+    const distinct = await createChannel(owner, [agentId]);
+    await database
+      .update(channels)
+      .set({ name: "Marketing Bot" })
+      .where(eq(channels.id, distinct.id));
+
+    const failure = await store
+      .create({
+        ownerUserId: owner.id,
+        agentId,
+        instruction: "Which one?",
+        cron: DAILY,
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+    expect(failure).toBeInstanceOf(RoutineRefusedError);
+    const message = (failure as Error).message;
+    // Both same-named channels are named by their full id, because that is the one thing the model
+    // can pass back as `channelId` when the names alone cannot disambiguate.
+    expect(message).toContain(twinOne.id);
+    expect(message).toContain(twinTwo.id);
+    // The distinctly-named channel is not: its name alone already disambiguates it, and appending
+    // an id it does not need would make the common, non-colliding case's sentence longer for
+    // nothing.
+    expect(message).toContain("Marketing Bot");
+    expect(message).not.toContain(`Marketing Bot (${distinct.id})`);
+  });
 });
 
 describe("reading a person's routines", () => {

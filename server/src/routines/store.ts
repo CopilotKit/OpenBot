@@ -264,10 +264,30 @@ function nextRunFor(cron: string, timezone: string, after: Date): Date {
   }
 }
 
-/** "A", "A, B", or five names and "and others" — a sentence, not a list a client renders. */
-function nameThem(names: string[]): string {
-  if (names.length <= MAX_NAMED_CHANNELS) return names.join(", ");
-  return [...names.slice(0, MAX_NAMED_CHANNELS), "and others"].join(", ");
+/**
+ * "A", "A, B", or five names and "and others" — a sentence, not a list a client renders.
+ *
+ * A name alone is not always enough to ask by: a real account turned up six channels all named
+ * "General Assistant" with the same Bot, and a refusal built from names alone read "General
+ * Assistant, General Assistant, … and others" — circular, because the person cannot answer it and
+ * the model cannot map an answer back to a channelId. So every candidate whose name is shared by
+ * another candidate gets its full id appended in parentheses; the id is the one thing the model can
+ * pass back as `channelId` when names cannot tell two channels apart, and a person pasting it back
+ * is ugly but functional. A candidate with a unique name stays bare, so the common case — and the
+ * sentence's length — is unaffected by a collision elsewhere in the list.
+ */
+function nameThem(candidates: { id: string; name: string }[]): string {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    counts.set(candidate.name, (counts.get(candidate.name) ?? 0) + 1);
+  }
+  const labels = candidates.map((candidate) =>
+    (counts.get(candidate.name) ?? 0) > 1
+      ? `${candidate.name} (${candidate.id})`
+      : candidate.name,
+  );
+  if (labels.length <= MAX_NAMED_CHANNELS) return labels.join(", ");
+  return [...labels.slice(0, MAX_NAMED_CHANNELS), "and others"].join(", ");
 }
 
 export function createRoutineStore(database: Database): RoutineStore {
@@ -342,7 +362,7 @@ export function createRoutineStore(database: Database): RoutineStore {
       // question it can put to the person, and "be more specific" is not.
       throw new RoutineRefusedError(
         `You are in more than one channel with me — ${nameThem(
-          candidates.map((candidate) => candidate.name),
+          candidates,
         )}. Say which one.`,
       );
     }
