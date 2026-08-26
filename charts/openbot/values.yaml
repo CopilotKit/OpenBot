@@ -212,6 +212,11 @@ computers:
 
   nodeSelector: {}
   tolerations: []
+  # Free-form additions, and where a Bot's outbound address is set. `EGRESS_PROXY_DEFAULT` covers
+  # every Bot and `EGRESS_PROXY_<BOT>` names one, upper-cased with anything unusual replaced, so
+  # `sales-bot` reads `EGRESS_PROXY_SALES_BOT`. Both reach the computer whichever mode it runs in.
+  # With `networkPolicy.enabled` the proxy also has to be named in
+  # `networkPolicy.computerExtraEgress`, or the computer cannot reach it.
   extraEnv: []
 
   # `mode: sandbox` only. Where the per-Bot computers are created and what may create them.

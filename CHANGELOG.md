@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot's egress proxy is reachable on Kubernetes, or the install is refused
+
+The chart named no egress variable anywhere, so a Helm deployment read the per-Bot proxy settings
+nowhere and every Bot went out directly. They were always settable through `computers.extraEnv`,
+which reaches the computer in both the shared and the sandbox arrangement, but nothing in the chart
+or its README said so, and a setting whose whole purpose is to give a security team a per-Bot
+address is not one to leave undocumented.
+
+The other half is that setting it was not enough. A computer is allowed 80 and 443 to public
+addresses and nothing else, which is almost no proxies: they sit on a private address, or on 3128 or
+8080. So a proxy the network policy provably blocks is now refused at `helm install`, naming
+`networkPolicy.computerExtraEgress`, rather than found later as a Bot that fails on every page.
+Nothing changes for a deployment that sets no proxy, or one that already opened a path to it.
+
 ### A finished turn shows the page it opened, not the one open now
 
 Reopening a conversation made every past turn fetch the screen as it is now, so an answer about
