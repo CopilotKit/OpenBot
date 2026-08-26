@@ -266,6 +266,20 @@ given them. It is optional, so a deployment with no proxy is unchanged, and giti
 proxy URL can carry a password.
 
 **Move these two out of `.env` and into `egress.env`.** In `.env` they reach no process.
+### Screens without a conversation stop polling for a Bot that does not exist
+
+Every surface asks which components its Bot holds, and asks again every few seconds so a revoked
+grant leaves an open conversation quickly. The Bot it asked about was whichever one the surface
+declared — and on a screen with no conversation at all, that was the placeholder id the routing
+holder falls back to, which no package registers and the server answers 404 for. An admin page left
+open polled a guaranteed miss every five seconds, indefinitely.
+
+Nothing looked wrong. The screen rendered, because an absent grant list and an empty one draw the
+same. The cost was the noise: a request log where the same 404 repeats forever is one where the 404
+that matters is invisible.
+
+The grant queries now wait for a surface to declare a real Bot, and simply do not run while the
+placeholder holds. Conversation surfaces — the Bot page, channels — declare one and are unchanged.
 
 ### Knowledge searches instead of guessing
 
