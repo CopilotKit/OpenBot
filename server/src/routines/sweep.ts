@@ -37,7 +37,7 @@ const DEFAULT_LIMIT = 50;
  * fifteen-minute floor a routine's schedule may have (`MINIMUM_INTERVAL_MS` in `./schedule`), so the
  * window can never call two consecutive occurrences of one routine current at the same time.
  */
-const DEFAULT_GRACE_MS = 10 * 60_000;
+export const DEFAULT_GRACE_MS = 10 * 60_000;
 
 export type RoutineSweepOptions = {
   routineStore: RoutineStore;
@@ -49,7 +49,7 @@ export type RoutineSweepOptions = {
   owner: string;
   /** Lease for a claimed firing; phase two is what applies it. Default 60_000. */
   leaseMs?: number;
-  /** How many goes one firing gets before it stops being offered. Default `DEFAULT_MAX_ATTEMPTS`. */
+  /** How many goes one firing gets before it stops being offered. Default the queue's default attempt cap. */
   maxAttempts?: number;
   /** How many due routines one pass considers. Default 50. */
   limit?: number;
@@ -161,8 +161,11 @@ export async function offerDueRoutines(
     } catch (error) {
       /*
        * Said out loud, with the routine in it. A pass that swallowed this would look clean while one
-       * routine's clock never moved again: it would be read as due, warned about and re-offered under
-       * the same key on every pass thereafter — harmless, but invisible to anybody not reading logs.
+       * routine's clock never moved again: it would be read as due and warned about on every pass
+       * thereafter, but OFFERED only while its stamp is still inside `graceMs` — once the stamp ages
+       * past the grace window, the guard above skips the offer before this throw is ever reached. So
+       * the grace policy (the window worth having, above) is what bounds this failure mode to one
+       * firing: harmless and loud, but invisible to anybody not reading logs.
        */
       console.warn(
         JSON.stringify({

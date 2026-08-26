@@ -942,6 +942,40 @@ describe("the runner's read of one firing", () => {
 });
 
 /**
+ * The consumer's re-read: "gone or disabled since the offer -> finish without dispatching" needs a
+ * by-id read that is not owner-scoped, because the id it is given comes from a work item's own
+ * payload, not from a person calling in with their own identity. `runContext` cannot answer this —
+ * it needs a run row to exist and does not report `enabled` — so this is a second, narrower read.
+ */
+describe("the sweep's by-id read of a routine before firing", () => {
+  test("an existing enabled routine reads back enabled", async () => {
+    const { routine } = await makeRoutine();
+
+    expect(await store.routineForFiring(routine.id)).toEqual({
+      id: routine.id,
+      enabled: true,
+    });
+  });
+
+  test("a disabled routine reads back disabled, not missing", async () => {
+    const { owner, routine } = await makeRoutine();
+    await store.setEnabled(owner.id, routine.id, false);
+
+    expect(await store.routineForFiring(routine.id)).toEqual({
+      id: routine.id,
+      enabled: false,
+    });
+  });
+
+  test("a deleted routine reads as no routine at all", async () => {
+    const { owner, routine } = await makeRoutine();
+    await store.remove(owner.id, routine.id);
+
+    expect(await store.routineForFiring(routine.id)).toBeNull();
+  });
+});
+
+/**
  * The fatigue rule counts the failures at the tail, and this file pins what a `skipped` run does to
  * that tail: A SKIP IS NOT A FAILURE AND DOES NOT BREAK THE STREAK. A skip means the channel was
  * gone, not that the turn failed, so it is not counted; and it does not reset the count either,

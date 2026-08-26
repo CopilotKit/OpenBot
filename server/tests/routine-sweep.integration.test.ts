@@ -23,8 +23,13 @@ import {
   users,
   workItems,
 } from "../src/db/schema";
+import { MINIMUM_INTERVAL_MS } from "../src/routines/schedule";
 import { createRoutineStore } from "../src/routines/store";
-import { ROUTINE_FIRE_KIND, offerDueRoutines } from "../src/routines/sweep";
+import {
+  DEFAULT_GRACE_MS,
+  ROUTINE_FIRE_KIND,
+  offerDueRoutines,
+} from "../src/routines/sweep";
 import { createWorkQueue } from "../src/work/queue";
 import { TEST_POOL } from "./support/database";
 
@@ -212,6 +217,13 @@ async function firingsFor(routineId: string) {
       ),
     );
 }
+
+test("the grace window stays under the schedule floor, as a compile/test-time fact rather than prose", () => {
+  // Two consecutive occurrences of one routine must never both be inside the grace window — that
+  // would make a routine's own next firing look like a re-offer of a stale one. The floor between
+  // two occurrences is `MINIMUM_INTERVAL_MS`, so the grace window has to stay strictly under it.
+  expect(DEFAULT_GRACE_MS).toBeLessThan(MINIMUM_INTERVAL_MS);
+});
 
 describe("offering the firings that are due", () => {
   /**
@@ -458,10 +470,17 @@ describe("surviving a routine that cannot be scheduled", () => {
     expect(complaint).toBeDefined();
     expect(JSON.parse(complaint as string).routineId).toBe(poisoned.id);
 
-    // The poisoned routine's clock could not move, so it stays due and stays being warned about —
-    // loudly and harmlessly, because the offer key is the same one every pass.
+    // The poisoned routine's clock could not move, so it stays due and stays being warned about on
+    // every pass thereafter. It is not re-offered forever, though: this pass fired it because its
+    // stamp was still inside the grace window (two minutes late). Once the stamp ages past graceMs,
+    // the grace guard skips the offer before this throw is ever reached, so the grace policy is what
+    // bounds this failure mode to a single firing rather than an unbounded stream of re-offers.
     expect((await readRoutine(poisoned.id))?.nextRunAt.getTime()).toBe(
       new Date("2001-01-01T09:25:00Z").getTime(),
     );
+
+    // That single firing is the entire blast radius: pin it as exactly one `work_items` row, the
+    // offer that preceded the throw, rather than leaving it inferred from the warning alone.
+    expect(await firingsFor(poisoned.id)).toHaveLength(1);
   });
 });

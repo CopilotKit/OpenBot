@@ -188,6 +188,15 @@ export type RoutineStore = {
    * means the routine was deleted between queueing and running, which takes its runs with it.
    */
   runContext(runId: string): Promise<RoutineRunContext | null>;
+  /**
+   * The sweep's read, like `dueRoutines` — not owner-scoped. A routine id here comes from a work
+   * item's own payload, not from a person, so there is no owner to check it against. Answers exactly
+   * what the consumer's re-read needs before firing: has the routine been deleted or switched off
+   * since the offer. Null means deleted; otherwise `enabled` says the rest.
+   */
+  routineForFiring(
+    id: string,
+  ): Promise<{ id: string; enabled: boolean } | null>;
   /** Close a run row with its outcome, and the capped error when there was one. */
   finishRun(
     runId: string,
@@ -581,10 +590,14 @@ export function createRoutineStore(database: Database): RoutineStore {
        * routine in the same second, exactly one update matches and the rest change nothing. False
        * means another sweep won, which is fine either way — the firing still happens once.
        *
-       * And it happens BEFORE the run is offered. A crash between advancing and running skips that
-       * firing; advancing afterwards would mean a crash re-offers it, and a routine that spends
-       * money or sends mail would double-fire. A skipped firing is recoverable by waiting for the
-       * next one; a doubled one is not.
+       * And it happens AFTER the run is offered — `sweep.ts`'s ordering comment is the one to read
+       * for why. The old fear here was that advancing after offering would double-fire on a crash
+       * between the two; it doesn't, because the offer key carries the minute the firing was due, so
+       * a re-offer of the same due stamp collides on `work_items`' `(kind, key)` primary key rather
+       * than queueing a second run. That holds even for a firing that already finished: `finish`
+       * marks the row rather than deleting it, so a finished row still conflicts. The compare-and-set
+       * below is what makes the advance itself safe under the same race, which is a separate claim
+       * from the ordering.
        *
        * The equality is on a stamp that round-trips: every writer of `next_run_at` computes it from
        * `nextOccurrence`, which lands on a cron boundary with no sub-second part, and the driver
@@ -630,6 +643,17 @@ export function createRoutineStore(database: Database): RoutineStore {
         .from(routineRuns)
         .innerJoin(routines, eq(routines.id, routineRuns.routineId))
         .where(eq(routineRuns.id, runId))
+        .limit(1);
+      return row ?? null;
+    },
+
+    async routineForFiring(id) {
+      // A single select, not owner-scoped — the sweep's read, like `dueRoutines`. A routine id here
+      // comes from a work item's own payload, not from a person, so there is no owner to check.
+      const [row] = await database
+        .select({ id: routines.id, enabled: routines.enabled })
+        .from(routines)
+        .where(eq(routines.id, id))
         .limit(1);
       return row ?? null;
     },
