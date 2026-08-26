@@ -11,6 +11,8 @@ docs/plans/
 .env
 .env.*
 !.env.example
+# Per-Bot egress proxies. Carries credentials in the URL, like .env does.
+egress.env
 node_modules/
 **/dist/
 app/src/lib/generated/application-config.ts

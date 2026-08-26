@@ -191,14 +191,32 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 - `WORKSPACE_DIR`
 - `PROFILES_DIR`
 - `COMPUTER_BOT_ID`
-- `EGRESS_PROXY_DEFAULT`
-- `EGRESS_PROXY_<BOT_ID>`
+- `EGRESS_PROXY_DEFAULT` (in `egress.env`, see below)
+- `EGRESS_PROXY_<BOT_ID>` (in `egress.env`, see below)
 - `COMPUTER_SHELL_ENV`
 
 A command on the computer inherits PATH, locale and terminal names, and the proxy variables, not
 the rest of the process environment. Userinfo is stripped from a proxy URL, so a password in
 `HTTP_PROXY` is not in `env`. `COMPUTER_SHELL_ENV` is a comma-separated list of extra names to
 pass. Naming a secret or a credentialed proxy there is an operator's decision; the default does not.
+
+### Per-Bot egress
+
+The two egress variables live in `egress.env` at the repository root, not in `.env`. `EGRESS_PROXY_<BOT_ID>`
+is derived from a Bot's id, so there is no fixed set of names for Compose to list the way it lists
+every other variable, and Compose passes a container only the names it is given. A file of its own
+rather than `.env` because that one holds the deployment's secrets and neither the browser container
+nor the supervisor is given those.
+
+```sh
+# egress.env
+EGRESS_PROXY_DEFAULT=http://user:password@proxy.internal:8080
+EGRESS_PROXY_SALES_BOT=http://sales.proxy.internal:8080
+```
+
+The file is optional and gitignored. Without it every Bot's browser goes out directly, which is the
+default. Both the shared computer and the supervisor are given it: the computer resolves its own
+proxy from these names, and the supervisor forwards them into each computer it creates.
 
 The supervisor also reads:
 
