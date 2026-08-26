@@ -226,6 +226,32 @@ export function createHandoffDelivery(options: {
       }
 
       const runId = held.runId;
+
+      /*
+       * THE CONVERSATION GOES ON THE AGENT, NOT IN THE RUN.
+       *
+       * `runAgent` takes `runId`, `tools`, `context` and `forwardedProps` and nothing else: AG-UI
+       * keeps the messages and the thread on the agent itself, and builds the run's input from them.
+       * A `messages` array passed as a parameter is silently ignored, which is the worst shape a
+       * mistake can take. Nothing failed. The addressed Bot ran, against an empty conversation, and
+       * answered "how can I help?" to a question it had never been shown, in a transcript that
+       * displayed the question directly above the answer.
+       */
+      const asked = [
+        /*
+         * The conversation that ASKED, not the one it is answering in. The addressed Bot is joining
+         * something already in progress and has to have read it; its own conversation is new and
+         * empty, and reading that would tell it nothing.
+         */
+        ...conversationOnly(
+          await history({ threadId: work.threadId, actorId: work.actorId }),
+        ),
+        { id: `handoff-${runId}`, role: "user", content: message },
+      ];
+      agent.threadId = where.threadId;
+      // The platform's own message type rather than AG-UI's, which is what `history` returns: the
+      // two agree where it matters, and converting between them is a place to lose a message.
+      agent.setMessages(asked as Parameters<AbstractAgent["setMessages"]>[0]);
       /*
        * Renewed while the addressed Bot works, because the lock expires on its own. A run is minutes
        * and the platform's window is short; a lock that lapses mid-answer lets a second run into the
@@ -269,30 +295,10 @@ export function createHandoffDelivery(options: {
               threadId: where.threadId,
               runId,
               /*
-               * The conversation, then the ask. The addressed Bot is joining something already in
-               * progress and answering the person in it, so it needs to have read it: a Bot handed only
-               * the task answers the question asked and misses that half of it was settled three
-               * messages ago.
+               * The same conversation the agent was given, so the run's own record of what it was
+               * asked agrees with what it read.
                */
-              messages: [
-                /*
-                 * The conversation that ASKED, not the one it is answering in. The addressed Bot is
-                 * joining something already in progress and has to have read it; its own conversation
-                 * is new and empty, and reading that would tell it nothing.
-                 */
-                ...conversationOnly(
-                  await history({
-                    threadId: work.threadId,
-                    actorId: work.actorId,
-                  }),
-                ),
-                {
-                  id: `handoff-${runId}`,
-                  role: "user",
-                  content: message,
-                },
-              ],
-
+              messages: asked,
               tools: [],
               context: [],
               state: {},

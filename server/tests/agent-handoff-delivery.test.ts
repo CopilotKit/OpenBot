@@ -26,9 +26,23 @@ const PRIOR: Message[] = [
   { id: "m2", role: "assistant", content: "I will find out when" },
 ];
 
+const FINISHED = [{ type: "RUN_FINISHED" }] as unknown as BaseEvent[];
+
+/** Enough of an agent for the delivery to hand a conversation to. */
+function stubAgent(): AbstractAgent {
+  const agent = {
+    threadId: "",
+    messages: [] as unknown[],
+    setMessages(messages: unknown[]) {
+      agent.messages = messages;
+    },
+  };
+  return agent as unknown as AbstractAgent;
+}
+
 function delivery(
   events: BaseEvent[],
-  agent: AbstractAgent | null = {} as AbstractAgent,
+  agent: AbstractAgent | null = stubAgent(),
   lockHeld = true,
   options: { history?: readonly unknown[]; deadlineMs?: number } = {},
 ) {
@@ -83,8 +97,6 @@ function delivery(
     }),
   };
 }
-
-const FINISHED = [{ type: "RUN_FINISHED" }] as unknown as BaseEvent[];
 
 describe("turning a hop into a turn", () => {
   test("the addressed Bot reads the conversation before the ask", async () => {
@@ -190,7 +202,7 @@ describe("holding the conversation while a Bot answers", () => {
   test("a conversation somebody else is running in is waited for, not failed", async () => {
     const { delivery: deliver, requests } = delivery(
       FINISHED,
-      {} as never,
+      stubAgent(),
       false,
     );
 
@@ -309,17 +321,13 @@ describe("the conversation that crosses a hop", () => {
  */
 describe("a delivery that never finishes", () => {
   test("is given up on, and says so", async () => {
-    const { delivery: deliver, lockCalls } = delivery(
-      [],
-      { runAgent: () => new Promise(() => {}) } as unknown as AbstractAgent,
-      true,
-      { deadlineMs: 20 },
-    );
+    const { delivery: deliver, lockCalls } = delivery([], stubAgent(), true, {
+      deadlineMs: 20,
+    });
     // A run that emits nothing and never completes, which is what a stalled Bot looks like.
     const stalled = createHandoffDelivery({
       deadlineMs: 20,
-      agentFor: async () =>
-        ({ runAgent: async () => {} }) as unknown as AbstractAgent,
+      agentFor: async () => stubAgent(),
       history: async () => PRIOR,
       newRunId: () => "run-2",
       answerIn: async () => ({ threadId: "answer-thread" }),
@@ -387,5 +395,39 @@ describe("what a hop leaves in the transcript", () => {
     expect(messages.at(-1)).toMatchObject({
       content: expect.stringContaining("Task:"),
     });
+  });
+});
+
+/**
+ * Where the conversation has to be put.
+ *
+ * `runAgent` takes `runId`, `tools`, `context` and `forwardedProps`. AG-UI keeps the messages and
+ * the thread on the agent, so a `messages` array passed as a run parameter is ignored in silence:
+ * the Bot runs, reads nothing, and answers "how can I help?" to a question printed directly above
+ * its reply. Nothing fails, which is why this is a test rather than a comment.
+ */
+describe("what the addressed Bot is actually given", () => {
+  test("the conversation is set on the agent, not only in the run", async () => {
+    const agent = stubAgent();
+    const { delivery: deliver } = delivery(FINISHED, agent);
+
+    await deliver.deliver({
+      work: WORK,
+      message: "the ask",
+      shown: "one line",
+      assertion: "s",
+    });
+
+    const given = (agent as unknown as { messages: Message[] }).messages;
+    expect(given.map((message) => message.id)).toEqual([
+      "m1",
+      "m2",
+      "handoff-platform-run",
+    ]);
+    expect(given.at(-1)).toMatchObject({ role: "user", content: "the ask" });
+    // And it runs in its own conversation, which the agent also carries.
+    expect((agent as unknown as { threadId: string }).threadId).toBe(
+      "answer-thread",
+    );
   });
 });
