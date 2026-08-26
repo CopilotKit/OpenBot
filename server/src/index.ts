@@ -717,6 +717,8 @@ const app = createApp(
   createPageFrameStore(database),
   // What a due routine actually does: a turn, run as its owner, into the thread they will open.
   routineRunner,
+  // A person's own standing instructions: the list, and a switch to stop one.
+  routineStore,
 );
 
 /**

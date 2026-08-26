@@ -45,6 +45,7 @@ import { REFUSAL_MARKER } from "./plugins/tools";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import type { RoutineRunner } from "./routines/runner";
+import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { PackageStatusReader } from "./tenant-package";
 
 /**
@@ -186,6 +187,17 @@ export function createApp(
    * refusing every call: a deployment that never built a worker has no door for it, not a locked one.
    */
   routineRunner?: RoutineRunner,
+  /**
+   * A person's own standing instructions: the list, and a switch to stop one.
+   *
+   * Appended last, like `routineRunner` beside it: these are positional, so inserting one anywhere
+   * else silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the routes unmounted rather than mounted and refusing every call, the same
+   * degraded shape every other optional store here takes: a deployment that never built the store
+   * has no door for this at all, not a locked one.
+   */
+  routineStore?: RoutineStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -814,6 +826,10 @@ export function createApp(
       "/api/channels",
       createChannelRoutes(channelStore, requireUser, channelEvents, auditStore),
     );
+  }
+
+  if (routineStore) {
+    app.route("/api/routines", createRoutineRoutes(routineStore, requireUser));
   }
 
   if (componentStore) {
