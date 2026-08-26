@@ -710,7 +710,7 @@ if (config.singleUser) {
   console.warn(
     "No identity provider is configured, so every request is treated as " +
       `${DEV_ACTOR.email} (administrator). Configure GOOGLE_OAUTH_*, ` +
-      "MICROSOFT_OAUTH_* or OKTA_OAUTH_* before anybody else can reach this.",
+      "MICROSOFT_OAUTH_*, OKTA_OAUTH_* or OIDC_* before anybody else can reach this.",
   );
 }
 

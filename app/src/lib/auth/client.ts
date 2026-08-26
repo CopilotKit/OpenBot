@@ -9,6 +9,7 @@ const PROVIDER_NAMES: Record<AuthProviderId, string> = {
   google: "Google",
   microsoft: "Microsoft",
   okta: "Okta",
+  oidc: "Grok",
 };
 
 export function providerName(provider: AuthProviderId): string {
@@ -29,6 +30,22 @@ type SocialResult = { error?: { message?: string } | null };
  * `start` is injectable because Better Auth's client is a proxy, so a test cannot replace the method
  * on it. Named so it cannot shadow anything it defaults to.
  */
+/**
+ * Pick up a Grok Build session that finished on loopback CORS, where the
+ * browser would not store Better Auth's Set-Cookie on the consent fetch.
+ */
+export async function claimOidcSession(): Promise<boolean> {
+  const response = await fetch("/api/auth/oidc-claim", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    return false;
+  }
+  const body = (await response.json()) as { claimed?: boolean };
+  return body.claimed === true;
+}
+
 export async function signInWith(
   provider: AuthProviderId,
   start: (input: {

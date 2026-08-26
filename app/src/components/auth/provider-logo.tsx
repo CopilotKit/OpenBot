@@ -19,6 +19,7 @@ import type { AuthProviderId } from "@/lib/auth/queries";
 export function ProviderLogo({ provider }: { provider: AuthProviderId }) {
   if (provider === "google") return <GoogleMark />;
   if (provider === "microsoft") return <MicrosoftMark />;
+  if (provider === "oidc") return <OidcMark />;
   return <OktaMark />;
 }
 
@@ -90,6 +91,34 @@ function OktaMark() {
       <path
         d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"
         fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+/**
+ * A generic OpenID Connect mark.
+ *
+ * `currentColor`, like Okta: this is not one company's button. The issuer is whoever the
+ * deployment registered, so a branded colour would be a lie on most of them and unreadable in
+ * one of the two themes on the rest.
+ */
+function OidcMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-[18px]"
+      fill="none"
+      focusable="false"
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      <path
+        d="M12 7v10"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="2"
       />
     </svg>
   );

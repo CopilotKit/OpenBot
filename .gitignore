@@ -11,6 +11,7 @@ docs/plans/
 .env
 .env.*
 !.env.example
+.local/
 node_modules/
 **/dist/
 app/src/lib/generated/application-config.ts

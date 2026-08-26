@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { configuredAuthProviders, loadConfig } from "../src/config";
 
 // Intelligence is part of the MINIMUM contract, so it belongs in the base environment every other
@@ -306,6 +306,83 @@ describe("deployment configuration", () => {
       "microsoft",
       "okta",
     ]);
+  });
+
+  test("enables a generic OpenID Connect issuer", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      OIDC_CLIENT_ID: "oidc-client-id",
+      OIDC_CLIENT_SECRET: "oidc-client-secret",
+      OIDC_ISSUER: "https://auth.example.com",
+    });
+
+    expect(config.auth?.oidc).toEqual({
+      clientId: "oidc-client-id",
+      clientSecret: "oidc-client-secret",
+      issuer: "https://auth.example.com",
+      name: "OpenID Connect",
+      scopes: ["openid", "profile", "email", "offline_access"],
+    });
+    expect(configuredAuthProviders(config.auth)).toEqual(["oidc"]);
+  });
+
+  test("admits a public OpenID Connect client with no secret", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      OIDC_CLIENT_ID: "oidc-public-client",
+      OIDC_ISSUER: "https://auth.example.com",
+    });
+
+    expect(config.auth?.oidc).toEqual({
+      clientId: "oidc-public-client",
+      issuer: "https://auth.example.com",
+      name: "OpenID Connect",
+      scopes: ["openid", "profile", "email", "offline_access"],
+    });
+  });
+
+  test("names the grok-build issuer Grok and asks for its CLI scopes", () => {
+    const config = loadConfig({
+      ...withoutSignIn,
+      ...SESSION,
+      OIDC_CLIENT_ID: "b1a00492-073a-47ea-816f-4c329264a828",
+      OIDC_ISSUER: "https://auth.x.ai",
+    });
+
+    expect(config.auth?.oidc?.name).toBe("Grok");
+    expect(config.auth?.oidc?.scopes).toEqual([
+      "openid",
+      "profile",
+      "email",
+      "offline_access",
+      "grok-cli:access",
+      "api:access",
+    ]);
+    expect(config.auth?.oidc?.redirectURI).toBe(
+      "http://127.0.0.1:3001/callback",
+    );
+  });
+
+  test("refuses an OpenID Connect issuer with no client", () => {
+    expect(() =>
+      loadConfig({
+        ...withoutSignIn,
+        ...SESSION,
+        OIDC_ISSUER: "https://auth.example.com",
+      }),
+    ).toThrow("OIDC_CLIENT_ID");
+  });
+
+  test("refuses an OpenID Connect client with no issuer", () => {
+    expect(() =>
+      loadConfig({
+        ...withoutSignIn,
+        ...SESSION,
+        OIDC_CLIENT_ID: "oidc-client-id",
+      }),
+    ).toThrow("OIDC_ISSUER");
   });
 
   /**

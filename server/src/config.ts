@@ -68,10 +68,32 @@ export type ComputerConfig =
  * has Google or Entra or Okta and is not going to acquire another, so the shape here is a set of
  * optional providers rather than one required one, and the deployment turns on whichever it has.
  */
-export type AuthProviderId = "google" | "microsoft" | "okta";
+export type AuthProviderId = "google" | "microsoft" | "okta" | "oidc";
 
 /** An OAuth client, as every provider here needs one. */
 export type OAuthClient = { clientId: string; clientSecret: string };
+
+/**
+ * A generic OpenID Connect provider, identified by its issuer.
+ *
+ * The client secret is optional because some issuers register public clients and authenticate the
+ * token request with PKCE (`token_endpoint_auth_methods_supported` includes `none`) rather than a
+ * shared secret. Okta, Google and Entra still require one; this is the path for everyone else.
+ */
+export type OidcClient = {
+  clientId: string;
+  clientSecret?: string;
+  issuer: string;
+  /** Shown on the sign-in button. Defaults to "OpenID Connect". */
+  name: string;
+  scopes: string[];
+  /**
+   * Exact redirect URI sent to the issuer. Grok Build's public client is
+   * registered for loopback `/callback` (RFC 8252), not Better Auth's default
+   * `/api/auth/callback/oidc`.
+   */
+  redirectURI?: string;
+};
 
 export type AuthConfig = {
   baseUrl: string;
@@ -87,6 +109,8 @@ export type AuthConfig = {
   microsoft?: OAuthClient & { tenantId: string };
   /** Okta is an OIDC provider rather than a named one, so it is identified by its issuer. */
   okta?: OAuthClient & { issuer: string };
+  /** Any other OpenID Connect issuer, reached the same way Okta is. */
+  oidc?: OidcClient;
 };
 
 /**
@@ -104,6 +128,7 @@ export function configuredAuthProviders(
   if (auth.google) providers.push("google");
   if (auth.microsoft) providers.push("microsoft");
   if (auth.okta) providers.push("okta");
+  if (auth.oidc) providers.push("oidc");
   return providers;
 }
 
@@ -366,7 +391,7 @@ function commaSeparated(environment: Environment, name: string): string[] {
 /**
  * Sign-in, if this deployment has an identity provider to sign people in with.
  *
- * Any one of the three turns authentication on. More than one is allowed and is the normal shape
+ * Any one of them turns authentication on. More than one is allowed and is the normal shape
  * for a company mid-migration, where some people are on Entra and some are still on Okta.
  *
  * Every combination that cannot work refuses at start-up rather than at somebody's first attempt to
@@ -380,14 +405,15 @@ function authConfig(
 ): AuthConfig | undefined {
   const microsoft = microsoftAuth(environment);
   const okta = oktaAuth(environment);
+  const oidc = oidcAuth(environment);
 
   const secret = optional(environment, "BETTER_AUTH_SECRET");
   const baseUrl = url(environment, "BETTER_AUTH_URL");
 
-  if (!google && !microsoft && !okta) {
+  if (!google && !microsoft && !okta && !oidc) {
     if (secret || baseUrl) {
       throw new Error(
-        "BETTER_AUTH_SECRET or BETTER_AUTH_URL is set but no identity provider is. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_*, or unset both",
+        "BETTER_AUTH_SECRET or BETTER_AUTH_URL is set but no identity provider is. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_*, OKTA_OAUTH_* or OIDC_*, or unset both",
       );
     }
     return undefined;
@@ -430,6 +456,7 @@ function authConfig(
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
     ...(okta ? { okta } : {}),
+    ...(oidc ? { oidc } : {}),
   };
 }
 
@@ -476,6 +503,81 @@ function oktaAuth(
     );
   }
   return { ...client, issuer };
+}
+
+/**
+ * Any OpenID Connect issuer, reached the same way Okta is.
+ *
+ * The issuer is required because there is no default: this is not one company's product, it is
+ * whoever published a discovery document at that URL. The client secret is not, because a public
+ * client authenticates the token request with PKCE rather than a shared secret, and refusing to
+ * start without one would lock out the issuers this path exists for.
+ */
+function oidcAuth(environment: Environment): OidcClient | undefined {
+  const clientId = optional(environment, "OIDC_CLIENT_ID");
+  const clientSecret = optional(environment, "OIDC_CLIENT_SECRET");
+  const issuer = url(environment, "OIDC_ISSUER");
+
+  if (!clientId && !clientSecret && !issuer) {
+    return undefined;
+  }
+  if (!clientId) {
+    throw new Error(
+      "OIDC_ISSUER is set but OIDC_CLIENT_ID is not. A generic OpenID Connect provider needs the client this deployment registered with that issuer",
+    );
+  }
+  if (!issuer) {
+    throw new Error(
+      "OpenID Connect sign-in requires OIDC_ISSUER, such as https://auth.example.com",
+    );
+  }
+
+  const grokBuild = issuer.replace(/\/$/, "") === "https://auth.x.ai";
+  const name =
+    optional(environment, "OIDC_NAME") ??
+    (grokBuild ? "Grok" : "OpenID Connect");
+  const scopes = commaSeparated(environment, "OIDC_SCOPES");
+  const redirectURI =
+    optional(environment, "OIDC_REDIRECT_URI") ??
+    (grokBuild ? grokBuildRedirectURI(environment) : undefined);
+  return {
+    clientId,
+    issuer,
+    name,
+    scopes: scopes.length
+      ? scopes
+      : grokBuild
+        ? [
+            "openid",
+            "profile",
+            "email",
+            "offline_access",
+            "grok-cli:access",
+            "api:access",
+          ]
+        : ["openid", "profile", "email", "offline_access"],
+    ...(redirectURI ? { redirectURI } : {}),
+    ...(clientSecret ? { clientSecret } : {}),
+  };
+}
+
+/**
+ * Grok Build registers `http://127.0.0.1:<port>/callback`. `localhost` and
+ * `/api/auth/callback/oidc` are both refused at authorize time.
+ */
+function grokBuildRedirectURI(environment: Environment): string {
+  const configured = url(environment, "BETTER_AUTH_URL");
+  let port = "3001";
+  if (configured) {
+    try {
+      port =
+        new URL(configured).port ||
+        (configured.startsWith("https:") ? "443" : "80");
+    } catch {
+      port = "3001";
+    }
+  }
+  return `http://127.0.0.1:${port}/callback`;
 }
 
 /**

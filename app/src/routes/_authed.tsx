@@ -1,9 +1,15 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { claimOidcSession } from "../lib/auth/client";
 import { currentUserQueryOptions } from "../lib/auth/queries";
 import { CopilotProvider } from "../lib/copilot/provider";
 
 export const Route = createFileRoute("/_authed")({
   beforeLoad: async ({ context }) => {
+    if (await claimOidcSession()) {
+      context.queryClient.removeQueries({
+        queryKey: currentUserQueryOptions().queryKey,
+      });
+    }
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );

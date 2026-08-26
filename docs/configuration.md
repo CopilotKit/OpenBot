@@ -122,6 +122,10 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `OKTA_OAUTH_CLIENT_ID`       | Okta client id.                                                                        |
 | `OKTA_OAUTH_CLIENT_SECRET`   | Okta client secret.                                                                    |
 | `OKTA_OAUTH_ISSUER`          | Which Okta, for example `https://example.okta.com/oauth2/default`.                     |
+| `OIDC_CLIENT_ID`             | Client id for any other OpenID Connect issuer.                                         |
+| `OIDC_CLIENT_SECRET`         | Client secret. Optional for a public client that authenticates with PKCE.              |
+| `OIDC_ISSUER`                | Issuer origin, for example `https://auth.example.com`.                                 |
+| `OIDC_REDIRECT_URI`          | Exact redirect URI sent to the issuer. Grok Build (`https://auth.x.ai`) defaults to `http://127.0.0.1:<api-port>/callback`. |
 | `BETTER_AUTH_SECRET`         | At least 32 characters. Required with any provider.                                    |
 | `BETTER_AUTH_URL`            | Public API server base URL, where OAuth callbacks return. Required with any provider.  |
 | `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API, plus every host in a registered OIDC provider's discovery document. |
@@ -135,10 +139,11 @@ configure, because a public URL where every visitor is an administrator fails si
 does not enter into it. `.env.example` ships the line switched on, so a clone runs with no
 configuration at all.
 
-**Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
-secret must be set together, Okta additionally needs its issuer, and any of them requires
-`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` and `INITIAL_ADMIN_EMAILS`. Every incomplete combination is
-refused at start-up rather than at somebody's first attempt to sign in.
+**Any one provider turns sign-in on**, and several may be configured at once. Each named provider's
+id and secret must be set together, Okta additionally needs its issuer, a generic OpenID Connect
+issuer needs `OIDC_CLIENT_ID` and `OIDC_ISSUER` (the secret is optional for a public client), and
+any of them requires `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` and `INITIAL_ADMIN_EMAILS`. Every
+incomplete combination is refused at start-up rather than at somebody's first attempt to sign in.
 
 `INITIAL_ADMIN_EMAILS` is required because nothing else grants the administrator role at first: an
 address it names becomes an administrator at every sign-in and cannot be demoted from the People
@@ -160,7 +165,7 @@ added it. The client secret and any SAML signing material are encrypted at rest 
 `KEY_ENCRYPTION_KEY`.
 
 The redirect URI to register with each provider is `<BETTER_AUTH_URL>/api/auth/callback/<provider>`,
-where `<provider>` is `google`, `microsoft` or `okta`.
+where `<provider>` is `google`, `microsoft`, `okta` or `oidc`.
 
 `OPENBOT_PUBLIC_URL` and `OPENBOT_APP_URL` matter only for a connector each person connects their own account to, such as Google Drive.
 

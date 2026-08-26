@@ -20,6 +20,10 @@ import {
   requireAdmin,
 } from "./auth/guards";
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
+import {
+  claimOidcLoopbackCookies,
+  stashOidcLoopbackCookies,
+} from "./auth/oidc-loopback-claim";
 import type { ChannelEventHub } from "./channels/events";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
@@ -30,9 +34,9 @@ import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
+import type { PageFrameStore } from "./computer/page-frames";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
-import type { PageFrameStore } from "./computer/page-frames";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createIntelligenceClient } from "./intelligence-client";
@@ -43,6 +47,21 @@ import { REFUSAL_MARKER } from "./plugins/tools";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import type { PackageStatusReader } from "./tenant-package";
+
+function oidcLoopbackCallbackPath(
+  redirectURI: string | undefined,
+): string | null {
+  if (!redirectURI) return null;
+  try {
+    const parsed = new URL(redirectURI);
+    if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
+      return null;
+    }
+    return parsed.pathname || "/callback";
+  } catch {
+    return null;
+  }
+}
 
 /**
  * One row for something an administrator did to somebody's access.
@@ -213,6 +232,30 @@ export function createApp(
     "/api/auth/sso/delete-provider",
   ]);
 
+  /*
+   * First-party handoff after the Grok consent tab's CORS fetch. That fetch
+   * cannot store OpenBot's session cookie (third-party). The sign-in page
+   * claims the stashed cookies over Vite, which is first-party.
+   */
+  app.post("/api/auth/oidc-claim", (context) => {
+    const host = (context.req.header("host") ?? "").split(":")[0] ?? "";
+    if (host !== "127.0.0.1" && host !== "localhost") {
+      return context.json({ error: "Loopback only." }, 403);
+    }
+    const cookies = claimOidcLoopbackCookies();
+    if (!cookies) {
+      return context.json({ claimed: false });
+    }
+    const headers = new Headers({ "content-type": "application/json" });
+    for (const cookie of cookies) {
+      headers.append("set-cookie", cookie.replace(/;\s*secure/gi, ""));
+    }
+    return new Response(JSON.stringify({ claimed: true }), {
+      status: 200,
+      headers,
+    });
+  });
+
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     if (!auth) {
       return context.json(
@@ -240,6 +283,62 @@ export function createApp(
 
     return auth.handler(context.req.raw);
   });
+
+  /*
+   * Grok Build's OAuth client will not accept Better Auth's default callback path. It is registered
+   * for loopback `/callback` (see `OidcClient.redirectURI`). The consent page at accounts.x.ai
+   * delivers the code with `fetch()` onto that URL, so this route must speak CORS and Private
+   * Network Access the way the Grok Build CLI's loopback server does.
+   */
+  const oidcLoopbackPath = oidcLoopbackCallbackPath(
+    config.auth?.oidc?.redirectURI,
+  );
+  if (oidcLoopbackPath) {
+    const grokAccountsOrigin = "https://accounts.x.ai";
+    const grokLoopbackCors: Record<string, string> = {
+      "Access-Control-Allow-Origin": grokAccountsOrigin,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Private-Network": "true",
+    };
+    const grokAppUrl = config.appUrl ?? "http://127.0.0.1:3010";
+    const grokSignedInHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Signed in</title></head><body style="font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0"><p>Grok sign-in finished. Return to OpenBot and it will pick up the session.</p><p><a href="${grokAppUrl}">Open OpenBot</a></p><script>setTimeout(function(){window.location.replace(${JSON.stringify(grokAppUrl)})},800)</script></body></html>`;
+
+    app.options(oidcLoopbackPath, (context) =>
+      context.body(null, 204, grokLoopbackCors),
+    );
+    app.on(["GET", "POST"], oidcLoopbackPath, async (context) => {
+      if (!auth) {
+        return context.json(
+          { error: "No identity provider is configured." },
+          503,
+        );
+      }
+      const inbound = new URL(context.req.url);
+      inbound.pathname = "/api/auth/callback/oidc";
+      const authResponse = await auth.handler(
+        new Request(inbound, context.req.raw),
+      );
+      const setCookies = authResponse.headers.getSetCookie();
+      if (authResponse.status < 400) {
+        stashOidcLoopbackCookies(setCookies);
+      }
+      const fromAccounts = context.req.header("origin") === grokAccountsOrigin;
+      if (!fromAccounts) {
+        return authResponse;
+      }
+      const headers = new Headers(grokLoopbackCors);
+      headers.set("content-type", "text/html; charset=utf-8");
+      for (const cookie of setCookies) {
+        headers.append("set-cookie", cookie);
+      }
+      const ok = authResponse.status < 400;
+      return new Response(ok ? grokSignedInHtml : await authResponse.text(), {
+        status: ok ? 200 : authResponse.status,
+        headers,
+      });
+    });
+  }
 
   const authenticationUnavailable: MiddlewareHandler<{
     Variables: AppVariables;

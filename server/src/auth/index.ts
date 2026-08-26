@@ -115,29 +115,58 @@ export function createAuth(
   }
 
   /*
-   * Okta goes through the generic OAuth plugin, the other two do not.
+   * Okta and generic OpenID Connect go through the generic OAuth plugin, the other two do not.
    *
    * Google and Entra are named providers that Better Auth knows the endpoints of. Okta is not one
    * place: every customer has their own issuer, so it is OIDC discovery against a URL rather than a
-   * provider with a fixed address. The plugin is only registered when Okta is configured, so a
-   * deployment that does not use it carries no extra routes.
+   * provider with a fixed address. A generic issuer is the same shape without Okta's helper: the
+   * discovery document at that URL is the whole configuration. The plugin is only registered when
+   * one of them is configured, so a deployment that does not use either carries no extra routes.
    *
-   * They converge again at the browser: `signIn.social({ provider })` starts all three, so the
+   * They converge again at the browser: `signIn.social({ provider })` starts all of them, so the
    * sign-in screen has one code path and does not need to know which kind each provider is.
    */
-  const plugins = [
+  const genericProviders = [
     ...(authConfig.okta
       ? [
-          genericOAuth({
-            config: [
-              okta({
-                clientId: authConfig.okta.clientId,
-                clientSecret: authConfig.okta.clientSecret,
-                issuer: authConfig.okta.issuer,
-              }),
-            ],
+          okta({
+            clientId: authConfig.okta.clientId,
+            clientSecret: authConfig.okta.clientSecret,
+            issuer: authConfig.okta.issuer,
           }),
         ]
+      : []),
+    ...(authConfig.oidc
+      ? [
+          {
+            providerId: "oidc" as const,
+            name: authConfig.oidc.name,
+            clientId: authConfig.oidc.clientId,
+            ...(authConfig.oidc.clientSecret
+              ? { clientSecret: authConfig.oidc.clientSecret }
+              : {}),
+            ...(authConfig.oidc.redirectURI
+              ? { redirectURI: authConfig.oidc.redirectURI }
+              : {}),
+            discoveryUrl: `${authConfig.oidc.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`,
+            pkce: true,
+            scopes: authConfig.oidc.scopes,
+            ...(authConfig.oidc.issuer.replace(/\/$/, "") ===
+            "https://auth.x.ai"
+              ? {
+                  authorizationUrlParams: {
+                    plan: "generic",
+                    referrer: "grok-build",
+                  },
+                }
+              : {}),
+          },
+        ]
+      : []),
+  ];
+  const plugins = [
+    ...(genericProviders.length > 0
+      ? [genericOAuth({ config: genericProviders })]
       : []),
     /*
      * Identity providers a company registers while this is running, by SAML or OIDC.
@@ -194,6 +223,12 @@ export function createAuth(
        * accounts of everybody who has already signed in.
        */
       encryptOAuthTokens: true,
+      /*
+       * Grok Build's consent page delivers the auth code with `fetch()` from
+       * accounts.x.ai onto loopback. That request has no Better Auth state
+       * cookie. PKCE and the server-stored verifier still bind the code.
+       */
+      ...(authConfig.oidc?.redirectURI ? { skipStateCookieCheck: true } : {}),
     },
     plugins,
     socialProviders: {

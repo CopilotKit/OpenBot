@@ -108,7 +108,7 @@ function IdentityProvidersPage() {
       title="Identity providers"
     >
       <PageSection
-        description="Google, Microsoft and Okta are configured in the environment instead and do not appear here."
+        description="Google, Microsoft, Okta and a generic OpenID Connect issuer are configured in the environment instead and do not appear here."
         title="Registered"
       >
         {failure ? (

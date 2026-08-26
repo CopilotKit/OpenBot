@@ -80,7 +80,7 @@ export function singleUserEnabled(
   if (asked) return true;
 
   throw new Error(
-    "No identity provider is configured. Set GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or set OPENBOT_SINGLE_USER=true to run with one administrator and no sign-in. Refusing to start rather than serving a deployment where every visitor is an administrator.",
+    "No identity provider is configured. Set GOOGLE_OAUTH_*, MICROSOFT_OAUTH_*, OKTA_OAUTH_* or OIDC_* with BETTER_AUTH_SECRET and BETTER_AUTH_URL, or set OPENBOT_SINGLE_USER=true to run with one administrator and no sign-in. Refusing to start rather than serving a deployment where every visitor is an administrator.",
   );
 }
 

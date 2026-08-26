@@ -38,6 +38,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   google: "Google",
   microsoft: "Microsoft",
   okta: "Okta",
+  oidc: "Grok",
 };
 
 /**

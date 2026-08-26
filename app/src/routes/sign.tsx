@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AgentOrb from "@/components/agents/orb/agent-orb";
 import { ProviderLogo } from "@/components/auth/provider-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
+  claimOidcSession,
   providerName,
   signInWith,
   signInWithEmailDomain,
@@ -27,6 +28,11 @@ const ENTRANCE_OFFSET = "translateY(12px)";
 
 export const Route = createFileRoute("/sign")({
   beforeLoad: async ({ context }) => {
+    if (await claimOidcSession()) {
+      context.queryClient.removeQueries({
+        queryKey: currentUserQueryOptions().queryKey,
+      });
+    }
     const user = await context.queryClient.ensureQueryData(
       currentUserQueryOptions(),
     );
@@ -48,6 +54,19 @@ function SignScreen() {
   const { data: options } = useQuery(authProvidersQueryOptions());
   const providers = options?.providers ?? [];
   const [email, setEmail] = useState("");
+  const [pasted, setPasted] = useState("");
+
+  // Grok Build's OAuth client is registered for 127.0.0.1, not localhost. The
+  // session cookie is host-bound, so sign-in that starts on localhost cannot
+  // complete on 127.0.0.1. Bounce before offering the button.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hostname !== "localhost") return;
+    if (!providers.includes("oidc")) return;
+    const next = new URL(window.location.href);
+    next.hostname = "127.0.0.1";
+    window.location.replace(next.toString());
+  }, [providers]);
 
   /**
    * Sign in through whichever identity provider covers this address.
@@ -197,6 +216,47 @@ function SignScreen() {
                 {opening === "sso"
                   ? "Opening…"
                   : "Continue with your company account"}
+              </Button>
+            </form>
+          ) : null}
+          {providers.includes("oidc") ? (
+            <form
+              className="mt-4 space-y-2"
+              onSubmit={(submission) => {
+                submission.preventDefault();
+                const raw = pasted.trim();
+                if (!raw) return;
+                try {
+                  const asUrl = new URL(raw);
+                  const code = asUrl.searchParams.get("code");
+                  const oauthState = asUrl.searchParams.get("state");
+                  if (code && oauthState) {
+                    window.location.assign(
+                      `http://127.0.0.1:3001/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(oauthState)}`,
+                    );
+                    return;
+                  }
+                } catch {
+                  // Bare codes from the consent screen still need the state query.
+                }
+                setError(
+                  "Paste the full http://127.0.0.1:3001/callback?... URL. A bare code is not enough.",
+                );
+              }}
+            >
+              <Input
+                onChange={(event) => setPasted(event.target.value)}
+                placeholder="Or paste the Grok callback URL"
+                value={pasted}
+              />
+              <Button
+                className="h-10 w-full tracking-tight"
+                disabled={opening !== null || pasted.trim().length === 0}
+                size="lg"
+                type="submit"
+                variant="outline"
+              >
+                Finish with pasted URL
               </Button>
             </form>
           ) : null}
