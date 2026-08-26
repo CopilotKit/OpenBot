@@ -11,12 +11,14 @@ import {
   agents,
   channels,
   intelligenceChannelMappings,
+  routineRuns,
   routines,
   users,
 } from "../src/db/schema";
 import {
   MAX_ENABLED_ROUTINES,
   MAX_INSTRUCTION_CODE_POINTS,
+  MAX_RUN_ERROR,
   RoutineNotFoundError,
   RoutineRefusedError,
   createRoutineStore,
@@ -433,7 +435,7 @@ describe("reading a person's routines", () => {
     expect(summary?.channelName).toBe(channel.name);
     expect(summary?.channelDeleted).toBe(false);
     expect(summary?.nextRunAt).toBeInstanceOf(Date);
-    // Nothing writes routine_runs yet; the join is here for the commit that does.
+    // A routine that has never fired has no run row, so the join has nothing to report.
     expect(summary?.lastRun).toBeNull();
   });
 
@@ -663,5 +665,276 @@ describe("changing a routine", () => {
     await expect(store.remove(owner.id, routine.id)).rejects.toBeInstanceOf(
       RoutineNotFoundError,
     );
+  });
+});
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * The sweep's half. Nothing below is asked a question by a person, and everything below is about
+ * two things happening at once: several replicas reading the same due row in the same second.
+ *
+ * NO CLAIM OR LEASE SEMANTICS ARE TESTED HERE. Firing mechanics live in the shared `work_items`
+ * queue, and `server/tests/work-queue.integration.test.ts` owns `for update skip locked`, leases
+ * on the database's clock, and the attempt count. What this file tests is the routines table's own
+ * compare-and-set on `next_run_at`, which is a different guarantee: the clock moves once.
+ */
+
+/**
+ * The create path always computes a future stamp, so a due-in-the-past row has to be written
+ * directly — the same direct write the staleness test above uses. The stamps are deliberately
+ * ancient: `dueRoutines` is not owner-scoped, so a test that asserts on ordering has to be sure
+ * its own rows sort ahead of anything else in the database.
+ */
+async function makeDueAt(routineId: string, nextRunAt: Date): Promise<Date> {
+  await database
+    .update(routines)
+    .set({ nextRunAt })
+    .where(eq(routines.id, routineId));
+  const [row] = await database
+    .select({ nextRunAt: routines.nextRunAt })
+    .from(routines)
+    .where(eq(routines.id, routineId))
+    .limit(1);
+  // Read back rather than trusting the Date we wrote: the comparison the CAS makes is Postgres's.
+  return row?.nextRunAt as Date;
+}
+
+async function readRoutine(routineId: string) {
+  const [row] = await database
+    .select()
+    .from(routines)
+    .where(eq(routines.id, routineId))
+    .limit(1);
+  return row;
+}
+
+async function makeRoutine(instruction = "Summarise the day.") {
+  const { owner, agentId, channel } = await setUp();
+  const routine = await store.create({
+    ownerUserId: owner.id,
+    agentId,
+    channelId: channel.id,
+    instruction,
+    cron: DAILY,
+  });
+  return { owner, agentId, channel, routine };
+}
+
+describe("moving a routine's clock", () => {
+  test("two sweeps racing on the same stamp advance it exactly once", async () => {
+    const { routine } = await makeRoutine();
+    const from = await makeDueAt(routine.id, new Date("2001-03-04T09:00:00Z"));
+
+    const outcomes = await Promise.all([
+      store.advanceNextRun(routine.id, from),
+      store.advanceNextRun(routine.id, from),
+    ]);
+
+    expect(outcomes.filter((won) => won)).toHaveLength(1);
+    expect(outcomes.filter((won) => !won)).toHaveLength(1);
+
+    // The loser's re-read sees the advanced value: whichever call lost, the clock has moved on and
+    // nothing is left holding the stamp it was asked to move from.
+    const after = await readRoutine(routine.id);
+    expect(after?.nextRunAt.getTime()).toBeGreaterThan(from.getTime());
+  });
+
+  test("a stale `from` returns false and moves nothing", async () => {
+    const { routine } = await makeRoutine();
+    const from = await makeDueAt(routine.id, new Date("2001-03-04T09:00:00Z"));
+
+    const moved = await store.advanceNextRun(
+      routine.id,
+      new Date("2001-03-03T09:00:00Z"),
+    );
+
+    expect(moved).toBe(false);
+    const after = await readRoutine(routine.id);
+    expect(after?.nextRunAt.getTime()).toBe(from.getTime());
+    expect(after?.lastRunAt).toBeNull();
+  });
+
+  test("advancing stamps last_run_at with the `from` it was given", async () => {
+    const { routine } = await makeRoutine();
+    const from = await makeDueAt(routine.id, new Date("2001-03-04T09:00:00Z"));
+
+    expect(await store.advanceNextRun(routine.id, from)).toBe(true);
+
+    const after = await readRoutine(routine.id);
+    // The moment the routine was due, not the moment the sweep happened to look at it.
+    expect(after?.lastRunAt?.getTime()).toBe(from.getTime());
+    expect(after?.nextRunAt.getTime()).toBeGreaterThan(from.getTime());
+  });
+});
+
+describe("reading which routines are due", () => {
+  test("returns the due ones oldest first and respects the limit", async () => {
+    const { owner, agentId, channel } = await setUp();
+    const oldest = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      instruction: "Oldest.",
+      cron: DAILY,
+    });
+    const middle = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      instruction: "Middle.",
+      cron: DAILY,
+    });
+    const newest = await store.create({
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      instruction: "Newest.",
+      cron: DAILY,
+    });
+    await makeDueAt(oldest.id, new Date("2001-01-01T09:00:00Z"));
+    await makeDueAt(middle.id, new Date("2001-01-02T09:00:00Z"));
+    await makeDueAt(newest.id, new Date("2001-01-03T09:00:00Z"));
+
+    const all = await store.dueRoutines(10);
+    expect(all.map((row) => row.id).slice(0, 3)).toEqual([
+      oldest.id,
+      middle.id,
+      newest.id,
+    ]);
+    expect(all[0]?.nextRunAt).toBeInstanceOf(Date);
+
+    const limited = await store.dueRoutines(2);
+    expect(limited.map((row) => row.id)).toEqual([oldest.id, middle.id]);
+  });
+
+  test("excludes a routine that is switched off", async () => {
+    const { owner, routine } = await makeRoutine();
+    await store.setEnabled(owner.id, routine.id, false);
+    await makeDueAt(routine.id, new Date("2001-01-01T09:00:00Z"));
+
+    const due = await store.dueRoutines(50);
+    expect(due.map((row) => row.id)).not.toContain(routine.id);
+  });
+
+  test("excludes a routine whose next run is still ahead", async () => {
+    const { routine } = await makeRoutine();
+    // The create path already put this in the future; the point is that nothing rounds it down.
+    const due = await store.dueRoutines(50);
+    expect(due.map((row) => row.id)).not.toContain(routine.id);
+
+    await makeDueAt(routine.id, new Date(Date.now() + 60 * 60 * 1000));
+    const stillAhead = await store.dueRoutines(50);
+    expect(stillAhead.map((row) => row.id)).not.toContain(routine.id);
+  });
+});
+
+describe("opening and closing a run", () => {
+  test("a finished run stamps finished_at and leaves the error null", async () => {
+    const { routine } = await makeRoutine();
+
+    const { runId } = await store.insertRun(routine.id);
+    const [inFlight] = await database
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.id, runId));
+    // Null status is the in-flight state, which is why the column is nullable.
+    expect(inFlight?.status).toBeNull();
+    expect(inFlight?.finishedAt).toBeNull();
+    expect(inFlight?.startedAt).toBeInstanceOf(Date);
+
+    await store.finishRun(runId, "succeeded");
+
+    const [finished] = await database
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.id, runId));
+    expect(finished?.status).toBe("succeeded");
+    expect(finished?.finishedAt).toBeInstanceOf(Date);
+    expect(finished?.error).toBeNull();
+  });
+
+  test("caps a long error rather than storing whatever a failure produced", async () => {
+    const { routine } = await makeRoutine();
+    const { runId } = await store.insertRun(routine.id);
+
+    await store.finishRun(runId, "failed", "x".repeat(600));
+
+    const [finished] = await database
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.id, runId));
+    expect(finished?.status).toBe("failed");
+    expect(finished?.error).toHaveLength(MAX_RUN_ERROR);
+    expect(MAX_RUN_ERROR).toBe(400);
+  });
+
+  test("the page's last run reads the newest of several", async () => {
+    const { owner, routine } = await makeRoutine();
+    const first = await store.insertRun(routine.id);
+    await store.finishRun(first.runId, "failed", "the first one");
+    const second = await store.insertRun(routine.id);
+    await store.finishRun(second.runId, "succeeded");
+
+    const [summary] = await store.listFor(owner.id);
+    expect(summary?.lastRun?.status).toBe("succeeded");
+    expect(summary?.lastRun?.finishedAt).toBeInstanceOf(Date);
+  });
+});
+
+/**
+ * The fatigue rule counts the failures at the tail, and this file pins what a `skipped` run does to
+ * that tail: A SKIP IS NOT A FAILURE AND DOES NOT BREAK THE STREAK. A skip means the channel was
+ * gone, not that the turn failed, so it is not counted; and it does not reset the count either,
+ * because a routine whose channel flaps must not be able to escape the fatigue rule by skipping
+ * between its failures.
+ */
+describe("counting the failures at the tail", () => {
+  async function finish(
+    routineId: string,
+    status: "succeeded" | "failed" | "skipped",
+  ) {
+    const { runId } = await store.insertRun(routineId);
+    await store.finishRun(
+      runId,
+      status,
+      status === "failed" ? "it threw" : undefined,
+    );
+  }
+
+  test("counts up, resets on a success, and is not broken by a skip", async () => {
+    const { routine } = await makeRoutine();
+
+    expect(await store.consecutiveFailures(routine.id)).toBe(0);
+
+    await finish(routine.id, "succeeded");
+    expect(await store.consecutiveFailures(routine.id)).toBe(0);
+
+    await finish(routine.id, "failed");
+    expect(await store.consecutiveFailures(routine.id)).toBe(1);
+
+    await finish(routine.id, "failed");
+    await finish(routine.id, "failed");
+    expect(await store.consecutiveFailures(routine.id)).toBe(3);
+
+    await finish(routine.id, "succeeded");
+    expect(await store.consecutiveFailures(routine.id)).toBe(0);
+  });
+
+  test("a skip between failures neither counts nor resets", async () => {
+    const { routine } = await makeRoutine();
+
+    await finish(routine.id, "failed");
+    await finish(routine.id, "skipped");
+    await finish(routine.id, "failed");
+
+    expect(await store.consecutiveFailures(routine.id)).toBe(2);
+  });
+
+  test("an in-flight run is not an outcome", async () => {
+    const { routine } = await makeRoutine();
+    await finish(routine.id, "failed");
+    await store.insertRun(routine.id);
+
+    expect(await store.consecutiveFailures(routine.id)).toBe(1);
   });
 });

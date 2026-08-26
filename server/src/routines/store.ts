@@ -7,12 +7,12 @@
  * never taken from an argument a model supplied. Its failures are one person's failures — a bad cron,
  * a channel they are not in — and none of them are about two things happening at once.
  *
- * The other half is the sweep's: the ledger read on a clock (which routines are due, advancing the
- * next run, opening and closing a run row). Nothing there is asked a question by a person, and
- * everything there is about concurrency — several replicas reading the same due row in the same
- * second. That is why the halves are worth telling apart: only the second one has anything to do with
- * concurrency, and only the second one needs to be reasoned about as a race. It lands in the next
- * commit, and this file deliberately does not contain it.
+ * The other half is the sweep's, and it starts at the marked boundary further down: the ledger read
+ * on a clock (which routines are due, advancing the next run, opening and closing a run row).
+ * Nothing there is asked a question by a person, and everything there is about concurrency — several
+ * replicas reading the same due row in the same second. That is why the halves are worth telling
+ * apart: only the second one has anything to do with concurrency, and only the second one needs to be
+ * reasoned about as a race.
  *
  * NO CLAIM OR LEASE MACHINERY, EVER. Firing mechanics belong to the shared `work_items` queue in
  * `server/src/work/queue.ts`, which already owns `for update skip locked`, leases on the database's
@@ -20,7 +20,17 @@
  * `locked_until` — is exactly the duplicated firing mechanism #235 exists to prevent: two half-right
  * implementations of the same hard thing, one of which nobody tests.
  */
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  sql,
+} from "drizzle-orm";
 import type { Database } from "../db/client";
 import {
   channelAgents,
@@ -50,6 +60,17 @@ export class RoutineRefusedError extends Error {
 export const MAX_ENABLED_ROUTINES = 20;
 /** Same code-point cap discipline as channel activity. */
 export const MAX_INSTRUCTION_CODE_POINTS = 2000;
+/** Capped like audit payloads, because a failure is not a promise about length. */
+export const MAX_RUN_ERROR = 400;
+/**
+ * How far back the failure count looks.
+ *
+ * Twice what the fatigue rule can act on, so the answer is never truncated where it matters, and
+ * bounded because an unbounded read of a routine's whole history is the wrong shape for something
+ * called on every failed firing, for ever: a routine that has failed nightly for a year would make
+ * the count get slower exactly as the routine got worse.
+ */
+const FAILURE_SCAN_LIMIT = 20;
 
 const NO_SHARED_CHANNEL =
   "I can only post into a channel you and I are both in.";
@@ -133,6 +154,23 @@ export type RoutineStore = {
   ): Promise<Routine>;
   remove(ownerUserId: string, id: string): Promise<void>;
   setEnabled(ownerUserId: string, id: string, enabled: boolean): Promise<void>;
+
+  /* The sweep's half. Deliberately not owner-scoped — see the boundary comment below. */
+
+  /** Enabled routines whose next run has arrived, oldest due first. */
+  dueRoutines(limit: number): Promise<{ id: string; nextRunAt: Date }[]>;
+  /** Compare-and-set the clock forward. False means another sweep got there first. */
+  advanceNextRun(id: string, from: Date): Promise<boolean>;
+  /** Open a run row. Its status stays null until something finishes it. */
+  insertRun(routineId: string): Promise<{ runId: string }>;
+  /** Close a run row with its outcome, and the capped error when there was one. */
+  finishRun(
+    runId: string,
+    status: RoutineRunOutcome,
+    error?: string,
+  ): Promise<void>;
+  /** How many failures the routine has at the tail, for the fatigue rule to read. */
+  consecutiveFailures(routineId: string): Promise<number>;
 };
 
 type RoutineRow = typeof routines.$inferSelect;
@@ -377,9 +415,8 @@ export function createRoutineStore(database: Database): RoutineStore {
 
     async listFor(ownerUserId) {
       /*
-       * The last-run join reads `routine_runs`, which migration 0020 already created even though
-       * nothing in THIS commit writes a row to it — the sweep's half does. The join is not dead code;
-       * it is the half of the page that stays empty until the sweep lands.
+       * The last-run join reads `routine_runs`, which only the sweep's half of this file writes to:
+       * the page stays empty here until a routine has actually fired.
        *
        * `distinct on (routine_id) ... order by started_at desc` gives one row per routine, the most
        * recent, in a single index scan of `routine_runs_by_routine_idx`. Reading the runs in a
@@ -414,7 +451,15 @@ export function createRoutineStore(database: Database): RoutineStore {
           })
           .from(routineRuns)
           .where(inArray(routineRuns.routineId, routineIds))
-          .orderBy(routineRuns.routineId, desc(routineRuns.startedAt));
+          .orderBy(
+            routineRuns.routineId,
+            desc(routineRuns.startedAt),
+            // The id breaks the tie. Two runs of one routine can share a `started_at` — a retry in
+            // the same instant, a clock with coarse resolution — and without a tiebreak `distinct
+            // on` picks whichever of them the scan reached first, so the page's "last ran" would
+            // flip between two rows for no reason a person could see.
+            desc(routineRuns.id),
+          );
         for (const run of runRows) {
           lastRuns.set(run.routineId, {
             status: run.status,
@@ -453,6 +498,142 @@ export function createRoutineStore(database: Database): RoutineStore {
       // One field through the same path, so enabling re-checks the cap and recomputes the next run
       // rather than having a second, quieter version of those rules.
       await update(ownerUserId, id, { enabled });
+    },
+
+    /* =========================================================================================
+     * THE SWEEP'S HALF STARTS HERE.
+     *
+     * One store, because there is one table and one owner-guarding discipline to keep straight
+     * about it; but the two halves read nothing alike. Above, every method takes an owner and
+     * every failure is one person's — a bad cron, a channel they are not in — and none of them is
+     * about two things happening at once. Below, nobody asks a question: a sweep on a clock reads
+     * the ledger, and every method has to be read as a race between replicas.
+     *
+     * WHOSE CLOCK. The database's, for every moment these methods compare — the same discipline
+     * `server/src/work/queue.ts` states in its header, for the same reason: a node ninety seconds
+     * behind once wrote a lease Postgres considered expired on arrival, and two replicas ran the
+     * same item. `now()` in SQL, never `Date.now()`.
+     * ========================================================================================= */
+
+    async dueRoutines(limit) {
+      /*
+       * NOT OWNER-SCOPED, ON PURPOSE. Every other method in this file is guarded by the owner, so
+       * an unguarded one reads like an oversight; this one is the sweep's read, and the sweep has
+       * no owner. It runs as no person and looks at every person's routines, which is exactly why
+       * it returns ids and stamps and nothing a person wrote.
+       */
+      return await database
+        .select({ id: routines.id, nextRunAt: routines.nextRunAt })
+        .from(routines)
+        .where(
+          and(
+            eq(routines.enabled, true),
+            // The comparison Postgres makes against its own clock. A replica's `Date.now()` here
+            // would decide what is due from a clock the row was never written by.
+            lte(routines.nextRunAt, sql`now()`),
+          ),
+        )
+        // Oldest due first, so a backlog drains in the order it built up. The id is a tiebreak, so
+        // two routines due in the same instant come back in a fixed order rather than whichever
+        // the index happened to hand over.
+        .orderBy(asc(routines.nextRunAt), asc(routines.id))
+        .limit(limit);
+    },
+
+    async advanceNextRun(id, from) {
+      const [row] = await database
+        .select({ cron: routines.cron, timezone: routines.timezone })
+        .from(routines)
+        .where(eq(routines.id, id))
+        .limit(1);
+      if (!row) return false;
+
+      const next = nextRunFor(row.cron, row.timezone, from);
+
+      /*
+       * THE COMPARE-AND-SET IS THE WHOLE MECHANISM. `where next_run_at = from` means the row only
+       * moves for the sweep that read that exact stamp: however many replicas see the same due
+       * routine in the same second, exactly one update matches and the rest change nothing. False
+       * means another sweep won, which is fine either way — the firing still happens once.
+       *
+       * And it happens BEFORE the run is offered. A crash between advancing and running skips that
+       * firing; advancing afterwards would mean a crash re-offers it, and a routine that spends
+       * money or sends mail would double-fire. A skipped firing is recoverable by waiting for the
+       * next one; a doubled one is not.
+       */
+      const moved = await database
+        .update(routines)
+        .set({ nextRunAt: next, lastRunAt: from, updatedAt: sql`now()` })
+        .where(and(eq(routines.id, id), eq(routines.nextRunAt, from)))
+        .returning({ id: routines.id });
+      return moved.length > 0;
+    },
+
+    async insertRun(routineId) {
+      const runId = `routine_run_${crypto.randomUUID()}`;
+      // `startedAt` defaults to the database's now, and `status` stays null: null is the in-flight
+      // state, which is the reason that column is nullable rather than defaulted to something.
+      const [row] = await database
+        .insert(routineRuns)
+        .values({ id: runId, routineId })
+        .returning({ id: routineRuns.id });
+      if (!row) throw new Error("inserting a routine run returned no row");
+      return { runId: row.id };
+    },
+
+    async finishRun(runId, status, error) {
+      await database
+        .update(routineRuns)
+        .set({
+          status,
+          // The database's clock closes the row, the same as it opened it.
+          finishedAt: sql`now()`,
+          // Left alone rather than nulled when there was no error, so finishing a run twice cannot
+          // erase what the first finish recorded.
+          ...(error === undefined
+            ? {}
+            : { error: error.slice(0, MAX_RUN_ERROR) }),
+        })
+        .where(eq(routineRuns.id, runId));
+    },
+
+    async consecutiveFailures(routineId) {
+      /*
+       * Bounded, then counted here. The bound is the point: this is read on every failed firing,
+       * for ever, and `select ... where routine_id = $1` with no limit gets slower for exactly the
+       * routines that fail most. The rule only acts on the first handful, so reading twice that
+       * many and stopping is the whole answer.
+       *
+       * Finished runs only — an in-flight run has no outcome yet and must not end the streak.
+       */
+      const rows = await database
+        .select({ status: routineRuns.status })
+        .from(routineRuns)
+        .where(
+          and(
+            eq(routineRuns.routineId, routineId),
+            isNotNull(routineRuns.status),
+          ),
+        )
+        .orderBy(desc(routineRuns.startedAt), desc(routineRuns.id))
+        .limit(FAILURE_SCAN_LIMIT);
+
+      let failures = 0;
+      for (const run of rows) {
+        if (run.status === "failed") {
+          failures += 1;
+          continue;
+        }
+        /*
+         * A SKIP IS NOT A FAILURE, AND DOES NOT BREAK THE STREAK. It means the channel was gone,
+         * not that the turn failed, so it is not counted; and it does not reset the count either,
+         * because a routine whose channel flaps would otherwise never reach the fatigue rule — it
+         * would disable itself over ten missing channels, or never at all.
+         */
+        if (run.status === "skipped") continue;
+        break;
+      }
+      return failures;
     },
   };
 }
