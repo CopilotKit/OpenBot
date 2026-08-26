@@ -304,6 +304,8 @@ export async function buildAgents(
    * address a run finally reaches are only the same address while nobody redirects.
    */
   agentFetch?: AgentFetch,
+  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
+  handoff?: HandoffForRun,
 ): Promise<Record<string, AbstractAgent>> {
   const vendors = await loadVendors().catch(() => [] as readonly string[]);
   return Object.fromEntries(
@@ -321,6 +323,7 @@ export async function buildAgents(
           vendors,
           selection,
           agentFetch,
+          handoff,
         ),
       ]),
     ),
@@ -338,6 +341,7 @@ async function buildAgent(
   connectedVendors: readonly string[] = [],
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
+  handoff?: HandoffForRun,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -416,19 +420,45 @@ async function buildAgent(
     );
 
   const whole = withTools(granted);
-  if (!narrowing) return whole;
+  if (!narrowing && !handoff) return whole;
 
-  return new RunSelectedAgent(
+  return new RunBuiltAgent(
     { agentId: agent.id, description: agent.name },
     whole,
     async (input) => {
-      const offered = await offeredFor(input);
-      // Nothing narrowed means nothing to rebuild, and reusing the agent already built for this
-      // request keeps that path allocation-for-allocation what it was.
-      return offered.length === granted.length ? whole : withTools(offered);
+      const offered = narrowing ? await offeredFor(input) : granted;
+      /*
+       * The tool for handing work to another Bot is made per run, not per request.
+       *
+       * It has to know which run is asking: how deep the chain already is, and which conversation an
+       * answer belongs in. Both live on the run rather than on the request, and both have to be this
+       * deployment's own statement rather than anything the model can edit. A request is earlier
+       * than a run and knows neither.
+       */
+      const passing = (await handoff?.(agent.id, input)) ?? null;
+      const tools = passing ? [...offered, passing] : offered;
+      // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already
+      // built for this request keeps that path allocation-for-allocation what it was.
+      return tools.length === granted.length && !passing
+        ? whole
+        : withTools(tools);
     },
   );
 }
+
+/**
+ * How a run gets its tool for handing work to another Bot, or does not.
+ *
+ * Given the Bot and the run, because the answer depends on both: which Bots this one has been
+ * granted, and how deep the chain it is already part of has gone. Null means this run is not offered
+ * the tool at all, which is the right shape for a deployment with the capability switched off, a Bot
+ * nobody granted anybody to, and a run already at the cap. A model offered a tool whose every call
+ * would be refused spends attention on it and tells the person it tried.
+ */
+export type HandoffForRun = (
+  botId: string,
+  input: RunAgentInput,
+) => Promise<GrantedTool | null>;
 
 /**
  * How a deployment narrows a Bot's tools to the ones a run is about. Absent means it does not.
@@ -625,7 +655,7 @@ function remoteAgentWithStandingRole(
 
 /**
  * An agent whose tools are decided when the run starts, because that is the first moment anybody
- * knows what the run is about.
+ * knows what the run is about, and who is asking on whose behalf.
  *
  * WHY A WRAPPER AND NOT A NARROWER `loadTools`. Tools are resolved per request, and a request is
  * earlier than a run: at that point there is a Bot and a person and no message, so there is nothing
@@ -638,7 +668,7 @@ function remoteAgentWithStandingRole(
  * The deferral is per subscription, so a retried run reselects rather than reusing a decision made
  * for a message that is no longer the last one.
  */
-class RunSelectedAgent extends AbstractAgent {
+class RunBuiltAgent extends AbstractAgent {
   /**
    * The agent this run turned into, once there is one.
    *
@@ -692,8 +722,8 @@ class RunSelectedAgent extends AbstractAgent {
    * (`agents[agentId].clone()`), which means the omission is not a corner case: without this, the
    * first message anybody sends fails on a `build` that is not a function.
    */
-  clone(): RunSelectedAgent {
-    const cloned = super.clone() as RunSelectedAgent;
+  clone(): RunBuiltAgent {
+    const cloned = super.clone() as RunBuiltAgent;
     cloned.whole = this.whole;
     cloned.build = this.build;
     // Deliberately not the inner agent. A clone is a new run, and inheriting the last run's agent
@@ -734,6 +764,8 @@ export async function resolveRuntimeAgents(
   loadVendors?: () => Promise<readonly string[]>,
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
+  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
+  handoff?: HandoffForRun,
 ): Promise<Record<string, AbstractAgent>> {
   const registered = await loadAgents();
   if (registered.length === 0) {
@@ -756,6 +788,7 @@ export async function resolveRuntimeAgents(
     loadVendors,
     selection,
     agentFetch,
+    handoff,
   );
 }
 
@@ -819,6 +852,13 @@ export function createRequestAgents(
   selectionForActor?: (actorId: string) => ToolSelection,
   /** The fetch remote agents are dialled with. See {@link buildAgents}. */
   agentFetch?: AgentFetch,
+  /**
+   * How a run gets its tool for handing work to another Bot, resolved for whoever is asking.
+   *
+   * Per actor for the same reason the tools are: which Bots may be reached is decided against the
+   * roster that person can see, so a Bot must never be able to address one they cannot.
+   */
+  handoffForActor?: (actorId: string) => HandoffForRun,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -833,6 +873,7 @@ export function createRequestAgents(
       loadVendors,
       selectionForActor?.(actor.id),
       agentFetch,
+      handoffForActor?.(actor.id),
     );
   };
 }
@@ -933,6 +974,8 @@ export function mountCopilotRuntime(
   selectionForActor?: (actorId: string) => ToolSelection,
   /** The fetch remote agents are dialled with. See {@link buildAgents}. */
   agentFetch?: AgentFetch,
+  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
+  handoffForActor?: (actorId: string) => HandoffForRun,
 ) {
   const { intelligence } = config.runtime;
 
@@ -976,6 +1019,7 @@ export function mountCopilotRuntime(
       loadVendors,
       selectionForActor,
       agentFetch,
+      handoffForActor,
     ) as never,
   });
 

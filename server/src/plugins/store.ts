@@ -2124,6 +2124,23 @@ export function createPluginStore(options: PluginStoreOptions) {
       });
     },
 
+    /**
+     * The Bots one Bot has been granted, read fresh.
+     *
+     * NEVER CACHED. Whether one Bot may address another is a decision an administrator can change,
+     * and a grant revoked a minute ago has to apply to the next hop rather than after a restart. It
+     * is a single indexed read, which is the right price for that.
+     */
+    async botsReachableFrom(agentId: string): Promise<string[]> {
+      const rows = await database
+        .select({ ref: pluginGrants.ref })
+        .from(pluginGrants)
+        .where(
+          and(eq(pluginGrants.kind, "bot"), eq(pluginGrants.agentId, agentId)),
+        );
+      return rows.map((row) => row.ref);
+    },
+
     async grant(
       kind: PluginKind,
       ref: string,

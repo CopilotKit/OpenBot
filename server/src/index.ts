@@ -1,6 +1,8 @@
 import { serve } from "bun";
-import { mintRunAssertion } from "./agents/callback-token";
+import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
+import { createHandoffDesk } from "./agents/handoff";
+import { handoffTool } from "./agents/handoff-tool";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
@@ -56,6 +58,7 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
+import { createWorkQueue } from "./work/queue";
 
 /**
  * Who is asking, for a CopilotKit request.
@@ -288,6 +291,31 @@ const pluginStore = createPluginStore({
    * registering.
    */
   redirectUri: config.publicUrl ? redirectUriFor(config.publicUrl) : undefined,
+});
+
+/**
+ * Where a Bot handing work to another gets decided.
+ *
+ * The queue is the one #216 shipped, shared with the idle-computer culler and with routines: durable
+ * work claimed by whichever replica gets to it, leased so a dead replica's work comes back. A hop is
+ * that, because the Bot being addressed will very likely run on a different pod from the Bot that
+ * addressed it, and a hop held in memory is lost the moment either is rescheduled.
+ */
+const handoffDesk = createHandoffDesk({
+  queue: createWorkQueue(database),
+  profiles: agentProfileStore,
+  // Read per hop and never held, so revoking a grant applies to the next hop rather than after a
+  // restart.
+  mayAddress: async (fromBotId, toBotId) =>
+    (
+      await pluginStore
+        .botsReachableFrom(fromBotId)
+        // A grant that cannot be read is not a grant. Failing closed here costs a hop; failing open
+        // would let a Bot address one nobody gave it because the database blinked.
+        .catch(() => [] as string[])
+    ).includes(toBotId),
+  auditStore: bootAuditStore,
+  caps: config.handoff,
 });
 
 void recordAuditEvent(bootAuditStore, {
@@ -532,6 +560,50 @@ const app = createApp(
         });
       },
     }),
+    /*
+     * The tool one Bot uses to hand work to another, made per run and per person.
+     *
+     * Per person because which Bots may be reached is decided against the roster that person can
+     * see: a Bot must never be able to address one they cannot, or this becomes a way around agent
+     * visibility. Per run because the caps need to know how deep the chain already is and where an
+     * answer belongs, and both of those are the deployment's own statement about the run rather than
+     * anything the model can edit.
+     */
+    (actorId) => async (botId, input) => {
+      const from = readRunAssertion(
+        (input.forwardedProps as { openbotRun?: unknown } | undefined)
+          ?.openbotRun,
+        config.keyEncryptionKey,
+      );
+      return handoffTool({
+        desk: handoffDesk,
+        from: {
+          botId,
+          actorId,
+          runId: input.runId,
+          threadId: input.threadId,
+          /*
+           * How deep this run already is, from the assertion the deployment signed when it handed
+           * this work on. A run a person started carries none, and none means zero.
+           *
+           * NOT `from.botId`. The assertion proves what this run is, and the Bot is whichever one the
+           * runtime is building right now: on a hop those agree, and taking the id from the signed
+           * value rather than from the build would let a stale assertion aim the next hop at the
+           * wrong Bot's grants.
+           */
+          depth: from?.depth ?? 0,
+        },
+        // Read now rather than at boot, so a grant made a minute ago counts and one revoked a
+        // minute ago stops counting.
+        hasSomebodyToAsk:
+          (
+            await pluginStore
+              .botsReachableFrom(botId)
+              .catch(() => [] as string[])
+          ).length > 0,
+        maxDepth: config.handoff.maxDepth,
+      });
+    },
   ),
   // The only path to an acting call.
   computerGateway,
