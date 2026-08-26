@@ -868,6 +868,32 @@ describe("opening and closing a run", () => {
     expect(MAX_RUN_ERROR).toBe(400);
   });
 
+  test("finishing a run twice cannot relabel what the first finish recorded", async () => {
+    const { routine } = await makeRoutine();
+    const { runId } = await store.insertRun(routine.id);
+
+    await store.finishRun(runId, "succeeded");
+    const [firstFinish] = await database
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.id, runId));
+
+    // The natural next-task implementation: finish "succeeded", then something downstream throws,
+    // and the catch calls finishRun("failed", ...). Without a finish-once guard this would
+    // relabel a run that had already succeeded.
+    await store.finishRun(runId, "failed", "late");
+
+    const [secondFinish] = await database
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.id, runId));
+    expect(secondFinish?.status).toBe("succeeded");
+    expect(secondFinish?.error).toBeNull();
+    expect(secondFinish?.finishedAt?.getTime()).toBe(
+      firstFinish?.finishedAt?.getTime(),
+    );
+  });
+
   test("the page's last run reads the newest of several", async () => {
     const { owner, routine } = await makeRoutine();
     const first = await store.insertRun(routine.id);
@@ -936,5 +962,31 @@ describe("counting the failures at the tail", () => {
     await store.insertRun(routine.id);
 
     expect(await store.consecutiveFailures(routine.id)).toBe(1);
+  });
+
+  /**
+   * A routine with a flapping channel skips far more often than it fails. If the bounded window
+   * is filled with every finished run — skips included — the skips eat slots a failure needed,
+   * and a routine that has genuinely failed a dozen times in a row can look like it has failed
+   * only six or seven. That falsifies the fatigue rule for exactly the scenario the skip rule was
+   * written for: it would never reach the disable threshold. The window has to be filled with the
+   * rows the fatigue rule can act on, not with every finished row.
+   */
+  test("skips do not dilute the bounded window the fatigue rule reads", async () => {
+    const { routine } = await makeRoutine();
+
+    // Twelve failures, each trailed by two skips, and nothing after them: a flapping channel's
+    // shape. Post-fix, all twelve failures are read (well under the 20-row limit) because skips
+    // never occupy a slot. Pre-fix, the 20-row window is filled with the interleaved skips too,
+    // so it only reaches back a handful of failures — short of the >=10 disable threshold.
+    for (let i = 0; i < 12; i++) {
+      await finish(routine.id, "failed");
+      await finish(routine.id, "skipped");
+      await finish(routine.id, "skipped");
+    }
+
+    expect(await store.consecutiveFailures(routine.id)).toBeGreaterThanOrEqual(
+      10,
+    );
   });
 });

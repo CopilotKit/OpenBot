@@ -29,6 +29,7 @@ import {
   isNotNull,
   isNull,
   lte,
+  ne,
   sql,
 } from "drizzle-orm";
 import type { Database } from "../db/client";
@@ -560,6 +561,13 @@ export function createRoutineStore(database: Database): RoutineStore {
        * firing; advancing afterwards would mean a crash re-offers it, and a routine that spends
        * money or sends mail would double-fire. A skipped firing is recoverable by waiting for the
        * next one; a doubled one is not.
+       *
+       * The equality is on a stamp that round-trips: every writer of `next_run_at` computes it from
+       * `nextOccurrence`, which lands on a cron boundary with no sub-second part, and the driver
+       * binds a `Date` at millisecond precision. The column is microsecond-precision, so
+       * `next_run_at = now()` written anywhere in SQL would put microseconds in a value this
+       * comparison reads back truncated — and the CAS would stop matching, silently, for ever. This
+       * one moment is the database's clock via a value the database gave us, not via `now()`.
        */
       const moved = await database
         .update(routines)
@@ -589,12 +597,20 @@ export function createRoutineStore(database: Database): RoutineStore {
           // The database's clock closes the row, the same as it opened it.
           finishedAt: sql`now()`,
           // Left alone rather than nulled when there was no error, so finishing a run twice cannot
-          // erase what the first finish recorded.
+          // erase what the first finish recorded — and the `status is null` guard below is what
+          // makes that true.
           ...(error === undefined
             ? {}
-            : { error: error.slice(0, MAX_RUN_ERROR) }),
+            : {
+                // Measured in code points, like `validInstruction`, so an emoji-bearing error
+                // cannot be cut mid-surrogate-pair.
+                error: Array.from(error).slice(0, MAX_RUN_ERROR).join(""),
+              }),
         })
-        .where(eq(routineRuns.id, runId));
+        // A run finishes once. The second call — succeeded, then a downstream throw whose catch
+        // calls finishRun("failed") — matches no row here and is a silent no-op, rather than
+        // relabeling what the first finish already recorded.
+        .where(and(eq(routineRuns.id, runId), isNull(routineRuns.status)));
     },
 
     async consecutiveFailures(routineId) {
@@ -613,6 +629,17 @@ export function createRoutineStore(database: Database): RoutineStore {
           and(
             eq(routineRuns.routineId, routineId),
             isNotNull(routineRuns.status),
+            /*
+             * A SKIP IS NOT A FAILURE, AND DOES NOT BREAK THE STREAK. It means the channel was
+             * gone, not that the turn failed, so it is not counted; and it does not reset the
+             * count either, because a routine whose channel flaps would otherwise never reach the
+             * fatigue rule — it would disable itself over ten missing channels, or never at all.
+             * Excluding it here, rather than reading it and skipping over it below, keeps it from
+             * consuming a slot in the bounded window: a routine that skips twice for every
+             * failure must still be able to count past ten failures, not top out around six or
+             * seven because skips ate two-thirds of the rows the window could hold.
+             */
+            ne(routineRuns.status, "skipped"),
           ),
         )
         .orderBy(desc(routineRuns.startedAt), desc(routineRuns.id))
@@ -620,18 +647,8 @@ export function createRoutineStore(database: Database): RoutineStore {
 
       let failures = 0;
       for (const run of rows) {
-        if (run.status === "failed") {
-          failures += 1;
-          continue;
-        }
-        /*
-         * A SKIP IS NOT A FAILURE, AND DOES NOT BREAK THE STREAK. It means the channel was gone,
-         * not that the turn failed, so it is not counted; and it does not reset the count either,
-         * because a routine whose channel flaps would otherwise never reach the fatigue rule — it
-         * would disable itself over ten missing channels, or never at all.
-         */
-        if (run.status === "skipped") continue;
-        break;
+        if (run.status !== "failed") break;
+        failures += 1;
       }
       return failures;
     },
