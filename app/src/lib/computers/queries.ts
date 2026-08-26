@@ -71,3 +71,44 @@ export function actionPolicyQueryOptions() {
       }),
   });
 }
+
+/** One recorded action a candidate policy would decide differently than what happened. */
+export type DryRunChange = {
+  id: string;
+  createdAt: string;
+  action: string;
+  bot: string;
+  page: string;
+  element: { role: string; name: string } | null;
+  command: string | null;
+  file: string | null;
+  was: "allowed" | "refused";
+  would: "allowed" | "refused";
+  rule: string | null;
+  reason: string;
+};
+
+export type DryRunReport = {
+  scanned: number;
+  wouldRefuse: number;
+  wouldAllow: number;
+  unchanged: number;
+  /** Capped by the server; the counts cover everything scanned. */
+  changes: DryRunChange[];
+};
+
+/**
+ * What would this policy have decided, about recent recorded actions?
+ *
+ * A plain function rather than a query: the answer is about this candidate at this moment, nothing
+ * caches it and nothing invalidates it. It writes nothing — not the policy, and no audit row.
+ */
+export async function dryRunActionPolicy(
+  candidate: ActionPolicy,
+): Promise<DryRunReport> {
+  return client("/api/computers/policy-dry-run", "report", {
+    method: "POST",
+    body: { policy: candidate },
+    fallback: "The rule could not be tested against history.",
+  });
+}

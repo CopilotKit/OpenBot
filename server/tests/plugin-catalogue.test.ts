@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   CATALOGUE,
+  type CatalogueEntry,
   catalogueEntry,
   classifyTool,
   customUrlRefusal,
   hostAdmissible,
   resolveServerUrl,
+  serverCredentialKind,
 } from "../src/plugins/catalogue";
 
 /**
@@ -342,7 +344,155 @@ describe("a URL an administrator typed", () => {
     expect(refusal).not.toContain("oauth");
   });
 
+  test("a credential in the query string is refused", () => {
+    // The same harm as the userinfo case above, reached through the other part of the URL no host
+    // rule looks at. addCustomServer writes the string it was given into mcp_servers.url and into
+    // the configuration.changed audit payload, audit redaction keys on the field name, and "url" is
+    // not a sensitive name, so a token here sits in an append-only trail in clear text.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?token=sk-live-abcdef"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?api_key=SECRET"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?access_token=SECRET"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?client_secret=SECRET"),
+    ).not.toBeNull();
+  });
+
+  test("the names a credential is actually given are refused too", () => {
+    // The first version of this rule listed exact names, which is a corner of the class rather than
+    // the class: every one of these was accepted while `?token=` was refused, and an operator does
+    // not know which spelling the check happens to hold. The match reads the name for what it says.
+    for (const name of [
+      "auth_token",
+      "api_token",
+      "apiToken",
+      "access_key",
+      "secret_key",
+      "private_key",
+      "session_token",
+      "x-api-key",
+      "subscription-key",
+      "X-Amz-Signature",
+      "bearer",
+      "pwd",
+    ]) {
+      expect(
+        customUrlRefusal(`https://mcp.example.com/mcp?${name}=s3cret`),
+      ).not.toBeNull();
+    }
+  });
+
+  test("an ordinary query parameter is still accepted", () => {
+    // The rule reads the parameter name, not the presence of a query, because vendors route and
+    // version with parameters. Refusing every query string would make this floor an outage rather
+    // than a guard, and an operator who cannot add a working server will find a way around it.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?workspace=acme&version=2"),
+    ).toBeNull();
+    // The near misses, which are what a rule that reads names rather than matching them exactly has
+    // to get right: "keyword" is not a key and "author" is not auth.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?keyword=x&author=jane"),
+    ).toBeNull();
+  });
+
+  test("refusing a credential in the query does not repeat it", () => {
+    // Same property as the userinfo refusal: this string is rendered to an administrator and can
+    // reach a log, so it must not carry the secret it exists to reject.
+    const refusal = customUrlRefusal(
+      "https://mcp.example.com/mcp?token=s3cret",
+    );
+    expect(refusal).not.toBeNull();
+    expect(refusal).not.toContain("s3cret");
+    expect(refusal).not.toContain("mcp.example.com");
+  });
+
+  test("a credential in the fragment is refused too", () => {
+    // The fragment never leaves the browser, but that is not the harm here. addCustomServer stores
+    // and audits the whole string, so a secret written after the hash is as durable and as readable
+    // as one in the query. Refusing one and not the other would leave the same bypass a character
+    // away.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp#token=s3cret"),
+    ).not.toBeNull();
+    // The shapes a fragment is actually written in. A hash route or an OAuth-style callback puts a
+    // path before the question mark, and reading the whole fragment as one query string turns all
+    // of it into a single name that matches nothing.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp#/callback?token=s3cret"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp#!/x?token=s3cret"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp#token%3Ds3cret"),
+    ).not.toBeNull();
+    // An ordinary fragment is not a credential and is left alone.
+    expect(customUrlRefusal("https://mcp.example.com/mcp#section")).toBeNull();
+  });
+
+  test("the short name for the cloud metadata endpoint is refused", () => {
+    // metadata.goog is Google's own alias for the metadata server, published beside
+    // metadata.google.internal and 169.254.169.254. It carries a dot and none of the suffixes
+    // above, so it read as an ordinary vendor name, while the long spelling was caught only
+    // incidentally by the .internal test.
+    expect(
+      customUrlRefusal("https://metadata.goog/computeMetadata/v1/"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://metadata.goog./computeMetadata/v1/"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://METADATA.GOOG/computeMetadata/v1/"),
+    ).not.toBeNull();
+  });
+
   test("nonsense is refused rather than thrown", () => {
     expect(customUrlRefusal("not a url")).toBe("That is not a URL.");
+  });
+});
+
+describe("which credential a curated server is given", () => {
+  /**
+   * A synthetic entry, because the catalogue holds one vendor today and it is `user-oauth`.
+   *
+   * The shared-token branch is the one a fork re-enables when it puts a removed vendor back, which
+   * is the case this rule exists for, so it is exercised here rather than left to be discovered
+   * then. The other side of the same argument is why the entry is written out in full rather than
+   * spread from a real one: what is under test is the auth kind deciding the answer.
+   */
+  const sharedToken: CatalogueEntry = {
+    key: "shared-token-vendor",
+    title: "Vendor",
+    vendor: "Vendor",
+    summary: "A server the deployment holds one token for.",
+    host: "https://mcp.vendor.example",
+    path: "/mcp",
+    auth: { kind: "deployment-bearer" },
+    writeTools: [],
+    docsUrl: "https://vendor.example/docs",
+  };
+
+  test("a shared-token server takes the deployment's own token for it", () => {
+    expect(serverCredentialKind(sharedToken)).toBe("mcp");
+  });
+
+  test("a server reached as the asker takes no credential from the caller", () => {
+    // Its OAuth client arrives through registerOAuthClient, which mints the credential itself. An id
+    // offered here is therefore never the right one, whatever kind it names.
+    const drive = catalogueEntry("google-drive");
+    expect(drive?.auth.kind).toBe("user-oauth");
+    expect(serverCredentialKind(drive as CatalogueEntry)).toBeNull();
+  });
+
+  test("a server that needs no credential takes none", () => {
+    expect(
+      serverCredentialKind({ ...sharedToken, auth: { kind: "none" } }),
+    ).toBeNull();
   });
 });

@@ -8,6 +8,21 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot in trouble no longer needs somebody watching
+
+A boundary refusal or a stalled run was recorded and then waited for a person to happen to look — at
+the right channel, or at the audit page an administrator has and nobody else does. The trail knew;
+nobody was told.
+
+**Attention**, in the sidebar for everybody, shows the refusals and stalled runs nobody has handled
+yet, scoped to the Bots this person may use, with a badge saying how many. Marking one handled
+clears it for everyone and records who did; two people pressing Resolve at once is settled by the
+database rather than by luck, and the second is told who got there first.
+
+It is a view over the trail, not a second record of it. Refusals and stalls are already written
+transactionally by the gateway and the stall guard, so the inbox cannot miss one and nothing new
+runs on the action path. The only state it owns is the resolution, held beside the append-only trail
+rather than in it. The trail itself still keeps everything; the inbox is only what is open now.
 ### A channel a Bot has spoken in unseen shows a dot
 
 The sidebar marks a channel when a Bot has said something since you last had it open: a dot beside
@@ -17,6 +32,68 @@ the membership row like the pin — so one person reading does not clear anybody
 
 The deployment gains one nullable column, via migration `0019`.
 
+### The API can reach Intelligence and sign-in when a NetworkPolicy is on
+
+`networkPolicy.enabled` wrote a rule for the API server that named DNS, the database and the Bots'
+computers, and nothing on 443. On a cluster that enforces policy the server could therefore reach
+neither CopilotKit Intelligence, nor an identity provider, nor a Bot: nobody could sign in and no
+conversation ran. Two of the five shipped `ci/` targets turn the policy on, and on GKE enforcement is
+the default and cannot be switched off.
+
+Nothing said so. The pod passed every probe and stayed Ready, because `/health` answers from a
+literal, so the first evidence was a timeout to a hostname that read as the internet being down.
+
+The API now reaches HTTP and HTTPS everywhere outside the cluster's private ranges, in every
+`computers.mode` rather than only `sandbox`, cut by the same exception list the computers' own policy
+uses. It still cannot address another pod, a node, or a cloud metadata endpoint.
+
+`mode: sandbox` had been working only because a rule meant for the Kubernetes API server carried no
+destination and so permitted everything. That rule now covers the API server alone, and
+`networkPolicy.kubernetesApiCidr` narrows it to your cluster's service range; left empty it stays as
+it was, because a chart cannot know that range.
+### Taking the wheel stops the Bot's shell, not just its clicks
+
+While a person held the wheel the Bot was refused on the page, and not in the shell. `/exec` and a
+workspace write went through, so a Bot could keep running commands and rewriting its `/workspace`
+underneath somebody who had taken the browser at a login wall. The guard existed and covered
+navigation and the four page actions; the shell arrived later and was never wired to it.
+
+Every acting path now asks the same question in one place, so the property the documentation states
+is the property the computer has. Reading is deliberately not acting: `/files/read` and
+`/files/list` still answer while a person drives, because a Bot that has just been stopped still has
+to be able to say what it was doing.
+
+Nothing to configure. A Bot that acts during a takeover gets the refusal it already got for a click,
+and the trail records the attempt and the failure the same way.
+### A computer that was suspended once suspends again
+
+Scale-to-zero worked once per Bot. A computer suspended, resumed, used and then left alone again was
+offered for suspension on every sweep after that and never suspended, and stayed awake until the next
+day. Nothing reported it, because a sweep that offers work and suspends nothing looks exactly like a
+fleet that is busy.
+
+The queue keys a suspension on the Bot id and keeps the finished row so that a late offer of the same
+key collides with it rather than running the work twice. Both are right. What was wrong is that the
+finished row was kept for a day, which is the window the other half of the sweep needs: a suspension
+that keeps failing is held back that long before anything tries it again. One number could not be
+both, so there are now two, and a finished suspension is kept for the idle window instead. That is
+the same clock the offer runs on, so a Bot cannot come back round as idle until its row has gone.
+
+Nothing to configure, and the sweep already runs on a schedule. A deployment where each Bot has its
+own computer stops paying for browsers that were used once.
+### A Bot's egress proxy is reachable on Kubernetes, or the install is refused
+
+The chart named no egress variable anywhere, so a Helm deployment read the per-Bot proxy settings
+nowhere and every Bot went out directly. They were always settable through `computers.extraEnv`,
+which reaches the computer in both the shared and the sandbox arrangement, but nothing in the chart
+or its README said so, and a setting whose whole purpose is to give a security team a per-Bot
+address is not one to leave undocumented.
+
+The other half is that setting it was not enough. A computer is allowed 80 and 443 to public
+addresses and nothing else, which is almost no proxies: they sit on a private address, or on 3128 or
+8080. So a proxy the network policy provably blocks is now refused at `helm install`, naming
+`networkPolicy.computerExtraEgress`, rather than found later as a Bot that fails on every page.
+Nothing changes for a deployment that sets no proxy, or one that already opened a path to it.
 
 ### A finished turn shows the page it opened, not the one open now
 
@@ -146,6 +223,31 @@ unknown session means "no opinion" and skips the generation check, so on exactly
 shape it was written for, the check that stops a ref from a replaced computer resolving against a
 live one was silently absent. It now asks the supervisor when it does not know, by listing rather
 than by ensuring, so asking never starts a computer that had stopped.
+### A routing trail says why a message was not routed, not only that it was not
+
+Every untagged message writes a `channel.routed` row, and that row carried `fallback: true` for two
+completely different situations: the router answering honestly that no specialist was a confident
+match, which is the feature working, and the router not answering at all, which is an endpoint that is
+down. Both read identically, so a deployment whose router had stopped working looked like one whose
+messages were simply hard to route.
+
+That is not hypothetical. The intent router spent an unknown period 404'ing on every deployment that
+set `OPENAI_BASE_URL`, because a `/v1` was appended to a URL that already had one. It was fixed in
+0.0.3, whose own note says untagged messages "silently stopped being routed and nothing said why".
+
+The row now carries `undecided`, naming the cause: `unreachable`, `unparsed`, `off-roster`,
+`unconfident`, or `one-candidate` — and `null` when the router did decide. Named values rather than a
+sentence, because the useful question is how often, and a count needs something to group by.
+
+Two smaller corrections came with it. A message routed to the only coworker that can reach the system
+it names kept that as its reason and threw the cause away, so a router that had been down for a week
+produced rows reading like reach-based routing working as intended; the cause now survives that path.
+And an answer containing no JSON at all — a model replying in prose — was recorded as the router
+naming a coworker off the roster, which sends whoever reads it to look at their roster rather than at
+the model. It is now reported as unparsed, which is what it is.
+
+Nothing changes about where a message goes. Every routing decision is the same decision it was.
+
 ### Notion joins the connector catalogue
 
 Notion is now a governed MCP connector, reached through Notion's own hosted server on the
@@ -173,6 +275,108 @@ read that as a stolen token and revoke the whole connection. Every plugin call t
 token now locks the credential's vault row for the length of the exchange, so a second replica waits
 rather than races, and the rotated token is written back in the same transaction that held the lock.
 Nothing to configure; a connection just stops going stale under concurrent traffic.
+
+### An MCP token is spent only by its own server, and only at the address it was given
+
+Pointing a server at a credential is the one place this deployment takes a reference to a stored
+secret rather than the secret itself. Everywhere else, the value was typed into the same request that
+stores it: a Bot's key is minted from what an administrator pasted and the id it gets is nobody's to
+choose. So this is the one field where which secret and which address could be made to disagree, and
+the add settles the disagreement by spending the credential: the tool refresh runs before the call
+returns and sends what it decrypts to the URL from that same request.
+
+Two ways they could disagree, and both are now refused. A server could be pointed at any `mcp`
+credential in the vault, including one minted for a different vendor, so a token given to one server
+was deliverable to another. And re-adding a server with a different URL rewrote the address while
+keeping the credential, so the same token could be sent somewhere else entirely with no
+cross-server trick at all: the token really did belong to that server, and only the address moved.
+
+The second is why the first was not enough on its own. A credential now has to belong to the server
+it is attached to, and a server that already holds one cannot be re-added at a different address.
+Correcting a title or retrying an interrupted add sends the same URL and is unaffected. A server
+holding no credential can still be re-addressed, because there is nothing to misdirect. Moving a
+server that does hold one means removing it and adding it again with the token the new address is
+meant to have, which is the honest description of what has happened anyway.
+
+This matters more than "an administrator could misconfigure something". A stored credential cannot
+be read back by anybody, by design: the credentials screen answers that a credential exists and
+never what it is. These two shapes were the way around that, so a deployment where somebody has
+used them should treat the credentials involved as disclosed and rotate them.
+
+A token also stops outliving the server it was minted for. Re-adding a server without naming a
+credential used to clear the pointer while leaving the credential live, and removing a server retires
+its token by reading it off that pointer, so a cleared one meant the token survived its server and
+could be attached to a freshly created one at any address, where there was no longer a stored address
+to compare against. Three ordinary acts in a row and the binding above stopped meaning anything. The
+pointer now survives a re-add that names none, removal therefore finds and retires it, and a retired
+credential is refused rather than quietly attached to fail on its next call.
+
+Curated servers keep working as they did. Their URL comes from the catalogue rather than the
+request, and a per-instance hostname is matched against the vendor's own anchored pattern before
+anything is stored, so re-adding one cannot point it at an address of the caller's choosing.
+### A configured egress proxy reaches the browser that uses it
+
+`EGRESS_PROXY_DEFAULT` and `EGRESS_PROXY_<BOT>` were documented as the way to give a Bot a stable
+outbound address, and Compose passed neither to anything. `docker-compose.yml` named no egress
+variable and had no `env_file`, so the shared computer resolved every Bot to no proxy and went out
+directly, and under the supervisor the same emptiness meant there was nothing to forward into the
+computers it creates.
+
+The failure was silent, which for a setting whose purpose is to give a security team a per-Bot
+address for network rules is the worst of the available failures. The stack started, the browser
+left by the host, and the Computers screen reported "Leaves directly" because it was reading the
+same empty environment.
+
+They now live in `egress.env`, which both the computer and the supervisor are given. A file rather
+than more `environment:` entries because `EGRESS_PROXY_<BOT>` is derived from a Bot's id and there
+is no fixed set of names to list; a file of its own rather than `.env` because that one holds the
+deployment's secrets and the container running a browser and a Bot's shell is deliberately not
+given them. It is optional, so a deployment with no proxy is unchanged, and gitignored, because a
+proxy URL can carry a password.
+
+**Move these two out of `.env` and into `egress.env`.** In `.env` they reach no process.
+### Screens without a conversation stop polling for a Bot that does not exist
+
+Every surface asks which components its Bot holds, and asks again every few seconds so a revoked
+grant leaves an open conversation quickly. The Bot it asked about was whichever one the surface
+declared — and on a screen with no conversation at all, that was the placeholder id the routing
+holder falls back to, which no package registers and the server answers 404 for. An admin page left
+open polled a guaranteed miss every five seconds, indefinitely.
+
+Nothing looked wrong. The screen rendered, because an absent grant list and an empty one draw the
+same. The cost was the noise: a request log where the same 404 repeats forever is one where the 404
+that matters is invisible.
+
+The grant queries now wait for a surface to declare a real Bot, and simply do not run while the
+placeholder holds. Conversation surfaces — the Bot page, channels — declare one and are unchanged.
+### A rule can be tested against history before it is saved
+
+A boundary was written blind: an administrator typed a CEL rule, saved it, and learned what it
+actually matches from the refusals it produced in production. The trail already records every judged
+computer action with the same facts the gateway judged it on, so the question "what would this rule
+have done" had an answer nobody could ask.
+
+The Boundaries page now has **Test first** beside **Add rule**. The candidate — the current policy
+plus the drafted rule — is replayed over recent recorded actions, and the reply names each one it
+would have decided differently and the rule that would have decided it. Nothing is saved and nothing
+is decided; no audit row is written, because no action was permitted or refused.
+
+Replay, not simulation: the context is rebuilt from the audit row exactly as the gateway built it at
+decision time, through the same helpers, so a rule behaves here as it will behave live. The scan is
+bounded and biased to recency, and the reply says how many rows it covered.
+
+### A browser refusal names the element again
+
+Every browser context carries a neutral all-empty `mcp` object, so a rule naming `mcp.effect`
+evaluates to false instead of throwing. The refusal copy keyed on that object being present rather
+than on its contents, so every live browser refusal took the tool-call branch and read
+":  on  is blocked" — two empty strings where the element and the page belonged. The tests passed,
+because their contexts omitted the field the gateway always attaches.
+
+The branch now keys on the server and tool being named, which a real tool call always has. A refused
+click reads "“Submit order” on shop.example is blocked by the rule ..." again, which is what the Bot
+relays to the person asking.
+
 ### Knowledge searches instead of guessing
 
 A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the
@@ -224,6 +428,60 @@ this port has to reach it another way**, which is what publishing it on every in
 This does not reach back in time. A deployment that has been running with the two on one network
 should assume a Bot could have read or written the database, and look at the trail with that in
 mind.
+### A credential in an MCP server address is refused in the query and the fragment too
+
+Refusing `https://user:token@vendor.example/mcp` closed the userinfo spelling of a credential in the
+address and left the two obvious ones open. `?token=`, `?api_key=` and their neighbours were still
+accepted, and the address is stored and named in the trail exactly as given: audit redaction keys on
+the field name, `url` is not a sensitive one, so the secret was written to `mcp_servers` and to an
+append-only audit row in clear text. That is the same disclosure the userinfo rule exists to prevent,
+one character away.
+
+A parameter whose name reads as a credential is now refused, in the query string and in the fragment,
+and the refusal points at the token field without repeating what was typed. The name is read rather
+than matched against a list, so `?auth_token=`, `?x-api-key=` and `?X-Amz-Signature=` are refused
+alongside `?token=`: a rule that only catches the spellings somebody thought of reads as a guard
+while behaving like a gap. The test is on the parameter name rather than on the presence of a query,
+because vendors route and version with parameters and a floor that refused every one of them would
+be one an operator works around instead of with. `https://mcp.example.com/mcp?workspace=acme&version=2`
+is unaffected, and so is an ordinary fragment. A credential written into the *path* is still
+accepted: it is indistinguishable from a route, and at least one hosted provider addresses servers
+that way. **A deployment where somebody has put a credential in an address should treat it as
+disclosed and rotate it**, for the same reason as before: the audit row cannot be deleted.
+
+`metadata.goog` is refused too. It is Google's own short name for the metadata server, published
+beside `metadata.google.internal`, and it carries a dot and none of the suffixes this check lists, so
+it read as an ordinary vendor name. The long spelling was only ever refused incidentally, by the
+`.internal` rule. Both are now named, so the address this check was written for is refused on purpose
+rather than by luck.
+### A curated MCP server is pointed at its own kind of credential too
+
+Adding a server by URL was made to check which credential it is being pointed at. Adding one from the
+catalogue, the other half of the same screen, took the same field from the same request and stored it
+unread, so a credential of any kind could be attached to a curated server and spent by the refresh
+that runs before the add returns.
+
+Worth being plain about the reach, because it is narrower than the path beside it. The column is a
+foreign key, so an id naming nothing was already refused by the database, and the one entry in the
+catalogue is reached with each person's own Google account, whose OAuth client is registered through
+its own call and sent to an address pinned in code. Nothing could be delivered to an address a caller
+chose. What was reachable was a credential of the wrong kind being accepted and spent on behalf of
+somebody who never agreed to it, and a malformed id arriving as a database error rather than as a
+refusal.
+
+The rule now comes from the entry: a server the deployment holds one token for takes that token, and
+a server answered as the person asking takes no credential when it is added, because its client
+arrives through the call that mints it. Both add paths ask the same question in the same words, so a
+credential that does not exist and one of the wrong kind are still refused identically and the
+endpoint cannot be used to ask which ids are real. Adding a curated server the way the admin screen
+does is unchanged.
+
+Adding a curated server that is already there no longer clears the credential it points at. The
+column holds the OAuth client that registering one put there, and re-adding the server to change an
+instance host said nothing about that client, but cleared it anyway: the credential row was left
+behind with nothing pointing at it and nothing to revoke it, and everybody who had connected their
+account was told the deployment has no client registered. A re-add that names no credential now
+leaves the one that is there alone.
 
 ### Name the private addresses an agent may live at
 
@@ -469,6 +727,44 @@ one they are, so those match too.
 
 No configuration changes and nothing is stored differently; a deployment that was already on the
 light theme sees no difference at all.
+### `start.sh` refuses a port that answers but is not OpenBot
+
+The startup checks asked whether a port answered, and treated that as proof the port belonged to this
+stack. Those are not the same claim. Any single-page app serves its index.html for every path it does
+not recognise, so an unrelated dashboard on a default port answers `200` to `/api/capabilities` as
+readily as this server does.
+
+The cost was not a wrong answer, it was a wrong answer three stages later. `require_free_or_ours`
+reported "already up", so the server was never started; `wait_for` then printed a green
+"server ready"; and the run failed at stage 3 inside `json.loads`, parsing that stranger's HTML. The
+error names `char 0`, which reads like an empty response rather than a `<`, so the visible symptom
+pointed nowhere near the port.
+
+Each surface is now asked for something only it can produce: a `licenseStatus` field for the server,
+its own `<title>` for the app, `/health` for the compose services. When a check gives up it says
+whether the process failed to start or the port belongs to something else.
+
+The root cause was in `.env.example`, and is fixed there too. The server reads `PORT`, this script
+reads `SERVER_PORT`, `docs/configuration.md` documents `SERVER_PORT` as the setting, and only `PORT`
+shipped. Moving the server by editing that one line left the script still looking at 3001. Both names
+are now present, next to each other, saying they have to agree.
+
+**A run may now stop where it used to continue.** That is the point: it stops at the port that is
+wrong, naming it, rather than several steps later on a parse error.
+
+### `docker compose up -d` configures the same stack `scripts/start.sh` does
+
+`SUPERVISOR_TOKEN` and `COMPUTER_TOKEN` defaulted to the empty string in `docker-compose.yml`, so
+which stack you got depended on how you brought it up. `scripts/start.sh` resolves both to their
+`openbot-dev-*` defaults and exports them before calling compose. A plain `docker compose up -d` —
+which this project's own shutdown notes tell you to use — passed an empty string instead.
+
+`agent-computer` refuses to start without one, so that half failed loudly. The supervisor half was
+the quiet one: the server kept the token it started with while the supervisor held an empty string,
+and every call between them was refused at the door.
+
+Both now carry the same defaults `start.sh` applies, as `COMPUTER_IMAGE` already did two lines down.
+A value set in `.env` still wins, and a deployment should set one.
 
 ## 0.0.4
 

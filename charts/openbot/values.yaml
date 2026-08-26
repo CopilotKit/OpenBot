@@ -225,6 +225,11 @@ computers:
 
   nodeSelector: {}
   tolerations: []
+  # Free-form additions, and where a Bot's outbound address is set. `EGRESS_PROXY_DEFAULT` covers
+  # every Bot and `EGRESS_PROXY_<BOT>` names one, upper-cased with anything unusual replaced, so
+  # `sales-bot` reads `EGRESS_PROXY_SALES_BOT`. Both reach the computer whichever mode it runs in.
+  # With `networkPolicy.enabled` the proxy also has to be named in
+  # `networkPolicy.computerExtraEgress`, or the computer cannot reach it.
   extraEnv: []
 
   # `mode: sandbox` only. Where the per-Bot computers are created and what may create them.
@@ -381,8 +386,18 @@ httpRoute:
 networkPolicy:
   enabled: false
   # Where the API may reach out to. A deployment with a managed database adds its CIDR here.
+  #
+  # It already reaches HTTP and HTTPS everywhere outside the cluster's private ranges, because that
+  # is where Intelligence, sign-in and the Bots are. This is for anything on the private side.
   extraEgress: []
   extraIngress: []
+  # `computers.mode: sandbox` only. The service range the Kubernetes API server answers on, so the
+  # rule that lets the API ask for a Bot's computer can name it instead of being left open.
+  #
+  # Empty means unscoped, which is the only thing a chart can do by default: the range is the
+  # cluster's, not the release's. `kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'` shows
+  # which one yours is on; on EKS it is usually 172.20.0.0/16, on GKE and kubeadm 10.96.0.0/12.
+  kubernetesApiCidr: ""
   # Where a Bot's computer may reach beyond the public internet. A deployment whose Bots must reach
   # an internal site adds it here, one address at a time, rather than reopening the private ranges.
   computerExtraEgress: []

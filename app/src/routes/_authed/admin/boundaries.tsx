@@ -6,6 +6,8 @@ import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
   type ActionPolicy,
   actionPolicyQueryOptions,
+  type DryRunReport,
+  dryRunActionPolicy,
   type PolicyMode,
 } from "@/lib/computers/queries";
 import { queryClient } from "@/query-client";
@@ -51,6 +53,12 @@ function BoundariesPage() {
   const [saved, setSaved] = useState(false);
   const [draft, setDraft] = useState("");
 
+  const [tested, setTested] = useState<{
+    rule: string;
+    report: DryRunReport;
+  } | null>(null);
+  const [testing, setTesting] = useState(false);
+
   const stored = useQuery(actionPolicyQueryOptions());
   const savePolicy = useMutation(saveActionPolicyMutationOptions(queryClient));
 
@@ -90,6 +98,31 @@ function BoundariesPage() {
     if (!trimmed || policy.deny.includes(trimmed)) return;
     void save({ ...policy, deny: [...policy.deny, trimmed] });
     setDraft("");
+    setTested(null);
+  };
+
+  /*
+   * The rule as it would be in force — the current policy plus this draft — replayed over recent
+   * recorded actions. Nothing is saved and nothing is decided; the reply names the actions the
+   * addition would have decided differently, so the rule's real reach is known before it starts
+   * refusing anybody.
+   */
+  const testRule = async (rule: string) => {
+    const trimmed = rule.trim();
+    if (!trimmed) return;
+    setProblem(null);
+    setTesting(true);
+    try {
+      const report = await dryRunActionPolicy({
+        ...policy,
+        deny: [...policy.deny, trimmed],
+      });
+      setTested({ rule: trimmed, report });
+    } catch (thrown) {
+      setProblem((thrown as Error).message);
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -191,6 +224,7 @@ function BoundariesPage() {
             onChange={(event) => {
               setDraft(event.target.value);
               setSaved(false);
+              setTested(null);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter") addRule(draft);
@@ -199,6 +233,14 @@ function BoundariesPage() {
             value={draft}
           />
           <Button
+            disabled={testing || draft.trim().length === 0}
+            onClick={() => void testRule(draft)}
+            size="sm"
+            variant="outline"
+          >
+            {testing ? "Testing…" : "Test first"}
+          </Button>
+          <Button
             disabled={saving || draft.trim().length === 0}
             onClick={() => addRule(draft)}
             size="sm"
@@ -206,6 +248,8 @@ function BoundariesPage() {
             Add rule
           </Button>
         </div>
+
+        {tested ? <DryRunResult report={tested.report} /> : null}
 
         <ul className="mt-3 space-y-2">
           {PRESETS.map((preset) => (
@@ -254,5 +298,68 @@ function BoundariesPage() {
         )}
       </p>
     </PageShell>
+  );
+}
+
+
+/**
+ * What the tested rule would have done to actions already on the trail.
+ *
+ * Says the number over everything scanned first, because the list below it is capped and a reader
+ * who stops at the rows should not believe the rows are the whole answer.
+ */
+function DryRunResult({ report }: { report: DryRunReport }) {
+  if (report.scanned === 0) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground" role="status">
+        No recorded computer actions to test against yet. The rule is valid;
+        what it matches will only be known once Bots have acted.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-2" role="status">
+      <p className="text-xs text-muted-foreground">
+        {report.wouldRefuse === 0
+          ? `Tested against the last ${report.scanned} recorded actions: this rule would have refused none of them. It may still match future actions.`
+          : `Tested against the last ${report.scanned} recorded actions: this rule would have refused ${report.wouldRefuse}.`}
+      </p>
+      {report.changes.length > 0 ? (
+        <ul className="mt-2 divide-y divide-border rounded-md border border-border">
+          {report.changes.map((change) => (
+            <li className="px-3 py-2" key={change.id}>
+              <p className="text-xs">
+                <span className="font-medium">
+                  {change.would === "refused"
+                    ? "Would refuse"
+                    : "Would now allow"}
+                </span>{" "}
+                <code className="font-mono">{change.action}</code>
+                {change.element?.name ? <> on “{change.element.name}”</> : null}
+                {change.command ? (
+                  <>
+                    {" "}
+                    running <code className="font-mono">{change.command}</code>
+                  </>
+                ) : null}
+                {change.file ? <> touching {change.file}</> : null}
+              </p>
+              <p className="mt-0.5 text-muted-foreground text-xs">
+                {change.bot}
+                {change.page ? <> · {change.page}</> : null} ·{" "}
+                {new Date(change.createdAt).toLocaleString()}
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {report.wouldRefuse > report.changes.length ? (
+        <p className="mt-1 text-muted-foreground text-xs">
+          Showing the first {report.changes.length}; the count above covers
+          everything scanned.
+        </p>
+      ) : null}
+    </div>
   );
 }

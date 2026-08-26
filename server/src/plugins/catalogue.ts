@@ -26,6 +26,9 @@
  * These are where this deployment sends a person's authorization code and receives the refresh
  * token that stands in for their access, so they are a reviewed source contract too.
  */
+// The one place browsing and this check agree on: the addresses that hold the deployment's own
+// cloud credentials. `target.ts` imports nothing itself, so asking it here adds no dependency.
+import { isNeverAllowedHostname } from "../computer/target";
 // Type-only, so naming the transport here creates no import cycle with the registry that resolves it.
 import type { TransportKind } from "./transport";
 
@@ -263,6 +266,21 @@ const PATTERNS = new Map(
   ]),
 );
 
+/**
+ * Which kind of credential this entry's server record may be pointed at, or null when it takes none
+ * from the caller.
+ *
+ * Beside the entry rather than at the call site, because it is a property of the vendor's auth and
+ * not of the request. `deployment-bearer` is the only kind that means "one token this deployment
+ * holds for this server", which is what `mcp` names in the vault. A `user-oauth` server is answered
+ * with the asker's own grant and its OAuth client is registered through its own call, which mints
+ * the credential itself, so an id offered when the server is added is never the right one whatever
+ * kind it names. A server needing no credential takes none.
+ */
+export function serverCredentialKind(entry: CatalogueEntry): "mcp" | null {
+  return entry.auth.kind === "deployment-bearer" ? "mcp" : null;
+}
+
 export function catalogueEntry(key: string): CatalogueEntry | null {
   return BY_KEY.get(key) ?? null;
 }
@@ -331,6 +349,61 @@ export function classifyTool(
 }
 
 /**
+ * Words that make a parameter name a credential, wherever they appear in it.
+ *
+ * A containment test rather than a list of exact names, because the exact-name version of this rule
+ * refused `?token=` and accepted `?auth_token=`, `?api_token=`, `?session_token=` and every other
+ * spelling one word away. An operator has no way to know which of those the check happens to hold,
+ * so a rule that only refuses the names somebody thought of reads as a guard while behaving like a
+ * gap.
+ *
+ * Not shared with `sensitiveKeys` in `audit.ts`: that module reaches the database and this function
+ * deliberately imports nothing that does. The two also want different contents, since audit redacts
+ * `content`, `prompt` and `result`, which are payload field names and mean nothing here.
+ */
+const CREDENTIAL_WORDS = [
+  "token",
+  "secret",
+  "password",
+  "passwd",
+  "credential",
+  "signature",
+  "bearer",
+];
+
+/**
+ * Names that are a credential on their own but are too short to contain safely.
+ *
+ * `sig` is the reason this list is separate from the one above: "design" contains it. These are
+ * compared whole, so an ordinary word carrying the same three letters is left alone.
+ */
+const CREDENTIAL_NAMES = new Set([
+  "auth",
+  "authorization",
+  "pass",
+  "pwd",
+  "sig",
+]);
+
+/**
+ * Does this parameter name say it holds a credential?
+ *
+ * Names are compared with their separators dropped, so `api_key`, `apiKey` and `x-api-key` are one
+ * question rather than three. A name ending in "key" is a credential and a name merely containing it
+ * is not, which is what keeps `keyword` and `monkey` apart; "author" is likewise not "auth".
+ *
+ * It over-refuses in one direction on purpose. A parameter this rule misreads costs an operator a
+ * rename, and one it misses is written to an append-only audit row that cannot be deleted.
+ */
+function readsAsCredential(name: string): boolean {
+  const normalized = name.replaceAll(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  if (CREDENTIAL_NAMES.has(normalized) || normalized.endsWith("key")) {
+    return true;
+  }
+  return CREDENTIAL_WORDS.some((word) => normalized.includes(word));
+}
+
+/**
  * Is this a URL an administrator may point the deployment at?
  *
  * A curated entry is reviewed in code; this is the other path, and it needs its own floor because
@@ -366,6 +439,32 @@ export function customUrlRefusal(raw: string): string | null {
     return "Put the credential in the token field rather than in the address.";
   }
 
+  /*
+   * The query is the other half of the same hole, and the fragment is the half after that.
+   *
+   * No host rule below reads either one, and both are stored and audited with the rest of the
+   * string, so a token written here is as durable and as readable as one written into the userinfo.
+   * The fragment never reaches the server at all, which is why it is not a request-forgery concern
+   * and is still a disclosure one: what this rule is about is where the string ends up, not where
+   * the request goes.
+   *
+   * The test is on the parameter name rather than on the presence of a query, because vendors
+   * legitimately route and version with parameters. A floor that refused every one of them would be
+   * one an operator works around rather than with, and an ordinary `#section` is left alone for the
+   * same reason.
+   */
+  const hash = url.hash.replace(/^#/, "");
+  const marker = hash.indexOf("?");
+  const fragment =
+    marker === -1 ? [hash] : [hash.slice(0, marker), hash.slice(marker + 1)];
+  const named = [
+    ...url.searchParams.keys(),
+    ...fragment.flatMap((part) => [...new URLSearchParams(part).keys()]),
+  ];
+  if (named.some(readsAsCredential)) {
+    return "Put the credential in the token field rather than in the address.";
+  }
+
   // A trailing dot is the root-anchored spelling of the same name and resolves to the same place, so
   // they are stripped here rather than added to each comparison below. Without it "localhost."
   // misses the equality test, "vault.internal." misses the suffix tests, and "database." picks up
@@ -376,6 +475,20 @@ export function customUrlRefusal(raw: string): string | null {
   // Bracketed IPv6 arrives with the brackets already stripped by URL, so the colon test catches it.
   if (host.includes(":") || /^[0-9.]+$/.test(host)) {
     return "Give a hostname rather than an IP address.";
+  }
+  /*
+   * The cloud metadata endpoint, by name rather than by luck.
+   *
+   * `metadata.goog` is Google's own short alias for it, published beside `metadata.google.internal`,
+   * and it carries a dot and none of the suffixes below, so it read as an ordinary vendor name. The
+   * long spelling was refused only incidentally, by the `.internal` test.
+   *
+   * Asked of the list browsing already uses rather than a second copy here. That list holds the
+   * aliases somebody has already had to think about, including the ones Alibaba and ECS answer on,
+   * and a new alias added there should not have to be remembered here as well.
+   */
+  if (isNeverAllowedHostname(host)) {
+    return "That address holds this deployment's own cloud credentials.";
   }
   if (host === "localhost" || host.endsWith(".localhost")) {
     return "That address is local to the deployment.";

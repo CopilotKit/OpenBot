@@ -141,6 +141,13 @@
       "when": 1787744867526,
       "tag": "0019_channel_read_marker",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787761381038,
+      "tag": "0020_attention_resolutions",
+      "breakpoints": true
     }
   ]
 }

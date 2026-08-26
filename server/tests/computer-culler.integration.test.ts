@@ -219,4 +219,57 @@ describe("suspending computers nobody is using", () => {
     // Each exactly once, which is the point of claiming rather than sweeping.
     expect(new Set(stopped).size).toBe(stopped.length);
   });
+
+  /*
+   * The second idle window, which is the one that pays for scale-to-zero.
+   *
+   * A computer is suspended once and then resumed, used, and left alone again. Every sweep after the
+   * first was offering work that the finished row silently swallowed, so the Bot stayed awake until
+   * that row aged out a day later. The queue is right to keep the row: it is what stops the same key
+   * running twice. It is the retention window for a finished suspension that has to be the idle
+   * window rather than a day, which is what the sweep below passes.
+   */
+  test("a computer used again after it was suspended is suspended again", async () => {
+    const botId = botOf("recycled");
+    const { provider, stopped } = providerWith([
+      { botId, status: "running", url: "http://c" },
+    ]);
+    const at = (iso: string) => () => new Date(iso);
+    const sweep = async (whenIso: string) => {
+      const options = {
+        database,
+        queue,
+        provider,
+        idleAfterMs,
+        owner: "replica-1",
+        now: at(whenIso),
+      };
+      await offerIdleComputers(options);
+      const report = await suspendClaimedComputers(options);
+      /*
+       * What the CronJob does at the end of every sweep. Zero here rather than the idle window
+       * because these rows are finished seconds ago in real time and `purge` reads the database's
+       * clock, not this test's: the window being separate from the give-up one is the property
+       * under test, not its length.
+       */
+      await queue.purge({
+        kind: CULL_KIND,
+        olderThanMs: 24 * 60 * 60_000,
+        finishedOlderThanMs: 0,
+      });
+      return report;
+    };
+
+    await database.insert(auditEvents).values(ran(botId, minutesAgo(60)));
+    expect((await sweep("2026-08-24T12:00:00Z")).suspended).toEqual([botId]);
+
+    // Somebody comes back at 13:00, and it is quiet again by 14:00.
+    await database
+      .insert(auditEvents)
+      .values(ran(botId, new Date("2026-08-24T13:00:00Z")));
+    const second = await sweep("2026-08-24T14:00:00Z");
+
+    expect(second.suspended).toEqual([botId]);
+    expect(stopped).toEqual([botId, botId]);
+  });
 });

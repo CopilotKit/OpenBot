@@ -85,7 +85,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.19.0
       # For the coherence check below, which is a Bun script like everything else here.
@@ -149,6 +149,13 @@ jobs:
           # A browser inside every replica of a replicated API.
           refuses "an embedded browser across several replicas" \
             --set server.embeddedComputer=true --set server.replicaCount=2
+          # A Bot's egress proxy on a port the computer's own network policy does not allow. The
+          # variables reach the computer through extraEnv, so nothing else notices that the policy
+          # then refuses to let it be reached.
+          refuses "an egress proxy the network policy blocks" \
+            --set networkPolicy.enabled=true \
+            --set computers.extraEnv[0].name=EGRESS_PROXY_DEFAULT \
+            --set-string computers.extraEnv[0].value=http://proxy.internal:3128
 
   test:
     name: tests

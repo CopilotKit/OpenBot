@@ -51,6 +51,7 @@ import {
   createCredentialStore,
   resolveModelApiKey,
 } from "./credentials";
+import { createAttentionStore } from "./attention/store";
 import { createDatabase } from "./db/client";
 import { createPeopleStore } from "./people/store";
 import { redirectUriFor } from "./plugins/oauth";
@@ -746,6 +747,8 @@ const app = createApp(
   identityProviderStore,
   // Chooses the coworker for an untagged message, on the deployment's own model and key.
   intentRouter,
+  // Resolutions for the attention inbox: which trail rows a person has marked handled.
+  createAttentionStore(database),
   // What a browsing turn's screen looked like when it finished, so the transcript can show it later.
   createPageFrameStore(database),
 );
