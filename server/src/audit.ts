@@ -352,6 +352,17 @@ export const auditEventTypes = [
    */
   "agent.handoff_offered",
   "agent.handoff_refused",
+  /*
+   * And what became of one, which is a different question from whether it was accepted.
+   *
+   * `delivered` is the other Bot's turn being on record. `failed` is a hop that will be tried again.
+   * `retried` is the one worth its own name: a hop on its second attempt may already have run that
+   * Bot, spent a model call and posted an answer before its owner died, so a person looking at two
+   * similar answers can tell a duplicate from a mystery.
+   */
+  "agent.handoff_delivered",
+  "agent.handoff_failed",
+  "agent.handoff_retried",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];
