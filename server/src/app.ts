@@ -643,6 +643,7 @@ export function createApp(
         requireUser,
         canUseBot,
         pageFrames,
+        auditReader,
       ),
     );
   }

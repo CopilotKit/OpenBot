@@ -17,7 +17,12 @@ import {
   WorkspaceRequestError,
 } from "./gateway";
 import type { PageFrameStore } from "./page-frames";
+import type { AuditReader } from "../audit";
 import { type PolicyStore, parseActionPolicy } from "./policy-store";
+import {
+  dryRunAgainstHistory,
+  REPLAYABLE_EVENT_TYPES,
+} from "./policy-dry-run";
 
 /**
  * The Bot computer's surface, behind the same session guard as every other API route.
@@ -41,6 +46,12 @@ export function createComputerRoutes(
   canUseBot: BotAccessCheck,
   /** Where the frame a page was opened on is kept. Absent leaves the transcript as it was. */
   pageFrames?: PageFrameStore,
+  /**
+   * For the policy dry-run, which replays the trail. Optional the way `auditReader` is optional in
+   * `createApp`: a deployment wired without one still governs and records actions, and the dry-run
+   * endpoint says it cannot answer rather than answering from nothing.
+   */
+  auditReader?: AuditReader,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -611,6 +622,57 @@ export function createComputerRoutes(
     // Echoed back so a caller can see exactly what is now in force rather than assuming its request
     // was stored verbatim.
     return context.json({ policy: policyStore.get() });
+  });
+
+  /**
+   * What would this policy have decided, about actions already on the trail?
+   *
+   * A rule is otherwise written blind: saved first, understood later, from the refusals it produces
+   * in production. This answers before the save — the candidate is validated exactly as PUT
+   * validates it, replayed over recent judged actions, and the reply names each action it would have
+   * decided differently and the rule that would have decided it.
+   *
+   * A POST that writes nothing: not the policy, and no audit row either. Nothing is decided here —
+   * no action is permitted or refused, nothing runs or is stopped — and a trail row for every
+   * what-if would bury the rows that record what actually happened. Deployment-wide and named in
+   * DEPLOYMENT_ROUTES beside `/policy`, and admin-gated the same way, because history is the
+   * administrator's view.
+   */
+  routes.post("/policy-dry-run", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
+    if (!auditReader) {
+      return context.json(
+        {
+          error:
+            "This deployment records no readable trail, so there is no history to test against.",
+        },
+        501,
+      );
+    }
+
+    const body = (await context.req.json().catch(() => null)) as {
+      policy?: unknown;
+      limit?: unknown;
+    } | null;
+    const parsed = parseActionPolicy(body?.policy);
+    if (!parsed.ok) {
+      return context.json({ error: parsed.error }, 400);
+    }
+
+    // Bounded, and biased to recency: the question is what this rule does to the traffic the
+    // deployment actually has, and last week's traffic answers that better than a full scan.
+    const requested = typeof body?.limit === "number" ? body.limit : 200;
+    const limit = Math.min(Math.max(Math.trunc(requested), 1), 500);
+
+    const { events } = await auditReader.list({
+      limit,
+      eventType: REPLAYABLE_EVENT_TYPES.join(","),
+      targetType: "computer",
+    });
+
+    return context.json({ report: dryRunAgainstHistory(parsed.policy, events) });
   });
 
   return routes;
