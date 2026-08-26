@@ -4,6 +4,7 @@ import type { AppVariables } from "../auth/guards";
 import {
   RoutineNotFoundError,
   RoutineRefusedError,
+  type RoutineRunOutcome,
   type RoutineStore,
   type RoutineSummary,
 } from "./store";
@@ -88,7 +89,7 @@ type RoutineDto = {
   channel: { id: string; name: string | null; gone: boolean };
   enabled: boolean;
   nextRunAt: string;
-  lastRun: { status: string | null; at: string | null } | null;
+  lastRun: { status: RoutineRunOutcome | null; at: string | null } | null;
 };
 
 function routineDto(routine: RoutineSummary): RoutineDto {

@@ -139,6 +139,35 @@ describe("GET /", () => {
     expect((await json(response)).routines[0].lastRun).toBeNull();
   });
 
+  test("an open run stays an object with a null status, never collapsed to null", async () => {
+    const store = fakeStore({
+      listFor: async () => [
+        summary({ lastRun: { status: null, finishedAt: null } }),
+      ],
+    });
+    const response = await appFor(store).request("http://openbot.test/");
+
+    expect((await json(response)).routines[0].lastRun).toEqual({
+      status: null,
+      at: null,
+    });
+  });
+
+  test("a channel with no name and gone reads as gone with a null name", async () => {
+    const store = fakeStore({
+      listFor: async () => [
+        summary({ channelName: null, channelDeleted: true }),
+      ],
+    });
+    const response = await appFor(store).request("http://openbot.test/");
+
+    expect((await json(response)).routines[0].channel).toEqual({
+      id: "channel-1",
+      name: null,
+      gone: true,
+    });
+  });
+
   test("the DTO carries the schedule as words and never a cron field", async () => {
     const store = fakeStore();
     const response = await appFor(store).request("http://openbot.test/");

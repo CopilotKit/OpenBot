@@ -1,5 +1,5 @@
 import { IconTrash } from "@tabler/icons-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   PageEmpty,
@@ -33,6 +33,7 @@ import {
   type RoutineRecord,
   routinesQueryOptions,
 } from "@/lib/routines/queries";
+import { queryClient } from "@/query-client";
 
 const RELATIVE_UNITS = [
   { limit: 60_000, divisor: 1_000, unit: "second" },
@@ -86,7 +87,13 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
       className: "text-amber-600 dark:text-amber-500",
     };
   }
-  return { text: `Ran ${when}`, className: "text-muted-foreground" };
+  if (lastRun.status === "succeeded") {
+    return { text: `Ran ${when}`, className: "text-muted-foreground" };
+  }
+  // An outcome this DTO doesn't recognise degrades to a neutral label rather than an invented
+  // success — the contract typing (`RoutineRunOutcome | null`) makes a fourth outcome a build-time
+  // error, but this is the runtime fallback if that ever slips through.
+  return { text: `Finished ${when}`, className: "text-muted-foreground" };
 }
 
 /**
@@ -94,7 +101,6 @@ function lastRunLabel(lastRun: RoutineRecord["lastRun"]): {
  * switch to stop one taking effect, and a delete that ends it for good.
  */
 export function RoutinesList() {
-  const queryClient = useQueryClient();
   const routines = useQuery(routinesQueryOptions());
   const setEnabled = useMutation(setRoutineEnabledMutationOptions(queryClient));
   const deleteRoutine = useMutation(deleteRoutineMutationOptions(queryClient));
@@ -154,6 +160,16 @@ export function RoutinesList() {
                             : (routine.channel.name ?? "Unnamed channel")}
                         </span>
                         <span className={lastRunClassName}>{lastRunText}</span>
+                        {/*
+                         * Enabled only: the store recomputes nextRunAt on cron/timezone change or
+                         * re-enable, so a disabled routine's stamp is frozen in the past — rendering
+                         * it unguarded would announce a stale "3 days ago" as the next run.
+                         */}
+                        {routine.enabled ? (
+                          <span className="text-muted-foreground">
+                            Next {relativeTime(routine.nextRunAt)}
+                          </span>
+                        ) : null}
                       </div>
                     </ItemFooter>
                   </ItemContent>
