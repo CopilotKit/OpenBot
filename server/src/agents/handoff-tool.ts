@@ -19,6 +19,16 @@ import type { HandoffDesk } from "./handoff";
 /** What the model is offered. One name, so a transcript can find every hop by searching for it. */
 export const HANDOFF_TOOL = "message_bot";
 
+/**
+ * How this answers when a hop was accepted.
+ *
+ * A CONSTANT BECAUSE THE TRANSCRIPT READS IT. A server-side tool's result reaches the surface as
+ * text meant for a model, so the only thing the renderer has to tell an accepted hop from a refused
+ * one is the wording. That is not a good contract; naming it in one place at least stops the two
+ * drifting apart silently, which they did once already and drew every success as Blocked.
+ */
+export const HANDED_OVER = "Handed to ";
+
 const parameters = z.object({
   bot: z
     .string()
@@ -105,7 +115,7 @@ export function handoffTool(options: {
        * way, and the model is owed something it can say out loud.
        */
       return outcome.ok
-        ? `Handed to ${outcome.toName}. It will answer in this conversation as its own message, so tell the person you have asked it and what for, and do not answer on its behalf.`
+        ? `${HANDED_OVER}${outcome.toName}. It will answer in this conversation as its own message, so tell the person you have asked it and what for, and do not answer on its behalf.`
         : outcome.refusal;
     },
   };

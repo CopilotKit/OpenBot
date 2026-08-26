@@ -1061,6 +1061,19 @@ export function mountCopilotRuntime(
 
   return {
     handler: createCopilotHonoHandler({ runtime, basePath }),
+    /**
+     * How to reach the platform's runner, exactly as the runtime reaches it.
+     *
+     * TAKEN FROM THE CLIENT, NOT FROM CONFIGURATION, and this is the whole of a bug that only a real
+     * gateway could show. Built from `gatewayWsUrl` and the deployment's API key, every join was
+     * refused with `active_lock_mismatch`: a thread's active run is a lock the platform issues, and
+     * the token that holds it is not the API key. The runtime asks the client for both, so anything
+     * else driving a run has to ask the same client the same way.
+     */
+    runnerConnection: () => ({
+      url: intelligenceClient.ɵgetRunnerWsUrl(),
+      authToken: intelligenceClient.ɵgetRunnerAuthToken(),
+    }),
     agentFor,
     /**
      * A thread's messages, as the platform holds them.

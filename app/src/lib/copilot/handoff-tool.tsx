@@ -30,8 +30,29 @@ const parameters = z.object({
  * a working handoff.
  */
 function refused(result: unknown): boolean {
-  return typeof result === "string" && !result.startsWith("Handed to ");
+  if (typeof result !== "string") return false;
+  /*
+   * Normalised before it is read, because what arrives here is not what the tool returned.
+   *
+   * A server-side tool's result reaches the transcript as a tool message, and its content is a
+   * JSON-encoded string: the tool returns `Handed to Knowledge…` and this sees `"Handed to
+   * Knowledge…"`, quotes and all. Matching on the raw value drew every successful handoff as
+   * Blocked, which is worse than not drawing it at all: a working boundary and a working handoff
+   * looked identical, and the wrong one was the reassuring one.
+   */
+  const said = result.trim().replace(/^"|"$/g, "");
+  return !said.startsWith(HANDED_OVER);
 }
+
+/**
+ * How the tool starts a sentence when a hop was accepted.
+ *
+ * Shared with the server rather than written twice. Reading an outcome out of prose is not something
+ * to be proud of, and it is what a server-side tool leaves available: its result reaches the
+ * transcript as text meant for a model. Naming the prefix in one place at least means the two cannot
+ * drift silently, and the drift is invisible when they do.
+ */
+const HANDED_OVER = "Handed to ";
 
 export function HandoffTool() {
   useRenderTool({

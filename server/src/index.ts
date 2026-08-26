@@ -637,10 +637,12 @@ if (config.handoff.maxDepth > 0) {
       agentFor: copilotRuntime.agentFor,
       history: copilotRuntime.history,
       newRunId: () => randomUUID(),
-      runner: new IntelligenceAgentRunner({
-        url: `${config.runtime.intelligence.gatewayWsUrl.replace(/\/$/, "")}/runner`,
-        authToken: config.runtime.intelligence.apiKey,
-      }) as never,
+      // The same address and the same token the runtime uses. Assembling either from configuration
+      // produced a runner every join was refused for, because the thread's active run is a lock the
+      // platform issues rather than something an API key can claim.
+      runner: new IntelligenceAgentRunner(
+        copilotRuntime.runnerConnection(),
+      ) as never,
     }),
   });
 

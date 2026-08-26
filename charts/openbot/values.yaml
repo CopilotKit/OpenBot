@@ -242,6 +242,9 @@ computers:
     # is not the same question, so the culler below asks this one.
     idleAfter: 30m
     culler:
+      # A ceiling on one sweep. `concurrencyPolicy: Forbid` means a sweep that hangs holds the lock
+      # for ever and culling stops silently, which is the failure this feature exists to prevent.
+      activeDeadlineSeconds: 600
       enabled: true
       schedule: "*/5 * * * *"
 
