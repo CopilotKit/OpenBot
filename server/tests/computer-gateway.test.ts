@@ -7,9 +7,10 @@ import {
   WorkspaceRefusedError,
 } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
-import type {
-  ComputerLocation,
-  ComputerProvider,
+import {
+  type ComputerLocation,
+  type ComputerProvider,
+  createSharedComputerProvider,
 } from "../src/computer/provider";
 import type { SnapshotResult } from "../src/computer/schema";
 import {
@@ -1316,5 +1317,193 @@ describe("acting on a ref the server cannot resolve", () => {
     await gateway.scroll("bot-1", ACTOR, { deltaY: 200 });
 
     expect(calls).toEqual(["scroll"]);
+  });
+});
+
+/**
+ * The deployment with one computer for every Bot.
+ *
+ * Every session case above supplies a provider that reports a run, and the shared computer is the one
+ * that had nothing to report it from: no supervisor, no container per Bot, one process that outlives
+ * every reset. The ordering the rest of this file exercises was therefore inert exactly there, and
+ * the two failures it exists to stop were both reachable. These go through the real provider rather
+ * than a fake, because the fake is what hid it.
+ */
+describe("a Bot on the one shared computer", () => {
+  const FRESH = {
+    snapshotId: 1,
+    url: "https://fresh.example/start",
+    title: "Start",
+    truncated: false,
+    elements: [{ ref: "e1", role: "link", name: "Sign in" }],
+  } satisfies SnapshotResult;
+
+  /** A shared computer that answers which run each Bot's browser is on, as the real one does. */
+  function sharedComputer() {
+    let run = "run-1";
+    let live: SnapshotResult = SNAPSHOT;
+    let afterSnapshot: (() => void) | undefined;
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        const path = new URL(request.url).pathname;
+        if (path === "/run") return Response.json({ run });
+        if (path === "/snapshot") {
+          const answer = Response.json(live);
+          // A computer that goes away as it answers, which is the window the run has to be read before.
+          afterSnapshot?.();
+          return answer;
+        }
+        if (path === "/computers/reset") return Response.json({ reset: true });
+        if (path === "/click")
+          return Response.json({
+            action: "click",
+            url: live.url,
+            elapsedMs: 1,
+          });
+        return Response.json({ error: path }, { status: 404 });
+      },
+    });
+    return {
+      baseUrl: `http://127.0.0.1:${server.port}`,
+      stop: () => server.stop(true),
+      /** A new browser session: a restart, an eviction, a redeploy, or a reset. */
+      replaceRun: (next: string) => {
+        run = next;
+      },
+      showing: (next: SnapshotResult) => {
+        live = next;
+      },
+      /** Something that happens the instant the snapshot is answered, and before anything else is asked. */
+      onSnapshot: (effect: () => void) => {
+        afterSnapshot = effect;
+      },
+    };
+  }
+
+  function gatewayOn(computer: ReturnType<typeof sharedComputer>) {
+    const snapshots = createInMemorySnapshotStore();
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider: createSharedComputerProvider({ baseUrl: computer.baseUrl }),
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      snapshots,
+    });
+    return { gateway, rows, snapshots };
+  }
+
+  test("a save still in flight when the wipe landed cannot resurrect the page", async () => {
+    /*
+     * `clear` deletes the row, so a save that was already on its way finds nothing to conflict with
+     * and inserts unconditionally. The row is back, describing a page the reset destroyed, and the
+     * policy decides about its elements: a deny rule on "Submit order" fires on a click nowhere near
+     * one, or a rule written for the new page does not fire on one that is.
+     *
+     * The write cannot tell the two apart, and does not have to. The resurrected row carries the run
+     * that took it, the reset gave the Bot a new one, and the read refuses the citation.
+     */
+    const computer = sharedComputer();
+    try {
+      const { gateway, rows, snapshots } = gatewayOn(computer);
+      const taken = await gateway.snapshot("bot-1");
+
+      await gateway.resetComputer("bot-1", ACTOR);
+      expect(await snapshots.load("bot-1")).toBeUndefined();
+      // The reset closed that browser, so the next one is a different run.
+      computer.replaceRun("run-2");
+      // And now the save that was in flight when it landed, carrying the run it was taken on.
+      await snapshots.save("bot-1", {
+        snapshotId: taken.snapshotId,
+        url: taken.url,
+        elements: new Map(
+          taken.elements.map((element) => [element.ref, element]),
+        ),
+        session: "run-1",
+      });
+
+      const refusal = await gateway
+        .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+        .catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(StaleSnapshotError);
+      expect(rows.at(-1)?.payload.element).toBe("not in the current snapshot");
+    } finally {
+      computer.stop();
+    }
+  });
+
+  test("a restarted computer's first snapshot lands instead of being read as stale", async () => {
+    /*
+     * The generation lives in a map in the computer's process, and a restart, a redeploy, or the idle
+     * sweep dropping the session all mint it at zero again. Nothing clears the server's row, so with
+     * the generation as the only ordering the fresh page looks older than the dead one and every
+     * snapshot is dropped until the counter climbs back past it. Refs then resolve against a page
+     * nobody is on.
+     */
+    const computer = sharedComputer();
+    try {
+      const { gateway, snapshots } = gatewayOn(computer);
+      await gateway.snapshot("bot-1");
+      expect((await snapshots.load("bot-1"))?.snapshotId).toBe(7);
+
+      computer.replaceRun("run-2");
+      computer.showing(FRESH);
+      await gateway.snapshot("bot-1");
+
+      const held = await snapshots.load("bot-1");
+      expect(held?.snapshotId).toBe(1);
+      expect(held?.url).toBe(FRESH.url);
+    } finally {
+      computer.stop();
+    }
+  });
+
+  test("a computer replaced while a snapshot was being taken does not stamp the page with the new run", async () => {
+    /*
+     * The run is asked for on the same path as the snapshot, and the two answers have to describe the
+     * same browser. Asked afterwards, they need not: a container that goes away between answering
+     * `/snapshot` and answering this one stamps the page it drew with the run of the browser that
+     * replaced it, and the row then claims the live run is showing a page from the dead one. Every
+     * ref on it resolves, and the fresh browser's own snapshots are refused for being older, which is
+     * both halves of the bug back inside a smaller window.
+     *
+     * Asked first, the stamp is the run that was live when we asked. A computer replaced underneath
+     * leaves a row nothing will match until the next snapshot lands, which is the direction this is
+     * allowed to fail in.
+     */
+    const computer = sharedComputer();
+    try {
+      const { gateway, rows, snapshots } = gatewayOn(computer);
+      computer.onSnapshot(() => computer.replaceRun("run-2"));
+
+      const taken = await gateway.snapshot("bot-1");
+      expect((await snapshots.load("bot-1"))?.session).toBe("run-1");
+
+      const refusal = await gateway
+        .click("bot-1", ACTOR, { ref: "e9", snapshotId: taken.snapshotId })
+        .catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(StaleSnapshotError);
+      expect(rows.at(-1)?.payload.element).toBe("not in the current snapshot");
+    } finally {
+      computer.stop();
+    }
+  });
+
+  test("within one run an older snapshot still does not overwrite a newer one", async () => {
+    // The control. Ordering across runs that also stopped ordering within one would let two replicas
+    // snapshotting the same computer land in whichever order Postgres saw them.
+    const computer = sharedComputer();
+    try {
+      const { gateway, snapshots } = gatewayOn(computer);
+      await gateway.snapshot("bot-1");
+      computer.showing(FRESH);
+      await gateway.snapshot("bot-1");
+
+      expect((await snapshots.load("bot-1"))?.snapshotId).toBe(7);
+    } finally {
+      computer.stop();
+    }
   });
 });

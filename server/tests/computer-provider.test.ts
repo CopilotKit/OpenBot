@@ -24,6 +24,7 @@ type FakeAgentComputerHandler = {
   computers?: (request: Request) => Response | Promise<Response>;
   stop?: (request: Request) => Response | Promise<Response>;
   reset?: (request: Request) => Response | Promise<Response>;
+  run?: (request: Request) => Response | Promise<Response>;
 };
 
 function serveAgentComputer(
@@ -55,6 +56,11 @@ function serveAgentComputer(
     if (url.pathname === "/computers/stop" && request.method === "POST") {
       if (handlers.stop) return handlers.stop(request);
       return Response.json({ stopped: true, wasRunning: true });
+    }
+
+    if (url.pathname === "/run" && request.method === "GET") {
+      if (handlers.run) return handlers.run(request);
+      return Response.json({ run: "run-1" });
     }
 
     if (url.pathname === "/computers/reset" && request.method === "POST") {
@@ -265,6 +271,98 @@ describe("shared computer provider", () => {
         egress: null,
       },
     ]);
+  });
+
+  /**
+   * Which run of the shared computer this is.
+   *
+   * The one part of the boundary that has no infrastructure to read it off. A Bot with its own
+   * container gets a run from the container, and a sandbox gets one from the moment its browser last
+   * became ready, but every Bot here shares one container that outlives every reset, so the only
+   * thing that knows a browser session was replaced is the computer itself. Without an answer the
+   * server orders snapshots on the generation alone, which is the ordering that cannot tell a save
+   * left over from a wiped session apart from the fresh browser's first.
+   */
+  test("reports the run the computer says this Bot's browser is on", async () => {
+    const asked: {
+      path: string;
+      botId: string | null;
+      token: string | null;
+    }[] = [];
+    const baseUrl = serveAgentComputer(
+      {
+        run: (request) => {
+          asked.push({
+            path: new URL(request.url).pathname,
+            botId: request.headers.get("x-openbot-bot-id"),
+            token: request.headers.get("x-openbot-computer-token"),
+          });
+          return Response.json({ run: "d7c0f1" });
+        },
+      },
+      { token: "computer-secret" },
+    );
+    const provider = createSharedComputerProvider({
+      baseUrl,
+      token: "computer-secret",
+    });
+
+    expect(await provider.sessionOf?.("sales")).toBe("d7c0f1");
+    // Addressed and authenticated like every other call, or one Bot would be told about another's.
+    expect(asked).toEqual([
+      { path: "/run", botId: "sales", token: "computer-secret" },
+    ]);
+  });
+
+  test("each Bot gets its own, because they share the container and nothing else", async () => {
+    const baseUrl = serveAgentComputer({
+      run: (request) =>
+        Response.json({
+          run: `run-of-${request.headers.get("x-openbot-bot-id")}`,
+        }),
+    });
+    const provider = createSharedComputerProvider({ baseUrl });
+
+    expect(await provider.sessionOf?.("sales")).toBe("run-of-sales");
+    expect(await provider.sessionOf?.("analytics")).toBe("run-of-analytics");
+  });
+
+  test("asks again rather than remembering, because a restart is not announced", async () => {
+    // The supervisor caches because `/ensure` refreshes it on every action. Nothing refreshes this
+    // one: `locate` here is a string and makes no call, so a remembered run would say "same run"
+    // for the whole life of the process, which is the answer this exists to stop giving.
+    let run = "run-1";
+    const baseUrl = serveAgentComputer({
+      run: () => Response.json({ run }),
+    });
+    const provider = createSharedComputerProvider({ baseUrl });
+
+    expect(await provider.sessionOf?.("sales")).toBe("run-1");
+    run = "run-2";
+    expect(await provider.sessionOf?.("sales")).toBe("run-2");
+  });
+
+  test("answers undefined when the computer cannot say, rather than throwing", async () => {
+    // A computer from before this endpoint existed, or one that is not answering. Unknown is not
+    // mismatched: the comparison goes back to being skipped, which is where it started, and a
+    // refusal on every ref would be a far worse failure than the one being fixed.
+    const baseUrl = serveAgentComputer({
+      run: () => Response.json({ error: "Not found." }, { status: 404 }),
+    });
+    const provider = createSharedComputerProvider({ baseUrl });
+
+    // Asserted first, or a provider with no `sessionOf` at all would pass this vacuously.
+    expect(provider.sessionOf).toBeDefined();
+    expect(await provider.sessionOf?.("sales")).toBeUndefined();
+  });
+
+  test("answers undefined when the computer answers without one", async () => {
+    const baseUrl = serveAgentComputer({ run: () => Response.json({}) });
+    const provider = createSharedComputerProvider({ baseUrl });
+
+    // Asserted first, or a provider with no `sessionOf` at all would pass this vacuously.
+    expect(provider.sessionOf).toBeDefined();
+    expect(await provider.sessionOf?.("sales")).toBeUndefined();
   });
 
   test("aborts fetch that never settles with configurable timeoutMs and throws ProviderError", async () => {
