@@ -19,6 +19,7 @@ import {
   agents,
   channels,
   intelligenceChannelMappings,
+  routineRuns,
   routines,
   users,
   workItems,
@@ -28,13 +29,14 @@ import { createRoutineStore } from "../src/routines/store";
 import {
   DEFAULT_GRACE_MS,
   ROUTINE_FIRE_KIND,
+  dispatchClaimedRoutines,
   offerDueRoutines,
 } from "../src/routines/sweep";
-import { createWorkQueue } from "../src/work/queue";
+import { DEFAULT_MAX_ATTEMPTS, createWorkQueue } from "../src/work/queue";
 import { TEST_POOL } from "./support/database";
 
 /**
- * The sweep's first half against a real PostgreSQL and the real `work_items` queue.
+ * Both halves of the sweep against a real PostgreSQL and the real `work_items` queue.
  *
  * A fake queue cannot answer the only question worth asking here. The whole reason a routine fires
  * once when three replicas wake at 09:00 is a primary key on `(kind, key)` and
@@ -48,8 +50,9 @@ import { TEST_POOL } from "./support/database";
  *
  * NO CLAIM, LEASE OR OWNERSHIP INTERNALS ARE TESTED HERE. `for update skip locked`, leases named on
  * the database's clock and the attempt count belong to `work-queue.integration.test.ts`. What this
- * file tests is which firings the sweep decides are worth offering, and that the key it offers them
- * under makes a repeat harmless.
+ * file tests is which firings the sweep decides are worth offering, and — for the consuming half —
+ * whether the consumer honours the booleans the queue hands back: a `renew` that says the lease has
+ * gone, a `finish` that says the item was not ours, an attempt count that has reached its cap.
  */
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -78,9 +81,9 @@ const DAILY = "0 9 * * *";
 /**
  * The dispatch half of the options, recorded rather than dialled.
  *
- * Nothing in this commit calls it — `offerDueRoutines` only puts work on the queue — but the option
- * is wired so the file is ready for the half that claims those items, and so a dispatch that
- * started happening in this phase would show up as a recorded call rather than as nothing.
+ * `offerDueRoutines` never calls it — it only puts work on the queue — so a dispatch that started
+ * happening in the offering phase shows up here as a recorded call rather than as nothing. What the
+ * consuming phase hands it is a run id, which is the only thing `/internal/routines/run` is told.
  */
 const dispatched: string[] = [];
 const dispatch = async (routineRunId: string) => {
@@ -216,6 +219,44 @@ async function firingsFor(routineId: string) {
         like(workItems.key, `${routineId}:%`),
       ),
     );
+}
+
+/** Every run row this routine has, in-flight ones included: `status` is null until something ends. */
+async function runsFor(routineId: string) {
+  return await database
+    .select()
+    .from(routineRuns)
+    .where(eq(routineRuns.routineId, routineId));
+}
+
+/**
+ * One routine, due at `due`, offered by a sweep that thinks it is `at`.
+ *
+ * The offer is made by the real `offerDueRoutines` rather than by a hand-written insert, so what the
+ * consuming half claims is the row and the payload production would give it — including
+ * `scheduledFor`, which the consumer re-checks against the grace window before it fires anything.
+ */
+async function offerFiring(routineId: string, due: Date, at: Date) {
+  await makeDueAt(routineId, due);
+  await offerDueRoutines(sweepOptions({ now: () => at }));
+}
+
+/**
+ * Age a queued firing by hand.
+ *
+ * The queue names every moment of its own in SQL, so a test cannot wait for a lease to lapse or for
+ * a release delay to pass; it writes the timestamp the queue would have arrived at. That is a test
+ * driving the clock, not a test reimplementing the queue: what is asserted afterwards is still the
+ * queue's own answer to `claim`, `renew` and `purge`.
+ */
+async function backdate(
+  key: string,
+  values: Partial<typeof workItems.$inferInsert>,
+) {
+  await database
+    .update(workItems)
+    .set(values)
+    .where(and(eq(workItems.kind, ROUTINE_FIRE_KIND), eq(workItems.key, key)));
 }
 
 test("the grace window stays under the schedule floor, as a compile/test-time fact rather than prose", () => {
@@ -482,5 +523,462 @@ describe("surviving a routine that cannot be scheduled", () => {
     // That single firing is the entire blast radius: pin it as exactly one `work_items` row, the
     // offer that preceded the throw, rather than leaving it inferred from the warning alone.
     expect(await firingsFor(poisoned.id)).toHaveLength(1);
+  });
+});
+
+/**
+ * The consuming half: a claimed item becomes a run, and the queue's booleans are believed.
+ *
+ * Every branch below is about the gap between the offer and the firing. The item was put on the
+ * queue by another replica at another time, and by the time this one claims it the routine may have
+ * been switched off, deleted, or the occurrence may simply have gone stale while the item sat behind
+ * a backlog. The queue answers those questions with booleans — `renew`, `finish`, `release` — and a
+ * consumer that treats them as formalities is a consumer that fires twice.
+ */
+describe("consuming a claimed firing", () => {
+  const at = (moment: string) => () => new Date(moment);
+
+  test("a claimed firing is dispatched once, finished, and never claimed again", async () => {
+    const { routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+
+    const report = await dispatchClaimedRoutines(
+      sweepOptions({ now: at("2001-01-01T09:26:00Z") }),
+    );
+
+    expect(report.fired).toEqual([routine.id]);
+    expect(report.skipped).toEqual([]);
+    // The run row is what the dispatch is told about, and it owns the outcome from here: opened with
+    // no status, because null is the in-flight state.
+    const runs = await runsFor(routine.id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBeNull();
+    expect(dispatched).toEqual([runs[0]?.id]);
+
+    // Marked, not deleted: the finished row is what a late replica's re-offer collides with.
+    const [row] = await firingsFor(routine.id);
+    expect(row?.finishedAt).not.toBeNull();
+    expect(row?.claimedBy).toBeNull();
+
+    // And the next sweep claims nothing, so the person gets one run rather than one per sweep.
+    const second = await dispatchClaimedRoutines(
+      sweepOptions({ now: at("2001-01-01T09:27:00Z") }),
+    );
+    expect(second.considered).toBe(0);
+    expect(dispatched).toHaveLength(1);
+    expect(await runsFor(routine.id)).toHaveLength(1);
+  });
+
+  test("a dispatch that throws pushes the firing out, and it comes back with its attempts grown", async () => {
+    const { routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+
+    const report = await dispatchClaimedRoutines(
+      sweepOptions({
+        now: at("2001-01-01T09:26:00Z"),
+        dispatch: async () => {
+          throw new Error("the server answered 503");
+        },
+      }),
+    );
+
+    expect(report.fired).toEqual([]);
+    expect(report.skipped[0]?.routineId).toBe(routine.id);
+    expect(report.skipped[0]?.reason).toContain("503");
+
+    /*
+     * THE ROW, NOT THE RETURN VALUE. A consumer that reported a failure and finished the item anyway
+     * would pass any assertion made on the report alone, and the firing would be gone for good.
+     */
+    const [row] = await firingsFor(routine.id);
+    expect(row?.finishedAt).toBeNull();
+    expect(row?.claimedBy).toBeNull();
+    expect(row?.attempts).toBe(1);
+    // The reason stays on the row, so an item that eventually runs out of attempts says why.
+    expect(row?.lastError).toContain("503");
+    // Pushed out rather than retried in the same pass: whatever refused this will probably refuse it
+    // again in the next second.
+    expect(row?.runAt.getTime()).toBeGreaterThan(Date.now() + 30_000);
+
+    // Claimable again once the delay has passed, and the second hand-out says it is a second one.
+    await backdate(row?.key as string, {
+      runAt: new Date("2001-01-01T09:27:00Z"),
+    });
+    const [again] = await queue.claim({
+      kind: ROUTINE_FIRE_KIND,
+      owner: "sweep-test",
+      leaseMs: 30_000,
+    });
+    expect(again?.key).toBe(row?.key);
+    expect(again?.attempts).toBe(2);
+  });
+
+  test("a routine switched off between the offer and the firing is finished without dispatching", async () => {
+    const { owner, routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+    await store.setEnabled(owner.id, routine.id, false);
+
+    const report = await dispatchClaimedRoutines(
+      sweepOptions({ now: at("2001-01-01T09:26:00Z") }),
+    );
+
+    expect(report.fired).toEqual([]);
+    expect(report.skipped[0]?.routineId).toBe(routine.id);
+    expect(dispatched).toEqual([]);
+    expect(await runsFor(routine.id)).toHaveLength(0);
+    // Finished rather than released: re-running cannot make a switched-off routine want to fire.
+    const [row] = await firingsFor(routine.id);
+    expect(row?.finishedAt).not.toBeNull();
+  });
+
+  test("a routine deleted between the offer and the firing is finished without dispatching", async () => {
+    const { owner, routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+    // A hard delete, which is what `remove` does — and it takes the routine's runs with it.
+    await store.remove(owner.id, routine.id);
+
+    const report = await dispatchClaimedRoutines(
+      sweepOptions({ now: at("2001-01-01T09:26:00Z") }),
+    );
+
+    expect(report.fired).toEqual([]);
+    expect(report.skipped[0]?.routineId).toBe(routine.id);
+    expect(dispatched).toEqual([]);
+    // Finished, not released: no number of retries will make a deleted routine exist.
+    const [row] = await firingsFor(routine.id);
+    expect(row?.finishedAt).not.toBeNull();
+  });
+
+  /**
+   * THE WINDOW IS ENFORCED AGAIN AT FIRING TIME, not only at offering time.
+   *
+   * The offer refused anything staler than the grace window, but the queue's own machinery can
+   * outlive that window: a backlogged sweep, or five releases at a minute each, and the item is
+   * claimed long after the occurrence it names. Firing it then posts "here is your morning summary"
+   * in the afternoon, which is exactly what the stale-stamp policy exists to prevent.
+   */
+  test("a firing claimed after its window has passed is finished without dispatching, and leaves no run row", async () => {
+    const { routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      // Offered one minute late, well inside the window. Nothing here is a stale offer.
+      new Date("2001-01-01T09:26:00Z"),
+    );
+
+    // Claimed twenty minutes after the occurrence, which is outside the default ten.
+    const report = await dispatchClaimedRoutines(
+      sweepOptions({ now: at("2001-01-01T09:45:00Z") }),
+    );
+
+    expect(report.fired).toEqual([]);
+    expect(report.skipped[0]?.routineId).toBe(routine.id);
+    expect(dispatched).toEqual([]);
+    /*
+     * NO ORPHAN. The check sits beside the deleted/disabled branch, before `insertRun`, so a skipped
+     * firing leaves nothing in `routine_runs` — a run row with no outcome and nothing coming to give
+     * it one would show on the routines page as a firing that started and never ended.
+     */
+    expect(await runsFor(routine.id)).toHaveLength(0);
+    // Finished rather than released: re-delivery cannot make a past occurrence current.
+    const [row] = await firingsFor(routine.id);
+    expect(row?.finishedAt).not.toBeNull();
+
+    // The window is still a setting, so a caller that wants the late firing can have it.
+    await makeDueAt(routine.id, new Date("2001-02-01T09:25:00Z"));
+    await offerDueRoutines(
+      sweepOptions({ now: () => new Date("2001-02-01T09:26:00Z") }),
+    );
+    const generous = await dispatchClaimedRoutines(
+      sweepOptions({
+        now: at("2001-02-01T09:45:00Z"),
+        graceMs: 30 * 60_000,
+      }),
+    );
+    expect(generous.fired).toEqual([routine.id]);
+  });
+
+  /**
+   * THE LESSON FROM `culler.ts:141-151`, which is why the renew comes before anything else.
+   *
+   * A batch is many and a lease is one. The first consumer claims, is slow, and its lease lapses;
+   * another replica takes the item and runs it. If the first then dispatched what it was holding,
+   * the person would get the same summary twice — and worse, the first would `finish` an item that
+   * belongs to the second, taking the lease away from a run that is still going.
+   */
+  test("a consumer whose lease has gone neither dispatches nor finishes the item that is now somebody else's", async () => {
+    const { routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+    const [offered] = await firingsFor(routine.id);
+    const now = at("2001-01-01T09:26:00Z");
+
+    const dispatchedBySecond: string[] = [];
+    const finishedByFirst: string[] = [];
+    let second: Awaited<ReturnType<typeof dispatchClaimedRoutines>> | undefined;
+
+    /*
+     * The first consumer's claim succeeds and then it stalls: the lease is written into the past and
+     * a whole second consumer runs the item to completion before the first gets to its own loop.
+     * Standing in for a slow pass rather than reimplementing one — everything after this point is
+     * still the queue's own answer.
+     */
+    const stalling = {
+      ...queue,
+      claim: async (input: Parameters<typeof queue.claim>[0]) => {
+        const claimed = await queue.claim(input);
+        await backdate(offered?.key as string, {
+          leaseUntil: new Date("2001-01-01T00:00:00Z"),
+        });
+        second = await dispatchClaimedRoutines(
+          sweepOptions({
+            owner: "consumer-second",
+            now,
+            dispatch: async (runId: string) => {
+              dispatchedBySecond.push(runId);
+            },
+          }),
+        );
+        return claimed;
+      },
+      finish: async (input: Parameters<typeof queue.finish>[0]) => {
+        finishedByFirst.push(input.key);
+        return await queue.finish(input);
+      },
+    };
+
+    const first = await dispatchClaimedRoutines(
+      sweepOptions({
+        owner: "consumer-first",
+        queue: stalling,
+        now,
+        dispatch: async (runId: string) => {
+          dispatched.push(`first:${runId}`);
+        },
+      }),
+    );
+
+    // The second consumer did the work, exactly once.
+    expect(second?.fired).toEqual([routine.id]);
+    expect(dispatchedBySecond).toHaveLength(1);
+    expect(await runsFor(routine.id)).toHaveLength(1);
+
+    // The first stopped at `renew`, which is not an error: the item is being handled, just not here.
+    expect(first.considered).toBe(1);
+    expect(first.fired).toEqual([]);
+    expect(first.skipped[0]?.routineId).toBe(routine.id);
+    expect(dispatched).toEqual([]);
+    // And it never called `finish`, so it could not have taken the item off a run in flight.
+    expect(finishedByFirst).toEqual([]);
+  });
+
+  /**
+   * At the cap the item stops being claimed, so this loop never sees that routine again: every
+   * sweep looks clean while one person's routine silently never fires. The row carries the count and
+   * the reason for anybody who queries the table; the warning is for whoever reads the logs.
+   */
+  test("at the attempt cap the firing stops being claimed, and the giving up is said out loud", async () => {
+    const { routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+
+    const lines: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((...args) => {
+      lines.push(String(args[0]));
+    });
+    try {
+      await dispatchClaimedRoutines(
+        sweepOptions({
+          now: at("2001-01-01T09:26:00Z"),
+          // One go, so the first failure is also the last.
+          maxAttempts: 1,
+          dispatch: async () => {
+            throw new Error("the server answered 503");
+          },
+        }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    const complaint = lines.find((line) => line.includes(routine.id));
+    expect(complaint).toBeDefined();
+    const said = JSON.parse(complaint as string);
+    expect(said.routineId).toBe(routine.id);
+    expect(said.attempts).toBe(1);
+    expect(said.reason).toContain("503");
+
+    /*
+     * And it is the cap that stops it, not the release delay: the delay is put in the past first, so
+     * a claim that still refuses the item is refusing it for having run out of goes.
+     */
+    const [row] = await firingsFor(routine.id);
+    await backdate(row?.key as string, {
+      runAt: new Date("2001-01-01T09:27:00Z"),
+    });
+    expect(
+      await queue.claim({
+        kind: ROUTINE_FIRE_KIND,
+        owner: "sweep-test",
+        leaseMs: 30_000,
+        maxAttempts: 1,
+      }),
+    ).toEqual([]);
+  });
+
+  /**
+   * BOTH KINDS OF DONE WITH, which is the half `queue.ts:262-274` documents as having been forgotten.
+   *
+   * A finished row has to outlive the run long enough for a late replica to collide with it, and
+   * then go. An item at its attempt cap is not finished and is reaped by nothing else, so without
+   * this its key stays wedged for ever and that routine can never be offered for that minute again.
+   */
+  test("the purge takes the finished firing and the one that gave up, once each is past the window", async () => {
+    const { routine: done } = await makeRoutine("Finished cleanly.");
+    const { routine: gaveUp } = await makeRoutine("Out of attempts.");
+    await offerFiring(
+      done.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+    await dispatchClaimedRoutines(
+      sweepOptions({ now: at("2001-01-01T09:26:00Z") }),
+    );
+    /*
+     * The finished routine's clock is parked out of reach before the second offer.
+     *
+     * `dueRoutines` asks Postgres what is due, so a routine whose stamp the first offer advanced to
+     * another day in 2001 is still due by the real clock, and the second offer would queue a second
+     * firing of it. That is the offering half behaving as designed against ancient stamps; what this
+     * test wants is one finished row and one that gave up, so it says which routine each pass is
+     * about rather than working around the overlap afterwards.
+     */
+    await makeDueAt(done.id, new Date("2999-01-01T09:00:00Z"));
+    await offerFiring(
+      gaveUp.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+    // The giving-up warning is asserted in its own test above; here it is only noise.
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await dispatchClaimedRoutines(
+        sweepOptions({
+          now: at("2001-01-01T09:26:00Z"),
+          maxAttempts: 1,
+          dispatch: async () => {
+            throw new Error("the server answered 503");
+          },
+        }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    const window = 24 * 60 * 60 * 1000;
+    // Inside the window both rows stay: a finished row too young to have been collided with is the
+    // whole reason `finish` marks rather than deletes.
+    expect(
+      await queue.purge({
+        kind: ROUTINE_FIRE_KIND,
+        olderThanMs: window,
+        maxAttempts: 1,
+      }),
+    ).toBe(0);
+    expect(await firingsFor(done.id)).toHaveLength(1);
+    expect(await firingsFor(gaveUp.id)).toHaveLength(1);
+
+    const aged = new Date(Date.now() - 2 * window);
+    const [doneRow] = await firingsFor(done.id);
+    const [gaveUpRow] = await firingsFor(gaveUp.id);
+    await backdate(doneRow?.key as string, { finishedAt: aged });
+    // The one that gave up has no `finished_at` to age at all — its `updated_at` is what dates it,
+    // which is precisely why it used to be reaped by nothing.
+    await backdate(gaveUpRow?.key as string, { updatedAt: aged });
+
+    expect(
+      await queue.purge({
+        kind: ROUTINE_FIRE_KIND,
+        olderThanMs: window,
+        maxAttempts: 1,
+      }),
+    ).toBe(2);
+    expect(await firingsFor(done.id)).toHaveLength(0);
+    expect(await firingsFor(gaveUp.id)).toHaveLength(0);
+  });
+
+  /**
+   * The cap the consumer warns at has to be the cap the queue stops claiming at.
+   *
+   * A consumer with its own number warns on the wrong pass: too low and it complains every pass
+   * while the item is still being retried, too high and it never complains at all — the item stops
+   * being claimed and nothing anywhere says so.
+   */
+  test("with no cap given, the consumer gives up on the pass the queue's own default stops handing it out", async () => {
+    const { routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+    const [offered] = await firingsFor(routine.id);
+    // One short of the queue's default, so this claim is the last one the queue will allow.
+    await backdate(offered?.key as string, {
+      attempts: DEFAULT_MAX_ATTEMPTS - 1,
+    });
+
+    const lines: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((...args) => {
+      lines.push(String(args[0]));
+    });
+    try {
+      await dispatchClaimedRoutines(
+        sweepOptions({
+          now: at("2001-01-01T09:26:00Z"),
+          dispatch: async () => {
+            throw new Error("the server answered 503");
+          },
+        }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    const complaint = lines.find((line) => line.includes(routine.id));
+    expect(complaint).toBeDefined();
+    expect(JSON.parse(complaint as string).attempts).toBe(DEFAULT_MAX_ATTEMPTS);
+
+    await backdate(offered?.key as string, {
+      runAt: new Date("2001-01-01T09:27:00Z"),
+    });
+    expect(
+      await queue.claim({
+        kind: ROUTINE_FIRE_KIND,
+        owner: "sweep-test",
+        leaseMs: 30_000,
+      }),
+    ).toEqual([]);
   });
 });

@@ -21,13 +21,30 @@
  * A second half-right copy grown next to it is the duplicated firing mechanism #235 exists to
  * prevent.
  */
-import type { WorkQueue } from "../work/queue";
+import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import type { RoutineStore } from "./store";
 
 export const ROUTINE_FIRE_KIND = "routine.fire";
 
 /** How many due routines one pass will look at. Bounded, because a pass has to end. */
 const DEFAULT_LIMIT = 50;
+
+/**
+ * How long a claimed firing is leased for, and renewed by, while it is being dispatched.
+ *
+ * A minute: a dispatch is one HTTP call to this deployment's own server, which either answers or
+ * fails long before that, and a firing whose owner died is worth picking up again quickly. It is
+ * renewed before every item, so the length bounds one dispatch rather than the whole batch.
+ */
+const DEFAULT_LEASE_MS = 60_000;
+
+/**
+ * How long a firing that could not be dispatched waits before anybody tries again.
+ *
+ * A minute, for the culler's reason: whatever refused this will probably refuse it again in the next
+ * second, and the queue's attempt cap is what stops the waiting going on for ever.
+ */
+const DISPATCH_RETRY_DELAY_MS = 60_000;
 
 /**
  * How late a firing may be and still be worth having.
@@ -61,8 +78,9 @@ export type RoutineSweepOptions = {
 /**
  * What one pass of phase two did.
  *
- * Declared here with the options it shares because PHASE TWO ARRIVES NEXT — the half that claims
- * these items, opens a run row and dispatches it. Nothing in this file returns one yet.
+ * `fired` is "a run was opened and the dispatch was accepted", not "the routine succeeded": the run
+ * row in `routine_runs` owns the outcome from the moment the dispatch resolves, and this report is
+ * the sweep's own account of its pass rather than a summary of anybody's turn.
  */
 export type RoutineSweepReport = {
   considered: number;
@@ -180,4 +198,274 @@ export async function offerDueRoutines(
   }
 
   return { offered };
+}
+
+/**
+ * Which routine a claimed item is about.
+ *
+ * The payload is the answer, and the key is the fallback for a row written before the payload was:
+ * the key is `<routineId>:<minute>` and a routine id carries no colon, so everything up to the first
+ * one is the routine. A firing whose routine cannot be named at all would be a firing nothing could
+ * report, which is why this never returns undefined.
+ */
+function routineIdOf(item: { key: string; payload: Record<string, unknown> }) {
+  const fromPayload = item.payload.routineId;
+  if (typeof fromPayload === "string" && fromPayload.length > 0) {
+    return fromPayload;
+  }
+  const colon = item.key.indexOf(":");
+  return colon === -1 ? item.key : item.key.slice(0, colon);
+}
+
+/**
+ * Phase two: claimed items become dispatched firings, with the queue's booleans honoured.
+ *
+ * EVERY BRANCH HERE IS ABOUT THE GAP BETWEEN THE OFFER AND THE FIRING. Another replica decided this
+ * should fire, at another time, and by now the routine may be switched off, deleted, or the
+ * occurrence may have gone stale while the item waited behind a backlog. So the world is re-read at
+ * the moment of acting — the culler's discipline, for the culler's reason — and the queue's own
+ * answers are believed: a `renew` that says no means the item is somebody else's, and a `finish` that
+ * says no means it stopped being ours while we were working.
+ *
+ * `finish` and `release` mean different things and are not interchangeable. `release` is for a
+ * dispatch that could have worked and might work next time; `finish` is for a firing that will never
+ * be worth having, however many times it comes back.
+ */
+export async function dispatchClaimedRoutines(
+  options: RoutineSweepOptions,
+): Promise<RoutineSweepReport> {
+  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
+  const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const claimed = await options.queue.claim({
+    kind: ROUTINE_FIRE_KIND,
+    owner: options.owner,
+    leaseMs,
+    limit: options.limit ?? DEFAULT_LIMIT,
+    // Passed through only when asked for, so the queue's own default stays the one default.
+    ...(options.maxAttempts === undefined
+      ? {}
+      : { maxAttempts: options.maxAttempts }),
+  });
+
+  const report: RoutineSweepReport = {
+    considered: claimed.length,
+    fired: [],
+    skipped: [],
+  };
+
+  for (const item of claimed) {
+    const routineId = routineIdOf(item);
+
+    /*
+     * Renewed before acting, because the batch is many and the lease is one.
+     *
+     * This is the lesson at `server/src/work/culler.ts:141-151` verbatim: twenty API calls with
+     * nothing renewed while they ran, the lease expiring part-way down the list, and another replica
+     * claiming the tail this one was still working through. A lease nobody renews is a timer, and a
+     * timer is what this queue exists not to be.
+     *
+     * False means it is already somebody else's, and then the only correct answer is to leave it
+     * entirely alone: no dispatch, because that replica is already running this firing and a second
+     * dispatch is a second message to a person; and no `finish`, because finishing somebody else's
+     * item takes the lease away from a run that is still going.
+     */
+    if (
+      !(await options.queue.renew({
+        kind: ROUTINE_FIRE_KIND,
+        key: item.key,
+        owner: options.owner,
+        leaseMs,
+      }))
+    ) {
+      report.skipped.push({
+        routineId,
+        reason: "the lease went to another replica",
+      });
+      continue;
+    }
+
+    try {
+      /*
+       * RE-READ, because the offer was another replica's judgement at another time. A person who
+       * switched a routine off a minute after it was offered, or deleted it, has said what they want;
+       * firing it anyway posts a message they have asked not to receive.
+       *
+       * Finished rather than released in both cases: no number of retries will make a deleted routine
+       * exist, and a switched-off one does not want its queued firing carried out later either. The
+       * next occurrence is offered afresh if it is switched back on.
+       */
+      const routine = await options.routineStore.routineForFiring(routineId);
+      if (!routine?.enabled) {
+        const reason = routine
+          ? "switched off between the offer and the firing"
+          : "deleted between the offer and the firing";
+        await finishOrSay(options, item.key, routineId, reason);
+        report.skipped.push({ routineId, reason });
+        continue;
+      }
+
+      /*
+       * AND THE WINDOW AGAIN, HERE, before any run row exists.
+       *
+       * The offer already enforced this window at offer time, and that is not enough: the queue's
+       * redelivery machinery can outlive it. A backlogged queue, or five releases at a minute each,
+       * and the item is claimed well after the occurrence it names — "here is your morning summary",
+       * in the afternoon, which is exactly what the stale-stamp policy above exists to prevent. So it
+       * is re-checked at the moment of acting, which is the culler's precedent ("Somebody came back",
+       * `culler.ts:~170`): the decision was made elsewhere and the world has moved since.
+       *
+       * BESIDE the deleted/disabled branch and before `insertRun`, so a skipped firing leaves no
+       * `routine_runs` row: a run opened with no outcome and nothing coming to give it one shows on
+       * the routines page as a firing that started and never ended.
+       *
+       * Finished, not released, for the same reason as above: re-delivery cannot make a past
+       * occurrence current. A missing or unreadable stamp is not treated as stale — the offer is the
+       * only writer of this payload and always writes one, so there is no window to enforce rather
+       * than a window that has passed, and dropping the firing on a payload this file wrote would be
+       * inventing a reason to lose it.
+       */
+      const now = options.now?.() ?? new Date();
+      const stamp = item.payload.scheduledFor;
+      const scheduledFor =
+        typeof stamp === "string" ? new Date(stamp) : undefined;
+      if (
+        scheduledFor &&
+        !Number.isNaN(scheduledFor.getTime()) &&
+        now.getTime() - scheduledFor.getTime() > graceMs
+      ) {
+        const reason = "claimed too long after the occurrence it was due for";
+        await finishOrSay(options, item.key, routineId, reason);
+        report.skipped.push({ routineId, reason });
+        continue;
+      }
+
+      /*
+       * The run row first, then the dispatch, because the dispatch is told a run id and nothing else.
+       * From the moment it resolves the run row owns the outcome: the queue's retries are for
+       * DISPATCH failures only, and a turn that failed is final for this firing — the fatigue rule
+       * owns that, not this loop.
+       */
+      const { runId } = await options.routineStore.insertRun(routineId);
+      await options.dispatch(runId);
+      if (
+        !(await options.queue.finish({
+          kind: ROUTINE_FIRE_KIND,
+          key: item.key,
+          owner: options.owner,
+        }))
+      ) {
+        /*
+         * The dispatch happened, so this is `fired` either way; but a `finish` that says no says the
+         * lease lapsed while the call was in flight, which means another replica may claim this same
+         * minute and dispatch it again. Said out loud, because it is the shape of a duplicate run and
+         * nothing else in the system will mention it.
+         */
+        console.warn(
+          JSON.stringify({
+            type: "routine-fire-finish-lost",
+            routineId,
+            runId,
+            reason:
+              "the lease had gone by the time the dispatch came back, so the firing may be redelivered",
+          }),
+        );
+      }
+      report.fired.push(routineId);
+    } catch (error) {
+      /*
+       * ONE FIRING'S FAILURE IS ONE FIRING'S FAILURE, exactly as in the offering half above: an
+       * unguarded throw here would take everybody else's claimed firings down with it, on every
+       * pass, for as long as the one bad item exists.
+       *
+       * Released rather than finished, and pushed out rather than retried in this pass: a server
+       * that refused this dispatch will probably refuse it again in the next second, and the queue's
+       * attempt cap is what bounds the retrying.
+       */
+      const reason =
+        error instanceof Error ? error.message : "could not be dispatched";
+      let released = false;
+      try {
+        released = await options.queue.release({
+          kind: ROUTINE_FIRE_KIND,
+          key: item.key,
+          owner: options.owner,
+          delayMs: DISPATCH_RETRY_DELAY_MS,
+          reason,
+        });
+      } catch (releaseError) {
+        // Best-effort: an item that could not even be released has a lease that will lapse on its
+        // own, and the pass still has other firings to get through.
+        console.warn(
+          JSON.stringify({
+            type: "routine-fire-release-failed",
+            routineId,
+            reason: String(releaseError),
+          }),
+        );
+      }
+      /*
+       * Said out loud when it gives up, because otherwise it stops silently.
+       *
+       * At the cap the item is no longer claimed, so this loop simply never sees that routine again
+       * and every sweep looks clean while one person's routine never fires. The row carries the count
+       * and the reason for anybody who queries the table; this is for whoever reads the logs.
+       */
+      if (item.attempts >= maxAttempts) {
+        console.warn(
+          JSON.stringify({
+            type: "routine-fire-gave-up",
+            routineId,
+            key: item.key,
+            attempts: item.attempts,
+            reason,
+          }),
+        );
+      } else if (!released) {
+        // Not ours any more, which means somebody else holds it: worth a line, because a release that
+        // did nothing leaves this pass's failure recorded nowhere on the row.
+        console.warn(
+          JSON.stringify({
+            type: "routine-fire-release-lost",
+            routineId,
+            key: item.key,
+            reason,
+          }),
+        );
+      }
+      report.skipped.push({ routineId, reason });
+    }
+  }
+
+  return report;
+}
+
+/**
+ * Finish a firing nobody wants, and say so if it was not ours to finish.
+ *
+ * The boolean is the truth about ownership rather than a formality: false means the lease went while
+ * this pass was deciding, so the routine was NOT stopped from firing here — whoever holds it now will
+ * make its own decision, and this one should say what it saw rather than retry into a race.
+ */
+async function finishOrSay(
+  options: RoutineSweepOptions,
+  key: string,
+  routineId: string,
+  reason: string,
+): Promise<void> {
+  const finished = await options.queue.finish({
+    kind: ROUTINE_FIRE_KIND,
+    key,
+    owner: options.owner,
+  });
+  if (!finished) {
+    console.warn(
+      JSON.stringify({
+        type: "routine-fire-finish-lost",
+        routineId,
+        key,
+        reason,
+      }),
+    );
+  }
 }
