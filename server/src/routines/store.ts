@@ -137,6 +137,21 @@ export type RoutineInput = {
   timezone?: string;
 };
 
+/**
+ * One firing, and everything running it headlessly needs — the runner's read, and nobody else's.
+ *
+ * The owner comes back because the runner acts AS the owner: the channel it posts into, the thread
+ * it continues and the grants the turn resolves are all that person's, and a runner that had to be
+ * told whose they were would be a runner that could be told the wrong answer.
+ */
+export type RoutineRunContext = {
+  routineId: string;
+  ownerUserId: string;
+  agentId: string;
+  channelId: string;
+  instruction: string;
+};
+
 export type RoutinePatch = Partial<{
   instruction: string;
   cron: string;
@@ -164,6 +179,15 @@ export type RoutineStore = {
   advanceNextRun(id: string, from: Date): Promise<boolean>;
   /** Open a run row. Its status stays null until something finishes it. */
   insertRun(routineId: string): Promise<{ runId: string }>;
+  /**
+   * The runner's read: an opened run row, joined to the routine it fires.
+   *
+   * Not owner-scoped, like everything else in this half — a run id is not something a person names,
+   * it is something the queue hands back — and deliberately out of RoutineTools' reach: nothing a
+   * model can call resolves a run id, so nothing a model can call gets an owner out of one. Null
+   * means the routine was deleted between queueing and running, which takes its runs with it.
+   */
+  runContext(runId: string): Promise<RoutineRunContext | null>;
   /** Close a run row with its outcome, and the capped error when there was one. */
   finishRun(
     runId: string,
@@ -587,6 +611,27 @@ export function createRoutineStore(database: Database): RoutineStore {
         .returning({ id: routineRuns.id });
       if (!row) throw new Error("inserting a routine run returned no row");
       return { runId: row.id };
+    },
+
+    async runContext(runId) {
+      /*
+       * An inner join, so a run whose routine is gone reads as no row rather than as a firing with
+       * nothing to say. `remove` is a hard delete and the runs cascade with it, so in practice both
+       * sides disappear together; the join is what makes that one absence instead of two.
+       */
+      const [row] = await database
+        .select({
+          routineId: routines.id,
+          ownerUserId: routines.ownerUserId,
+          agentId: routines.agentId,
+          channelId: routines.channelId,
+          instruction: routines.instruction,
+        })
+        .from(routineRuns)
+        .innerJoin(routines, eq(routines.id, routineRuns.routineId))
+        .where(eq(routineRuns.id, runId))
+        .limit(1);
+      return row ?? null;
     },
 
     async finishRun(runId, status, error) {

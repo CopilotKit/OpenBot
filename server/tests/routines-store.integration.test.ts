@@ -907,6 +907,40 @@ describe("opening and closing a run", () => {
   });
 });
 
+describe("the runner's read of one firing", () => {
+  test("joins the run to its routine, owner included", async () => {
+    const { owner, agentId, channel, routine } = await makeRoutine(
+      "Post the standup summary.",
+    );
+    const { runId } = await store.insertRun(routine.id);
+
+    // The owner comes back because the runner acts AS the owner: the channel it posts into and the
+    // thread it continues are that person's, and nothing else in the run row says who that is.
+    expect(await store.runContext(runId)).toEqual({
+      routineId: routine.id,
+      ownerUserId: owner.id,
+      agentId,
+      channelId: channel.id,
+      instruction: "Post the standup summary.",
+    });
+  });
+
+  test("a run id nothing wrote reads as no firing", async () => {
+    expect(await store.runContext("routine_run_missing")).toBeNull();
+  });
+
+  test("a deleted routine takes its queued firing with it", async () => {
+    const { owner, routine } = await makeRoutine();
+    const { runId } = await store.insertRun(routine.id);
+
+    await store.remove(owner.id, routine.id);
+
+    // Nobody's problem: the delete cascades, so there is no row left to finish and the runner has
+    // nothing to say to anybody.
+    expect(await store.runContext(runId)).toBeNull();
+  });
+});
+
 /**
  * The fatigue rule counts the failures at the tail, and this file pins what a `skipped` run does to
  * that tail: A SKIP IS NOT A FAILURE AND DOES NOT BREAK THE STREAK. A skip means the channel was
