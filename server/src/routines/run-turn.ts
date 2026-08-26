@@ -348,6 +348,15 @@ export function createTurnRunner(options: {
     let heartbeatError: unknown;
     /** Whether the deadline stopped this turn. See the throw below the `finally`. */
     let stopped = false;
+    /**
+     * `stopCanonicalRun`'s shape (`channel-manager.mjs:222-229`): one promise for the whole turn,
+     * not one per caller. Both the heartbeat-reject path and the deadline path call `stopTurn`, and
+     * without the `??=` each would issue its own `runner.stop`, which is two stops racing each other
+     * for one run id. The seam note above about the acquire echo applies here too: if this file ever
+     * adopts the acquired `threadId`/`runId` instead of minting its own, it must guard the echo the
+     * way `run.mjs:94` does — `lock.threadId || threadId` — before trusting it, not use it bare.
+     */
+    let stopPromise: Promise<boolean | undefined> | undefined;
 
     const clearHeartbeat = () => {
       if (heartbeat === undefined) return;
@@ -365,7 +374,7 @@ export function createTurnRunner(options: {
         // it sets `stopRequested`, which is what makes `finalizeRunEvents` close the run as
         // stopped rather than leaving it open for ever on the platform.
       }
-      void runner.stop({ threadId, runId }).catch(() => undefined);
+      stopPromise ??= runner.stop({ threadId, runId }).catch(() => undefined);
     };
 
     heartbeat = setInterval(() => {
@@ -454,8 +463,13 @@ export function createTurnRunner(options: {
     }
 
     // Raised after the lock is released, and ahead of any reply: a turn that lost its lock partway
-    // through is not a turn that answered, however much text it produced first.
-    if (heartbeatError !== undefined) throw heartbeatError;
+    // through is not a turn that answered, however much text it produced first. `stopPromise` is
+    // awaited first — the reference's own order (`channel-manager.mjs:311-313`) — so a stop this
+    // path itself requested has actually settled before we report on it, not just been requested.
+    if (heartbeatError !== undefined) {
+      await stopPromise;
+      throw heartbeatError;
+    }
 
     /*
      * And the same for a turn the deadline stopped, even when the abort worked and the run then
@@ -464,6 +478,7 @@ export function createTurnRunner(options: {
      * and close the firing as a success.
      */
     if (stopped) {
+      await stopPromise;
       throw new Error(
         `The routine's turn was stopped after ${Math.round(turnTimeoutMs / 1000)}s.`,
       );
@@ -476,20 +491,23 @@ export function createTurnRunner(options: {
     // The diff first, the streamed chunks as the fallback: the diff is what was persisted, which is
     // what the person will read in the channel, and the chunks are only what went past.
     const replyText = (said.length > 0 ? said : chunks).join("\n\n");
-    if (replyText.length === 0) {
-      throw new Error("The turn finished without saying anything.");
-    }
+
     /*
-     * An interrupt is an unfinished turn with nobody to ask.
-     *
-     * The Bot stopped to put a question to a person who is not there, so whatever it said first is
-     * half of an exchange. Posting it as the answer would be the worst of the options: the routine
-     * would read as successful and the channel would carry a reply that is waiting on something.
+     * An interrupt is an unfinished turn with nobody to ask, and it is checked BEFORE the empty-reply
+     * case below. A turn that interrupted before saying anything has both conditions true at once,
+     * and only one sentence can go on the run row and into the channel: "finished without saying
+     * anything" would be a lie about a turn that in fact stopped to ask a question. The Bot stopped
+     * to put a question to a person who is not there, so whatever it said first is half of an
+     * exchange. Posting it as the answer would be the worst of the options: the routine would read as
+     * successful and the channel would carry a reply that is waiting on something.
      */
     if (agent.pendingInterrupts.length > 0) {
       throw new Error(
         "The turn stopped to ask a question, and a routine has nobody to ask.",
       );
+    }
+    if (replyText.length === 0) {
+      throw new Error("The turn finished without saying anything.");
     }
 
     return { replyText };

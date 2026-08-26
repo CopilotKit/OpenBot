@@ -80,6 +80,8 @@ const answers: Driver = ({ agent, observer }) => {
 function harness(options: {
   history?: HistoryRow[];
   historyFails?: () => Error;
+  /** What the acquire call does. A thunk that throws, for the same reason `renew` is one. */
+  acquireFails?: () => Error;
   drive?: Driver;
   /**
    * What a renew does. A thunk that THROWS rather than one that returns a rejected promise: a
@@ -139,6 +141,7 @@ function harness(options: {
       ttlSeconds?: number;
     }) => {
       order.push("acquire");
+      if (options.acquireFails) throw options.acquireFails();
       calls.acquired.push(params);
       return { threadId: params.threadId, runId: params.runId, joinToken: "t" };
     },
@@ -236,6 +239,17 @@ describe("a routine's headless turn", () => {
 
   test("returns what the Bot said, taken from the agent the runner was handed", async () => {
     const { run } = harness({});
+
+    expect(await run()).toEqual({ replyText: "Three things happened." });
+  });
+
+  test("does not leak history into the reply: the before-set must be taken after seeding, not before", async () => {
+    // A non-empty history containing an existing assistant row ("Hello back.") is the regression
+    // guard the empty-history tests above cannot provide: if `before` were ever taken ABOVE
+    // `agent.setMessages(messages)` instead of below it, that seeded row would read as "new" too,
+    // and the reply would come back as "Hello back.\n\nThree things happened." instead of just the
+    // one line the run actually added.
+    const { run } = harness({ history: THREE_ROWS });
 
     expect(await run()).toEqual({ replyText: "Three things happened." });
   });
@@ -398,6 +412,27 @@ describe("the lock is released on every exit path", () => {
   });
 });
 
+describe("cleanup only runs for a lock that was actually taken", () => {
+  test("a rejected acquire never cleans up, renews, or starts the heartbeat", async () => {
+    // `ɵcleanupThreadLock` is DELETE on the platform's lock endpoint. If cleanup ran when the
+    // acquire itself failed, it would delete whoever DOES hold the lock — the person's own browser
+    // session, most likely. So this is not just "no cleanup call happened to be made", it is "no
+    // cleanup call may ever be made when we never held anything to begin with".
+    const { run, calls } = harness({
+      acquireFails: () => new Error("lock service unavailable"),
+      heartbeatMs: 2,
+    });
+
+    await expect(run()).rejects.toThrow("lock service unavailable");
+
+    expect(calls.cleaned).toEqual([]);
+    expect(calls.renewed).toEqual([]);
+    // And no heartbeat was ever scheduled: still nothing, even after it would have ticked.
+    await wait(20);
+    expect(calls.renewed).toEqual([]);
+  });
+});
+
 describe("one run id, everywhere", () => {
   test("reaches the acquire, every renew and the cleanup", async () => {
     const { run, calls } = harness({
@@ -433,6 +468,27 @@ describe("one run id, everywhere", () => {
 
     const runId = calls.acquired[0]?.runId;
     expect(calls.stops).toEqual([{ threadId: THREAD_ID, runId }]);
+  });
+
+  test("stops the run exactly once when the heartbeat rejects and the deadline also fires", async () => {
+    // Two independent callers of `stopTurn` — the heartbeat-reject path and the deadline path — can
+    // both fire in the same run. `runner.stop` deletes the platform's stop-requested flag work for
+    // one run id; issuing it twice is not double-safe the way the lock cleanup's `.catch` is, it is
+    // just two racing calls. The `stopPromise ??=` dedup (mirroring `channel-manager.mjs:222-229`)
+    // is what keeps this to exactly one call regardless of which path got there first.
+    const { run, calls } = harness({
+      drive: () => undefined,
+      heartbeatMs: 2,
+      turnTimeoutMs: 20,
+      abortGraceMs: 50,
+      renew: () => {
+        throw new Error("somebody else holds this lock");
+      },
+    });
+
+    await expect(run()).rejects.toThrow("could not be stopped");
+
+    expect(calls.stops).toHaveLength(1);
   });
 });
 
@@ -523,6 +579,25 @@ describe("recovering what was said", () => {
 
     await expect(run()).rejects.toThrow("nobody to ask");
     expect(calls.cleaned).toHaveLength(1);
+  });
+
+  test("throws the interrupt sentence, not the empty-reply one, when the turn interrupted before saying anything", async () => {
+    // Both conditions are true at once here: no new assistant message AND a pending interrupt. Only
+    // one sentence can go on the run row and into the channel, and "finished without saying
+    // anything" would be a lie about a turn that in fact stopped to ask a question.
+    const { run } = harness({
+      drive: ({ observer, agent }) => {
+        agent.pendingInterrupts = [
+          // biome-ignore lint/suspicious/noExplicitAny: the interrupt's shape is not the subject.
+          { id: "interrupt_1" } as any,
+        ];
+        observer.complete();
+      },
+    });
+
+    await expect(run()).rejects.toThrow(
+      "The turn stopped to ask a question, and a routine has nobody to ask.",
+    );
   });
 });
 
