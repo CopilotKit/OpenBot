@@ -33,6 +33,8 @@ import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
+import { createAttentionRoutes } from "./attention/routes";
+import type { AttentionStore } from "./attention/store";
 import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
@@ -155,6 +157,12 @@ export function createApp(
    * the default coworker, which is exactly the failsafe the router itself falls back to.
    */
   intentRouter?: IntentRouter,
+  /**
+   * Resolutions for the attention inbox. Built beside the other stores in index.ts. Absent leaves
+   * the inbox unmounted rather than degraded: an inbox that cannot subtract what has been handled
+   * would show everything forever, and one that cannot see the trail would show a false all-quiet.
+   */
+  attentionStore?: AttentionStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -631,6 +639,18 @@ export function createApp(
         requireUser,
         canUseBot,
       ),
+    );
+  }
+
+  /*
+   * The attention inbox: what on the trail is waiting for a person. Needs the trail to read and the
+   * database for resolutions, and without either it is not mounted — an inbox that cannot see
+   * refusals is not a reduced feature, it is a false "all quiet".
+   */
+  if (auditReader && attentionStore) {
+    app.route(
+      "/api/attention",
+      createAttentionRoutes(auditReader, attentionStore, requireUser, canUseBot),
     );
   }
 

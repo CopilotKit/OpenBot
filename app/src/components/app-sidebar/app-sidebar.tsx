@@ -1,4 +1,5 @@
 import {
+  IconBellRinging,
   IconBolt,
   IconBox,
   IconLogout,
@@ -40,6 +41,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { signOutMutationOptions } from "@/lib/auth/mutations";
+import { attentionListQueryOptions } from "@/lib/attention/queries";
 import { currentUserQueryOptions } from "@/lib/auth/queries";
 import {
   type ChannelSummary,
@@ -152,6 +154,9 @@ function ChannelRow({
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { data: currentUser } = useQuery(currentUserQueryOptions());
+  // Unhandled attention items this person may see; drawn as a badge only when nonzero.
+  const attentionCount =
+    useQuery(attentionListQueryOptions()).data?.length ?? 0;
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
@@ -269,6 +274,35 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu className="gap-px">
+          <SidebarMenuItem>
+            {/*
+             * Above Skills because it is the row that can be urgent. The count is the number of
+             * unhandled items this person may see; zero draws no badge, because an empty inbox
+             * asking for attention is the boy who cried wolf.
+             */}
+            <SidebarMenuButton
+              className="hover:bg-foreground/5 h-10"
+              render={(props) => (
+                <Link
+                  {...props}
+                  to="/attention"
+                  activeProps={{
+                    className: "bg-foreground/5",
+                  }}
+                />
+              )}
+            >
+              <div className="size-[28px] flex items-center justify-center">
+                <IconBellRinging />
+              </div>
+              <span className="text-sm trackint-tight">Attention</span>
+              {attentionCount > 0 ? (
+                <span className="ml-auto rounded-full bg-destructive px-1.5 text-destructive-foreground text-xs tabular-nums">
+                  {attentionCount}
+                </span>
+              ) : null}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             {/* Beside Agents rather than inside Admin: writing a skill is something anybody does. */}
             <SidebarMenuButton

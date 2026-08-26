@@ -8,6 +8,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot in trouble no longer needs somebody watching
+
+A boundary refusal or a stalled run was recorded and then waited for a person to happen to look — at
+the right channel, or at the audit page an administrator has and nobody else does. The trail knew;
+nobody was told.
+
+**Attention**, in the sidebar for everybody, shows the refusals and stalled runs nobody has handled
+yet, scoped to the Bots this person may use, with a badge saying how many. Marking one handled
+clears it for everyone and records who did; two people pressing Resolve at once is settled by the
+database rather than by luck, and the second is told who got there first.
+
+It is a view over the trail, not a second record of it. Refusals and stalls are already written
+transactionally by the gateway and the stall guard, so the inbox cannot miss one and nothing new
+runs on the action path. The only state it owns is the resolution, held beside the append-only trail
+rather than in it. The trail itself still keeps everything; the inbox is only what is open now.
+
 ### Knowledge searches instead of guessing
 
 A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the
