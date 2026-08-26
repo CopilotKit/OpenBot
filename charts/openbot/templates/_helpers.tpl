@@ -267,6 +267,20 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 {{- with .Values.config.extraEnv }}
 {{ toYaml . }}
 {{- end }}
+{{- /*
+  One definition, for the same reason `openbot.databaseUrlEnv` is one (see its comment above): the
+  API server needs this value to RECOGNISE the worker, and the routines CronJob needs the same value
+  to BE the worker. Two definitions could drift; this can't. Gated on `routines.enabled` so a
+  deployment that never turns routines on gets no env var pointing at a key its secret store may not
+  hold.
+*/}}
+{{- if .Values.routines.enabled }}
+- name: WORKER_SHARED_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: worker-shared-secret
+{{- end }}
 {{- end -}}
 
 {{/*

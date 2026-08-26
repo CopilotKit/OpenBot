@@ -28,6 +28,8 @@ secrets:
   googleClientSecret: "example-for-rendering-only"
   computerToken: "example-for-rendering-only"
   licenseToken: "example-for-rendering-only"
+  # So the routines CronJob renders in CI at all. Rendering example only.
+  workerSharedSecret: "example-for-rendering-only"
 ingress:
   enabled: true
   className: nginx
@@ -39,6 +41,10 @@ ingress:
 
 computers:
   mode: shared
+
+# So the routines CronJob renders in CI at all.
+routines:
+  enabled: true
 
 # On, so these render in CI at all. They were written, reviewed and shipped without a single target
 # producing one, which means nothing had ever checked they were valid YAML, let alone right. Off is
