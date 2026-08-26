@@ -1,7 +1,7 @@
 import type { CatalogueEntry } from "./catalogue";
 import * as driveRest from "./google-drive-rest";
-import * as mcp from "./mcp";
 import type { McpCallResult, McpTool } from "./mcp";
+import * as mcp from "./mcp";
 
 /**
  * How this deployment reaches one vendor: which protocol, chosen per catalogue entry.

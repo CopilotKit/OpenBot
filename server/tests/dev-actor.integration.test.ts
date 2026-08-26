@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { DEV_ACTOR, initializeDevActorUser } from "../src/auth/dev-actor";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import { users } from "../src/db/schema";
+import { TEST_POOL } from "./support/database";
 
 const databaseUrl =
   process.env.DATABASE_URL ??

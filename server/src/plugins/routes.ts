@@ -7,17 +7,18 @@ import { CATALOGUE, catalogueEntry } from "./catalogue";
 import {
   authorizationUrlFor,
   challengeFor,
+  connectedAccountsUrlFor,
   createVerifier,
   readConnectState,
   redeemAuthorizationCode,
   redirectUriFor,
-  connectedAccountsUrlFor,
   sealConnectState,
 } from "./oauth";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
   type OAuthClient,
+  type PluginKind,
   PluginRefusedError,
   type PluginStore,
 } from "./store";
@@ -627,6 +628,19 @@ export function createPluginRoutes(
    */
 
   /**
+   * The kinds of grant this API will act on.
+   *
+   * CHECKED AT RUNTIME, not only in the types. `kind` arrives in a JSON body, so a type annotation
+   * on it is a comment: before this, anything at all could be written into the grant table through
+   * the ordinary endpoint, and one kind that was never meant to be settable this way already could.
+   */
+  const GRANT_KINDS = new Set<PluginKind>(["mcp", "skill", "bot"]);
+  const asGrantKind = (value: unknown): PluginKind | null =>
+    typeof value === "string" && GRANT_KINDS.has(value as PluginKind)
+      ? (value as PluginKind)
+      : null;
+
+  /**
    * May this person put this on that Bot?
    *
    * MCP is an administrator's, always: it reaches another company's system with a stored credential.
@@ -636,7 +650,7 @@ export function createPluginRoutes(
    */
   async function enablementRefusal(
     context: { var: AppVariables },
-    kind: "mcp" | "skill",
+    kind: PluginKind,
     ref: string,
     agentId: string,
   ): Promise<string | null> {
@@ -644,6 +658,17 @@ export function createPluginRoutes(
     if (actor.isAdmin) return null;
     if (kind === "mcp") {
       return "An administrator decides which Bots may reach a tool.";
+    }
+    /*
+     * And one Bot reaching another is an administrator's too.
+     *
+     * It is not an instruction somebody attaches to their own coworker: it lets one Bot spend
+     * another's model calls, wake its computer, and reach whatever that Bot may reach. Falling
+     * through to the skill branch below would have answered "there is no skill called knowledge",
+     * which is both wrong and a way to probe the skill table.
+     */
+    if (kind === "bot") {
+      return "An administrator decides which Bots may hand work to another Bot.";
     }
 
     const owner = await store.skillOwner(ref);
@@ -666,11 +691,12 @@ export function createPluginRoutes(
 
   routes.post("/grants", requireUser, async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
-      kind?: "mcp" | "skill";
+      kind?: unknown;
       ref?: string;
       agentId?: string;
     } | null;
-    if (!body?.kind || !body.ref || !body.agentId) {
+    const kind = asGrantKind(body?.kind);
+    if (!kind || !body?.ref || !body.agentId) {
       return context.json(
         { error: "A kind, a ref and a Bot are required." },
         400,
@@ -678,21 +704,21 @@ export function createPluginRoutes(
     }
     const refusal = await enablementRefusal(
       context,
-      body.kind,
+      kind,
       body.ref,
       body.agentId,
     );
     if (refusal) return context.json({ error: refusal }, 403);
 
-    await store.grant(body.kind, body.ref, body.agentId, actorEmail(context));
+    await store.grant(kind, body.ref, body.agentId, actorEmail(context));
     return context.json({ ok: true });
   });
 
   routes.delete("/grants", requireUser, async (context) => {
-    const kind = context.req.query("kind");
+    const kind = asGrantKind(context.req.query("kind"));
     const ref = context.req.query("ref");
     const agentId = context.req.query("agentId");
-    if ((kind !== "mcp" && kind !== "skill") || !ref || !agentId) {
+    if (!kind || !ref || !agentId) {
       return context.json(
         { error: "A kind, a ref and a Bot are required." },
         400,

@@ -66,9 +66,20 @@ export function handoffTool(options: {
   /** Whether this Bot has been granted anybody at all. */
   hasSomebodyToAsk: boolean;
   maxDepth: number;
+  /** How many Bots one run may address. Zero switches it off as surely as a depth of zero. */
+  maxPerRun: number;
 }): GrantedTool | null {
-  const { desk, from, hasSomebodyToAsk, maxDepth } = options;
-  if (maxDepth <= 0 || !hasSomebodyToAsk) return null;
+  const { desk, from, hasSomebodyToAsk, maxDepth, maxPerRun } = options;
+  /*
+   * Both zeros mean the same thing, and both have to be checked here.
+   *
+   * A run allowed to go no Bots deep and a run allowed to address no Bots are the same deployment
+   * decision from two directions, and only one of them was closing the door. With a fan-out cap of
+   * zero the tool was still offered, every call was refused by the desk, and the model spent
+   * attention on it and told the person it had tried and failed, which reads as the deployment being
+   * broken rather than as it being switched off.
+   */
+  if (maxDepth <= 0 || maxPerRun <= 0 || !hasSomebodyToAsk) return null;
   /*
    * Not offered to a run that is already as deep as this deployment allows.
    *

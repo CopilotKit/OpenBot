@@ -443,3 +443,54 @@ describe("a pinned channel in a paged roster", () => {
     ]);
   });
 });
+
+/**
+ * The one conversation a person has with one Bot.
+ *
+ * A hop delivers into it, and a Bot asked for several things in one turn produces several hops at
+ * once. Looking and then making is not find-or-create: each of two concurrent deliveries found
+ * nothing and made a conversation, so that person had two Knowledge channels holding two threads,
+ * with the answers split between them.
+ */
+describe("finding or making a person's channel with one Bot", () => {
+  test("two at once get the same conversation, not one each", async () => {
+    const owner = await createUser();
+    const agentId = await createAgent(owner, "Knowledge");
+
+    const [first, second] = await Promise.all([
+      store.direct(owner, agentId),
+      store.direct(owner, agentId),
+    ]);
+    createdChannelIds.push(first.id, second.id);
+
+    expect(second.id).toBe(first.id);
+    expect(second.threadId).toBe(first.threadId);
+  });
+
+  test("an existing conversation is reused rather than added to", async () => {
+    const owner = await createUser();
+    const agentId = await createAgent(owner, "Knowledge");
+    const made = await createChannel(owner, [agentId]);
+
+    const found = await store.direct(owner, agentId);
+
+    expect(found.id).toBe(made.id);
+  });
+
+  /*
+   * A channel holding this Bot and another one matches an agent test on its own. Delivering into it
+   * would put a hop's answer in front of a Bot nobody had asked.
+   */
+  test("a channel with a second Bot in it is not that person's direct one", async () => {
+    const owner = await createUser();
+    const agentId = await createAgent(owner, "Knowledge");
+    const other = await createAgent(owner, "Research");
+    const shared = await createChannel(owner, [agentId, other]);
+
+    const found = await store.direct(owner, agentId);
+    createdChannelIds.push(found.id);
+
+    expect(found.id).not.toBe(shared.id);
+    expect(found.agentIds).toEqual([agentId]);
+  });
+});

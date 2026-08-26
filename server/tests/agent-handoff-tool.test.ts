@@ -35,6 +35,7 @@ describe("the handoff tool", () => {
       from: FROM,
       hasSomebodyToAsk: true,
       maxDepth: 1,
+      maxPerRun: 3,
     });
 
     expect(tool?.name).toBe(HANDOFF_TOOL);
@@ -47,6 +48,7 @@ describe("the handoff tool", () => {
         from: FROM,
         hasSomebodyToAsk: false,
         maxDepth: 1,
+        maxPerRun: 3,
       }),
     ).toBe(null);
   });
@@ -58,6 +60,7 @@ describe("the handoff tool", () => {
         from: FROM,
         hasSomebodyToAsk: true,
         maxDepth: 0,
+        maxPerRun: 3,
       }),
     ).toBe(null);
   });
@@ -83,6 +86,7 @@ describe("the handoff tool", () => {
       from: FROM,
       hasSomebodyToAsk: true,
       maxDepth: 1,
+      maxPerRun: 3,
     });
 
     const said = await tool?.execute({
@@ -117,10 +121,33 @@ describe("the handoff tool", () => {
       from: FROM,
       hasSomebodyToAsk: true,
       maxDepth: 1,
+      maxPerRun: 3,
     });
 
     await expect(tool?.execute({ bot: "researcher" })).resolves.toContain(
       "say what you are asking it to do",
     );
+  });
+});
+
+/**
+ * The other zero.
+ *
+ * A run allowed to go no Bots deep and a run allowed to address no Bots are the same deployment
+ * decision from two directions, and only one of them was closing the door. With a fan-out cap of
+ * zero the tool was offered, every call was refused, and the model told the person it had tried and
+ * failed — which reads as the deployment being broken rather than as it being switched off.
+ */
+describe("a deployment that allows no hops at all", () => {
+  test("offers nothing when the fan-out cap is zero", () => {
+    expect(
+      handoffTool({
+        desk: deskReturning(ALLOWED),
+        from: FROM,
+        hasSomebodyToAsk: true,
+        maxDepth: 1,
+        maxPerRun: 0,
+      }),
+    ).toBeNull();
   });
 });

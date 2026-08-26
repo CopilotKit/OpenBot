@@ -1,9 +1,9 @@
-import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import { Hono } from "hono";
+import type { AgentProfileStore } from "../agents/profile-store";
 import type { AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
-import type { AgentProfileStore } from "../agents/profile-store";
 import type {
   IntentRouter,
   RoutingCandidate,

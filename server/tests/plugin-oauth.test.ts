@@ -4,12 +4,12 @@ import type { CatalogueAuth } from "../src/plugins/catalogue";
 import {
   authorizationUrlFor,
   challengeFor,
+  connectedAccountsUrlFor,
   createVerifier,
   readConnectState,
   redeemAuthorizationCode,
   redirectUriFor,
   registerDynamicClient,
-  connectedAccountsUrlFor,
   sealConnectState,
 } from "../src/plugins/oauth";
 

@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { createAgentProfileStore } from "../src/agents/profile-store";
+import type { AgentActor } from "../src/agents/profile-types";
 import { createCredentialStore } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import { agentProfiles, agents, credentials, users } from "../src/db/schema";
-import { createAgentProfileStore } from "../src/agents/profile-store";
-import type { AgentActor } from "../src/agents/profile-types";
 
 /**
  * Editing a Bot's key, against a real database.

@@ -11,6 +11,7 @@ import { handoffTool } from "./agents/handoff-tool";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
+import { createAttentionStore } from "./attention/store";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
 import { startAuditRetention } from "./audit-retention";
 import { createAuth } from "./auth";
@@ -51,7 +52,6 @@ import {
   createCredentialStore,
   resolveModelApiKey,
 } from "./credentials";
-import { createAttentionStore } from "./attention/store";
 import { createDatabase } from "./db/client";
 import { createPeopleStore } from "./people/store";
 import { redirectUriFor } from "./plugins/oauth";
@@ -601,6 +601,7 @@ const copilotRuntime = mountCopilotRuntime(
         (await pluginStore.botsReachableFrom(botId).catch(() => [] as string[]))
           .length > 0,
       maxDepth: config.handoff.maxDepth,
+      maxPerRun: config.handoff.maxPerRun,
     });
     /*
      * The way to stop and ask is offered whether or not there is a Bot to hand to.

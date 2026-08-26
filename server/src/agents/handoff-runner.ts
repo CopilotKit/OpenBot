@@ -97,6 +97,14 @@ export function createHandoffRunner(options: {
   limit?: number;
   /** After how many tries a hop is given up on. Must match what `claim` is told. */
   maxAttempts?: number;
+  /**
+   * How often a claim is refreshed. Comfortably inside the lease.
+   *
+   * Injectable so the thing it protects against can be driven in a test in milliseconds rather than
+   * in minutes. What it protects against is a batch whose tail expires while its head is delivering,
+   * which is a matter of one duration outrunning another and does not care about the scale.
+   */
+  renewEveryMs?: number;
 }) {
   const {
     queue,
@@ -107,6 +115,7 @@ export function createHandoffRunner(options: {
     leaseMs = 60_000,
     limit = 5,
     maxAttempts = DEFAULT_MAX_ATTEMPTS,
+    renewEveryMs = RENEW_EVERY_MS,
   } = options;
 
   /**
@@ -148,126 +157,208 @@ export function createHandoffRunner(options: {
       });
       const report: HandoffRunReport = { delivered: [], skipped: [] };
 
-      for (const item of claimed) {
-        const work = item.payload as unknown as HandoffWork;
-        if (!work?.toBotId || !work.threadId) {
-          /*
-           * A hop nothing can be done with. Finished rather than released, because releasing it puts
-           * the same unusable row back on the queue for ever.
-           */
-          await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
-          report.skipped.push({ key: item.key, reason: "not a hop" });
-          continue;
-        }
-
-        /*
-         * A hop that has already been tried is not a fresh one, and the difference matters here more
-         * than anywhere else this queue is used: a first attempt has certainly not run the other
-         * Bot, while a second may already have run it, spent a model call and posted an answer
-         * before its owner died. Recorded rather than guessed at, so somebody reading the trail can
-         * tell a duplicate answer from a mystery.
-         */
-        if (item.attempts > 1) {
-          await recordAuditEvent(auditStore, {
-            eventType: "agent.handoff_retried",
-            targetType: "agent",
-            targetId: work.toBotId,
-            ...(work.actorId ? { actorUserId: work.actorId } : {}),
-            payload: {
-              from: work.fromBotId,
-              to: work.toBotId,
-              run: work.runId,
-              attempt: item.attempts,
-              note: "A previous attempt may already have run this Bot.",
-            },
-          });
-        }
-
-        const heartbeat = setInterval(() => {
+      /*
+       * EVERY CLAIMED HOP IS RENEWED, not just the one being delivered.
+       *
+       * A claim leases the whole batch from one moment and this loop delivers them one at a time, so
+       * a heartbeat started per item leaves the rest of the batch on a lease that is quietly running
+       * out while the first delivery runs. A delivery is minutes and the lease is one, so the tail of
+       * every batch expired, was claimed by another replica, and was delivered twice: two model
+       * calls, two answers in the person's conversation, and both replicas reporting success.
+       *
+       * Reproduced against a real PostgreSQL with two replicas, which is the only way this shows up:
+       * the item in flight is fine, and the ones waiting behind it are not.
+       */
+      const ours = new Set(claimed.map((item) => item.key));
+      const heartbeat = setInterval(() => {
+        for (const key of ours) {
           void queue
-            .renew({ kind: HANDOFF_KIND, key: item.key, owner, leaseMs })
+            .renew({ kind: HANDOFF_KIND, key, owner, leaseMs })
+            .then((kept) => {
+              // False means it went to somebody else. Dropped rather than renewed again, so the
+              // loop below knows not to spend a model call on work it no longer holds.
+              if (!kept) ours.delete(key);
+            })
             .catch(() => {});
-        }, RENEW_EVERY_MS);
+        }
+      }, renewEveryMs);
 
-        /*
-         * How long the hop took, recorded either way. A hop is a run nobody is watching, so the
-         * trail is the only place its duration is visible: "delivered in 4s" and "delivered in 4m"
-         * are the same row otherwise, and the second is what a person waiting was actually shown.
-         */
-        const startedAt = Date.now();
-        try {
-          const shown = summarise(work);
-          await delivery.deliver({
-            work,
-            message: attribute(work),
-            ...(shown ? { shown } : {}),
-            assertion: sign(work),
-          });
-          await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
-          report.delivered.push(work.toBotId);
-          await recordAuditEvent(auditStore, {
-            eventType: "agent.handoff_delivered",
-            targetType: "agent",
-            targetId: work.toBotId,
-            ...(work.actorId ? { actorUserId: work.actorId } : {}),
-            payload: {
-              from: work.fromBotId,
-              to: work.toBotId,
-              run: work.runId,
-              depth: work.depth,
-              ms: Date.now() - startedAt,
-            },
-          });
-        } catch (error) {
-          const reason =
-            error instanceof Error ? error.message : "could not be delivered";
+      try {
+        for (const item of claimed) {
+          const work = item.payload as unknown as HandoffWork;
+          if (!work?.toBotId || !work.threadId) {
+            /*
+             * A hop nothing can be done with. Finished rather than released, because releasing it puts
+             * the same unusable row back on the queue for ever.
+             */
+            await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+            report.skipped.push({ key: item.key, reason: "not a hop" });
+            continue;
+          }
+
           /*
-           * The last try, so the person is told rather than left waiting.
-           *
-           * Enqueued before the release, because the release is what makes this attempt the last
-           * one: after it the row will never be claimed again and nothing else will ever look at
-           * this hop. A person who was told their question had been handed on, and then hears
-           * nothing for ever, has no way to tell a slow Bot from a broken one.
+           * A hop that has already been tried is not a fresh one, and the difference matters here more
+           * than anywhere else this queue is used: a first attempt has certainly not run the other
+           * Bot, while a second may already have run it, spent a model call and posted an answer
+           * before its owner died. Recorded rather than guessed at, so somebody reading the trail can
+           * tell a duplicate answer from a mystery.
            */
-          if (item.attempts >= maxAttempts && !work.answerIn) {
-            await tell(work, reason).catch((failure) => {
-              // A notice that cannot be queued must not take the release with it: leaving the row
-              // claimed would be worse than a hop nobody was told about.
-              console.warn(
-                "Could not queue the notice for a hop that failed for good.",
-                failure,
-              );
+          if (item.attempts > 1) {
+            await recordAuditEvent(auditStore, {
+              eventType: "agent.handoff_retried",
+              targetType: "agent",
+              targetId: work.toBotId,
+              ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              payload: {
+                from: work.fromBotId,
+                to: work.toBotId,
+                run: work.runId,
+                attempt: item.attempts,
+                note: "A previous attempt may already have run this Bot.",
+              },
             });
           }
+
           /*
-           * Released and pushed out rather than dropped. The work still wants doing, and whatever
-           * refused it once will probably refuse it again in the next second.
+           * How long the hop took, recorded either way. A hop is a run nobody is watching, so the
+           * trail is the only place its duration is visible: "delivered in 4s" and "delivered in 4m"
+           * are the same row otherwise, and the second is what a person waiting was actually shown.
            */
-          await queue.release({
+          const startedAt = Date.now();
+          /*
+           * Still ours, ASKED OF THE DATABASE, immediately before a model call rather than after it.
+           *
+           * Consulting the heartbeat's own set would only catch a renewal that had been attempted
+           * and refused. A process paused long enough for the lease to lapse never attempted one, so
+           * its set still says the hop is his, and he delivers it on top of whoever has since taken
+           * it. The renewal is the question and the answer at once, and it puts a fresh lease under
+           * the delivery about to start, which is the moment one is most needed.
+           *
+           * Running a hop that is no longer ours is the expensive half of a duplicate: a whole agent
+           * turn, billed, ending in a second answer in somebody's conversation.
+           */
+          const stillOurs = await queue.renew({
             kind: HANDOFF_KIND,
             key: item.key,
             owner,
-            delayMs: 60_000,
-            reason,
+            leaseMs,
           });
-          report.skipped.push({ key: item.key, reason });
-          await recordAuditEvent(auditStore, {
-            eventType: "agent.handoff_failed",
-            targetType: "agent",
-            targetId: work.toBotId,
-            ...(work.actorId ? { actorUserId: work.actorId } : {}),
-            payload: {
-              from: work.fromBotId,
-              to: work.toBotId,
-              run: work.runId,
-              attempt: item.attempts,
+          if (!stillOurs) {
+            ours.delete(item.key);
+            report.skipped.push({
+              key: item.key,
+              reason: "the lease went elsewhere",
+            });
+            continue;
+          }
+
+          try {
+            const shown = summarise(work);
+            await delivery.deliver({
+              work,
+              message: attribute(work),
+              ...(shown ? { shown } : {}),
+              assertion: sign(work),
+            });
+            const kept = await queue.finish({
+              kind: HANDOFF_KIND,
+              key: item.key,
+              owner,
+            });
+            ours.delete(item.key);
+            /*
+             * `finish` answering false means the lease went elsewhere while this ran, so another
+             * replica may have delivered the same hop. The turn happened either way and the trail has
+             * to say so; what it must not say is that this replica finished the work, because it did
+             * not, and a person reading two similar answers would have nothing to tell a duplicate
+             * from a mystery.
+             */
+            if (!kept) {
+              report.skipped.push({
+                key: item.key,
+                reason: "delivered, but the lease had gone elsewhere",
+              });
+              await recordAuditEvent(auditStore, {
+                eventType: "agent.handoff_retried",
+                targetType: "agent",
+                targetId: work.toBotId,
+                ...(work.actorId ? { actorUserId: work.actorId } : {}),
+                payload: {
+                  from: work.fromBotId,
+                  to: work.toBotId,
+                  run: work.runId,
+                  attempt: item.attempts,
+                  note: "This replica delivered a hop whose lease had already gone elsewhere. Another may have delivered it too.",
+                },
+              });
+              continue;
+            }
+            report.delivered.push(work.toBotId);
+            await recordAuditEvent(auditStore, {
+              eventType: "agent.handoff_delivered",
+              targetType: "agent",
+              targetId: work.toBotId,
+              ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              payload: {
+                from: work.fromBotId,
+                to: work.toBotId,
+                run: work.runId,
+                depth: work.depth,
+                ms: Date.now() - startedAt,
+              },
+            });
+          } catch (error) {
+            const reason =
+              error instanceof Error ? error.message : "could not be delivered";
+            /*
+             * The last try, so the person is told rather than left waiting.
+             *
+             * Enqueued before the release, because the release is what makes this attempt the last
+             * one: after it the row will never be claimed again and nothing else will ever look at
+             * this hop. A person who was told their question had been handed on, and then hears
+             * nothing for ever, has no way to tell a slow Bot from a broken one.
+             */
+            if (item.attempts >= maxAttempts && !work.answerIn) {
+              await tell(work, reason).catch((failure) => {
+                // A notice that cannot be queued must not take the release with it: leaving the row
+                // claimed would be worse than a hop nobody was told about.
+                console.warn(
+                  "Could not queue the notice for a hop that failed for good.",
+                  failure,
+                );
+              });
+            }
+            /*
+             * Released and pushed out rather than dropped. The work still wants doing, and whatever
+             * refused it once will probably refuse it again in the next second.
+             */
+            await queue.release({
+              kind: HANDOFF_KIND,
+              key: item.key,
+              owner,
+              delayMs: 60_000,
               reason,
-              ms: Date.now() - startedAt,
-            },
-          });
-        } finally {
-          clearInterval(heartbeat);
+            });
+            ours.delete(item.key);
+            report.skipped.push({ key: item.key, reason });
+            await recordAuditEvent(auditStore, {
+              eventType: "agent.handoff_failed",
+              targetType: "agent",
+              targetId: work.toBotId,
+              ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              payload: {
+                from: work.fromBotId,
+                to: work.toBotId,
+                run: work.runId,
+                attempt: item.attempts,
+                reason,
+                ms: Date.now() - startedAt,
+              },
+            });
+          }
         }
+      } finally {
+        clearInterval(heartbeat);
       }
 
       return report;

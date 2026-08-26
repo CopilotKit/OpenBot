@@ -103,3 +103,128 @@ describe("adding a curated server", () => {
     expect((await request({ key: "google-drive" })).status).toBe(403);
   });
 });
+
+/**
+ * Granting one Bot to another, through the API an administrator actually has.
+ *
+ * The grant table gained a `bot` kind and the store learned it, but these two endpoints did not.
+ * Revoke rejected it outright, so enabling the capability meant writing a row by hand and revoking
+ * it was not possible at all — while the design says a revoked grant applies to the very next hop.
+ *
+ * `kind` also arrives in a JSON body, so a type annotation on it is a comment. It is checked here.
+ */
+function grantsApp(role: "admin" | "user" = "admin") {
+  const calls: Array<{ verb: string; kind: string; ref: string }> = [];
+  const store = {
+    listServers: async () => [],
+    listSkills: async () => [],
+    listGrants: async () => [],
+    grant: async (kind: string, ref: string) => {
+      calls.push({ verb: "grant", kind, ref });
+    },
+    revoke: async (kind: string, ref: string) => {
+      calls.push({ verb: "revoke", kind, ref });
+    },
+    skillOwner: async () => null,
+    agentOwner: async () => null,
+  };
+
+  const app = createApp(
+    loadConfig(testEnvironment()),
+    {
+      handler: () => new Response(null, { status: 204 }),
+      api: { getSession: async () => ({ user: ADMIN }) },
+    } as never,
+    { rolesForUser: async () => [role] },
+    ...(Array.from({ length: 11 }) as never[]),
+    store as never,
+  );
+
+  return { calls, app };
+}
+
+describe("granting one Bot to another", () => {
+  test("an administrator can grant it", async () => {
+    const { calls, app } = grantsApp();
+
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "bot",
+          ref: "knowledge",
+          agentId: "assistant",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ verb: "grant", kind: "bot", ref: "knowledge" }]);
+  });
+
+  /*
+   * The half that was missing entirely. "Nothing about who may address whom is cached in a process"
+   * is only true if there is a way to stop it.
+   */
+  test("and revoke it again", async () => {
+    const { calls, app } = grantsApp();
+
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants?kind=bot&ref=knowledge&agentId=assistant",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ verb: "revoke", kind: "bot", ref: "knowledge" }]);
+  });
+
+  /*
+   * It lets one Bot spend another's model calls, wake its computer and reach whatever that Bot may
+   * reach. That is not an instruction somebody attaches to a coworker they own.
+   */
+  test("somebody who is not an administrator cannot", async () => {
+    const { calls, app } = grantsApp("user");
+
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "bot",
+          ref: "knowledge",
+          agentId: "assistant",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error:
+        "An administrator decides which Bots may hand work to another Bot.",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  test("a kind nobody defined is refused rather than written", async () => {
+    const { calls, app } = grantsApp();
+
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "anything",
+          ref: "x",
+          agentId: "assistant",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+});

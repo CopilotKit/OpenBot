@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { AuditEvent } from "../src/audit";
 import { attentionItemsFrom } from "../src/attention/view";
+import type { AuditEvent } from "../src/audit";
 
 /**
  * The inbox must show exactly the trail rows that mean "a Bot is waiting on a person", minus what

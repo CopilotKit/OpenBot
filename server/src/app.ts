@@ -5,6 +5,8 @@ import { authoriseAgentCall } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
+import { createAttentionRoutes } from "./attention/routes";
+import type { AttentionStore } from "./attention/store";
 import {
   type AuditReader,
   type AuditStore,
@@ -30,11 +32,9 @@ import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
-import type { PolicyStore } from "./computer/policy-store";
-import { createAttentionRoutes } from "./attention/routes";
-import type { AttentionStore } from "./attention/store";
-import { createComputerRoutes } from "./computer/routes";
 import type { PageFrameStore } from "./computer/page-frames";
+import type { PolicyStore } from "./computer/policy-store";
+import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createIntelligenceClient } from "./intelligence-client";
