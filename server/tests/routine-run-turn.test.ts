@@ -1,7 +1,11 @@
 import { AbstractAgent, EventType } from "@ag-ui/client";
+import type { Message } from "@ag-ui/client";
 import { describe, expect, test } from "bun:test";
 import { EMPTY } from "rxjs";
-import { createTurnRunner } from "../src/routines/run-turn";
+import {
+  createTurnRunner,
+  sanitizeSeededHistory,
+} from "../src/routines/run-turn";
 
 /**
  * A headless turn, asserted without a gateway, without a database and without a model.
@@ -263,18 +267,23 @@ describe("a routine's headless turn", () => {
           role: "assistant",
           toolCalls: [{ id: "call_1", name: "search", args: '{"q":"x"}' }],
         },
+        // The result that answers `call_1`. Present because the row above is otherwise a dangling
+        // call, which `sanitizeSeededHistory` drops — and what this test is about is the conversion,
+        // not the sanitation, so the fixture has to be a healthy exchange.
+        { id: "m5", role: "tool", content: "found x", toolCallId: "call_1" },
       ],
     });
 
     await run();
 
     expect(agent.threadId).toBe(THREAD_ID);
-    // The four history rows, then this turn's instruction, then what the run added.
-    expect(agent.messages.map((message) => message.id).slice(0, 4)).toEqual([
+    // The five history rows, then this turn's instruction, then what the run added.
+    expect(agent.messages.map((message) => message.id).slice(0, 5)).toEqual([
       "m1",
       "m2",
       "m3",
       "m4",
+      "m5",
     ]);
     // A tool-call-only row has no content on the platform, and AG-UI requires the field.
     expect(agent.messages[3]).toMatchObject({
@@ -287,7 +296,9 @@ describe("a routine's headless turn", () => {
         },
       ],
     });
-    expect(agent.messages[4]).toMatchObject({
+    // And a result row still points at the call it answers.
+    expect(agent.messages[4]).toMatchObject({ toolCallId: "call_1" });
+    expect(agent.messages[5]).toMatchObject({
       role: "user",
       content: INSTRUCTION,
     });
@@ -299,6 +310,148 @@ describe("a routine's headless turn", () => {
     await run();
 
     expect(calls.runs[0]?.input.messages).toHaveLength(1);
+  });
+});
+
+/**
+ * The seeded history has to be a conversation the model API will ACCEPT, and a thread that was once
+ * interrupted mid-tool-call is not one.
+ *
+ * Found in production: two firings fifteen minutes apart both failed with `Tool result is missing for
+ * tool call call_TTbiXzJVNifQt8ioU1JJmj4S.` — the SAME call id both times, so it came from persisted
+ * history rather than from the live turn. One interrupted chat turn therefore poisoned every
+ * subsequent firing in that channel until the fatigue rule disabled the routine: a permanent failure
+ * out of transient damage. These are the properties that keep that from happening again.
+ */
+describe("the seeded history is sanitized of dangling tool calls", () => {
+  test("an unanswered tool call is dropped and the answered one survives, with all text intact", async () => {
+    const { run, calls } = harness({
+      history: [
+        { id: "m1", role: "user", content: "Look two things up." },
+        {
+          id: "m2",
+          role: "assistant",
+          content: "Looking them up.",
+          toolCalls: [
+            { id: "call_answered", name: "search", args: '{"q":"x"}' },
+            { id: "call_dangling", name: "search", args: '{"q":"y"}' },
+          ],
+        },
+        {
+          id: "m3",
+          role: "tool",
+          content: "found x",
+          toolCallId: "call_answered",
+        },
+        { id: "m4", role: "assistant", content: "Here is x." },
+      ],
+    });
+
+    await run();
+
+    const seeded = calls.runs[0]?.input.messages ?? [];
+    // Every message survives — nothing said out loud is thrown away — and only the call that has no
+    // answer is gone.
+    expect(seeded.map((message) => message.id).slice(0, 4)).toEqual([
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+    ]);
+    expect(seeded).toHaveLength(5);
+    expect(seeded[1]).toMatchObject({
+      content: "Looking them up.",
+      toolCalls: [
+        {
+          id: "call_answered",
+          type: "function",
+          function: { name: "search", arguments: '{"q":"x"}' },
+        },
+      ],
+    });
+    expect(seeded[2]).toMatchObject({ toolCallId: "call_answered" });
+  });
+
+  test("an assistant message whose only content was a dangling tool call is dropped entirely", async () => {
+    // An assistant row with neither text nor tool calls is itself invalid for some providers, so
+    // stripping the call is not enough: the husk has to go too.
+    const { run, calls } = harness({
+      history: [
+        { id: "m1", role: "user", content: "Look it up." },
+        {
+          id: "m2",
+          role: "assistant",
+          toolCalls: [{ id: "call_dangling", name: "search", args: "{}" }],
+        },
+        { id: "m3", role: "user", content: "Anything?" },
+      ],
+    });
+
+    await run();
+
+    const seeded = calls.runs[0]?.input.messages ?? [];
+    expect(seeded.map((message) => message.id).slice(0, 2)).toEqual([
+      "m1",
+      "m3",
+    ]);
+    expect(seeded).toHaveLength(3);
+  });
+
+  test("an orphaned tool result is dropped", async () => {
+    // The mirror-image dangle: a result whose call is not in the history at all.
+    const { run, calls } = harness({
+      history: [
+        { id: "m1", role: "user", content: "Hello." },
+        {
+          id: "m2",
+          role: "tool",
+          content: "left over",
+          toolCallId: "call_gone",
+        },
+        { id: "m3", role: "assistant", content: "Hello back." },
+      ],
+    });
+
+    await run();
+
+    const seeded = calls.runs[0]?.input.messages ?? [];
+    expect(seeded.map((message) => message.id).slice(0, 2)).toEqual([
+      "m1",
+      "m3",
+    ]);
+    expect(seeded).toHaveLength(3);
+  });
+
+  test("a clean history passes through unchanged, object for object", () => {
+    const clean = [
+      { id: "m1", role: "user", content: "Look it up." },
+      {
+        id: "m2",
+        role: "assistant",
+        content: "Looking it up.",
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "search", arguments: "{}" },
+          },
+        ],
+      },
+      { id: "m3", role: "tool", content: "found", toolCallId: "call_1" },
+      { id: "m4", role: "assistant", content: "Here it is." },
+    ] as unknown as Message[];
+    const snapshot = structuredClone(clean);
+
+    const sanitized = sanitizeSeededHistory(clean);
+
+    // Nothing reordered, nothing rewritten — and not even reallocated, so there is no room for a
+    // silent normalization to creep in on the overwhelmingly common healthy-thread path.
+    expect(sanitized).toEqual(snapshot);
+    for (const [index, message] of sanitized.entries()) {
+      expect(message).toBe(clean[index]);
+    }
+    // And the caller's array was not mutated underneath it.
+    expect(clean).toEqual(snapshot);
   });
 });
 
@@ -317,6 +470,31 @@ describe("persistedInputMessages is the subtraction", () => {
     for (const message of request?.persistedInputMessages ?? []) {
       expect(historic.has(message.id)).toBe(false);
     }
+  });
+
+  test("a history carrying a dangle persists exactly the new message, and nothing sanitized", async () => {
+    // The subtraction is over the ids the PLATFORM handed back, and sanitizing changes no id: a
+    // message the sanitizer stripped a tool call from keeps its id and so is still subtracted out,
+    // and a message it dropped was never a candidate to persist in the first place. So a dangle
+    // must not turn this firing into one that re-persists half the transcript.
+    const { run, calls } = harness({
+      history: [
+        ...THREE_ROWS,
+        {
+          id: "m4",
+          role: "assistant",
+          toolCalls: [{ id: "call_dangling", name: "search", args: "{}" }],
+        },
+      ],
+    });
+
+    await run();
+
+    const [request] = calls.runs;
+    // Three seeded rows survive the sanitation, plus this turn's instruction.
+    expect(request?.input.messages).toHaveLength(4);
+    expect(request?.persistedInputMessages).toHaveLength(1);
+    expect(request?.persistedInputMessages?.[0]?.content).toBe(INSTRUCTION);
   });
 
   test("an empty history persists everything", async () => {
