@@ -17,6 +17,7 @@
  * tries again on the next tick. So every phase below gets its own try/catch, and nothing here ever
  * lets a phase's error reach the top and take the process down.
  */
+import { randomUUID } from "node:crypto";
 import { createDatabase } from "../../server/src/db/client";
 import { createRoutineStore } from "../../server/src/routines/store";
 import {
@@ -62,12 +63,27 @@ if (!serverInternalUrl) {
   );
 }
 
-const database = createDatabase(process.env.DATABASE_URL ?? "");
+/*
+ * Refused for the same reason as the two checks above: a loop that started anyway would hand
+ * `createDatabase` an empty connection string and fail on the first query with no indication of
+ * what was actually missing.
+ */
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error(
+    "DATABASE_URL is not set, so this worker has no database to read routines from or claim them in.",
+  );
+}
+
+const database = createDatabase(databaseUrl);
 const queue = createWorkQueue(database);
 const routineStore = createRoutineStore(database);
 
-// A name for the lease, so a stuck claim can be traced back to the process that took it.
-const owner = `routines/${process.env.HOSTNAME ?? "laptop"}`;
+// A name for the lease, so a stuck claim can be traced back to the process that took it. Mirrors
+// `fire-routines.ts`: `HOSTNAME` is not set by bash, so without the random fallback every worker
+// started by `scripts/start.sh` would share the owner "routines/laptop" and `ours()` could no
+// longer tell one worker's lease apart from another's.
+const owner = `routines/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`;
 
 /**
  * Hand one opened run to the server, which owns everything about running it.
@@ -85,6 +101,9 @@ async function dispatch(routineRunId: string): Promise<void> {
       "content-type": "application/json",
     },
     body: JSON.stringify({ routineRunId }),
+    // The `for(;;)` loop below has no CronJob deadline bounding this call from outside; a wedged
+    // server must not stall the only thing firing routines.
+    signal: AbortSignal.timeout(30_000),
   });
   if (response.status !== 202) {
     throw new Error(
@@ -150,7 +169,9 @@ async function runOneTick(): Promise<void> {
 
   // The purge phase, on its own much longer cadence and its own try/catch: a purge failure this hour
   // is worth logging and retrying next hour, not a reason to stop offering and firing routines.
-  if (tick % PURGE_EVERY_N_TICKS === 0) {
+  // Also on the very first tick: a laptop restarted every 40 minutes would otherwise never survive
+  // to tick 120, and would never reap.
+  if (tick === 1 || tick % PURGE_EVERY_N_TICKS === 0) {
     try {
       const purged = await queue.purge({
         kind: ROUTINE_FIRE_KIND,

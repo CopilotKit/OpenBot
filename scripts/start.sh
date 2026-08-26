@@ -289,14 +289,25 @@ wait_for_openbot "$SERVER_PORT" server
 # matches the server's own command line with `pkill -f`: the worker loop has no HTTP endpoint of its
 # own to ask, so "is a matching process already running" is the only signal a rerun of this script
 # has for "leave it alone."
-if ! pgrep -f "bun src/index.ts" >/dev/null 2>&1; then
+#
+# Launched from `$ROOT` with `bun worker/src/index.ts`, not `cd worker && bun src/index.ts`: on a
+# Linux host, container processes are visible to `pgrep` too, and `server/Dockerfile`,
+# `agent-computer/Dockerfile`, and `supervisor/Dockerfile` all run `bun src/index.ts` as their argv.
+# The old pattern matched those containers, the guard false-positived, and the worker silently never
+# started. `bun worker/src/index.ts` matches nothing else in the repo. Running from `$ROOT` is safe:
+# relative imports resolve from the importing file, not from the process's cwd.
+if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
   WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
-  (cd worker && \
+  (cd "$ROOT" && \
     DATABASE_URL="$WORKER_DATABASE_URL" \
     SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
     WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-    bun src/index.ts >"$LOGS/worker.log" 2>&1 &)
+    bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
   info "  worker: started (routine sweep loop)"
+  sleep 1
+  if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
+    red "  worker: did not stay up, check $LOGS/worker.log"
+  fi
 else
   info "  worker: already running"
 fi
@@ -347,6 +358,7 @@ Try:
 
 Logs: $LOGS
   Routine sweep worker: $LOGS/worker.log
+Stop the routine worker: pkill -f 'bun worker/src/index.ts'
 Stop Docker services: docker compose down
   A Bot's computer is made by the supervisor rather than by compose, so it keeps running:
   docker rm -f \$(docker ps -q --filter label=openbot.supervisor=true)
