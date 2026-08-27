@@ -291,9 +291,13 @@ const iso = (value: Date | string | null): string | null =>
  * the row a per-person connector exists to be able to trust.
  *
  * `deployment` for a shared token; the asker's own id for a server reached as the person asking.
+ * `builtin` is the third case and the only one with no credential at all — the actor is not whose
+ * token was used, it is whose rows were touched.
  */
 const reachedAsFor = (entry: CatalogueEntry | null, actorId: string): string =>
-  entry?.auth.kind === "user-oauth" ? actorId : "deployment";
+  entry?.auth.kind === "user-oauth" || entry?.auth.kind === "builtin"
+    ? actorId
+    : "deployment";
 
 /**
  * Where this server actually is, when the stored row and the catalogue disagree.
@@ -501,7 +505,12 @@ export type PluginStoreOptions = {
    * reachable, which means the property most worth testing would be the one thing never tested.
    */
   callVendor?: (
-    connection: { url: string; token?: string },
+    connection: {
+      url: string;
+      token?: string;
+      actorId?: string;
+      botId?: string;
+    },
     toolName: string,
     args: Record<string, unknown>,
   ) => Promise<{ text: string; isError: boolean }>;
@@ -2802,7 +2811,12 @@ export function createPluginStore(options: PluginStoreOptions) {
         const { token } = await connectionTokenFor(row, entry, input.actorId);
         const vendor = injectedVendor ?? transportFor(entry).callTool;
         const result = await vendor(
-          { url: effectiveUrl(row, entry), token },
+          {
+            url: effectiveUrl(row, entry),
+            token,
+            actorId: input.actorId,
+            botId: input.botId,
+          },
           toolName,
           args,
         );

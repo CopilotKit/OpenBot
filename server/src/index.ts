@@ -1,7 +1,13 @@
+import {
+  CopilotKitIntelligence,
+  IntelligenceAgentRunner,
+} from "@copilotkit/runtime/v2";
 import { serve } from "bun";
+import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
 import { mintRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { createAgentProfileStore } from "./agents/profile-store";
+import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
@@ -38,18 +44,23 @@ import {
   type IdentifyActor,
   type IdentifyUser,
   mountCopilotRuntime,
+  resolveRuntimeAgents,
+  type ToolSelection,
 } from "./copilot";
 import {
   createCredentialAdminService,
   createCredentialStore,
   resolveModelApiKey,
 } from "./credentials";
-import { createAttentionStore } from "./attention/store";
 import { createDatabase } from "./db/client";
 import { createPeopleStore } from "./people/store";
+import { useRoutineTools } from "./plugins/builtin-routines";
 import { redirectUriFor } from "./plugins/oauth";
 import { createPluginStore } from "./plugins/store";
 import { grantedSkills, grantedTools } from "./plugins/tools";
+import { createTurnRunner } from "./routines/run-turn";
+import { createRoutineRunner } from "./routines/runner";
+import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
 import {
@@ -291,6 +302,19 @@ const pluginStore = createPluginStore({
   redirectUri: config.publicUrl ? redirectUriFor(config.publicUrl) : undefined,
 });
 
+/**
+ * Routines, and the one moment its tools are told what to act on.
+ *
+ * The builtin transport is reached as a MODULE — `transportFor` maps a kind to one — so there is no
+ * constructor to hand a store to and no request-time seam either: the transport registry is built at
+ * import time, long before there is a database. So the store is installed here, once, from the place
+ * that already owns building stores. Without this call the four tools are advertised and every one of
+ * them refuses, which is the honest behaviour for a deployment that never wired it, and would be a
+ * silent outage for this one.
+ */
+const routineStore = createRoutineStore(database);
+useRoutineTools(routineStore);
+
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.policy_loaded",
   targetType: "policy",
@@ -408,6 +432,231 @@ const chooseSkills = createModelCompleter({
     }),
 });
 
+/*
+ * WHY THESE ARE NAMED CONSTANTS RATHER THAN ARGUMENTS WRITTEN INLINE.
+ *
+ * Two callers now build a Bot: a person's chat request, through `mountCopilotRuntime` below, and a
+ * routine's headless turn, through `buildAgentFor` further down. They have to build the SAME Bot. A
+ * routine that resolved its tools, its run assertion or its endpoint dialling through a second,
+ * slightly different set of collaborators would be a Bot that behaves one way when a person asks and
+ * another way at three in the morning, with nothing to point at. So each of these is written once and
+ * passed to both.
+ */
+
+/** The deployment's model key, resolved per call so a credential rotated a moment ago is used next. */
+const resolveRuntimeModelApiKey = () =>
+  resolveModelApiKey({
+    encryptionKey: config.keyEncryptionKey,
+    reader: credentialStore,
+    provider: tenantPackage.model.provider,
+    keyId: tenantPackage.model.credentialSecretRef,
+    environment: process.env,
+  });
+
+// Tools run here, not in the browser. Each one still executes through the plugin store, so the
+// grant, the policy and the audit row are exactly where they were.
+const loadToolsForActor = (actorId: string) => (botId: string) =>
+  grantedTools({ store: pluginStore, botId, actorId });
+
+/*
+ * What the deployment tells a remote Bot about the run it is starting.
+ *
+ * Signed here, where the encryption key lives, so the runtime module never holds a secret. The Bot
+ * hands this back when it calls a tool, and it is where the Bot id and the person's name come
+ * from: its own token proves which agent is calling, this proves who it is calling for, and
+ * neither is read out of the request body any more.
+ */
+const signRunForActor = (actorId: string) => (botId: string, runId: string) =>
+  mintRunAssertion({ botId, actorId, runId }, config.keyEncryptionKey);
+
+/*
+ * Which vendors this deployment connects to, held by a Bot or not.
+ *
+ * A Bot holding no grants used to be told nothing about connectors at all, so it treated a
+ * connected vendor as an ordinary website and browsed to it: a Bot with no Drive grant opened
+ * Google's sign-in page and asked a person to sign in to an account the deployment had already
+ * connected. Naming them lets it say which one it has not been granted instead.
+ *
+ * Read per request rather than held, because a connector added a minute ago has to count, and
+ * failing is the same as having none: a Bot that cannot be told loses a sentence, not a run.
+ */
+const loadVendors = async () => {
+  try {
+    return (await pluginStore.listServers()).map((server) => server.id);
+  } catch {
+    return [];
+  }
+};
+
+/*
+ * How a run's tools are narrowed to the ones it is about.
+ *
+ * A model picks the right tool reliably out of about ten, and a deployment of this template
+ * clears that as soon as it connects a second vendor. Past it the wrong tool gets called, or
+ * none does and the answer comes from memory, and neither says so. So a Bot holding more than a
+ * handful is offered the tools of the skills that match the message rather than everything at
+ * once. See `plugins/selection.ts`.
+ *
+ * This narrows the offer and nothing else. What a Bot may call is the grant, checked in
+ * `callTool` with the policy and the audit row exactly as before, so every path through here can
+ * be wrong without a Bot gaining anything. That is also why every failure below is silent and
+ * lands on the whole catalogue: the narrowing is worth an accuracy point, never a capability.
+ */
+const selectionForActor = (actorId: string): ToolSelection => ({
+  loadSkills: (botId) => grantedSkills({ store: pluginStore, botId }),
+  // The deployment's own model and key, the same pair the intent router uses, so selection is
+  // never a second thing to configure. It throws on a missing key, which reads as "could not
+  // choose" and leaves the whole catalogue offered.
+  choose: chooseSkills,
+  record: async (botId, selection) => {
+    await recordAuditEvent(bootAuditStore, {
+      eventType: "mcp.tools_discovered",
+      targetType: "bot",
+      targetId: botId,
+      actorUserId: actorId,
+      payload: {
+        bot: botId,
+        reason: selection.reason,
+        granted: selection.granted,
+        offered: selection.offered.length,
+        skills: selection.skills,
+      },
+    });
+  },
+});
+
+// Every run dials the stored endpoint again, so the check that was applied when it was
+// registered has to be applied to wherever it redirects now.
+// Absent computer configuration means nothing opted into private hosts, which is the safe
+// reading and the same one `createApp` takes.
+const agentFetch = createAgentFetch({
+  allowPrivateHosts: config.computer?.allowPrivateHosts === true,
+  // Named addresses are reachable on every hop, not only the one that was registered.
+  allowedHosts: config.agentEndpointAllowedHosts,
+  // The refusal is what the run already knows; this is what the deployment knows. Written here
+  // rather than in `endpoint.ts` so that file keeps deciding and nothing else, the way the
+  // target check it reuses does.
+  onRefusal: ({ address, reason }) => {
+    void recordAuditEvent(bootAuditStore, {
+      eventType: "agent.dial_refused",
+      targetType: "agent_endpoint",
+      targetId: address,
+      payload: { address, reason },
+    }).catch((error) => {
+      // A trail that cannot be written must not take a refusal down with it: the request is
+      // already refused by the time this runs, and the alternative to a logged failure here is
+      // an unhandled rejection.
+      console.error("Could not record a refused agent dial.", error);
+    });
+  },
+});
+
+/**
+ * Who a routine acts as, resolved the way {@link resolveRequestActor} resolves it.
+ *
+ * THE ROLE IS READ, NOT ASSUMED. Which coworkers exist is decided per person and an administrator
+ * sees Bots a user does not, so hardcoding `role: "user"` here would hide an administrator's own Bots
+ * from their own routine — the routine would fail with "that Bot is no longer registered" for a Bot
+ * sitting in front of them in chat. This asks the same repository the request path asks, so a routine
+ * sees exactly the coworkers its owner sees.
+ */
+const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
+  // One person, and they are an administrator. The id stays the routine owner's rather than being
+  // rewritten to DEV_ACTOR's: in this mode they are the same person, and if they ever were not,
+  // silently borrowing the dev actor's identity would be worse than finding nothing.
+  if (config.singleUser) return { id: ownerUserId, role: DEV_ACTOR.role };
+  const roles = await roleRepository.rolesForUser(ownerUserId);
+  if (!roles.includes("admin") && !roles.includes("user")) {
+    throw new Error("A routine requires an authorized owner.");
+  }
+  return {
+    id: ownerUserId,
+    role: roles.includes("admin") ? "admin" : "user",
+  };
+};
+
+/**
+ * One Bot, built for a routine's turn, as its owner.
+ *
+ * Per turn rather than per boot, for the same reason the request path rebuilds: a Bot registered or
+ * edited since the last firing has to count, and a private coworker must be absent for everybody but
+ * its owner. No header and no request are involved — the owner is asserted by construction, from the
+ * routine row — which is the whole point of doing it here rather than adding an impersonation path to
+ * a public route.
+ */
+const buildAgentFor = async ({
+  ownerUserId,
+  agentId,
+}: {
+  ownerUserId: string;
+  agentId: string;
+}) => {
+  const actor = await actorFor(ownerUserId);
+  const agents = await resolveRuntimeAgents(
+    () => loadAgentsForActor(actor),
+    tenantPackage.model,
+    resolveRuntimeModelApiKey,
+    stallGuard,
+    loadToolsForActor(actor.id),
+    signRunForActor(actor.id),
+    config.computer ? COMPUTER_GUIDANCE : undefined,
+    loadVendors,
+    selectionForActor(actor.id),
+    agentFetch,
+  );
+  const agent = agents[agentId];
+  if (!agent) {
+    /*
+     * Named, and raised rather than swallowed. The routine's Bot was deleted, or made private by
+     * somebody else, or the owner lost the role that could see it. The runner turns this into a
+     * failed run row with this sentence on it, the first failure is said once in the channel, and
+     * the fatigue rule switches the routine off after ten — which is exactly the right handling for
+     * a routine pointed at something that is not coming back.
+     */
+    const error = new Error(
+      `That Bot is no longer registered, so this routine has nothing to run: ${agentId}.`,
+    );
+    error.name = "RoutineBotNotRegistered";
+    throw error;
+  }
+  return agent;
+};
+
+/*
+ * The pair a headless turn is driven through, built ONCE.
+ *
+ * Not the runtime's own pair: `mountCopilotRuntime` keeps its client and its runner inside
+ * `CopilotRuntime` and hands neither back, and reaching into that object would be a worse seam than
+ * building our own from the same three settings. Built from `config.runtime.intelligence`, which is
+ * required and not optional — `RuntimeCapabilities` has exactly one mode and every Intelligence field
+ * with it (`config.ts:10-22`), and `loadConfig` refuses to boot without them — so there is no
+ * not-in-Intelligence-mode branch to write here. If a second mode is ever added, THIS is the line that
+ * has to grow a guard, and the routine runner must then be left off `createApp` entirely.
+ *
+ * One runner for the process, reused across firings: it opens a socket per run and holds no idle
+ * connection, but its `threads` map is per instance, and a runner per turn would fragment the
+ * already-running check that keeps two turns off one thread. See `routines/run-turn.ts`.
+ */
+const routineIntelligence = new CopilotKitIntelligence({
+  apiUrl: config.runtime.intelligence.apiUrl,
+  wsUrl: config.runtime.intelligence.gatewayWsUrl,
+  apiKey: config.runtime.intelligence.apiKey,
+});
+const routineAgentRunner = new IntelligenceAgentRunner({
+  url: routineIntelligence.ɵgetRunnerWsUrl(),
+  authToken: routineIntelligence.ɵgetRunnerAuthToken(),
+});
+
+const routineRunner = createRoutineRunner({
+  routineStore,
+  channelStore,
+  runTurn: createTurnRunner({
+    intelligence: routineIntelligence,
+    runner: routineAgentRunner,
+    buildAgentFor,
+  }),
+});
+
 const app = createApp(
   config,
   auth,
@@ -425,111 +674,16 @@ const app = createApp(
     config,
     tenantPackage.model,
     loadAgentsForActor,
-    () =>
-      resolveModelApiKey({
-        encryptionKey: config.keyEncryptionKey,
-        reader: credentialStore,
-        provider: tenantPackage.model.provider,
-        keyId: tenantPackage.model.credentialSecretRef,
-        environment: process.env,
-      }),
+    resolveRuntimeModelApiKey,
     identifyUser,
     identifyActor,
     stallGuard,
-    // Tools run here, not in the browser. Each one still executes through the plugin store, so the
-    // grant, the policy and the audit row are exactly where they were.
-    (actorId) => (botId) =>
-      grantedTools({ store: pluginStore, botId, actorId }),
-    /*
-     * What the deployment tells a remote Bot about the run it is starting.
-     *
-     * Signed here, where the encryption key lives, so the runtime module never holds a secret. The Bot
-     * hands this back when it calls a tool, and it is where the Bot id and the person's name come
-     * from: its own token proves which agent is calling, this proves who it is calling for, and
-     * neither is read out of the request body any more.
-     */
-    (actorId) => (botId, runId) =>
-      mintRunAssertion({ botId, actorId, runId }, config.keyEncryptionKey),
+    loadToolsForActor,
+    signRunForActor,
     undefined,
-    /*
-     * Which vendors this deployment connects to, held by a Bot or not.
-     *
-     * A Bot holding no grants used to be told nothing about connectors at all, so it treated a
-     * connected vendor as an ordinary website and browsed to it: a Bot with no Drive grant opened
-     * Google's sign-in page and asked a person to sign in to an account the deployment had already
-     * connected. Naming them lets it say which one it has not been granted instead.
-     *
-     * Read per request rather than held, because a connector added a minute ago has to count, and
-     * failing is the same as having none: a Bot that cannot be told loses a sentence, not a run.
-     */
-    async () => {
-      try {
-        return (await pluginStore.listServers()).map((server) => server.id);
-      } catch {
-        return [];
-      }
-    },
-    /*
-     * How a run's tools are narrowed to the ones it is about.
-     *
-     * A model picks the right tool reliably out of about ten, and a deployment of this template
-     * clears that as soon as it connects a second vendor. Past it the wrong tool gets called, or
-     * none does and the answer comes from memory, and neither says so. So a Bot holding more than a
-     * handful is offered the tools of the skills that match the message rather than everything at
-     * once. See `plugins/selection.ts`.
-     *
-     * This narrows the offer and nothing else. What a Bot may call is the grant, checked in
-     * `callTool` with the policy and the audit row exactly as before, so every path through here can
-     * be wrong without a Bot gaining anything. That is also why every failure below is silent and
-     * lands on the whole catalogue: the narrowing is worth an accuracy point, never a capability.
-     */
-    (actorId) => ({
-      loadSkills: (botId) => grantedSkills({ store: pluginStore, botId }),
-      // The deployment's own model and key, the same pair the intent router uses, so selection is
-      // never a second thing to configure. It throws on a missing key, which reads as "could not
-      // choose" and leaves the whole catalogue offered.
-      choose: chooseSkills,
-      record: async (botId, selection) => {
-        await recordAuditEvent(bootAuditStore, {
-          eventType: "mcp.tools_discovered",
-          targetType: "bot",
-          targetId: botId,
-          actorUserId: actorId,
-          payload: {
-            bot: botId,
-            reason: selection.reason,
-            granted: selection.granted,
-            offered: selection.offered.length,
-            skills: selection.skills,
-          },
-        });
-      },
-    }),
-    // Every run dials the stored endpoint again, so the check that was applied when it was
-    // registered has to be applied to wherever it redirects now.
-    // Absent computer configuration means nothing opted into private hosts, which is the safe
-    // reading and the same one `createApp` takes.
-    createAgentFetch({
-      allowPrivateHosts: config.computer?.allowPrivateHosts === true,
-      // Named addresses are reachable on every hop, not only the one that was registered.
-      allowedHosts: config.agentEndpointAllowedHosts,
-      // The refusal is what the run already knows; this is what the deployment knows. Written here
-      // rather than in `endpoint.ts` so that file keeps deciding and nothing else, the way the
-      // target check it reuses does.
-      onRefusal: ({ address, reason }) => {
-        void recordAuditEvent(bootAuditStore, {
-          eventType: "agent.dial_refused",
-          targetType: "agent_endpoint",
-          targetId: address,
-          payload: { address, reason },
-        }).catch((error) => {
-          // A trail that cannot be written must not take a refusal down with it: the request is
-          // already refused by the time this runs, and the alternative to a logged failure here is
-          // an unhandled rejection.
-          console.error("Could not record a refused agent dial.", error);
-        });
-      },
-    }),
+    loadVendors,
+    selectionForActor,
+    agentFetch,
   ),
   // The only path to an acting call.
   computerGateway,
@@ -556,10 +710,12 @@ const app = createApp(
   identityProviderStore,
   // Chooses the coworker for an untagged message, on the deployment's own model and key.
   intentRouter,
-  // Resolutions for the attention inbox: which trail rows a person has marked handled.
-  createAttentionStore(database),
   // What a browsing turn's screen looked like when it finished, so the transcript can show it later.
   createPageFrameStore(database),
+  // What a due routine actually does: a turn, run as its owner, into the thread they will open.
+  routineRunner,
+  // A person's own standing instructions: the list, and a switch to stop one.
+  routineStore,
 );
 
 /**

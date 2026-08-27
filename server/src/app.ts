@@ -1,7 +1,7 @@
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
-import { authoriseAgentCall } from "./agents/callback-token";
+import { authoriseAgentCall, sameToken } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
@@ -31,8 +31,6 @@ import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
 import type { ComputerGateway } from "./computer/gateway";
 import type { PolicyStore } from "./computer/policy-store";
-import { createAttentionRoutes } from "./attention/routes";
-import type { AttentionStore } from "./attention/store";
 import { createComputerRoutes } from "./computer/routes";
 import type { PageFrameStore } from "./computer/page-frames";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
@@ -44,6 +42,8 @@ import type { PluginStore } from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
+import type { RoutineRunner } from "./routines/runner";
+import { createRoutineRoutes, type RoutineStore } from "./routines/routes";
 import type { PackageStatusReader } from "./tenant-package";
 
 /**
@@ -159,12 +159,6 @@ export function createApp(
    */
   intentRouter?: IntentRouter,
   /**
-   * Resolutions for the attention inbox. Built beside the other stores in index.ts. Absent leaves
-   * the inbox unmounted rather than degraded: an inbox that cannot subtract what has been handled
-   * would show everything forever, and one that cannot see the trail would show a false all-quiet.
-   */
-  attentionStore?: AttentionStore,
-  /**
    * Where the frame a browsing turn ended on is kept.
    *
    * Appended last on purpose: these are positional, so inserting one anywhere else silently
@@ -175,6 +169,27 @@ export function createApp(
    * the wrong thing.
    */
   pageFrames?: PageFrameStore,
+  /**
+   * Fires one routine run with nobody's browser open, when the worker hands one back.
+   *
+   * Appended last, like `pageFrames`: these are positional, so inserting one anywhere else silently
+   * shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the internal `/internal/routines/run` route unmounted rather than mounted and
+   * refusing every call: a deployment that never built a worker has no door for it, not a locked one.
+   */
+  routineRunner?: RoutineRunner,
+  /**
+   * A person's own standing instructions: the list, and a switch to stop one.
+   *
+   * Appended last, like `routineRunner` beside it: these are positional, so inserting one anywhere
+   * else silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the routes unmounted rather than mounted and refusing every call, the same
+   * degraded shape every other optional store here takes: a deployment that never built the store
+   * has no door for this at all, not a locked one.
+   */
+  routineStore?: RoutineStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -613,6 +628,84 @@ export function createApp(
     }
     return context.json({ package: await packageStatusReader.active() });
   });
+  /*
+   * Where the worker hands a routine run back. Not under /api and not behind requireUser: the
+   * worker is not a person with a session, it is another process on this deployment's own network,
+   * and the shared secret below is its whole credential.
+   *
+   * Mounted only when a runner was built, so a deployment that never stood up a worker has no door
+   * for this at all, rather than one that is mounted and permanently refuses.
+   */
+  if (routineRunner) {
+    app.post("/internal/routines/run", async (context) => {
+      const offered = context.req.header("authorization");
+      const expected = config.workerSharedSecret
+        ? `Bearer ${config.workerSharedSecret}`
+        : null;
+      /*
+       * The no-secret-configured case is refused here, before any comparison, and with the exact
+       * same response as a wrong secret. A deployment with no worker must not answer a guess any
+       * differently than a deployment with a worker and a wrong key would.
+       */
+      if (!expected || !offered || !sameToken(offered, expected)) {
+        /*
+         * Recorded, because this is a boundary being held and every other one here leaves a row. A
+         * worker with a stale or missing secret used to fail here in total silence: every routine
+         * stopped firing and nothing anywhere said why, the same false negative `mcp.callback_refused`
+         * exists to catch on the sibling unauthenticated boundary above.
+         *
+         * The reason is short and lives only in the row, never on the wire: the response below stays
+         * byte-identical across all three causes on purpose (see the comment above), so this is the
+         * one place the distinction is allowed to exist. The offered credential itself is never
+         * recorded, not even a fragment of it.
+         */
+        if (auditStore) {
+          try {
+            await recordAuditEvent(auditStore, {
+              eventType: "routines.dispatch_refused",
+              targetType: "worker",
+              payload: {
+                reason: !expected
+                  ? "unconfigured"
+                  : !offered
+                    ? "missing-header"
+                    : "mismatch",
+                note: "A worker's bearer secret did not check out, so no routine run was dispatched.",
+              },
+            });
+          } catch (error) {
+            // Never fatal: the 401 above is already decided and sent. A trail that is briefly
+            // unavailable is not a reason to turn a refusal into a 500.
+            console.error(
+              JSON.stringify({
+                type: "routine-dispatch-audit-write-failed",
+                error: String(error),
+              }),
+            );
+          }
+        }
+        return context.json({ error: "This endpoint is the worker's." }, 401);
+      }
+      const body = await context.req.json().catch(() => null);
+      if (
+        typeof (body as { routineRunId?: unknown } | null)?.routineRunId !==
+        "string"
+      ) {
+        return context.json({ error: "A routineRunId is required." }, 400);
+      }
+      /*
+       * Fire and answer: the consumer needs "accepted", not the outcome. The run row in
+       * `routine_runs` carries the outcome, and the consumer finishes the work item on this 202.
+       * Queue retries exist for DISPATCH failures only — a failed turn is final for this firing, and
+       * the fatigue rule owns it. `run()` never throws by contract; this swallow only guards against
+       * that contract being wrong without turning a bug there into an unhandled rejection here.
+       */
+      void routineRunner
+        .run((body as { routineRunId: string }).routineRunId)
+        .catch(() => {});
+      return context.json({ accepted: true }, 202);
+    });
+  }
   // The CopilotKit runtime, behind the same session guard as every other API route. Mounted last so
   // its own routing under /api/copilotkit cannot shadow an OpenBot route declared above.
   if (copilotHandler) {
@@ -652,23 +745,6 @@ export function createApp(
         canUseBot,
         pageFrames,
         auditReader,
-      ),
-    );
-  }
-
-  /*
-   * The attention inbox: what on the trail is waiting for a person. Needs the trail to read and the
-   * database for resolutions, and without either it is not mounted — an inbox that cannot see
-   * refusals is not a reduced feature, it is a false "all quiet".
-   */
-  if (auditReader && attentionStore) {
-    app.route(
-      "/api/attention",
-      createAttentionRoutes(
-        auditReader,
-        attentionStore,
-        requireUser,
-        canUseBot,
       ),
     );
   }
@@ -730,6 +806,10 @@ export function createApp(
       "/api/channels",
       createChannelRoutes(channelStore, requireUser, channelEvents, auditStore),
     );
+  }
+
+  if (routineStore) {
+    app.route("/api/routines", createRoutineRoutes(routineStore, requireUser));
   }
 
   if (componentStore) {

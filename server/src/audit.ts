@@ -337,6 +337,17 @@ export const auditEventTypes = [
   "bot.deleted",
   "bot.callback_token_issued",
   "bot.callback_token_revoked",
+  /*
+   * A worker's bearer secret did not check out at `/internal/routines/run`, and every routine this
+   * deployment has stopped firing until somebody notices.
+   *
+   * Recorded because that route answers a refusal with the exact same 401 for a missing header, a
+   * wrong secret, and a deployment that never configured one — deliberately, so a caller cannot tell
+   * those apart from the wire. Which means the wire is also the only place this trail could otherwise
+   * be read from, and it was told nothing. `payload.reason` carries the distinction the response
+   * withholds; the offered credential never does.
+   */
+  "routines.dispatch_refused",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

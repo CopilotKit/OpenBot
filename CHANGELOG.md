@@ -22,21 +22,26 @@ have, or one set where it cannot be sent — a provider that is not OpenAI, or a
 Responses API — stops the Bot at startup with a message naming what to change, rather than starting
 with a setting that goes nowhere.
 
-### A Bot in trouble no longer needs somebody watching
+### A Bot can be asked to do something on a schedule
 
-A boundary refusal or a stalled run was recorded and then waited for a person to happen to look — at
-the right channel, or at the audit page an administrator has and nobody else does. The trail knew;
-nobody was told.
+"Every weekday at nine, post the standup notes here" is now something a Bot can be asked rather than
+something somebody has to remember. A routine created this way runs under its own creator's grants —
+it can do exactly what they could do in chat, and nothing more — and its reply lands in the channel as
+an ordinary Bot message: it lights the unread dot the same way any other message does, and it appears
+in the transcript rather than anywhere separate. A routine that fails posts one message about its
+first failure and, after ten in a row, switches itself off with a final one rather than failing
+forever unnoticed.
 
-**Attention**, in the sidebar for everybody, shows the refusals and stalled runs nobody has handled
-yet, scoped to the Bots this person may use, with a badge saying how many. Marking one handled
-clears it for everyone and records who did; two people pressing Resolve at once is settled by the
-database rather than by luck, and the second is told who got there first.
+The deployment gains two tables, via migration `0021`.
 
-It is a view over the trail, not a second record of it. Refusals and stalls are already written
-transactionally by the gateway and the stall guard, so the inbox cannot miss one and nothing new
-runs on the action path. The only state it owns is the resolution, held beside the append-only trail
-rather than in it. The trail itself still keeps everything; the inbox is only what is open now.
+**This needs a new process.** A worker fires due routines by calling this deployment's own API server,
+and a deployment that never starts one schedules nothing — the routine sits on the Routines page with
+a next run time like any other, and nothing on the screen says a worker is missing. `WORKER_SHARED_SECRET`
+is the credential the worker presents; a deployment without it configured refuses every handoff rather
+than accepting one it cannot attribute. `scripts/start.sh` runs the worker locally; the Helm chart
+turns it on with `routines.enabled` and takes the secret as `secrets.workerSharedSecret`. No new port
+is opened for any of this — the worker only ever calls out to the server it already trusts.
+
 ### A channel a Bot has spoken in unseen shows a dot
 
 The sidebar marks a channel when a Bot has said something since you last had it open: a dot beside
