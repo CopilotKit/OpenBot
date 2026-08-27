@@ -110,6 +110,10 @@ docker run -p 3001:3001 --env-file .env \
 Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
 [docs/deployment.md](docs/deployment.md) has the minimum sizes, the platform notes, and how it behaves behind more than one replica.
 
+## ☁️ One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/OpenBot/)
+
 ## Try it
 
 - Open `/bot` and ask: `Open news.ycombinator.com and tell me the top story.`
