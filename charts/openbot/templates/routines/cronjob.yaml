@@ -18,7 +18,14 @@ metadata:
   labels:
 {{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
 spec:
-  schedule: {{ (.Values.routines).schedule | default "* * * * *" | quote }}
+  {{- $schedule := "*/5 * * * *" -}}
+  {{- if not (kindIs "invalid" (.Values.routines).schedule) -}}
+  {{- $schedule = (.Values.routines).schedule -}}
+  {{- end }}
+  # The fallback matches values.yaml, and is only reached on an upgrade that reuses values from
+  # before this key existed. It said `* * * * *` for one commit, which is five times more often than
+  # anything documents.
+  schedule: {{ $schedule | quote }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3

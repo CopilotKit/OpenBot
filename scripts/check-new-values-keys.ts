@@ -84,11 +84,25 @@ const now = paths(parse(await Bun.file("charts/openbot/values.yaml").text()));
  * test twice. The parent is the harsher of the two, because that is what --reuse-values actually
  * leaves absent.
  */
+/**
+ * The parent of `a.b` is `a`; a top-level key has none.
+ *
+ * `slice(0, lastIndexOf("."))` looks right and is not: `lastIndexOf` answers -1 for a dotless key,
+ * and `slice(0, -1)` chops the last character. `routines` became `routine`, which is in nobody's
+ * value file, so every NEW TOP-LEVEL KEY was filtered out of the check — precisely the case that
+ * caused this script to be written.
+ */
+function parentOf(path: string): string | null {
+  const cut = path.lastIndexOf(".");
+  return cut === -1 ? null : path.slice(0, cut);
+}
+
 const added = now
   .filter((path) => !before.has(path))
   .filter((path) => {
-    const parent = path.slice(0, path.lastIndexOf("."));
-    return parent === "" || before.has(parent);
+    const parent = parentOf(path);
+    // A key whose parent is also new is covered by nulling the parent, which is the harsher test.
+    return parent === null || before.has(parent);
   });
 
 if (added.length === 0) {
@@ -194,5 +208,37 @@ for (const path of added) {
     continue;
   }
   console.log(`renders without ${path}`);
+}
+
+/*
+ * And that a value of ZERO is rendered as zero.
+ *
+ * `| default` substitutes on empty, and in Go templates zero IS empty, so a guard added for the
+ * absent case silently rewrote `maxDepth: 0` to `1` — switching a capability back on for a
+ * deployment that had switched it off. A nil-guard that defeats an off switch is worse than the nil
+ * dereference it was added for, and it renders perfectly, so nothing above would have caught it.
+ */
+const offSwitches: Array<{ path: string; variable: string }> = [
+  { path: "config.handoff.maxDepth", variable: "BOT_HANDOFF_MAX_DEPTH" },
+  { path: "config.handoff.maxPerRun", variable: "BOT_HANDOFF_MAX_PER_RUN" },
+];
+for (const { path, variable } of offSwitches) {
+  const attempt = render(["--set", `${path}=0`]);
+  if (!attempt.ok) {
+    console.error(`::error::The chart failed to render with ${path}=0.`);
+    bad += 1;
+    continue;
+  }
+  const lines = attempt.out.split("\n");
+  const at = lines.findIndex((line) => line.includes(`name: ${variable}`));
+  const value = at === -1 ? undefined : lines[at + 1]?.trim();
+  if (value !== 'value: "0"') {
+    console.error(
+      `::error::Setting ${path}=0 rendered ${value ?? "nothing"} rather than value: "0". A zero is an off switch, not an absent value.`,
+    );
+    bad += 1;
+    continue;
+  }
+  console.log(`${path}=0 stays zero`);
 }
 process.exit(bad === 0 ? 0 : 1);

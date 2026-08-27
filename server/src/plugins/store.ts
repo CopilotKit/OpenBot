@@ -2302,12 +2302,30 @@ export function createPluginStore(options: PluginStoreOptions) {
      * and a grant revoked a minute ago has to apply to the next hop rather than after a restart. It
      * is a single indexed read, which is the right price for that.
      */
+    /**
+     * The Bots this one may hand work to, and can actually reach.
+     *
+     * FILTERED AT READ TIME, not only when the grant is made. Refusing a new grant to a Bot that
+     * runs at its own endpoint stops one being created; it does nothing about the ones already
+     * there, or about a Bot that was built in when it was granted and was pointed at an endpoint
+     * afterwards. Those rows read as configured and are inert, which is the shape of thing an
+     * administrator debugs for an afternoon: the grant is right there in the table and no hop ever
+     * happens.
+     *
+     * The asking side is the one that matters here — a Bot at an endpoint runs its own loop and is
+     * never offered this tool — so it is the grantee, `agent_id`, that is checked.
+     */
     async botsReachableFrom(agentId: string): Promise<string[]> {
       const rows = await database
         .select({ ref: pluginGrants.ref })
         .from(pluginGrants)
+        .innerJoin(agents, eq(agents.id, pluginGrants.agentId))
         .where(
-          and(eq(pluginGrants.kind, "bot"), eq(pluginGrants.agentId, agentId)),
+          and(
+            eq(pluginGrants.kind, "bot"),
+            eq(pluginGrants.agentId, agentId),
+            eq(agents.type, "built_in"),
+          ),
         );
       return rows.map((row) => row.ref);
     },

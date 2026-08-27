@@ -14,6 +14,7 @@
 import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
 import type { Observable } from "rxjs";
 import type { HandoffDelivery } from "./handoff-runner";
+import { textOf } from "./message-text";
 
 /** Whatever runs an agent against a thread and records what it did. */
 export type ThreadRunner = {
@@ -375,36 +376,8 @@ function conversationOnly(messages: readonly unknown[]): readonly unknown[] {
     if (role !== "user" && role !== "assistant") return false;
     // An assistant message with nothing in it is a tool call and nothing else. Keeping it would put
     // back the half of the pair that has no counterpart, which is the failure being fixed.
-    return said(content).length > 0;
+    return textOf(content).length > 0;
   });
-}
-
-/**
- * What a message actually says, whichever shape it says it in.
- *
- * A MESSAGE IS NOT ALWAYS A STRING. AG-UI's user message takes `string | InputContent[]`, the
- * platform types a thread message's content as unknown "structured AG-UI content", and this app's
- * own transcript already reads the array form. Nothing in this deployment writes one yet, which is
- * exactly why testing for `typeof content === "string"` looked complete: the day attachments ship,
- * every message carrying one would vanish from the conversation handed across a hop, silently, and
- * the addressed Bot would answer a question with pieces missing and no sign that anything was
- * dropped.
- *
- * Only the text is taken. A part this does not understand contributes nothing rather than being
- * guessed at, but a message is kept as long as SOMETHING in it reads as text.
- */
-function said(content: unknown): string {
-  if (typeof content === "string") return content.trim();
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) => {
-      if (typeof part === "string") return part;
-      if (typeof part !== "object" || part === null) return "";
-      const { text } = part as { text?: unknown };
-      return typeof text === "string" ? text : "";
-    })
-    .join(" ")
-    .trim();
 }
 
 /**

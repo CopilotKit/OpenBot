@@ -40,13 +40,19 @@ spec:
         
         Comfortably longer than a real sweep, which claims twenty computers and suspends them.
 
-        Defaulted, because this key is newer than the culler around it. Under
+        Defaulted through `kindIs "invalid"` rather than `| default`, because sprig substitutes on
+        EMPTY and zero is empty — the same trap that silently defeated the handoff off-switch one
+        file over. Here it is defaulted because this key is newer than the culler around it. Under
         `helm upgrade --reuse-values` an existing release carries `culler` without it, so the
         template still renders and emits an empty scalar: null, which Kubernetes reads as unset. The
         ceiling described above would then silently not exist, on exactly the deployments that have
         been running long enough to have a wedged sweep.
       */}}
-      activeDeadlineSeconds: {{ .Values.computers.sandbox.culler.activeDeadlineSeconds | default 600 }}
+      {{- $deadline := 600 -}}
+      {{- if not (kindIs "invalid" .Values.computers.sandbox.culler.activeDeadlineSeconds) -}}
+      {{- $deadline = .Values.computers.sandbox.culler.activeDeadlineSeconds -}}
+      {{- end }}
+      activeDeadlineSeconds: {{ $deadline }}
       template:
         metadata:
           labels:

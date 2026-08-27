@@ -3,6 +3,7 @@ import {
   askTheirOwnPerson,
   ESCALATE_TOOL,
   escalationTool,
+  PUT_TO,
 } from "../src/agents/escalation";
 import type { AuditEventInput } from "../src/audit";
 
@@ -96,5 +97,19 @@ describe("asking a person", () => {
     const said = await tool.execute({});
 
     expect(said).toContain("say what you need");
+  });
+});
+
+/*
+ * Same property, other tool: the transcript reads the first words of this to decide whether the
+ * question reached anybody.
+ */
+describe("what a routed question answers with", () => {
+  test("starts with the marker the transcript matches on", async () => {
+    const tool = escalationTool({ from: FROM, route: askTheirOwnPerson });
+
+    const said = await tool.execute({ question: "which account?" });
+
+    expect(said as string).toStartWith(PUT_TO);
   });
 });

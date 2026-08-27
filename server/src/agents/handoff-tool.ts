@@ -11,23 +11,15 @@
  * what shape of answer was wanted, and when it guesses wrong it does not fail, it returns something
  * else confidently. Naming the parts costs the asking model a little effort and removes most of that.
  */
+
 import { z } from "zod";
+import { HANDED_OVER } from "../../../shared/handoff-markers";
 import type { GrantedTool } from "../plugins/tools";
 import type { RunAssertion } from "./callback-token";
 import type { HandoffDesk } from "./handoff";
 
 /** What the model is offered. One name, so a transcript can find every hop by searching for it. */
 export const HANDOFF_TOOL = "message_bot";
-
-/**
- * How this answers when a hop was accepted.
- *
- * A CONSTANT BECAUSE THE TRANSCRIPT READS IT. A server-side tool's result reaches the surface as
- * text meant for a model, so the only thing the renderer has to tell an accepted hop from a refused
- * one is the wording. That is not a good contract; naming it in one place at least stops the two
- * drifting apart silently, which they did once already and drew every success as Blocked.
- */
-export const HANDED_OVER = "Handed to ";
 
 const parameters = z.object({
   bot: z
@@ -132,3 +124,6 @@ export function handoffTool(options: {
     },
   };
 }
+
+/** Re-exported so callers of this module do not need to know where it is declared. */
+export { HANDED_OVER };

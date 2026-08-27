@@ -180,17 +180,28 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   Always set, so a deployment that has switched this off says so rather than relying on the image's
   default staying what it is today.
 
-  PARENTHESISED AND DEFAULTED, because `config.handoff` is a key this chart did not have before.
+  ABSENT AND ZERO ARE DIFFERENT, which is why this is not `| default`. Sprig's `default` substitutes
+  whenever a value is EMPTY, and zero is empty: `--set config.handoff.maxDepth=0` rendered `"1"` and
+  silently switched the capability back on for a deployment that had switched it off. A guard that
+  defeats the off switch is worse than the nil dereference it was added for. `kindIs "invalid"` asks
+  the question actually being asked, which is whether anybody said anything at all.
+
+  PARENTHESISED, because `config.handoff` is a key this chart did not have before.
   `helm upgrade --reuse-values` takes the previous release's computed values instead of merging the
   new chart's defaults, so on every existing deployment this map is simply absent. Reached with a
   bare `.Values.config.handoff.maxDepth` that is a nil dereference, and it fails the WHOLE render:
   this helper is included by the server deployment, so the upgrade does not lose the handoff
   feature, it does not install at all.
 */}}
+{{- $handoff := .Values.config.handoff | default dict -}}
+{{- $maxDepth := 1 -}}
+{{- if not (kindIs "invalid" $handoff.maxDepth) -}}{{- $maxDepth = $handoff.maxDepth -}}{{- end -}}
+{{- $maxPerRun := 3 -}}
+{{- if not (kindIs "invalid" $handoff.maxPerRun) -}}{{- $maxPerRun = $handoff.maxPerRun -}}{{- end }}
 - name: BOT_HANDOFF_MAX_DEPTH
-  value: {{ (.Values.config.handoff).maxDepth | default 1 | quote }}
+  value: {{ $maxDepth | quote }}
 - name: BOT_HANDOFF_MAX_PER_RUN
-  value: {{ (.Values.config.handoff).maxPerRun | default 3 | quote }}
+  value: {{ $maxPerRun | quote }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL
@@ -421,3 +432,4 @@ than anything that names the cause.
 {{- define "openbot.automountToken" -}}
 {{- or .Values.serviceAccount.automountServiceAccountToken (eq .Values.computers.mode "sandbox") -}}
 {{- end -}}
+

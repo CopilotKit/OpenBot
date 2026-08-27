@@ -27,14 +27,20 @@ const docs = await Bun.file("docs/configuration.md").text();
 /** What `handoffCaps` falls back to with nothing in the environment. */
 const code = loadConfig(testEnvironment()).handoff;
 
-/** The `| default N` a template falls back to when the values key is absent entirely. */
+/**
+ * The fallback a template uses when the values key is absent entirely.
+ *
+ * Read out of the `{{- $maxDepth := N -}}` assignment rather than a `| default`, because `default`
+ * substitutes on EMPTY and zero is empty: it silently rendered 1 for a deployment that had set the
+ * cap to 0 to switch the capability off. Matching on the assignment also means this test fails if
+ * somebody puts `| default` back.
+ */
 function helperDefault(variable: string): number {
-  const match = helpers.match(
-    new RegExp(`name: ${variable}[\\s\\S]{0,120}?default (\\d+)`),
-  );
+  const assigned = variable.includes("MAX_DEPTH") ? "maxDepth" : "maxPerRun";
+  const match = helpers.match(new RegExp(`\\$${assigned} := (\\d+)`));
   if (!match?.[1]) {
     throw new Error(
-      `No \`| default\` found for ${variable} in _helpers.tpl. Without one, an upgrade that reuses values renders it empty.`,
+      `No fallback found for ${variable} in _helpers.tpl. Without one, an upgrade that reuses values fails to render at all.`,
     );
   }
   return Number(match[1]);

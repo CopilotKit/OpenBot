@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { PUT_TO as SERVER_PUT_TO } from "../../server/src/agents/escalation";
-import { HANDED_OVER as SERVER_HANDED_OVER } from "../../server/src/agents/handoff-tool";
 import { HANDED_OVER, PUT_TO } from "../src/lib/copilot/markers";
 import {
   asText,
@@ -101,15 +99,13 @@ describe("telling an accepted hop from a refused one", () => {
  * The two ends of a phrase that crosses a network.
  *
  * The server writes the sentence; the transcript reads its first words to decide whether to draw a
- * hop or a boundary. Nothing held them together, so a rewording on one side was invisible until
- * somebody looked at a conversation.
+ * hop or a boundary. There is one declaration now, in `shared/handoff-markers.ts`, so the two cannot
+ * disagree — which is why there is no longer a test that they match. What is still worth holding is
+ * how the transcript reads a result, which is what the rest of this block does. That the SENTENCES
+ * still begin with these markers is asserted where the sentences are written, in
+ * `server/tests/agent-handoff-tool.test.ts` and `agent-escalation.test.ts`.
  */
 describe("the markers the server and the transcript both use", () => {
-  test("the browser's copy of each still matches the server's", () => {
-    expect(HANDED_OVER).toBe(SERVER_HANDED_OVER);
-    expect(PUT_TO).toBe(SERVER_PUT_TO);
-  });
-
   /*
    * A result that is neither a string nor absent used to mean success to one renderer and a refusal
    * to the other, for the same situation. Anything unrecognisable is not success: a boundary that

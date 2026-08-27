@@ -17,23 +17,15 @@
  * rota, a duty desk, a queue somebody works through in the morning. That is a route this deployment
  * hands in, not a channel post written into the tool.
  */
+
 import { z } from "zod";
+import { PUT_TO } from "../../../shared/handoff-markers";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import type { GrantedTool } from "../plugins/tools";
 import type { RunAssertion } from "./callback-token";
 
 /** What the model is offered. One name, so a transcript can find every escalation by searching. */
 export const ESCALATE_TOOL = "ask_person";
-
-/**
- * How this answers when the question was routed.
- *
- * A CONSTANT BECAUSE THE TRANSCRIPT READS IT. A server-side tool's result reaches the surface as
- * text meant for a model, so the only thing the renderer has to tell a question that reached
- * somebody from one that reached nobody is the wording. Naming it here at least stops the two
- * drifting apart in silence, which the handoff beside this did once already.
- */
-export const PUT_TO = "Put to ";
 
 /**
  * Where a question for a person goes.
@@ -150,3 +142,6 @@ export function escalationTool(options: {
     },
   };
 }
+
+/** Re-exported so callers of this module do not need to know where it is declared. */
+export { PUT_TO };

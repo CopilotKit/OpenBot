@@ -640,6 +640,11 @@ const buildAgentFor = async ({
     loadVendors,
     selectionForActor(actor.id),
     agentFetch,
+    undefined,
+    // Only the Bot this routine names. Same reason as the hop delivery: the roster is still read in
+    // full so a Bot this owner cannot see is still absent, but the other Bots are neither built nor
+    // asked what they hold.
+    agentId,
   );
   const agent = agents[agentId];
   if (!agent) {

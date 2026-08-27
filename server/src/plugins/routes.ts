@@ -653,6 +653,16 @@ export function createPluginRoutes(
     kind: PluginKind,
     ref: string,
     agentId: string,
+    /**
+     * Which way this is going, because they are not symmetric.
+     *
+     * TAKING SOMETHING AWAY IS ALWAYS ALLOWED. The checks below decide whether a grant should exist,
+     * and applying them to a revoke turns every one of them into a trap: a `bot` grant made before
+     * the grantee moved to its own endpoint — or before this check existed — could never be removed,
+     * because the reason it is wrong is the same reason the revoke was refused. An administrator
+     * looking at a dead row in the UI would have had no way to delete it.
+     */
+    intent: "grant" | "revoke",
   ): Promise<string | null> {
     /*
      * A grant that could never do anything is refused rather than stored.
@@ -667,7 +677,7 @@ export function createPluginRoutes(
      * Checked before the role, because it is a fact about the Bot rather than about who is asking:
      * an administrator should be told this too.
      */
-    if (kind === "bot") {
+    if (kind === "bot" && intent === "grant") {
       const runsHere = await store.agentRunsHere(agentId);
       if (runsHere === undefined) return "There is no such Bot.";
       if (!runsHere) {
@@ -728,6 +738,7 @@ export function createPluginRoutes(
       kind,
       body.ref,
       body.agentId,
+      "grant",
     );
     if (refusal) return context.json({ error: refusal }, 403);
 
@@ -745,7 +756,13 @@ export function createPluginRoutes(
         400,
       );
     }
-    const refusal = await enablementRefusal(context, kind, ref, agentId);
+    const refusal = await enablementRefusal(
+      context,
+      kind,
+      ref,
+      agentId,
+      "revoke",
+    );
     if (refusal) return context.json({ error: refusal }, 403);
 
     await store.revoke(kind, ref, agentId, actorEmail(context));

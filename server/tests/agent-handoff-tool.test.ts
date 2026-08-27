@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { HandoffDesk, HandoffOutcome } from "../src/agents/handoff";
-import { HANDOFF_TOOL, handoffTool } from "../src/agents/handoff-tool";
+import {
+  HANDED_OVER,
+  HANDOFF_TOOL,
+  handoffTool,
+} from "../src/agents/handoff-tool";
 
 /**
  * What the model is offered, and what it is told when it is refused.
@@ -149,5 +153,30 @@ describe("a deployment that allows no hops at all", () => {
         maxPerRun: 0,
       }),
     ).toBeNull();
+  });
+});
+
+/**
+ * The sentence and the marker, held together.
+ *
+ * The transcript decides whether to draw a hop or a boundary by reading the first words of this
+ * result. With one declaration the two sides cannot disagree about the PHRASE; what they can still
+ * disagree about is whether the sentence actually starts with it, which is what shipped once and
+ * drew every accepted hop as Blocked.
+ */
+describe("what an accepted hop answers with", () => {
+  test("starts with the marker the transcript matches on", async () => {
+    const tool = handoffTool({
+      desk: deskReturning(ALLOWED),
+      from: FROM,
+      hasSomebodyToAsk: true,
+      maxDepth: 1,
+      maxPerRun: 3,
+    });
+
+    const said = await tool?.execute({ bot: "researcher", task: "find it" });
+
+    expect(typeof said).toBe("string");
+    expect(said as string).toStartWith(HANDED_OVER);
   });
 });
