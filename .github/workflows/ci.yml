@@ -156,6 +156,14 @@ jobs:
             --set networkPolicy.enabled=true \
             --set computers.extraEnv[0].name=EGRESS_PROXY_DEFAULT \
             --set-string computers.extraEnv[0].value=http://proxy.internal:3128
+          # A warm pool nothing claims from. Only meaningful where the target asks for per-Bot
+          # computers; on the others the mode is not sandbox and the refusal is not armed.
+          if grep -qE '^ *mode: sandbox' charts/openbot/ci/${{ matrix.target }}-values.yaml; then
+            refuses "a warm pool no Bot can be handed a computer from" \
+              --set computers.sandbox.warmPool.enabled=true
+          else
+            echo "skipped: the warm-pool refusal is only armed for computers.mode: sandbox"
+          fi
 
   test:
     name: tests

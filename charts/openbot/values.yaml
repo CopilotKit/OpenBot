@@ -227,6 +227,11 @@ computers:
     requireController: true
     namespace: ""
     # Pre-warmed sandboxes, so a Bot's first action after lunch does not wait for Chromium to boot.
+    #
+    # Not usable yet, and the chart refuses to render with it on. A Bot reaches a warm sandbox by
+    # claiming it, and nothing in the server creates a SandboxClaim: `locate` posts a new Sandbox and
+    # waits for it, pool or no pool. Left here, with the template and the RBAC beside it, because the
+    # missing half is the claim rather than any of this.
     warmPool:
       enabled: false
       replicas: 2
