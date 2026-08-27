@@ -267,6 +267,39 @@ if [ "$SECRETS_ROTATED" = "true" ]; then
   pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
   sleep 1
 fi
+#
+# A server that answers as OpenBot can still be one no worker can hand a routine to. The worker
+# below is started unconditionally with this run's WORKER_SHARED_SECRET, and every dispatch it makes
+# is one POST to this server's /internal/routines/run — a door that a server started from an older
+# checkout does not have (404), and that a server started before this secret existed in its
+# environment holds shut (401, `workerSharedSecret` undefined or different). Either way routines
+# never fire, and nothing at start time says why.
+#
+# So before keeping a running server, ask it the one thing only a compatible one answers well: POST
+# the handoff route with this run's secret and a deliberately empty body. In server/src/app.ts the
+# secret is checked before the body is parsed, so a server holding this same secret rejects the
+# empty body with 400 — the healthy answer. 401 means it does not hold this secret; 404 means it
+# predates the route. Both are cured by a restart into this run's environment, so fall through to
+# the launch below. Anything else — including a probe that could not connect at all — keeps the
+# philosophy of leaving an answering server alone.
+if identifies_as_openbot "$SERVER_PORT" server; then
+  HANDOFF_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
+    -X POST "http://localhost:$SERVER_PORT/internal/routines/run" \
+    -H "Authorization: Bearer $WORKER_SHARED_SECRET" \
+    -H "Content-Type: application/json" --data '{}' 2>/dev/null || true)"
+  case "$HANDOFF_STATUS" in
+    401)
+      info "  server: up, but refuses the worker's secret (401), so it is restarted to pick it up"
+      pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+      sleep 1
+      ;;
+    404)
+      info "  server: up, but has no /internal/routines/run (404: an older checkout), so it is restarted"
+      pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+      sleep 1
+      ;;
+  esac
+fi
 if ! identifies_as_openbot "$SERVER_PORT" server; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
     (cd server && PORT="$SERVER_PORT" \
