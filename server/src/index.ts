@@ -344,6 +344,12 @@ const handoffDesk = createHandoffDesk({
         // would let a Bot address one nobody gave it because the database blinked.
         .catch(() => [] as string[])
     ).includes(toBotId),
+  /*
+   * Deferred rather than passed directly, because `actorFor` is defined further down with the rest
+   * of the run-building collaborators. It is only ever called during a hop, long after this module
+   * has finished loading.
+   */
+  actorFor: (userId) => actorFor(userId),
   auditStore: bootAuditStore,
   caps: config.handoff,
 });
@@ -810,7 +816,14 @@ const copilotRuntime = mountCopilotRuntime(
  * Only where the capability is switched on. A deployment with a depth cap of zero never has a hop to
  * deliver, and a loop polling for work that cannot exist is a query a second for nothing.
  */
-if (config.handoff.maxDepth > 0) {
+/*
+ * Both zeros switch the capability off, so both have to stop the loop.
+ *
+ * Gated on the depth alone, a deployment that set the fan-out cap to zero still swept every two
+ * seconds for hops that can never be offered: roughly forty thousand claim transactions per replica
+ * per day, for a feature it had turned off.
+ */
+if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
     owner: `handoff/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
@@ -845,8 +858,10 @@ if (config.handoff.maxDepth > 0) {
         // The conversation this person already has with that Bot, made only if they have not had
         // one. See ChannelStore.direct: a hop is retried, and creating here left an empty channel
         // behind for every attempt.
+        // The person's own role, for the same reason the desk resolves it: an administrator sees Bots
+        // a user does not, and a conversation with one of those is still theirs.
         const channel = await channelStore.direct(
-          { id: input.actorId, role: "user" },
+          await actorFor(input.actorId),
           input.botId,
         );
         return { threadId: channel.threadId, channelId: channel.id };
@@ -855,7 +870,7 @@ if (config.handoff.maxDepth > 0) {
       // than a browser. See ChannelStore.recordActivity.
       announce: async (input) =>
         channelStore.recordActivity(
-          { id: input.actorId, role: "user" },
+          await actorFor(input.actorId),
           input.channelId,
           { text: input.text, agentId: input.agentId, at: new Date() },
         ),

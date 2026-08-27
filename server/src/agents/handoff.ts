@@ -20,6 +20,7 @@ import { type AuditStore, recordAuditEvent } from "../audit";
 import type { WorkQueue } from "../work/queue";
 import type { RunAssertion } from "./callback-token";
 import type { AgentProfileStore } from "./profile-store";
+import type { AgentActor } from "./profile-types";
 
 /** The kind of work a hop is, on the shared queue. */
 export const HANDOFF_KIND = "bot.message";
@@ -78,10 +79,18 @@ export function createHandoffDesk(options: {
   profiles: AgentProfileStore;
   /** Whether the asking Bot has been granted the Bot it is addressing. Read per hop, never cached. */
   mayAddress: (fromBotId: string, toBotId: string) => Promise<boolean>;
+  /**
+   * Who the person is, as the roster is decided for them.
+   *
+   * A seam rather than a hardcoded `role: "user"`, because an administrator sees Bots a user does
+   * not: assumed, an administrator's hop to a Bot they can see and chat with was refused as "no
+   * such Bot". Resolved per hop, so a role granted or taken away a minute ago counts.
+   */
+  actorFor: (userId: string) => Promise<AgentActor>;
   auditStore: AuditStore;
   caps: HandoffCaps;
 }): HandoffDesk {
-  const { queue, profiles, mayAddress, auditStore, caps } = options;
+  const { queue, profiles, mayAddress, actorFor, auditStore, caps } = options;
 
   /** Said once, so the trail carries the same words the Bot was given. */
   async function refuse(
@@ -163,8 +172,13 @@ export function createHandoffDesk(options: {
        *
        * A Bot must not be able to reach a Bot its person cannot, or this becomes a way around agent
        * visibility: the model would name anything and the deployment would go and find it.
+       *
+       * THE ROLE IS ASKED FOR, NOT ASSUMED. Which coworkers exist is decided per person, and an
+       * administrator sees Bots a user does not. Hardcoded to `user`, an administrator's own hop to
+       * a Bot they can see and chat with in the UI was refused as "no such Bot" — the same failure
+       * `index.ts` warns about for a routine's owner, one file over.
        */
-      const roster = await profiles.list({ id: from.actorId, role: "user" });
+      const roster = await profiles.list(await actorFor(from.actorId));
       const wanted = target.trim().toLowerCase();
       /*
        * An id is exact and a name is not, so an id wins outright.
@@ -199,7 +213,10 @@ export function createHandoffDesk(options: {
             .join(", ")}. Ask again using the one you mean.`,
         );
       }
-      const found = byId ?? byName[0];
+      // `reachable`, not `byName`: the same list the ambiguity check one line above counted. The
+      // roster already filters hidden and deleted today, so these agree — but a fallback that could
+      // disagree with the check guarding it is one refactor away from being wrong.
+      const found = byId ?? reachable[0];
 
       /*
        * The same answer whether it does not exist or is not theirs to see.
@@ -244,8 +261,19 @@ export function createHandoffDesk(options: {
        * envelope rather than from a fresh id: the same request, sent twice in one run, is one hop.
        * That is the honest reading of a model repeating itself, and the alternative is at-least-once
        * with no ceiling.
+       *
+       * THE RUN IS HASHED, NOT INTERPOLATED, because `runId` arrives on the request and is a plain
+       * string this deployment never constrains. Written in raw it decides both halves of the key:
+       * a run calling itself `notice` gave the fan-out prefix `notice:`, which is what every failure
+       * notice in the deployment is keyed under, so one turn's budget of three was spent by other
+       * people's dead hops. Hashing removes every character a caller chooses from the prefix while
+       * keeping it stable for the run, which is all the cap needs.
        */
-      const key = `${from.runId}:${createHash("sha256")
+      const runPrefix = `hop:${createHash("sha256")
+        .update(`${from.actorId}\u0000${from.runId}`)
+        .digest("hex")
+        .slice(0, 32)}:`;
+      const key = `${runPrefix}${createHash("sha256")
         .update(
           JSON.stringify([
             found.id,
@@ -265,7 +293,7 @@ export function createHandoffDesk(options: {
          * several pods is exactly what this exists to bound: every hop this run has offered is a row
          * under its own prefix, so the rows are the count.
          */
-        atMost: { keyPrefix: `${from.runId}:`, max: caps.maxPerRun },
+        atMost: { keyPrefix: runPrefix, max: caps.maxPerRun },
         payload: {
           fromBotId: from.botId,
           toBotId: found.id,
@@ -300,13 +328,29 @@ export function createHandoffDesk(options: {
         },
       });
 
-      if (!offered) {
+      if (offered === "refused") {
         return refuse(
           from,
           target,
           "fanout_cap",
           `This turn has already asked ${caps.maxPerRun} ${caps.maxPerRun === 1 ? "Bot" : "Bots"}, which is as many as this deployment allows. Answer with what you have, or ask the person.`,
         );
+      }
+
+      /*
+       * The same ask again, which is not a second ask.
+       *
+       * `offer` is idempotent on the key, so a model repeating itself inside one run leaves one hop
+       * — which is the intent. What must not happen is telling it "handed over" a second time: the
+       * row it names may already have been delivered and finished, in which case nothing is queued
+       * and nobody is going to run it, and the Bot has just promised the person an answer twice. Said
+       * plainly instead, and not audited as a new hop, because it is not one.
+       */
+      if (offered === "already") {
+        return {
+          ok: false,
+          refusal: `You have already asked ${found.name} exactly this in this turn. Wait for that answer rather than asking again.`,
+        };
       }
 
       await recordAuditEvent(auditStore, {

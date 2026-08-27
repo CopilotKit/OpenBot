@@ -40,6 +40,9 @@ const queue = createWorkQueue(database);
 const desk = createHandoffDesk({
   queue,
   profiles,
+  // The person's own role, as the request path resolves it: an administrator sees Bots a user does
+  // not, and a hop to one of those is theirs to make.
+  actorFor: async (id: string) => ({ id, role: "user" as const }),
   mayAddress: async (fromBotId, toBotId) => {
     const rows = await database
       .select({ ref: pluginGrants.ref })
@@ -143,16 +146,21 @@ describe("a hop, against the database", () => {
     await send();
     await send();
 
+    /*
+     * Found by payload rather than by key prefix. The run is HASHED into the key — `runId` arrives
+     * on the request, and written in raw a run calling itself `notice` aliased the prefix every
+     * failure notice is keyed under — so a test that greps for the raw id is asserting the bug.
+     */
     const rows = await database
-      .select({ key: workItems.key })
+      .select({ key: workItems.key, payload: workItems.payload })
       .from(workItems)
-      .where(
-        and(
-          eq(workItems.kind, HANDOFF_KIND),
-          like(workItems.key, `run-${suite}-1:%`),
-        ),
-      );
-    expect(rows).toHaveLength(1);
+      .where(eq(workItems.kind, HANDOFF_KIND));
+    const mine = rows.filter(
+      (row) => (row.payload as { runId?: string }).runId === `run-${suite}-1`,
+    );
+    expect(mine).toHaveLength(1);
+    // And the id the caller chose is nowhere in the key it produced.
+    expect(mine[0]?.key).not.toContain(`run-${suite}-1`);
   });
 
   /*
@@ -225,10 +233,13 @@ describe("a hop, against the database", () => {
       envelope: { task: "have a look", expecting: "a date range" },
     });
 
-    const [row] = await database
+    const rows = await database
       .select({ payload: workItems.payload })
       .from(workItems)
-      .where(like(workItems.key, `${runId}:%`));
+      .where(eq(workItems.kind, HANDOFF_KIND));
+    const row = rows.find(
+      (candidate) => (candidate.payload as { runId?: string }).runId === runId,
+    );
     expect(row?.payload).toMatchObject({
       fromBotId: ASKER,
       toBotId: TARGET,

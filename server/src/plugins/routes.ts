@@ -664,43 +664,55 @@ export function createPluginRoutes(
      */
     intent: "grant" | "revoke",
   ): Promise<string | null> {
-    /*
-     * A grant that could never do anything is refused rather than stored.
-     *
-     * Handing work to another Bot is a tool this deployment executes, so it can only be offered to a
-     * run this deployment builds. A Bot at an endpoint runs its own loop and is handed descriptions
-     * of what it may call back for; `message_bot` is not one of them, and there is no callback path
-     * that would execute it. Stored anyway the grant reads as configured, `botsReachableFrom`
-     * returns it, and nothing ever happens — the administrator's evidence that they enabled the
-     * feature is a row that cannot work.
-     *
-     * Checked before the role, because it is a fact about the Bot rather than about who is asking:
-     * an administrator should be told this too.
-     */
-    if (kind === "bot" && intent === "grant") {
+    const actor = skillActor(context);
+
+    if (kind === "mcp") {
+      return actor.isAdmin
+        ? null
+        : "An administrator decides which Bots may reach a tool.";
+    }
+
+    if (kind === "bot") {
+      /*
+       * THE ROLE IS CHECKED BEFORE ANYTHING IS LOOKED UP, and that ordering is the point.
+       *
+       * One Bot reaching another lets it spend that Bot's model calls, wake its computer and reach
+       * whatever it may reach, so it is an administrator's decision rather than something somebody
+       * attaches to a coworker they own. But this route only requires a signed-in user, so every
+       * refusal below is readable by anybody: checking whether the Bot exists, and whether it runs
+       * here, before this line handed out three distinguishable answers and turned a 403 into an
+       * oracle for other people's private Bots. `handoff.ts` in this same feature collapses exactly
+       * this, deliberately, and this had it backwards.
+       */
+      if (!actor.isAdmin) {
+        return "An administrator decides which Bots may hand work to another Bot.";
+      }
+      // Taking something away is always allowed: see the note on `intent`.
+      if (intent === "revoke") return null;
+
+      /*
+       * A grant that could never do anything is refused rather than stored, from both ends.
+       *
+       * The GRANTEE has to run here, because handing work on is a tool this deployment executes: a
+       * Bot at an endpoint runs its own loop and is handed descriptions of what it may call back
+       * for, and there is no callback path that would execute a hop.
+       *
+       * The TARGET only has to exist. Being handed work is not the same as being able to hand it on,
+       * so a target at its own endpoint is perfectly ordinary — but `ref` is bare text with no
+       * foreign key, so a typo stored happily and every hop then refused as not-granted.
+       */
       const runsHere = await store.agentRunsHere(agentId);
       if (runsHere === undefined) return "There is no such Bot.";
       if (!runsHere) {
         return `${agentId} runs at its own endpoint, so this deployment cannot offer it a tool for handing work on. Only a Bot that runs here can be given one.`;
       }
+      if (!(await store.agentIsRegistered(ref))) {
+        return `There is no Bot called ${ref} to hand work to.`;
+      }
+      return null;
     }
 
-    const actor = skillActor(context);
     if (actor.isAdmin) return null;
-    if (kind === "mcp") {
-      return "An administrator decides which Bots may reach a tool.";
-    }
-    /*
-     * And one Bot reaching another is an administrator's too.
-     *
-     * It is not an instruction somebody attaches to their own coworker: it lets one Bot spend
-     * another's model calls, wake its computer, and reach whatever that Bot may reach. Falling
-     * through to the skill branch below would have answered "there is no skill called knowledge",
-     * which is both wrong and a way to probe the skill table.
-     */
-    if (kind === "bot") {
-      return "An administrator decides which Bots may hand work to another Bot.";
-    }
 
     const owner = await store.skillOwner(ref);
     if (owner === undefined) return `There is no skill called ${ref}.`;

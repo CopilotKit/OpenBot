@@ -48,6 +48,7 @@ function desk(options?: {
   granted?: boolean;
   offered?: number;
   caps?: HandoffCaps;
+  role?: "admin" | "user";
 }) {
   const rows: Array<{ kind: string; key: string; payload: unknown }> = [];
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> =
@@ -60,14 +61,15 @@ function desk(options?: {
       payload?: unknown;
       atMost?: { keyPrefix: string; max: number };
     }) => {
-      // Idempotent on the key, exactly as the real one is.
-      if (rows.some((row) => row.key === item.key)) return true;
+      // Idempotent on the key, exactly as the real one is — and it says so, because "already
+      // there" and "just queued" are different answers to the caller.
+      if (rows.some((row) => row.key === item.key)) return "already";
       // And the cap, counted and written as one step, exactly as the real one is.
       if (item.atMost && (options?.offered ?? rows.length) >= item.atMost.max) {
-        return false;
+        return "refused";
       }
       rows.push({ kind: item.kind, key: item.key, payload: item.payload });
-      return true;
+      return "queued";
     },
   } as unknown as WorkQueue;
 
@@ -93,6 +95,10 @@ function desk(options?: {
       queue,
       profiles,
       mayAddress: async () => options?.granted ?? true,
+      actorFor: async (id: string) => ({
+        id,
+        role: options?.role ?? ("user" as const),
+      }),
       auditStore,
       caps: options?.caps ?? CAPS,
     }),
@@ -414,5 +420,43 @@ describe("a name that means more than one Bot", () => {
 
     expect(outcome.ok).toBe(true);
     if (outcome.ok) expect(outcome.to).toBe("knowledge-b");
+  });
+});
+
+/**
+ * Whose roster the target is resolved against.
+ *
+ * An administrator sees Bots a user does not. Assumed to be a user, an administrator'"'"'s hop to a Bot
+ * they can see and chat with in the UI was refused as "no such Bot" — the same failure `index.ts`
+ * warns about for a routine'"'"'s owner.
+ */
+describe("the role a hop is resolved as", () => {
+  test("is asked for rather than assumed", async () => {
+    const asked: Array<{ id: string; role: string }> = [];
+    const profiles = {
+      list: async (actor: { id: string; role: string }) => {
+        asked.push(actor);
+        return [profile({ id: "researcher", name: "Researcher" })];
+      },
+    } as unknown as AgentProfileStore;
+
+    const built = createHandoffDesk({
+      queue: {
+        offer: async () => "queued",
+      } as unknown as WorkQueue,
+      profiles,
+      mayAddress: async () => true,
+      actorFor: async (id) => ({ id, role: "admin" }),
+      auditStore: { insert: async () => {} },
+      caps: CAPS,
+    });
+
+    await built.send({
+      from: FROM,
+      target: "researcher",
+      envelope: { task: "find it" },
+    });
+
+    expect(asked).toEqual([{ id: "user-1", role: "admin" }]);
   });
 });

@@ -107,9 +107,9 @@ const added = now
 
 if (added.length === 0) {
   console.log(`No values keys added since ${since}.`);
-  process.exit(0);
+} else {
+  console.log(`Keys added since ${since}: ${added.join(", ")}`);
 }
-console.log(`Keys added since ${since}: ${added.join(", ")}`);
 
 /** Render, and say what came out. */
 function render(extra: string[]): { ok: boolean; out: string; err: string } {
@@ -211,7 +211,11 @@ for (const path of added) {
 }
 
 /*
- * And that a value of ZERO is rendered as zero.
+ * And that a value of ZERO is rendered as zero, WHETHER OR NOT ANY KEY IS NEW.
+ *
+ * This is not about upgrades, so it does not belong under the added-keys check: once `config.handoff`
+ * ships in a tag it stops being new, and an assertion that stopped running with it would let a
+ * `| default 1` come back unnoticed.
  *
  * `| default` substitutes on empty, and in Go templates zero IS empty, so a guard added for the
  * absent case silently rewrote `maxDepth: 0` to `1` — switching a capability back on for a

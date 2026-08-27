@@ -99,11 +99,10 @@ describe("telling an accepted hop from a refused one", () => {
  * The two ends of a phrase that crosses a network.
  *
  * The server writes the sentence; the transcript reads its first words to decide whether to draw a
- * hop or a boundary. There is one declaration now, in `shared/handoff-markers.ts`, so the two cannot
- * disagree — which is why there is no longer a test that they match. What is still worth holding is
- * how the transcript reads a result, which is what the rest of this block does. That the SENTENCES
- * still begin with these markers is asserted where the sentences are written, in
- * `server/tests/agent-handoff-tool.test.ts` and `agent-escalation.test.ts`.
+ * hop or a boundary. One declaration in `shared/handoff-markers.ts` means the two cannot disagree
+ * about the phrase, so what is left to hold is how the transcript READS a result — which is what
+ * this block does. That the sentences still begin with these markers is asserted where the sentences
+ * are written: `server/tests/agent-handoff-tool.test.ts` and `agent-escalation.test.ts`.
  */
 describe("the markers the server and the transcript both use", () => {
   /*

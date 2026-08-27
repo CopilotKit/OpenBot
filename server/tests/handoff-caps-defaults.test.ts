@@ -21,29 +21,42 @@ const chart = parse(await Bun.file("charts/openbot/values.yaml").text()) as {
   config?: { handoff?: { maxDepth?: number; maxPerRun?: number } };
 };
 
-const helpers = await Bun.file("charts/openbot/templates/_helpers.tpl").text();
 const docs = await Bun.file("docs/configuration.md").text();
 
 /** What `handoffCaps` falls back to with nothing in the environment. */
 const code = loadConfig(testEnvironment()).handoff;
 
 /**
- * The fallback a template uses when the values key is absent entirely.
+ * What the chart actually renders for a given value, read out of the rendered YAML.
  *
- * Read out of the `{{- $maxDepth := N -}}` assignment rather than a `| default`, because `default`
- * substitutes on EMPTY and zero is empty: it silently rendered 1 for a deployment that had set the
- * cap to 0 to switch the capability off. Matching on the assignment also means this test fails if
- * somebody puts `| default` back.
+ * NOT OUT OF THE TEMPLATE SOURCE. Matching the `$maxDepth := 1` assignment looked like it pinned the
+ * fallback and pinned almost nothing: `{{ $maxDepth | default 1 }}` still matched, which is the very
+ * construct that swallowed an explicit zero, and it never checked WHICH env var the number ended up
+ * on, so swapping the two emissions passed too. Rendering answers both.
  */
-function helperDefault(variable: string): number {
-  const assigned = variable.includes("MAX_DEPTH") ? "maxDepth" : "maxPerRun";
-  const match = helpers.match(new RegExp(`\\$${assigned} := (\\d+)`));
-  if (!match?.[1]) {
-    throw new Error(
-      `No fallback found for ${variable} in _helpers.tpl. Without one, an upgrade that reuses values fails to render at all.`,
-    );
-  }
-  return Number(match[1]);
+function rendered(variable: string, set: string[]): string | undefined {
+  const result = Bun.spawnSync(
+    [
+      "helm",
+      "template",
+      "ci",
+      "charts/openbot",
+      "--values",
+      "charts/openbot/ci/eks-values.yaml",
+      "--set-string",
+      `secrets.keyEncryptionKey=${btoa("0".repeat(32))}`,
+      ...set.flatMap((one) => ["--set", one]),
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (result.exitCode !== 0) return undefined;
+  const lines = new TextDecoder().decode(result.stdout).split("\n");
+  const at = lines.findIndex((line) => line.includes(`name: ${variable}`));
+  if (at === -1) return undefined;
+  return lines[at + 1]
+    ?.trim()
+    .replace(/^value:\s*/, "")
+    .replace(/"/g, "");
 }
 
 describe("the handoff caps say the same thing everywhere", () => {
@@ -54,11 +67,34 @@ describe("the handoff caps say the same thing everywhere", () => {
 
   /*
    * This is the one that bites on an upgrade: the values key is absent on every release made before
-   * it existed, so the template's own default is what those deployments actually get.
+   * it existed, so the template's own fallback is what those deployments actually get.
    */
   test("the template's fallbacks match them too", () => {
-    expect(helperDefault("BOT_HANDOFF_MAX_DEPTH")).toBe(code.maxDepth);
-    expect(helperDefault("BOT_HANDOFF_MAX_PER_RUN")).toBe(code.maxPerRun);
+    expect(rendered("BOT_HANDOFF_MAX_DEPTH", ["config.handoff=null"])).toBe(
+      String(code.maxDepth),
+    );
+    expect(rendered("BOT_HANDOFF_MAX_PER_RUN", ["config.handoff=null"])).toBe(
+      String(code.maxPerRun),
+    );
+  });
+
+  /*
+   * The fallback must not eat a deliberate zero, and each number has to land on its OWN variable.
+   * Both were true of the version this replaced, and neither was tested.
+   */
+  test("an explicit zero reaches the container as a zero", () => {
+    expect(
+      rendered("BOT_HANDOFF_MAX_DEPTH", [
+        "config.handoff.maxDepth=0",
+        "config.handoff.maxPerRun=9",
+      ]),
+    ).toBe("0");
+    expect(
+      rendered("BOT_HANDOFF_MAX_PER_RUN", [
+        "config.handoff.maxDepth=0",
+        "config.handoff.maxPerRun=9",
+      ]),
+    ).toBe("9");
   });
 
   test("and the documented defaults are those numbers", () => {

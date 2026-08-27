@@ -154,8 +154,7 @@ export function createHandoffRunner(options: {
        * Carrying the hop's key, because one run may legally ask the same Bot two different things.
        * Keyed on the Bot alone both notices are the same work to `offer`, the second is dropped on
        * conflict, and the person hears about one of their two lost questions with the other's
-       * reason. Nothing purges this kind, so that row blocks the second notice for good rather than
-       * for a window.
+       * reason — for a whole day, until `reap` drops the row that is blocking it.
        */
       key: `notice:${key}`,
       payload: {
@@ -166,7 +165,7 @@ export function createHandoffRunner(options: {
         runId: work.runId,
         depth: work.depth,
         answerIn: work.threadId,
-        task: `You asked ${work.toBotId} to help with this and it never answered: ${reason}. Tell the person plainly that it did not come back, say what you had asked it for, and offer what you can do yourself.`,
+        task: `You asked ${work.toBotId} to help with this and it never answered: ${forThePerson(reason)}. Tell the person plainly that it did not come back, say what you had asked it for, and offer what you can do yourself.`,
       } as unknown as Record<string, unknown>,
     });
 
@@ -420,6 +419,23 @@ export function createHandoffRunner(options: {
       return report;
     },
   };
+}
+
+/**
+ * The same failure, in words that can be said out loud.
+ *
+ * The reason on a failed hop is whatever threw, and one of the things that throws is the platform
+ * client, whose message is `Intelligence platform error 409: {"error":{...}}` — a response body,
+ * verbatim. That reason is interpolated into the notice a Bot then paraphrases to a person, so an
+ * internal error envelope ends up in somebody's chat. The trail keeps the whole thing; the sentence
+ * gets the shape of the problem.
+ */
+function forThePerson(reason: string): string {
+  const platform = reason.match(/^Intelligence platform error (\d{3})\b/);
+  if (platform) {
+    return `the platform answered ${platform[1]} (the full response is in the trail)`;
+  }
+  return reason;
 }
 
 /**

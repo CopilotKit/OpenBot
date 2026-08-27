@@ -115,8 +115,11 @@ describe("adding a curated server", () => {
  */
 function grantsApp(
   role: "admin" | "user" = "admin",
-  runsHere: (agentId: string) => boolean | undefined = (agentId) =>
-    agentId !== "at-an-endpoint",
+  runsHere: (agentId: string) => boolean | undefined = (agentId) => {
+    // Undefined is "no such Bot", which is what the store answers for one nobody registered.
+    if (agentId === "never-registered") return undefined;
+    return agentId !== "at-an-endpoint";
+  },
 ) {
   const calls: Array<{ verb: string; kind: string; ref: string }> = [];
   const store = {
@@ -132,6 +135,8 @@ function grantsApp(
     skillOwner: async () => null,
     agentOwner: async () => null,
     agentRunsHere: async (agentId: string) => runsHere(agentId),
+    agentIsRegistered: async (agentId: string) =>
+      agentId !== "never-registered",
   };
 
   const app = createApp(
@@ -304,5 +309,74 @@ describe("granting a hop to a Bot that runs somewhere else", () => {
 
     expect(response.status).toBe(200);
     expect(calls).toEqual([{ verb: "grant", kind: "bot", ref: "knowledge" }]);
+  });
+});
+
+/**
+ * What a refusal tells somebody who is not an administrator.
+ *
+ * This route only requires a signed-in user. Checking whether a Bot exists, and whether it runs
+ * here, before checking the role handed out three distinguishable 403s and turned the refusal into
+ * an oracle for other people's private Bots — the exact property `handoff.ts` collapses on purpose.
+ */
+describe("what a bot grant refusal reveals", () => {
+  const refusalFor = async (
+    agentId: string,
+    role: "admin" | "user",
+    ref = "knowledge",
+  ) => {
+    const { calls, app } = grantsApp(role);
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "bot", ref, agentId }),
+      },
+    );
+    return { status: response.status, body: await response.json(), calls };
+  };
+
+  test("a non-administrator gets one answer, whatever the Bot is", async () => {
+    const said = new Set<string>();
+    for (const agentId of [
+      "general-assistant",
+      "at-an-endpoint",
+      "never-registered",
+    ]) {
+      const { status, body, calls } = await refusalFor(agentId, "user");
+      expect(status).toBe(403);
+      expect(calls).toEqual([]);
+      said.add(body.error);
+    }
+    // One sentence for all three, so nothing distinguishes "exists" from "does not".
+    expect(said.size).toBe(1);
+    expect([...said][0]).toBe(
+      "An administrator decides which Bots may hand work to another Bot.",
+    );
+  });
+
+  test("an administrator still gets the reason", async () => {
+    expect((await refusalFor("at-an-endpoint", "admin")).body.error).toContain(
+      "its own endpoint",
+    );
+    expect((await refusalFor("never-registered", "admin")).body.error).toBe(
+      "There is no such Bot.",
+    );
+  });
+
+  /*
+   * The target is bare text with no foreign key. A typo stored happily, `message_bot` was offered,
+   * and every hop then refused as not-granted.
+   */
+  test("a target nobody has heard of is refused", async () => {
+    const { status, body, calls } = await refusalFor(
+      "general-assistant",
+      "admin",
+      "never-registered",
+    );
+    expect(status).toBe(403);
+    expect(body.error).toContain("no Bot called never-registered");
+    expect(calls).toEqual([]);
   });
 });

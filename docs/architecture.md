@@ -217,9 +217,18 @@ able to switch off the safe exit and keep the expensive one would be backwards.
 
 Both tools are for Bots that run here. A Bot at its own endpoint runs its own loop and is handed
 descriptions of the tools it may call back for, and the callback path executes MCP refs only, so
-neither `message_bot` nor `ask_person` can reach it. A `bot` grant naming one is refused rather than
-stored, so an administrator finds out at the point of granting rather than from a Bot that never
-hands anything on.
+neither `message_bot` nor `ask_person` can reach it.
+
+It is the Bot **doing the asking** that has to run here. Being handed work is not the same as being
+able to hand it on, so the target of a grant may perfectly well live at its own endpoint. A grant
+whose *grantee* is remote is refused rather than stored, so an administrator finds out at the point
+of granting rather than from a Bot that never hands anything on.
+
+That is a real limit rather than a detail, and it is worth being plain about which Bots it leaves
+out: **a Bot created through the UI is a remote one**, because creating a coworker here means
+pointing it at an AG-UI endpoint. Only Bots a tenant package declares as built-in run in this
+process. So on a deployment with no package, nothing can be granted `message_bot` at all, and the
+screens say nothing about why.
 
 Who "a person" is, is a seam. This template answers the person in the conversation, which is the only
 answer a template can give honestly; a company has an on-call rota or a duty desk, and that is a

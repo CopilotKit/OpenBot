@@ -397,7 +397,8 @@ describe("offering at most so many under one prefix", () => {
       ),
     );
 
-    expect(results.filter(Boolean)).toHaveLength(3);
+    expect(results.filter((result) => result === "queued")).toHaveLength(3);
+    expect(results.filter((result) => result === "refused")).toHaveLength(2);
     const written = await database
       .select({ key: workItems.key })
       .from(workItems)
@@ -413,10 +414,16 @@ describe("offering at most so many under one prefix", () => {
     const run = `${randomUUID()}:`;
     const cap = { keyPrefix: run, max: 1 };
 
-    expect(await queue.offer({ kind, key: `${run}a`, atMost: cap })).toBe(true);
-    expect(await queue.offer({ kind, key: `${run}a`, atMost: cap })).toBe(true);
+    expect(await queue.offer({ kind, key: `${run}a`, atMost: cap })).toBe(
+      "queued",
+    );
+    // The same key again is work already queued, not a second piece of work — and not something the
+    // cap should refuse either. A caller that reports it as new promises an answer nobody will give.
+    expect(await queue.offer({ kind, key: `${run}a`, atMost: cap })).toBe(
+      "already",
+    );
     expect(await queue.offer({ kind, key: `${run}b`, atMost: cap })).toBe(
-      false,
+      "refused",
     );
   });
 
@@ -425,6 +432,6 @@ describe("offering at most so many under one prefix", () => {
     const results = await Promise.all(
       [1, 2, 3, 4, 5].map((n) => queue.offer({ kind, key: `${run}${n}` })),
     );
-    expect(results.every(Boolean)).toBe(true);
+    expect(results.every((result) => result === "queued")).toBe(true);
   });
 });

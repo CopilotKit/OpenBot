@@ -47,8 +47,13 @@ export type WorkQueue = {
   /**
    * Put work on the queue, or leave what is there. Idempotent on (kind, key).
    *
-   * False only ever means `atMost` refused it. Already being on the queue is true: the caller asked
-   * for this work to be queued and it is.
+   * `"queued"` is new work. `"already"` is the same key again — the caller asked for this work to be
+   * queued and it is, but it is NOT a second piece of work, and a caller that reports it as one is
+   * announcing something that will not happen. `"refused"` is `atMost` saying no.
+   *
+   * Three answers rather than a boolean because two of them used to be true: a hop offered under a
+   * key that already existed was reported to the model as handed over, while the row it named had
+   * long since been delivered and finished. Nothing was queued and nobody was ever going to run it.
    */
   offer: (item: {
     kind: string;
@@ -66,7 +71,7 @@ export type WorkQueue = {
      * looks like.
      */
     atMost?: { keyPrefix: string; max: number };
-  }) => Promise<boolean>;
+  }) => Promise<"queued" | "already" | "refused">;
   /** Take up to `limit` due items, leased to `owner`. */
   claim: (input: {
     kind: string;
@@ -153,8 +158,8 @@ export function createWorkQueue(database: Database): WorkQueue {
 
   return {
     async offer({ kind, key, payload = {}, runAt, atMost }) {
-      const write = async (transaction: Database) => {
-        await transaction
+      const write = async (transaction: Database) =>
+        transaction
           .insert(workItems)
           .values({ kind, key, payload, ...(runAt ? { runAt } : {}) })
           /*
@@ -166,12 +171,14 @@ export function createWorkQueue(database: Database): WorkQueue {
            * still counts as a conflict, which is what makes that true after the run as well as during
            * it.
            */
-          .onConflictDoNothing();
-      };
+          .onConflictDoNothing()
+          // Returning the key, so a caller can tell work it just queued from work that was already
+          // there. Nothing is written on conflict, so this comes back empty for a duplicate.
+          .returning({ key: workItems.key });
 
       if (!atMost) {
-        await write(database);
-        return true;
+        const [written] = await write(database);
+        return written ? "queued" : "already";
       }
 
       return database.transaction(async (transaction) => {
@@ -205,10 +212,10 @@ export function createWorkQueue(database: Database): WorkQueue {
           .from(workItems)
           .where(and(eq(workItems.kind, kind), eq(workItems.key, key)))
           .limit(1);
-        if (already.length > 0) return true;
-        if ((row?.total ?? 0) >= atMost.max) return false;
-        await write(transaction as unknown as Database);
-        return true;
+        if (already.length > 0) return "already";
+        if ((row?.total ?? 0) >= atMost.max) return "refused";
+        const [written] = await write(transaction as unknown as Database);
+        return written ? "queued" : "already";
       });
     },
 

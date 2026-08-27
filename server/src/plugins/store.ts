@@ -2176,9 +2176,31 @@ export function createPluginStore(options: PluginStoreOptions) {
       const [row] = await database
         .select({ type: agents.type })
         .from(agents)
-        .where(eq(agents.id, agentId))
+        .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
+        // A deleted Bot is not one anybody may be given, and answering about it at all would say it
+        // had existed.
+        .where(and(eq(agents.id, agentId), isNull(agentProfiles.deletedAt)))
         .limit(1);
       return row ? row.type === "built_in" : undefined;
+    },
+
+    /**
+     * Whether this Bot is one somebody could be handed work by, at all.
+     *
+     * The TARGET of a bot grant, unlike the grantee, may perfectly well run at its own endpoint —
+     * being handed work is not the same as being able to hand it on. What it may not be is absent:
+     * `ref` is bare text with no foreign key, so a typo stored happily, `message_bot` was offered,
+     * and every hop refused as not-granted. That is the same row-that-cannot-work this check exists
+     * to stop, arriving from the other side.
+     */
+    async agentIsRegistered(agentId: string): Promise<boolean> {
+      const [row] = await database
+        .select({ id: agents.id })
+        .from(agents)
+        .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
+        .where(and(eq(agents.id, agentId), isNull(agentProfiles.deletedAt)))
+        .limit(1);
+      return row !== undefined;
     },
 
     async agentOwner(agentId: string): Promise<string | null | undefined> {

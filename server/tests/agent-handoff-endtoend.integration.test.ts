@@ -51,6 +51,9 @@ const profiles = createAgentProfileStore(database);
 const desk = createHandoffDesk({
   queue,
   profiles,
+  // The person's own role, as the request path resolves it: an administrator sees Bots a user does
+  // not, and a hop to one of those is theirs to make.
+  actorFor: async (id: string) => ({ id, role: "user" as const }),
   mayAddress: async (fromBotId, toBotId) =>
     (
       await database
