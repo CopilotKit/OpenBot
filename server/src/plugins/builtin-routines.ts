@@ -1,8 +1,10 @@
 import {
+  MAX_RUN_ERROR,
   RoutineNotFoundError,
   RoutineRefusedError,
   type Routine,
   type RoutinePatch,
+  type RoutineStore,
   type RoutineSummary,
 } from "../routines/store";
 import { MAX_RESULT_CHARS, type McpCallResult, type McpTool } from "./mcp";
@@ -23,9 +25,6 @@ import { MAX_RESULT_CHARS, type McpCallResult, type McpTool } from "./mcp";
  * arrives through {@link useRoutineTools} rather than through a constructor — see the comment there.
  */
 
-/** No fetch, no vendor, no third party: the store's own refusal cap, in code points. */
-const MAX_FAILURE_CODE_POINTS = 400;
-
 /**
  * What the tools act on.
  *
@@ -33,23 +32,10 @@ const MAX_FAILURE_CODE_POINTS = 400;
  * absent, because nothing a model calls has any business advancing a clock or opening a run row. A
  * store satisfies this structurally, so wiring it is one call and no adapter.
  */
-export type RoutineTools = {
-  create(input: {
-    ownerUserId: string;
-    agentId: string;
-    channelId?: string;
-    instruction: string;
-    cron: string;
-    timezone?: string;
-  }): Promise<Routine>;
-  listFor(ownerUserId: string): Promise<RoutineSummary[]>;
-  update(
-    ownerUserId: string,
-    id: string,
-    patch: RoutinePatch,
-  ): Promise<Routine>;
-  remove(ownerUserId: string, id: string): Promise<void>;
-};
+export type RoutineTools = Pick<
+  RoutineStore,
+  "create" | "listFor" | "update" | "remove"
+>;
 
 let installed: RoutineTools | null = null;
 
@@ -489,11 +475,10 @@ export async function callTool(
       return failure("There is no routine of yours with that id.");
     }
     // Anything else is a bug or a broken database, and it still has to come back as a sentence
-    // rather than as a thrown error mid-turn. Capped in code points, like the store caps a run's
-    // error, so a message carrying an emoji cannot be cut mid-surrogate-pair.
+    // rather than as a thrown error mid-turn. Capped at the store's own refusal cap, in code
+    // points like the store caps a run's error, so a message carrying an emoji cannot be cut
+    // mid-surrogate-pair.
     const message = error instanceof Error ? error.message : String(error);
-    return failure(
-      Array.from(message).slice(0, MAX_FAILURE_CODE_POINTS).join(""),
-    );
+    return failure(Array.from(message).slice(0, MAX_RUN_ERROR).join(""));
   }
 }
