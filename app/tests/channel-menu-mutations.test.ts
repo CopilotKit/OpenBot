@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { QueryClient, type InfiniteData } from "@tanstack/react-query";
+import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import {
   deleteChannelMutationOptions,
   markChannelReadMutationOptions,
   setChannelPinnedMutationOptions,
 } from "../src/lib/channels/mutations";
-import { channelKeys, type ChannelPage } from "../src/lib/channels/queries";
+import { type ChannelPage, channelKeys } from "../src/lib/channels/queries";
 
 const realFetch = globalThis.fetch;
 

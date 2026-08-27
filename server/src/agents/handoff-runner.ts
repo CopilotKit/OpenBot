@@ -83,6 +83,16 @@ export type HandoffRunReport = {
  */
 const RENEW_EVERY_MS = 20_000;
 
+/**
+ * How long a hop that is over is kept before it is dropped.
+ *
+ * Long past the point where its key still has to stop a duplicate — that is the asking run's own
+ * lifetime, minutes — and short enough that this table holds about a day of work rather than all of
+ * it. Both the finished ones and the ones that ran out of attempts: the second is a terminal state
+ * somebody can query, and a day is long enough to query it in.
+ */
+const REAP_OLDER_THAN_MS = 24 * 60 * 60 * 1_000;
+
 export function createHandoffRunner(options: {
   queue: WorkQueue;
   delivery: HandoffDelivery;
@@ -161,6 +171,27 @@ export function createHandoffRunner(options: {
     });
 
   return {
+    /**
+     * Drop hops that are over, long after they were.
+     *
+     * NOTHING ELSE REAPS THIS KIND. A finished hop is kept rather than deleted, because a key that
+     * is still there is what makes `offer` idempotent and stops a retried delivery running the other
+     * Bot twice. Kept for ever, though, the table only grows — and the fan-out cap counts rows under
+     * a run's prefix with a `LIKE` that no index serves, so every offer pays for every hop the
+     * deployment has ever made.
+     *
+     * The window is what keeps both true at once. Idempotency only has to hold while the asking run
+     * could still offer the same hop again, which is minutes; a day is far past that and still short
+     * enough that the table reflects roughly a day's work.
+     */
+    async reap(): Promise<number> {
+      return queue.purge({
+        kind: HANDOFF_KIND,
+        olderThanMs: REAP_OLDER_THAN_MS,
+        maxAttempts,
+      });
+    },
+
     /** Deliver whatever this replica can claim. */
     async sweep(): Promise<HandoffRunReport> {
       const claimed = await queue.claim({

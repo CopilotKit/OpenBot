@@ -654,6 +654,27 @@ export function createPluginRoutes(
     ref: string,
     agentId: string,
   ): Promise<string | null> {
+    /*
+     * A grant that could never do anything is refused rather than stored.
+     *
+     * Handing work to another Bot is a tool this deployment executes, so it can only be offered to a
+     * run this deployment builds. A Bot at an endpoint runs its own loop and is handed descriptions
+     * of what it may call back for; `message_bot` is not one of them, and there is no callback path
+     * that would execute it. Stored anyway the grant reads as configured, `botsReachableFrom`
+     * returns it, and nothing ever happens — the administrator's evidence that they enabled the
+     * feature is a row that cannot work.
+     *
+     * Checked before the role, because it is a fact about the Bot rather than about who is asking:
+     * an administrator should be told this too.
+     */
+    if (kind === "bot") {
+      const runsHere = await store.agentRunsHere(agentId);
+      if (runsHere === undefined) return "There is no such Bot.";
+      if (!runsHere) {
+        return `${agentId} runs at its own endpoint, so this deployment cannot offer it a tool for handing work on. Only a Bot that runs here can be given one.`;
+      }
+    }
+
     const actor = skillActor(context);
     if (actor.isAdmin) return null;
     if (kind === "mcp") {

@@ -69,7 +69,6 @@ function desk(options?: {
       rows.push({ kind: item.kind, key: item.key, payload: item.payload });
       return true;
     },
-    count: async () => options?.offered ?? rows.length,
   } as unknown as WorkQueue;
 
   const profiles = {
@@ -358,5 +357,62 @@ describe("where a hop's answer lands", () => {
 
     expect(outcome.ok).toBe(false);
     expect(rows).toEqual([]);
+  });
+});
+
+/**
+ * Two Bots with one name.
+ *
+ * `agents.name` has no unique constraint and duplicating a Bot deliberately makes a second with the
+ * same name, so a person can be looking at two called Knowledge. Taking whichever sorted first sends
+ * the work to a Bot nobody meant, or refuses a legitimate hop as "not granted" because the other
+ * twin is the granted one. Neither says a word about there having been two.
+ */
+describe("a name that means more than one Bot", () => {
+  test("is refused, naming the ids to choose between", async () => {
+    const twins = desk({
+      roster: [
+        profile({ id: "knowledge-a", name: "Knowledge" }),
+        profile({ id: "knowledge-b", name: "Knowledge" }),
+      ],
+    });
+
+    const outcome = await twins.desk.send({
+      from: FROM,
+      target: "Knowledge",
+      envelope: { task: "find the policy" },
+    });
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.refusal).toContain("knowledge-a");
+      expect(outcome.refusal).toContain("knowledge-b");
+    }
+    expect(
+      twins.events.map((event) => ({
+        eventType: event.eventType,
+        reason: (event.payload as { reason?: string }).reason,
+      })),
+    ).toEqual([
+      { eventType: "agent.handoff_refused", reason: "ambiguous_bot" },
+    ]);
+  });
+
+  test("but the id still reaches exactly the one it names", async () => {
+    const twins = desk({
+      roster: [
+        profile({ id: "knowledge-a", name: "Knowledge" }),
+        profile({ id: "knowledge-b", name: "Knowledge" }),
+      ],
+    });
+
+    const outcome = await twins.desk.send({
+      from: FROM,
+      target: "knowledge-b",
+      envelope: { task: "find the policy" },
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) expect(outcome.to).toBe("knowledge-b");
   });
 });

@@ -2,6 +2,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { saveActionPolicyMutationOptions } from "@/lib/computers/mutations";
 import {
   type ActionPolicy,
@@ -11,8 +13,6 @@ import {
   type PolicyMode,
 } from "@/lib/computers/queries";
 import { queryClient } from "@/query-client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 /**
  * CEL computer-action boundary editor. Rules are shown as the gateway evaluates them, and denied

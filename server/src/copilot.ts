@@ -390,6 +390,17 @@ async function buildAgent(
      * `.use()` middleware is applied by `runAgent`, not by `run`, so an outer agent delegating to
      * `remote.run(input)` skips it: the endpoint would get a run with no standing role, no holdings
      * message, no tools and no signed assertion, and every one of those failures is silent.
+     *
+     * WHICH IS ALSO WHY A REMOTE BOT IS OFFERED NEITHER `message_bot` NOR `ask_person`. Both are
+     * executed here, by the wrapper below, against this deployment's grants and caps. A Bot at an
+     * endpoint runs its own loop and is handed descriptions of tools it may call back for, and the
+     * callback path executes MCP refs only — so a described `message_bot` would be a tool it could
+     * announce and never invoke. Granting one is refused at the door rather than stored dead: see
+     * `enablementRefusal` in plugins/routes.ts.
+     *
+     * Making this work is a feature rather than a fix: the callback would have to carry a run
+     * assertion the endpoint cannot forge, and execute a hop on its behalf. Worth doing; not done
+     * here, and worth knowing it is missing rather than assuming it is not.
      */
     return remoteAgentWithStandingRole(
       agent,
@@ -768,13 +779,30 @@ export async function resolveRuntimeAgents(
   agentFetch?: AgentFetch,
   /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
   handoff?: HandoffForRun,
+  /**
+   * Build only this one, when the caller wants only this one.
+   *
+   * A hop delivery and a routine's turn each want a single Bot, and both were resolving the whole
+   * roster to reach it: every registered Bot constructed, and a granted-tools query for each, with
+   * all but one thrown away. On a hop that is paid again on every retry. The roster is still LOADED
+   * in full, because which Bots exist for this person is what decides whether the one asked for is
+   * theirs to see at all; what narrows is what gets built.
+   */
+  onlyBotId?: string,
 ): Promise<Record<string, AbstractAgent>> {
-  const registered = await loadAgents();
-  if (registered.length === 0) {
+  const all = await loadAgents();
+  if (all.length === 0) {
     throw new Error(
       "No agents are registered. Add one to the tenant package or the agents table.",
     );
   }
+  const registered =
+    onlyBotId === undefined
+      ? all
+      : all.filter((agent) => agent.id === onlyBotId);
+  // Not an error: a caller asking for a Bot this person cannot see gets an empty result and decides
+  // what that means, exactly as it would have from a roster that did not contain it.
+  if (registered.length === 0) return {};
 
   const apiKey = registered.some((agent) => agent.type === "built_in")
     ? await resolveModelApiKey()
@@ -1015,6 +1043,10 @@ export function mountCopilotRuntime(
       selectionForActor?.(actor.id),
       agentFetch,
       handoffForActor?.(actor.id),
+      // Only the Bot this hop is for. The roster is still read in full, so a Bot this person cannot
+      // see is still absent; what this skips is constructing the other Bots and asking the database
+      // what each of them was granted, on every delivery and again on every retry.
+      input.botId,
     );
     return agents[input.botId] ?? null;
   };
@@ -1113,16 +1145,24 @@ export function mountCopilotRuntime(
           return { runId: held.runId };
         } catch (error) {
           /*
-           * Both mean "not now" to the caller, and they are not the same thing to a person reading
-           * the logs. A conversation somebody is already in is ordinary and self-clearing; a platform
-           * that cannot be reached is an outage, and collapsing the two silently is how an outage
-           * spends a day looking like ordinary contention.
+           * ONLY A CONFLICT MEANS "NOT NOW". Everything else is raised.
+           *
+           * A conversation somebody is already running in answers 409, and that is ordinary: the hop
+           * waits and is tried again. Anything else is not — a platform that cannot be reached, a
+           * token that stopped working, or one of the underscored APIs below being renamed by a
+           * routine version bump. Returned as `null` those all read as contention: every hop retries
+           * to exhaustion, every person is told their question was never answered, and the only
+           * evidence is a warning line that looks like a busy conversation.
+           *
+           * Raised, the runner writes the real reason onto `agent.handoff_failed`, and the sentence
+           * the person eventually gets names it.
            */
-          console.warn(
-            `[handoff] could not take the lock on ${input.threadId}:`,
-            error instanceof Error ? error.message : error,
-          );
-          return null;
+          const status =
+            error instanceof Error && "status" in error
+              ? (error as { status?: unknown }).status
+              : undefined;
+          if (status === 409) return null;
+          throw error;
         }
       },
       renew: async (input: { threadId: string; runId: string }) => {

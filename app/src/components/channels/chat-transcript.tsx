@@ -1,18 +1,15 @@
 import type { Message } from "@ag-ui/core";
-import { IconBox } from "@tabler/icons-react";
 import { useRenderToolCall } from "@copilotkit/react-core/v2";
+import { IconBox } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
 import { memo, useEffect, useMemo, useRef } from "react";
 import { Streamdown } from "streamdown";
-import { markdownComponents } from "@/lib/markdown";
-import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
   MessageContent,
   MessageFooter,
   Message as MessageRow,
 } from "@/components/ui/message";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -22,12 +19,15 @@ import {
   MessageScrollerViewport,
   useMessageScroller,
 } from "@/components/ui/message-scroller";
-import { toVisibleChatItems } from "./chat-messages";
-import { asText, forDisplay, REFUSAL_MARKER } from "@/lib/plugins/tool-result";
+import { Skeleton } from "@/components/ui/skeleton";
+import { markdownComponents } from "@/lib/markdown";
+import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
+import { asText, forDisplay, REFUSAL_MARKER } from "@/lib/plugins/tool-result";
+import { toVisibleChatItems } from "./chat-messages";
 import type { QueuedMessage } from "./composer";
-import { ToolLine } from "./tool-line";
 import { ToolRenderBoundary } from "./tool-boundary";
+import { ToolLine } from "./tool-line";
 
 type ChatTranscriptProps = {
   busy?: boolean;

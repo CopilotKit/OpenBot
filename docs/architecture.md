@@ -210,10 +210,16 @@ happened is visible in the transcript and one that was refused is invisible ever
 judgement it does not have should stop and ask rather than guess or hand the question sideways to a
 Bot that cannot settle it either; a model with no named way to stop takes one of the two it has.
 
-It is offered to every run whether or not that Bot has been granted anybody. Reaching a second Bot
-spends a model call, may wake a computer and can fan out; asking the person already in the
-conversation costs nothing and cannot be aimed anywhere they cannot see. A deployment able to switch
-off the safe exit and keep the expensive one would be backwards.
+It is offered to every run this deployment builds, whether or not that Bot has been granted anybody.
+Reaching a second Bot spends a model call, may wake a computer and can fan out; asking the person
+already in the conversation costs nothing and cannot be aimed anywhere they cannot see. A deployment
+able to switch off the safe exit and keep the expensive one would be backwards.
+
+Both tools are for Bots that run here. A Bot at its own endpoint runs its own loop and is handed
+descriptions of the tools it may call back for, and the callback path executes MCP refs only, so
+neither `message_bot` nor `ask_person` can reach it. A `bot` grant naming one is refused rather than
+stored, so an administrator finds out at the point of granting rather than from a Bot that never
+hands anything on.
 
 Who "a person" is, is a seam. This template answers the person in the conversation, which is the only
 answer a template can give honestly; a company has an on-call rota or a duty desk, and that is a

@@ -16,6 +16,7 @@ import {
 import type { Database } from "../db/client";
 import {
   agentProfiles,
+  agents,
   // Aliased: `credentials` is already the injected vault interface in this module, and the table and
   // the interface are two different things to reach for.
   credentials as credentialRows,
@@ -2164,6 +2165,22 @@ export function createPluginStore(options: PluginStoreOptions) {
      * Read here rather than through the coworker store because the only question this file asks is
      * "may this person put their skill on that Bot", and a whole profile is more than that needs.
      */
+    /**
+     * Whether this Bot's run happens in this process, rather than at an endpoint somewhere.
+     *
+     * Undefined for a Bot nobody has heard of. Asked because a tool this deployment executes can
+     * only be offered to a run it builds: a Bot at an endpoint runs its own loop and is handed
+     * descriptions of what it may call back for, and handing work to another Bot is not one of them.
+     */
+    async agentRunsHere(agentId: string): Promise<boolean | undefined> {
+      const [row] = await database
+        .select({ type: agents.type })
+        .from(agents)
+        .where(eq(agents.id, agentId))
+        .limit(1);
+      return row ? row.type === "built_in" : undefined;
+    },
+
     async agentOwner(agentId: string): Promise<string | null | undefined> {
       const [row] = await database
         .select({ ownerUserId: agentProfiles.ownerUserId })

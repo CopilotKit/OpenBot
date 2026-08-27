@@ -1,7 +1,8 @@
 import { useRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
-import { asText } from "@/lib/plugins/tool-result";
+import { PUT_TO } from "@/lib/copilot/markers";
+import { saidItWentAhead } from "@/lib/plugins/tool-result";
 
 /**
  * How a Bot stopping to ask a person reads in the transcript.
@@ -25,13 +26,8 @@ const parameters = z.object({
  * Bot has stopped and nobody has been asked.
  */
 function reached(result: unknown): boolean {
-  if (result === undefined) return true;
-  if (typeof result !== "string") return false;
-  return asText(result).startsWith(PUT_TO);
+  return saidItWentAhead(result, PUT_TO);
 }
-
-/** How the tool starts a sentence when the question was routed. Shared with the server. */
-const PUT_TO = "Put to ";
 
 export function EscalationTool() {
   useRenderTool({

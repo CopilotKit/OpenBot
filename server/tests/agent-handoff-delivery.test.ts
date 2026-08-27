@@ -431,3 +431,80 @@ describe("what the addressed Bot is actually given", () => {
     );
   });
 });
+
+/**
+ * A message is not always a string.
+ *
+ * AG-UI's user message takes `string | InputContent[]` and the platform types thread content as
+ * unknown. Nothing here writes an array yet, which is why a `typeof content === "string"` test
+ * looked complete — and why the day attachments ship, every message carrying one would vanish from
+ * the conversation handed across a hop with nothing recording it.
+ */
+describe("a conversation that is not all plain strings", () => {
+  test("a message made of parts is carried across, not dropped", async () => {
+    const { delivery: deliver, requests } = delivery(
+      FINISHED,
+      undefined,
+      true,
+      {
+        history: [
+          {
+            id: "m1",
+            role: "user",
+            content: [
+              { type: "text", text: "here is the invoice" },
+              { type: "image", url: "https://example.test/a.png" },
+            ],
+          },
+          { id: "m2", role: "assistant", content: "I will read it" },
+        ],
+      },
+    );
+
+    await deliver.deliver({
+      work: WORK,
+      message: "the ask",
+      shown: "one line",
+      assertion: "s",
+    });
+
+    const messages = requests[0]?.input.messages as Message[];
+    expect(messages.map((message) => message.id)).toEqual([
+      "m1",
+      "m2",
+      "handoff-platform-run",
+    ]);
+  });
+
+  /*
+   * Still dropped: a message whose only content is parts this does not understand says nothing, and
+   * an assistant message with nothing in it is a tool call whose other half was never kept.
+   */
+  test("a message with no text in it at all is still left behind", async () => {
+    const { delivery: deliver, requests } = delivery(
+      FINISHED,
+      undefined,
+      true,
+      {
+        history: [
+          { id: "m1", role: "user", content: [{ type: "image", url: "x" }] },
+          { id: "m2", role: "assistant", content: [] },
+          { id: "m3", role: "user", content: "what does it say?" },
+        ],
+      },
+    );
+
+    await deliver.deliver({
+      work: WORK,
+      message: "the ask",
+      shown: "one line",
+      assertion: "s",
+    });
+
+    const messages = requests[0]?.input.messages as Message[];
+    expect(messages.map((message) => message.id)).toEqual([
+      "m3",
+      "handoff-platform-run",
+    ]);
+  });
+});

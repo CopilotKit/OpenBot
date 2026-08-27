@@ -166,11 +166,40 @@ export function createHandoffDesk(options: {
        */
       const roster = await profiles.list({ id: from.actorId, role: "user" });
       const wanted = target.trim().toLowerCase();
-      const found = roster.find(
-        (candidate) =>
-          candidate.id.toLowerCase() === wanted ||
-          candidate.name.toLowerCase() === wanted,
+      /*
+       * An id is exact and a name is not, so an id wins outright.
+       *
+       * `agents.name` has no unique constraint and duplicating a Bot deliberately makes a second one
+       * with the same name, so a person can be looking at two Bots called Knowledge. Taking whichever
+       * sorted first would send the work to a Bot nobody meant — and the grant check runs after this,
+       * so with only the other twin granted a perfectly legitimate hop is refused as "not granted".
+       * Neither failure says a word about there having been two.
+       */
+      const byId = roster.find(
+        (candidate) => candidate.id.toLowerCase() === wanted,
       );
+      const byName = roster.filter(
+        (candidate) => candidate.name.toLowerCase() === wanted,
+      );
+      const reachable = byName.filter(
+        (candidate) => !candidate.hidden && candidate.deletedAt === null,
+      );
+      if (!byId && reachable.length > 1) {
+        /*
+         * Named rather than guessed at. The ids are the escape hatch this refusal is pointing at,
+         * and they are all Bots this person can already see, so naming them tells the model nothing
+         * the roster did not.
+         */
+        return refuse(
+          from,
+          target,
+          "ambiguous_bot",
+          `More than one Bot is called "${target.trim().slice(0, 60)}": ${reachable
+            .map((candidate) => candidate.id)
+            .join(", ")}. Ask again using the one you mean.`,
+        );
+      }
+      const found = byId ?? byName[0];
 
       /*
        * The same answer whether it does not exist or is not theirs to see.

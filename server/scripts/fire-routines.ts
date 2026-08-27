@@ -17,9 +17,9 @@ import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
 import { createRoutineStore } from "../src/routines/store";
 import {
-  ROUTINE_FIRE_KIND,
   dispatchClaimedRoutines,
   offerDueRoutines,
+  ROUTINE_FIRE_KIND,
 } from "../src/routines/sweep";
 import { createWorkQueue } from "../src/work/queue";
 

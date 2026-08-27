@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { asText, forDisplay } from "../src/lib/plugins/tool-result";
+import { PUT_TO as SERVER_PUT_TO } from "../../server/src/agents/escalation";
+import { HANDED_OVER as SERVER_HANDED_OVER } from "../../server/src/agents/handoff-tool";
+import { HANDED_OVER, PUT_TO } from "../src/lib/copilot/markers";
+import {
+  asText,
+  forDisplay,
+  saidItWentAhead,
+} from "../src/lib/plugins/tool-result";
 
 /**
  * What a tool actually said, recovered from how the transcript carries it.
@@ -56,8 +63,16 @@ describe("reading a tool's answer", () => {
  * the prefix never matches, and every accepted hop was drawn as Blocked.
  */
 describe("telling an accepted hop from a refused one", () => {
-  const handedOver = "Handed to ";
-  const putTo = "Put to ";
+  /*
+   * Read from the server's own source, not retyped.
+   *
+   * These markers cross a network: the server writes the sentence and the transcript reads its first
+   * words. Nothing coupled the two ends, so a rewording on the server left every accepted hop drawn
+   * as Blocked with the whole suite green — which is the bug both renderers' comments recount. The
+   * test imports the browser's copies and asserts they still match the server's.
+   */
+  const handedOver = HANDED_OVER;
+  const putTo = PUT_TO;
 
   test("an accepted handoff is not a refusal, encoded or not", () => {
     const said = `${handedOver}Knowledge. It will answer in its own conversation.`;
@@ -79,5 +94,33 @@ describe("telling an accepted hop from a refused one", () => {
   test("a route that reached nobody does not start with the marker", () => {
     const said = "The on-call rota is not configured.";
     expect(asText(JSON.stringify(said)).startsWith(putTo)).toBe(false);
+  });
+});
+
+/**
+ * The two ends of a phrase that crosses a network.
+ *
+ * The server writes the sentence; the transcript reads its first words to decide whether to draw a
+ * hop or a boundary. Nothing held them together, so a rewording on one side was invisible until
+ * somebody looked at a conversation.
+ */
+describe("the markers the server and the transcript both use", () => {
+  test("the browser's copy of each still matches the server's", () => {
+    expect(HANDED_OVER).toBe(SERVER_HANDED_OVER);
+    expect(PUT_TO).toBe(SERVER_PUT_TO);
+  });
+
+  /*
+   * A result that is neither a string nor absent used to mean success to one renderer and a refusal
+   * to the other, for the same situation. Anything unrecognisable is not success: a boundary that
+   * held drawn as a Bot getting on with it is the worse of the two mistakes.
+   */
+  test("an unrecognisable result is never drawn as success", () => {
+    expect(saidItWentAhead({ some: "object" }, HANDED_OVER)).toBe(false);
+    expect(saidItWentAhead(42, PUT_TO)).toBe(false);
+  });
+
+  test("a result that has not arrived yet is left to the caller's status", () => {
+    expect(saidItWentAhead(undefined, HANDED_OVER)).toBe(true);
   });
 });

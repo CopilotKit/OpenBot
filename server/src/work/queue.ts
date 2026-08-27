@@ -99,14 +99,6 @@ export type WorkQueue = {
     reason?: string;
   }) => Promise<boolean>;
   /**
-   * How many items of one kind share a key prefix, whatever state they are in.
-   *
-   * FOR A CAP THAT HAS TO SURVIVE A REPLICA. Counting in a process is counting on one pod, and the
-   * thing a fan-out cap exists to stop is precisely a run whose hops land on several. Every hop this
-   * run has offered is a row, finished or not, so the rows are the count.
-   */
-  count: (input: { kind: string; keyPrefix: string }) => Promise<number>;
-  /**
    * Drop what is done with, older than the retention window. Returns how many went.
    *
    * Both kinds of done: finished, and given up on. An item at its attempt cap is not finished and was
@@ -335,21 +327,6 @@ export function createWorkQueue(database: Database): WorkQueue {
         .where(ours(kind, key, owner))
         .returning({ key: workItems.key });
       return Boolean(released);
-    },
-
-    async count({ kind, keyPrefix }) {
-      const [row] = await database
-        .select({ total: sql<number>`count(*)::int` })
-        .from(workItems)
-        .where(
-          and(
-            eq(workItems.kind, kind),
-            // The prefix is ours, not a caller's pattern: escaped so a key containing `%` or `_`
-            // cannot widen the count to somebody else's rows.
-            like(workItems.key, `${escapeLike(keyPrefix)}%`),
-          ),
-        );
-      return row?.total ?? 0;
     },
 
     async purge({

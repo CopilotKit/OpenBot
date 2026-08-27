@@ -113,7 +113,11 @@ describe("adding a curated server", () => {
  *
  * `kind` also arrives in a JSON body, so a type annotation on it is a comment. It is checked here.
  */
-function grantsApp(role: "admin" | "user" = "admin") {
+function grantsApp(
+  role: "admin" | "user" = "admin",
+  runsHere: (agentId: string) => boolean | undefined = (agentId) =>
+    agentId !== "at-an-endpoint",
+) {
   const calls: Array<{ verb: string; kind: string; ref: string }> = [];
   const store = {
     listServers: async () => [],
@@ -127,6 +131,7 @@ function grantsApp(role: "admin" | "user" = "admin") {
     },
     skillOwner: async () => null,
     agentOwner: async () => null,
+    agentRunsHere: async (agentId: string) => runsHere(agentId),
   };
 
   const app = createApp(
@@ -226,5 +231,78 @@ describe("granting one Bot to another", () => {
 
     expect(response.status).toBe(400);
     expect(calls).toEqual([]);
+  });
+});
+
+/**
+ * A grant that could never do anything.
+ *
+ * Handing work to another Bot is a tool this deployment executes, so it can only be offered to a run
+ * this deployment builds. A Bot at its own endpoint runs its own loop and is handed descriptions of
+ * what it may call back for; there is no callback path that would execute a hop. Stored anyway, the
+ * grant reads as configured and nothing ever happens.
+ */
+describe("granting a hop to a Bot that runs somewhere else", () => {
+  test("is refused, and says why", async () => {
+    const { calls, app } = grantsApp();
+
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "bot",
+          ref: "knowledge",
+          agentId: "at-an-endpoint",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toContain("its own endpoint");
+    expect(calls).toEqual([]);
+  });
+
+  test("a Bot nobody has heard of is refused too", async () => {
+    // Undefined is "no such Bot", which must not read as "runs somewhere else" or as permission.
+    const { calls, app } = grantsApp("admin", () => undefined);
+
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "bot",
+          ref: "knowledge",
+          agentId: "never-registered",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toBe("There is no such Bot.");
+    expect(calls).toEqual([]);
+  });
+
+  test("a Bot that does run here is granted as before", async () => {
+    const { calls, app } = grantsApp();
+
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "bot",
+          ref: "knowledge",
+          agentId: "general-assistant",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ verb: "grant", kind: "bot", ref: "knowledge" }]);
   });
 });

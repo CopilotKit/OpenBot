@@ -739,26 +739,44 @@ const copilotRuntime = mountCopilotRuntime(
       threadId: input.threadId,
       depth: from?.depth ?? 0,
     };
-    const passing = handoffTool({
-      desk: handoffDesk,
-      /*
-       * How deep this run already is comes from the assertion the deployment signed when it handed
-       * this work on. A run a person started carries none, and none means zero.
-       *
-       * NOT `from.botId`. The assertion proves what this run is, and the Bot is whichever one the
-       * runtime is building right now: on a hop those agree, and taking the id from the signed
-       * value rather than from the build would let a stale assertion aim the next hop at the
-       * wrong Bot's grants.
-       */
-      from: run,
-      // Read now rather than at boot, so a grant made a minute ago counts and one revoked a
-      // minute ago stops counting.
-      hasSomebodyToAsk:
-        (await pluginStore.botsReachableFrom(botId).catch(() => [] as string[]))
-          .length > 0,
-      maxDepth: config.handoff.maxDepth,
-      maxPerRun: config.handoff.maxPerRun,
-    });
+    /*
+     * The caps are checked BEFORE the grants query, not inside the tool that would discard it.
+     *
+     * `handoffTool` short-circuits on all three of these, but only after being handed a
+     * `hasSomebodyToAsk` that costs a query. So a deployment which switched the capability off
+     * still paid one grants read per run of every Bot, for a tool it was never going to be offered,
+     * and a run already at the cap paid it again.
+     */
+    const couldHandOn =
+      config.handoff.maxDepth > 0 &&
+      config.handoff.maxPerRun > 0 &&
+      run.depth < config.handoff.maxDepth;
+
+    const passing = couldHandOn
+      ? handoffTool({
+          desk: handoffDesk,
+          /*
+           * How deep this run already is comes from the assertion the deployment signed when it handed
+           * this work on. A run a person started carries none, and none means zero.
+           *
+           * NOT `from.botId`. The assertion proves what this run is, and the Bot is whichever one the
+           * runtime is building right now: on a hop those agree, and taking the id from the signed
+           * value rather than from the build would let a stale assertion aim the next hop at the
+           * wrong Bot's grants.
+           */
+          from: run,
+          // Read now rather than at boot, so a grant made a minute ago counts and one revoked a
+          // minute ago stops counting.
+          hasSomebodyToAsk:
+            (
+              await pluginStore
+                .botsReachableFrom(botId)
+                .catch(() => [] as string[])
+            ).length > 0,
+          maxDepth: config.handoff.maxDepth,
+          maxPerRun: config.handoff.maxPerRun,
+        })
+      : null;
     /*
      * The way to stop and ask is offered whether or not there is a Bot to hand to.
      *
@@ -868,6 +886,30 @@ if (config.handoff.maxDepth > 0) {
    * it was asked for.
    */
   repeatAfterEach(sweep, 2_000);
+
+  /*
+   * And dropping the ones that are over, on a far slower clock.
+   *
+   * Every replica reaps; the statement is a delete by age, so two doing it is the same as one doing
+   * it. Its own loop rather than a phase of the sweep, so a reap that fails costs a reap rather than
+   * a delivery, and so an hour of failing to reap never delays somebody's answer.
+   */
+  repeatAfterEach(
+    async () => {
+      try {
+        const purged = await runner.reap();
+        if (purged > 0) {
+          console.info(JSON.stringify({ type: "bot-handoff-reaped", purged }));
+        }
+      } catch (error) {
+        console.warn(
+          "[handoff] hops that are over could not be dropped:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    },
+    60 * 60 * 1_000,
+  );
 }
 
 const app = createApp(
