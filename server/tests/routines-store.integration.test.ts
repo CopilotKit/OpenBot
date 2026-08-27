@@ -279,6 +279,56 @@ describe("how many a person may have switched on", () => {
       store.setEnabled(owner.id, created[0] as string, true),
     ).rejects.toBeInstanceOf(RoutineRefusedError);
   });
+
+  /**
+   * The cap has to hold under concurrency, not just in sequence. A bare count-then-insert lets two
+   * creates racing at 19 both count 19 and both insert — the person holds 21 — which is why the
+   * store serializes the count and the write per owner under an advisory lock. This drives the race
+   * for real: two creates in flight at once on separate pooled connections.
+   */
+  test("two creates racing at the cap admit exactly one", async () => {
+    const { owner, agentId, channel } = await setUp();
+    for (let index = 0; index < MAX_ENABLED_ROUTINES - 1; index += 1) {
+      await store.create({
+        ownerUserId: owner.id,
+        agentId,
+        channelId: channel.id,
+        instruction: `Routine ${index}`,
+        cron: DAILY,
+      });
+    }
+
+    const outcomes = await Promise.allSettled([
+      store.create({
+        ownerUserId: owner.id,
+        agentId,
+        channelId: channel.id,
+        instruction: "Racer one.",
+        cron: DAILY,
+      }),
+      store.create({
+        ownerUserId: owner.id,
+        agentId,
+        channelId: channel.id,
+        instruction: "Racer two.",
+        cron: DAILY,
+      }),
+    ]);
+
+    const refused = outcomes.filter(
+      (outcome) => outcome.status === "rejected",
+    ) as PromiseRejectedResult[];
+    expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    // The loser gets the friendly sentence, not a constraint violation: the same refusal a
+    // sequential twenty-first create gets.
+    expect(refused[0]?.reason).toBeInstanceOf(RoutineRefusedError);
+
+    const enabled = (await store.listFor(owner.id)).filter(
+      (summary) => summary.enabled,
+    );
+    expect(enabled).toHaveLength(MAX_ENABLED_ROUTINES);
+  });
 });
 
 /**
@@ -805,6 +855,34 @@ describe("moving a routine's clock", () => {
     expect(after?.lastRunAt).toBeNull();
   });
 
+  test("an explicit computeFrom drains a stale clock current in one move, CAS intact", async () => {
+    const { routine } = await makeRoutine();
+    const from = await makeDueAt(routine.id, new Date("2001-01-01T09:00:00Z"));
+
+    // The sweep's stale-backlog call: compare against the month-old stamp it read, but land on the
+    // occurrence after the moment the sweep is standing in — not one day along a 31-day drain.
+    const moved = await store.advanceNextRun(
+      routine.id,
+      from,
+      new Date("2001-02-01T10:00:00Z"),
+    );
+
+    expect(moved).toBe(true);
+    const after = await readRoutine(routine.id);
+    expect(after?.nextRunAt.toISOString()).toBe("2001-02-02T09:00:00.000Z");
+    // The bookmark still records the stamp the CAS compared against.
+    expect(after?.lastRunAt?.getTime()).toBe(from.getTime());
+
+    // And the CAS still guards: a second call holding the drained stamp moves nothing.
+    expect(
+      await store.advanceNextRun(
+        routine.id,
+        from,
+        new Date("2001-03-01T10:00:00Z"),
+      ),
+    ).toBe(false);
+  });
+
   test("advancing stamps last_run_at with the `from` it was given", async () => {
     const { routine } = await makeRoutine();
     const from = await makeDueAt(routine.id, new Date("2001-03-04T09:00:00Z"));
@@ -959,29 +1037,37 @@ describe("opening and closing a run", () => {
 });
 
 /**
- * Every dispatch attempt that goes nowhere opens a run row and leaves it open — `insertRun` runs
- * before `dispatch`, and a dispatch that throws never reaches `finishRun`. `dueRoutines`/the sweep's
- * attempt cap eventually stops retrying, but nothing else closes those rows: `listFor` shows the
- * newest one, so the page reads "running now" forever for a routine that never ran at all.
- *
- * `failOpenRuns` is the sweep's cleanup for exactly that: close every open (`status is null`) run for
- * one routine as "failed", not just the newest, because every one of them was a real dispatch attempt
- * that went nowhere — closing only the newest would still leave the others open and wrong.
+ * A server that dies mid-turn strands its run row open forever: the work item was finished on the
+ * 202, so no retry ever comes back for that row, and nothing else writes it — the routines page
+ * reads "running now" for a run no process is running. `reapAbandonedRuns` is the sweep's mop for
+ * exactly that, and its age bound is what keeps it off live work: a young open row may be a turn
+ * some server is still running, and closing it would turn the real `finishRun` into a silent no-op.
  */
-describe("closing the runs a dispatch never got to finish", () => {
-  test("closes every open run for the routine, leaves a finished one untouched, and reports the count", async () => {
+describe("reaping the runs the server never finished", () => {
+  /** Age one run row past the reaper's cutoff by hand; the reaper compares on the database's clock. */
+  async function ageRun(runId: string, byMs: number) {
+    await database
+      .update(routineRuns)
+      .set({ startedAt: new Date(Date.now() - byMs) })
+      .where(eq(routineRuns.id, runId));
+  }
+
+  test("closes only the rows past the cutoff, as skipped, and leaves live work alone", async () => {
     const { routine } = await makeRoutine();
-    const firstOpen = await store.insertRun(routine.id);
-    const secondOpen = await store.insertRun(routine.id);
+    const abandoned = await store.insertRun(routine.id);
+    const inFlight = await store.insertRun(routine.id);
     const finished = await store.insertRun(routine.id);
     await store.finishRun(finished.runId, "succeeded");
+    await ageRun(abandoned.runId, 11 * 60_000);
 
-    const closed = await store.failOpenRuns(
-      routine.id,
-      "the server answered 503",
+    const reaped = await store.reapAbandonedRuns(
+      10 * 60_000,
+      "the server did not finish this run; it may have restarted mid-turn",
     );
 
-    expect(closed).toBe(2);
+    // At least the row this test aged: the reaper is deliberately not routine-scoped, so a stray
+    // abandoned row from elsewhere in the database may be swept up in the same call.
+    expect(reaped).toBeGreaterThanOrEqual(1);
 
     const rows = await database
       .select()
@@ -989,25 +1075,25 @@ describe("closing the runs a dispatch never got to finish", () => {
       .where(eq(routineRuns.routineId, routine.id));
     const byId = new Map(rows.map((row) => [row.id, row]));
 
-    for (const { runId } of [firstOpen, secondOpen]) {
-      const row = byId.get(runId);
-      expect(row?.status).toBe("failed");
-      expect(row?.finishedAt).toBeInstanceOf(Date);
-      expect(row?.error).toBe("the server answered 503");
-    }
+    const abandonedRow = byId.get(abandoned.runId);
+    expect(abandonedRow?.status).toBe("skipped");
+    expect(abandonedRow?.finishedAt).toBeInstanceOf(Date);
+    expect(abandonedRow?.error).toContain("did not finish this run");
 
-    // The finished run's outcome is untouched: this cleanup closes leaked attempts, not runs that
-    // already have an outcome.
-    const finishedRow = byId.get(finished.runId);
-    expect(finishedRow?.status).toBe("succeeded");
-    expect(finishedRow?.error).toBeNull();
+    // The fresh open row is a turn some server may still be running: closing it would make the real
+    // finishRun a silent no-op, which is the exact overreach the age bound exists to prevent.
+    expect(byId.get(inFlight.runId)?.status).toBeNull();
+
+    // And a run with an outcome already has its truth; the reaper closes abandonment, not history.
+    expect(byId.get(finished.runId)?.status).toBe("succeeded");
   });
 
-  test("caps the error the same way finishRun does", async () => {
+  test("caps the reason the same way finishRun does", async () => {
     const { routine } = await makeRoutine();
     const { runId } = await store.insertRun(routine.id);
+    await ageRun(runId, 11 * 60_000);
 
-    await store.failOpenRuns(routine.id, "x".repeat(600));
+    await store.reapAbandonedRuns(10 * 60_000, "x".repeat(600));
 
     const [row] = await database
       .select()
@@ -1015,12 +1101,58 @@ describe("closing the runs a dispatch never got to finish", () => {
       .where(eq(routineRuns.id, runId));
     expect(row?.error).toHaveLength(MAX_RUN_ERROR);
   });
+});
 
-  test("a routine with nothing open closes nothing", async () => {
-    const { routine } = await makeRoutine();
-    expect(await store.failOpenRuns(routine.id, "no attempts to close")).toBe(
-      0,
+/**
+ * The sweep's off switch for a routine whose own schedule refuses to advance — a cron written before
+ * a validation existed, or hand-edited under it. Left enabled, such a routine throws out of
+ * `advanceNextRun` on every pass forever: its clock never moves and it burns a due slot each time.
+ */
+describe("switching off a routine the sweep cannot schedule", () => {
+  test("disables it and leaves a skipped run carrying the reason where the page reads it", async () => {
+    const { owner, routine } = await makeRoutine();
+
+    await store.markUnschedulable(
+      routine.id,
+      "Routines may run at most every 15 minutes.",
     );
+
+    const [summary] = await store.listFor(owner.id);
+    expect(summary?.enabled).toBe(false);
+    // The run row is the announcement: the sweep has no channel to say this in, so the page's
+    // last-run column is where the owner learns why their routine stopped.
+    expect(summary?.lastRun?.status).toBe("skipped");
+    const [row] = await database
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.routineId, routine.id));
+    expect(row?.error).toBe("Routines may run at most every 15 minutes.");
+    expect(row?.finishedAt).toBeInstanceOf(Date);
+  });
+
+  test("a skipped announcement neither counts as a failure nor breaks a streak", async () => {
+    const { routine } = await makeRoutine();
+    const { runId } = await store.insertRun(routine.id);
+    await store.finishRun(runId, "failed", "it threw");
+
+    await store.markUnschedulable(routine.id, "unschedulable");
+
+    // The fatigue rule reads through the announcement to the real failure tail.
+    expect(await store.consecutiveFailures(routine.id)).toBe(1);
+  });
+
+  test("a routine deleted in the meantime is left alone", async () => {
+    const { owner, routine } = await makeRoutine();
+    await store.remove(owner.id, routine.id);
+
+    // Gone is gone: no throw, and no orphaned run row for a routine nobody can see.
+    await store.markUnschedulable(routine.id, "unschedulable");
+    expect(
+      await database
+        .select()
+        .from(routineRuns)
+        .where(eq(routineRuns.routineId, routine.id)),
+    ).toEqual([]);
   });
 });
 

@@ -417,14 +417,14 @@ describe("offering the firings that are due", () => {
 /**
  * A STALE STAMP IS NOT A BACKLOG TO REPLAY.
  *
- * `advanceNextRun` moves the clock one occurrence on from the stamp it was given, so a routine whose
- * stamp is a month behind comes back due pass after pass, once per missed occurrence. Turn the
- * worker on after a quiet month and a person gets thirty summaries of thirty days ago; a 15-minute
- * routine idle a year would be some thirty-five thousand firings. The stamp still has to drain, so
- * the pass advances it — it just says nothing while it does.
+ * A routine whose stamp is a month behind must not fire once per missed occurrence when the worker
+ * comes back: a person would get thirty summaries of thirty days ago. And it must not drain one
+ * occurrence per pass either — that kept a fifteen-minute routine silent a further fortnight after a
+ * month of downtime, because stepping through ~2,900 missed occurrences at one per five-minute sweep
+ * is itself two weeks. One pass makes the clock current, silently.
  */
 describe("draining a stale stamp instead of replaying it", () => {
-  test("a month-old firing is advanced without being offered, and a two-minute-old one fires", async () => {
+  test("a month-old firing is caught up to current in one pass, and a two-minute-old one fires", async () => {
     const { routine: stale } = await makeRoutine("A month behind.");
     const { routine: fresh } = await makeRoutine("Two minutes late.");
     const staleFrom = await makeDueAt(
@@ -441,11 +441,13 @@ describe("draining a stale stamp instead of replaying it", () => {
     expect(await firingsFor(stale.id)).toHaveLength(0);
     expect(await firingsFor(fresh.id)).toHaveLength(1);
 
-    // Advanced all the same, one occurrence on, so successive passes drain it silently rather than
-    // reading it as due for ever.
+    // Advanced past the whole backlog in one move: the next occurrence is computed from the pass's
+    // own moment, not one day along a thirty-one-day drain, so the routine is silent for the missed
+    // month and then simply current. (Whether it is still "due" is Postgres's real clock's judgement,
+    // which is why this asserts the landing point rather than a second pass over a 2001 stamp.)
     const after = await readRoutine(stale.id);
     expect(after?.nextRunAt.getTime()).toBeGreaterThan(staleFrom.getTime());
-    expect(after?.nextRunAt.toISOString()).toBe("2001-01-02T09:00:00.000Z");
+    expect(after?.nextRunAt.toISOString()).toBe("2001-02-02T09:00:00.000Z");
   });
 
   test("the grace window is a setting, so a caller can say what counts as worth having", async () => {
@@ -467,15 +469,18 @@ describe("draining a stale stamp instead of replaying it", () => {
 });
 
 /**
- * One poisoned routine is one person's problem, not everybody's.
+ * One poisoned routine is one person's problem, not everybody's — and not silently for ever.
  *
- * A cron the parser cannot read makes `advanceNextRun` throw, and an unguarded loop would take the
- * whole pass down with it — for every other person's routine too, on every pass, for as long as the
- * bad row exists. The one routine nobody can schedule must not be able to stop the sweep.
+ * A cron the schedule module refuses makes `advanceNextRun` throw. An unguarded loop would take the
+ * whole pass down with it, for every other person's routine too; and a loop that only warned would
+ * read the same row as due on every pass for ever, burning one of the pass's slots while its owner
+ * saw a routine that quietly stopped. So the pass survives it, says so, and switches the routine off
+ * with the reason written where the routines page reads it.
  */
 describe("surviving a routine that cannot be scheduled", () => {
-  test("a poisoned cron is warned about and the next routine is still offered", async () => {
-    const { routine: poisoned } = await makeRoutine("Unschedulable.");
+  test("a poisoned cron is warned about, switched off with its reason on the page, and the next routine still offered", async () => {
+    const { owner: poisonedOwner, routine: poisoned } =
+      await makeRoutine("Unschedulable.");
     const { routine: healthy } = await makeRoutine("Perfectly fine.");
     // Only a direct write can make this row: `create` and `update` both refuse a cron the schedule
     // module cannot read, which is exactly why the bad row has to be simulated rather than created.
@@ -506,23 +511,68 @@ describe("surviving a routine that cannot be scheduled", () => {
     expect(await firingsFor(healthy.id)).toHaveLength(1);
 
     // Said out loud, with the routine in it: a sweep that swallowed this would look clean while one
-    // routine never advanced again.
+    // routine was switched off.
     const complaint = lines.find((line) => line.includes(poisoned.id));
     expect(complaint).toBeDefined();
     expect(JSON.parse(complaint as string).routineId).toBe(poisoned.id);
 
-    // The poisoned routine's clock could not move, so it stays due and stays being warned about on
-    // every pass thereafter. It is not re-offered forever, though: this pass fired it because its
-    // stamp was still inside the grace window (two minutes late). Once the stamp ages past graceMs,
-    // the grace guard skips the offer before this throw is ever reached, so the grace policy is what
-    // bounds this failure mode to a single firing rather than an unbounded stream of re-offers.
-    expect((await readRoutine(poisoned.id))?.nextRunAt.getTime()).toBe(
+    /*
+     * SWITCHED OFF, NOT LEFT TO WEDGE. The clock could not move, so left enabled this row would be
+     * read as due and thrown over on every pass for ever — invisible to its owner, who would see a
+     * routine that simply stopped. Disabled, it stops burning a due slot, and the skipped run row is
+     * the announcement: the sweep has no channel to speak in, so the page's last-run column is where
+     * the owner learns why.
+     */
+    const after = await readRoutine(poisoned.id);
+    expect(after?.enabled).toBe(false);
+    expect(after?.nextRunAt.getTime()).toBe(
       new Date("2001-01-01T09:25:00Z").getTime(),
     );
+    const [summary] = await store.listFor(poisonedOwner.id);
+    expect(summary?.enabled).toBe(false);
+    expect(summary?.lastRun?.status).toBe("skipped");
 
     // That single firing is the entire blast radius: pin it as exactly one `work_items` row, the
     // offer that preceded the throw, rather than leaving it inferred from the warning alone.
     expect(await firingsFor(poisoned.id)).toHaveLength(1);
+  });
+
+  /**
+   * The wedge that motivated the deterministic floor: `45,55 8 * * *` used to be ACCEPTED when
+   * created between the pair (the next two occurrences sampled 23h50m apart), and then the first
+   * advance handed the schedule an `after` of 08:45, saw the ten-minute pair, and threw — on every
+   * pass, for ever, while the routine silently never fired again. Creation now refuses it, so the
+   * row is written directly to stand for the ones already in the wild.
+   */
+  test("a sub-floor cron already in the table is switched off instead of wedging the sweep", async () => {
+    const { owner, routine } = await makeRoutine("Grandfathered in.");
+    await database
+      .update(routines)
+      .set({ cron: "45,55 8 * * *" })
+      .where(eq(routines.id, routine.id));
+    await makeDueAt(routine.id, new Date("2001-01-01T08:45:00Z"));
+
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await offerDueRoutines(
+        sweepOptions({ now: () => new Date("2001-01-01T08:46:00Z") }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    const [summary] = await store.listFor(owner.id);
+    expect(summary?.enabled).toBe(false);
+    expect(summary?.lastRun?.status).toBe("skipped");
+    // The reason on the run row is the schedule's own sentence, so the owner (and their Bot) can
+    // propose a schedule that works rather than guess at what broke.
+    const runs = await runsFor(routine.id);
+    expect(runs[0]?.error).toContain("15 minutes");
+
+    // And a disabled routine is not due: the pass after this one no longer spends a slot on it.
+    expect((await store.dueRoutines(50)).map((row) => row.id)).not.toContain(
+      routine.id,
+    );
   });
 });
 
@@ -593,6 +643,16 @@ describe("consuming a claimed firing", () => {
     expect(report.fired).toEqual([]);
     expect(report.skipped[0]?.routineId).toBe(routine.id);
     expect(report.skipped[0]?.reason).toContain("503");
+
+    /*
+     * The run row this attempt opened stays open FOR NOW, on purpose: a dispatch that timed out may
+     * be a dispatch a wedged server accepted anyway, with a detached turn coming back for this very
+     * row, and only age can tell that apart from abandonment. The reaper closes it once it is older
+     * than any turn could still be running — the age-scoped test further down pins that half.
+     */
+    const runs = await runsFor(routine.id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBeNull();
 
     /*
      * THE ROW, NOT THE RETURN VALUE. A consumer that reported a failure and finished the item anyway
@@ -849,14 +909,16 @@ describe("consuming a claimed firing", () => {
   });
 
   /**
-   * THE LEAKED RUN ROW THE ATTEMPT CAP LEFT BEHIND. `insertRun` runs before `dispatch` on every
-   * attempt, so a dispatch that throws on the very last attempt still leaves an open (`status` null)
-   * run row nothing else closes: the item stops being claimed at the cap and the queue's own
-   * machinery has nothing to do with `routine_runs`. Without closing it, `listFor` — the routines
-   * page's read — keeps showing that open row as the newest run, and a routine that never ran reads
-   * as "running now" forever.
+   * NO RUN ROW STAYS OPEN FOR EVER AFTER THE CAP. `insertRun` runs before `dispatch` on every
+   * attempt, so a dispatch that throws on the very last attempt leaves an open (`status` null) run
+   * row: the item stops being claimed at the cap and the queue's own machinery has nothing to do
+   * with `routine_runs`. Nothing closes that row at the give-up itself — a timed-out dispatch may be
+   * a turn a wedged server accepted, and only age can tell — but the reaper closes it on a later
+   * pass, so `listFor` (the routines page's read) stops showing "running now" for a routine that
+   * never ran. At Helm defaults the old give-up branch was unreachable in time anyway (five 1-minute
+   * retries against a 10-minute grace), so these rows used to leak for ever.
    */
-  test("giving up at the attempt cap also closes the run row it leaked, so the page stops reading 'running'", async () => {
+  test("a run row leaked at the attempt cap is closed by a later pass, so the page stops reading 'running'", async () => {
     const { owner, routine } = await makeRoutine();
     await offerFiring(
       routine.id,
@@ -875,18 +937,196 @@ describe("consuming a claimed firing", () => {
           },
         }),
       );
+
+      // Old enough that no turn could still be running it; the reaper compares on the database's
+      // clock, so the age is written rather than waited for.
+      const [leaked] = await runsFor(routine.id);
+      await database
+        .update(routineRuns)
+        .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
+        .where(eq(routineRuns.id, leaked?.id as string));
+
+      await dispatchClaimedRoutines(
+        sweepOptions({ now: at("2001-01-01T09:40:00Z") }),
+      );
     } finally {
       warn.mockRestore();
     }
 
-    // No run row for this routine is left open: every attempt that opened one also got it closed.
+    // No run row for this routine is left open once the reaper has passed.
     const runs = await runsFor(routine.id);
     expect(runs.length).toBeGreaterThan(0);
     expect(runs.every((run) => run.status !== null)).toBe(true);
 
-    // And the page-facing read agrees: the newest run reads "failed", not "running now".
+    // The page-facing read agrees, and it reads "skipped", not "failed": the turn never ran, so the
+    // routine's own failure streak must not grow — ten flapping dispatches used to read as ten turn
+    // failures, enough to trip the fatigue rule and switch a perfectly healthy routine off.
     const [summary] = await store.listFor(owner.id);
-    expect(summary?.lastRun?.status).toBe("failed");
+    expect(summary?.lastRun?.status).toBe("skipped");
+    expect(summary?.lastRun?.finishedAt).toBeInstanceOf(Date);
+    expect(await store.consecutiveFailures(routine.id)).toBe(0);
+  });
+
+  /**
+   * THE NET MUST NOT CATCH THE NEIGHBOUR'S FISH. An earlier firing of the same routine can be
+   * genuinely mid-turn while a later firing runs out of dispatch attempts: the dispatch call aborts
+   * at 30 seconds, but the server's detached turn keeps running for minutes and finishes its row
+   * itself. The old give-up cleanup closed EVERY open run of the routine, that one included, so the
+   * real turn's finish then no-oped against an already-"failed" row and an honest success was
+   * recorded as a failure. Cleanup is age-scoped now, and a fresh row is by definition one a turn
+   * may still be running.
+   */
+  test("giving up leaves a genuinely in-flight run from an earlier firing untouched", async () => {
+    const { routine } = await makeRoutine();
+    // The earlier firing: already dispatched, its turn still running on the server, its row open.
+    const inFlight = await store.insertRun(routine.id);
+
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await dispatchClaimedRoutines(
+        sweepOptions({
+          now: at("2001-01-01T09:26:00Z"),
+          maxAttempts: 1,
+          dispatch: async () => {
+            throw new Error("the server answered 503");
+          },
+        }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    // Nothing was mislabelled at the give-up: both rows are still open, because both are young
+    // enough to be turns some server is running.
+    const runs = await runsFor(routine.id);
+    expect(runs.find((run) => run.id === inFlight.runId)?.status).toBeNull();
+
+    // The in-flight turn now completes, and its outcome lands rather than no-oping against a row
+    // the give-up already closed — which is exactly what the old cleanup caused.
+    await store.finishRun(inFlight.runId, "succeeded");
+    expect(
+      (await runsFor(routine.id)).find((run) => run.id === inFlight.runId)
+        ?.status,
+    ).toBe("succeeded");
+
+    // And once the abandoned attempt's row is old enough that no turn could still be running it,
+    // the reaper closes it — as skipped, never touching the finished run beside it.
+    const attempt = runs.find((run) => run.id !== inFlight.runId);
+    await database
+      .update(routineRuns)
+      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(routineRuns.id, attempt?.id as string));
+    const warnAgain = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await dispatchClaimedRoutines(
+        sweepOptions({ now: at("2001-01-01T09:40:00Z") }),
+      );
+    } finally {
+      warnAgain.mockRestore();
+    }
+    const after = await runsFor(routine.id);
+    expect(after.find((run) => run.id === attempt?.id)?.status).toBe("skipped");
+    expect(after.find((run) => run.id === inFlight.runId)?.status).toBe(
+      "succeeded",
+    );
+  });
+
+  /**
+   * A firing abandoned mid-retry must not strand its run rows. An attempt fails inside the grace
+   * window and its item is released; by the time the item is claimed again the window has passed and
+   * the firing is finished as stale. The grace-skip itself opens nothing and closes nothing — the
+   * open row may be a turn a wedged server accepted, and only age can tell — but the reaper closes
+   * it once it is old enough, so nothing about the abandoned firing reads "running now" for ever.
+   */
+  test("a firing abandoned by the grace window does not strand its earlier attempt's run row", async () => {
+    const { routine } = await makeRoutine();
+    await offerFiring(
+      routine.id,
+      new Date("2001-01-01T09:25:00Z"),
+      new Date("2001-01-01T09:26:00Z"),
+    );
+
+    // Attempt one, inside the window: the dispatch throws and the item is pushed out for retry.
+    await dispatchClaimedRoutines(
+      sweepOptions({
+        now: at("2001-01-01T09:26:00Z"),
+        dispatch: async () => {
+          throw new Error("the server answered 503");
+        },
+      }),
+    );
+    // The retry delay is written into the past so the next pass can claim the item at all, and the
+    // leaked row is aged past the reaper's cutoff the same way — the clock is driven, not waited on.
+    const [row] = await firingsFor(routine.id);
+    await backdate(row?.key as string, {
+      runAt: new Date("2001-01-01T09:27:00Z"),
+    });
+    const [leaked] = await runsFor(routine.id);
+    await database
+      .update(routineRuns)
+      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(routineRuns.id, leaked?.id as string));
+
+    // Attempt two, claimed twenty minutes after the occurrence: outside the window, so the firing
+    // is finished without dispatching — and the same pass's reaper closes the leaked row.
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    let report: Awaited<ReturnType<typeof dispatchClaimedRoutines>>;
+    try {
+      report = await dispatchClaimedRoutines(
+        sweepOptions({ now: at("2001-01-01T09:45:00Z") }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+    expect(report.fired).toEqual([]);
+    expect(report.skipped[0]?.routineId).toBe(routine.id);
+
+    // Nothing about this firing is still open: attempt one's row is closed as skipped — no turn ran,
+    // so the fatigue rule must not count it — and attempt two never opened one.
+    const runs = await runsFor(routine.id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("skipped");
+    expect(await store.consecutiveFailures(routine.id)).toBe(0);
+    const [finished] = await firingsFor(routine.id);
+    expect(finished?.finishedAt).not.toBeNull();
+  });
+
+  /**
+   * THE REAPER, for the row no retry ever comes back for. The server 202s the dispatch, the queue
+   * item is finished, and then the server dies mid-turn: its run row stays open with nothing in the
+   * system holding a reference to it — the page reads "running now" for a run no process is running.
+   * The sweep's consuming pass is on a clock anyway, so it is the thing that mops these up.
+   */
+  test("a run abandoned by a dead server is closed by the next pass, as skipped, with an honest reason", async () => {
+    const { owner, routine } = await makeRoutine();
+    const { runId } = await store.insertRun(routine.id);
+    // Aged past the reaper's cutoff (twice the server's five-minute turn timeout) by hand: the run
+    // was opened by a server that died eleven minutes ago.
+    await database
+      .update(routineRuns)
+      .set({ startedAt: new Date(Date.now() - 11 * 60_000) })
+      .where(eq(routineRuns.id, runId));
+
+    // Nothing is claimed in this pass; the reaper alone does the work.
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    let report: Awaited<ReturnType<typeof dispatchClaimedRoutines>>;
+    try {
+      report = await dispatchClaimedRoutines(sweepOptions());
+    } finally {
+      warn.mockRestore();
+    }
+    expect(report.considered).toBe(0);
+
+    const runs = await runsFor(routine.id);
+    expect(runs[0]?.status).toBe("skipped");
+    expect(runs[0]?.error).toContain("never finished this run");
+    const [summary] = await store.listFor(owner.id);
+    expect(summary?.lastRun?.status).toBe("skipped");
     expect(summary?.lastRun?.finishedAt).toBeInstanceOf(Date);
   });
 

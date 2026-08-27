@@ -50,6 +50,57 @@ describe("nextOccurrence", () => {
     expect(result).toBeInstanceOf(Date);
   });
 
+  /**
+   * The floor must be a property of the expression, not of the clock at the moment of asking.
+   *
+   * "45,55 8 * * *" has one ten-minute pair per day. A check that samples only the next two
+   * occurrences after `after` sees that pair when asked before 08:45 and a 23h50m gap when asked at
+   * 08:50 — so the routine is accepted or refused depending on when the person happened to create
+   * it, and an accepted one wedges at its first advance: the sweep hands `nextOccurrence` an `after`
+   * of 08:45, the pair check throws, and `next_run_at` never moves again.
+   */
+  test("refuses a sub-floor adjacent pair no matter when it is asked about", () => {
+    // Asked from a moment where the next two occurrences are 23h50m apart: the shape the
+    // next-two-samples check accepted.
+    expect(() =>
+      nextOccurrence("45,55 8 * * *", "UTC", new Date("2026-01-01T08:50:00Z")),
+    ).toThrow("Routines may run at most every 15 minutes.");
+    // And from a moment where the pair is the next thing ahead, for symmetry.
+    expect(() =>
+      nextOccurrence("45,55 8 * * *", "UTC", new Date("2026-01-01T00:00:00Z")),
+    ).toThrow(ScheduleRefusedError);
+  });
+
+  test("refuses a sub-floor pair that only exists on one day of the year", () => {
+    // 09:00 and 09:10 every 25 December. Asked five minutes after the 09:05 of one Christmas, the
+    // next two occurrences are 09:10 and NEXT year's 09:00 — the old sampling accepted that.
+    expect(() =>
+      nextOccurrence("0,10 9 25 12 *", "UTC", new Date("2026-12-25T09:05:00Z")),
+    ).toThrow("Routines may run at most every 15 minutes.");
+  });
+
+  test("refuses a sub-floor gap that only appears across midnight", () => {
+    // 00:00, 00:50, 23:00 and 23:50 every day: every same-day gap clears the floor, but 23:50 to
+    // the next day's 00:00 is ten minutes. A scan that stopped at one day's occurrences would
+    // accept it.
+    expect(() =>
+      nextOccurrence(
+        "0,50 0,23 * * *",
+        "UTC",
+        new Date("2026-01-01T00:10:00Z"),
+      ),
+    ).toThrow("Routines may run at most every 15 minutes.");
+  });
+
+  test("still accepts a listed pair that clears the floor", () => {
+    const result = nextOccurrence(
+      "0,30 9 * * *",
+      "UTC",
+      new Date("2026-01-01T09:05:00Z"),
+    );
+    expect(result.toISOString()).toBe("2026-01-01T09:30:00.000Z");
+  });
+
   test("refuses an unknown IANA timezone", () => {
     expect(() =>
       nextOccurrence(

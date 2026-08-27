@@ -175,8 +175,15 @@ export type RoutineStore = {
 
   /** Enabled routines whose next run has arrived, oldest due first. */
   dueRoutines(limit: number): Promise<{ id: string; nextRunAt: Date }[]>;
-  /** Compare-and-set the clock forward. False means another sweep got there first. */
-  advanceNextRun(id: string, from: Date): Promise<boolean>;
+  /**
+   * Compare-and-set the clock forward. False means another sweep got there first.
+   *
+   * The CAS always compares against `from`, the stamp the caller read. `computeFrom` is for the
+   * stale-backlog case: a routine whose stamp is a month behind used to be stepped one occurrence
+   * per pass — a fifteen-minute routine idle a month stayed silent another fortnight while its
+   * clock caught up — so the sweep passes `now` here and one advance makes the clock current.
+   */
+  advanceNextRun(id: string, from: Date, computeFrom?: Date): Promise<boolean>;
   /** Open a run row. Its status stays null until something finishes it. */
   insertRun(routineId: string): Promise<{ runId: string }>;
   /**
@@ -204,22 +211,38 @@ export type RoutineStore = {
     error?: string,
   ): Promise<void>;
   /**
-   * Close every open (`status is null`) run for one routine as "failed", with the same error on all
-   * of them. Returns how many rows it closed.
+   * Close every run row that has sat open (`status is null`) longer than `olderThanMs` as
+   * "skipped", with the same reason on all of them. Returns how many rows it closed.
    *
-   * The give-up branch's cleanup, not `finishRun`'s: `insertRun` runs before `dispatch` on every
-   * attempt, so a dispatch that throws leaves an open run row behind, and the queue's attempt cap
-   * eventually stops offering that item to anybody — nothing else ever closes those rows. `listFor`
-   * shows the newest one, so without this a routine that never ran once reads "running now" forever.
-   * Closing ALL of them, not just the newest, is the more truthful shape: every open row is a real
-   * dispatch attempt that went nowhere, not just the last one.
+   * The sweep's reaper, and deliberately NOT scoped to one routine or one firing: it exists for the
+   * rows nothing else can reach — a server that died mid-turn after the queue item was already
+   * finished on the 202, or a dispatch-failure close that itself failed. The age bound is what keeps
+   * it away from live work: a run younger than the cutoff may be a turn some server is still
+   * running, and closing that row would make the real `finishRun` a silent no-op. "skipped" rather
+   * than "failed" so an infrastructure death is not counted by the fatigue rule as the routine's own
+   * failure.
    */
-  failOpenRuns(routineId: string, error: string): Promise<number>;
+  reapAbandonedRuns(olderThanMs: number, error: string): Promise<number>;
+  /**
+   * Switch a routine off because its own schedule refuses to advance, and record why.
+   *
+   * The sweep's off switch, not a person's, so it is not owner-scoped — like everything else in this
+   * half, the id comes from the sweep's own read, not from a caller. A routine whose stored cron the
+   * schedule module refuses (a row written before a validation existed, a hand-edited value) throws
+   * out of `advanceNextRun` on every pass for ever: its clock never moves, it burns one of the
+   * pass's due slots each time, and the owner sees a routine that silently stopped. Disabling it
+   * ends that, and the finished "skipped" run row this writes is the announcement — the sweep has no
+   * channel to speak in, and the run history is what `listFor` surfaces to the owner.
+   */
+  markUnschedulable(id: string, reason: string): Promise<void>;
   /** How many failures the routine has at the tail, for the fatigue rule to read. */
   consecutiveFailures(routineId: string): Promise<number>;
 };
 
 type RoutineRow = typeof routines.$inferSelect;
+
+/** What drizzle hands the callback of `database.transaction`. */
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 function toRoutine(row: RoutineRow): Routine {
   return {
@@ -369,15 +392,45 @@ export function createRoutineStore(database: Database): RoutineStore {
     return only.id;
   }
 
-  /** How many of this person's routines are switched on. The cap counts these, not rows. */
-  async function countEnabled(ownerUserId: string): Promise<number> {
-    const [row] = await database
+  /**
+   * How many of this person's routines are switched on. The cap counts these, not rows.
+   *
+   * Takes the transaction it must count on: a count made on another pooled connection would not see
+   * the uncommitted row a racing create is about to add, which is the exact blindness the lock below
+   * exists to remove.
+   */
+  async function countEnabled(
+    handle: Transaction,
+    ownerUserId: string,
+  ): Promise<number> {
+    const [row] = await handle
       .select({ total: sql<number>`count(*)::int` })
       .from(routines)
       .where(
         and(eq(routines.ownerUserId, ownerUserId), eq(routines.enabled, true)),
       );
     return row?.total ?? 0;
+  }
+
+  /**
+   * Serialize this owner's cap-guarded writes: count and write under one advisory lock.
+   *
+   * The cap used to be a bare count-then-write, and two concurrent creates that both counted 19 both
+   * inserted — the person held 21. An advisory lock rather than a row lock because the thing being
+   * guarded is a COUNT: there is no one row whose `for update` covers "how many are enabled".
+   * Transaction-scoped (`_xact_`), so the commit or the rollback releases it and never us forgetting.
+   * `hashtext` collisions are harmless — two owners sharing a hash take turns, slower and not wrong.
+   */
+  async function withEnabledCapLock<T>(
+    ownerUserId: string,
+    work: (transaction: Transaction) => Promise<T>,
+  ): Promise<T> {
+    return await database.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`routine-cap-${ownerUserId}`}))`,
+      );
+      return await work(transaction);
+    });
   }
 
   async function loadOwned(
@@ -417,9 +470,6 @@ export function createRoutineStore(database: Database): RoutineStore {
     if (patch.enabled !== undefined) values.enabled = patch.enabled;
 
     const enabling = patch.enabled === true && !existing.enabled;
-    if (enabling && (await countEnabled(ownerUserId)) >= MAX_ENABLED_ROUTINES) {
-      throw new RoutineRefusedError(TOO_MANY_ENABLED);
-    }
 
     const cron = patch.cron ?? existing.cron;
     const timezone = patch.timezone ?? existing.timezone;
@@ -434,11 +484,24 @@ export function createRoutineStore(database: Database): RoutineStore {
       values.nextRunAt = nextRunFor(cron, timezone, new Date());
     }
 
-    const [row] = await database
-      .update(routines)
-      .set(values)
-      .where(and(eq(routines.id, id), eq(routines.ownerUserId, ownerUserId)))
-      .returning();
+    /*
+     * The cap is re-counted inside the lock, in the same transaction as the write. Counting outside
+     * and writing inside would keep the very race the lock removes: two enables that both counted 19
+     * before either committed.
+     */
+    const [row] = await withEnabledCapLock(ownerUserId, async (transaction) => {
+      if (
+        enabling &&
+        (await countEnabled(transaction, ownerUserId)) >= MAX_ENABLED_ROUTINES
+      ) {
+        throw new RoutineRefusedError(TOO_MANY_ENABLED);
+      }
+      return await transaction
+        .update(routines)
+        .set(values)
+        .where(and(eq(routines.id, id), eq(routines.ownerUserId, ownerUserId)))
+        .returning();
+    });
     if (!row) throw new RoutineNotFoundError();
     return toRoutine(row);
   }
@@ -456,23 +519,32 @@ export function createRoutineStore(database: Database): RoutineStore {
       );
       const nextRunAt = nextRunFor(input.cron, timezone, new Date());
 
-      if ((await countEnabled(input.ownerUserId)) >= MAX_ENABLED_ROUTINES) {
-        throw new RoutineRefusedError(TOO_MANY_ENABLED);
-      }
-
-      const [row] = await database
-        .insert(routines)
-        .values({
-          id: `routine_${crypto.randomUUID()}`,
-          ownerUserId: input.ownerUserId,
-          agentId: input.agentId,
-          channelId,
-          instruction,
-          cron: input.cron,
-          timezone,
-          nextRunAt,
-        })
-        .returning();
+      // Counted and inserted under the owner's cap lock, so two creates racing at 19 cannot both
+      // count 19 and hand the person 21: the second waits, counts 20, and gets the refusal.
+      const [row] = await withEnabledCapLock(
+        input.ownerUserId,
+        async (transaction) => {
+          if (
+            (await countEnabled(transaction, input.ownerUserId)) >=
+            MAX_ENABLED_ROUTINES
+          ) {
+            throw new RoutineRefusedError(TOO_MANY_ENABLED);
+          }
+          return await transaction
+            .insert(routines)
+            .values({
+              id: `routine_${crypto.randomUUID()}`,
+              ownerUserId: input.ownerUserId,
+              agentId: input.agentId,
+              channelId,
+              instruction,
+              cron: input.cron,
+              timezone,
+              nextRunAt,
+            })
+            .returning();
+        },
+      );
       // An insert that returned nothing is not a missing routine, it is a broken database: loud
       // rather than folded into the not-found sentence a caller is meant to be able to trust.
       if (!row) throw new Error("inserting a routine returned no row");
@@ -606,7 +678,7 @@ export function createRoutineStore(database: Database): RoutineStore {
         .limit(limit);
     },
 
-    async advanceNextRun(id, from) {
+    async advanceNextRun(id, from, computeFrom) {
       const [row] = await database
         .select({ cron: routines.cron, timezone: routines.timezone })
         .from(routines)
@@ -614,7 +686,10 @@ export function createRoutineStore(database: Database): RoutineStore {
         .limit(1);
       if (!row) return false;
 
-      const next = nextRunFor(row.cron, row.timezone, from);
+      // `computeFrom` moves only where the next occurrence is measured from, never what the CAS
+      // compares against: the sweep uses it to make a month-stale clock current in one pass, and
+      // the guarantee that exactly one replica moves the row has to survive that.
+      const next = nextRunFor(row.cron, row.timezone, computeFrom ?? from);
 
       /*
        * THE COMPARE-AND-SET IS THE WHOLE MECHANISM. `where next_run_at = from` means the row only
@@ -714,22 +789,53 @@ export function createRoutineStore(database: Database): RoutineStore {
         .where(and(eq(routineRuns.id, runId), isNull(routineRuns.status)));
     },
 
-    async failOpenRuns(routineId, error) {
-      // One UPDATE, not a select-then-loop: every row this WHERE matches is a leaked attempt, and
-      // there is nothing to decide per row that `status is null` does not already decide.
+    async reapAbandonedRuns(olderThanMs, error) {
+      /*
+       * One UPDATE, not a select-then-loop: every row this WHERE matches is abandoned, and there is
+       * nothing to decide per row that the age bound does not already decide. Both sides of the age
+       * comparison are the database's clock — `started_at` was written by its `now()`, so measuring
+       * it against a replica's `Date.now()` would let ninety seconds of skew reap a run some server
+       * is still running, which is this file's standing clock discipline.
+       */
       const closed = await database
         .update(routineRuns)
         .set({
-          status: "failed",
+          status: "skipped",
           finishedAt: sql`now()`,
-          // Same code-point cap as `finishRun`, so a give-up reason cannot be cut mid-surrogate-pair.
+          // Same code-point cap as `finishRun`, so a reap reason cannot be cut mid-surrogate-pair.
           error: Array.from(error).slice(0, MAX_RUN_ERROR).join(""),
         })
         .where(
-          and(eq(routineRuns.routineId, routineId), isNull(routineRuns.status)),
+          and(
+            isNull(routineRuns.status),
+            lte(
+              routineRuns.startedAt,
+              sql`now() - (${olderThanMs} * interval '1 millisecond')`,
+            ),
+          ),
         )
         .returning({ id: routineRuns.id });
       return closed.length;
+    },
+
+    async markUnschedulable(id, reason) {
+      const disabled = await database
+        .update(routines)
+        .set({ enabled: false, updatedAt: sql`now()` })
+        .where(eq(routines.id, id))
+        .returning({ id: routines.id });
+      // Deleted between the sweep's read and this write: gone is gone, and a run row inserted here
+      // would only violate the foreign key of a routine nobody can see any more.
+      if (disabled.length === 0) return;
+      // A finished "skipped" row rather than "failed": no turn ran, so the fatigue rule must not
+      // count this, and skipped is exactly the vocabulary for a firing that never became a turn.
+      await database.insert(routineRuns).values({
+        id: `routine_run_${crypto.randomUUID()}`,
+        routineId: id,
+        status: "skipped",
+        finishedAt: sql`now()`,
+        error: Array.from(reason).slice(0, MAX_RUN_ERROR).join(""),
+      });
     },
 
     async consecutiveFailures(routineId) {
@@ -749,8 +855,9 @@ export function createRoutineStore(database: Database): RoutineStore {
             eq(routineRuns.routineId, routineId),
             isNotNull(routineRuns.status),
             /*
-             * A SKIP IS NOT A FAILURE, AND DOES NOT BREAK THE STREAK. It means the channel was
-             * gone, not that the turn failed, so it is not counted; and it does not reset the
+             * A SKIP IS NOT A FAILURE, AND DOES NOT BREAK THE STREAK. It means no turn ran — the
+             * channel was gone, the dispatch never reached the server, or a restart abandoned the
+             * run — not that the turn failed, so it is not counted; and it does not reset the
              * count either, because a routine whose channel flaps would otherwise never reach the
              * fatigue rule — it would disable itself over ten missing channels, or never at all.
              * Excluding it here, rather than reading it and skipping over it below, keeps it from

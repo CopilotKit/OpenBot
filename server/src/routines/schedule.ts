@@ -25,28 +25,120 @@ function hasFiveFields(cron: string): boolean {
 }
 
 /**
+ * Both memo caches below are keyed by caller-supplied strings, so an unbounded map is a slow leak a
+ * hostile caller can drive on purpose: one invalid timezone per request grows it forever. Cleared
+ * wholesale at the cap rather than evicted piecemeal — the population that matters (the handful of
+ * zones and expressions real routines use) is re-learned in one pass and the code stays one line.
+ */
+const MAX_MEMOIZED_VERDICTS = 1000;
+
+const timeZoneVerdicts = new Map<string, boolean>();
+
+/**
  * The only reliable way to validate an IANA zone name in plain JS/TS: ask Intl to
  * build a formatter for it and see whether it throws. cron-parser (via luxon)
  * accepts an invalid zone silently at parse() time and only blows up later, with
  * a message ("unhandled timestamp: Invalid Date") that says nothing about
  * timezones — so we check this ourselves, up front, to give a sentence that means
  * something.
+ *
+ * Memoized because this sits on the sweep's hot path: `advanceNextRun` calls in here for every due
+ * routine on every pass, and building an Intl.DateTimeFormat per call is the expensive way to keep
+ * re-learning that "UTC" is a timezone.
  */
 function isKnownTimeZone(timezone: string): boolean {
+  const cached = timeZoneVerdicts.get(timezone);
+  if (cached !== undefined) return cached;
+  let known: boolean;
   try {
     new Intl.DateTimeFormat(undefined, { timeZone: timezone });
-    return true;
+    known = true;
   } catch {
-    return false;
+    known = false;
   }
+  if (timeZoneVerdicts.size >= MAX_MEMOIZED_VERDICTS) timeZoneVerdicts.clear();
+  timeZoneVerdicts.set(timezone, known);
+  return known;
+}
+
+/**
+ * Where the floor scan starts, fixed so acceptance is a property of the expression rather than of
+ * the clock at the moment somebody asked. The failure this prevents: `45,55 8 * * *` asked about at
+ * 08:50 sees 08:55 and then tomorrow's 08:45 as its next two occurrences — a 23h50m gap — so a check
+ * that samples from "now" accepts at some times of day what it refuses at others, and the accepted
+ * routine then wedges the moment the sweep tries to advance it past the ten-minute pair. A leap-year
+ * start, so expressions pinned to 29 February are scanned on days they actually fire.
+ */
+const FLOOR_SCAN_START = new Date("2024-01-01T00:00:00Z");
+
+/**
+ * How many successive occurrences the floor scan walks.
+ *
+ * The intra-day pattern of a five-field cron is the same on every day it fires (minutes × hours),
+ * so the first firing day already shows every within-day gap, and the densest day the floor allows
+ * is 96 firings — 200 covers a full day of those plus the wrap into the next firing day, and for
+ * sparse expressions the iterator simply walks forward until it has seen 200 real firings, however
+ * far apart they are. Not exhaustive: a sub-floor gap that only exists under a DST compression more
+ * than 200 occurrences from the scan start can still slip through, which is why the per-call pair
+ * check below stays as the runtime backstop.
+ */
+const FLOOR_SCAN_OCCURRENCES = 200;
+
+/** null means the expression cleared the floor; a string is the refusal to throw. */
+const floorVerdicts = new Map<string, string | null>();
+
+/**
+ * Refuse any expression whose own cycle contains an adjacent pair under the floor, deterministically.
+ *
+ * Scanned from a fixed start rather than from `after`, because the caller's `after` moves with the
+ * clock and a floor sampled near it is a floor that depends on when the question was asked. Parse
+ * and iteration errors are swallowed here on purpose: an unreadable expression is the caller's
+ * refusal to make (with the unreadable-schedule sentence), and an expression that runs out of
+ * occurrences mid-scan has shown every gap it has. Memoized because this runs inside
+ * `nextOccurrence`, which the sweep calls for every due routine on every pass.
+ */
+function refuseSubFloorCycle(cron: string, timezone: string): void {
+  const key = `${timezone}\u0000${cron}`;
+  const cached = floorVerdicts.get(key);
+  if (cached !== undefined) {
+    if (cached !== null) throw new ScheduleRefusedError(cached);
+    return;
+  }
+
+  let verdict: string | null = null;
+  try {
+    const expression = CronExpressionParser.parse(cron, {
+      tz: timezone,
+      currentDate: FLOOR_SCAN_START,
+    });
+    let previous = expression.next().toDate().getTime();
+    for (let index = 1; index < FLOOR_SCAN_OCCURRENCES; index += 1) {
+      const current = expression.next().toDate().getTime();
+      if (current - previous < MINIMUM_INTERVAL_MS) {
+        verdict = TOO_FREQUENT_MESSAGE;
+        break;
+      }
+      previous = current;
+    }
+  } catch {
+    // Unreadable, or fewer occurrences than the scan wanted. Either way the gaps seen were fine,
+    // and unreadability is refused by the parse in `nextOccurrence` with the sentence for it.
+  }
+
+  if (floorVerdicts.size >= MAX_MEMOIZED_VERDICTS) floorVerdicts.clear();
+  floorVerdicts.set(key, verdict);
+  if (verdict !== null) throw new ScheduleRefusedError(verdict);
 }
 
 /**
  * Parse, validate against the floor, and return the next occurrence after `after`.
  *
- * One function owns both acceptance and scheduling, so what was accepted is always schedulable:
- * the floor is checked on the gap between the next two occurrences, not on a guess about the
- * expression's shape.
+ * One function owns both acceptance and scheduling, so what was accepted is always schedulable. The
+ * floor is enforced twice, on purpose: `refuseSubFloorCycle` scans the expression's own cycle from a
+ * fixed start, so acceptance cannot depend on the time of the asking, and the pair check at the
+ * bottom re-measures the gap actually ahead of `after`, catching the rare shapes the bounded scan
+ * cannot see (a DST compression far from the scan window). A pair-check throw at sweep time is what
+ * the sweep's unschedulable-routine switch-off exists for.
  */
 export function nextOccurrence(
   cron: string,
@@ -59,6 +151,7 @@ export function nextOccurrence(
   if (!isKnownTimeZone(timezone)) {
     throw new ScheduleRefusedError(UNKNOWN_TIMEZONE_MESSAGE);
   }
+  refuseSubFloorCycle(cron, timezone);
 
   let first: Date;
   let second: Date;

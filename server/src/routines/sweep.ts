@@ -22,7 +22,7 @@
  * prevent.
  */
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
-import type { RoutineStore } from "./store";
+import { RoutineRefusedError, type RoutineStore } from "./store";
 
 export const ROUTINE_FIRE_KIND = "routine.fire";
 
@@ -55,6 +55,19 @@ const DISPATCH_RETRY_DELAY_MS = 60_000;
  * window can never call two consecutive occurrences of one routine current at the same time.
  */
 export const DEFAULT_GRACE_MS = 10 * 60_000;
+
+/**
+ * How long a run row may sit open with no outcome before a pass declares it abandoned.
+ *
+ * A server that dies mid-turn strands its run row for ever: the queue item was finished on the 202,
+ * so no retry comes back for it, and nothing else writes that row — the routines page reads
+ * "running now" for a run no process is running. Twice the server's own turn timeout
+ * (`DEFAULT_TURN_TIMEOUT_MS` in `./run-turn`, five minutes), so a slow-but-alive turn is never
+ * closed out from under the server still running it. A local constant rather than an import because
+ * the sweep runs as a CronJob and must not drag the runtime's import graph — the Intelligence
+ * client and everything behind it — into that process.
+ */
+const ABANDONED_RUN_MS = 10 * 60_000;
 
 export type RoutineSweepOptions = {
   routineStore: RoutineStore;
@@ -139,21 +152,18 @@ export async function offerDueRoutines(
      */
     try {
       /*
-       * A STALE STAMP IS NOT A BACKLOG TO REPLAY. `advanceNextRun` moves the clock one occurrence on
-       * from the stamp it was given, so a routine whose stamp is a month behind — a deployment that
-       * ran with no worker, a worker that was down — comes back due on the next pass, and the pass
-       * after that, once per missed occurrence, each with its own offer key and its own real firing.
-       * Turn the worker on after a quiet month and a person gets thirty summaries of thirty days ago.
+       * A STALE STAMP IS NOT A BACKLOG TO REPLAY. A routine whose stamp is a month behind — a
+       * deployment that ran with no worker, a worker that was down — must not fire once per missed
+       * occurrence when the worker comes back: turn it on after a quiet month and a person would get
+       * thirty summaries of thirty days ago.
        *
        * So this loop offers only firings that are still worth having: a stamp within GRACE of now.
-       * For anything later than that, advance WITHOUT offering and say nothing — the occurrence is
-       * past and nobody wants it now — and let successive passes drain the stamp silently until it is
-       * current. The store deliberately does not decide this: it moves the clock one step and reports
-       * whether it won, and which steps are worth firing is this file's policy.
-       *
-       * Draining costs a slot of `limit` per pass per stale routine, which is the price of a bounded
-       * pass; the routines still current are read on the same passes, because the ordering is by due
-       * stamp and a stale one leaves the list as soon as its clock catches up.
+       * For anything later than that, advance WITHOUT offering and compute the next occurrence from
+       * NOW rather than from the stale stamp, so one pass makes the clock current. Stepping one
+       * occurrence per pass instead — the earlier shape — kept a fifteen-minute routine silent a
+       * further fortnight after a month of downtime, because draining ~2,900 missed occurrences at
+       * one per five-minute sweep is itself two weeks. The store deliberately does not decide this:
+       * which stamps are worth firing, and where a stale clock should land, are this file's policy.
        */
       const lateBy = now.getTime() - routine.nextRunAt.getTime();
       if (lateBy <= graceMs) {
@@ -172,19 +182,52 @@ export async function offerDueRoutines(
           },
         });
         offered.push(routine.id);
+        // False means another sweep advanced it first, which is fine either way: the firing was
+        // offered under the same key by both, so it still happens once.
+        await options.routineStore.advanceNextRun(
+          routine.id,
+          routine.nextRunAt,
+        );
+      } else {
+        // The CAS still compares against the stale stamp it read — only the landing point moves.
+        await options.routineStore.advanceNextRun(
+          routine.id,
+          routine.nextRunAt,
+          now,
+        );
       }
-      // False means another sweep advanced it first, which is fine either way: the firing was offered
-      // under the same key by both, so it still happens once.
-      await options.routineStore.advanceNextRun(routine.id, routine.nextRunAt);
     } catch (error) {
       /*
-       * Said out loud, with the routine in it. A pass that swallowed this would look clean while one
-       * routine's clock never moved again: it would be read as due and warned about on every pass
-       * thereafter, but OFFERED only while its stamp is still inside `graceMs` — once the stamp ages
-       * past the grace window, the guard above skips the offer before this throw is ever reached. So
-       * the grace policy (the window worth having, above) is what bounds this failure mode to one
-       * firing: harmless and loud, but invisible to anybody not reading logs.
+       * A refusal from the store here is the schedule's own: `advanceNextRun` recomputes the next
+       * occurrence, and a cron the schedule module refuses — a row written before a validation
+       * existed, a hand-edited value — throws on every pass for ever. Left alone, that routine's
+       * clock never moves, it burns one of this pass's `limit` slots each time, and its owner sees a
+       * routine that silently stopped. Deterministic refusals do not heal, so the routine is
+       * switched off and the reason written where the routines page reads it — the sweep has no
+       * channel to announce itself in, the way the runner's fatigue switch-off does. Queue and
+       * database errors are NOT this: they heal, so those routines are left enabled for the next
+       * pass to try again.
        */
+      if (error instanceof RoutineRefusedError) {
+        try {
+          await options.routineStore.markUnschedulable(
+            routine.id,
+            error.message,
+          );
+        } catch (markError) {
+          // Best-effort: a switch-off that failed leaves the loud warning below, and the next pass
+          // will be back here to try the switch-off again.
+          console.warn(
+            JSON.stringify({
+              type: "routine-sweep-disable-failed",
+              routineId: routine.id,
+              reason: String(markError),
+            }),
+          );
+        }
+      }
+      // Said out loud, with the routine in it: a pass that swallowed this would look clean while
+      // one routine was switched off, or failed to be.
       console.warn(
         JSON.stringify({
           type: "routine-sweep-offer-failed",
@@ -198,23 +241,6 @@ export async function offerDueRoutines(
   }
 
   return { offered };
-}
-
-/**
- * Which routine a claimed item is about.
- *
- * The payload is the answer, and the key is the fallback for a row written before the payload was:
- * the key is `<routineId>:<minute>` and a routine id carries no colon, so everything up to the first
- * one is the routine. A firing whose routine cannot be named at all would be a firing nothing could
- * report, which is why this never returns undefined.
- */
-function routineIdOf(item: { key: string; payload: Record<string, unknown> }) {
-  const fromPayload = item.payload.routineId;
-  if (typeof fromPayload === "string" && fromPayload.length > 0) {
-    return fromPayload;
-  }
-  const colon = item.key.indexOf(":");
-  return colon === -1 ? item.key : item.key.slice(0, colon);
 }
 
 /**
@@ -254,8 +280,38 @@ export async function dispatchClaimedRoutines(
     skipped: [],
   };
 
+  /*
+   * THE REAPER, before any firing is considered. It closes the run rows nothing in the system will
+   * ever come back for: a server that died mid-turn (the queue item was finished on the 202, so no
+   * retry returns for that row), and the rows opened by dispatch attempts that threw (the loop below
+   * deliberately does not close those itself — see the comment at the dispatch). Without it those
+   * rows read "running now" on the routines page for ever. Age-scoped rather than identity-scoped,
+   * because age is the one signal that distinguishes an abandoned row from a turn some server is
+   * still running; the cutoff sits above the turn timeout so a live turn always finishes its own row
+   * first. Best-effort with its own catch, because a reaper that cannot run must not stop this pass
+   * from firing what is due.
+   */
+  try {
+    const reaped = await options.routineStore.reapAbandonedRuns(
+      ABANDONED_RUN_MS,
+      "the server never finished this run; it may have restarted mid-turn, or the run may never have been dispatched",
+    );
+    if (reaped > 0) {
+      console.warn(JSON.stringify({ type: "routine-runs-reaped", reaped }));
+    }
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        type: "routine-run-reap-failed",
+        reason: String(error),
+      }),
+    );
+  }
+
   for (const item of claimed) {
-    const routineId = routineIdOf(item);
+    // The offer above is the only writer of these items and always names the routine in the
+    // payload; the key is the last-resort stand-in for a row written by hand, the culler's idiom.
+    const routineId = String(item.payload.routineId ?? item.key);
 
     /*
      * Renewed before acting, because the batch is many and the lease is one.
@@ -347,6 +403,18 @@ export async function dispatchClaimedRoutines(
        * owns that, not this loop.
        */
       const { runId } = await options.routineStore.insertRun(routineId);
+      /*
+       * A dispatch that throws leaves the row this attempt opened with no status, AND NOTHING HERE
+       * CLOSES IT — the reaper above does, once the row is older than any turn could still be
+       * running. That restraint is deliberate: a dispatch that timed out is not a dispatch that
+       * failed, because the abort tears down the sweep's side of the call while the server may
+       * already have accepted it and detached the turn — a turn that will come back minutes later
+       * and finish this very row. `finishRun` finishes once, so closing the row now would turn that
+       * turn's real outcome into a silent no-op; the earlier shape of this cleanup ("close every
+       * open run of the routine at the give-up") mislabelled exactly such in-flight runs as failed.
+       * Age is the only signal the sweep has that no server is coming back for a row, so age is the
+       * scope the closing uses.
+       */
       await options.dispatch(runId);
       if (
         !(await options.queue.finish({
@@ -412,18 +480,9 @@ export async function dispatchClaimedRoutines(
        * and the reason for anybody who queries the table; this is for whoever reads the logs.
        */
       if (item.attempts >= maxAttempts) {
-        /*
-         * THE ROW THIS GIVE-UP LEAKED. Every attempt opened a run row before it dispatched
-         * (`insertRun` above), and a dispatch that throws never reaches `finishRun` — so an item at
-         * the cap is not just off the queue, it is one or more `routine_runs` rows stuck open with no
-         * status. `listFor` shows the newest one, so without this the routines page reads "running
-         * now" for a routine that never ran at all, forever. Closed before the warning so the row is
-         * never left open even if the log line itself fails.
-         */
-        const closed = await options.routineStore.failOpenRuns(
-          routineId,
-          reason,
-        );
+        // The run rows the attempts opened are NOT closed here: one of them may be a turn a wedged
+        // server accepted after the dispatch timed out, and only age can tell (see the comment at
+        // the dispatch). The reaper closes them on a later pass; this branch only has to say so.
         console.warn(
           JSON.stringify({
             type: "routine-fire-gave-up",
@@ -431,7 +490,6 @@ export async function dispatchClaimedRoutines(
             key: item.key,
             attempts: item.attempts,
             reason,
-            closedRuns: closed,
           }),
         );
       } else if (!released) {
