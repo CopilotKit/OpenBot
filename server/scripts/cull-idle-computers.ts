@@ -11,7 +11,6 @@
  * losing anything, and a failing CronJob that pages somebody at 3am should mean something worse.
  */
 import { randomUUID } from "node:crypto";
-import { createPageFrameStore } from "../src/computer/page-frames";
 import { createComputerProvider } from "../src/computer/provider";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -36,20 +35,10 @@ if (config.computer.provider !== "sandbox") {
 
 const database = createDatabase(config.databaseUrl);
 const queue = createWorkQueue(database);
-const pageFrames = createPageFrameStore(database);
 const provider = createComputerProvider(config.computer);
 
 // A name for the lease, so a stuck claim can be traced back to the pod that took it.
 const owner = `culler/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`;
-
-/**
- * How long a turn's screenshot is kept.
- *
- * A month, because reading back a conversation is the thing these exist for and people do that long
- * after the run. Past that the transcript names the page it opened instead, which is the same
- * sentence with less in it rather than a broken one.
- */
-const FRAME_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 try {
   const options = {
@@ -86,19 +75,6 @@ try {
      */
     finishedOlderThanMs: config.computer.idleAfterMs,
   });
-  /*
-   * And the screenshots, which had a reaper and nothing calling it.
-   *
-   * A page is a row and a Bot that browses makes them for as long as it runs, so this table only
-   * ever grew: written on every navigation, taken out by a profile wipe and by nothing else. Kept
-   * long enough that reading back a conversation from last month still shows what it opened, and not
-   * for ever, because these are the largest thing this deployment stores and the least useful once
-   * nobody is reading that conversation any more.
-   *
-   * Here rather than in the API server because this is already the sweep that runs on a schedule
-   * with a claim under it, and a second timer would be a second thing to get wrong.
-   */
-  const framesPurged = await pageFrames.purge(FRAME_RETENTION_MS);
   console.info(
     JSON.stringify({
       type: "computer-cull",
@@ -106,7 +82,6 @@ try {
       suspended: report.suspended,
       skipped: report.skipped,
       purged,
-      framesPurged,
     }),
   );
 } finally {

@@ -275,21 +275,45 @@ export function createComputerGateway(
     );
   }
 
+  /**
+   * `address` is this action's own `/ensure`, when the caller has already made it.
+   *
+   * Locating twice for one action is two calls to the supervisor to learn the same thing, and worse,
+   * they can disagree: the run the action was decided against would not be the run it was sent to.
+   * Passing the address through means the check and the send are the same trip.
+   */
   async function post<T>(
     botId: string,
     path: string,
     payload: unknown,
     signal?: AbortSignal,
     timeoutMs?: number,
+    address?: string,
   ): Promise<T> {
     return transport.post<T>(
-      await locate(botId),
+      address ?? (await locate(botId)),
       botId,
       path,
       payload,
       signal,
       timeoutMs,
     );
+  }
+
+  /**
+   * This action's own `/ensure`, or nothing when it cannot be made.
+   *
+   * A computer that cannot be located is not a verdict this may reach on its own. The action still
+   * has to be decided and recorded, and the attempt failing is what writes the failure row beside the
+   * decision; throwing here would take the action off the trail entirely. So a failure answers
+   * "unknown", which leaves the generation check where it was and leaves the address to the attempt.
+   */
+  async function locateForAction(botId: string): Promise<string | undefined> {
+    try {
+      return await locate(botId);
+    } catch {
+      return undefined;
+    }
   }
 
   /*
@@ -421,13 +445,29 @@ export function createComputerGateway(
       /** The person's Stop, on its way to the browser. See the acting methods below. */
       signal?: AbortSignal;
     },
-    run: () => Promise<T>,
+    run: (address?: string) => Promise<T>,
   ): Promise<T> {
     const { ref, filePath, snapshotId } = subject;
     // Loaded from the store, not this process's memory: the snapshot these refs belong to was very
     // likely taken by another replica, and resolving against a local map would find nothing there.
     const stored = await snapshots.load(botId);
-    const { session } = await sessionOf(botId);
+    /*
+     * LOCATE FIRST, THEN ASK WHICH RUN THAT WAS. The order is the check.
+     *
+     * `sessionOf` answers with what the last `/ensure` reported, and until this action has made its
+     * own, the last one belongs to the action before it. Asking first compared the stored snapshot
+     * against the previous action's run, which is the same run on every action but the first one
+     * after a replacement — exactly the action the check exists to catch. The click after a replaced
+     * container was allowed and the one after that refused, which is a guarantee arriving one action
+     * too late.
+     *
+     * Only for an action that cites a ref. Nothing else is resolved against a snapshot, so nothing
+     * else needs the run, and a scroll or a file read should not have to reach the supervisor before
+     * the policy has even seen it. The address that comes back is the one the attempt then uses, so
+     * this costs no extra call for the actions that do need it.
+     */
+    const address = ref ? await locateForAction(botId) : undefined;
+    const { session } = ref ? await sessionOf(botId) : { session: undefined };
     const element = resolve(stored, ref, snapshotId, session);
     // For a navigation the relevant page is the one being opened, not the one already loaded. Using
     // the stored URL would mean `page.host == "..."` could never match the destination, which is the
@@ -532,7 +572,7 @@ export function createComputerGateway(
           `${ref} is not on the page this computer is showing, so nothing can be checked against it before acting. Take a fresh snapshot and use the refs it returns.`,
         );
       }
-      result = await run();
+      result = await run(address);
     } catch (error) {
       /**
        * A permitted action that did not happen gets its own row.
@@ -782,7 +822,15 @@ export function createComputerGateway(
           snapshotId: input.snapshotId,
           ...(signal ? { signal } : {}),
         },
-        () => post<ActionResult>(botId, "/click", input, signal),
+        (address) =>
+          post<ActionResult>(
+            botId,
+            "/click",
+            input,
+            signal,
+            undefined,
+            address,
+          ),
       );
     },
 
@@ -810,7 +858,8 @@ export function createComputerGateway(
           ...(input.submit ? { key: "Enter" } : {}),
           ...(signal ? { signal } : {}),
         },
-        () => post<ActionResult>(botId, "/type", input, signal),
+        (address) =>
+          post<ActionResult>(botId, "/type", input, signal, undefined, address),
       );
     },
 
@@ -832,7 +881,8 @@ export function createComputerGateway(
           key: input.key,
           ...(signal ? { signal } : {}),
         },
-        () => post<ActionResult>(botId, "/key", input, signal),
+        (address) =>
+          post<ActionResult>(botId, "/key", input, signal, undefined, address),
       );
     },
 

@@ -113,6 +113,24 @@ export type ManagedAgentConfig = {
   token: string;
 };
 
+/**
+ * How far one Bot handing work to another may go.
+ *
+ * NUMBERS A DEPLOYMENT CHOOSES, not constants. A small team and a company running this across
+ * departments want different answers, and neither should have to edit code to get one.
+ *
+ * Both defaults are deliberately mean. A hop costs a whole agent turn at the other end, fan-out
+ * shapes cost several times a single run because each Bot spends its own full budget, and on a
+ * cluster a hop to a Bot whose computer is asleep also pays a pod resume. One level of delegation is
+ * what most systems allow by default, and a deployment that wants more can say so.
+ */
+export type HandoffCaps = {
+  /** How many Bots deep a chain may go. `0` switches the whole capability off. */
+  maxDepth: number;
+  /** How many other Bots one run may address. */
+  maxPerRun: number;
+};
+
 export type DeploymentConfig = {
   databaseUrl: string;
   keyEncryptionKey: string;
@@ -215,6 +233,8 @@ export type DeploymentConfig = {
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
   computer?: ComputerConfig;
+  /** How far one Bot handing work to another may go. */
+  handoff: HandoffCaps;
   /**
    * The secret a Bot presents when it calls a tool back through this server.
    *
@@ -227,9 +247,41 @@ export type DeploymentConfig = {
    * than an open door.
    */
   agentToolToken?: string;
+  /**
+   * The secret the worker presents when it hands a routine run back to this server.
+   *
+   * Absent means the internal routines endpoint refuses everything, which is the correct state of a
+   * deployment with no worker — a deployment that has not asked for scheduled turns should not have a
+   * door for them standing open.
+   */
+  workerSharedSecret?: string;
 };
 
 type Environment = Record<string, string | undefined>;
+
+/**
+ * The caps, read from the environment, refusing anything that is not a whole number at least zero.
+ *
+ * Refused rather than coerced. A cap is a safety number, and a deployment that typed `two` and got
+ * the default would believe it had set one: the failure has to be at start-up where somebody is
+ * looking, not at the first loop.
+ */
+function handoffCaps(environment: Environment): HandoffCaps {
+  const read = (name: string, fallback: number): number => {
+    const raw = optional(environment, name);
+    if (raw === undefined) return fallback;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`${name} must be a whole number of zero or more`);
+    }
+    return value;
+  };
+  return {
+    // One level of delegation, which is what most systems allow before anybody asks for more.
+    maxDepth: read("BOT_HANDOFF_MAX_DEPTH", 1),
+    maxPerRun: read("BOT_HANDOFF_MAX_PER_RUN", 3),
+  };
+}
 
 function required(environment: Environment, name: string): string {
   const value = environment[name]?.trim();
@@ -759,6 +811,7 @@ export function loadConfig(
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
   const managedAgent = managedAgentConfig(environment);
+  const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
     databaseUrl: required(environment, "DATABASE_URL"),
@@ -791,8 +844,10 @@ export function loadConfig(
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),
     computer: computerConfig(environment),
+    handoff: handoffCaps(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
       : {}),
+    ...(workerSharedSecret ? { workerSharedSecret } : {}),
   };
 }

@@ -144,8 +144,23 @@ const ROSTER_ORDER = [
   desc(channels.id),
 ];
 
+/** The transaction `create` and `direct` share, as the driver hands it to a callback. */
+type ChannelTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 export type ChannelStore = {
   create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
+  /**
+   * The one conversation this person has with this Bot alone, made if they have not had one yet.
+   *
+   * FOUND BEFORE IT IS MADE, because the callers that want it are called more than once for the
+   * same pair. A hop delivered to a Bot is retried when the delivery fails, and creating here would
+   * leave a fresh empty conversation behind for every attempt: the person would open the roster to
+   * five Knowledge channels, four of them empty, and no way to tell which one holds the answer.
+   *
+   * The one it finds is the one the person already talks to that Bot in, which is also where they
+   * would look for the answer.
+   */
+  direct(actor: AgentActor, agentId: string): Promise<AgentChannel>;
   get(actor: AgentActor, channelId: string): Promise<AgentChannel | null>;
   list(actor: AgentActor, query?: ChannelQuery): Promise<ChannelPage>;
   /** Pin or unpin the caller's own membership. Throws ChannelNotFoundError for a non-member. */
@@ -201,62 +216,138 @@ export function createChannelStore(
   profileStore: AgentProfileStore,
   threadIdentity: ThreadIdentity,
 ): ChannelStore {
-  return {
+  /**
+   * Making a channel, on a transaction the caller already holds.
+   *
+   * Extracted so `direct` can find-or-create inside ONE transaction. Two of those arriving together
+   * for the same person and Bot each found nothing and each made a conversation, so that person had
+   * two Knowledge channels holding two threads, with their answers split between them. Reproduced
+   * against a real PostgreSQL: it needs no cluster, only two hops delivered at once, which is what a
+   * Bot asking for several things in one turn produces.
+   */
+  const makeChannel = async (
+    transaction: ChannelTransaction,
+    actor: AgentActor,
+    agentIds: string[],
+  ): Promise<AgentChannel> => {
+    // Validated on this transaction, not through `profileStore.get`: the read has to share
+    // the connection this transaction already holds, and has to hold the profile so an agent
+    // cannot be deleted between passing the check and being linked to the new channel.
+    //
+    // Locks are taken in agent-ID order. Two channels selecting the same pair of agents in
+    // opposite orders would otherwise be able to deadlock against each other.
+    const profilesById = new Map<string, AgentProfile>();
+    for (const agentId of [...agentIds].sort()) {
+      const profile = await profileStore.getWithin(transaction, actor, agentId);
+      if (!profile) throw new AgentNotFoundError(agentId);
+      profilesById.set(agentId, profile);
+    }
+
+    const id = `channel_${crypto.randomUUID()}`;
+    // Minted rather than a bare random id, so the thread says which deployment it belongs to
+    // in a project that may hold more than one. See thread-identity.ts.
+    const threadId = threadIdentity.mint();
+    // Named from the caller's ordering, which is the order the channel presents its agents in.
+    const name = channelName(
+      agentIds.map((agentId) => {
+        const profile = profilesById.get(agentId);
+        if (!profile) throw new AgentNotFoundError(agentId);
+        return profile.name;
+      }),
+    );
+
+    await transaction.insert(channels).values({
+      id,
+      name,
+      description: PRIVATE_AGENT_CHANNEL_DESCRIPTION,
+    });
+    await transaction.insert(channelMemberships).values({
+      channelId: id,
+      userId: actor.id,
+    });
+    await transaction
+      .insert(channelAgents)
+      .values(agentIds.map((agentId) => ({ channelId: id, agentId })));
+    await transaction.insert(intelligenceChannelMappings).values({
+      userId: actor.id,
+      channelId: id,
+      threadId,
+    });
+
+    return { id, name, agentIds, threadId, active: true };
+  };
+
+  const store: ChannelStore = {
     create(actor, agentIds) {
       return database.transaction(
+        async (transaction) => makeChannel(transaction, actor, agentIds),
+        { isolationLevel: "read committed" },
+      );
+    },
+
+    async direct(actor, agentId) {
+      const found = await database.transaction(
         async (transaction) => {
-          // Validated on this transaction, not through `profileStore.get`: the read has to share
-          // the connection this transaction already holds, and has to hold the profile so an agent
-          // cannot be deleted between passing the check and being linked to the new channel.
-          //
-          // Locks are taken in agent-ID order. Two channels selecting the same pair of agents in
-          // opposite orders would otherwise be able to deadlock against each other.
-          const profilesById = new Map<string, AgentProfile>();
-          for (const agentId of [...agentIds].sort()) {
-            const profile = await profileStore.getWithin(
-              transaction,
-              actor,
-              agentId,
-            );
-            if (!profile) throw new AgentNotFoundError(agentId);
-            profilesById.set(agentId, profile);
-          }
-
-          const id = `channel_${crypto.randomUUID()}`;
-          // Minted rather than a bare random id, so the thread says which deployment it belongs to
-          // in a project that may hold more than one. See thread-identity.ts.
-          const threadId = threadIdentity.mint();
-          // Named from the caller's ordering, which is the order the channel presents its agents in.
-          const name = channelName(
-            agentIds.map((agentId) => {
-              const profile = profilesById.get(agentId);
-              if (!profile) throw new AgentNotFoundError(agentId);
-              return profile.name;
-            }),
+          /*
+           * ONE AT A TIME PER PERSON AND BOT, across every replica.
+           *
+           * Looking and then making is not find-or-create: two hops delivered at the same moment
+           * each saw nothing and each made a conversation, and that person ended up with two
+           * Knowledge channels holding two threads, with the answers split between them. A Bot
+           * asking for several things in one turn produces exactly that, so it needs no cluster and
+           * no unusual timing.
+           *
+           * An advisory lock rather than a unique constraint, because what has to be unique is not a
+           * column: it is "this person's channel whose whole roster is this one Bot", which is a
+           * count over another table. The lock is held for the transaction and taken on the pair, so
+           * nothing else on the channel table waits behind it.
+           */
+          await transaction.execute(
+            sql`select pg_advisory_xact_lock(hashtext(${`channel:direct:${actor.id}:${agentId}`}))`,
           );
+          const [existing] = await transaction
+            .select({ id: channels.id })
+            .from(channels)
+            .innerJoin(
+              channelMemberships,
+              and(
+                eq(channelMemberships.channelId, channels.id),
+                eq(channelMemberships.userId, actor.id),
+              ),
+            )
+            .innerJoin(
+              channelAgents,
+              and(
+                eq(channelAgents.channelId, channels.id),
+                eq(channelAgents.agentId, agentId),
+              ),
+            )
+            /*
+             * A channel of this person's whose whole roster is this one Bot. The count is what makes
+             * it "alone": a channel holding this Bot and another one would match an agent test on
+             * its own, and delivering into it would put the answer in front of a Bot nobody asked.
+             */
+            .where(
+              and(
+                isNull(channels.deletedAt),
+                sql`(select count(*) from ${channelAgents} where ${channelAgents.channelId} = ${channels.id}) = 1`,
+              ),
+            )
+            .orderBy(...ROSTER_ORDER)
+            .limit(1);
 
-          await transaction.insert(channels).values({
-            id,
-            name,
-            description: PRIVATE_AGENT_CHANNEL_DESCRIPTION,
-          });
-          await transaction.insert(channelMemberships).values({
-            channelId: id,
-            userId: actor.id,
-          });
-          await transaction
-            .insert(channelAgents)
-            .values(agentIds.map((agentId) => ({ channelId: id, agentId })));
-          await transaction.insert(intelligenceChannelMappings).values({
-            userId: actor.id,
-            channelId: id,
-            threadId,
-          });
-
-          return { id, name, agentIds, threadId, active: true };
+          return existing
+            ? existing.id
+            : await makeChannel(transaction, actor, [agentId]);
         },
         { isolationLevel: "read committed" },
       );
+
+      if (typeof found !== "string") return found;
+      const channel = await store.get(actor, found);
+      // Null only if it was deleted between the two reads, which is a reason to make a new one
+      // rather than to fail: the caller asked for a conversation, not for that row.
+      return channel ?? store.create(actor, [agentId]);
     },
 
     async get(actor, channelId) {
@@ -666,6 +757,7 @@ export function createChannelStore(
       );
     },
   };
+  return store;
 }
 
 export class ChannelNotFoundError extends Error {

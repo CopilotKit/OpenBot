@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { configuredAuthProviders, loadConfig } from "../src/config";
 
 // Intelligence is part of the MINIMUM contract, so it belongs in the base environment every other
@@ -638,5 +638,39 @@ describe("AGENT_ENDPOINT_ALLOWED_HOSTS", () => {
     expect(() =>
       loadConfig({ ...base(), AGENT_ENDPOINT_ALLOWED_HOSTS: "*.internal" }),
     ).toThrow(/Patterns are not accepted/);
+  });
+});
+
+/**
+ * A cap is a safety number, so a value that is not one has to stop the deployment rather than be
+ * quietly replaced by the default. Somebody who typed `two` would otherwise believe they had set a
+ * cap, and find out at the first loop.
+ */
+describe("how far a Bot may hand work on", () => {
+  test("defaults to one level and three per run", () => {
+    const config = loadConfig({ ...baseEnvironment });
+    expect(config.handoff).toEqual({ maxDepth: 1, maxPerRun: 3 });
+  });
+
+  test("a deployment can widen or switch it off", () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        BOT_HANDOFF_MAX_DEPTH: "0",
+        BOT_HANDOFF_MAX_PER_RUN: "10",
+      }).handoff,
+    ).toEqual({ maxDepth: 0, maxPerRun: 10 });
+  });
+
+  test("refuses a cap that is not a whole number", () => {
+    expect(() =>
+      loadConfig({ ...baseEnvironment, BOT_HANDOFF_MAX_DEPTH: "two" }),
+    ).toThrow("BOT_HANDOFF_MAX_DEPTH");
+    expect(() =>
+      loadConfig({ ...baseEnvironment, BOT_HANDOFF_MAX_PER_RUN: "-1" }),
+    ).toThrow("BOT_HANDOFF_MAX_PER_RUN");
+    expect(() =>
+      loadConfig({ ...baseEnvironment, BOT_HANDOFF_MAX_PER_RUN: "1.5" }),
+    ).toThrow("BOT_HANDOFF_MAX_PER_RUN");
   });
 });

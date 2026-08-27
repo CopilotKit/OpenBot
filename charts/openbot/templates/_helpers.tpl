@@ -174,6 +174,34 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 - name: COMPUTER_SANDBOX_TEMPLATE_FILE
   value: /etc/openbot/sandbox-template.json
 {{- end }}
+{{- /*
+  How far one Bot may hand work to another.
+  
+  Always set, so a deployment that has switched this off says so rather than relying on the image's
+  default staying what it is today.
+
+  ABSENT AND ZERO ARE DIFFERENT, which is why this is not `| default`. Sprig's `default` substitutes
+  whenever a value is EMPTY, and zero is empty: `--set config.handoff.maxDepth=0` rendered `"1"` and
+  silently switched the capability back on for a deployment that had switched it off. A guard that
+  defeats the off switch is worse than the nil dereference it was added for. `kindIs "invalid"` asks
+  the question actually being asked, which is whether anybody said anything at all.
+
+  PARENTHESISED, because `config.handoff` is a key this chart did not have before.
+  `helm upgrade --reuse-values` takes the previous release's computed values instead of merging the
+  new chart's defaults, so on every existing deployment this map is simply absent. Reached with a
+  bare `.Values.config.handoff.maxDepth` that is a nil dereference, and it fails the WHOLE render:
+  this helper is included by the server deployment, so the upgrade does not lose the handoff
+  feature, it does not install at all.
+*/}}
+{{- $handoff := .Values.config.handoff | default dict -}}
+{{- $maxDepth := 1 -}}
+{{- if not (kindIs "invalid" $handoff.maxDepth) -}}{{- $maxDepth = $handoff.maxDepth -}}{{- end -}}
+{{- $maxPerRun := 3 -}}
+{{- if not (kindIs "invalid" $handoff.maxPerRun) -}}{{- $maxPerRun = $handoff.maxPerRun -}}{{- end }}
+- name: BOT_HANDOFF_MAX_DEPTH
+  value: {{ $maxDepth | quote }}
+- name: BOT_HANDOFF_MAX_PER_RUN
+  value: {{ $maxPerRun | quote }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL
@@ -264,6 +292,25 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
       name: {{ default (include "openbot.secretName" .) .Values.computers.existingTokenSecret }}
       key: computer-token
       optional: {{ eq .Values.computers.mode "external" }}
+{{- /*
+  One definition, for the same reason `openbot.databaseUrlEnv` is one (see its comment above): the
+  API server needs this value to RECOGNISE the worker, and the routines CronJob needs the same value
+  to BE the worker. Two definitions could drift; this can't. Gated on `routines.enabled` so a
+  deployment that never turns routines on gets no env var pointing at a key its secret store may not
+  hold.
+
+  Above `config.extraEnv`, not below it: Kubernetes takes the last of a duplicate name, and this must
+  lose to an operator's own value, not win over it. Below it, this chart's own secretKeyRef would
+  override whatever `extraEnv` set, which turns the escape hatch into a trap for the one variable
+  someone would need it for.
+*/}}
+{{- if (.Values.routines).enabled }}
+- name: WORKER_SHARED_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: worker-shared-secret
+{{- end }}
 {{- with .Values.config.extraEnv }}
 {{ toYaml . }}
 {{- end }}
@@ -385,3 +432,4 @@ than anything that names the cause.
 {{- define "openbot.automountToken" -}}
 {{- or .Values.serviceAccount.automountServiceAccountToken (eq .Values.computers.mode "sandbox") -}}
 {{- end -}}
+

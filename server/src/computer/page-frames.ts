@@ -4,7 +4,7 @@
  * Written where the navigation happens, which is the one moment the screen is certainly showing the
  * page that was asked for, and read back when somebody reopens the conversation that asked for it.
  */
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { computerPageFrame } from "../db/schema";
 
@@ -16,6 +16,19 @@ import { computerPageFrame } from "../db/schema";
  * picture, it is a broken one.
  */
 const MAX_FRAME_BYTES = 4 * 1024 * 1024;
+
+/**
+ * How long a turn's screenshot is kept.
+ *
+ * A month, because reading back a conversation is the thing these exist for and people do that long
+ * after the run. Past that the transcript names the page it opened instead, which is the same
+ * sentence with less in it rather than a broken one.
+ */
+export const FRAME_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Small batches: a frame is hundreds of kilobytes, so the audit sweep's five thousand would be a gigabyte a statement.
+const PURGE_BATCH = 200;
+const MAX_PURGE_BATCHES = 200;
 
 /**
  * How big a base64 string actually is, in bytes.
@@ -124,16 +137,21 @@ export function createPageFrameStore(database: Database): PageFrameStore {
     },
 
     async purge(olderThanMs) {
-      const gone = await database
-        .delete(computerPageFrame)
-        .where(
-          lt(
-            computerPageFrame.capturedAt,
-            sql`now() - make_interval(secs => ${olderThanMs / 1000})`,
-          ),
-        )
-        .returning({ url: computerPageFrame.url });
-      return gone.length;
+      // Batched like the audit sweep: one statement over ninety days of one Bot held its locks for 17s.
+      let removed = 0;
+      for (let batch = 0; batch < MAX_PURGE_BATCHES; batch += 1) {
+        const result = (await database.execute(sql`
+          delete from ${computerPageFrame} where ctid in (
+            select ctid from ${computerPageFrame}
+            where ${computerPageFrame.capturedAt} < now() - make_interval(secs => ${olderThanMs / 1000})
+            limit ${PURGE_BATCH}
+          )
+        `)) as unknown as { count?: number };
+        const count = result?.count ?? 0;
+        removed += count;
+        if (count < PURGE_BATCH) break;
+      }
+      return removed;
     },
   };
 }

@@ -337,6 +337,55 @@ export const auditEventTypes = [
   "bot.deleted",
   "bot.callback_token_issued",
   "bot.callback_token_revoked",
+
+  /*
+   * One Bot handing work to another.
+   *
+   * BOTH OUTCOMES, and the refused one is the more important of the pair. A hop that happened is
+   * visible in the transcript anyway; a hop that was refused is invisible everywhere else, and
+   * "why did this Bot not ask the specialist" is a question somebody asks about an answer that came
+   * back thin. The refusal row names which cap or which missing grant stopped it.
+   *
+   * `agent.handoff_offered` is written when the hop is accepted and made durable, not when the other
+   * Bot answers. The two are minutes apart on a busy cluster, and a trail that only recorded
+   * completion would be silent about work that was accepted and then lost.
+   */
+  "agent.handoff_offered",
+  "agent.handoff_refused",
+  /*
+   * And what became of one, which is a different question from whether it was accepted.
+   *
+   * `delivered` is the other Bot's turn being on record. `failed` is a hop that will be tried again.
+   * `retried` is the one worth its own name: a hop on its second attempt may already have run that
+   * Bot, spent a model call and posted an answer before its owner died, so a person looking at two
+   * similar answers can tell a duplicate from a mystery.
+   */
+  "agent.handoff_delivered",
+  "agent.handoff_failed",
+  "agent.handoff_retried",
+  /*
+   * A Bot asking a person instead.
+   *
+   * The counterpart to the rows above, and the one that says a chain stopped on purpose. Without it
+   * a Bot that correctly refused to guess looks identical to one that ran out of things to try: both
+   * end in a sentence to the person and neither leaves a trace of the decision.
+   *
+   * `agent.escalation_failed` is a question that reached nobody. It is the row worth finding later:
+   * the Bot stopped, the person was never asked, and nothing else anywhere says so.
+   */
+  "agent.escalated",
+  "agent.escalation_failed",
+  /*
+   * A worker's bearer secret did not check out at `/internal/routines/run`, and every routine this
+   * deployment has stopped firing until somebody notices.
+   *
+   * Recorded because that route answers a refusal with the exact same 401 for a missing header, a
+   * wrong secret, and a deployment that never configured one — deliberately, so a caller cannot tell
+   * those apart from the wire. Which means the wire is also the only place this trail could otherwise
+   * be read from, and it was told nothing. `payload.reason` carries the distinction the response
+   * withholds; the offered credential never does.
+   */
+  "routines.dispatch_refused",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

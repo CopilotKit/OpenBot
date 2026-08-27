@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { AuditEvent } from "../src/audit";
+import type { ActionPolicy } from "../src/computer/policy";
 import {
   contextFromAuditPayload,
   dryRunAgainstHistory,
 } from "../src/computer/policy-dry-run";
-import type { ActionPolicy } from "../src/computer/policy";
 
 /**
  * The replay must judge a recorded action exactly as the gateway judged it live. Every case here is

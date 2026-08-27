@@ -16,22 +16,6 @@
 import type { ComputerLocation, ComputerProvider } from "./provider";
 import type { ComputerStatus } from "./schema";
 
-/**
- * The last container start time seen for each Bot, from the `/ensure` that located it.
- *
- * Not a cache in front of the supervisor: `locate` still calls it every time. This only carries the
- * answer the few lines to whoever needs to know which run of the computer they are talking to.
- *
- * PROCESS-LOCAL, AND THEREFORE NEVER THE ONLY ANSWER. On one replica the snapshot and the click that
- * follows it are the same process, so this is always populated by the time anything asks. On several
- * they are usually not, and a replica that has never located this Bot has nothing here. `resolve`
- * reads an unknown session as "no opinion" and skips the generation check, so an empty map does not
- * fail — it silently stops checking, on exactly the deployment shape the check was written for. So
- * `sessionOf` falls back to asking, and this stays what it always was: a way to skip the round trip
- * on the replica that just did the work.
- */
-const sessions = new Map<string, string>();
-
 type SupervisorComputerLocation = {
   botId: string;
   container?: string;
@@ -66,6 +50,23 @@ export function createDockerSupervisorProvider(
   const timeoutMs = options.timeoutMs ?? 120_000;
   const hostForPort =
     options.hostForPort ?? ((port) => `http://localhost:${port}`);
+
+  /**
+   * The last container start time seen for each Bot, from the `/ensure` that located it.
+   *
+   * ONE MAP PER PROVIDER, not one per process. It was module-scope, so every provider built in a
+   * process shared it: two supervisors, or a test's second stack, answered each other's question
+   * about which run a Bot's computer is on, and the answer they gave was whichever one wrote last.
+   *
+   * Not a cache in front of the supervisor: `locate` still calls it every time, and a governed
+   * action locates before it asks. This only carries that answer the few lines to whoever needs to
+   * know which run of the computer they are talking to.
+   *
+   * Still process-local, and therefore never the only answer. A replica that has never located this
+   * Bot has nothing here, and an unknown run skips the generation check rather than failing it, so
+   * `sessionOf` falls back to asking rather than letting an empty map quietly stop checking.
+   */
+  const sessions = new Map<string, string>();
 
   async function call(path: string, method = "POST"): Promise<unknown> {
     let response: Response;

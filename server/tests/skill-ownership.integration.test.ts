@@ -4,10 +4,10 @@ import { inArray } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import { agentProfiles, agents, skills, users } from "../src/db/schema";
 import { createPluginRoutes } from "../src/plugins/routes";
 import { createPluginStore } from "../src/plugins/store";
+import { TEST_POOL } from "./support/database";
 
 /**
  * Whose skill is whose, and which Bots a person may put one on.

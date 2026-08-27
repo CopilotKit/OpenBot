@@ -12,7 +12,9 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
+import { textOfChunk } from "./deltas";
 import { toLangChainMessages } from "./history";
+import { readReasoningEffort } from "./model-options";
 
 /**
  * The same Bot, on a framework.
@@ -97,6 +99,40 @@ const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
 const GOOGLE_BASE_URL =
   process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.trim() || undefined;
 
+/**
+ * OpenAI only, and Responses API only: how hard this Bot is allowed to think.
+ *
+ * Checked here rather than sent onward and forgotten. An effort the API does not have is dropped
+ * somewhere down the stack, and a Bot that starts, looks healthy and then thinks for as long as it
+ * likes is a worse outcome than one that refuses to start and says why.
+ */
+const { effort: REASONING_EFFORT, problem: REASONING_PROBLEM } =
+  readReasoningEffort(process.env.BOT_REASONING_EFFORT);
+if (REASONING_PROBLEM) {
+  console.error(REASONING_PROBLEM);
+  process.exit(1);
+}
+/*
+ * The two ways this setting would reach an API with nowhere to put it.
+ *
+ * Anthropic and Google express thinking budgets differently, and on `/v1/chat/completions` the
+ * field does not exist at all. Refusing is the same call the issue makes about invalid values:
+ * configuration that goes nowhere is worse than configuration that is absent, because the Bot looks
+ * configured either way. Both messages name the variable that would make it work.
+ */
+if (REASONING_EFFORT && PROVIDER !== "openai") {
+  console.error(
+    `BOT_REASONING_EFFORT is OpenAI's setting, and BOT_PROVIDER=${PROVIDER}. Unset it, or set BOT_PROVIDER=openai.`,
+  );
+  process.exit(1);
+}
+if (REASONING_EFFORT && !USE_RESPONSES_API) {
+  console.error(
+    `BOT_REASONING_EFFORT needs the Responses API, and BOT_MODEL=${MODEL} is not being run on it. Use a model that requires it, or set BOT_RESPONSES_API=true.`,
+  );
+  process.exit(1);
+}
+
 function defaultModelFor(provider: string): string {
   if (provider === "anthropic") return "claude-sonnet-4-5";
   if (provider === "google") return "gemini-2.5-flash";
@@ -177,6 +213,11 @@ function buildModel() {
     streaming: true,
     ...(OPENAI_BASE_URL ? { configuration: { baseURL: OPENAI_BASE_URL } } : {}),
     ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),
+    /*
+     * `reasoning.effort`, not the `reasoningEffort` convenience field: the integration deprecated
+     * the latter in favour of merging it into this object, and one of them is the one that survives.
+     */
+    ...(REASONING_EFFORT ? { reasoning: { effort: REASONING_EFFORT } } : {}),
   });
 }
 
@@ -396,8 +437,15 @@ async function runAgent(input: RunAgentInput): Promise<Response> {
             const chunk = event.data?.chunk as
               | { content?: unknown }
               | undefined;
-            const text =
-              typeof chunk?.content === "string" ? chunk.content : "";
+            /*
+             * Both content shapes, because the API decides which one arrives.
+             *
+             * Chat completions streams a string. The Responses API streams content blocks, so
+             * reading only the string shape dropped every delta and the run finished having said
+             * nothing — the "no text at all on gpt-5.6-*" this repository documents in
+             * `.env.example` and `docker-compose.yml`.
+             */
+            const text = textOfChunk(chunk?.content);
             if (!text) continue;
 
             if (!textOpen) {

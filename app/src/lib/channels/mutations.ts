@@ -1,6 +1,6 @@
 import {
-  mutationOptions,
   type InfiniteData,
+  mutationOptions,
   type QueryClient,
 } from "@tanstack/react-query";
 import { client, tryClient } from "@/lib/client";

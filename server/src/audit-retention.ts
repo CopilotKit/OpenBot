@@ -21,6 +21,10 @@
  * every action writes to.
  */
 import postgres from "postgres";
+import {
+  FRAME_RETENTION_MS,
+  type PageFrameStore,
+} from "./computer/page-frames";
 
 /**
  * The advisory lock this takes, as an arbitrary but fixed number.
@@ -117,18 +121,39 @@ export type RetentionSweeper = { stop: () => void };
  * Not immediately at boot: a deployment rolling several servers would have all of them contend for
  * the lock in the same second, and the one that wins would compete with start-up for the database.
  */
-export function startAuditRetention(
+export function startRetentionSweeps(
   databaseUrl: string,
   retentionDays: number | undefined,
+  // Swept whatever the audit policy is: their only other caller runs in `computers.mode: sandbox` alone.
+  pageFrames?: PageFrameStore,
   options: { intervalMs?: number; firstRunMs?: number } = {},
 ): RetentionSweeper {
-  if (!retentionDays || retentionDays < 1) return { stop: () => undefined };
+  const sweepsAudit = Boolean(retentionDays && retentionDays >= 1);
+  if (!sweepsAudit && !pageFrames) return { stop: () => undefined };
 
   const intervalMs = options.intervalMs ?? 60 * 60_000;
   const firstRunMs = options.firstRunMs ?? 60_000;
   const timers: ReturnType<typeof setInterval>[] = [];
 
   const run = () => {
+    if (pageFrames) {
+      void pageFrames
+        .purge(FRAME_RETENTION_MS)
+        .then((removed) => {
+          if (removed === 0) return;
+          console.info(JSON.stringify({ type: "page-frames-swept", removed }));
+        })
+        .catch((error) => {
+          console.error(
+            JSON.stringify({
+              type: "page-frames-sweep-failed",
+              note: "Old turn screenshots were not removed. Nothing is broken; the table is larger than it should be.",
+              error: String(error),
+            }),
+          );
+        });
+    }
+    if (!sweepsAudit || !retentionDays) return;
     void sweepAuditTrail(databaseUrl, retentionDays)
       .then(({ deleted }) => {
         if (deleted === null || deleted === 0) return;

@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { createAuditStore, recordAuditEvent } from "../src/audit";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import { agents } from "../src/db/schema";
+import { TEST_POOL } from "./support/database";
 
 /**
  * A jsonb column must hold JSON, not a string that looks like it.

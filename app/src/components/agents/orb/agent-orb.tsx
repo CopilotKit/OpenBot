@@ -1,4 +1,3 @@
-import { cn } from "@/lib/utils";
 import {
   type MotionStyle,
   motion,
@@ -7,6 +6,7 @@ import {
   useReducedMotion,
   useTransform,
 } from "motion/react";
+import { cn } from "@/lib/utils";
 import {
   type AIAmplitude,
   type AIState,

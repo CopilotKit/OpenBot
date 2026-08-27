@@ -8,13 +8,13 @@ import {
   createComponentStore,
 } from "../src/components/store";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import {
   agents,
   componentExclusions,
   componentFunctions,
   components,
 } from "../src/db/schema";
+import { TEST_POOL } from "./support/database";
 
 /**
  * The grant surface, against a real database.

@@ -38,6 +38,15 @@ do on a laptop with no supervisor configured. A shared browser means shared logi
 shared session between Bots, which is fine for a deployment where one team trusts its own Bots and
 is not fine as a boundary between tenants.
 
+**The routines schedule.** Nothing in this image is scheduled to fire a routine — there is no
+worker service beside the API, and `worker/` (the looping local variant) is not in the image. The
+sweep itself is: `bun scripts/fire-routines.ts` from `/app/server`, one pass then exit, which is what
+the Helm chart's CronJob runs from this same image. So a one-container deployment needs something
+outside the container to run it on a schedule — an external cron, a platform scheduled job, or a
+second container of this image with that command — with `DATABASE_URL`, `SERVER_INTERNAL_URL` and
+`WORKER_SHARED_SECRET` set. Until something does, a routine is stored, its next run time is computed,
+the Routines page shows it, and it never fires. See [routines.md](routines.md).
+
 ## Minimum size
 
 Measured on the real image, one Bot, arm64.

@@ -55,6 +55,7 @@ at `agent-langgraph` on a laptop.
 | `AGENT_TOOL_TOKEN`   | unset; `start.sh` generates one    | The secret a framework Bot presents when it calls a granted tool back through this server. |
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
+| `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
 
 **`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
 show: a stream that stops producing anything. Every other audit row is something that happened, and
@@ -77,6 +78,30 @@ It is one of a pair, and they are not interchangeable: `MANAGED_AGENT_TOKEN` is 
 itself to a Bot, this is a Bot proving itself to the server. Rotating either means the process
 holding the old one refuses every call, which is why `start.sh` restarts the server and recreates the
 Bot containers on a run that mints one.
+
+**`WORKER_SHARED_SECRET`** is the same shape of secret for a different pair: it is what the routines
+worker presents to `/internal/routines/run` to prove a routine's dispatch actually came from it. The
+API server refuses a handoff without one configured, and the worker refuses to start without one at
+all. See [routines.md](routines.md) for what a deployment with no worker at all looks like — it is
+not obvious from the screen.
+
+Unlike `AGENT_TOOL_TOKEN`, `start.sh` does not generate and persist this one. It supplies a fixed
+local default, `openbot-dev-worker-secret`, the same value every clone of this repository gets. That
+is fine here not because of where the server listens — it binds no hostname, so the port itself is
+reachable like any other — but because this is a dev-only default on a machine's own dev stack, and
+the endpoint it guards accepts nothing but an unguessable `routine_run_<uuid>` id: the server
+re-reads the routine, the owner and the channel from its own tables rather than trusting anything
+else the caller says, so a well-known value from a public repository gates nothing sensitive here.
+`AGENT_TOOL_TOKEN` is generated fresh and written to `.env` precisely because it is not that: it is
+copied into every Bot container, and a framework Bot holding it may be running on a machine of its
+own, so a fixed default there would be no boundary at all. Production deployments must set a real
+`WORKER_SHARED_SECRET`.
+
+**`SERVER_INTERNAL_URL`** is read by the worker, not by the API server, so it is not in the table
+above: it says where the worker's own process can reach this deployment's API, which is a fact about
+where the worker runs rather than a fact about the deployment `loadConfig` describes. `start.sh` points
+it at the server's own port on a laptop; the Helm chart's routines CronJob points it at the server's
+in-cluster Service address.
 
 ## OpenAI-compatible endpoints
 
@@ -167,6 +192,19 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 `OPENBOT_PUBLIC_URL` builds the redirect URI the vendor sends somebody back to after they consent, which has to match what an administrator registered with that vendor character for character — so it comes from configuration rather than from the incoming request. Most deployments never set it, because `BETTER_AUTH_URL` is already the same public address. With neither, the Plugins page says the deployment cannot complete a consent flow, and no account can be connected.
 
 `OPENBOT_APP_URL` is where the callback sends the person afterwards. It is a separate setting because the app and the API are separate addresses: locally the app is Vite on `3010` and the API is `3001`, so a relative redirect would land on the API, which serves no pages. A deployment serving both from one origin can leave it unset.
+
+## One Bot handing work to another
+
+| Variable                   | Meaning                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------- |
+| `BOT_HANDOFF_MAX_DEPTH`    | How many Bots deep a chain may go. `0` switches the capability off entirely. Default `1`.    |
+| `BOT_HANDOFF_MAX_PER_RUN`  | How many other Bots one run may address. Default `3`.                                        |
+
+Both refuse rather than truncate, and both are refused at start-up if they are not whole numbers of
+zero or more: a deployment that typed `two` and silently got the default would believe it had set a
+cap.
+
+Which Bots may address which is a grant, not a variable. It is made per Bot like any other grant.
 
 ## Computer and supervisor
 

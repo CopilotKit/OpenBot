@@ -1,7 +1,8 @@
+import * as builtinRoutines from "./builtin-routines";
 import type { CatalogueEntry } from "./catalogue";
 import * as driveRest from "./google-drive-rest";
-import * as mcp from "./mcp";
 import type { McpCallResult, McpTool } from "./mcp";
+import * as mcp from "./mcp";
 
 /**
  * How this deployment reaches one vendor: which protocol, chosen per catalogue entry.
@@ -36,9 +37,37 @@ export type VendorTransport = {
    * sequence hinted that the middle step was doing no work.
    */
   listNeedsCredential: boolean;
-  listTools(connection: { url: string; token?: string }): Promise<McpTool[]>;
+  listTools(connection: {
+    url: string;
+    token?: string;
+    /**
+     * Who this call is for, and which Bot is making it.
+     *
+     * Ignored by every transport that dials a vendor: MCP and Drive answer to a credential, and who
+     * holds it is already decided by the time the connection is built. The builtin transport has no
+     * credential and no vendor — it acts on this deployment's own tables — so the actor is not
+     * context, it is the authorization, and it refuses without one. A routine is somebody's.
+     */
+    actorId?: string;
+    /** The Bot the run belongs to. A routine runs as its Bot, which is never a name a model supplies. */
+    botId?: string;
+  }): Promise<McpTool[]>;
   callTool(
-    connection: { url: string; token?: string },
+    connection: {
+      url: string;
+      token?: string;
+      /**
+       * Who this call is for, and which Bot is making it.
+       *
+       * Ignored by every transport that dials a vendor: MCP and Drive answer to a credential, and who
+       * holds it is already decided by the time the connection is built. The builtin transport has no
+       * credential and no vendor — it acts on this deployment's own tables — so the actor is not
+       * context, it is the authorization, and it refuses without one. A routine is somebody's.
+       */
+      actorId?: string;
+      /** The Bot the run belongs to. A routine runs as its Bot, which is never a name a model supplies. */
+      botId?: string;
+    },
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<McpCallResult>;
@@ -50,11 +79,12 @@ export type VendorTransport = {
  * A closed union rather than a string, so adding one is a change to this file and to the registry
  * below together. An entry naming a transport that does not exist should not typecheck.
  */
-export type TransportKind = "mcp" | "google-drive-rest";
+export type TransportKind = "mcp" | "google-drive-rest" | "builtin-routines";
 
 const TRANSPORTS: Record<TransportKind, VendorTransport> = {
   mcp,
   "google-drive-rest": driveRest,
+  "builtin-routines": builtinRoutines,
 };
 
 /**

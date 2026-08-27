@@ -38,6 +38,11 @@ export type CatalogueAuth =
   /** One token, held by the deployment, used for everybody. */
   | { kind: "deployment-bearer" }
   /**
+   * First-party and in-process. There is no credential, because there is nothing to authenticate
+   * to: the call runs against this deployment's own tables, as the person whose turn it is.
+   */
+  | { kind: "builtin" }
+  /**
    * The asker's own grant. The deployment registers an OAuth client; each person consents once and
    * the call runs on their token, so the vendor decides what comes back.
    */
@@ -99,7 +104,8 @@ export type CatalogueEntry = {
    *
    * `deployment-bearer` is a token an administrator holds on behalf of everybody. `user-oauth` is
    * the person's own grant, where the deployment holds only the OAuth client and each person
-   * consents for themselves.
+   * consents for themselves. `builtin` is neither: there is nothing to authenticate to, because the
+   * call runs in this process against this deployment's own tables as the person whose turn it is.
    */
   auth: CatalogueAuth;
   /**
@@ -137,6 +143,12 @@ export type CatalogueEntry = {
  * `deployment-bearer` therefore has no entry using it. The shape stays because the call path still
  * needs it: a server an administrator added by URL has no catalogue entry at all, and that is the
  * branch it falls into.
+ *
+ * Routines is the first entry here that is not a remote vendor at all — no host to dial, nothing
+ * outside this process to trust. It is in the catalogue anyway, on purpose rather than by oversight:
+ * the catalogue is where a deployment decides which Bots may do what, and a Bot that can schedule its
+ * own future runs is a capability worth that same deliberate grant, even though there is no vendor on
+ * the other end of it.
  */
 export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
   {
@@ -253,6 +265,28 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
       "notion-update-view",
     ]),
     docsUrl: "https://developers.notion.com/guides/mcp/build-mcp-client",
+  },
+  {
+    key: "routines",
+    title: "Routines",
+    vendor: "OpenBot",
+    summary:
+      "Standing instructions a Bot runs on a schedule, as whoever scheduled them.",
+    /*
+     * First-party and in-process: no host to dial, no credential to hold. In the catalogue anyway,
+     * because the catalogue is where a deployment decides WHICH Bots may do WHAT — and scheduling
+     * future work is a capability an administrator should grant as deliberately as a vendor.
+     */
+    host: "builtin://routines",
+    path: "/",
+    transport: "builtin-routines",
+    auth: Object.freeze({ kind: "builtin" }),
+    writeTools: Object.freeze([
+      "create_routine",
+      "update_routine",
+      "delete_routine",
+    ]),
+    docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/routines.md",
   },
 ]);
 

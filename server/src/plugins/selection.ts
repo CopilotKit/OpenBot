@@ -1,3 +1,4 @@
+import { textOf } from "../agents/message-text";
 /**
  * Choosing which of a Bot's tools to put in front of the model, one run at a time.
  *
@@ -252,31 +253,18 @@ export async function selectTools<Tool extends SelectableTool>(input: {
  * turn being taken. Feeding the transcript in would make an early mention of Drive keep Drive tools
  * loaded for the rest of the conversation, which is the opposite of narrowing.
  */
+
 export function latestUserText(
   messages: readonly { role?: string; content?: unknown }[],
 ): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.role !== "user") continue;
+    // AG-UI allows structured content, and text parts are the only part a selector can read. See
+    // textOf: a hop asks the same question of the same shapes.
     if (typeof message.content === "string") return message.content;
-    // AG-UI allows structured content. Text parts are the only part a selector can read.
-    if (Array.isArray(message.content)) {
-      const text = message.content
-        .map((part) =>
-          typeof part === "object" &&
-          part !== null &&
-          typeof (part as { text?: unknown }).text === "string"
-            ? ((part as { text: string }).text as string)
-            : "",
-        )
-        // Dropped before joining, so an image between two sentences does not leave a double space
-        // in the middle of the one thing the selector reads.
-        .filter((part) => part !== "")
-        .join(" ")
-        .trim();
-      if (text !== "") return text;
-    }
-    return "";
+    const text = textOf(message.content);
+    return text === "" ? "" : text;
   }
   return "";
 }

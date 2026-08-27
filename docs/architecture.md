@@ -113,6 +113,18 @@ on group membership from the identity provider, not as a control that is running
 
 See [coworkers.md](coworkers.md).
 
+## Routines
+
+A routine is a standing instruction, created by asking a Bot in a channel rather than through a form,
+that fires on a schedule and posts its reply into that channel as the person who created it.
+
+The sweep that notices a routine is due sits beside the computer culler on one shared mechanism: both
+write to `work_items`, one PostgreSQL table claimed with `select ... for update skip locked`, leases
+timed on the database's own clock, and an attempt cap. Neither runs as a timer inside the API, because
+a timer fires in every replica and each would decide independently that the same firing or the same
+suspension is due; the queue is what lets exactly one claim it while every other replica's attempt
+collides harmlessly with the same row. See [routines.md](routines.md).
+
 ## Components
 
 Components are frontend tools a Bot can call instead of answering only in prose.
@@ -130,6 +142,99 @@ Governance:
 - component data functions require a separate per-component grant.
 
 The shipped component data functions read the audit trail: `botActivity` and `recentRefusals`.
+
+## One Bot handing work to another
+
+A Bot can address another Bot, and the addressed one answers for itself rather than the first
+relaying text on its behalf.
+
+`message_bot` is offered beside a Bot's granted tools, so which Bots may reach which is an ordinary
+grant: `plugin_grants` with a `bot` kind. A Bot granted nobody is offered nothing.
+
+What it takes is typed. The asking model names the task, anything that bounds it and what a good
+answer looks like, rather than writing a paragraph. Free text is the commonest way a handoff goes
+quietly wrong: the receiving Bot infers the intent, guesses the constraints, and when it guesses
+wrong it does not fail, it answers something else confidently.
+
+Four things are decided by the deployment and never by the model:
+
+- **Who is being addressed**, resolved against the roster the asking person may see. A Bot must not
+  reach a Bot its person cannot, or this is a way around agent visibility. A Bot that does not exist
+  and one that is not theirs to see are refused in the same words, so this cannot enumerate the
+  roster.
+- **Where the answer lands**, from the signed run assertion. Otherwise a Bot could drop a turn into a
+  conversation it was never part of.
+- **Who is asking**, stamped from the row this deployment wrote. A Bot able to write its own
+  attribution could claim to be another one.
+- **How deep the chain is**, also from the assertion, which is what stops A asking B asking C asking
+  A for ever.
+
+The second Bot runs as the same person, with its own role and its own grants, so it sees what that
+person may see and no more.
+
+**The answer lands in that Bot's own conversation with the person.** Not the conversation that asked,
+and this is a property of the platform rather than a choice: an Intelligence thread is owned by
+exactly one agent. So the conversation that asked says where the work went, and the one that answers
+moves to the top of the roster with an unread mark. The person gets both halves.
+
+What the answering conversation keeps is one line saying who asked and what for, not the envelope.
+Those are two texts with two readers: the model needs the task, the constraints and the shape of a
+good answer, while a person scrolling needs to know why that Bot suddenly spoke. The asking
+conversation's history is read by the addressed Bot as context and is not repeated into the
+transcript.
+
+**A hop that fails for good is said out loud.** When one runs out of attempts, the asking Bot is sent
+back into the conversation the person is watching to say plainly that nothing came back. Otherwise a
+question handed on and never answered is indistinguishable from a slow one, and the conversation just
+stops.
+
+**A hop is claimed work, not a callback.** It is a row on the same queue the idle-computer culler
+uses: the Bot being addressed is very unlikely to be on the pod that addressed it, and a hop held in
+memory is lost the moment either is rescheduled. Every replica sweeps for hops and the queue decides
+which gets which. The lease is renewed for as long as the run takes, because a run is minutes and a
+lapsed lease hands the same hop to a second replica.
+
+`BOT_HANDOFF_MAX_DEPTH` and `BOT_HANDOFF_MAX_PER_RUN` are the ceilings, and both refuse rather than
+truncate. They are not polish: a hop is a whole agent turn at the other end, several Bots asked in one
+turn cost several full runs, and where each Bot has its own computer a fan-out wakes a machine per
+Bot. `BOT_HANDOFF_MAX_DEPTH=0` switches the capability off, and then no Bot is offered the tool and
+the delivery loop does not run.
+
+Every outcome is in the audit trail: offered, refused with which cap or missing grant stopped it,
+delivered, failed, and retried. The refused row is the one that matters most, because a hop that
+happened is visible in the transcript and one that was refused is invisible everywhere else.
+
+### Asking a person
+
+`ask_person` sits beside `message_bot` and competes with it for the same decision. A Bot that needs
+judgement it does not have should stop and ask rather than guess or hand the question sideways to a
+Bot that cannot settle it either; a model with no named way to stop takes one of the two it has.
+
+It is offered to every run this deployment builds, whether or not that Bot has been granted anybody.
+Reaching a second Bot spends a model call, may wake a computer and can fan out; asking the person
+already in the conversation costs nothing and cannot be aimed anywhere they cannot see. A deployment
+able to switch off the safe exit and keep the expensive one would be backwards.
+
+Both tools are for Bots that run here. A Bot at its own endpoint runs its own loop and is handed
+descriptions of the tools it may call back for, and the callback path executes MCP refs only, so
+neither `message_bot` nor `ask_person` can reach it.
+
+It is the Bot **doing the asking** that has to run here. Being handed work is not the same as being
+able to hand it on, so the target of a grant may perfectly well live at its own endpoint. A grant
+whose *grantee* is remote is refused rather than stored, so an administrator finds out at the point
+of granting rather than from a Bot that never hands anything on.
+
+That is a real limit rather than a detail, and it is worth being plain about which Bots it leaves
+out: **a Bot created through the UI is a remote one**, because creating a coworker here means
+pointing it at an AG-UI endpoint. Only Bots a tenant package declares as built-in run in this
+process. So on a deployment with no package, nothing can be granted `message_bot` at all, and the
+screens say nothing about why.
+
+Who "a person" is, is a seam. This template answers the person in the conversation, which is the only
+answer a template can give honestly; a company has an on-call rota or a duty desk, and that is a
+route the deployment hands in rather than a channel post written into the tool. `agent.escalated`
+records the question and why it needed a person; `agent.escalation_failed` records one that reached
+nobody, which is the row worth finding later.
 
 ## MCP and skills
 

@@ -12,18 +12,17 @@ import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
-  createCredentialStore,
   type CredentialStoreValue,
+  createCredentialStore,
   decryptSecret,
   encryptSecret,
 } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import {
   agents,
   auditEvents,
-  credentials,
   credentials as credentialRows,
+  credentials,
   mcpServers,
   mcpTools,
   mcpUserCredentials,
@@ -34,8 +33,8 @@ import { catalogueEntry } from "../src/plugins/catalogue";
 import { redirectUriFor } from "../src/plugins/oauth";
 import {
   type AccessToken,
-  createPluginStore,
   CustomServerRefusedError,
+  createPluginStore,
   exchangeRefreshTokenOverHttp,
   INVALID_CLIENT,
   type OAuthClient,
@@ -43,6 +42,7 @@ import {
   TokenRefusedError,
   unlistedAdvertisedTools,
 } from "../src/plugins/store";
+import { TEST_POOL } from "./support/database";
 
 /**
  * The two questions a tool call has to pass, and the row each answer leaves behind.

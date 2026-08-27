@@ -8,21 +8,64 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### A Bot in trouble no longer needs somebody watching
+### The framework Bot answers on 5.6-tier models, and can be told how hard to think
 
-A boundary refusal or a stalled run was recorded and then waited for a person to happen to look — at
-the right channel, or at the audit page an administrator has and nobody else does. The trail knew;
-nobody was told.
+Pointing `BOT_MODEL` at a `gpt-5.6-*` model gave a Bot that started, reported healthy, and then said
+nothing: every run was a RUN_STARTED and a RUN_FINISHED with no text between them. Those models are
+run on the Responses API, which streams content blocks where chat completions streams a string, and
+the run read only the string — so every delta was dropped on the floor. Both shapes are read now.
+Nothing changes for a deployment on 5.5 or on Anthropic or Google.
 
-**Attention**, in the sidebar for everybody, shows the refusals and stalled runs nobody has handled
-yet, scoped to the Bots this person may use, with a badge saying how many. Marking one handled
-clears it for everyone and records who did; two people pressing Resolve at once is settled by the
-database rather than by luck, and the second is told who got there first.
+`BOT_REASONING_EFFORT` sets how hard a reasoning model thinks: `none`, `minimal`, `low`, `medium`,
+`high`, `xhigh` or `max`. Unset, the model keeps its provider's default. A value the API does not
+have, or one set where it cannot be sent — a provider that is not OpenAI, or a model not on the
+Responses API — stops the Bot at startup with a message naming what to change, rather than starting
+with a setting that goes nowhere.
 
-It is a view over the trail, not a second record of it. Refusals and stalls are already written
-transactionally by the gateway and the stall guard, so the inbox cannot miss one and nothing new
-runs on the action path. The only state it owns is the resolution, held beside the append-only trail
-rather than in it. The trail itself still keeps everything; the inbox is only what is open now.
+### A Bot can be asked to do something on a schedule
+
+"Every weekday at nine, post the standup notes here" is now something a Bot can be asked rather than
+something somebody has to remember. A routine created this way runs under its own creator's grants —
+it can do exactly what they could do in chat, and nothing more — and its reply lands in the channel as
+an ordinary Bot message: it lights the unread dot the same way any other message does, and it appears
+in the transcript rather than anywhere separate. A routine that fails posts one message about its
+first failure and, after ten in a row, switches itself off with a final one rather than failing
+forever unnoticed.
+
+The deployment gains two tables, via migration `0021`.
+
+**This needs a new process.** A worker fires due routines by calling this deployment's own API server,
+and a deployment that never starts one schedules nothing — the routine sits on the Routines page with
+a next run time like any other, and nothing on the screen says a worker is missing. `WORKER_SHARED_SECRET`
+is the credential the worker presents; a deployment without it configured refuses every handoff rather
+than accepting one it cannot attribute. `scripts/start.sh` runs the worker locally; the Helm chart
+turns it on with `routines.enabled` and takes the secret as `secrets.workerSharedSecret`. No new port
+is opened for any of this — the worker only ever calls out to the server it already trusts.
+
+### Turn screenshots are swept in every deployment, not one
+
+A page a Bot opens is photographed and kept in `computer_page_frame`, so a conversation read back
+later shows what it was looking at. The reaper for those rows had one caller: the idle-computer
+culler, which refuses to run unless each Bot has its own computer and is scheduled only by the Helm
+chart's CronJob, which exists only when `computers.mode` is `sandbox`. On Compose, on the all-in-one
+image, and on the chart's own default of `shared`, nothing ever called it. One browsing Bot over
+ninety days is several hundred megabytes of rows that nothing was ever going to remove.
+
+The sweep now runs on the server, on the same hourly timer that removes old audit rows, and does not
+wait for a retention policy to be configured: a month of screenshots is what the store already meant
+to keep. It also removes them in batches, because one statement over that much data held its locks
+for seventeen seconds.
+
+Deployments using `computers.mode: sandbox` are unaffected in what they keep. The culler no longer
+purges frames, because the server does it there too and one owner is better than two.
+
+**On upgrade, the first sweep removes the backlog.** A deployment that has been keeping every
+screenshot since it was installed will lose the ones older than a month, about a minute after the
+server starts. That is the window the store has always documented and the one sandbox deployments
+have been enforcing, but it has never been applied anywhere else, so it is worth knowing before the
+upgrade rather than after. It is drained in batches, forty thousand rows an hour, rather than in one
+statement.
+
 ### A channel a Bot has spoken in unseen shows a dot
 
 The sidebar marks a channel when a Bot has said something since you last had it open: a dot beside

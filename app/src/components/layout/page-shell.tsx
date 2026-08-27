@@ -1,9 +1,8 @@
-import type * as React from "react";
-
-import { cn } from "@/lib/utils";
-import { Link, type LinkProps } from "@tanstack/react-router";
-import { Button } from "../ui/button";
 import { IconChevronLeft } from "@tabler/icons-react";
+import { Link, type LinkProps } from "@tanstack/react-router";
+import type * as React from "react";
+import { cn } from "@/lib/utils";
+import { Button } from "../ui/button";
 
 /**
  * The frame every configuration screen sits in.

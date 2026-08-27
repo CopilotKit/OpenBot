@@ -16,6 +16,7 @@ import {
 import type { Database } from "../db/client";
 import {
   agentProfiles,
+  agents,
   // Aliased: `credentials` is already the injected vault interface in this module, and the table and
   // the interface are two different things to reach for.
   credentials as credentialRows,
@@ -48,7 +49,30 @@ import { transportFor } from "./transport";
  * mean an operator who granted a Bot a server had also, invisibly, waived every rule about it.
  */
 
-export type PluginKind = "mcp" | "skill";
+/**
+ * What a grant is a grant OF.
+ *
+ * `bot` is one Bot's permission to hand work to another, and it lives here rather than in a table of
+ * its own on purpose: an administrator already understands "this Bot may use that", a fork's policy
+ * layer already applies to grants, and reachability between Bots is the same kind of decision as
+ * reachability to a vendor's tools. A second table would be a second thing to reason about and a
+ * second thing for a fork to reimplement.
+ */
+export type PluginKind = "mcp" | "skill" | "bot";
+
+/**
+ * What an audit row about a grant is a row ABOUT.
+ *
+ * A mapping rather than a ternary, because a ternary quietly labelled everything that was not an MCP
+ * tool a skill. Adding a third kind made that wrong rather than merely terse: a grant letting one Bot
+ * address another would have been filed in the trail as a skill, which is the sort of small lie an
+ * investigation trips over months later.
+ */
+function grantTargetType(kind: PluginKind): string {
+  if (kind === "mcp") return "mcp_tool";
+  if (kind === "bot") return "agent";
+  return "skill";
+}
 
 export type ToolRecord = {
   serverId: string;
@@ -291,9 +315,13 @@ const iso = (value: Date | string | null): string | null =>
  * the row a per-person connector exists to be able to trust.
  *
  * `deployment` for a shared token; the asker's own id for a server reached as the person asking.
+ * `builtin` is the third case and the only one with no credential at all — the actor is not whose
+ * token was used, it is whose rows were touched.
  */
 const reachedAsFor = (entry: CatalogueEntry | null, actorId: string): string =>
-  entry?.auth.kind === "user-oauth" ? actorId : "deployment";
+  entry?.auth.kind === "user-oauth" || entry?.auth.kind === "builtin"
+    ? actorId
+    : "deployment";
 
 /**
  * Where this server actually is, when the stored row and the catalogue disagree.
@@ -501,7 +529,12 @@ export type PluginStoreOptions = {
    * reachable, which means the property most worth testing would be the one thing never tested.
    */
   callVendor?: (
-    connection: { url: string; token?: string },
+    connection: {
+      url: string;
+      token?: string;
+      actorId?: string;
+      botId?: string;
+    },
     toolName: string,
     args: Record<string, unknown>,
   ) => Promise<{ text: string; isError: boolean }>;
@@ -2132,6 +2165,44 @@ export function createPluginStore(options: PluginStoreOptions) {
      * Read here rather than through the coworker store because the only question this file asks is
      * "may this person put their skill on that Bot", and a whole profile is more than that needs.
      */
+    /**
+     * Whether this Bot's run happens in this process, rather than at an endpoint somewhere.
+     *
+     * Undefined for a Bot nobody has heard of. Asked because a tool this deployment executes can
+     * only be offered to a run it builds: a Bot at an endpoint runs its own loop and is handed
+     * descriptions of what it may call back for, and handing work to another Bot is not one of them.
+     */
+    async agentRunsHere(agentId: string): Promise<boolean | undefined> {
+      const [row] = await database
+        .select({ type: agents.type })
+        .from(agents)
+        .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
+        // A deleted Bot is not one anybody may be given, and answering about it at all would say it
+        // had existed.
+        .where(and(eq(agents.id, agentId), isNull(agentProfiles.deletedAt)))
+        .limit(1);
+      return row ? row.type === "built_in" : undefined;
+    },
+
+    /**
+     * Whether this Bot is one somebody could be handed work by, at all.
+     *
+     * The TARGET of a bot grant, unlike the grantee, may perfectly well run at its own endpoint —
+     * being handed work is not the same as being able to hand it on. What it may not be is absent:
+     * `ref` is bare text with no foreign key, so a typo stored happily, `message_bot` was offered,
+     * and every hop refused as not-granted. That is the same row-that-cannot-work this check exists
+     * to stop, arriving from the other side.
+     */
+    async agentIsRegistered(agentId: string): Promise<boolean> {
+      const [row] = await database
+        .select({ id: agents.id })
+        .from(agents)
+        .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
+        .where(and(eq(agents.id, agentId), isNull(agentProfiles.deletedAt)))
+        .limit(1);
+      return row !== undefined;
+    },
+
     async agentOwner(agentId: string): Promise<string | null | undefined> {
       const [row] = await database
         .select({ ownerUserId: agentProfiles.ownerUserId })
@@ -2246,6 +2317,41 @@ export function createPluginStore(options: PluginStoreOptions) {
       });
     },
 
+    /**
+     * The Bots one Bot has been granted, read fresh.
+     *
+     * NEVER CACHED. Whether one Bot may address another is a decision an administrator can change,
+     * and a grant revoked a minute ago has to apply to the next hop rather than after a restart. It
+     * is a single indexed read, which is the right price for that.
+     */
+    /**
+     * The Bots this one may hand work to, and can actually reach.
+     *
+     * FILTERED AT READ TIME, not only when the grant is made. Refusing a new grant to a Bot that
+     * runs at its own endpoint stops one being created; it does nothing about the ones already
+     * there, or about a Bot that was built in when it was granted and was pointed at an endpoint
+     * afterwards. Those rows read as configured and are inert, which is the shape of thing an
+     * administrator debugs for an afternoon: the grant is right there in the table and no hop ever
+     * happens.
+     *
+     * The asking side is the one that matters here — a Bot at an endpoint runs its own loop and is
+     * never offered this tool — so it is the grantee, `agent_id`, that is checked.
+     */
+    async botsReachableFrom(agentId: string): Promise<string[]> {
+      const rows = await database
+        .select({ ref: pluginGrants.ref })
+        .from(pluginGrants)
+        .innerJoin(agents, eq(agents.id, pluginGrants.agentId))
+        .where(
+          and(
+            eq(pluginGrants.kind, "bot"),
+            eq(pluginGrants.agentId, agentId),
+            eq(agents.type, "built_in"),
+          ),
+        );
+      return rows.map((row) => row.ref);
+    },
+
     async grant(
       kind: PluginKind,
       ref: string,
@@ -2262,7 +2368,7 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
-        targetType: kind === "mcp" ? "mcp_tool" : "skill",
+        targetType: grantTargetType(kind),
         targetId: ref,
         payload: {
           actor: by,
@@ -2292,7 +2398,7 @@ export function createPluginStore(options: PluginStoreOptions) {
 
       await recordAuditEvent(auditStore, {
         eventType: "configuration.changed",
-        targetType: kind === "mcp" ? "mcp_tool" : "skill",
+        targetType: grantTargetType(kind),
         targetId: ref,
         payload: {
           actor: by,
@@ -2802,7 +2908,12 @@ export function createPluginStore(options: PluginStoreOptions) {
         const { token } = await connectionTokenFor(row, entry, input.actorId);
         const vendor = injectedVendor ?? transportFor(entry).callTool;
         const result = await vendor(
-          { url: effectiveUrl(row, entry), token },
+          {
+            url: effectiveUrl(row, entry),
+            token,
+            actorId: input.actorId,
+            botId: input.botId,
+          },
           toolName,
           args,
         );

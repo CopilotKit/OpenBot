@@ -31,7 +31,6 @@ import {
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import {
   agentProfiles,
   agents,
@@ -42,6 +41,7 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
+import { TEST_POOL } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 const actor = {

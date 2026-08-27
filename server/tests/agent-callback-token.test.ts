@@ -42,7 +42,8 @@ describe("an agent's callback token", () => {
 describe("the run assertion", () => {
   test("survives a round trip", () => {
     const signed = mintRunAssertion(RUN, KEY);
-    expect(readRunAssertion(signed, KEY)).toEqual(RUN);
+    // A run that began with a person is depth zero, which is what an unstated depth means.
+    expect(readRunAssertion(signed, KEY)).toEqual({ ...RUN, depth: 0 });
   });
 
   test("is refused when signed with another key", () => {
@@ -67,7 +68,10 @@ describe("the run assertion", () => {
     // Eleven minutes later: past the ten-minute life of an assertion.
     expect(readRunAssertion(signed, KEY, 11 * 60 * 1000)).toBeNull();
     // Still good a minute in, so the bound is a real window rather than nothing.
-    expect(readRunAssertion(signed, KEY, 60 * 1000)).toEqual(RUN);
+    expect(readRunAssertion(signed, KEY, 60 * 1000)).toEqual({
+      ...RUN,
+      depth: 0,
+    });
   });
 
   test("is refused when it is missing, empty or not a string", () => {
@@ -253,5 +257,49 @@ describe("a callback that cannot prove which Bot it is", () => {
     expect(verdict.ok).toBe(false);
     expect(verdict).not.toHaveProperty("botId");
     expect(verdict).not.toHaveProperty("actorId");
+  });
+});
+
+/**
+ * How deep a chain of Bots already is travels here because it has to cross a process.
+ *
+ * A Bot handing work to another is A to B to C, three runs on up to three pods. A counter in a
+ * variable stops applying the moment the second hop lands somewhere else, which is also the moment a
+ * loop starts costing real money: the cap would go quiet exactly when it was needed. Signed with the
+ * rest, so it is the deployment's number rather than one a Bot can edit.
+ */
+describe("how deep a run is", () => {
+  test("survives a round trip", () => {
+    const signed = mintRunAssertion({ ...RUN, depth: 2 }, KEY);
+    expect(readRunAssertion(signed, KEY)?.depth).toBe(2);
+  });
+
+  test("a run that began with a person is zero", () => {
+    expect(readRunAssertion(mintRunAssertion(RUN, KEY), KEY)?.depth).toBe(0);
+  });
+
+  /*
+   * Read as zero rather than refused. The signature has already been checked, so this is a field
+   * that predates the feature being absent rather than a caller lying, and the cap refuses on the
+   * way out anyway.
+   */
+  test("a depth that is not a depth reads as zero", () => {
+    for (const nonsense of [-1, 1.5, "2", null]) {
+      const signed = mintRunAssertion(
+        { ...RUN, depth: nonsense as never },
+        KEY,
+      );
+      expect(readRunAssertion(signed, KEY)?.depth).toBe(0);
+    }
+  });
+
+  test("the conversation survives a round trip, and is absent when there is none", () => {
+    expect(
+      readRunAssertion(mintRunAssertion({ ...RUN, threadId: "t1" }, KEY), KEY)
+        ?.threadId,
+    ).toBe("t1");
+    expect(readRunAssertion(mintRunAssertion(RUN, KEY), KEY)?.threadId).toBe(
+      undefined,
+    );
   });
 });

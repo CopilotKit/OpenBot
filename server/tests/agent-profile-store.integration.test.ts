@@ -16,7 +16,6 @@ import type {
 } from "../src/agents/profile-types";
 import { DEPLOYMENT_ROUTES } from "../src/computer/deployment-routes";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import {
   agentPreferences,
   agentProfiles,
@@ -27,6 +26,7 @@ import {
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
+import { TEST_POOL } from "./support/database";
 
 const databaseUrl =
   process.env.DATABASE_URL ??

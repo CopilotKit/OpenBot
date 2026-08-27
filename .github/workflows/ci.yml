@@ -85,6 +85,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The new-values-key check compares this chart against the last released one, or against
+          # main where the chart has not shipped yet. A shallow clone has neither to compare with.
+          fetch-depth: 0
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.19.0
@@ -164,6 +167,15 @@ jobs:
           else
             echo "skipped: the warm-pool refusal is only armed for computers.mode: sandbox"
           fi
+      # And that a values key this chart did not used to have still renders when it is absent.
+      #
+      # `helm upgrade --reuse-values` takes the previous release's computed values rather than
+      # merging the new chart's defaults, so a key added by the release being installed is missing on
+      # every deployment that already exists. Unguarded that is a nil dereference that fails the
+      # whole render, or an empty scalar Kubernetes reads as unset. Both shipped: one was found in
+      # review, the other by a live upgrade after the first had been fixed one key over.
+      - name: A new values key can be absent
+        run: bun scripts/check-new-values-keys.ts charts/openbot/ci/${{ matrix.target }}-values.yaml
 
   test:
     name: tests

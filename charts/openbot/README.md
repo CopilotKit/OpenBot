@@ -124,7 +124,13 @@ installing on somebody's bare-metal cluster.
 The chart fails the install, naming the value to change, when: there is no database or two of them;
 nobody would be an administrator; `singleUser` is combined with a public URL; both an Ingress and an
 HTTPRoute are enabled; both `externalSecrets` and an existing Secret are named; a Bot endpoint is
-named with no token to call it with; or a browser is asked for inside more than one API replica.
+named with no token to call it with; a browser is asked for inside more than one API replica; or
+`routines.enabled` is set with no `secrets.workerSharedSecret` — and, on `externalSecrets`, no
+`worker-shared-secret` key named for it to read instead. One combination gets no refusal at all:
+`secrets.existingSecret` with `routines.enabled`, because the Secret this chart would otherwise
+validate is somebody else's to create — put `worker-shared-secret` in it yourself, or every pod that
+mounts it fails to start — the routines CronJob, the culler, and the API server itself — with nothing
+at install time to say so.
 
 ## Your own Bot
 
@@ -196,6 +202,13 @@ each would decide independently to suspend the same computer. The work is claime
 PostgreSQL with `select ... for update skip locked`, so whichever pod runs the sweep takes what
 nobody else holds, and one that dies mid-suspend hands its work back when the lease expires. The
 decision is re-checked at the moment of acting, because somebody may have come back in between.
+
+A second CronJob shares that same mechanism for a different job: `routines.enabled` turns on the
+sweep that fires standing instructions a Bot was asked to carry out on a schedule, on
+`routines.schedule`. It needs `secrets.workerSharedSecret` — the credential it presents to the API
+server to be recognised as the worker rather than an arbitrary caller — and is off by default because
+turning it on with no secret set is a CronJob whose every run is refused. See the routines refusal
+below, and [docs/routines.md](../../docs/routines.md).
 
 ## NetworkPolicy, and whether your cluster enforces one
 

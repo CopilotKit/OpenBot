@@ -28,6 +28,31 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
+      {{- /*
+        A CEILING ON ONE SWEEP, because `Forbid` above turns a hung one into a permanent stop.
+        
+        Without this a sweep that never returns — a wedged API-server call, a database connection
+        that hangs rather than refuses — holds the concurrency lock for ever. Kubernetes will not
+        start the next one, so culling simply ceases: no error, no restart, no alert, and the first
+        sign is a cloud bill for a fleet of browsers nobody has used in a fortnight. That is exactly
+        the failure this feature exists to prevent, arriving through the mechanism meant to prevent
+        overlapping runs.
+        
+        Comfortably longer than a real sweep, which claims twenty computers and suspends them.
+
+        Defaulted through `kindIs "invalid"` rather than `| default`, because sprig substitutes on
+        EMPTY and zero is empty — the same trap that silently defeated the handoff off-switch one
+        file over. Here it is defaulted because this key is newer than the culler around it. Under
+        `helm upgrade --reuse-values` an existing release carries `culler` without it, so the
+        template still renders and emits an empty scalar: null, which Kubernetes reads as unset. The
+        ceiling described above would then silently not exist, on exactly the deployments that have
+        been running long enough to have a wedged sweep.
+      */}}
+      {{- $deadline := 600 -}}
+      {{- if not (kindIs "invalid" .Values.computers.sandbox.culler.activeDeadlineSeconds) -}}
+      {{- $deadline = .Values.computers.sandbox.culler.activeDeadlineSeconds -}}
+      {{- end }}
+      activeDeadlineSeconds: {{ $deadline }}
       template:
         metadata:
           labels:

@@ -35,6 +35,15 @@ ONE_COMPUTER_EACH="${OPENBOT_ONE_COMPUTER_EACH:-true}"
 export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
+# A fixed default is fine here, unlike `AGENT_TOOL_TOKEN` below, but not because of where the server
+# listens — it binds no hostname, so this port is reachable from the network like any other. It is
+# fine because this is a dev-only default on a machine's own dev stack, and the endpoint it guards
+# accepts nothing but an unguessable `routine_run_<uuid>` id: the server re-reads the routine, the
+# owner and the channel from its own tables rather than trusting anything else the caller says, so
+# the fixed default gates nothing sensitive here. That is also why it is generated fresh and
+# persisted for AGENT_TOOL_TOKEN (see the SECRETS_ROTATED block) but not for this one — production
+# must set a real WORKER_SHARED_SECRET.
+WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 
 # The secret the server sends to a managed Bot, generated and written back on first run.
 #
@@ -210,7 +219,7 @@ for svc in agent-computer agent-bot agent-langgraph; do
   SERVICES+=("$svc")
 done
 
-export SUPERVISOR_TOKEN COMPUTER_TOKEN
+export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
 export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
 docker compose up -d --build "${SERVICES[@]}" >/dev/null
 if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
@@ -258,18 +267,86 @@ if [ "$SECRETS_ROTATED" = "true" ]; then
   pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
   sleep 1
 fi
+#
+# A server that answers as OpenBot can still be one no worker can hand a routine to. The worker
+# below is started unconditionally with this run's WORKER_SHARED_SECRET, and every dispatch it makes
+# is one POST to this server's /internal/routines/run — a door that a server started from an older
+# checkout does not have (404), and that a server started before this secret existed in its
+# environment holds shut (401, `workerSharedSecret` undefined or different). Either way routines
+# never fire, and nothing at start time says why.
+#
+# So before keeping a running server, ask it the one thing only a compatible one answers well: POST
+# the handoff route with this run's secret and a deliberately empty body. In server/src/app.ts the
+# secret is checked before the body is parsed, so a server holding this same secret rejects the
+# empty body with 400 — the healthy answer. 401 means it does not hold this secret; 404 means it
+# predates the route. Both are cured by a restart into this run's environment, so fall through to
+# the launch below. Anything else — including a probe that could not connect at all — keeps the
+# philosophy of leaving an answering server alone.
+if identifies_as_openbot "$SERVER_PORT" server; then
+  HANDOFF_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
+    -X POST "http://localhost:$SERVER_PORT/internal/routines/run" \
+    -H "Authorization: Bearer $WORKER_SHARED_SECRET" \
+    -H "Content-Type: application/json" --data '{}' 2>/dev/null || true)"
+  case "$HANDOFF_STATUS" in
+    401)
+      info "  server: up, but refuses the worker's secret (401), so it is restarted to pick it up"
+      pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+      sleep 1
+      ;;
+    404)
+      info "  server: up, but has no /internal/routines/run (404: an older checkout), so it is restarted"
+      pkill -f "bun --env-file=../.env src/index.ts" >/dev/null 2>&1 || true
+      sleep 1
+      ;;
+  esac
+fi
 if ! identifies_as_openbot "$SERVER_PORT" server; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
     (cd server && PORT="$SERVER_PORT" \
       COMPUTER_SUPERVISOR_URL="http://localhost:$SUPERVISOR_PORT" \
       SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
       COMPUTER_TOKEN="$COMPUTER_TOKEN" \
+      WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
       bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
   else
-    (cd server && PORT="$SERVER_PORT" bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
+    (cd server && PORT="$SERVER_PORT" \
+      WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
+      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
   fi
 fi
 wait_for_openbot "$SERVER_PORT" server
+
+# The worker: a local stand-in for the routines CronJob, looping the same sweep
+# (`offerDueRoutines`/`dispatchClaimedRoutines`) a cluster would run on a schedule instead. Started
+# only now, because dispatching a claimed routine is one HTTP call to this server's own
+# /internal/routines/run, and the wait_for above is what confirms that call has somewhere to land.
+#
+# Guarded by a pgrep check rather than an HTTP health check, the same way the restart guard above
+# matches the server's own command line with `pkill -f`: the worker loop has no HTTP endpoint of its
+# own to ask, so "is a matching process already running" is the only signal a rerun of this script
+# has for "leave it alone."
+#
+# Launched from `$ROOT` with `bun worker/src/index.ts`, not `cd worker && bun src/index.ts`: on a
+# Linux host, container processes are visible to `pgrep` too, and `server/Dockerfile`,
+# `agent-computer/Dockerfile`, and `supervisor/Dockerfile` all run `bun src/index.ts` as their argv.
+# The old pattern matched those containers, the guard false-positived, and the worker silently never
+# started. `bun worker/src/index.ts` matches nothing else in the repo. Running from `$ROOT` is safe:
+# relative imports resolve from the importing file, not from the process's cwd.
+if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
+  WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
+  (cd "$ROOT" && \
+    DATABASE_URL="$WORKER_DATABASE_URL" \
+    SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
+    WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
+    bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
+  info "  worker: started (routine sweep loop)"
+  sleep 1
+  if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
+    red "  worker: did not stay up, check $LOGS/worker.log"
+  fi
+else
+  info "  worker: already running"
+fi
 
 info "3/4  Runtime health"
 INFO="$(curl -fsS --max-time 8 "http://localhost:$SERVER_PORT/api/copilotkit/info")"
@@ -316,6 +393,8 @@ Try:
   4. Add a deny rule in /admin/boundaries, then retry the same action.
 
 Logs: $LOGS
+  Routine sweep worker: $LOGS/worker.log
+Stop the routine worker: pkill -f 'bun worker/src/index.ts'
 Stop Docker services: docker compose down
   A Bot's computer is made by the supervisor rather than by compose, so it keeps running:
   docker rm -f \$(docker ps -q --filter label=openbot.supervisor=true)

@@ -1,5 +1,5 @@
-import type { Message } from "@ag-ui/core";
 import { describe, expect, test } from "bun:test";
+import type { Message } from "@ag-ui/core";
 import {
   seedMessage,
   stashFirstMessage,

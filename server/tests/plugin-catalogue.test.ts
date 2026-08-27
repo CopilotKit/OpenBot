@@ -92,6 +92,11 @@ describe("which servers this deployment will talk to", () => {
         // Anchored at both ends or the pattern is decoration.
         expect(entry.hostPattern?.startsWith("^")).toBe(true);
         expect(entry.hostPattern?.endsWith("$")).toBe(true);
+      } else if (entry.auth.kind === "builtin") {
+        // First-party and in-process: there is no host outside this process to reach, so the
+        // https requirement below does not apply. Asserted positively instead, so this branch
+        // cannot quietly become a loophole for a future entry that DOES dial a real host.
+        expect(entry.host).toBe("builtin://routines");
       } else {
         expect(entry.host.startsWith("https://")).toBe(true);
       }
@@ -105,7 +110,7 @@ describe("whose credential a server uses", () => {
     // whose, and a reader who guessed would guess the deployment's, which for a user-oauth vendor
     // is the one answer that breaks the promise the connector exists to keep.
     for (const entry of CATALOGUE) {
-      expect(["none", "deployment-bearer", "user-oauth"]).toContain(
+      expect(["none", "deployment-bearer", "user-oauth", "builtin"]).toContain(
         entry.auth.kind,
       );
     }
@@ -235,6 +240,48 @@ describe("Notion", () => {
     }
     expect(classifyTool(entry, "notion-search", true)).toBe("read");
     expect(classifyTool(entry, "brand-new-tool", false)).toBe("write");
+  });
+});
+
+describe("Routines", () => {
+  const entry = catalogueEntry("routines");
+
+  test("is in the catalogue and resolves to its own builtin address", () => {
+    expect(entry).not.toBeNull();
+    expect(resolveServerUrl("routines")?.url).toBe("builtin://routines");
+  });
+
+  test("has no credential, because there is nothing to authenticate to", () => {
+    expect(entry?.auth.kind).toBe("builtin");
+  });
+
+  test("is reached through the builtin transport, not a vendor", () => {
+    expect(entry?.transport).toBe("builtin-routines");
+  });
+
+  test("pins the exact write list, so a dropped or renamed entry fails here", () => {
+    expect(entry?.writeTools).toEqual([
+      "create_routine",
+      "update_routine",
+      "delete_routine",
+    ]);
+  });
+
+  test("classifies its tools the same way every other vendor's are classified", () => {
+    for (const name of entry?.writeTools ?? []) {
+      expect(classifyTool(entry, name, true)).toBe("write");
+    }
+    expect(classifyTool(entry, "list_routines", true)).toBe("read");
+    // A name nothing here has vouched for is a write, the same as for any other vendor.
+    expect(classifyTool(entry, "brand-new-tool", false)).toBe("write");
+    // Every tool, advertised or not, is a write when the server never said it was advertised.
+    for (const name of [
+      ...(entry?.writeTools ?? []),
+      "list_routines",
+      "brand-new-tool",
+    ]) {
+      expect(classifyTool(entry, name, false)).toBe("write");
+    }
   });
 });
 
