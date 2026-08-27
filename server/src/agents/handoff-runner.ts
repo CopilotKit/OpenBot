@@ -95,7 +95,7 @@ export function createHandoffRunner(options: {
   leaseMs?: number;
   /** How many hops one sweep will take. */
   limit?: number;
-  /** After how many tries a hop is given up on. Must match what `claim` is told. */
+  /** After how many tries a hop is given up on. Told to `claim` as well as gating the notice. */
   maxAttempts?: number;
   /**
    * How often a claim is refreshed. Comfortably inside the lease.
@@ -129,11 +129,25 @@ export function createHandoffRunner(options: {
    * Marked with `answerIn`, which is also what stops this recursing: a notice that fails is not
    * itself worth a notice, and the check above skips any hop that carries one.
    */
-  const tell = (work: HandoffWork, reason: string) =>
+  const tell = (work: HandoffWork, key: string, reason: string) =>
     queue.offer({
       kind: HANDOFF_KIND,
-      // Distinct from the hop's own key, or `offer` would treat this as the same work and drop it.
-      key: `${work.runId}:notice:${work.toBotId}`,
+      /*
+       * OUTSIDE THE RUN'S OWN PREFIX, and carrying the failed hop's key.
+       *
+       * Outside, because the fan-out cap counts every row whose key starts with `${runId}:` and a
+       * notice is not one of the Bots this run asked for. A hop that failed for good while the run
+       * was still going would otherwise spend a third of a three-Bot budget on the message saying
+       * so, and the run's next legitimate ask would be refused with "this turn has already asked 3
+       * Bots" after asking two.
+       *
+       * Carrying the hop's key, because one run may legally ask the same Bot two different things.
+       * Keyed on the Bot alone both notices are the same work to `offer`, the second is dropped on
+       * conflict, and the person hears about one of their two lost questions with the other's
+       * reason. Nothing purges this kind, so that row blocks the second notice for good rather than
+       * for a window.
+       */
+      key: `notice:${key}`,
       payload: {
         fromBotId: work.toBotId,
         toBotId: work.fromBotId,
@@ -154,6 +168,17 @@ export function createHandoffRunner(options: {
         owner,
         leaseMs,
         limit,
+        /*
+         * The same ceiling the notice below is gated on, because two different ceilings is two
+         * different ideas of when a hop is over.
+         *
+         * `claim` stops serving a row at its own cutoff. Set higher here than there and the row is
+         * never handed out again, `attempts` never reaches this number, and the notice that exists
+         * to stop a person waiting for ever is never sent: the silent stop, arriving through the
+         * feature built to prevent it. Set lower and the person is told it failed for good while
+         * the queue keeps handing it out, so the Bot may answer after they were told it would not.
+         */
+        maxAttempts,
       });
       const report: HandoffRunReport = { delivered: [], skipped: [] };
 
@@ -319,7 +344,7 @@ export function createHandoffRunner(options: {
              * nothing for ever, has no way to tell a slow Bot from a broken one.
              */
             if (item.attempts >= maxAttempts && !work.answerIn) {
-              await tell(work, reason).catch((failure) => {
+              await tell(work, item.key, reason).catch((failure) => {
                 // A notice that cannot be queued must not take the release with it: leaving the row
                 // claimed would be worse than a hop nobody was told about.
                 console.warn(

@@ -16,12 +16,12 @@ import {
   users,
 } from "../src/db/schema";
 import {
+  createRoutineStore,
   MAX_ENABLED_ROUTINES,
   MAX_INSTRUCTION_CODE_POINTS,
   MAX_RUN_ERROR,
   RoutineNotFoundError,
   RoutineRefusedError,
-  createRoutineStore,
 } from "../src/routines/store";
 import { TEST_POOL } from "./support/database";
 

@@ -1,6 +1,6 @@
-import { AbstractAgent, EventType } from "@ag-ui/client";
-import type { Message } from "@ag-ui/client";
 import { describe, expect, test } from "bun:test";
+import type { Message } from "@ag-ui/client";
+import { AbstractAgent, EventType } from "@ag-ui/client";
 import { EMPTY } from "rxjs";
 import {
   createTurnRunner,

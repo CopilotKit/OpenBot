@@ -74,6 +74,7 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
+import { repeatAfterEach } from "./work/loop";
 import { createWorkQueue } from "./work/queue";
 
 /**
@@ -860,8 +861,13 @@ if (config.handoff.maxDepth > 0) {
     }
   };
 
-  // Unref'd so this never holds the process open on its own. A pod draining should drain.
-  setInterval(sweep, 2_000).unref();
+  /*
+   * ONE SWEEP AT A TIME ON THIS REPLICA. See repeatAfterEach: an interval would start another sweep
+   * every two seconds while a five-minute delivery runs, each claiming a different batch, and this
+   * replica's concurrent agent runs would grow with the backlog rather than stopping at the limit
+   * it was asked for.
+   */
+  repeatAfterEach(sweep, 2_000);
 }
 
 const app = createApp(

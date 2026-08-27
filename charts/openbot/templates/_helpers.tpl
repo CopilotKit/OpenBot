@@ -177,13 +177,20 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 {{- /*
   How far one Bot may hand work to another.
   
-  Always set, including the zeroes, so a deployment that has switched this off says so rather than
-  relying on the image's default staying what it is today.
+  Always set, so a deployment that has switched this off says so rather than relying on the image's
+  default staying what it is today.
+
+  PARENTHESISED AND DEFAULTED, because `config.handoff` is a key this chart did not have before.
+  `helm upgrade --reuse-values` takes the previous release's computed values instead of merging the
+  new chart's defaults, so on every existing deployment this map is simply absent. Reached with a
+  bare `.Values.config.handoff.maxDepth` that is a nil dereference, and it fails the WHOLE render:
+  this helper is included by the server deployment, so the upgrade does not lose the handoff
+  feature, it does not install at all.
 */}}
 - name: BOT_HANDOFF_MAX_DEPTH
-  value: {{ .Values.config.handoff.maxDepth | quote }}
+  value: {{ (.Values.config.handoff).maxDepth | default 1 | quote }}
 - name: BOT_HANDOFF_MAX_PER_RUN
-  value: {{ .Values.config.handoff.maxPerRun | quote }}
+  value: {{ (.Values.config.handoff).maxPerRun | default 3 | quote }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL

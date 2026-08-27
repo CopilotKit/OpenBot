@@ -1,5 +1,5 @@
-import type { CatalogueEntry } from "./catalogue";
 import * as builtinRoutines from "./builtin-routines";
+import type { CatalogueEntry } from "./catalogue";
 import * as driveRest from "./google-drive-rest";
 import type { McpCallResult, McpTool } from "./mcp";
 import * as mcp from "./mcp";

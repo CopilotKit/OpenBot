@@ -217,6 +217,58 @@ describe("a hop that failed for good", () => {
   });
 
   /*
+   * The fan-out cap counts every row whose key starts with the run's own prefix. A notice is not one
+   * of the Bots this run asked for, and a run long enough to see a hop fail for good is exactly the
+   * run that still has asking to do.
+   */
+  test("its key is outside the run's own prefix, so it costs no fan-out budget", async () => {
+    const {
+      runner: sweeper,
+      calls,
+      offered,
+    } = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 5 },
+      ] as unknown as WorkItem[],
+      deliver: async () => {
+        throw new Error("nope");
+      },
+    });
+
+    await sweeper.sweep();
+
+    const key = calls.find((call) => call.verb === "offer")?.key ?? "";
+    expect(key.startsWith("run-1:")).toBe(false);
+    expect(key).toContain("run-1:abc");
+    expect(offered).toHaveLength(1);
+  });
+
+  /*
+   * One run may legally ask the same Bot two different things. Keyed on the Bot alone both notices
+   * are the same work to `offer`, the second is dropped on conflict, and nothing purges this kind —
+   * so the person hears about one of their two lost questions, for good.
+   */
+  test("two lost questions to one Bot leave two notices", async () => {
+    const { runner: sweeper, calls } = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:aaa", payload: WORK, attempts: 5 },
+        { kind: "bot.message", key: "run-1:bbb", payload: WORK, attempts: 5 },
+      ] as unknown as WorkItem[],
+      deliver: async () => {
+        throw new Error("nope");
+      },
+    });
+
+    await sweeper.sweep();
+
+    const keys = calls
+      .filter((call) => call.verb === "offer")
+      .map((call) => call.key);
+    expect(keys).toHaveLength(2);
+    expect(new Set(keys).size).toBe(2);
+  });
+
+  /*
    * Otherwise a Bot nobody can reach produces a notice that cannot be delivered either, which
    * produces a notice, for ever.
    */

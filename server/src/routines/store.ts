@@ -40,7 +40,7 @@ import {
   routineRuns,
   routines,
 } from "../db/schema";
-import { ScheduleRefusedError, describeCron, nextOccurrence } from "./schedule";
+import { describeCron, nextOccurrence, ScheduleRefusedError } from "./schedule";
 
 export class RoutineNotFoundError extends Error {
   constructor(message = "That routine does not exist.") {

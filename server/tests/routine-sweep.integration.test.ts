@@ -28,11 +28,11 @@ import { MINIMUM_INTERVAL_MS } from "../src/routines/schedule";
 import { createRoutineStore } from "../src/routines/store";
 import {
   DEFAULT_GRACE_MS,
-  ROUTINE_FIRE_KIND,
   dispatchClaimedRoutines,
   offerDueRoutines,
+  ROUTINE_FIRE_KIND,
 } from "../src/routines/sweep";
-import { DEFAULT_MAX_ATTEMPTS, createWorkQueue } from "../src/work/queue";
+import { createWorkQueue, DEFAULT_MAX_ATTEMPTS } from "../src/work/queue";
 import { TEST_POOL } from "./support/database";
 
 /**
