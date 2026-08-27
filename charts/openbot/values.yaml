@@ -253,6 +253,15 @@ computers:
       enabled: true
       schedule: "*/5 * * * *"
 
+# Standing instructions a Bot runs on a schedule. The sweep offers due routines to the shared work
+# queue and hands each firing to the API server, which runs the turn as the person who scheduled it.
+routines:
+  # Off by default, because it needs a secret. Without `secrets.workerSharedSecret` the API server
+  # refuses every handoff, and a CronJob whose every run is a 401 is worse than no CronJob at all.
+  enabled: false
+  # Inside the 15-minute floor the tools enforce, so a firing waits at most one tick.
+  schedule: "*/5 * * * *"
+
 database:
   # Used when `postgresql.enabled` is false. A URL, or a secret holding one.
   #
@@ -349,6 +358,9 @@ secrets:
   licenseToken: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
   managedAgentToken: ""
+  # Required when `routines.enabled`: what the CronJob presents to the API server to be recognised
+  # as the worker rather than as an unauthenticated caller.
+  workerSharedSecret: ""
   # The client secret for whichever provider is configured above.
   googleClientSecret: ""
   microsoftClientSecret: ""

@@ -274,6 +274,25 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
       name: {{ default (include "openbot.secretName" .) .Values.computers.existingTokenSecret }}
       key: computer-token
       optional: {{ eq .Values.computers.mode "external" }}
+{{- /*
+  One definition, for the same reason `openbot.databaseUrlEnv` is one (see its comment above): the
+  API server needs this value to RECOGNISE the worker, and the routines CronJob needs the same value
+  to BE the worker. Two definitions could drift; this can't. Gated on `routines.enabled` so a
+  deployment that never turns routines on gets no env var pointing at a key its secret store may not
+  hold.
+
+  Above `config.extraEnv`, not below it: Kubernetes takes the last of a duplicate name, and this must
+  lose to an operator's own value, not win over it. Below it, this chart's own secretKeyRef would
+  override whatever `extraEnv` set, which turns the escape hatch into a trap for the one variable
+  someone would need it for.
+*/}}
+{{- if .Values.routines.enabled }}
+- name: WORKER_SHARED_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openbot.secretName" . }}
+      key: worker-shared-secret
+{{- end }}
 {{- with .Values.config.extraEnv }}
 {{ toYaml . }}
 {{- end }}

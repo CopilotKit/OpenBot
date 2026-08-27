@@ -113,6 +113,18 @@ on group membership from the identity provider, not as a control that is running
 
 See [coworkers.md](coworkers.md).
 
+## Routines
+
+A routine is a standing instruction, created by asking a Bot in a channel rather than through a form,
+that fires on a schedule and posts its reply into that channel as the person who created it.
+
+The sweep that notices a routine is due sits beside the computer culler on one shared mechanism: both
+write to `work_items`, one PostgreSQL table claimed with `select ... for update skip locked`, leases
+timed on the database's own clock, and an attempt cap. Neither runs as a timer inside the API, because
+a timer fires in every replica and each would decide independently that the same firing or the same
+suspension is due; the queue is what lets exactly one claim it while every other replica's attempt
+collides harmlessly with the same row. See [routines.md](routines.md).
+
 ## Components
 
 Components are frontend tools a Bot can call instead of answering only in prose.
