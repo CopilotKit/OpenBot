@@ -123,7 +123,11 @@ export const routines = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (table) => [index("routines_due_idx").on(table.enabled, table.nextRunAt)],
+  (table) => [
+    index("routines_due_idx").on(table.enabled, table.nextRunAt),
+    /** Owner-scoped reads and writes: listFor, countEnabled, and the users cascade all hit this. */
+    index("routines_by_owner_idx").on(table.ownerUserId, table.enabled),
+  ],
 );
 
 /** One row per firing, which is what the page's "last ran" and the fatigue rule read. */
