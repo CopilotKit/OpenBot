@@ -226,6 +226,43 @@ const offSwitches: Array<{ path: string; variable: string }> = [
   { path: "config.handoff.maxDepth", variable: "BOT_HANDOFF_MAX_DEPTH" },
   { path: "config.handoff.maxPerRun", variable: "BOT_HANDOFF_MAX_PER_RUN" },
 ];
+
+/** The value rendered onto a named env var, or undefined if it is not there. */
+function renderedValue(out: string, variable: string): string | undefined {
+  const lines = out.split("\n");
+  const at = lines.findIndex((line) => line.includes(`name: ${variable}`));
+  if (at === -1) return undefined;
+  return lines[at + 1]
+    ?.trim()
+    .replace(/^value:\s*/, "")
+    .replace(/"/g, "");
+}
+
+/*
+ * And that the TEMPLATE's own fallback is the number values.yaml documents.
+ *
+ * Reached only on an upgrade from before the key existed, which is exactly when nobody is looking.
+ * Asserted here rather than in the suite that checks values.yaml against the code, because that one
+ * runs in a job with no Helm — and a test that shells out to a binary which is not there returns
+ * undefined rather than failing.
+ */
+const chartValues = parse(
+  await Bun.file("charts/openbot/values.yaml").text(),
+) as { config?: { handoff?: Record<string, number> } };
+const absent = render(["--set", "config.handoff=null"]);
+for (const { path, variable } of offSwitches) {
+  const leaf = path.slice(path.lastIndexOf(".") + 1);
+  const documented = chartValues.config?.handoff?.[leaf];
+  const got = absent.ok ? renderedValue(absent.out, variable) : undefined;
+  if (got !== String(documented)) {
+    console.error(
+      `::error::With config.handoff absent, ${variable} rendered ${got ?? "nothing"} but values.yaml documents ${documented}.`,
+    );
+    bad += 1;
+  } else {
+    console.log(`${variable} falls back to ${got}, as values.yaml says`);
+  }
+}
 for (const { path, variable } of offSwitches) {
   const attempt = render(["--set", `${path}=0`]);
   if (!attempt.ok) {

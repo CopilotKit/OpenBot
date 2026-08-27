@@ -26,39 +26,6 @@ const docs = await Bun.file("docs/configuration.md").text();
 /** What `handoffCaps` falls back to with nothing in the environment. */
 const code = loadConfig(testEnvironment()).handoff;
 
-/**
- * What the chart actually renders for a given value, read out of the rendered YAML.
- *
- * NOT OUT OF THE TEMPLATE SOURCE. Matching the `$maxDepth := 1` assignment looked like it pinned the
- * fallback and pinned almost nothing: `{{ $maxDepth | default 1 }}` still matched, which is the very
- * construct that swallowed an explicit zero, and it never checked WHICH env var the number ended up
- * on, so swapping the two emissions passed too. Rendering answers both.
- */
-function rendered(variable: string, set: string[]): string | undefined {
-  const result = Bun.spawnSync(
-    [
-      "helm",
-      "template",
-      "ci",
-      "charts/openbot",
-      "--values",
-      "charts/openbot/ci/eks-values.yaml",
-      "--set-string",
-      `secrets.keyEncryptionKey=${btoa("0".repeat(32))}`,
-      ...set.flatMap((one) => ["--set", one]),
-    ],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  if (result.exitCode !== 0) return undefined;
-  const lines = new TextDecoder().decode(result.stdout).split("\n");
-  const at = lines.findIndex((line) => line.includes(`name: ${variable}`));
-  if (at === -1) return undefined;
-  return lines[at + 1]
-    ?.trim()
-    .replace(/^value:\s*/, "")
-    .replace(/"/g, "");
-}
-
 describe("the handoff caps say the same thing everywhere", () => {
   test("the chart's values match the code's fallbacks", () => {
     expect(chart.config?.handoff?.maxDepth).toBe(code.maxDepth);
@@ -66,36 +33,15 @@ describe("the handoff caps say the same thing everywhere", () => {
   });
 
   /*
-   * This is the one that bites on an upgrade: the values key is absent on every release made before
-   * it existed, so the template's own fallback is what those deployments actually get.
+   * The TEMPLATE's own fallback, and that it does not eat a deliberate zero, are asserted where Helm
+   * exists — `scripts/check-new-values-keys.ts`, run by the chart job. This suite runs in a job with
+   * no Helm binary, and a test that shells out to one that is not there does not fail, it returns
+   * undefined and compares it to nothing. That is how the first version of this passed locally and
+   * failed in CI.
+   *
+   * The two halves chain: the script holds the rendered fallback to values.yaml, and this holds
+   * values.yaml to the code and the docs.
    */
-  test("the template's fallbacks match them too", () => {
-    expect(rendered("BOT_HANDOFF_MAX_DEPTH", ["config.handoff=null"])).toBe(
-      String(code.maxDepth),
-    );
-    expect(rendered("BOT_HANDOFF_MAX_PER_RUN", ["config.handoff=null"])).toBe(
-      String(code.maxPerRun),
-    );
-  });
-
-  /*
-   * The fallback must not eat a deliberate zero, and each number has to land on its OWN variable.
-   * Both were true of the version this replaced, and neither was tested.
-   */
-  test("an explicit zero reaches the container as a zero", () => {
-    expect(
-      rendered("BOT_HANDOFF_MAX_DEPTH", [
-        "config.handoff.maxDepth=0",
-        "config.handoff.maxPerRun=9",
-      ]),
-    ).toBe("0");
-    expect(
-      rendered("BOT_HANDOFF_MAX_PER_RUN", [
-        "config.handoff.maxDepth=0",
-        "config.handoff.maxPerRun=9",
-      ]),
-    ).toBe("9");
-  });
 
   test("and the documented defaults are those numbers", () => {
     const row = (name: string) =>
