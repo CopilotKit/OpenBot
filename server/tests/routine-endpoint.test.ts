@@ -66,7 +66,6 @@ function buildApp(
     undefined, // peopleStore
     undefined, // identityProviders
     undefined, // intentRouter
-    undefined, // attentionStore
     undefined, // pageFrames
     runner,
   ];
