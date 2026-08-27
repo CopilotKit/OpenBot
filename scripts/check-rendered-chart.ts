@@ -154,6 +154,50 @@ if (serverPolicy) {
   }
 }
 
+/**
+ * Every pod this release runs is covered by a policy, once any policy exists.
+ *
+ * A NetworkPolicy applies only to the pods its selector matches, and a pod nothing selects keeps the
+ * cluster default rather than being denied — so on a release that has policies at all, a workload
+ * with none is the one workload that is not fenced. That is invisible in a rendered chart and in
+ * `kubectl get networkpolicy`, because the policies that do exist look right.
+ *
+ * Asked of the rendered objects rather than of the templates, because the question is which pods
+ * came out, not which conditionals were written.
+ */
+const policyComponents = new Set(
+  documents
+    .filter((document) => /^kind:\s*NetworkPolicy\s*$/m.test(document))
+    .flatMap((document) => {
+      const selector = document.split(/^\s{2}podSelector:\s*$/m)[1] ?? "";
+      const found = selector.match(
+        /app\.kubernetes\.io\/component:\s*([\w-]+)/,
+      );
+      return found?.[1] ? [found[1]] : [];
+    }),
+);
+if (policyComponents.size > 0) {
+  const workloads = documents.filter((document) =>
+    /^kind:\s*(Deployment|StatefulSet|CronJob|Job|DaemonSet)\s*$/m.test(
+      document,
+    ),
+  );
+  for (const workload of workloads) {
+    const component = workload.match(
+      /app\.kubernetes\.io\/component:\s*([\w-]+)/,
+    )?.[1];
+    const name = workload.match(/^\s{2}name:\s*(\S+)/m)?.[1] ?? "a workload";
+    if (!component) continue;
+    // The migrations Job runs once at install and is torn down; it is not a standing surface.
+    if (component === "migrations") continue;
+    if (!policyComponents.has(component)) {
+      problems.push(
+        `This release has NetworkPolicies but none selects ${name} (component: ${component}), so it is the one pod left unfenced while everything around it is restricted. Give it a policy or say in the chart why it needs none.`,
+      );
+    }
+  }
+}
+
 if (problems.length > 0) {
   for (const problem of problems) console.error(`::error::${problem}`);
   process.exit(1);

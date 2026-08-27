@@ -180,3 +180,87 @@ spec:
 {{ toYaml . | indent 4 }}
     {{- end }}
 {{- end }}
+
+{{- if and .Values.networkPolicy.enabled (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.culler.enabled }}
+---
+{{- $culler := "culler" -}}
+{{/*
+The culler, which is the third pod this release runs and was the only one no policy selected.
+
+A NetworkPolicy applies to the pods its selector matches, and a pod nothing selects is not covered
+by the release's policy at all — it keeps the cluster default, which on a cluster with no
+default-deny is unrestricted egress. So turning `networkPolicy.enabled` on fenced the API and the
+computers and left this one open, which is the wrong way round: it mounts a service account token
+bound to create, patch and delete on Sandboxes, and it carries the API's whole environment,
+including `KEY_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET`, because it runs the same image with the same
+config. It also wakes every five minutes by default.
+
+Narrower than the API's policy because it does less. It reads the database and it asks the
+Kubernetes API server which computers to suspend. It never calls Intelligence, an identity provider
+or a Bot, so it gets no rule to the internet — the exception-list egress the API needs is exactly
+what this pod should not have.
+
+No ingress at all: nothing connects to a CronJob.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $culler) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $culler) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $culler) | indent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress rules, which under an Ingress policyType denies all of it.
+  ingress: []
+  egress:
+    # DNS, or the database hostname does not resolve and the sweep reads as the database being down.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- /*
+      The Kubernetes API server, which is the whole reason this pod holds a token.
+
+      Unscoped unless a deployment says otherwise, for the same reason the API's rule is: the API
+      server answers on a ClusterIP from a service range no chart can know at template time. Name it
+      in `networkPolicy.kubernetesApiCidr` and this narrows with it.
+    */}}
+    - {{- with .Values.networkPolicy.kubernetesApiCidr }}
+      to:
+        - ipBlock:
+            cidr: {{ . }}
+      {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- /*
+      A database that is not the bundled one.
+
+      `postgresql.enabled` off means the rule above did not render, and this pod has no rule to the
+      internet, so without something here it could not reach its own database and every sweep would
+      fail on connect. The chart already refuses `networkPolicy.enabled` with an external database
+      unless `networkPolicy.extraEgress` names it, so that list is where the address already is;
+      reusing it keeps an operator from having to write the same CIDR twice and keeps an upgrade from
+      silently breaking the sweep. Set `cullerExtraEgress` to give this pod a narrower list instead.
+    */}}
+    {{- with (default .Values.networkPolicy.extraEgress .Values.networkPolicy.cullerExtraEgress) }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}
