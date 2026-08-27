@@ -260,11 +260,12 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
-      # gpt-5.5. This integration answers nothing at all on gpt-5.6-* through the Responses API:
-      # RUN_STARTED, then RUN_FINISHED, no text. Driven against the real service. 5.6 is still
-      # reachable by setting BOT_MODEL, and the Responses API is switched on for it automatically.
+      # gpt-5.5, to stay comparable with agent-bot above rather than because 5.6 does not work:
+      # set BOT_MODEL to one and the Responses API is switched on for it automatically.
       BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
       BOT_RESPONSES_API: ${BOT_RESPONSES_API:-false}
+      # How hard it thinks, on a model that reasons. Empty leaves the provider's own default.
+      BOT_REASONING_EFFORT: ${BOT_REASONING_EFFORT:-}
       # Where this Bot runs a tool: back through the deployment that granted it, never at the vendor.
       # `host.docker.internal` because the API server runs on the host, not in this network.
       OPENBOT_TOOL_URL: ${OPENBOT_TOOL_URL:-http://host.docker.internal:3001/api/agent-tools/call}

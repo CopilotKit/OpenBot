@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The framework Bot answers on 5.6-tier models, and can be told how hard to think
+
+Pointing `BOT_MODEL` at a `gpt-5.6-*` model gave a Bot that started, reported healthy, and then said
+nothing: every run was a RUN_STARTED and a RUN_FINISHED with no text between them. Those models are
+run on the Responses API, which streams content blocks where chat completions streams a string, and
+the run read only the string — so every delta was dropped on the floor. Both shapes are read now.
+Nothing changes for a deployment on 5.5 or on Anthropic or Google.
+
+`BOT_REASONING_EFFORT` sets how hard a reasoning model thinks: `none`, `minimal`, `low`, `medium`,
+`high`, `xhigh` or `max`. Unset, the model keeps its provider's default. A value the API does not
+have, or one set where it cannot be sent — a provider that is not OpenAI, or a model not on the
+Responses API — stops the Bot at startup with a message naming what to change, rather than starting
+with a setting that goes nowhere.
+
 ### A Bot in trouble no longer needs somebody watching
 
 A boundary refusal or a stalled run was recorded and then waited for a person to happen to look — at
