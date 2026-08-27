@@ -701,6 +701,13 @@ export function createPluginRoutes(
        * so a target at its own endpoint is perfectly ordinary — but `ref` is bare text with no
        * foreign key, so a typo stored happily and every hop then refused as not-granted.
        */
+      /*
+       * A Bot cannot be granted itself. The desk refuses a self-hop outright — "a Bot cannot hand
+       * work to itself" — so the row is dead the moment it is written, and reads as configured.
+       */
+      if (ref === agentId) {
+        return "A Bot cannot be granted itself to hand work to.";
+      }
       const runsHere = await store.agentRunsHere(agentId);
       if (runsHere === undefined) return "There is no such Bot.";
       if (!runsHere) {

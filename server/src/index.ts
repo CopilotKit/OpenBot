@@ -349,7 +349,10 @@ const handoffDesk = createHandoffDesk({
    * of the run-building collaborators. It is only ever called during a hop, long after this module
    * has finished loading.
    */
-  actorFor: (userId) => actorFor(userId),
+  actorFor: (userId) =>
+    // Null rather than a throw: see the seam's own note. A role that cannot be read is not a role,
+    // and the hop is refused with a sentence rather than ending the run in silence.
+    actorFor(userId).catch(() => null),
   auditStore: bootAuditStore,
   caps: config.handoff,
 });
@@ -824,6 +827,24 @@ const copilotRuntime = mountCopilotRuntime(
  * per day, for a feature it had turned off.
  */
 if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
+  /**
+   * The person a delivery acts as, with a failure a person can be told about.
+   *
+   * `actorFor` throws when a role cannot be established — a revoked role, or a database that
+   * blinked. Thrown from inside a delivery that message becomes the reason on a failed hop, and the
+   * reason is paraphrased to somebody by the Bot that asked: "A routine requires an authorized
+   * owner." is not a sentence to put in front of a person who asked about a refund policy.
+   */
+  const theirActor = async (userId: string) => {
+    const actor = await actorFor(userId).catch(() => null);
+    if (!actor) {
+      throw new Error(
+        "who this is for could not be confirmed, so the answer had nowhere to go",
+      );
+    }
+    return actor;
+  };
+
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
     owner: `handoff/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
@@ -844,7 +865,20 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
         config.keyEncryptionKey,
       ),
     delivery: createHandoffDelivery({
-      agentFor: copilotRuntime.agentFor,
+      /*
+       * Built as the person, WITH THEIR ROLE. The desk resolved it to decide the hop was allowed; a
+       * delivery that then rebuilt them as an ordinary user could not find the Bot the desk had just
+       * agreed to, and the person was told it never answered.
+       */
+      agentFor: async ({ actorId, botId }) => {
+        const actor = await actorFor(actorId).catch(() => null);
+        if (!actor) {
+          throw new Error(
+            "who this is for could not be confirmed, so the Bot was not run",
+          );
+        }
+        return copilotRuntime.agentFor({ actor, botId });
+      },
       history: copilotRuntime.history,
       lock: copilotRuntime.threadLock,
       /*
@@ -861,7 +895,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
         // The person's own role, for the same reason the desk resolves it: an administrator sees Bots
         // a user does not, and a conversation with one of those is still theirs.
         const channel = await channelStore.direct(
-          await actorFor(input.actorId),
+          await theirActor(input.actorId),
           input.botId,
         );
         return { threadId: channel.threadId, channelId: channel.id };
@@ -870,7 +904,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
       // than a browser. See ChannelStore.recordActivity.
       announce: async (input) =>
         channelStore.recordActivity(
-          await actorFor(input.actorId),
+          await theirActor(input.actorId),
           input.channelId,
           { text: input.text, agentId: input.agentId, at: new Date() },
         ),
@@ -906,31 +940,48 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
    * it was asked for.
    */
   repeatAfterEach(sweep, 2_000);
-
-  /*
-   * And dropping the ones that are over, on a far slower clock.
-   *
-   * Every replica reaps; the statement is a delete by age, so two doing it is the same as one doing
-   * it. Its own loop rather than a phase of the sweep, so a reap that fails costs a reap rather than
-   * a delivery, and so an hour of failing to reap never delays somebody's answer.
-   */
-  repeatAfterEach(
-    async () => {
-      try {
-        const purged = await runner.reap();
-        if (purged > 0) {
-          console.info(JSON.stringify({ type: "bot-handoff-reaped", purged }));
-        }
-      } catch (error) {
-        console.warn(
-          "[handoff] hops that are over could not be dropped:",
-          error instanceof Error ? error.message : error,
-        );
-      }
-    },
-    60 * 60 * 1_000,
-  );
 }
+
+/*
+ * And dropping the hops that are over, whether or not the capability is switched on.
+ *
+ * OUTSIDE THE GATE ABOVE, deliberately. A deployment that switches handing work off still has
+ * whatever it made while it was on, and rows that stop being reaped are rows that stay at the head
+ * of the queue: switched back on a month later, the first thing that happens is a month-old question
+ * being delivered to somebody who has long since stopped waiting. Reaping is housekeeping about the
+ * past rather than part of the feature.
+ *
+ * Every replica reaps; the statement is a delete by age, so two doing it is the same as one doing it.
+ * Its own loop rather than a phase of the sweep, so an hour of failing to reap never delays an answer.
+ */
+const reaper = createHandoffRunner({
+  queue: createWorkQueue(database),
+  owner: `reaper/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
+  sign: () => "",
+  auditStore: bootAuditStore,
+  // Never called: `reap` deletes rows by age and claims nothing.
+  delivery: {
+    deliver: async () => {
+      throw new Error("the reaper does not deliver hops");
+    },
+  },
+});
+repeatAfterEach(
+  async () => {
+    try {
+      const purged = await reaper.reap();
+      if (purged > 0) {
+        console.info(JSON.stringify({ type: "bot-handoff-reaped", purged }));
+      }
+    } catch (error) {
+      console.warn(
+        "[handoff] hops that are over could not be dropped:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  },
+  60 * 60 * 1_000,
+);
 
 const app = createApp(
   config,

@@ -1027,10 +1027,19 @@ export function mountCopilotRuntime(
    * role from the one the person talks to.
    */
   const agentFor = async (input: {
-    actorId: string;
+    /**
+     * The person, WITH THEIR ROLE, rather than an id this rebuilds a role for.
+     *
+     * An administrator sees Bots a user does not. Assumed to be a user here while the desk resolved
+     * the real role, the two disagreed in the worst direction: the desk accepted an administrator's
+     * hop to a Bot only they can see, the model was told it had been handed over, and then every
+     * delivery attempt failed to build that Bot and the person was told it never answered. A
+     * refusal that failed closed became a lie that failed slowly.
+     */
+    actor: AgentActor;
     botId: string;
   }): Promise<AbstractAgent | null> => {
-    const actor: AgentActor = { id: input.actorId, role: "user" };
+    const { actor } = input;
     const agents = await resolveRuntimeAgents(
       () => loadAgents(actor),
       model,

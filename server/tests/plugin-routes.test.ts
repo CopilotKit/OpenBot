@@ -380,3 +380,30 @@ describe("what a bot grant refusal reveals", () => {
     expect(calls).toEqual([]);
   });
 });
+
+/*
+ * The desk refuses a self-hop outright — "a Bot cannot hand work to itself" — so a grant of a Bot to
+ * itself is dead the moment it is written, and reads as configured.
+ */
+describe("granting a Bot itself", () => {
+  test("is refused rather than stored", async () => {
+    const { calls, app } = grantsApp();
+
+    const response = await app.request(
+      "http://openbot.test/api/plugins/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "bot",
+          ref: "general-assistant",
+          agentId: "general-assistant",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toContain("cannot be granted itself");
+    expect(calls).toEqual([]);
+  });
+});

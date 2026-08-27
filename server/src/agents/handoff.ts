@@ -80,13 +80,18 @@ export function createHandoffDesk(options: {
   /** Whether the asking Bot has been granted the Bot it is addressing. Read per hop, never cached. */
   mayAddress: (fromBotId: string, toBotId: string) => Promise<boolean>;
   /**
-   * Who the person is, as the roster is decided for them.
+   * Who the person is, as the roster is decided for them. Null when that cannot be established.
    *
    * A seam rather than a hardcoded `role: "user"`, because an administrator sees Bots a user does
    * not: assumed, an administrator's hop to a Bot they can see and chat with was refused as "no
    * such Bot". Resolved per hop, so a role granted or taken away a minute ago counts.
+   *
+   * NULL RATHER THAN A THROW, because everything in this module answers with a sentence. A role
+   * revoked mid-run, or a database that blinked, would otherwise end the run with nothing said at
+   * all — the failure the file's own opening paragraph is about, arriving through a seam added to
+   * fix something else. `mayAddress` beside it catches for exactly this reason.
    */
-  actorFor: (userId: string) => Promise<AgentActor>;
+  actorFor: (userId: string) => Promise<AgentActor | null>;
   auditStore: AuditStore;
   caps: HandoffCaps;
 }): HandoffDesk {
@@ -178,7 +183,16 @@ export function createHandoffDesk(options: {
        * a Bot they can see and chat with in the UI was refused as "no such Bot" — the same failure
        * `index.ts` warns about for a routine's owner, one file over.
        */
-      const roster = await profiles.list(await actorFor(from.actorId));
+      const actor = await actorFor(from.actorId);
+      if (!actor) {
+        return refuse(
+          from,
+          target,
+          "no_actor",
+          "Who you are asking on behalf of could not be confirmed just now, so this was not sent. Try again, or ask the person.",
+        );
+      }
+      const roster = await profiles.list(actor);
       const wanted = target.trim().toLowerCase();
       /*
        * An id is exact and a name is not, so an id wins outright.
@@ -347,10 +361,20 @@ export function createHandoffDesk(options: {
        * plainly instead, and not audited as a new hop, because it is not one.
        */
       if (offered === "already") {
-        return {
-          ok: false,
-          refusal: `You have already asked ${found.name} exactly this in this turn. Wait for that answer rather than asking again.`,
-        };
+        /*
+         * Recorded like every other refusal, and worded without claiming when.
+         *
+         * "In this turn" was a guess: the key is per run, and the run id arrives on the request, so
+         * a caller reusing one makes that sentence false. What is certainly true is that this exact
+         * ask already exists — it may be queued, it may have been delivered and finished. Either
+         * way it is not a new hop and saying "handed over" would promise a second answer.
+         */
+        return refuse(
+          from,
+          target,
+          "duplicate",
+          `You have already asked ${found.name} exactly this. Wait for that answer rather than asking again.`,
+        );
       }
 
       await recordAuditEvent(auditStore, {

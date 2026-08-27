@@ -460,3 +460,74 @@ describe("the role a hop is resolved as", () => {
     expect(asked).toEqual([{ id: "user-1", role: "admin" }]);
   });
 });
+
+/**
+ * Asking for the same thing twice.
+ *
+ * `offer` is idempotent on the key, so a model repeating itself inside one run leaves one hop, which
+ * is the intent. What must not happen is being told "handed over" a second time: the row it names
+ * may already have been delivered and finished, so nothing is queued, nobody is going to run it, and
+ * the Bot has just promised the person an answer twice.
+ */
+describe("the same ask a second time", () => {
+  test("is refused plainly rather than reported as handed over", async () => {
+    const twice = desk();
+
+    const first = await twice.desk.send({
+      from: FROM,
+      target: "researcher",
+      envelope: { task: "find the outage window" },
+    });
+    const second = await twice.desk.send({
+      from: FROM,
+      target: "researcher",
+      envelope: { task: "find the outage window" },
+    });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.refusal).toContain("already asked");
+      // Not a claim about when: the run id arrives on the request, so "this turn" can be false.
+      expect(second.refusal).not.toContain("this turn");
+    }
+    // One row, and one refusal on the trail beside the offer.
+    expect(twice.rows).toHaveLength(1);
+    expect(
+      twice.events.map((event) => ({
+        eventType: event.eventType,
+        reason: (event.payload as { reason?: string }).reason,
+      })),
+    ).toEqual([
+      { eventType: "agent.handoff_offered", reason: undefined },
+      { eventType: "agent.handoff_refused", reason: "duplicate" },
+    ]);
+  });
+
+  /*
+   * A role that cannot be read is not a role. Everything in this module answers with a sentence, so
+   * a seam that throws would end the run with nothing said at all.
+   */
+  test("a person whose role cannot be established is refused, not thrown at", async () => {
+    const unknown = createHandoffDesk({
+      queue: { offer: async () => "queued" } as unknown as WorkQueue,
+      profiles: {
+        list: async () => [profile({ id: "researcher", name: "Researcher" })],
+      } as unknown as AgentProfileStore,
+      mayAddress: async () => true,
+      actorFor: async () => null,
+      auditStore: { insert: async () => {} },
+      caps: CAPS,
+    });
+
+    const outcome = await unknown.send({
+      from: FROM,
+      target: "researcher",
+      envelope: { task: "find it" },
+    });
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok)
+      expect(outcome.refusal).toContain("could not be confirmed");
+  });
+});
