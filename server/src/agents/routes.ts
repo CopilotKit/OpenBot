@@ -193,6 +193,29 @@ export function createAgentRoutes(
     return context.json({ recorded: true });
   });
 
+  /**
+   * Where a remote agent's OAuth consent popup lands.
+   *
+   * A remote ADK agent asking for the person's own sign-in suspends its run on an
+   * `adk_request_credential` tool call; the app opens the provider's consent page in a popup with
+   * this address as the redirect. The provider sends the browser back here with the authorization
+   * code in the URL, and this page's only job is to carry that URL to the tab that is waiting —
+   * it posts `location.href` to its opener and closes. The agent redeems the code on its own side;
+   * this server never touches it.
+   *
+   * Deliberately not behind `requireUser`: the browser arrives on a cross-site redirect, and the
+   * page acts for nobody — it holds no session, calls no store, and reflects nothing from the
+   * request into the markup, so there is nothing here to protect or to inject into. The message
+   * goes only to this page's own origin, so a foreign site that opens this URL itself hears
+   * nothing back.
+   *
+   * The address must be registered as a redirect URI with the OAuth client the agent uses; see
+   * docs/coworkers.md.
+   */
+  routes.get("/oauth/callback", (context) =>
+    context.html(AGENT_OAUTH_CALLBACK_PAGE),
+  );
+
   routes.get("/", requireUser, async (context) => {
     try {
       const hidden = context.req.query("hidden") === "true";
@@ -442,6 +465,36 @@ export function createAgentRoutes(
 
   return routes;
 }
+
+/**
+ * Static on purpose. The interesting values — code and state — stay in the URL, which the script
+ * reads from its own `location` rather than having the server print into the page, so nothing a
+ * provider (or anybody else) appends to the query string can become markup. The message `type`
+ * is matched by the consent card; see app/src/lib/copilot/adk-credential.ts.
+ */
+const AGENT_OAUTH_CALLBACK_PAGE = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Sign-in complete</title></head>
+<body>
+<p>Returning you to OpenBot…</p>
+<script>
+  (function () {
+    var note = document.querySelector("p");
+    if (window.opener) {
+      window.opener.postMessage(
+        { type: "openbot:agent-oauth-callback", url: window.location.href },
+        window.location.origin
+      );
+      note.textContent = "Signed in. You can close this window.";
+      window.setTimeout(function () { window.close(); }, 50);
+    } else {
+      note.textContent =
+        "This page only makes sense as a sign-in popup. You can close it.";
+    }
+  })();
+</script>
+</body>
+</html>`;
 
 function boundedText(
   value: unknown,

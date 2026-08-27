@@ -1,6 +1,7 @@
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import type { ReactNode } from "react";
 import { ActiveBotProvider } from "./active-bot";
+import { AgentCredentialTools } from "./agent-credential-tools";
 import { ComputerTools } from "./computer-tools";
 import { GalleryTools } from "./gallery-tools";
 import { SandboxedTools } from "./sandboxed-tools";
@@ -29,6 +30,8 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}
         <SandboxedTools />
+        {/* Consent cards for remote ADK agents asking for the person's own sign-in. */}
+        <AgentCredentialTools />
         {children}
       </ActiveBotProvider>
     </CopilotKitProvider>

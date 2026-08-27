@@ -93,6 +93,26 @@ Endpoint registration uses target checks. Cloud metadata addresses are refused u
 
 `POST /api/agents/test-connection` checks whether an endpoint answers before saving it.
 
+## Per-user sign-in for ADK agents
+
+An agent built on Google ADK can hold tools that act as the person talking to it — an MCP server
+with per-user OAuth, for instance. When such a tool runs for the first time, the agent suspends its
+run and emits a tool call named `adk_request_credential` carrying the provider's consent URL.
+OpenBot renders that as a consent card in the transcript: the person signs in with the provider in
+a popup, or declines, and either answer resumes the run. The agent exchanges the authorization code
+for a token on its own side; neither the token nor the person's password ever passes through
+OpenBot, and nothing about the connection is stored here — the credential lives with the agent.
+
+One thing is the deployment operator's to do: the popup returns to
+`https://<your-openbot>/api/agents/oauth/callback`, and OAuth providers only redirect to addresses
+they have been told about. Register that URL as a redirect URI on the OAuth client the agent uses
+(for a Google client, under *Authorized redirect URIs*; for a server supporting dynamic client
+registration, at registration time). A consent popup that ends on the provider's
+`redirect_uri_mismatch` page means this step is missing.
+
+Declining sends the request back unanswered: the agent's tool fails to authenticate and the agent
+says so, rather than the conversation hanging on a question nobody answered.
+
 ## Capabilities
 
 A coworker's role does not grant capabilities. Capabilities are governed separately:

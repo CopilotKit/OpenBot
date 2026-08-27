@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### An ADK agent can now ask the person to sign in
+
+A remote agent built on Google ADK that holds a per-user tool — an MCP server with OAuth, say —
+asks for the person's own sign-in by suspending its run on an `adk_request_credential` tool call.
+OpenBot previously drew that as an inert tool line and the conversation hung there. It is now a
+consent card: the card names the provider and the scopes, the person signs in with the provider in
+a popup or declines, and either answer resumes the run.
+
+The sign-in happens with the provider directly. OpenBot's part is a static callback page at
+`/api/agents/oauth/callback` that hands the provider's answer back to the waiting tab; the agent
+redeems the code on its own side, and no token, password, or connection state is stored in OpenBot.
+The callback address must be registered as a redirect URI on the OAuth client the agent uses — see
+`docs/coworkers.md`.
+
 ### A Bot in trouble no longer needs somebody watching
 
 A boundary refusal or a stalled run was recorded and then waited for a person to happen to look — at
