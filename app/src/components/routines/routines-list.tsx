@@ -142,7 +142,7 @@ export function RoutinesList() {
                         {routine.timezone}
                       </span>
                     </ItemTitle>
-                    <ItemDescription className="line-clamp-none">
+                    <ItemDescription className="line-clamp-3">
                       {routine.instruction}
                     </ItemDescription>
                     {/* A set, so it wraps onto its own line rather than crowding the title. */}
