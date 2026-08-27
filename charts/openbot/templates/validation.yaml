@@ -287,7 +287,7 @@ This template renders nothing.
   `managed-agent-token` and `better-auth-secret` above: the value is not readable at template time,
   but the list of keys is, and a store that never mentions this key cannot be holding one.
 */}}
-{{- if and .Values.routines.enabled .Values.externalSecrets.enabled }}
+{{- if and (.Values.routines).enabled .Values.externalSecrets.enabled }}
 {{- $named := list }}
 {{- range .Values.externalSecrets.data }}{{- $named = append $named .secretKey }}{{- end }}
 {{- if not (has "worker-shared-secret" $named) }}

@@ -1,4 +1,4 @@
-{{- if .Values.routines.enabled }}
+{{- if (.Values.routines).enabled }}
 {{- $component := "routines" -}}
 {{/*
 Firing the routines a Bot was scheduled to run.
@@ -18,7 +18,7 @@ metadata:
   labels:
 {{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
 spec:
-  schedule: {{ .Values.routines.schedule | quote }}
+  schedule: {{ (.Values.routines).schedule | default "* * * * *" | quote }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3

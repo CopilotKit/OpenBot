@@ -293,7 +293,7 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   override whatever `extraEnv` set, which turns the escape hatch into a trap for the one variable
   someone would need it for.
 */}}
-{{- if .Values.routines.enabled }}
+{{- if (.Values.routines).enabled }}
 - name: WORKER_SHARED_SECRET
   valueFrom:
     secretKeyRef:

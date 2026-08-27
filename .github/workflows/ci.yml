@@ -85,6 +85,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The new-values-key check compares this chart against the last released one, or against
+          # main where the chart has not shipped yet. A shallow clone has neither to compare with.
+          fetch-depth: 0
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.19.0
@@ -159,41 +162,12 @@ jobs:
       # And that a values key this chart did not used to have still renders when it is absent.
       #
       # `helm upgrade --reuse-values` takes the previous release's computed values rather than
-      # merging the new chart's defaults, so on every deployment that already exists a key added by
-      # the release being installed is simply missing. Reaching through it unguarded is a nil
-      # dereference that fails the WHOLE render, and emitting it unguarded writes an empty scalar
-      # that Kubernetes reads as unset — a ceiling that silently stops existing on exactly the
-      # deployments old enough to need it. Both shipped here; neither was visible to `helm lint`.
+      # merging the new chart's defaults, so a key added by the release being installed is missing on
+      # every deployment that already exists. Unguarded that is a nil dereference that fails the
+      # whole render, or an empty scalar Kubernetes reads as unset. Both shipped: one was found in
+      # review, the other by a live upgrade after the first had been fixed one key over.
       - name: A new values key can be absent
-        run: |
-          set -euo pipefail
-          renders() {
-            local what="$1"; shift
-            local out
-            if ! out=$(helm template ci charts/openbot \
-                 --values charts/openbot/ci/${{ matrix.target }}-values.yaml \
-                 --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)" \
-                 --api-versions agents.x-k8s.io/v1beta1/Sandbox \
-                 --api-versions extensions.agents.x-k8s.io/v1beta1/SandboxTemplate \
-                 "$@" 2>&1); then
-              echo "::error::The chart failed to render with $what absent, which is what --reuse-values does to it."
-              echo "$out" | tail -5
-              return 1
-            fi
-            # An empty scalar is null, which Kubernetes reads as unset rather than as the default.
-            if echo "$out" | grep -qE '^[[:space:]]*[A-Za-z][A-Za-z0-9]*:[[:space:]]*$' \
-               && echo "$out" | grep -E '^[[:space:]]*(activeDeadlineSeconds|value):[[:space:]]*$' >/dev/null; then
-              echo "::error::Rendering with $what absent left a key with an empty value."
-              echo "$out" | grep -nE '^[[:space:]]*(activeDeadlineSeconds|value):[[:space:]]*$' | head -3
-              return 1
-            fi
-            echo "renders without $what"
-          }
-          renders "the whole config.handoff map" --set config.handoff=null
-          renders "config.handoff.maxDepth" --set config.handoff.maxDepth=null
-          renders "config.handoff.maxPerRun" --set config.handoff.maxPerRun=null
-          renders "the culler's activeDeadlineSeconds" \
-            --set computers.sandbox.culler.activeDeadlineSeconds=null
+        run: bun scripts/check-new-values-keys.ts charts/openbot/ci/${{ matrix.target }}-values.yaml
 
   test:
     name: tests
