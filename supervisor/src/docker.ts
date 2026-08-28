@@ -292,6 +292,8 @@ export type EnsureOptions = {
   environment: string[];
   /** A network to join, when the supervisor runs alongside a compose stack. */
   network?: string;
+  /** Operator-configured static Tailnet host mappings for this computer. */
+  extraHosts?: string[];
   /**
    * The container runtime. Left unset this is Docker's default, which shares the host kernel.
    * Setting `runsc` runs each computer under gVisor, which intercepts syscalls in user space and is
@@ -324,7 +326,7 @@ export type EnsureOptions = {
  * off the host, and none of them costs a Bot anything it legitimately needs: a browser and a
  * filesystem under `/workspace`.
  */
-function hostConfig(names: ComputerNames, options: EnsureOptions) {
+export function computerHostConfig(names: ComputerNames, options: EnsureOptions) {
   return {
     // The Bot's own storage. This is what turns the path confinement inside the computer from a
     // boundary between a Bot and the host into a boundary between one Bot and another.
@@ -354,6 +356,7 @@ function hostConfig(names: ComputerNames, options: EnsureOptions) {
     RestartPolicy: { Name: "unless-stopped" },
     ...(options.network ? { NetworkMode: options.network } : {}),
     ...(options.runtime ? { Runtime: options.runtime } : {}),
+    ...(options.extraHosts?.length ? { ExtraHosts: options.extraHosts } : {}),
 
     // No path from inside to more privilege than it started with, whatever it manages to run.
     SecurityOpt: ["no-new-privileges:true"],
@@ -432,7 +435,7 @@ export async function ensure(
           Labels: labelsFor(names),
           Env: options.environment,
           ExposedPorts: { [COMPUTER_PORT]: {} },
-          HostConfig: hostConfig(names, options),
+          HostConfig: computerHostConfig(names, options),
         });
       } catch (error) {
         if (statusOf(error) !== 409) {
