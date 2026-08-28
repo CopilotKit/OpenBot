@@ -11,9 +11,11 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 ### One Bot can hand work to another, and reach a person when no Bot will do
 
 A Bot asked something it is not the right Bot for can now put the question to one that is. The
-addressed Bot answers as itself, with its own tools and its own knowledge, and the answer arrives in
-the conversation the person was already in rather than somewhere they would have to go and look. A
-Bot that judges no other Bot will do can instead reach the person who asked it.
+addressed Bot answers **as itself, in its own conversation**, with its own tools and its own
+knowledge — the asking Bot does not relay text on its behalf, so what you read is the answer that
+Bot actually gave rather than another Bot's summary of it. The asking conversation records that the
+question was put and to whom. A Bot that judges no other Bot will do can instead reach the person
+who asked it.
 
 **No Bot may address any other until an administrator says so.** Which Bot may reach which is an
 ordinary grant, made per Bot, and a Bot with no grant is told it cannot rather than quietly trying.

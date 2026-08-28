@@ -355,6 +355,9 @@ export function createHandoffRunner(options: {
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
               payload: {
+                // See the same key on `agent.handoff_offered`: the Audit screen's Bot column reads
+                // `payload.bot`, so a row without it names no Bot.
+                bot: work.fromBotId,
                 from: work.fromBotId,
                 to: work.toBotId,
                 run: work.runId,
