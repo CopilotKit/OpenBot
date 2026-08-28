@@ -4,11 +4,12 @@ import {
   IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
 import { serve } from "bun";
+import { eq } from "drizzle-orm";
 import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
 import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
-import { createHandoffDesk } from "./agents/handoff";
+import { createHandoffDesk, HANDOFF_KIND } from "./agents/handoff";
 import { createHandoffDelivery } from "./agents/handoff-delivery";
 import { createHandoffRunner } from "./agents/handoff-runner";
 import { handoffTool } from "./agents/handoff-tool";
@@ -59,6 +60,7 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { intelligenceChannelMappings } from "./db/schema";
 import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
 import { useRoutineTools } from "./plugins/builtin-routines";
@@ -76,7 +78,7 @@ import {
   synchronizeTenantPackage,
 } from "./tenant-package";
 import { repeatAfterEach } from "./work/loop";
-import { createWorkQueue } from "./work/queue";
+import { createWorkQueue, startWorkOfferedListener } from "./work/queue";
 
 /**
  * Who is asking, for a CopilotKit request.
@@ -805,6 +807,11 @@ const copilotRuntime = mountCopilotRuntime(
     });
     return passing ? [passing, asking] : [asking];
   },
+  // A run started or ended on a thread; light the channel it belongs to. Fire-and-forget, keyed by
+  // thread, and a scratch thread maps to no channel and signals nowhere.
+  (input) => {
+    void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
+  },
 );
 
 /**
@@ -826,24 +833,6 @@ const copilotRuntime = mountCopilotRuntime(
  * per day, for a feature it had turned off.
  */
 if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
-  /**
-   * The person a delivery acts as, with a failure a person can be told about.
-   *
-   * `actorFor` throws when a role cannot be established — a revoked role, or a database that
-   * blinked. Thrown from inside a delivery that message becomes the reason on a failed hop, and the
-   * reason is paraphrased to somebody by the Bot that asked: "A routine requires an authorized
-   * owner." is not a sentence to put in front of a person who asked about a refund policy.
-   */
-  const theirActor = async (userId: string) => {
-    const actor = await actorFor(userId).catch(() => null);
-    if (!actor) {
-      throw new Error(
-        "who this is for could not be confirmed, so the answer had nowhere to go",
-      );
-    }
-    return actor;
-  };
-
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
     owner: `handoff/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
@@ -881,32 +870,38 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
       history: copilotRuntime.history,
       lock: copilotRuntime.threadLock,
       /*
-       * A conversation of the addressed Bot's own, with the same person.
+       * A scratch thread of the addressed Bot's own, one per hop.
        *
        * An Intelligence thread has exactly one agent, so a second Bot cannot answer inside the first
-       * Bot's conversation however it asks. Rather than pretend otherwise, the answer lands where
-       * that Bot can speak and the conversation that asked says where it went.
+       * Bot's conversation however it asks. Its turn runs here instead, unmapped to any channel, and
+       * what it said comes back to the conversation that asked through the relay — in the asking
+       * Bot's voice, which is the only voice that thread admits. Minted with the deployment's own
+       * identity, like every thread this deployment starts.
        */
-      answerIn: async (input) => {
-        // The conversation this person already has with that Bot, made only if they have not had
-        // one. See ChannelStore.direct: a hop is retried, and creating here left an empty channel
-        // behind for every attempt.
-        // The person's own role, for the same reason the desk resolves it: an administrator sees Bots
-        // a user does not, and a conversation with one of those is still theirs.
-        const channel = await channelStore.direct(
-          await theirActor(input.actorId),
-          input.botId,
-        );
-        return { threadId: channel.threadId, channelId: channel.id };
+      mintThreadId: () => threadIdentity.mint(),
+      /*
+       * The roster, told that a relayed answer landed. The delivery knows only the thread it ran
+       * in; this resolves which channel shows that thread — a scratch thread maps to nothing and
+       * announces nowhere, which is the point of a scratch thread.
+       */
+      announce: async (input) => {
+        const [mapped] = await database
+          .select({ channelId: intelligenceChannelMappings.channelId })
+          .from(intelligenceChannelMappings)
+          .where(eq(intelligenceChannelMappings.threadId, input.threadId))
+          .limit(1);
+        if (!mapped) return;
+        const actor = await actorFor(input.actorId).catch(() => null);
+        if (!actor) return;
+        await channelStore.recordActivity(actor, mapped.channelId, {
+          text: input.text,
+          agentId: input.agentId,
+          at: new Date(),
+        });
       },
-      // The roster is written by whoever finished a run, and for a hop that is this server rather
-      // than a browser. See ChannelStore.recordActivity.
-      announce: async (input) =>
-        channelStore.recordActivity(
-          await theirActor(input.actorId),
-          input.channelId,
-          { text: input.text, agentId: input.agentId, at: new Date() },
-        ),
+      // The asking conversation shown as working while a hop runs in it. Keyed by thread, resolved
+      // to its channel by the store; a scratch thread maps to none and signals nowhere.
+      setBusy: (input) => channelStore.signalBusy(input.threadId, input.busy),
       newRunId: () => randomUUID(),
       // The same address and the same token the runtime uses. Assembling either from configuration
       // produced a runner every join was refused for, because the thread's active run is a lock the
@@ -933,12 +928,41 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
   };
 
   /*
-   * ONE SWEEP AT A TIME ON THIS REPLICA. See repeatAfterEach: an interval would start another sweep
-   * every two seconds while a five-minute delivery runs, each claiming a different batch, and this
-   * replica's concurrent agent runs would grow with the backlog rather than stopping at the limit
-   * it was asked for.
+   * ONE SWEEP AT A TIME ON THIS REPLICA, from both callers below. A sweep poked while one is
+   * running is remembered rather than started, and runs once the current one ends — a wake-up
+   * that arrived mid-sweep may be for a hop the running sweep's claim already missed.
    */
-  repeatAfterEach(sweep, 2_000);
+  let sweeping = false;
+  let sweepAgain = false;
+  const kick = async () => {
+    if (sweeping) {
+      sweepAgain = true;
+      return;
+    }
+    sweeping = true;
+    try {
+      do {
+        sweepAgain = false;
+        await sweep();
+      } while (sweepAgain);
+    } finally {
+      sweeping = false;
+    }
+  };
+
+  /*
+   * Woken by the queue itself, from any replica: a person is waiting through every hop, and the
+   * poll below would spend up to two seconds per leg doing nothing. The poll stays as the
+   * backstop — a notification is a latency optimisation, and one lost in transit costs one
+   * interval, never the work. See repeatAfterEach for why an interval must not be used: an
+   * interval would start another sweep every two seconds while a five-minute delivery runs, each
+   * claiming a different batch, and this replica's concurrent agent runs would grow with the
+   * backlog rather than stopping at the limit it was asked for.
+   */
+  await startWorkOfferedListener(config.databaseUrl, (kind) => {
+    if (kind === HANDOFF_KIND) void kick();
+  });
+  repeatAfterEach(kick, 2_000);
 }
 
 /*

@@ -85,6 +85,7 @@ describe("a batch of hops and a lease that can run out", () => {
         deliver: async ({ work }) => {
           ran.push(`a:${work.toBotId}`);
           if (work.toBotId === "bot-1") await held.promise;
+          return { answer: null };
         },
       },
     });
@@ -94,6 +95,7 @@ describe("a batch of hops and a lease that can run out", () => {
       delivery: {
         deliver: async ({ work }) => {
           ran.push(`b:${work.toBotId}`);
+          return { answer: null };
         },
       },
     });
@@ -140,6 +142,7 @@ describe("a batch of hops and a lease that can run out", () => {
         deliver: async ({ work }) => {
           ran.push(work.toBotId);
           if (work.toBotId === "bot-1") await held.promise;
+          return { answer: null };
         },
       },
     });
