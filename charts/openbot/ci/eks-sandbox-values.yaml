@@ -20,8 +20,8 @@
 config:
   initialAdminEmails: admin@example.com
   intelligence:
-    apiUrl: https://api.cloud.copilotkit.ai
-    gatewayWsUrl: wss://gateway.cloud.copilotkit.ai
+    apiUrl: https://api.intelligence.copilotkit.ai
+    gatewayWsUrl: wss://realtime.intelligence.copilotkit.ai
   auth:
     google:
       clientId: example.apps.googleusercontent.com

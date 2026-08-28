@@ -36,6 +36,92 @@ cluster and is not empty is now refused with a sentence naming the mount to use 
 
 Reported by [@jerelvelarde](https://github.com/CopilotKit/OpenBot/issues/269) with the container logs
 for both mount paths, which is what made the two failure modes separable.
+### A sign-in a site opens in a new window is shown, and can be clicked
+
+A Bot's browser was bound to the page it launched with, and to nothing the site opened afterwards.
+Anything arriving in a new window or tab was invisible on the live screen and unreachable by input,
+so the popup sign-ins that a person takes the wheel to complete were exactly the ones they could not
+complete. Worse than invisible: a click at the place the popup's button was drawn went to the page
+underneath it, so a person trying to finish a sign-in could navigate the page the Bot was working on
+without seeing either result.
+
+The browser now follows the window the site opens, and returns to the opener when it closes, which is
+what a sign-in popup does when it succeeds. A snapshot taken before the change of page is refused
+afterwards with the same "take a new snapshot" it already gives after a navigation, so a stale ref
+cannot act on the wrong document.
+
+Nothing to configure.
+### Stopping a Bot's computer stops it, and the person watching is told
+
+A computer somebody stopped came back up on its own about a second later, and reset did the same. The
+live screen kept a loop asking for the Bot's current page once a second, asking for a page is what
+starts a browser, and nothing tore that loop down when the browser it was showing went away. The same
+loop kept the browser marked recently used, so a Bot with somebody watching was also immune to the
+idle timeout and came straight back after being closed to stay under the cap on running browsers.
+Those last two never involved a request at all, so nothing on the stop path could have covered them.
+
+Two smaller failures went with it. A person who reconnected, leaving their old window open, could
+have that old window's typing land in the page the new one was watching, with nothing said to either.
+And a window closed while the browser was still starting left a screencast and its loop behind for a
+connection that had already gone.
+
+The screen is now held per connection rather than per Bot, so closing one only ever ends its own, and
+teardown hangs off the browser closing rather than off the two requests that ask for it. A viewer
+whose screen ends is sent a message saying why, whether the computer stopped, was reset, or the
+screen was taken over by another window.
+
+Nothing to configure, and no change for a deployment where nobody watches a Bot work. **The app does
+not yet show that message**: it arrives at the browser and is held in state the live screen does not
+read, so a person still sees the last frame until they reopen the screen. That half is tracked
+separately in #287.
+
+## 0.0.5
+
+### One Bot can hand work to another, and reach a person when no Bot will do
+
+A Bot asked something it is not the right Bot for can now put the question to one that is. The
+addressed Bot answers **as itself, in its own conversation**, with its own tools and its own
+knowledge. The asking Bot does not relay text on its behalf, so what you read is the answer that
+Bot actually gave rather than another Bot's summary of it. The asking conversation records that the
+question was put and to whom. A Bot that judges no other Bot will do can instead reach the person
+who asked it.
+
+**No Bot may address any other until an administrator says so.** Which Bot may reach which is an
+ordinary grant, made per Bot on that Bot's own screen under **Bots it may ask**, and a Bot with no
+grant is told it cannot rather than quietly trying. The pair is directional: that list is who this
+Bot may ask, not who may ask it, so letting two Bots ask each other is two switches. A Bot addressed
+by a name two Bots answer to is refused and both are named, because picking one would be a guess
+about which colleague a person meant.
+
+Two ceilings, because a Bot deciding to ask another Bot is a Bot deciding to spend a run:
+`BOT_HANDOFF_MAX_DEPTH` is how many Bots deep a chain may go and defaults to `1`, and **`0` switches
+the capability off entirely**: the tool is not offered rather than offered and refused.
+`BOT_HANDOFF_MAX_PER_RUN` is how many Bots one run may address and defaults to `3`. The Helm chart
+takes the same two as `config.handoff.maxDepth` and `config.handoff.maxPerRun`.
+
+A hop that fails is reported back by the Bot that asked, after its attempts are spent, rather than
+leaving the person watching a conversation that never finishes. One rough edge to know about: a hop
+that is retried leaves one "asked" line per attempt in the addressed Bot's own transcript, so a hop
+that took three attempts reads there as having been asked three times.
+
+No new tables: this uses the work queue that already fires the culler.
+
+### A conversation that used a tool no longer stops answering for good
+
+A channel could reach a state where every turn in it failed and the only thing it said was
+`Tool result is missing for tool call call_…`. Not the turn: the conversation. Everything sent
+afterwards failed the same way, including a question as ordinary as what two plus two is, and there
+was nothing a person could do to it from the screen.
+
+A tool result is matched to the call above it, and a thread read back from the platform does not
+always carry the two in that order. Where the result was stored ahead of its own call, this
+deployment counted the call answered, sent the history on unchanged, and the model provider rejected
+the whole conversation while assembling it. Handing work to another Bot, asking a person, and
+calling a connector's tool could each leave a thread in that shape.
+
+A result now only answers a call it follows. One that arrives early is moved to sit after its call,
+keeping what it actually said, and a result whose call is nowhere in the thread is dropped. Affected
+conversations start answering again on their own; there is nothing to run and nothing to reset.
 
 ### The framework Bot answers on 5.6-tier models, and can be told how hard to think
 
@@ -223,8 +309,8 @@ A Helm chart under `charts/openbot`, Bots and all, and the fixes that installing
 up. Proven on a real EKS cluster: five workloads, replicas across two nodes, EBS volumes bound, and a
 Bot opening a real page from inside AWS with the decision in the audit trail.
 
-One chart, four targets: EKS, GKE, AKS and somebody's own cluster, with nothing but values between
-them. There is no cloud branching in any template. Every place the clouds genuinely differ is a
+One chart, five targets: EKS with a shared browser, EKS with a computer for each Bot, GKE, AKS and
+somebody's own cluster, with nothing but values between them. There is no cloud branching in any template. Every place the clouds genuinely differ is a
 value whose default is what a plain self-hosted cluster does: the cluster's own default StorageClass,
 no RuntimeClass, a plain Kubernetes Secret, an Ingress. Identity is one `serviceAccount.annotations`
 map, which is all IRSA, Workload Identity and AKS workload identity are. Secrets are a plain Secret

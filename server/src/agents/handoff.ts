@@ -383,6 +383,11 @@ export function createHandoffDesk(options: {
         targetId: found.id,
         ...(from.actorId ? { actorUserId: from.actorId } : {}),
         payload: {
+          // The Bot that did this, under the key the Audit screen reads for its Bot column. `from`
+          // below says the same thing and is what the payload is read by, but the screen renders
+          // `payload.bot` and nothing else, so without this the two handoff rows are the only Bot
+          // actions on a screen headed "Every action a Bot took" that name no Bot.
+          bot: from.botId,
           from: from.botId,
           to: found.id,
           run: from.runId,

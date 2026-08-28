@@ -204,7 +204,14 @@ Both refuse rather than truncate, and both are refused at start-up if they are n
 zero or more: a deployment that typed `two` and silently got the default would believe it had set a
 cap.
 
-Which Bots may address which is a grant, not a variable. It is made per Bot like any other grant.
+Which Bots may address which is a grant, not a variable, and no Bot may address any other until one
+is made. It is made on the Bot's own screen: open it from **Agents**, and switch on each Bot under
+**Bots it may ask**. The pair is directional: that list is who this Bot may ask, not who may ask it,
+so letting them ask each other is two switches. Only an administrator may change it; anyone who can
+see the Bot can read it.
+
+With both caps above at zero the screen says the capability is switched off, because a grant made
+then is a row nothing will read.
 
 ## Computer and supervisor
 

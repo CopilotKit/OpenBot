@@ -317,6 +317,13 @@ describe("handing work to another Bot", () => {
       from: "assistant",
       to: "researcher",
       run: "run-1",
+      /*
+       * The Audit screen's Bot column reads `payload.bot` and nothing else, so a row without it
+       * renders a dash. Every other Bot action sets it — `agent.escalated` one file over does —
+       * and these two did not, which made the handoff the only thing on a screen headed "Every
+       * action a Bot took" that named no Bot. Asserted rather than left to the reader of a payload.
+       */
+      bot: "assistant",
     });
 
     const refused = desk({ granted: false });

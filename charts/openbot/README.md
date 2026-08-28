@@ -1,7 +1,108 @@
 # OpenBot on Kubernetes
 
-Runs OpenBot on any Kubernetes cluster: EKS, GKE, AKS, or your own. One chart, four targets, and the
+Runs OpenBot on any Kubernetes cluster: EKS, GKE, AKS, or your own. One chart, five targets, and the
 only difference between them is values.
+
+## What a cluster needs first
+
+Four things this chart assumes and does not create.
+
+**An image the cluster can pull.** A release publishes `ghcr.io/copilotkit/openbot:vX.Y.Z`
+publicly, and that tag is what `image.tag` wants. It is built for **`linux/amd64` only**, so an
+arm64 node group (Graviton on EKS, Tau T2A on GKE, Ampere on AKS) cannot run it: the pods sit in
+`ImagePullBackOff`, which is the same thing a wrong tag or a missing pull secret looks like, so the
+node pool being the wrong shape is the last thing anybody checks. Either run amd64 nodes, or build the image for the
+architecture you have and push it somewhere the cluster can reach. Check before assuming:
+
+```sh
+docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.4 | grep architecture
+```
+
+**Intelligence credentials.** OpenBot requires CopilotKit Intelligence and the chart refuses to
+install without `secrets.intelligenceApiKey` and `secrets.licenseToken`. Both come from the CLI, on
+any machine with a browser:
+
+```sh
+npx --yes copilotkit@latest login           # browser sign-in
+npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
+npx --yes copilotkit@latest license --print # prints the licence token
+```
+
+`--print` rather than `--write` here: `--write` puts the token in a local `.env`, which is what a
+laptop wants and not what you are about to paste into a Secret. The free plan is enough to install.
+
+**A default StorageClass**, or a named one. Both a Bot's computer and the bundled database ask for
+a volume, and a fresh cluster often has no class marked default. See
+[Check for a default StorageClass first](#check-for-a-default-storageclass-first), which is the
+single most common reason a first install comes up with a pod stuck `Pending` and nothing saying
+why.
+
+**A database, and the Secret that names it**, unless you are using the bundled one. The chart reads
+a URL out of a Secret you make; it never writes your database credentials into a values file:
+
+```sh
+kubectl create namespace openbot
+kubectl -n openbot create secret generic openbot-database \
+  --from-literal=database-url='postgresql://USER:PASSWORD@HOST:5432/openbot?sslmode=require'
+```
+
+Then `--set database.existingSecret=openbot-database`. The key must be `database-url`, or name a
+different one with `database.existingSecretKey`. See
+[Your own database](#your-own-database-which-is-what-a-real-deployment-uses) for `sslmode` and the
+`vector` extension, both of which a managed database will otherwise fail on in a way that names the
+wrong problem.
+
+### A cluster from nothing, on EKS
+
+The three above, as one config and two commands. `eksctl` creates `gp2` and does not mark it
+default, and the provisioner it names is the in-tree one current Kubernetes no longer has, so the
+StorageClass below is not optional.
+
+```yaml
+# cluster.yaml
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata: { name: openbot, region: us-east-2, version: "1.34" }
+iam: { withOIDC: true }
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: metrics-server
+  # Last to be created, because it needs the OIDC provider that needs the control plane. Let it
+  # finish; creating the same addon by hand while this is running fails the cluster create.
+  - name: aws-ebs-csi-driver
+    wellKnownPolicies: { ebsCSIController: true }
+managedNodeGroups:
+  - name: workers
+    # amd64: the published image has no arm64 variant. See the image note above.
+    instanceType: t3.large
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 4
+    volumeSize: 60
+    volumeType: gp3
+```
+
+```sh
+eksctl create cluster -f cluster.yaml
+
+kubectl apply -f - <<'EOF'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations: { storageclass.kubernetes.io/is-default-class: "true" }
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters: { type: gp3 }
+EOF
+```
+
+The database goes in the same VPC, in the private subnets, with a security group admitting 5432
+from the cluster's own security group. `aws eks describe-cluster` names both. Keep it
+`--no-publicly-accessible`: the only thing that needs to reach it is in the cluster.
 
 ## Install
 
@@ -60,7 +161,7 @@ user and not the actual problem.
 creates it and a later one drops it again. On a managed database, create it once as the
 administrative role; `CREATE EXTENSION IF NOT EXISTS` then passes for an ordinary user.
 
-## The four targets
+## The five targets
 
 `ci/` holds a values file per target, and each is the shortest thing that expresses what is different
 about that cluster:
@@ -69,6 +170,7 @@ about that cluster:
 | --- | --- |
 | `self-hosted-values.yaml` | Nothing turned on. If this file needs to grow, a default is wrong. |
 | `eks-values.yaml` | IRSA, Secrets Manager, ALB, zone spread, autoscaling. |
+| `eks-sandbox-values.yaml` | The same, with a computer each rather than one shared browser. `shared` and `sandbox` render a different Deployment, different RBAC and a different pod template, so a target that renders only one checks half the chart. |
 | `gke-values.yaml` | Workload Identity, Secret Manager, Gateway API instead of an Ingress. |
 | `aks-values.yaml` | Workload identity, Key Vault, the AKS web app routing class. |
 
@@ -260,5 +362,8 @@ install rather than found as a browser that fails on every page.
 Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it
 has not seen. An init container would mean every replica racing to migrate the same database.
 
-Use `helm upgrade --install --atomic` so a failed upgrade rolls back rather than leaving half a
-rollout.
+Roll back a failed upgrade rather than leaving half a rollout: `helm upgrade --install --atomic` on
+Helm 3, and `--rollback-on-failure` on Helm 4, which renamed the flag. Helm 4 still accepts
+`--atomic` on `upgrade` as a deprecated alias and prints a warning, so the Helm 3 spelling keeps
+working on both today; it is `helm install --atomic` that Helm 4 removed outright, which is one more
+reason this is written as `upgrade --install`.

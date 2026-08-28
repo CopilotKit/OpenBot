@@ -359,6 +359,9 @@ secrets:
   modelApiKey: ""
   computerToken: ""
   supervisorToken: ""
+  # Both from the CopilotKit CLI: `npx --yes copilotkit@latest project select` prints the runtime
+  # key, and `npx --yes copilotkit@latest license --print` prints the licence. The chart refuses to
+  # install without them, because there is no mode where this runs with Intelligence missing.
   intelligenceApiKey: ""
   licenseToken: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
@@ -418,6 +421,11 @@ networkPolicy:
   # Where a Bot's computer may reach beyond the public internet. A deployment whose Bots must reach
   # an internal site adds it here, one address at a time, rather than reopening the private ranges.
   computerExtraEgress: []
+  # Extra egress for the culler. Empty falls back to `extraEgress`, where an external database is
+  # already named; set it to give the culler a narrower list.
+  cullerExtraEgress: []
+  # The same, for the routines sweep.
+  routinesExtraEgress: []
 
 podSecurityContext:
   runAsNonRoot: false

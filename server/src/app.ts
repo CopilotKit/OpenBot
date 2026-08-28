@@ -764,6 +764,21 @@ export function createApp(
         // Addresses this deployment named, which is how a hosted one reaches an agent on its own
         // network without dropping the floor for everything else.
         config.agentEndpointAllowedHosts,
+        /*
+         * What the Bot's own screen needs to show, and change, which Bots it may hand work to.
+         *
+         * Read per request rather than captured, for the reason the desk reads it per hop: a grant
+         * made a minute ago counts and one revoked a minute ago stops counting. Absent with no
+         * plugin store, which is a deployment where no Bot may address any other.
+         */
+        pluginStore
+          ? {
+              enabled:
+                config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0,
+              reachableFrom: (agentId) =>
+                pluginStore.botsReachableFrom(agentId),
+            }
+          : undefined,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the

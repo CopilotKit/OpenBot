@@ -63,7 +63,7 @@ Measured on the real image, one Bot, arm64.
 | --- | --- | --- | --- |
 | Memory | 409 MB idle, 498 MB after three page loads, 548 MB after a snapshot | **2 GB** | **4 GB** |
 | vCPU | 3 to 6 percent at rest, bursty while a page renders | **1** | **2** |
-| Disk | 5.3 GB image | **8 GB** | 10 GB with room for `/workspace` |
+| Disk | 1.4 GB image | **4 GB** | 8 GB with room for `/workspace` |
 
 **Why 2 GB when it measures at 550 MB.** That figure is one Bot with one page open. Every additional
 concurrent page is roughly another 100 to 200 MB, and Playwright's own guidance is to allow about
@@ -140,6 +140,12 @@ in ECR, and is what AWS points App Runner users at now that App Runner takes no 
 Plain ECS on Fargate behind an ALB is the answer if you want task definitions and fine-grained IAM.
 No shared-memory configuration is needed or possible.
 
+**Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
+and it is the only one that gives a Bot a computer of its own, runs the routines schedule without
+something outside the container, and scales the API past a single replica. That is the Helm chart:
+[charts/openbot/README.md](../charts/openbot/README.md), which covers EKS, GKE, AKS and a plain
+self-hosted cluster from the same templates.
+
 **Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets
 are capped at 350 per instance on the basic tier.
@@ -149,8 +155,8 @@ which makes them the shortest path from nothing to a running deployment.
 
 ## Known costs
 
-**The image is 5.3 GB**, most of it the Playwright base, which ships Firefox and WebKit alongside the
-Chromium we use. Deleting them afterwards does not help, because the bytes still ship in the layer
+**The image is 1.4 GB**, and 595 MB of that is Firefox and WebKit, which the Playwright base ships
+alongside the Chromium we use and nothing here ever launches. Deleting them afterwards does not help, because the bytes still ship in the layer
 below. Building Chromium-only onto a slim base would cut this substantially and is not done yet.
 
 **A strict content-security-policy needs a hash or a nonce.** `app/index.html` runs a small inline

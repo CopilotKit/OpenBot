@@ -154,6 +154,41 @@ if (serverPolicy) {
   }
 }
 
+// A pod no policy selects keeps the cluster default, so on a release that has policies it is the
+// only unfenced one. Asked of rendered objects, because the question is which pods came out.
+const policyComponents = new Set(
+  documents
+    .filter((document) => /^kind:\s*NetworkPolicy\s*$/m.test(document))
+    .flatMap((document) => {
+      const selector = document.split(/^\s{2}podSelector:\s*$/m)[1] ?? "";
+      const found = selector.match(
+        /app\.kubernetes\.io\/component:\s*([\w-]+)/,
+      );
+      return found?.[1] ? [found[1]] : [];
+    }),
+);
+if (policyComponents.size > 0) {
+  const workloads = documents.filter((document) =>
+    /^kind:\s*(Deployment|StatefulSet|CronJob|Job|DaemonSet)\s*$/m.test(
+      document,
+    ),
+  );
+  for (const workload of workloads) {
+    const component = workload.match(
+      /app\.kubernetes\.io\/component:\s*([\w-]+)/,
+    )?.[1];
+    const name = workload.match(/^\s{2}name:\s*(\S+)/m)?.[1] ?? "a workload";
+    if (!component) continue;
+    // The migrations Job runs once at install and is torn down; it is not a standing surface.
+    if (component === "migrations") continue;
+    if (!policyComponents.has(component)) {
+      problems.push(
+        `This release has NetworkPolicies but none selects ${name} (component: ${component}), so it is the one pod left unfenced while everything around it is restricted. Give it a policy or say in the chart why it needs none.`,
+      );
+    }
+  }
+}
+
 if (problems.length > 0) {
   for (const problem of problems) console.error(`::error::${problem}`);
   process.exit(1);

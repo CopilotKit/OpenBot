@@ -34,6 +34,10 @@ function runner(options?: {
 }) {
   const calls: Array<{ verb: string; key: string; owner?: string }> = [];
   const events: string[] = [];
+  const written: Array<{
+    eventType: string;
+    payload: Record<string, unknown>;
+  }> = [];
   const delivered: Array<{ message: string; assertion: string }> = [];
   const offered: HandoffWork[] = [];
 
@@ -66,12 +70,17 @@ function runner(options?: {
   const auditStore: AuditStore = {
     insert: async (event) => {
       events.push(event.eventType);
+      written.push({
+        eventType: event.eventType,
+        payload: (event.payload ?? {}) as Record<string, unknown>,
+      });
     },
   };
 
   return {
     calls,
     events,
+    written,
     delivered,
     offered,
     runner: createHandoffRunner({
@@ -165,6 +174,26 @@ describe("delivering a hop", () => {
 
     expect(events[0]).toBe("agent.handoff_retried");
     expect(events).toContain("agent.handoff_delivered");
+  });
+
+  /*
+   * The Audit screen's Bot column reads `payload.bot` and renders a dash without it, so a delivery
+   * that names the Bot only under `from` is a row saying a handoff happened and not who did it.
+   * Its sibling `agent.handoff_offered` is asserted the same way in `agent-handoff.test.ts`.
+   */
+  test("a delivery names the Bot that handed the work over", async () => {
+    const { runner: sweep, written } = runner();
+
+    await sweep.sweep();
+
+    const delivery = written.find(
+      (event) => event.eventType === "agent.handoff_delivered",
+    );
+    expect(delivery?.payload).toMatchObject({
+      bot: WORK.fromBotId,
+      from: WORK.fromBotId,
+      to: WORK.toBotId,
+    });
   });
 
   /* Releasing an unusable row would put it back on the queue for ever. */

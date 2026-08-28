@@ -180,3 +180,104 @@ spec:
 {{ toYaml . | indent 4 }}
     {{- end }}
 {{- end }}
+
+{{- if and .Values.networkPolicy.enabled (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.culler.enabled }}
+---
+{{- $culler := "culler" -}}
+{{/* A pod no policy selects keeps the cluster default, so this one was the release's only unfenced one. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $culler) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $culler) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $culler) | indent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress rules, which under an Ingress policyType denies all of it.
+  ingress: []
+  egress:
+    # DNS, or the database hostname does not resolve and the sweep reads as the database being down.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- /* Empty kubernetesApiCidr permits these ports to any address, as the server's rule above does. */}}
+    - {{- with .Values.networkPolicy.kubernetesApiCidr }}
+      to:
+        - ipBlock:
+            cidr: {{ . }}
+      {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- /* An external database, which extraEgress already had to name; cullerExtraEgress narrows it. */}}
+    {{- with (default .Values.networkPolicy.extraEgress .Values.networkPolicy.cullerExtraEgress) }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}
+
+{{- if and .Values.networkPolicy.enabled .Values.routines.enabled }}
+---
+{{- $routines := "routines" -}}
+{{/* Same reason as the culler; this pod holds no token and reaches only the database and the API server. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $routines) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $routines) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $routines) | indent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress rules, which under an Ingress policyType denies all of it.
+  ingress: []
+  egress:
+    # DNS, or neither the database nor the server resolves and the sweep reads as both being down.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- /* The API server, where SERVER_INTERNAL_URL points and the only thing this pod calls. */}}
+    - to:
+        - podSelector:
+            matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" "server") | indent 14 }}
+      ports:
+        - port: {{ .Values.server.service.port }}
+          protocol: TCP
+    {{- /* An external database, for the reason given on the culler's policy above. */}}
+    {{- with (default .Values.networkPolicy.extraEgress .Values.networkPolicy.routinesExtraEgress) }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}

@@ -15,7 +15,7 @@
  *
  *     bun scripts/check-new-values-keys.ts <ci-values.yaml> [--since v0.0.4]
  */
-import { parse } from "yaml";
+import { parse, parseAllDocuments } from "yaml";
 
 const [valuesFile, ...rest] = process.argv.slice(2);
 if (!valuesFile) {
@@ -246,9 +246,10 @@ function renderedValue(out: string, variable: string): string | undefined {
  * runs in a job with no Helm — and a test that shells out to a binary which is not there returns
  * undefined rather than failing.
  */
-const chartValues = parse(
-  await Bun.file("charts/openbot/values.yaml").text(),
-) as { config?: { handoff?: Record<string, number> } };
+const rawChartValues = await Bun.file("charts/openbot/values.yaml").text();
+const chartValues = parse(rawChartValues) as {
+  config?: { handoff?: Record<string, number> };
+};
 const absent = render(["--set", "config.handoff=null"]);
 for (const { path, variable } of offSwitches) {
   const leaf = path.slice(path.lastIndexOf(".") + 1);
@@ -263,6 +264,140 @@ for (const { path, variable } of offSwitches) {
     console.log(`${variable} falls back to ${got}, as values.yaml says`);
   }
 }
+/**
+ * What has to be switched on for the workload carrying this fallback to render at all.
+ *
+ * The culler only needs the sandbox mode it belongs to. Routines additionally need the credential
+ * the worker presents, and WHERE that lives differs per target: three of the five read secrets from
+ * a cloud store, where naming `secrets.workerSharedSecret` is not enough and `externalSecrets.data`
+ * has to name it too. Appended after whatever the target already declares rather than turning the
+ * store off, so this still renders the target as shipped.
+ */
+const targetValues = parse(await Bun.file(valuesFile).text()) as {
+  externalSecrets?: { enabled?: boolean; data?: unknown[] };
+};
+function enableFor(component: string): string[] {
+  if (component === "culler") return ["--set", "computers.mode=sandbox"];
+  const on = ["--set", "routines.enabled=true"];
+  if (!targetValues.externalSecrets?.enabled) {
+    return [
+      ...on,
+      "--set-string",
+      "secrets.workerSharedSecret=for-rendering-only",
+    ];
+  }
+  const next = targetValues.externalSecrets.data?.length ?? 0;
+  return [
+    ...on,
+    "--set",
+    `externalSecrets.data[${next}].secretKey=worker-shared-secret`,
+    "--set",
+    `externalSecrets.data[${next}].remoteRef.key=openbot/worker-shared-secret`,
+  ];
+}
+
+/** One step of a dotted path through parsed YAML, without asserting a shape it may not have. */
+function at(value: unknown, key: string): unknown {
+  return value !== null && typeof value === "object"
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+/** What sits at a dotted path, or undefined if any step of it is missing. */
+function valueAt(root: unknown, path: readonly string[]): unknown {
+  return path.reduce<unknown>((here, key) => at(here, key), root);
+}
+
+/*
+ * The same assertion for the fallbacks that are not env vars.
+ *
+ * `offSwitches` above reads a rendered `name:`/`value:` pair, so it can only see a fallback that
+ * reaches a container's environment. Two do not: the routines schedule and the culler's deadline are
+ * fields on a CronJob. They were left unchecked as "no drift test yet" and the routines schedule had
+ * already been wrong once — `* * * * *`, five times more often than anything documents — which is
+ * the whole argument for asserting it rather than trusting the two comments that describe it.
+ *
+ * Nulling the LEAF, not the parent, because that is the shape `--reuse-values` actually produces
+ * here: an existing release carries `routines.enabled` from the release that introduced it and
+ * simply has no `schedule` key, so nulling the parent would delete the feature and render nothing
+ * to assert against.
+ */
+const fieldFallbacks: ReadonlyArray<{
+  /** The values key, as `--set` names it. */
+  path: string;
+  /** The component label on the workload that carries the field. */
+  component: string;
+  /** Where the field sits on the rendered resource. */
+  field: readonly string[];
+}> = [
+  {
+    path: "routines.schedule",
+    component: "routines",
+    field: ["spec", "schedule"],
+  },
+  {
+    path: "computers.sandbox.culler.activeDeadlineSeconds",
+    component: "culler",
+    field: ["spec", "jobTemplate", "spec", "activeDeadlineSeconds"],
+  },
+];
+
+const chartValuesTree = parse(rawChartValues) as unknown;
+
+for (const { path, component, field } of fieldFallbacks) {
+  const documented = valueAt(chartValuesTree, path.split("."));
+  const attempt = render([...enableFor(component), "--set", `${path}=null`]);
+  if (!attempt.ok) {
+    console.error(
+      `::error::The chart failed to render with ${path} absent: ${attempt.err.trim().split("\n")[0]}`,
+    );
+    bad += 1;
+    continue;
+  }
+  /*
+   * Found by its component label rather than by name, because a name is the release name plus a
+   * suffix and this check would then be pinned to both.
+   *
+   * Narrowed to pod-carrying kinds: a NetworkPolicy naming the same component carries the label too.
+   */
+  const WORKLOAD_KINDS = new Set([
+    "CronJob",
+    "DaemonSet",
+    "Deployment",
+    "Job",
+    "StatefulSet",
+  ]);
+  const carriers = parseAllDocuments(attempt.out)
+    .map((document) => document.toJS() as unknown)
+    .filter(
+      (resource) =>
+        WORKLOAD_KINDS.has(String(valueAt(resource, ["kind"]))) &&
+        valueAt(resource, [
+          "metadata",
+          "labels",
+          "app.kubernetes.io/component",
+        ]) === component,
+    );
+  if (carriers.length !== 1) {
+    console.error(
+      `::error::Rendering with ${path} absent produced ${carriers.length} workloads labelled ${component}, not one.`,
+    );
+    bad += 1;
+    continue;
+  }
+  const got = valueAt(carriers[0], field);
+  if (String(got) !== String(documented)) {
+    console.error(
+      `::error::With ${path} absent, the ${component} workload rendered ${JSON.stringify(got)} but values.yaml documents ${JSON.stringify(documented)}.`,
+    );
+    bad += 1;
+    continue;
+  }
+  console.log(
+    `${path} falls back to ${JSON.stringify(got)}, as values.yaml says`,
+  );
+}
+
 for (const { path, variable } of offSwitches) {
   const attempt = render(["--set", `${path}=0`]);
   if (!attempt.ok) {
