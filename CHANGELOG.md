@@ -219,8 +219,8 @@ A Helm chart under `charts/openbot`, Bots and all, and the fixes that installing
 up. Proven on a real EKS cluster: five workloads, replicas across two nodes, EBS volumes bound, and a
 Bot opening a real page from inside AWS with the decision in the audit trail.
 
-One chart, four targets: EKS, GKE, AKS and somebody's own cluster, with nothing but values between
-them. There is no cloud branching in any template. Every place the clouds genuinely differ is a
+One chart, five targets: EKS with a shared browser, EKS with a computer for each Bot, GKE, AKS and
+somebody's own cluster, with nothing but values between them. There is no cloud branching in any template. Every place the clouds genuinely differ is a
 value whose default is what a plain self-hosted cluster does: the cluster's own default StorageClass,
 no RuntimeClass, a plain Kubernetes Secret, an Ingress. Identity is one `serviceAccount.annotations`
 map, which is all IRSA, Workload Identity and AKS workload identity are. Secrets are a plain Secret
