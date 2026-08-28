@@ -1,4 +1,15 @@
+import { settleWithin } from "./env";
 import type { Screencast } from "./screencast";
+
+/**
+ * How long a cast gets to stop before the teardown moves on without it.
+ *
+ * Bounded because occupancy counts teardowns that are still running, and the session sweep reads
+ * occupancy. A `stop` that never settles would leave the entry in the set for the life of the
+ * process, so the Bot would read as watched forever and its session could never be swept, which is
+ * the unbounded growth that sweep exists to stop, arriving through the fix for it.
+ */
+const STOP_BUDGET_MS = 5_000;
 
 /**
  * Who owns a Bot's live screen, and what may still act on it.
@@ -72,7 +83,7 @@ export type ViewerSlot = {
   standingOf(socket: unknown): ViewerStanding;
   /** Is anybody watching, or about to be? What the session sweep asks. */
   occupied(): boolean;
-  /** Settle in-flight teardowns. For tests and shutdown, never on the acting path. */
+  /** Settle in-flight teardowns. A test seam; nothing on the acting path waits on this. */
   settled(): Promise<void>;
 };
 
@@ -127,11 +138,11 @@ export function createViewerSlot(): ViewerSlot {
     }
     const cast = entry.cast;
     entry.cast = undefined;
-    await cast?.stop().catch(() => undefined);
+    await settleWithin(cast?.stop(), STOP_BUDGET_MS);
   }
 
   async function stopStray(cast: Screencast): Promise<void> {
-    await cast.stop().catch(() => undefined);
+    await settleWithin(cast.stop(), STOP_BUDGET_MS);
   }
 
   return {
@@ -151,13 +162,24 @@ export function createViewerSlot(): ViewerSlot {
       return {
         async install(cast) {
           if (entry.revoked) {
-            await stopStray(cast);
+            /*
+             * Tracked, not merely awaited. Occupancy and `settled` are how everything else learns
+             * that nothing is casting any more, and a cast stopped outside that accounting means
+             * both of them can answer "nothing" while Chrome is still encoding frames.
+             */
+            const work = stopStray(cast);
+            track(work);
+            await work;
             return false;
           }
           const replaced = entry.cast;
           entry.cast = cast;
           // After the replacement is running, so the screen does not go blank in between.
-          if (replaced) await stopStray(replaced);
+          if (replaced) {
+            const work = stopStray(replaced);
+            track(work);
+            await work;
+          }
           return true;
         },
         setFollow(cancel) {

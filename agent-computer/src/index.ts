@@ -517,7 +517,11 @@ serve<StreamData>({
     async close(ws) {
       // Names the socket, so it can only ever give up its own screen. A superseded socket closing
       // after its replacement has started releases nothing; see viewer.ts.
-      await sessionFor(ws.data.botId).viewer.release(ws);
+      //
+      // `get`, not `sessionFor`: a socket closing for a Bot with no session has nothing to release,
+      // and creating one here would add a map entry on a teardown path, which is the direction the
+      // map is meant to shrink in.
+      await sessions.get(ws.data.botId)?.viewer.release(ws);
     },
   },
   async fetch(request, server) {

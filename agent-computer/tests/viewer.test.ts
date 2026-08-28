@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Screencast } from "../src/screencast";
-import { createViewerSlot } from "../src/viewer";
+import { createViewerSlot, SUPERSEDED } from "../src/viewer";
 
 /**
  * Who owns the live screen, and what may act on it.
@@ -37,18 +37,21 @@ function fakeCast(): Screencast & { stops: number; sent: unknown[] } {
 }
 
 /** A cast whose stop hangs until it is let go, so a teardown can be observed mid-flight. */
-function pendingCast(): Screencast & { finish: () => void } {
+function pendingCast(): Screencast & { finish: () => void; stops: number } {
   let release = () => {};
   const stopped = new Promise<void>((resolve) => {
     release = resolve;
   });
-  return {
+  const cast = {
+    stops: 0,
     async stop() {
+      cast.stops += 1;
       await stopped;
     },
     async send() {},
     finish: () => release(),
-  } as Screencast & { finish: () => void };
+  };
+  return cast as Screencast & { finish: () => void; stops: number };
 }
 
 /** A cast whose stop rejects. The teardown paths must survive one. */
@@ -252,8 +255,10 @@ describe("a second connection taking over", () => {
     slot.claim({ id: "second" }, () => {});
     await slot.settled();
 
-    expect(heard.said).toHaveLength(1);
-    expect(heard.said[0]).toMatch(/./);
+    // The exact message, not merely that something was said. This is the only thing a replaced
+    // viewer is ever told, and "some non-empty string" stays green if it becomes the stop message,
+    // the no-longer-live message, or a stray debug line.
+    expect(heard.said).toEqual([SUPERSEDED]);
   });
 
   test("the replaced claim can no longer install or follow", async () => {
@@ -321,6 +326,29 @@ describe("following the page the Bot moves to", () => {
     claim.setFollow(() => {});
 
     expect(firstCancelled).toBe(1);
+  });
+});
+
+describe("accounting for a cast the slot refused", () => {
+  test("a refused cast is stopped before the slot reports itself settled", async () => {
+    // Occupancy and `settled` are how the sweep and the tests learn that nothing is casting. A cast
+    // stopped outside that accounting lets both answer "nothing" while Chrome is still encoding, so
+    // the refusal has to be part of the teardown rather than beside it.
+    const slot = createViewerSlot();
+    const socket = { id: "a" };
+    const claim = slot.claim(socket, () => {});
+    await slot.release(socket);
+
+    const late = pendingCast();
+    const refusal = claim.install(late);
+
+    expect(slot.occupied()).toBe(true);
+
+    late.finish();
+    expect(await refusal).toBe(false);
+    await slot.settled();
+
+    expect(slot.occupied()).toBe(false);
   });
 });
 

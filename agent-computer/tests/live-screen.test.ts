@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,12 +31,40 @@ import { join } from "node:path";
 const asked = process.env.OPENBOT_LIVE_SCREEN === "1";
 
 const TOKEN = "test-computer-token";
-const PORT = 41641;
-const BASE = `http://127.0.0.1:${PORT}`;
-const WS = `ws://127.0.0.1:${PORT}`;
 
-/** Comfortably past the 1Hz follow loop, so a tick that would relaunch has had its chance. */
-const PAST_ONE_FOLLOW_TICK_MS = 1_600;
+/**
+ * A port the operating system says is free, rather than one picked in advance.
+ *
+ * A fixed number here fails the whole file at import when anything else holds it, and reports as one
+ * broken test rather than as a port clash. 41641 in particular is Tailscale's default, so on a host
+ * running it this file could never have run at all.
+ */
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const found = (probe.address() as { port: number }).port;
+      probe.close(() => resolve(found));
+    });
+  });
+}
+
+let BASE = "";
+let WS = "";
+
+/**
+ * How long "it did not come back" has to keep being true.
+ *
+ * A single check one tick later cannot tell a relaunch that never happened from one still in flight:
+ * `evict` reads only the browsers already running, and a launch is not one of those until it
+ * finishes, so both answer `wasRunning: false`. Holding the answer across several ticks and a whole
+ * cold start is what makes it mean the loop is gone rather than merely slow.
+ */
+const STAYS_STOPPED_MS = 9_000;
+
+/** Long enough for a close to land and the follow loop to tick once after it. */
+const AFTER_ONE_FOLLOW_TICK_MS = 1_600;
 /** A cold Chromium launch here takes under two seconds; this leaves room on a slower machine. */
 const LAUNCH_MS = 8_000;
 
@@ -127,6 +156,19 @@ async function until(
   throw new Error(`Timed out waiting for ${why}`);
 }
 
+/** Keep asking, and fail the moment the browser comes back rather than only at the end. */
+async function staysStopped(botId: string): Promise<void> {
+  const deadline = Date.now() + STAYS_STOPPED_MS;
+  while (Date.now() < deadline) {
+    if (await stopped(botId)) {
+      throw new Error(
+        "Something started the browser again after it was stopped",
+      );
+    }
+    await wait(250);
+  }
+}
+
 async function stopped(botId: string): Promise<boolean> {
   const response = await api("/computers/stop", botId, { method: "POST" });
   const body = (await response.json()) as { wasRunning?: boolean };
@@ -136,8 +178,11 @@ async function stopped(botId: string): Promise<boolean> {
 beforeAll(async () => {
   if (!asked) return;
   root = await mkdtemp(join(tmpdir(), "agent-computer-live-screen-"));
+  const port = await freePort();
+  BASE = `http://127.0.0.1:${port}`;
+  WS = `ws://127.0.0.1:${port}`;
   process.env.COMPUTER_TOKEN = TOKEN;
-  process.env.PORT = String(PORT);
+  process.env.PORT = String(port);
   process.env.PROFILES_DIR = join(root, "profiles");
   process.env.WORKSPACE_DIR = join(root, "workspace");
   await mkdir(join(root, "profiles"), { recursive: true });
@@ -159,6 +204,7 @@ afterAll(async () => {
     "stop-viewer",
     "reset-viewer",
     "wont-launch",
+    "still-starting",
   ]) {
     await api("/computers/stop", botId, { method: "POST" }).catch(
       () => undefined,
@@ -184,10 +230,12 @@ describe.skipIf(!asked)(
       viewer.close();
 
       await wait(LAUNCH_MS);
-      await stopped(botId);
-      await wait(PAST_ONE_FOLLOW_TICK_MS);
+      // The launch really did produce a browser. Without this the whole case passes vacuously on a
+      // machine where the launch failed or is still going: nothing was cast, no follow loop existed,
+      // and the orphaned interval this exists to catch was never created.
+      expect(await stopped(botId)).toBe(true);
 
-      expect(await stopped(botId)).toBe(false);
+      await staysStopped(botId);
     }, 30_000);
   },
 );
@@ -246,7 +294,7 @@ describe.skipIf(!asked)("a superseded socket closing later", () => {
 
     // The replaced socket goes away now, after its replacement is live.
     first.close();
-    await wait(PAST_ONE_FOLLOW_TICK_MS);
+    await wait(AFTER_ONE_FOLLOW_TICK_MS);
 
     // The survivor still owns the screen, and the proof is that its typing arrives: a cast that was
     // stopped underneath it, or an ownership it quietly lost, would refuse this instead.
@@ -318,10 +366,8 @@ describe.skipIf(!asked)("stopping the computer out from under a viewer", () => {
       5_000,
       "the viewer to be told the computer stopped",
     );
-    await wait(PAST_ONE_FOLLOW_TICK_MS);
 
-    // Nothing restarted it in the meantime, which is the whole observable.
-    expect(await stopped(botId)).toBe(false);
+    await staysStopped(botId);
   }, 30_000);
 
   test("the same holds when the computer is reset rather than stopped", async () => {
@@ -339,10 +385,30 @@ describe.skipIf(!asked)("stopping the computer out from under a viewer", () => {
       5_000,
       "the viewer to be told its computer went away",
     );
-    await wait(PAST_ONE_FOLLOW_TICK_MS);
 
-    expect(await stopped(botId)).toBe(false);
+    await staysStopped(botId);
   }, 30_000);
+});
+
+describe.skipIf(!asked)("typing into a screen that is still opening", () => {
+  test("is told the screen is starting, not that it ended", async () => {
+    // The reason there are three standings rather than two. A socket mid-launch owns a claim and no
+    // cast, exactly like a socket that was superseded, and answering both the same way tells somebody
+    // whose screen is seconds from live that their session is over.
+    const botId = "still-starting";
+    const viewer = watch(botId);
+    // Only connected, deliberately: the browser is still starting, so no cast exists yet.
+    await viewer.connected;
+    viewer.socket.send(JSON.stringify({ type: "key", key: "s" }));
+
+    await until(
+      () => viewer.errors.length > 0,
+      LAUNCH_MS,
+      "the socket to be answered while its screen is still starting",
+    );
+
+    expect(viewer.errors[0]).toMatch(/still starting/i);
+  }, 40_000);
 });
 
 describe.skipIf(!asked)("a screen whose browser will not start", () => {
@@ -364,14 +430,18 @@ describe.skipIf(!asked)("a screen whose browser will not start", () => {
       "the socket to be told its screen could not be started",
     );
 
+    // What it says is Playwright's to word, so this pins only that the socket was told why its
+    // screen never arrived rather than handed one of the lifecycle refusals, which would mean the
+    // failure had been reported as somebody else taking the screen.
+    expect(viewer.errors[0]).not.toMatch(
+      /no longer live|still starting|computer stopped/i,
+    );
+
     // Closed by the handler rather than left open against a browser that does not exist.
     await until(
       () => viewer.socket.readyState === WebSocket.CLOSED,
       5_000,
       "the socket to be closed after the failure",
     );
-
-    // The Bot is still usable afterwards: a failed launch must not wedge it.
-    expect(await stopped(botId)).toBe(false);
   }, 40_000);
 });

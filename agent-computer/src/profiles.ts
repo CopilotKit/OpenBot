@@ -39,7 +39,7 @@ import { type BrowserContext, chromium, type Page } from "playwright";
 import { profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
-import { numberFromEnv } from "./env";
+import { numberFromEnv, settleWithin } from "./env";
 import { botIdsIn } from "./profile-listing";
 
 // Re-exported so callers that already import it from here do not change, while the test imports it
@@ -120,6 +120,25 @@ console.info(
  */
 const CLOSE_SETTLE_MS = 2_000;
 
+/**
+ * How long telling a viewer its browser went away may take before the close carries on without it.
+ *
+ * The close is what has to happen; the announcement is courtesy. Unbounded, one screencast that will
+ * not stop would hold a browser close open, and because the cap evicts from inside another Bot's
+ * launch, it would hold that launch and everything queued behind it too. On the way out it would
+ * keep every profile from flushing until the container was killed.
+ */
+const ANNOUNCE_BUDGET_MS = 2_000;
+
+/**
+ * How long a stop or reset waits for a launch it is racing.
+ *
+ * Long enough for a cold Chromium start, which is what it is waiting for, and bounded so a launch
+ * that never finishes cannot hold a request open forever. Timing out leaves the browser running,
+ * which is the same answer the caller got before this waited at all.
+ */
+const LAUNCH_WAIT_MS = 30_000;
+
 /** What a Bot's browser looks like from outside. */
 export type BotBrowser = {
   botId: string;
@@ -196,10 +215,7 @@ const IDLE_SWEEP_MS = 60_000;
  */
 export type BrowserClosed = (botId: string) => void | Promise<void>;
 
-export function createProfiles(
-  root: string,
-  onClosed: BrowserClosed = () => {},
-) {
+export function createProfiles(root: string, onClosed: BrowserClosed) {
   /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
   const live = new Map<
     string,
@@ -234,7 +250,11 @@ export function createProfiles(
     );
     // Before the close, so whatever was watching this browser is taken down while it is still the
     // browser being closed. A live screen surviving here relaunches it a second later.
-    await Promise.resolve(onClosed(botId)).catch(() => undefined);
+    //
+    // Bounded, because this now sits on the launch path: `enforceCap` evicts from inside another
+    // Bot's launch, so a teardown that never answers would pin that launch and every caller waiting
+    // on it. The close is the thing that must happen; being told about it is best effort.
+    await settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS);
     await closeAndWait(running.context).catch(() => undefined);
     return true;
   };
@@ -272,6 +292,29 @@ export function createProfiles(
   }, IDLE_SWEEP_MS);
   // Housekeeping must not hold the process open on the way out.
   idleSweep.unref?.();
+
+  /**
+   * Close a browser a person asked to close, including one that is still starting.
+   *
+   * `evict` only knows about browsers already in `live`, and a launch does not land there until it
+   * finishes. A request arriving inside that window therefore passed straight through: it answered
+   * "nothing was running", the launch completed a moment later, and the browser the person asked to
+   * close was up with the live screen still on it and the follow loop keeping it marked recently
+   * used, so the idle sweep would not reclaim it either. Reset was worse, deleting the profile
+   * directory that the finishing launch then recreated.
+   *
+   * So a request waits for the launch it is racing and closes what it produced. This is deliberately
+   * NOT inside `evict`: the cap evicts from inside a launch, and an `evict` that waited on `starting`
+   * could wait on the very launch it is running under.
+   */
+  const closeOnRequest = async (
+    botId: string,
+    reason: string,
+  ): Promise<boolean> => {
+    // Its failure is the launch's own to report; here it only means there is nothing left to close.
+    await settleWithin(starting.get(botId), LAUNCH_WAIT_MS);
+    return evict(botId, reason);
+  };
 
   const sweepLocks = async (dir: string): Promise<void> => {
     await Promise.all(
@@ -361,12 +404,6 @@ export function createProfiles(
     },
 
     /**
-     * Close this Bot's browser without touching what it knows.
-     *
-     * Gracefully, so Chromium flushes its profile. This is what "kill" means for a Bot's computer: the
-     * browser stops, the login survives, and the next request starts it again where it left off.
-     */
-    /**
      * Stop this Bot's browser, keeping what it knows.
      *
      * The same close the cap and the idle sweep make, so it goes through the same path rather than
@@ -374,7 +411,7 @@ export function createProfiles(
      * and anything watching has to come down either way.
      */
     async stop(botId: string): Promise<boolean> {
-      return evict(botId, "it was stopped");
+      return closeOnRequest(botId, "it was stopped");
     },
 
     /**
@@ -387,7 +424,7 @@ export function createProfiles(
      */
     async reset(botId: string): Promise<void> {
       // Its own reason rather than borrowing stop's, so the trail says which of the two happened.
-      await evict(botId, "it was reset");
+      await closeOnRequest(botId, "it was reset");
       await rm(directoryFor(botId), { recursive: true, force: true });
     },
 
@@ -437,7 +474,7 @@ export function createProfiles(
       // but a viewer whose socket outlives this by a moment is still owed the message.
       await Promise.all(
         entries.map(([botId]) =>
-          Promise.resolve(onClosed(botId)).catch(() => undefined),
+          settleWithin(Promise.resolve(onClosed(botId)), ANNOUNCE_BUDGET_MS),
         ),
       );
       await Promise.all(entries.map(([, c]) => closeAndWait(c.context)));
