@@ -1,7 +1,43 @@
 # OpenBot on Kubernetes
 
-Runs OpenBot on any Kubernetes cluster: EKS, GKE, AKS, or your own. One chart, four targets, and the
+Runs OpenBot on any Kubernetes cluster: EKS, GKE, AKS, or your own. One chart, five targets, and the
 only difference between them is values.
+
+## What a cluster needs first
+
+Three things this chart assumes and does not create.
+
+**An image the cluster can pull.** A release publishes `ghcr.io/copilotkit/openbot:vX.Y.Z`
+publicly, and that tag is what `image.tag` wants. It is built for **`linux/amd64` only**, so an
+arm64 node group — Graviton on EKS, Tau T2A on GKE, Ampere on AKS — cannot run it: the pods sit in
+`ImagePullBackOff` and the event says `no match for platform`, which reads like a broken registry
+rather than a node pool of the wrong shape. Either run amd64 nodes, or build the image for the
+architecture you have and push it somewhere the cluster can reach. Check before assuming:
+
+```sh
+docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.4 | grep architecture
+```
+
+**A default StorageClass**, or a named one. Both a Bot's computer and the bundled database ask for
+a volume, and a fresh cluster often has no class marked default — see
+[Check for a default StorageClass first](#check-for-a-default-storageclass-first), which is the
+single most common reason a first install comes up with a pod stuck `Pending` and nothing saying
+why.
+
+**A database, and the Secret that names it**, unless you are using the bundled one. The chart reads
+a URL out of a Secret you make; it never writes your database credentials into a values file:
+
+```sh
+kubectl create namespace openbot
+kubectl -n openbot create secret generic openbot-database \
+  --from-literal=database-url='postgresql://USER:PASSWORD@HOST:5432/openbot?sslmode=require'
+```
+
+Then `--set database.existingSecret=openbot-database`. The key must be `database-url`, or name a
+different one with `database.existingSecretKey`. See
+[Your own database](#your-own-database-which-is-what-a-real-deployment-uses) for `sslmode` and the
+`vector` extension, both of which a managed database will otherwise fail on in a way that names the
+wrong problem.
 
 ## Install
 
@@ -60,7 +96,7 @@ user and not the actual problem.
 creates it and a later one drops it again. On a managed database, create it once as the
 administrative role; `CREATE EXTENSION IF NOT EXISTS` then passes for an ordinary user.
 
-## The four targets
+## The five targets
 
 `ci/` holds a values file per target, and each is the shortest thing that expresses what is different
 about that cluster:
@@ -69,6 +105,7 @@ about that cluster:
 | --- | --- |
 | `self-hosted-values.yaml` | Nothing turned on. If this file needs to grow, a default is wrong. |
 | `eks-values.yaml` | IRSA, Secrets Manager, ALB, zone spread, autoscaling. |
+| `eks-sandbox-values.yaml` | The same, with a computer each rather than one shared browser. `shared` and `sandbox` render a different Deployment, different RBAC and a different pod template, so a target that renders only one checks half the chart. |
 | `gke-values.yaml` | Workload Identity, Secret Manager, Gateway API instead of an Ingress. |
 | `aks-values.yaml` | Workload identity, Key Vault, the AKS web app routing class. |
 
