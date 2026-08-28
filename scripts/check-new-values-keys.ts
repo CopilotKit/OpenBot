@@ -357,11 +357,23 @@ for (const { path, component, field } of fieldFallbacks) {
   /*
    * Found by its component label rather than by name, because a name is the release name plus a
    * suffix and this check would then be pinned to both.
+   *
+   * Narrowed to the kinds that carry a pod, because the label is not unique to one: a NetworkPolicy
+   * naming the same component carries it too, and counting that as a second carrier fails a check
+   * about a CronJob field for a reason that has nothing to do with the field.
    */
+  const WORKLOAD_KINDS = new Set([
+    "CronJob",
+    "DaemonSet",
+    "Deployment",
+    "Job",
+    "StatefulSet",
+  ]);
   const carriers = parseAllDocuments(attempt.out)
     .map((document) => document.toJS() as unknown)
     .filter(
       (resource) =>
+        WORKLOAD_KINDS.has(String(valueAt(resource, ["kind"]))) &&
         valueAt(resource, [
           "metadata",
           "labels",
