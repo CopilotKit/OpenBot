@@ -84,7 +84,7 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
                   </span>
                 </span>
                 <Switch
-                  aria-label={`Let ${candidate.name} be asked by this Bot`}
+                  aria-label={`Let this Bot ask ${candidate.name}`}
                   checked={held}
                   disabled={!canGrant || setGrant.isPending}
                   onCheckedChange={(next: boolean) =>
