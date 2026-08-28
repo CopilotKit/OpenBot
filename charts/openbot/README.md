@@ -39,6 +39,58 @@ different one with `database.existingSecretKey`. See
 `vector` extension, both of which a managed database will otherwise fail on in a way that names the
 wrong problem.
 
+### A cluster from nothing, on EKS
+
+The three above, as one config and two commands. `eksctl` creates `gp2` and does not mark it
+default, and the provisioner it names is the in-tree one current Kubernetes no longer has, so the
+StorageClass below is not optional.
+
+```yaml
+# cluster.yaml
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata: { name: openbot, region: us-east-2, version: "1.34" }
+iam: { withOIDC: true }
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: metrics-server
+  # Last to be created, because it needs the OIDC provider that needs the control plane. Let it
+  # finish; creating the same addon by hand while this is running fails the cluster create.
+  - name: aws-ebs-csi-driver
+    wellKnownPolicies: { ebsCSIController: true }
+managedNodeGroups:
+  - name: workers
+    # amd64: the published image has no arm64 variant. See the image note above.
+    instanceType: t3.large
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 4
+    volumeSize: 60
+    volumeType: gp3
+```
+
+```sh
+eksctl create cluster -f cluster.yaml
+
+kubectl apply -f - <<'EOF'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations: { storageclass.kubernetes.io/is-default-class: "true" }
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters: { type: gp3 }
+EOF
+```
+
+The database goes in the same VPC, in the private subnets, with a security group admitting 5432
+from the cluster's own security group — `aws eks describe-cluster` names both. Keep it
+`--no-publicly-accessible`: the only thing that needs to reach it is in the cluster.
+
 ## Install
 
 The bundled database and one administrator, which is the shortest thing that works:
