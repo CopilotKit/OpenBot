@@ -182,6 +182,29 @@ export type ChannelStore = {
     channelId: string,
     activity: ChannelActivity,
   ): Promise<void>;
+  /**
+   * Tell a channel's members that a turn started or ended in it, by the thread it runs in.
+   *
+   * Keyed by thread because that is all a headless turn knows. A thread that maps to no channel —
+   * the scratch thread a handoff answers in — resolves to nothing and signals nowhere, which is
+   * the point of a scratch thread. Announced, never written: `busy` is a moment, not a fact about
+   * the channel, and a missed one costs a dot until the next real event rather than any data.
+   */
+  signalBusy(threadId: string, busy: boolean): Promise<void>;
+  /**
+   * The same signal, from a person's own run, by the channel they are in.
+   *
+   * A browser knows exactly when its run starts and stops and which channel it is in, which the
+   * server cannot see: the runtime does not tell this deployment when a person's turn begins. So
+   * the browser reports it, and this checks the caller belongs to the channel before announcing —
+   * the membership check `signalBusy` does not need, because that one is only ever called by the
+   * server about work it started itself.
+   */
+  signalChannelBusy(
+    actor: AgentActor,
+    channelId: string,
+    busy: boolean,
+  ): Promise<void>;
 };
 
 const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
@@ -756,6 +779,76 @@ export function createChannelStore(
         { isolationLevel: "read committed" },
       );
     },
+
+    async signalBusy(threadId, busy) {
+      // The channel this thread is shown in, if any. A scratch thread maps to nothing, so a hop
+      // running there signals nowhere and the branch below returns without announcing.
+      const [mapped] = await database
+        .select({ channelId: intelligenceChannelMappings.channelId })
+        .from(intelligenceChannelMappings)
+        .where(eq(intelligenceChannelMappings.threadId, threadId))
+        .limit(1);
+      if (!mapped) return;
+
+      const members = await database
+        .select({ userId: channelMemberships.userId })
+        .from(channelMemberships)
+        .where(eq(channelMemberships.channelId, mapped.channelId));
+      if (members.length === 0) return;
+
+      // No table write: busy is a moment, and the roster query stays the source of truth. Just the
+      // announcement, carrying the members the same way recordActivity does.
+      const event: ChannelActivityEvent = {
+        channelId: mapped.channelId,
+        memberIds: members.map((member) => member.userId),
+        lastMessage: null,
+        lastMessageAt: null,
+        lastMessageAgentId: null,
+        busy,
+      };
+      await database.execute(
+        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+      );
+    },
+
+    async signalChannelBusy(actor, channelId, busy) {
+      const [membership] = await database
+        .select({ userId: channelMemberships.userId })
+        .from(channelMemberships)
+        .innerJoin(
+          channels,
+          and(
+            eq(channels.id, channelMemberships.channelId),
+            isNull(channels.deletedAt),
+          ),
+        )
+        .where(
+          and(
+            eq(channelMemberships.channelId, channelId),
+            eq(channelMemberships.userId, actor.id),
+          ),
+        );
+      // Not a member, no such channel, or a deleted one: the same refusal every way, so belonging
+      // to a channel is not something an outsider can probe for.
+      if (!membership) throw new ChannelNotFoundError(channelId);
+
+      const members = await database
+        .select({ userId: channelMemberships.userId })
+        .from(channelMemberships)
+        .where(eq(channelMemberships.channelId, channelId));
+
+      const event: ChannelActivityEvent = {
+        channelId,
+        memberIds: members.map((member) => member.userId),
+        lastMessage: null,
+        lastMessageAt: null,
+        lastMessageAgentId: null,
+        busy,
+      };
+      await database.execute(
+        sql`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(event)})`,
+      );
+    },
   };
   return store;
 }
@@ -976,6 +1069,26 @@ export function createChannelRoutes(
         context.var.actor,
         context.req.param("channelId"),
         parsed.value,
+      );
+      return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.post("/:channelId/busy", requireUser, async (context) => {
+    const body = (await context.req.json().catch(() => null)) as {
+      busy?: unknown;
+    } | null;
+    if (typeof body?.busy !== "boolean") {
+      return context.json({ error: "busy must be true or false" }, 400);
+    }
+
+    try {
+      await store.signalChannelBusy(
+        context.var.actor,
+        context.req.param("channelId"),
+        body.busy,
       );
       return context.body(null, 204);
     } catch (error) {

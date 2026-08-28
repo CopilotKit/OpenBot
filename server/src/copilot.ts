@@ -1014,6 +1014,15 @@ export function mountCopilotRuntime(
   agentFetch?: AgentFetch,
   /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
   handoffForActor?: (actorId: string) => HandoffForRun,
+  /**
+   * Told when a run starts and ends on a thread, so a channel can show it is working.
+   *
+   * The universal seam: every run the runtime processes — a person's own turn, a headless hop —
+   * takes and gives back the thread lock, and it does so on the server, so a person who sends a
+   * message and navigates away still lights the channel they left. A side effect only: it is never
+   * awaited in the lock path and a failure in it never touches whether the lock was taken.
+   */
+  onRunBusy?: (input: { threadId: string; busy: boolean }) => void,
 ) {
   const { intelligence } = config.runtime;
 
@@ -1145,6 +1154,11 @@ export function mountCopilotRuntime(
       }) => {
         try {
           const held = await intelligenceClient.ɵacquireThreadLock(input);
+          // A run started on this thread. Side effect only, never awaited: a channel showing it is
+          // working is worth nothing next to the lock the run depends on.
+          try {
+            onRunBusy?.({ threadId: input.threadId, busy: true });
+          } catch {}
           /*
            * The run id only. The lock also hands back a join token, which is what a browser presents
            * to watch the conversation; the runner's socket has its own credential and passing this
@@ -1181,6 +1195,11 @@ export function mountCopilotRuntime(
         });
       },
       release: async (input: { threadId: string; runId: string }) => {
+        // The run on this thread is over. Cleared here rather than trusting a browser: the run may
+        // have outlived the tab that started it, and this is where the platform is told it ended.
+        try {
+          onRunBusy?.({ threadId: input.threadId, busy: false });
+        } catch {}
         await intelligenceClient.ɵcleanupThreadLock(input);
       },
     },
