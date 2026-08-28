@@ -112,6 +112,8 @@ type BotSession = {
   control: Control;
   /** This Bot's snapshot generation. See the note above on staleness. */
   snapshotId: number;
+  /** The page this Bot was last handed, so a change of page can retire its refs. */
+  livePage?: Page;
   /** The one live screen viewer for this Bot, if a person is watching. */
   viewer?: {
     socket: unknown;
@@ -210,7 +212,13 @@ const DEFAULT_BOT_ID = (() => {
 })();
 
 async function currentPage(botId: string): Promise<Page> {
-  return profiles.page(botId);
+  const session = sessionFor(botId);
+  const page = await profiles.page(botId);
+  // A ref names an element on the page it was taken from, so moving to a window the site opened has
+  // to retire the outstanding ones exactly as a navigation does, or a click lands on the wrong document.
+  if (session.livePage && session.livePage !== page) session.snapshotId += 1;
+  session.livePage = page;
+  return page;
 }
 
 /**

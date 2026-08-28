@@ -40,6 +40,7 @@ import { profileDirectoryFor } from "./bot-id";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv } from "./env";
+import { chooseLivePage } from "./live-page";
 import { botIdsIn } from "./profile-listing";
 
 // Re-exported so callers that already import it from here do not change, while the test imports it
@@ -180,17 +181,17 @@ const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000);
 const IDLE_SWEEP_MS = 60_000;
 
 export function createProfiles(root: string) {
+  type LiveBrowser = {
+    context: BrowserContext;
+    page: Page;
+    startedAt: string;
+    /** When this Bot last asked for its page. Decides what the cap and the sweep close. */
+    usedAt: number;
+    /** Point `page` at whatever is open now. Called on every page opening and closing. */
+    retarget: () => void;
+  };
   /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
-  const live = new Map<
-    string,
-    {
-      context: BrowserContext;
-      page: Page;
-      startedAt: string;
-      /** When this Bot last asked for its page. Decides what the cap and the sweep close. */
-      usedAt: number;
-    }
-  >();
+  const live = new Map<string, LiveBrowser>();
   /** Launches in flight, so a cold computer is started once however many callers ask at once. */
   const starting = new Map<string, Promise<Page>>();
 
@@ -274,6 +275,9 @@ export function createProfiles(root: string) {
       if (launching) return launching;
 
       const existing = live.get(botId);
+      // Asked before the page is judged, so a close that has not been delivered yet does not read as
+      // a browser that has gone.
+      existing?.retarget();
       if (
         existing?.context.browser()?.isConnected() &&
         !existing.page.isClosed()
@@ -309,16 +313,40 @@ export function createProfiles(root: string) {
         });
         // Persistent contexts open with a page already; reuse it rather than leaving an extra blank tab.
         const page = context.pages()[0] ?? (await context.newPage());
-        live.set(botId, {
+        const record: LiveBrowser = {
           context,
           page,
           startedAt: new Date().toISOString(),
           usedAt: Date.now(),
+          retarget: () => {},
+        };
+        record.retarget = () => {
+          const next = chooseLivePage(context.pages());
+          if (!next || next === record.page) return;
+          record.page = next;
+          console.info(
+            JSON.stringify({
+              type: "computer-page-changed",
+              botId,
+              url: next.url(),
+            }),
+          );
+        };
+        // Without this the Bot stays pinned to the page it launched with, so a sign-in the site opens
+        // in a new window is neither shown to the person taking the wheel nor reachable by input.
+        context.on("page", (opened) => {
+          record.retarget();
+          // A popup closes itself when it succeeds, and the record must move back to the opener
+          // rather than leave a closed page to be read as a dead browser.
+          opened.on("close", () => record.retarget());
         });
+        page.on("close", () => record.retarget());
+        live.set(botId, record);
         // After the new one is in the map, so the cap counts what is really running and the Bot that
         // just asked is the most recently used and therefore never the one closed.
         await enforceCap();
-        return page;
+        // Not `page`: a window opened while the browser was starting is already the live one.
+        return record.page;
       })();
 
       starting.set(botId, launch);

@@ -8,6 +8,22 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A sign-in a site opens in a new window is shown, and can be clicked
+
+A Bot's browser was bound to the page it launched with, and to nothing the site opened afterwards.
+Anything arriving in a new window or tab was invisible on the live screen and unreachable by input,
+so the popup sign-ins that a person takes the wheel to complete were exactly the ones they could not
+complete. Worse than invisible: a click at the place the popup's button was drawn went to the page
+underneath it, so a person trying to finish a sign-in could navigate the page the Bot was working on
+without seeing either result.
+
+The browser now follows the window the site opens, and returns to the opener when it closes, which is
+what a sign-in popup does when it succeeds. A snapshot taken before the change of page is refused
+afterwards with the same "take a new snapshot" it already gives after a navigation, so a stale ref
+cannot act on the wrong document.
+
+Nothing to configure.
+
 ## 0.0.5
 
 ### One Bot can hand work to another, and reach a person when no Bot will do
