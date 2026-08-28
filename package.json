@@ -21,6 +21,7 @@
     "test:ci": "bun scripts/test-ci.ts",
     "pretest": "bun run generate:app-config",
     "test:smoke": "OPENBOT_SMOKE=1 bun test tests/smoke",
+    "test:live-screen": "OPENBOT_LIVE_SCREEN=1 bun test agent-computer/tests/live-screen.test.ts",
     "diagram": "bun scripts/architecture-diagram.ts",
     "mock:knowledge": "bun scripts/mock-knowledge-mcp.ts"
   },
