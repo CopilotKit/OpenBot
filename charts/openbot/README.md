@@ -5,7 +5,7 @@ only difference between them is values.
 
 ## What a cluster needs first
 
-Three things this chart assumes and does not create.
+Four things this chart assumes and does not create.
 
 **An image the cluster can pull.** A release publishes `ghcr.io/copilotkit/openbot:vX.Y.Z`
 publicly, and that tag is what `image.tag` wants. It is built for **`linux/amd64` only**, so an
@@ -17,6 +17,19 @@ architecture you have and push it somewhere the cluster can reach. Check before 
 ```sh
 docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.4 | grep architecture
 ```
+
+**Intelligence credentials.** OpenBot requires CopilotKit Intelligence and the chart refuses to
+install without `secrets.intelligenceApiKey` and `secrets.licenseToken`. Both come from the CLI, on
+any machine with a browser:
+
+```sh
+npx --yes copilotkit@latest login           # browser sign-in
+npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
+npx --yes copilotkit@latest license --print # prints the licence token
+```
+
+`--print` rather than `--write` here: `--write` puts the token in a local `.env`, which is what a
+laptop wants and not what you are about to paste into a Secret. The free plan is enough to install.
 
 **A default StorageClass**, or a named one. Both a Bot's computer and the bundled database ask for
 a volume, and a fresh cluster often has no class marked default. See

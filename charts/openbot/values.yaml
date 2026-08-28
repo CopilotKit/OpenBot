@@ -359,6 +359,9 @@ secrets:
   modelApiKey: ""
   computerToken: ""
   supervisorToken: ""
+  # Both from the CopilotKit CLI: `npx --yes copilotkit@latest project select` prints the runtime
+  # key, and `npx --yes copilotkit@latest license --print` prints the licence. The chart refuses to
+  # install without them, because there is no mode where this runs with Intelligence missing.
   intelligenceApiKey: ""
   licenseToken: ""
   # Sent to `config.managedAgent.url` on every call. Required when that url is set.
