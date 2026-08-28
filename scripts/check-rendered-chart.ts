@@ -154,17 +154,8 @@ if (serverPolicy) {
   }
 }
 
-/**
- * Every pod this release runs is covered by a policy, once any policy exists.
- *
- * A NetworkPolicy applies only to the pods its selector matches, and a pod nothing selects keeps the
- * cluster default rather than being denied — so on a release that has policies at all, a workload
- * with none is the one workload that is not fenced. That is invisible in a rendered chart and in
- * `kubectl get networkpolicy`, because the policies that do exist look right.
- *
- * Asked of the rendered objects rather than of the templates, because the question is which pods
- * came out, not which conditionals were written.
- */
+// A pod no policy selects keeps the cluster default, so on a release that has policies it is the
+// only unfenced one. Asked of rendered objects, because the question is which pods came out.
 const policyComponents = new Set(
   documents
     .filter((document) => /^kind:\s*NetworkPolicy\s*$/m.test(document))

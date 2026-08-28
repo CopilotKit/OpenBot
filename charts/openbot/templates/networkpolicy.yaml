@@ -184,24 +184,7 @@ spec:
 {{- if and .Values.networkPolicy.enabled (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.culler.enabled }}
 ---
 {{- $culler := "culler" -}}
-{{/*
-The culler, which is the third pod this release runs and was the only one no policy selected.
-
-A NetworkPolicy applies to the pods its selector matches, and a pod nothing selects is not covered
-by the release's policy at all — it keeps the cluster default, which on a cluster with no
-default-deny is unrestricted egress. So turning `networkPolicy.enabled` on fenced the API and the
-computers and left this one open, which is the wrong way round: it mounts a service account token
-bound to create, patch and delete on Sandboxes, and it carries the API's whole environment,
-including `KEY_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET`, because it runs the same image with the same
-config. It also wakes every five minutes by default.
-
-Narrower than the API's policy because it does less. It reads the database and it asks the
-Kubernetes API server which computers to suspend. It never calls Intelligence, an identity provider
-or a Bot, so it gets no rule to the internet — the exception-list egress the API needs is exactly
-what this pod should not have.
-
-No ingress at all: nothing connects to a CronJob.
-*/}}
+{{/* A pod no policy selects keeps the cluster default, so this one was the release's only unfenced one. */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -233,13 +216,7 @@ spec:
         - port: 5432
           protocol: TCP
     {{- end }}
-    {{- /*
-      The Kubernetes API server, which is the whole reason this pod holds a token.
-
-      Unscoped unless a deployment says otherwise, for the same reason the API's rule is: the API
-      server answers on a ClusterIP from a service range no chart can know at template time. Name it
-      in `networkPolicy.kubernetesApiCidr` and this narrows with it.
-    */}}
+    {{- /* Empty kubernetesApiCidr permits these ports to any address, as the server's rule above does. */}}
     - {{- with .Values.networkPolicy.kubernetesApiCidr }}
       to:
         - ipBlock:
@@ -250,16 +227,7 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
-    {{- /*
-      A database that is not the bundled one.
-
-      `postgresql.enabled` off means the rule above did not render, and this pod has no rule to the
-      internet, so without something here it could not reach its own database and every sweep would
-      fail on connect. The chart already refuses `networkPolicy.enabled` with an external database
-      unless `networkPolicy.extraEgress` names it, so that list is where the address already is;
-      reusing it keeps an operator from having to write the same CIDR twice and keeps an upgrade from
-      silently breaking the sweep. Set `cullerExtraEgress` to give this pod a narrower list instead.
-    */}}
+    {{- /* An external database, which extraEgress already had to name; cullerExtraEgress narrows it. */}}
     {{- with (default .Values.networkPolicy.extraEgress .Values.networkPolicy.cullerExtraEgress) }}
 {{ toYaml . | indent 4 }}
     {{- end }}
@@ -268,22 +236,7 @@ spec:
 {{- if and .Values.networkPolicy.enabled .Values.routines.enabled }}
 ---
 {{- $routines := "routines" -}}
-{{/*
-The routines sweep, which is the other pod a policy has to name.
-
-Same rule as the culler above: a NetworkPolicy applies to the pods its selector matches, so a
-workload nothing selects keeps the cluster default instead of being fenced. This one arrived after
-the culler's policy was written, which is the case the coverage check in
-`scripts/check-rendered-chart.ts` exists to catch — it fails the render rather than letting a new
-component appear unfenced.
-
-Narrower than the culler's, because this pod holds less. It reads the database to find what is due
-and hands each run to the API server over `/internal/routines/run`; it never touches the Kubernetes
-API, and `automountServiceAccountToken` is already false on it, so there is no token here to protect
-and no rule for the API server to write. It calls nothing outside the cluster.
-
-No ingress: nothing connects to a CronJob.
-*/}}
+{{/* Same reason as the culler; this pod holds no token and reaches only the database and the API server. */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -315,10 +268,7 @@ spec:
         - port: 5432
           protocol: TCP
     {{- end }}
-    {{- /*
-      The API server, which is where `SERVER_INTERNAL_URL` points and the only thing this pod calls.
-      A run is handed over rather than performed here, so this rule is the sweep's whole purpose.
-    */}}
+    {{- /* The API server, where SERVER_INTERNAL_URL points and the only thing this pod calls. */}}
     - to:
         - podSelector:
             matchLabels:
