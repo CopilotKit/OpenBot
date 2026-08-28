@@ -8,6 +8,35 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Embedded PostgreSQL initialises on a platform volume, and says so when it cannot
+
+`EMBEDDED_POSTGRES=on` could not create its cluster on a platform whose persistent volume is an ext4
+mount — Railway, and by the same mechanism most others — and it failed differently depending on where
+the volume was mounted. Neither of the two paths this repo suggested worked, and the two suggestions
+disagreed with each other: `docs/deployment.md` said `/var/lib/postgresql/data`, the `Dockerfile`
+comment said `/var/lib/postgresql`.
+
+Mounted at the parent, the mount arrives owned by root, `data` is not in it, and the image's
+build-time `chown` is hidden underneath — so `initdb`, which has already dropped to the `postgres`
+user, cannot create the directory. `postgres-init` now creates and chowns it first, as root, which is
+the only step in a position to. This also fixes the plain
+`docker run -v openbot-data:/var/lib/postgresql` case, which relied entirely on that hidden chown.
+
+Mounted directly on the data directory, the mount arrives holding a `lost+found`, and `initdb` will
+not initialise into a directory with anything in it. **The documented mount is now the parent,
+`/var/lib/postgresql`**, which leaves `data` an ordinary subdirectory — what PostgreSQL's own hint
+asks for, and what the `Dockerfile` already said. A volume already mounted at
+`/var/lib/postgresql/data` and working — a Docker named volume, which arrives empty rather than with a
+`lost+found` — keeps working and needs no change.
+
+**The failure said nothing useful.** `api` waits on `postgres` and `migrate`, so neither started, the
+container came up anyway, the platform reported the deploy a success, and the public URL served a
+persistent 502 with the real reason visible only in the container log. A data directory that holds no
+cluster and is not empty is now refused with a sentence naming the mount to use instead.
+
+Reported by [@jerelvelarde](https://github.com/CopilotKit/OpenBot/issues/269) with the container logs
+for both mount paths, which is what made the two failure modes separable.
+
 ### The framework Bot answers on 5.6-tier models, and can be told how hard to think
 
 Pointing `BOT_MODEL` at a `gpt-5.6-*` model gave a Bot that started, reported healthy, and then said
