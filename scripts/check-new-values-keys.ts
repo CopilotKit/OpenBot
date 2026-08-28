@@ -264,22 +264,14 @@ for (const { path, variable } of offSwitches) {
     console.log(`${variable} falls back to ${got}, as values.yaml says`);
   }
 }
-/*
- * The same assertion for the fallbacks that are not env vars.
+/**
+ * What has to be switched on for the workload carrying this fallback to render at all.
  *
- * `offSwitches` above reads a rendered `name:`/`value:` pair, so it can only see a fallback that
- * reaches a container's environment. Two do not: the routines schedule and the culler's deadline are
- * fields on a CronJob. They were left unchecked as "no drift test yet" and the routines schedule had
- * already been wrong once — `* * * * *`, five times more often than anything documents — which is
- * the whole argument for asserting it rather than trusting the two comments that describe it.
- *
- * Nulling the LEAF, not the parent, because that is the shape `--reuse-values` actually produces
- * here: an existing release carries `routines.enabled` from the release that introduced it and
- * simply has no `schedule` key, so nulling the parent would delete the feature and render nothing
- * to assert against.
- */
-/*
- * The credential that lets `routines.enabled` render, in whichever place this target keeps secrets.
+ * The culler only needs the sandbox mode it belongs to. Routines additionally need the credential
+ * the worker presents, and WHERE that lives differs per target: three of the five read secrets from
+ * a cloud store, where naming `secrets.workerSharedSecret` is not enough and `externalSecrets.data`
+ * has to name it too. Appended after whatever the target already declares rather than turning the
+ * store off, so this still renders the target as shipped.
  */
 const targetValues = parse(await Bun.file(valuesFile).text()) as {
   externalSecrets?: { enabled?: boolean; data?: unknown[] };
@@ -316,6 +308,20 @@ function valueAt(root: unknown, path: readonly string[]): unknown {
   return path.reduce<unknown>((here, key) => at(here, key), root);
 }
 
+/*
+ * The same assertion for the fallbacks that are not env vars.
+ *
+ * `offSwitches` above reads a rendered `name:`/`value:` pair, so it can only see a fallback that
+ * reaches a container's environment. Two do not: the routines schedule and the culler's deadline are
+ * fields on a CronJob. They were left unchecked as "no drift test yet" and the routines schedule had
+ * already been wrong once — `* * * * *`, five times more often than anything documents — which is
+ * the whole argument for asserting it rather than trusting the two comments that describe it.
+ *
+ * Nulling the LEAF, not the parent, because that is the shape `--reuse-values` actually produces
+ * here: an existing release carries `routines.enabled` from the release that introduced it and
+ * simply has no `schedule` key, so nulling the parent would delete the feature and render nothing
+ * to assert against.
+ */
 const fieldFallbacks: ReadonlyArray<{
   /** The values key, as `--set` names it. */
   path: string;
