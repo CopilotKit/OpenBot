@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -140,6 +140,7 @@ beforeAll(async () => {
   process.env.PORT = String(PORT);
   process.env.PROFILES_DIR = join(root, "profiles");
   process.env.WORKSPACE_DIR = join(root, "workspace");
+  await mkdir(join(root, "profiles"), { recursive: true });
   // After the environment is set, because the module reads it while it loads, and behind the flag,
   // because this is the import that needs Playwright present.
   await import("../src/index");
@@ -157,6 +158,7 @@ afterAll(async () => {
     "wheel",
     "stop-viewer",
     "reset-viewer",
+    "wont-launch",
   ]) {
     await api("/computers/stop", botId, { method: "POST" }).catch(
       () => undefined,
@@ -341,4 +343,35 @@ describe.skipIf(!asked)("stopping the computer out from under a viewer", () => {
 
     expect(await stopped(botId)).toBe(false);
   }, 30_000);
+});
+
+describe.skipIf(!asked)("a screen whose browser will not start", () => {
+  test("says so and leaves nothing holding the session", async () => {
+    // `open`'s catch. A file sits where this Bot's profile directory would go, so Chromium cannot
+    // launch and `currentPage` throws while the claim is already held. The socket is told and closed,
+    // which is the observable part; the claim being released with it is what keeps the session
+    // sweepable, and `viewer.test.ts` pins that half because a leaked claim changes nothing a caller
+    // outside this process can see until the map has grown.
+    const botId = "wont-launch";
+    await writeFile(join(root, "profiles", botId), "not a directory");
+
+    const viewer = watch(botId);
+    await viewer.connected;
+
+    await until(
+      () => viewer.errors.length > 0,
+      15_000,
+      "the socket to be told its screen could not be started",
+    );
+
+    // Closed by the handler rather than left open against a browser that does not exist.
+    await until(
+      () => viewer.socket.readyState === WebSocket.CLOSED,
+      5_000,
+      "the socket to be closed after the failure",
+    );
+
+    // The Bot is still usable afterwards: a failed launch must not wedge it.
+    expect(await stopped(botId)).toBe(false);
+  }, 40_000);
 });
