@@ -96,6 +96,15 @@ const LAUNCH_ARGS = [
   ...(SANDBOX_ENABLED ? [] : ["--no-sandbox"]),
   "--disable-dev-shm-usage",
   "--password-store=basic",
+  // Drop the automation signals Chromium sets for itself, so a real person who takes the wheel can
+  // sign in to a site that refuses obvious automation (Google among them). This is the flag, not a
+  // JS patch of `navigator.webdriver`: the flag turns the property off at the source, where spoofing
+  // it from a script leaves the other tells a detector cross-checks. It does not change what the Bot
+  // may do; the governed path is unchanged. The larger tell — a headless build reporting
+  // `HeadlessChrome` in its user agent — is only removed by running headed under a virtual display,
+  // which is a heavier image change tracked separately; this reduces the signals it can reduce
+  // without one.
+  "--disable-blink-features=AutomationControlled",
 ];
 
 console.info(
@@ -372,6 +381,11 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         const proxy = egressFor(botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
           args: LAUNCH_ARGS,
+          // Playwright launches with `--enable-automation`, which sets `navigator.webdriver` and the
+          // "controlled by automated software" banner. Dropped for the same reason as the flag above:
+          // a person who takes the wheel should be able to sign in. Named explicitly so the sandbox
+          // default args Playwright still supplies are otherwise left intact.
+          ignoreDefaultArgs: ["--enable-automation"],
           // Playwright adds `--no-sandbox` on its own unless told otherwise, so leaving this out
           // means the flag above decides nothing and a deployment that asked for the sandbox does
           // not get one. Verified by reading the launched process arguments, not by trusting either.

@@ -640,11 +640,24 @@ export function ComputerView({
                       />
                     </div>
                   ) : showLiveScreen ? (
-                    <LiveScreen
-                      computerId={computerId}
-                      driving={driving}
-                      onProblem={setProblem}
-                    />
+                    <div className="relative w-full" style={{ aspectRatio }}>
+                      <LiveScreen
+                        computerId={computerId}
+                        driving={driving}
+                        onProblem={setProblem}
+                      />
+                      {/*
+                        A live screen that ends reports why through `onProblem`, and this is the
+                        branch that is mounted when it does. Without drawing it here the message
+                        landed in `problem`, which only the sibling `NothingToSee` reads, so the
+                        screen ended with the stale last frame frozen on the canvas and nothing said.
+                      */}
+                      {problem ? (
+                        <div className="absolute inset-0 flex items-center justify-center bg-background/85 p-4 text-center text-sm text-muted-foreground">
+                          <span>{problem}</span>
+                        </div>
+                      ) : null}
+                    </div>
                   ) : (
                     <div className="relative w-full" style={{ aspectRatio }}>
                       <NothingToSee

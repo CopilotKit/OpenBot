@@ -8,6 +8,37 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot's shell can no longer reach the embedded database without a password
+
+In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the
+same container: it could `psql -h 127.0.0.1 -U openbot` with no password and read the audit trail,
+the policy store, and the credential vault as the instance owner. The cluster now uses
+`scram-sha-256` with a password generated on first init and kept beside the data, handed to the API
+over the container environment. The shell has no way to learn it, so the connection is refused. An
+external `DATABASE_URL` deployment is unaffected.
+
+### A live screen that ends says so, instead of freezing the last frame
+
+When a Bot's live screen ended — the computer stopped, or the socket failed — the message explaining
+why was drawn only by a component the take-the-wheel view does not mount, so the screen sat frozen on
+its last frame with nothing said. The reason is now shown where the live screen is.
+
+### A Bot's browser drops the automation flags a person needs gone to sign in
+
+The browser announced itself as automated (`navigator.webdriver`, the enable-automation switch),
+which sites like Google refuse even when a real person has taken the wheel. Those flags are now off
+at the source — the browser flag, not a script that patches `navigator.webdriver` and leaves the
+other tells. A headless build still reports `HeadlessChrome` in its user agent, which only running
+headed under a virtual display removes; that heavier change is tracked separately.
+
+### An empty model reply, or a run with no question, no longer ends in silence
+
+Two failures on strict OpenAI-compatible providers (z.ai GLM, Anthropic): a follow-up run that
+carried only tool deltas and no human turn was refused outright, and a reply with no text and no tool
+call ended the run with nothing on screen. A run with no human turn now carries a neutral
+continuation, and an empty reply ends on a visible line rather than in silence. OpenAI, which
+tolerated both, is unchanged.
+
 ### Embedded PostgreSQL initialises on a platform volume, and says so when it cannot
 
 `EMBEDDED_POSTGRES=on` could not create its cluster on a platform whose persistent volume is an ext4
