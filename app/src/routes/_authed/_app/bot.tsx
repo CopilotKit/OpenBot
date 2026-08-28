@@ -31,7 +31,8 @@ function RouteComponent() {
   const { agent } = Route.useSearch();
   const { data: agents, isPending } = useQuery(agentListQueryOptions());
   const agentId = agent ?? agents?.[0]?.id;
-  const known = agents?.some((candidate) => candidate.id === agentId) ?? false;
+  const bot = agents?.find((candidate) => candidate.id === agentId);
+  const known = bot !== undefined;
 
   if (isPending) return null;
   if (!agentId || !known) {
@@ -50,10 +51,10 @@ function RouteComponent() {
    * Keyed on the Bot, so the hooks below never see it change under them. They cannot be called
    * conditionally, and the guards above return before any of them run.
    */
-  return <BotChat agentId={agentId} key={agentId} />;
+  return <BotChat agentId={agentId} key={agentId} name={bot.name} />;
 }
 
-function BotChat({ agentId }: { agentId: string }) {
+function BotChat({ agentId, name }: { agentId: string; name: string }) {
   // Tool calls here act on this Bot's own computer.
   useActiveBot(agentId);
   /*
@@ -77,7 +78,13 @@ function BotChat({ agentId }: { agentId: string }) {
     <div className="flex h-screen flex-col">
       <header className="border-b px-6 py-3">
         <div className="flex items-baseline justify-between">
-          <h1 className="text-lg font-semibold">Browser Bot</h1>
+          {/*
+           * The Bot this screen is actually showing. A name written into the markup is wrong on
+           * every deployment whose package did not happen to use it, which is the same defect the
+           * route default above was fixed for: this screen called whichever Bot you opened
+           * "Browser Bot", including the one named something else two lines of state away.
+           */}
+          <h1 className="text-lg font-semibold">{name}</h1>
           {/*
            * Labelled rather than the bare icon button the sidebar uses for its own "start
            * something new" control: that one opens an empty screen, but this one throws away
