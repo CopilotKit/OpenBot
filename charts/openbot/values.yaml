@@ -426,6 +426,8 @@ networkPolicy:
   # Left empty it falls back to `extraEgress`, which is where an external database already has to be
   # named; set it to give the culler a narrower list than the API's.
   cullerExtraEgress: []
+  # The same, for the routines sweep. It reaches the database and the API server and nothing else.
+  routinesExtraEgress: []
 
 podSecurityContext:
   runAsNonRoot: false

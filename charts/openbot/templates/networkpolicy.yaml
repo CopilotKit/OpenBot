@@ -264,3 +264,70 @@ spec:
 {{ toYaml . | indent 4 }}
     {{- end }}
 {{- end }}
+
+{{- if and .Values.networkPolicy.enabled .Values.routines.enabled }}
+---
+{{- $routines := "routines" -}}
+{{/*
+The routines sweep, which is the other pod a policy has to name.
+
+Same rule as the culler above: a NetworkPolicy applies to the pods its selector matches, so a
+workload nothing selects keeps the cluster default instead of being fenced. This one arrived after
+the culler's policy was written, which is the case the coverage check in
+`scripts/check-rendered-chart.ts` exists to catch — it fails the render rather than letting a new
+component appear unfenced.
+
+Narrower than the culler's, because this pod holds less. It reads the database to find what is due
+and hands each run to the API server over `/internal/routines/run`; it never touches the Kubernetes
+API, and `automountServiceAccountToken` is already false on it, so there is no token here to protect
+and no rule for the API server to write. It calls nothing outside the cluster.
+
+No ingress: nothing connects to a CronJob.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $routines) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $routines) | indent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $routines) | indent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress rules, which under an Ingress policyType denies all of it.
+  ingress: []
+  egress:
+    # DNS, or neither the database nor the server resolves and the sweep reads as both being down.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    {{- end }}
+    {{- /*
+      The API server, which is where `SERVER_INTERNAL_URL` points and the only thing this pod calls.
+      A run is handed over rather than performed here, so this rule is the sweep's whole purpose.
+    */}}
+    - to:
+        - podSelector:
+            matchLabels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" "server") | indent 14 }}
+      ports:
+        - port: {{ .Values.server.service.port }}
+          protocol: TCP
+    {{- /* An external database, for the reason given on the culler's policy above. */}}
+    {{- with (default .Values.networkPolicy.extraEgress .Values.networkPolicy.routinesExtraEgress) }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}
