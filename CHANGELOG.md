@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.5
+
 ### One Bot can hand work to another, and reach a person when no Bot will do
 
 A Bot asked something it is not the right Bot for can now put the question to one that is. The
