@@ -179,7 +179,27 @@ const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000);
 /** How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`. */
 const IDLE_SWEEP_MS = 60_000;
 
-export function createProfiles(root: string) {
+/**
+ * Told whenever a Bot's browser is closed and forgotten, before the close is waited on.
+ *
+ * Exists because closing a browser is not the whole of stopping a computer: anything still pointed
+ * at the page it was showing has to be taken down with it, and the live screen's follow loop calls
+ * back in for a page every second, which is a launch path. A viewer left running therefore relaunches
+ * whatever was just closed, so a stopped computer restarts itself and an idle one never goes away.
+ *
+ * It is announced here rather than called from the two request handlers because a browser closes
+ * from more places than those: the cap after a launch and the idle sweep close one without any
+ * request being involved. Hanging the teardown off the close itself covers those by construction,
+ * where remembering to add a call at each new handler does not.
+ *
+ * Awaited before the context closes, so a follow loop cannot squeeze a relaunch into the gap.
+ */
+export type BrowserClosed = (botId: string) => void | Promise<void>;
+
+export function createProfiles(
+  root: string,
+  onClosed: BrowserClosed = () => {},
+) {
   /** One running browser per Bot, up to {@link MAX_LIVE_BROWSERS}. */
   const live = new Map<
     string,
@@ -205,14 +225,18 @@ export function createProfiles(root: string) {
    * Gracefully, so Chromium flushes the profile: the whole point of closing one is that the Bot's
    * logins survive and its next request starts where it left off.
    */
-  const evict = async (botId: string, reason: string): Promise<void> => {
+  const evict = async (botId: string, reason: string): Promise<boolean> => {
     const running = live.get(botId);
-    if (!running) return;
+    if (!running) return false;
     live.delete(botId);
     console.info(
       JSON.stringify({ type: "computer-browser-closed", botId, reason }),
     );
+    // Before the close, so whatever was watching this browser is taken down while it is still the
+    // browser being closed. A live screen surviving here relaunches it a second later.
+    await Promise.resolve(onClosed(botId)).catch(() => undefined);
     await closeAndWait(running.context).catch(() => undefined);
+    return true;
   };
 
   /**
@@ -337,12 +361,15 @@ export function createProfiles(root: string) {
      * Gracefully, so Chromium flushes its profile. This is what "kill" means for a Bot's computer: the
      * browser stops, the login survives, and the next request starts it again where it left off.
      */
+    /**
+     * Stop this Bot's browser, keeping what it knows.
+     *
+     * The same close the cap and the idle sweep make, so it goes through the same path rather than
+     * repeating it: a request is one more reason a browser closes, not a different kind of closing,
+     * and anything watching has to come down either way.
+     */
     async stop(botId: string): Promise<boolean> {
-      const existing = live.get(botId);
-      if (!existing) return false;
-      live.delete(botId);
-      await closeAndWait(existing.context);
-      return true;
+      return evict(botId, "it was stopped");
     },
 
     /**
@@ -354,7 +381,8 @@ export function createProfiles(root: string) {
      * clean browser, which is the same path as a first ever start and so needs no second code path.
      */
     async reset(botId: string): Promise<void> {
-      await this.stop(botId);
+      // Its own reason rather than borrowing stop's, so the trail says which of the two happened.
+      await evict(botId, "it was reset");
       await rm(directoryFor(botId), { recursive: true, force: true });
     },
 
@@ -398,9 +426,16 @@ export function createProfiles(root: string) {
      */
     async closeAll(): Promise<void> {
       clearInterval(idleSweep);
-      const contexts = [...live.values()];
+      const entries = [...live.entries()];
       live.clear();
-      await Promise.all(contexts.map((c) => closeAndWait(c.context)));
+      // Told for each, the same as any other close. On the way out it changes nothing that survives,
+      // but a viewer whose socket outlives this by a moment is still owed the message.
+      await Promise.all(
+        entries.map(([botId]) =>
+          Promise.resolve(onClosed(botId)).catch(() => undefined),
+        ),
+      );
+      await Promise.all(entries.map(([, c]) => closeAndWait(c.context)));
     },
 
     /** How many browsers are running. For the idle sweep's own tests, and for a status reader. */

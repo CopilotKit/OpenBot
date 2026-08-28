@@ -193,7 +193,23 @@ const workspace = createWorkspace(process.env.WORKSPACE_DIR ?? "/workspace");
  * `chromium.launch()` gives a fresh anonymous profile every time. Persistent profiles live on a
  * mounted volume so sign-in state survives the container.
  */
-const profiles = createProfiles(process.env.PROFILES_DIR ?? "/profiles");
+/**
+ * The browsers, and what a closing one takes with it.
+ *
+ * Every close announces itself here, whether it came from a request, the cap, or the idle sweep, and
+ * the live screen watching that Bot comes down with it. Hanging this off the close rather than
+ * calling it from the stop and reset handlers is what covers the two closes no request makes: a
+ * viewer that outlived one of those kept a 1Hz loop asking for a page, which starts a browser, so
+ * the Bot was immune to the idle timeout and came straight back after a cap eviction.
+ *
+ * `sessions.get`, never `sessionFor`: a Bot with no session has nobody watching, and inventing one
+ * here would put an entry in the map on the path that closes browsers, which is where the map is
+ * meant to shrink.
+ */
+const profiles = createProfiles(
+  process.env.PROFILES_DIR ?? "/profiles",
+  (botId) => sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED),
+);
 // Rooted in the same workspace the file tools use, so a command and a written file see one
 // directory rather than two.
 const shell = createShell(process.env.WORKSPACE_DIR ?? "/workspace");
@@ -335,6 +351,10 @@ function json(body: unknown, status = 200): Response {
     headers: { "content-type": "application/json" },
   });
 }
+
+/** What a person watching is told when the browser they were watching went away. */
+const COMPUTER_STOPPED =
+  "This computer stopped, so the screen ended. Start it again to carry on watching.";
 
 /** What a person is told when their screen is still opening and they have already started typing. */
 const SCREEN_STILL_STARTING =

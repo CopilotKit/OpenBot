@@ -150,7 +150,14 @@ afterAll(async () => {
   for (const close of closing) close();
   closing = [];
   // Every browser this file started, so the rest of the suite does not inherit a stray Chromium.
-  for (const botId of ["cold-close", "supersede", "late-close", "wheel"]) {
+  for (const botId of [
+    "cold-close",
+    "supersede",
+    "late-close",
+    "wheel",
+    "stop-viewer",
+    "reset-viewer",
+  ]) {
     await api("/computers/stop", botId, { method: "POST" }).catch(
       () => undefined,
     );
@@ -292,3 +299,46 @@ describe.skipIf(!asked)(
     }, 30_000);
   },
 );
+
+describe.skipIf(!asked)("stopping the computer out from under a viewer", () => {
+  test("takes the screen down and does not come back", async () => {
+    // Failure 2. Stopping released the wheel and left the viewer alone, so the follow loop's next
+    // tick asked for a page, which starts a browser, and the computer somebody had just stopped was
+    // running again a second later, refreshing its own idle timestamp every tick while it did.
+    const botId = "stop-viewer";
+    const viewer = watch(botId);
+    await viewer.casting;
+
+    expect(await stopped(botId)).toBe(true);
+
+    await until(
+      () => viewer.errors.some((e) => /stopped/i.test(e)),
+      5_000,
+      "the viewer to be told the computer stopped",
+    );
+    await wait(PAST_ONE_FOLLOW_TICK_MS);
+
+    // Nothing restarted it in the meantime, which is the whole observable.
+    expect(await stopped(botId)).toBe(false);
+  }, 30_000);
+
+  test("the same holds when the computer is reset rather than stopped", async () => {
+    // Reset wipes the profile as well, and had the identical hole: it released the wheel and never
+    // touched the viewer. Its own response carries no `wasRunning`, so the relaunch is observed
+    // through a following stop rather than through what reset itself answers.
+    const botId = "reset-viewer";
+    const viewer = watch(botId);
+    await viewer.casting;
+
+    await api("/computers/reset", botId, { method: "POST" });
+
+    await until(
+      () => viewer.errors.some((e) => /stopped/i.test(e)),
+      5_000,
+      "the viewer to be told its computer went away",
+    );
+    await wait(PAST_ONE_FOLLOW_TICK_MS);
+
+    expect(await stopped(botId)).toBe(false);
+  }, 30_000);
+});
