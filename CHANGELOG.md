@@ -18,9 +18,11 @@ question was put and to whom. A Bot that judges no other Bot will do can instead
 who asked it.
 
 **No Bot may address any other until an administrator says so.** Which Bot may reach which is an
-ordinary grant, made per Bot, and a Bot with no grant is told it cannot rather than quietly trying.
-A Bot addressed by a name two Bots answer to is refused and both are named, because picking one
-would be a guess about which colleague a person meant.
+ordinary grant, made per Bot on that Bot's own screen under **Bots it may ask**, and a Bot with no
+grant is told it cannot rather than quietly trying. The pair is directional: that list is who this
+Bot may ask, not who may ask it, so letting two Bots ask each other is two switches. A Bot addressed
+by a name two Bots answer to is refused and both are named, because picking one would be a guess
+about which colleague a person meant.
 
 Two ceilings, because a Bot deciding to ask another Bot is a Bot deciding to spend a run:
 `BOT_HANDOFF_MAX_DEPTH` is how many Bots deep a chain may go and defaults to `1`, and **`0` switches
@@ -34,6 +36,23 @@ that is retried leaves one "asked" line per attempt in the addressed Bot's own t
 that took three attempts reads there as having been asked three times.
 
 No new tables: this uses the work queue that already fires the culler.
+
+### A conversation that used a tool no longer stops answering for good
+
+A channel could reach a state where every turn in it failed and the only thing it said was
+`Tool result is missing for tool call call_…`. Not the turn: the conversation. Everything sent
+afterwards failed the same way, including a question as ordinary as what two plus two is, and there
+was nothing a person could do to it from the screen.
+
+A tool result is matched to the call above it, and a thread read back from the platform does not
+always carry the two in that order. Where the result was stored ahead of its own call, this
+deployment counted the call answered, sent the history on unchanged, and the model provider rejected
+the whole conversation while assembling it. Handing work to another Bot, asking a person, and
+calling a connector's tool could each leave a thread in that shape.
+
+A result now only answers a call it follows. One that arrives early is moved to sit after its call,
+keeping what it actually said, and a result whose call is nowhere in the thread is dropped. Affected
+conversations start answering again on their own; there is nothing to run and nothing to reset.
 
 ### The framework Bot answers on 5.6-tier models, and can be told how hard to think
 
