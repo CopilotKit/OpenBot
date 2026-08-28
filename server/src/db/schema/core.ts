@@ -278,6 +278,12 @@ export const channels = pgTable(
         onDelete: "set null",
       },
     ),
+    /**
+     * When this channel was deleted, or null. Soft: the row, the transcript, and the Intelligence
+     * thread stay intact, and every read path filters on this instead. Channel grain, because
+     * deleting is for everyone — per-member hiding would be a membership fact instead.
+     */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -308,6 +314,16 @@ export const channelMemberships = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * When this member pinned the channel, or null. On the membership, not the channel: a pin is
+     * one person's marker, and the membership row is already the per-member half of a channel.
+     */
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+    /**
+     * When this member last had the channel open, or null for never. On the membership like the
+     * pin: reading is one person's act, and the unread marker it feeds is that person's alone.
+     */
+    lastReadAt: timestamp("last_read_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (table) => [primaryKey({ columns: [table.channelId, table.userId] })],
@@ -327,17 +343,28 @@ export const channelAgents = pgTable(
   (table) => [primaryKey({ columns: [table.channelId, table.agentId] })],
 );
 
-export const credentials = pgTable("credentials", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  kind: credentialKind("kind").notNull(),
-  provider: text("provider").notNull(),
-  encryptedValue: text("encrypted_value").notNull(),
-  keyId: text("key_id").notNull(),
-  metadata: jsonb("metadata").notNull(),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const credentials = pgTable(
+  "credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: credentialKind("kind").notNull(),
+    provider: text("provider").notNull(),
+    encryptedValue: text("encrypted_value").notNull(),
+    keyId: text("key_id").notNull(),
+    metadata: jsonb("metadata").notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    // At most one live credential per (kind, provider, key_id). Revoked rows are
+    // excluded so history is preserved, and two replicas racing to rotate the
+    // same secret cannot both insert a live row.
+    uniqueIndex("credentials_active_key_idx")
+      .on(table.kind, table.provider, table.keyId)
+      .where(sql`${table.revokedAt} IS NULL`),
+  ],
+);
 
 export const auditEvents = pgTable(
   "audit_events",

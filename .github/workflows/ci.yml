@@ -73,6 +73,110 @@ jobs:
       - run: bun run typecheck
         working-directory: ${{ matrix.package }}
 
+  chart:
+    name: chart (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      # One red target must not hide whether another is red too.
+      fail-fast: false
+      matrix:
+        target: [self-hosted, eks, eks-sandbox, gke, aks]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The new-values-key check compares this chart against the last released one, or against
+          # main where the chart has not shipped yet. A shallow clone has neither to compare with.
+          fetch-depth: 0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.19.0
+      # For the coherence check below, which is a Bun script like everything else here.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      # Nothing rendered this chart until now, which is how four values files that produce a server
+      # unable to start were shipped and stayed shipped. Rendering is the cheap half; the refusals in
+      # validation.yaml are the half that catches a missing value before a cluster does.
+      - run: helm dependency build charts/openbot
+      # Structure only. `helm lint` reports a template `fail` as an INFO line and exits 0 even under
+      # `--strict`, which was driven and confirmed, so it cannot gate the refusals below. Rendering
+      # does: `helm template` exits non-zero on one.
+      - run: helm lint charts/openbot --values charts/openbot/ci/${{ matrix.target }}-values.yaml
+      # A key encryption key is a real 32 bytes rather than a placeholder, because the chart checks
+      # its shape. Generated here so no example key is ever a literal in this repository.
+      - name: Render
+        run: |
+          helm template ci charts/openbot \
+            --values charts/openbot/ci/${{ matrix.target }}-values.yaml \
+            --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)" \
+            --api-versions agents.x-k8s.io/v1beta1/Sandbox \
+            --api-versions extensions.agents.x-k8s.io/v1beta1/SandboxTemplate \
+            > rendered.yaml
+      # Rendering proves the templates run. This proves the result is coherent, which is a different
+      # question: every secret key a container demands has to be one the chart actually writes.
+      # Getting that wrong is invisible until a pod starts, and every shipped target had it wrong.
+      - run: bun scripts/check-rendered-chart.ts rendered.yaml
+      # And that the refusals are load-bearing rather than decorative. A chart full of `fail`
+      # messages nothing ever triggers is a chart that has never been shown to refuse anything, and
+      # every one of these describes a state that shipped in a values file at some point.
+      - name: Refusals fire
+        run: |
+          set -uo pipefail
+          refuses() {
+            local why="$1"; shift
+            if helm template ci charts/openbot \
+                 --values charts/openbot/ci/${{ matrix.target }}-values.yaml \
+                 --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)" \
+                 --api-versions agents.x-k8s.io/v1beta1/Sandbox \
+                 --api-versions extensions.agents.x-k8s.io/v1beta1/SandboxTemplate \
+                 "$@" >/dev/null 2>&1; then
+              echo "::error::The chart rendered $why, which it is supposed to refuse."
+              return 1
+            fi
+            echo "refused: $why"
+          }
+          # The public example key, which the server will not start with. Only where this chart
+          # holds the secret: with a store, the value is not readable at template time, so the
+          # refusal is deliberately not armed and asserting it here would be asserting a bug.
+          if ! grep -qE '^ *enabled: true' <(sed -n '/^externalSecrets:/,/^[a-z]/p' charts/openbot/ci/${{ matrix.target }}-values.yaml); then
+            refuses "the public example encryption key" \
+              --set-string secrets.keyEncryptionKey="$(head -c 32 /dev/zero | base64)"
+          else
+            echo "skipped: the example-key refusal is not armed when the secret comes from a store"
+          fi
+          # A Bot endpoint with nothing on the request that says who is calling. Armed whether the
+          # secret is this chart's or a store's, because the key list is readable either way.
+          refuses "a managed agent URL with no token" \
+            --set-string config.managedAgent.url=http://agent.default:8000/ag-ui
+          # A browser inside every replica of a replicated API.
+          refuses "an embedded browser across several replicas" \
+            --set server.embeddedComputer=true --set server.replicaCount=2
+          # A Bot's egress proxy on a port the computer's own network policy does not allow. The
+          # variables reach the computer through extraEnv, so nothing else notices that the policy
+          # then refuses to let it be reached.
+          refuses "an egress proxy the network policy blocks" \
+            --set networkPolicy.enabled=true \
+            --set computers.extraEnv[0].name=EGRESS_PROXY_DEFAULT \
+            --set-string computers.extraEnv[0].value=http://proxy.internal:3128
+          # A warm pool nothing claims from. Only meaningful where the target asks for per-Bot
+          # computers; on the others the mode is not sandbox and the refusal is not armed.
+          if grep -qE '^ *mode: sandbox' charts/openbot/ci/${{ matrix.target }}-values.yaml; then
+            refuses "a warm pool no Bot can be handed a computer from" \
+              --set computers.sandbox.warmPool.enabled=true
+          else
+            echo "skipped: the warm-pool refusal is only armed for computers.mode: sandbox"
+          fi
+      # And that a values key this chart did not used to have still renders when it is absent.
+      #
+      # `helm upgrade --reuse-values` takes the previous release's computed values rather than
+      # merging the new chart's defaults, so a key added by the release being installed is missing on
+      # every deployment that already exists. Unguarded that is a nil dereference that fails the
+      # whole render, or an empty scalar Kubernetes reads as unset. Both shipped: one was found in
+      # review, the other by a live upgrade after the first had been fixed one key over.
+      - name: A new values key can be absent
+        run: bun scripts/check-new-values-keys.ts charts/openbot/ci/${{ matrix.target }}-values.yaml
+
   test:
     name: tests
     runs-on: ubuntu-latest
@@ -261,7 +365,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, test, build, migrations, image]
+    needs: [static, deployables, chart, test, build, migrations, image]
     steps:
       - name: Require every check
         env:

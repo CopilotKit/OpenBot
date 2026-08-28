@@ -35,6 +35,7 @@ export {
   WorkspaceRequestError,
 } from "./client";
 
+import type { PageFrameStore } from "./page-frames";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
@@ -112,6 +113,13 @@ export type ComputerGatewayOptions = {
    * is correct in one process and is what a unit test wants. See snapshot-store.ts.
    */
   snapshots?: SnapshotStore;
+  /**
+   * Where the frame a page was opened on is kept, so a reset can take them with the profile.
+   *
+   * Absent, a reset clears the profile and leaves the pictures, which is the wrong half of a promise
+   * this deployment makes in as many words.
+   */
+  pageFrames?: PageFrameStore;
 };
 
 export interface ComputerGateway {
@@ -231,6 +239,7 @@ export function createComputerGateway(
    * ref from a superseded page from resolving to whatever now holds it. See snapshot-store.ts.
    */
   const snapshots = options.snapshots ?? createInMemorySnapshotStore();
+  const pageFrames = options.pageFrames;
 
   /**
    * Where this Bot's computer is, checked before anything is sent to it.
@@ -266,21 +275,45 @@ export function createComputerGateway(
     );
   }
 
+  /**
+   * `address` is this action's own `/ensure`, when the caller has already made it.
+   *
+   * Locating twice for one action is two calls to the supervisor to learn the same thing, and worse,
+   * they can disagree: the run the action was decided against would not be the run it was sent to.
+   * Passing the address through means the check and the send are the same trip.
+   */
   async function post<T>(
     botId: string,
     path: string,
     payload: unknown,
     signal?: AbortSignal,
     timeoutMs?: number,
+    address?: string,
   ): Promise<T> {
     return transport.post<T>(
-      await locate(botId),
+      address ?? (await locate(botId)),
       botId,
       path,
       payload,
       signal,
       timeoutMs,
     );
+  }
+
+  /**
+   * This action's own `/ensure`, or nothing when it cannot be made.
+   *
+   * A computer that cannot be located is not a verdict this may reach on its own. The action still
+   * has to be decided and recorded, and the attempt failing is what writes the failure row beside the
+   * decision; throwing here would take the action off the trail entirely. So a failure answers
+   * "unknown", which leaves the generation check where it was and leaves the address to the attempt.
+   */
+  async function locateForAction(botId: string): Promise<string | undefined> {
+    try {
+      return await locate(botId);
+    } catch {
+      return undefined;
+    }
   }
 
   /*
@@ -412,13 +445,29 @@ export function createComputerGateway(
       /** The person's Stop, on its way to the browser. See the acting methods below. */
       signal?: AbortSignal;
     },
-    run: () => Promise<T>,
+    run: (address?: string) => Promise<T>,
   ): Promise<T> {
     const { ref, filePath, snapshotId } = subject;
     // Loaded from the store, not this process's memory: the snapshot these refs belong to was very
     // likely taken by another replica, and resolving against a local map would find nothing there.
     const stored = await snapshots.load(botId);
-    const { session } = await sessionOf(botId);
+    /*
+     * LOCATE FIRST, THEN ASK WHICH RUN THAT WAS. The order is the check.
+     *
+     * `sessionOf` answers with what the last `/ensure` reported, and until this action has made its
+     * own, the last one belongs to the action before it. Asking first compared the stored snapshot
+     * against the previous action's run, which is the same run on every action but the first one
+     * after a replacement — exactly the action the check exists to catch. The click after a replaced
+     * container was allowed and the one after that refused, which is a guarantee arriving one action
+     * too late.
+     *
+     * Only for an action that cites a ref. Nothing else is resolved against a snapshot, so nothing
+     * else needs the run, and a scroll or a file read should not have to reach the supervisor before
+     * the policy has even seen it. The address that comes back is the one the attempt then uses, so
+     * this costs no extra call for the actions that do need it.
+     */
+    const address = ref ? await locateForAction(botId) : undefined;
+    const { session } = ref ? await sessionOf(botId) : { session: undefined };
     const element = resolve(stored, ref, snapshotId, session);
     // For a navigation the relevant page is the one being opened, not the one already loaded. Using
     // the stored URL would mean `page.host == "..."` could never match the destination, which is the
@@ -523,7 +572,7 @@ export function createComputerGateway(
           `${ref} is not on the page this computer is showing, so nothing can be checked against it before acting. Take a fresh snapshot and use the refs it returns.`,
         );
       }
-      result = await run();
+      result = await run(address);
     } catch (error) {
       /**
        * A permitted action that did not happen gets its own row.
@@ -534,6 +583,13 @@ export function createComputerGateway(
        * Writing the decision before acting is still right, because an allowed action may have partial
        * effects before failing. The failure row records the outcome separately from the policy
        * decision.
+       *
+       * It carries the same subject the decision row did, and for the same reasons: a shell call
+       * that failed part-way is the row somebody most needs to name the command from, and a keypress
+       * that failed is still the difference between a submitted form and a typed letter. Leaving
+       * them off also chose the wrong element branch below, because "this action never had an
+       * element" is decided by the command and the file path — so a failed command claimed a
+       * snapshot lookup that never happened.
        */
       await write(auditStore, {
         toolName,
@@ -541,6 +597,8 @@ export function createComputerGateway(
         actor,
         element,
         ref,
+        ...(subject.key ? { key: subject.key } : {}),
+        ...(subject.command ? { command: subject.command } : {}),
         filePath,
         pageUrl,
         decision,
@@ -658,6 +716,15 @@ export function createComputerGateway(
       // The refs the last snapshot handed out describe a page that no longer exists, and a fresh
       // computer counts generations from one again, so the row has to go with the profile.
       await snapshots.clear(botId);
+      /*
+       * And the pictures, which are the part that made the promise above untrue.
+       *
+       * "Every login the Bot had is gone" was said while screenshots of the signed-in pages stayed
+       * in the database: an inbox, an admin console, a bank statement, still readable from the
+       * transcript by anybody who could reach that Bot. A reset that leaves those has not reset
+       * anything a person would recognise as private.
+       */
+      await pageFrames?.clear(botId);
       await writeControlEvent(auditStore, "computer.reset", {
         botId,
         actor,
@@ -755,7 +822,15 @@ export function createComputerGateway(
           snapshotId: input.snapshotId,
           ...(signal ? { signal } : {}),
         },
-        () => post<ActionResult>(botId, "/click", input, signal),
+        (address) =>
+          post<ActionResult>(
+            botId,
+            "/click",
+            input,
+            signal,
+            undefined,
+            address,
+          ),
       );
     },
 
@@ -783,7 +858,8 @@ export function createComputerGateway(
           ...(input.submit ? { key: "Enter" } : {}),
           ...(signal ? { signal } : {}),
         },
-        () => post<ActionResult>(botId, "/type", input, signal),
+        (address) =>
+          post<ActionResult>(botId, "/type", input, signal, undefined, address),
       );
     },
 
@@ -805,7 +881,8 @@ export function createComputerGateway(
           key: input.key,
           ...(signal ? { signal } : {}),
         },
-        () => post<ActionResult>(botId, "/key", input, signal),
+        (address) =>
+          post<ActionResult>(botId, "/key", input, signal, undefined, address),
       );
     },
 
@@ -894,7 +971,7 @@ export function createComputerGateway(
  * Lower-cased, because a rule forbidding `.env` must also catch `.ENV`; the
  * operator should have anticipated. Same reasoning as the case-insensitive `contains` in policy.ts.
  */
-function describeFile(path: string): {
+export function describeFile(path: string): {
   path: string;
   name: string;
   extension: string;
@@ -940,7 +1017,7 @@ const ACTIVATING_KEYS = new Set(["Enter", "NumpadEnter", "Space", " "]);
  */
 const HUMAN_GESTURES = new Set(["click", "type", "key", "scroll"]);
 
-function intentOf(
+export function intentOf(
   toolName: string,
   key: string | undefined,
 ): PolicyContext["intent"] {
@@ -1028,19 +1105,26 @@ async function write(
        * is the file body of this pair, and stays out.
        */
       ...(entry.command ? { command: entry.command } : {}),
+      /*
+       * The element, where the action named one.
+       *
+       * KEYED ON THE REF, not on the kind of action. An unresolved element is worth recording
+       * plainly rather than as an absent field that reads like a logging gap, but that only applies
+       * when the Bot pointed at something and the server could not say what: a ref it holds and the
+       * snapshot no longer does. Deciding it by elimination instead put "not in the current
+       * snapshot" on every navigation, every file read and every command, which is the reverse of
+       * the intent. Those actions did not fail to identify an element; they never had one, and a
+       * trail that says otherwise sends a reader looking for a snapshot that was never taken.
+       */
       element: entry.element
         ? {
             role: entry.element.role,
             name: entry.element.name,
             ...(entry.element.type ? { type: entry.element.type } : {}),
           }
-        : entry.filePath || entry.command
-          ? // A file or command action has no element and never will. Those rows leave the element
-            // field absent rather than describing a browser snapshot.
-            undefined
-          : // An action on an element the server cannot identify is worth recording plainly, rather
-            // than as an absent field that reads like a logging gap.
-            "not in the current snapshot",
+        : entry.ref
+          ? "not in the current snapshot"
+          : undefined,
       ...(entry.failure ? { failure: entry.failure } : {}),
       decision: {
         allowed: entry.decision.allowed,
@@ -1100,7 +1184,7 @@ async function writeControlEvent(
   });
 }
 
-function hostOf(url: string): string {
+export function hostOf(url: string): string {
   try {
     return new URL(url).host;
   } catch {

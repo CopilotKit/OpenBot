@@ -8,13 +8,6 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemTitle,
-} from "@/components/ui/item";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -22,6 +15,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { connectAccountMutationOptions } from "@/lib/plugins/mutations";
 import {

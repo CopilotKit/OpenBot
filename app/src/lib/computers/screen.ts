@@ -40,3 +40,31 @@ export async function readScreenshot(
     return { error: unavailable };
   }
 }
+
+/** The frame a page was showing when a Bot opened it. */
+export type PageFrame = { url: string; title: string | null; frame: string };
+
+/**
+ * What this turn had on screen when it opened its page, or nothing if it was never kept.
+ *
+ * Nothing here writes. The frame is taken on the server at the moment the navigation succeeds, which
+ * is the only moment the screen is certainly showing the page that was asked for. Capturing it here
+ * instead meant capturing it after the turn, from a computer other conversations are also driving,
+ * and filing whatever it happened to show.
+ */
+export async function readPageFrame(
+  computerId: string,
+  toolCallId: string,
+): Promise<PageFrame | null> {
+  try {
+    const response = await tryClient(
+      `/api/computers/${computerId}/page-frame/${encodeURIComponent(toolCallId)}`,
+    );
+    if (!response.ok) return null;
+    const body = (await response.json()) as { frame?: PageFrame | null };
+    return body.frame ?? null;
+  } catch {
+    // A missing picture is a smaller sentence, not a broken conversation.
+    return null;
+  }
+}

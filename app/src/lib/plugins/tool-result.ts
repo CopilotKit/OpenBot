@@ -81,3 +81,22 @@ export function forDisplay(text: string): string {
 
   return `\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
 }
+
+/**
+ * Whether a server-side tool's result begins with the phrase that means it went ahead.
+ *
+ * TWO CALLERS AND ONE RULE, because they had two. A tool that runs on the server reaches the
+ * transcript as text meant for a model, so the only thing the renderer can read an outcome out of is
+ * the wording — and the wording arrives JSON-encoded, which is why this decodes before it matches.
+ *
+ * The awkward case is a result that is neither a string nor absent. `message_bot` treated that as
+ * success and `ask_person` treated it as a refusal, for the same situation, and the handoff's own
+ * comments say which way round is worse: a boundary that held drawn as a Bot getting on with it.
+ * So anything unrecognisable is not success. Absent is left alone, because a call still running has
+ * no result yet and the caller decides that from its status.
+ */
+export function saidItWentAhead(result: unknown, marker: string): boolean {
+  if (result === undefined) return true;
+  if (typeof result !== "string") return false;
+  return asText(result).startsWith(marker);
+}

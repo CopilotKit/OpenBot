@@ -269,3 +269,130 @@ describe("falling back to somebody who can actually answer", () => {
     expect(decision.fallback).toBe(false);
   });
 });
+
+/**
+ * Why a message was not routed, as a thing a deployment can count.
+ *
+ * `fallback` says an inferred match did not happen. It does not say whether the router declined or
+ * the router failed, and only one of those is a deployment with something wrong with it. #178 was
+ * exactly that: the router 404'd on every deployment that set `OPENAI_BASE_URL`, and its changelog
+ * says untagged messages "silently stopped being routed and nothing said why". These pin the field
+ * that answers it.
+ */
+describe("saying why a message was not routed", () => {
+  test("a confident match leaves nothing undecided", async () => {
+    const decision = await withAnswer(
+      JSON.stringify({
+        agentId: "risk-analyst",
+        reason: "fraud",
+        confidence: 0.9,
+      }),
+    ).route("is this transaction fraud", ROSTER, "general-assistant");
+
+    expect(decision.fallback).toBe(false);
+    expect(decision.undecided).toBeNull();
+  });
+
+  test("an unreachable router is named as unreachable", async () => {
+    const decision = await throwing().route(
+      "anything",
+      ROSTER,
+      "general-assistant",
+    );
+    expect(decision.undecided).toBe("unreachable");
+  });
+
+  test("an answer that does not parse is named as unparsed", async () => {
+    const decision = await withAnswer('{ "agentId": }').route(
+      "anything",
+      ROSTER,
+      "general-assistant",
+    );
+    expect(decision.undecided).toBe("unparsed");
+  });
+
+  test("prose with no JSON in it is unparsed, not off-roster", async () => {
+    /*
+     * A model answering in sentences is a model not following the format. Recorded as off-roster it
+     * reads as a roster problem, and whoever investigates goes and looks at their roster.
+     */
+    const decision = await withAnswer("I think Risk Analyst is best.").route(
+      "anything",
+      ROSTER,
+      "general-assistant",
+    );
+    expect(decision.undecided).toBe("unparsed");
+  });
+
+  test("an id that is not on the roster is named as off-roster", async () => {
+    const decision = await withAnswer(
+      JSON.stringify({ agentId: "somebody-else", confidence: 0.9 }),
+    ).route("anything", ROSTER, "general-assistant");
+    expect(decision.undecided).toBe("off-roster");
+  });
+
+  test("an honest low confidence is named as unconfident, not as a failure", async () => {
+    // The one cause that is the feature working. Counting it with the failures would make the
+    // number useless, which is the whole reason this is a named cause rather than a boolean.
+    const decision = await withAnswer(
+      JSON.stringify({ agentId: "risk-analyst", confidence: 0.2 }),
+    ).route("anything", ROSTER, "general-assistant");
+    expect(decision.undecided).toBe("unconfident");
+  });
+
+  test("a roster of one is named as one-candidate, and asks nothing", async () => {
+    const decision = await throwing().route(
+      "anything",
+      [ROSTER[0] as RoutingCandidate],
+      "general-assistant",
+    );
+    expect(decision.undecided).toBe("one-candidate");
+  });
+
+  test("the reach answer does not hide that the router never answered", async () => {
+    /*
+     * THE CASE THIS EXISTS FOR. Landing on the only coworker that can reach Google Drive is a good
+     * outcome, and it says nothing about whether the router was up. Before this the reach sentence
+     * replaced the failure entirely, so a deployment whose router had been down for a week produced
+     * rows that read exactly like reach-based routing working as intended.
+     */
+    const reaching: RoutingCandidate[] = [
+      { ...(ROSTER[0] as RoutingCandidate) },
+      {
+        ...(ROSTER[1] as RoutingCandidate),
+        reaches: ["google-drive"],
+      },
+    ];
+
+    const decision = await throwing().route(
+      "find the PRD in google drive",
+      reaching,
+      "general-assistant",
+    );
+
+    // Still routed by reach, and still a fallback — both unchanged.
+    expect(decision.agentId).toBe("knowledge");
+    expect(decision.reason).toContain("google-drive");
+    expect(decision.fallback).toBe(true);
+    // And the router failure survives it.
+    expect(decision.undecided).toBe("unreachable");
+  });
+
+  test("reach after a low-confidence answer says unconfident, not unreachable", async () => {
+    // The two are told apart on the reach path as well, or the count is wrong wherever reach fires.
+    const reaching: RoutingCandidate[] = [
+      { ...(ROSTER[0] as RoutingCandidate) },
+      {
+        ...(ROSTER[1] as RoutingCandidate),
+        reaches: ["google-drive"],
+      },
+    ];
+
+    const decision = await withAnswer(
+      JSON.stringify({ agentId: "knowledge", confidence: 0.1 }),
+    ).route("find the PRD in google drive", reaching, "general-assistant");
+
+    expect(decision.agentId).toBe("knowledge");
+    expect(decision.undecided).toBe("unconfident");
+  });
+});

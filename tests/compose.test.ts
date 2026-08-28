@@ -121,3 +121,35 @@ test("runs migrations after PostgreSQL becomes healthy", () => {
   expect(compose).toContain("condition: service_healthy");
   expect(compose).toContain('"drizzle-kit", "migrate"');
 });
+
+/**
+ * Per-Bot egress reaches the processes that read it.
+ *
+ * `EGRESS_PROXY_<BOT>` and `EGRESS_PROXY_DEFAULT` are resolved from `process.env` by the computer
+ * itself (`agent-computer/src/egress.ts`), and the supervisor forwards every `EGRESS_PROXY` key out
+ * of its own environment into each computer it creates (`supervisor/src/index.ts`). Compose gives a
+ * container only what its `environment:` and `env_file:` blocks name, and for a long time neither
+ * named these, so an operator who configured a proxy per the documentation got a browser that went
+ * out directly and no error saying so.
+ *
+ * A file rather than `environment:` entries because the names are per-Bot and therefore not knowable
+ * here, and a file of its own rather than `.env` because that one holds the deployment's secrets and
+ * the browser container is deliberately not given them.
+ */
+test("carries per-Bot egress into the computer and the supervisor", () => {
+  const compose = readFileSync(
+    join(import.meta.dir, "..", "docker-compose.yml"),
+    "utf8",
+  );
+
+  // Both halves: the shared computer reads them itself, and the supervisor passes them on.
+  const services = compose.split(/^ {2}(?=\S)/m);
+  for (const name of ["agent-computer:", "supervisor:"]) {
+    const service = services.find((block) => block.startsWith(name));
+    expect(service).toBeDefined();
+    expect(service).toContain("egress.env");
+  }
+
+  // Optional, because a deployment with no proxy is the ordinary case and must still start.
+  expect(compose).toContain("required: false");
+});

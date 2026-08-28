@@ -73,11 +73,11 @@ export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
           tool_calls:
             message.toolCalls?.map((call) => ({
               id: call.id,
-              name: call.function.name,
+              name: callDetails(call).name,
               // LangChain wants parsed arguments where AG-UI carries the raw string. A call whose
               // arguments did not parse is passed as empty rather than dropped: the model needs to
               // see that it made the call, or it makes it again.
-              args: parseArguments(call.function.arguments),
+              args: parseArguments(callDetails(call).arguments),
             })) ?? [],
         }),
       );
@@ -95,7 +95,7 @@ export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
             new ToolMessage({
               tool_call_id: call.id,
               content: NO_ANSWER_CAME,
-              name: call.function.name,
+              name: callDetails(call).name,
             }),
           );
         }
@@ -115,4 +115,29 @@ function parseArguments(raw: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+/**
+ * A tool call's name and arguments, in whichever dialect it arrived in.
+ *
+ * TWO SPELLINGS, ONE CALL. AG-UI describes `{id, type: "function", function: {name, arguments}}` and
+ * the history store writes `{id, name, args}`. Read back from a thread, every call arrives in the
+ * second, so `call.function.name` here did not merely degrade: it threw, and took the run with it.
+ */
+function callDetails(call: {
+  function?: { name?: unknown; arguments?: unknown };
+  name?: unknown;
+  args?: unknown;
+}): { name: string; arguments: string } {
+  const name = call.function?.name ?? call.name;
+  const args = call.function?.arguments ?? call.args;
+  return {
+    name: typeof name === "string" && name ? name : "tool",
+    arguments:
+      typeof args === "string"
+        ? args
+        : args === undefined || args === null
+          ? "{}"
+          : JSON.stringify(args),
+  };
 }

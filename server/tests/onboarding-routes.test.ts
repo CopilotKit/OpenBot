@@ -26,11 +26,11 @@ function appWith(store?: OnboardingStore) {
     } as never,
     { rolesForUser: async () => ["user"] },
     /*
-     * Positions 4-20 are the other stores; `store` is 21, onboardingStore. Every parameter from 4
-     * on is optional, so a wrong count is a silent type-check pass — see people-routes.test.ts,
-     * which learned this the hard way.
+     * Positions 4-23 are the other stores; `store` is 24, onboardingStore, the signature's last.
+     * Every parameter from 4 on is optional, so a wrong count is a silent type-check pass — see
+     * people-routes.test.ts, which learned this the hard way.
      */
-    ...(Array.from({ length: 17 }) as never[]),
+    ...(Array.from({ length: 20 }) as never[]),
     store as never,
   );
 }

@@ -7,19 +7,34 @@ import { CATALOGUE, catalogueEntry } from "./catalogue";
 import {
   authorizationUrlFor,
   challengeFor,
+  connectedAccountsUrlFor,
   createVerifier,
   readConnectState,
   redeemAuthorizationCode,
   redirectUriFor,
-  connectedAccountsUrlFor,
-  signConnectState,
+  sealConnectState,
 } from "./oauth";
 import {
   CatalogueEntryUnknownError,
   CustomServerRefusedError,
+  type OAuthClient,
+  type PluginKind,
   PluginRefusedError,
   type PluginStore,
 } from "./store";
+
+/**
+ * Whether the person a consent was started for still has access to this deployment.
+ *
+ * A seam rather than an import, because these routes have no business knowing what a person is or
+ * where the deny list lives — and because the answer has to come from the deployment as it is when
+ * the callback lands, not from what was true when the flow started.
+ *
+ * False for somebody who was removed while they were away at the vendor's consent screen, and false
+ * for a user id that names nobody at all. Both are the same refusal: there is no live person for
+ * this grant to belong to.
+ */
+export type ConnectingPersonCheck = (userId: string) => Promise<boolean>;
 
 /**
  * The Plugins surface: what this deployment has added, and which Bots may use it.
@@ -47,8 +62,8 @@ export function createPluginRoutes(
    */
   canUseBot: BotAccessCheck,
   /**
-   * What the connect flow needs that the store does not hold: the key its state is signed with, and
-   * the address a vendor sends people back to.
+   * What the connect flow needs that the store does not hold: the key its state is sealed with, the
+   * address a vendor sends people back to, and who still has access when they come back.
    *
    * Optional, so a deployment with no public URL configured simply cannot start a connect flow and
    * says so, rather than building a redirect URI out of a request header and failing at the vendor.
@@ -60,6 +75,16 @@ export function createPluginRoutes(
    */
   connect?: {
     encryptionKey: string;
+    /**
+     * Whether the person a state names may still connect an account here.
+     *
+     * Required rather than optional, unlike everything else that arrived on this object as "one more
+     * parameter". The callback is sessionless on purpose, so this is the ONLY thing asking whether
+     * the identity in the state is still one this deployment recognises — and a deployment that
+     * forgot to pass it would complete a consent for somebody who was removed ten minutes ago and
+     * write a live refresh token nothing will ever revoke.
+     */
+    personHasAccess: ConnectingPersonCheck;
     /**
      * Whether this deployment holds a shared secret a Bot may present when calling a tool back.
      *
@@ -178,7 +203,12 @@ export function createPluginRoutes(
       });
       return context.json({ server });
     } catch (error) {
-      if (error instanceof CatalogueEntryUnknownError) {
+      // A refused credential is the administrator's mistake to correct, so it comes back as a
+      // refusal with its reason rather than as a 500 the way an unmapped throw would.
+      if (
+        error instanceof CatalogueEntryUnknownError ||
+        error instanceof CustomServerRefusedError
+      ) {
         return context.json({ error: error.message }, 400);
       }
       throw error;
@@ -348,8 +378,48 @@ export function createPluginRoutes(
       );
     }
 
-    const client = await store.oauthClientFor(serverId);
+    /*
+     * A dynamic entry introduces the deployment itself on first use; a manual one still waits
+     * for an administrator. Registration lives here, on the one handler that already refuses
+     * without OPENBOT_PUBLIC_URL — the redirect URI it registers is guaranteed to exist.
+     */
+    /*
+     * A vendor in the catalogue that nobody has added to this deployment reaches here, gets past
+     * every check above — the entry is real — and then asks the store for a client it cannot have,
+     * because there is no server row to hold one. `ensureOAuthClient` says so by throwing, and
+     * unhandled that was a 500 on the one path where a person is trying to connect their account.
+     *
+     * The same 409 as a vendor whose client an administrator has not pasted in yet, because it is
+     * the same situation: the person pressing Connect has no step to take, and an administrator has
+     * one. The sentence names the step rather than the exception.
+     */
+    let client: OAuthClient | null;
+    try {
+      client =
+        (await store.oauthClientFor(serverId)) ??
+        (entry.auth.clientRegistration === "dynamic"
+          ? await store.ensureOAuthClient(serverId, actorEmail(context))
+          : null);
+    } catch (error) {
+      if (error instanceof CatalogueEntryUnknownError) {
+        return context.json(
+          {
+            error: `${entry.title} has not been added to this deployment yet. An administrator has to add it first.`,
+          },
+          409,
+        );
+      }
+      throw error;
+    }
     if (!client) {
+      if (entry.auth.clientRegistration === "dynamic") {
+        return context.json(
+          {
+            error: `${entry.title} refused this deployment's registration. Try again, and check the vendor's status if it persists.`,
+          },
+          502,
+        );
+      }
       return context.json(
         {
           error: `${entry.title} has no OAuth client registered yet. An administrator has to add one first.`,
@@ -362,7 +432,7 @@ export function createPluginRoutes(
      * Where to come back to, as one of two names rather than a URL the caller chose.
      *
      * Read from the query and narrowed immediately, so an unrecognised value is the default rather
-     * than something carried into a signed state. See {@link ConnectOrigin}: a destination that could
+     * than something carried into a sealed state. See {@link ConnectOrigin}: a destination that could
      * name another origin is an open redirect with a consent screen in front of it.
      */
     const returnTo =
@@ -374,7 +444,7 @@ export function createPluginRoutes(
         auth: entry.auth,
         clientId: client.clientId,
         redirectUri: redirectUriFor(connect.publicUrl),
-        state: signConnectState(
+        state: await sealConnectState(
           { userId: context.var.actor.id, serverId, verifier, returnTo },
           connect.encryptionKey,
         ),
@@ -387,9 +457,12 @@ export function createPluginRoutes(
    * Where the vendor sends somebody back.
    *
    * Deliberately not behind `requireUser`. The person arrives on a redirect from another company's
-   * server, and whose connection this is comes from the signed state rather than from whatever
+   * server, and whose connection this is comes from the sealed state rather than from whatever
    * session the browser happens to be carrying — which is what stops a callback delivered to the
    * wrong browser from attaching one person's Google account to another person's row.
+   *
+   * Having no session is what makes the access check below necessary. Every other route asks the
+   * question by being behind a guard; this one has to ask it out loud.
    *
    * Every failure ends the same way: back at Settings with a word about what happened, and nothing
    * written. There is no useful distinction here for the person between a forged state and an expired
@@ -402,11 +475,28 @@ export function createPluginRoutes(
     if (!connect?.publicUrl) return context.redirect(failed);
 
     const code = context.req.query("code");
-    const state = readConnectState(
+    const state = await readConnectState(
       context.req.query("state") ?? "",
       connect.encryptionKey,
     );
     if (!code || !state) return context.redirect(failed);
+
+    /*
+     * Is the person in the state still somebody here?
+     *
+     * Asked here, before the code is redeemed and before anything is written, because a state is
+     * good for ten minutes and access can end inside them. Removing somebody deny-lists their
+     * address, deletes their sessions and retires the credentials they had already granted — and
+     * none of that reaches a consent already in flight at the vendor. Without this, that consent
+     * comes back and writes a fresh, live refresh token belonging to somebody who no longer has
+     * access, which nothing downstream will ever revoke because nothing knows it was created.
+     *
+     * The same anonymous failure as an unreadable state. Whether an address is deny-listed is not a
+     * fact this endpoint owes an unauthenticated caller.
+     */
+    if (!(await connect.personHasAccess(state.userId))) {
+      return context.redirect(failed);
+    }
 
     const entry = catalogueEntry(state.serverId);
     if (entry?.auth.kind !== "user-oauth") return context.redirect(failed);
@@ -435,7 +525,7 @@ export function createPluginRoutes(
       connectedAccountsUrlFor(
         connect.appUrl,
         { serverId: state.serverId },
-        // From the signed state, so the destination is one this deployment chose, not the browser.
+        // From the sealed state, so the destination is one this deployment chose, not the browser.
         state.returnTo,
       ),
     );
@@ -538,6 +628,19 @@ export function createPluginRoutes(
    */
 
   /**
+   * The kinds of grant this API will act on.
+   *
+   * CHECKED AT RUNTIME, not only in the types. `kind` arrives in a JSON body, so a type annotation
+   * on it is a comment: before this, anything at all could be written into the grant table through
+   * the ordinary endpoint, and one kind that was never meant to be settable this way already could.
+   */
+  const GRANT_KINDS = new Set<PluginKind>(["mcp", "skill", "bot"]);
+  const asGrantKind = (value: unknown): PluginKind | null =>
+    typeof value === "string" && GRANT_KINDS.has(value as PluginKind)
+      ? (value as PluginKind)
+      : null;
+
+  /**
    * May this person put this on that Bot?
    *
    * MCP is an administrator's, always: it reaches another company's system with a stored credential.
@@ -547,15 +650,76 @@ export function createPluginRoutes(
    */
   async function enablementRefusal(
     context: { var: AppVariables },
-    kind: "mcp" | "skill",
+    kind: PluginKind,
     ref: string,
     agentId: string,
+    /**
+     * Which way this is going, because they are not symmetric.
+     *
+     * TAKING SOMETHING AWAY IS ALWAYS ALLOWED. The checks below decide whether a grant should exist,
+     * and applying them to a revoke turns every one of them into a trap: a `bot` grant made before
+     * the grantee moved to its own endpoint — or before this check existed — could never be removed,
+     * because the reason it is wrong is the same reason the revoke was refused. An administrator
+     * looking at a dead row in the UI would have had no way to delete it.
+     */
+    intent: "grant" | "revoke",
   ): Promise<string | null> {
     const actor = skillActor(context);
-    if (actor.isAdmin) return null;
+
     if (kind === "mcp") {
-      return "An administrator decides which Bots may reach a tool.";
+      return actor.isAdmin
+        ? null
+        : "An administrator decides which Bots may reach a tool.";
     }
+
+    if (kind === "bot") {
+      /*
+       * THE ROLE IS CHECKED BEFORE ANYTHING IS LOOKED UP, and that ordering is the point.
+       *
+       * One Bot reaching another lets it spend that Bot's model calls, wake its computer and reach
+       * whatever it may reach, so it is an administrator's decision rather than something somebody
+       * attaches to a coworker they own. But this route only requires a signed-in user, so every
+       * refusal below is readable by anybody: checking whether the Bot exists, and whether it runs
+       * here, before this line handed out three distinguishable answers and turned a 403 into an
+       * oracle for other people's private Bots. `handoff.ts` in this same feature collapses exactly
+       * this, deliberately, and this had it backwards.
+       */
+      if (!actor.isAdmin) {
+        return "An administrator decides which Bots may hand work to another Bot.";
+      }
+      // Taking something away is always allowed: see the note on `intent`.
+      if (intent === "revoke") return null;
+
+      /*
+       * A grant that could never do anything is refused rather than stored, from both ends.
+       *
+       * The GRANTEE has to run here, because handing work on is a tool this deployment executes: a
+       * Bot at an endpoint runs its own loop and is handed descriptions of what it may call back
+       * for, and there is no callback path that would execute a hop.
+       *
+       * The TARGET only has to exist. Being handed work is not the same as being able to hand it on,
+       * so a target at its own endpoint is perfectly ordinary — but `ref` is bare text with no
+       * foreign key, so a typo stored happily and every hop then refused as not-granted.
+       */
+      /*
+       * A Bot cannot be granted itself. The desk refuses a self-hop outright — "a Bot cannot hand
+       * work to itself" — so the row is dead the moment it is written, and reads as configured.
+       */
+      if (ref === agentId) {
+        return "A Bot cannot be granted itself to hand work to.";
+      }
+      const runsHere = await store.agentRunsHere(agentId);
+      if (runsHere === undefined) return "There is no such Bot.";
+      if (!runsHere) {
+        return `${agentId} runs at its own endpoint, so this deployment cannot offer it a tool for handing work on. Only a Bot that runs here can be given one.`;
+      }
+      if (!(await store.agentIsRegistered(ref))) {
+        return `There is no Bot called ${ref} to hand work to.`;
+      }
+      return null;
+    }
+
+    if (actor.isAdmin) return null;
 
     const owner = await store.skillOwner(ref);
     if (owner === undefined) return `There is no skill called ${ref}.`;
@@ -577,11 +741,12 @@ export function createPluginRoutes(
 
   routes.post("/grants", requireUser, async (context) => {
     const body = (await context.req.json().catch(() => null)) as {
-      kind?: "mcp" | "skill";
+      kind?: unknown;
       ref?: string;
       agentId?: string;
     } | null;
-    if (!body?.kind || !body.ref || !body.agentId) {
+    const kind = asGrantKind(body?.kind);
+    if (!kind || !body?.ref || !body.agentId) {
       return context.json(
         { error: "A kind, a ref and a Bot are required." },
         400,
@@ -589,27 +754,34 @@ export function createPluginRoutes(
     }
     const refusal = await enablementRefusal(
       context,
-      body.kind,
+      kind,
       body.ref,
       body.agentId,
+      "grant",
     );
     if (refusal) return context.json({ error: refusal }, 403);
 
-    await store.grant(body.kind, body.ref, body.agentId, actorEmail(context));
+    await store.grant(kind, body.ref, body.agentId, actorEmail(context));
     return context.json({ ok: true });
   });
 
   routes.delete("/grants", requireUser, async (context) => {
-    const kind = context.req.query("kind");
+    const kind = asGrantKind(context.req.query("kind"));
     const ref = context.req.query("ref");
     const agentId = context.req.query("agentId");
-    if ((kind !== "mcp" && kind !== "skill") || !ref || !agentId) {
+    if (!kind || !ref || !agentId) {
       return context.json(
         { error: "A kind, a ref and a Bot are required." },
         400,
       );
     }
-    const refusal = await enablementRefusal(context, kind, ref, agentId);
+    const refusal = await enablementRefusal(
+      context,
+      kind,
+      ref,
+      agentId,
+      "revoke",
+    );
     if (refusal) return context.json({ error: refusal }, 403);
 
     await store.revoke(kind, ref, agentId, actorEmail(context));

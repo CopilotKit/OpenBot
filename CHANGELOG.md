@@ -8,6 +8,572 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.5
+
+### One Bot can hand work to another, and reach a person when no Bot will do
+
+A Bot asked something it is not the right Bot for can now put the question to one that is. The
+addressed Bot answers **as itself, in its own conversation**, with its own tools and its own
+knowledge. The asking Bot does not relay text on its behalf, so what you read is the answer that
+Bot actually gave rather than another Bot's summary of it. The asking conversation records that the
+question was put and to whom. A Bot that judges no other Bot will do can instead reach the person
+who asked it.
+
+**No Bot may address any other until an administrator says so.** Which Bot may reach which is an
+ordinary grant, made per Bot on that Bot's own screen under **Bots it may ask**, and a Bot with no
+grant is told it cannot rather than quietly trying. The pair is directional: that list is who this
+Bot may ask, not who may ask it, so letting two Bots ask each other is two switches. A Bot addressed
+by a name two Bots answer to is refused and both are named, because picking one would be a guess
+about which colleague a person meant.
+
+Two ceilings, because a Bot deciding to ask another Bot is a Bot deciding to spend a run:
+`BOT_HANDOFF_MAX_DEPTH` is how many Bots deep a chain may go and defaults to `1`, and **`0` switches
+the capability off entirely**: the tool is not offered rather than offered and refused.
+`BOT_HANDOFF_MAX_PER_RUN` is how many Bots one run may address and defaults to `3`. The Helm chart
+takes the same two as `config.handoff.maxDepth` and `config.handoff.maxPerRun`.
+
+A hop that fails is reported back by the Bot that asked, after its attempts are spent, rather than
+leaving the person watching a conversation that never finishes. One rough edge to know about: a hop
+that is retried leaves one "asked" line per attempt in the addressed Bot's own transcript, so a hop
+that took three attempts reads there as having been asked three times.
+
+No new tables: this uses the work queue that already fires the culler.
+
+### A conversation that used a tool no longer stops answering for good
+
+A channel could reach a state where every turn in it failed and the only thing it said was
+`Tool result is missing for tool call call_…`. Not the turn: the conversation. Everything sent
+afterwards failed the same way, including a question as ordinary as what two plus two is, and there
+was nothing a person could do to it from the screen.
+
+A tool result is matched to the call above it, and a thread read back from the platform does not
+always carry the two in that order. Where the result was stored ahead of its own call, this
+deployment counted the call answered, sent the history on unchanged, and the model provider rejected
+the whole conversation while assembling it. Handing work to another Bot, asking a person, and
+calling a connector's tool could each leave a thread in that shape.
+
+A result now only answers a call it follows. One that arrives early is moved to sit after its call,
+keeping what it actually said, and a result whose call is nowhere in the thread is dropped. Affected
+conversations start answering again on their own; there is nothing to run and nothing to reset.
+
+### The framework Bot answers on 5.6-tier models, and can be told how hard to think
+
+Pointing `BOT_MODEL` at a `gpt-5.6-*` model gave a Bot that started, reported healthy, and then said
+nothing: every run was a RUN_STARTED and a RUN_FINISHED with no text between them. Those models are
+run on the Responses API, which streams content blocks where chat completions streams a string, and
+the run read only the string — so every delta was dropped on the floor. Both shapes are read now.
+Nothing changes for a deployment on 5.5 or on Anthropic or Google.
+
+`BOT_REASONING_EFFORT` sets how hard a reasoning model thinks: `none`, `minimal`, `low`, `medium`,
+`high`, `xhigh` or `max`. Unset, the model keeps its provider's default. A value the API does not
+have, or one set where it cannot be sent — a provider that is not OpenAI, or a model not on the
+Responses API — stops the Bot at startup with a message naming what to change, rather than starting
+with a setting that goes nowhere.
+
+### A Bot can be asked to do something on a schedule
+
+"Every weekday at nine, post the standup notes here" is now something a Bot can be asked rather than
+something somebody has to remember. A routine created this way runs under its own creator's grants —
+it can do exactly what they could do in chat, and nothing more — and its reply lands in the channel as
+an ordinary Bot message: it lights the unread dot the same way any other message does, and it appears
+in the transcript rather than anywhere separate. A routine that fails posts one message about its
+first failure and, after ten in a row, switches itself off with a final one rather than failing
+forever unnoticed.
+
+The deployment gains two tables, via migration `0021`.
+
+**This needs a new process.** A worker fires due routines by calling this deployment's own API server,
+and a deployment that never starts one schedules nothing — the routine sits on the Routines page with
+a next run time like any other, and nothing on the screen says a worker is missing. `WORKER_SHARED_SECRET`
+is the credential the worker presents; a deployment without it configured refuses every handoff rather
+than accepting one it cannot attribute. `scripts/start.sh` runs the worker locally; the Helm chart
+turns it on with `routines.enabled` and takes the secret as `secrets.workerSharedSecret`. No new port
+is opened for any of this — the worker only ever calls out to the server it already trusts.
+
+### Turn screenshots are swept in every deployment, not one
+
+A page a Bot opens is photographed and kept in `computer_page_frame`, so a conversation read back
+later shows what it was looking at. The reaper for those rows had one caller: the idle-computer
+culler, which refuses to run unless each Bot has its own computer and is scheduled only by the Helm
+chart's CronJob, which exists only when `computers.mode` is `sandbox`. On Compose, on the all-in-one
+image, and on the chart's own default of `shared`, nothing ever called it. One browsing Bot over
+ninety days is several hundred megabytes of rows that nothing was ever going to remove.
+
+The sweep now runs on the server, on the same hourly timer that removes old audit rows, and does not
+wait for a retention policy to be configured: a month of screenshots is what the store already meant
+to keep. It also removes them in batches, because one statement over that much data held its locks
+for seventeen seconds.
+
+Deployments using `computers.mode: sandbox` are unaffected in what they keep. The culler no longer
+purges frames, because the server does it there too and one owner is better than two.
+
+**On upgrade, the first sweep removes the backlog.** A deployment that has been keeping every
+screenshot since it was installed will lose the ones older than a month, about a minute after the
+server starts. That is the window the store has always documented and the one sandbox deployments
+have been enforcing, but it has never been applied anywhere else, so it is worth knowing before the
+upgrade rather than after. It is drained in batches, forty thousand rows an hour, rather than in one
+statement.
+
+### A channel a Bot has spoken in unseen shows a dot
+
+The sidebar marks a channel when a Bot has said something since you last had it open: a dot beside
+the preview, the name a touch heavier. Opening the channel clears it, your own messages never set
+it, and the channel you are looking at never shows it. The marker is yours alone — per member, on
+the membership row like the pin — so one person reading does not clear anybody else's dot.
+
+The deployment gains one nullable column, via migration `0019`.
+
+### The API can reach Intelligence and sign-in when a NetworkPolicy is on
+
+`networkPolicy.enabled` wrote a rule for the API server that named DNS, the database and the Bots'
+computers, and nothing on 443. On a cluster that enforces policy the server could therefore reach
+neither CopilotKit Intelligence, nor an identity provider, nor a Bot: nobody could sign in and no
+conversation ran. Two of the five shipped `ci/` targets turn the policy on, and on GKE enforcement is
+the default and cannot be switched off.
+
+Nothing said so. The pod passed every probe and stayed Ready, because `/health` answers from a
+literal, so the first evidence was a timeout to a hostname that read as the internet being down.
+
+The API now reaches HTTP and HTTPS everywhere outside the cluster's private ranges, in every
+`computers.mode` rather than only `sandbox`, cut by the same exception list the computers' own policy
+uses. It still cannot address another pod, a node, or a cloud metadata endpoint.
+
+`mode: sandbox` had been working only because a rule meant for the Kubernetes API server carried no
+destination and so permitted everything. That rule now covers the API server alone, and
+`networkPolicy.kubernetesApiCidr` narrows it to your cluster's service range; left empty it stays as
+it was, because a chart cannot know that range.
+### Taking the wheel stops the Bot's shell, not just its clicks
+
+While a person held the wheel the Bot was refused on the page, and not in the shell. `/exec` and a
+workspace write went through, so a Bot could keep running commands and rewriting its `/workspace`
+underneath somebody who had taken the browser at a login wall. The guard existed and covered
+navigation and the four page actions; the shell arrived later and was never wired to it.
+
+Every acting path now asks the same question in one place, so the property the documentation states
+is the property the computer has. Reading is deliberately not acting: `/files/read` and
+`/files/list` still answer while a person drives, because a Bot that has just been stopped still has
+to be able to say what it was doing.
+
+Nothing to configure. A Bot that acts during a takeover gets the refusal it already got for a click,
+and the trail records the attempt and the failure the same way.
+### A computer that was suspended once suspends again
+
+Scale-to-zero worked once per Bot. A computer suspended, resumed, used and then left alone again was
+offered for suspension on every sweep after that and never suspended, and stayed awake until the next
+day. Nothing reported it, because a sweep that offers work and suspends nothing looks exactly like a
+fleet that is busy.
+
+The queue keys a suspension on the Bot id and keeps the finished row so that a late offer of the same
+key collides with it rather than running the work twice. Both are right. What was wrong is that the
+finished row was kept for a day, which is the window the other half of the sweep needs: a suspension
+that keeps failing is held back that long before anything tries it again. One number could not be
+both, so there are now two, and a finished suspension is kept for the idle window instead. That is
+the same clock the offer runs on, so a Bot cannot come back round as idle until its row has gone.
+
+Nothing to configure, and the sweep already runs on a schedule. A deployment where each Bot has its
+own computer stops paying for browsers that were used once.
+### A Bot's egress proxy is reachable on Kubernetes, or the install is refused
+
+The chart named no egress variable anywhere, so a Helm deployment read the per-Bot proxy settings
+nowhere and every Bot went out directly. They were always settable through `computers.extraEnv`,
+which reaches the computer in both the shared and the sandbox arrangement, but nothing in the chart
+or its README said so, and a setting whose whole purpose is to give a security team a per-Bot
+address is not one to leave undocumented.
+
+The other half is that setting it was not enough. A computer is allowed 80 and 443 to public
+addresses and nothing else, which is almost no proxies: they sit on a private address, or on 3128 or
+8080. So a proxy the network policy provably blocks is now refused at `helm install`, naming
+`networkPolicy.computerExtraEgress`, rather than found later as a Bot that fails on every page.
+Nothing changes for a deployment that sets no proxy, or one that already opened a path to it.
+
+### A finished turn shows the page it opened, not the one open now
+
+Reopening a conversation made every past turn fetch the screen as it is now, so an answer about
+Hacker News from an hour ago sat under a picture of whatever the Bot had open since.
+
+A page is now photographed where it is opened. The server takes the frame the moment a navigation
+succeeds and keeps it in `computer_page_frame` under the computer and the address, which is the one
+moment the screen is certainly showing the page that was asked for. Reopening the conversation shows
+that frame rather than the live screen, and a turn with nothing kept names the page instead of
+drawing the wrong one.
+
+The surface used to capture it itself once the turn went quiet, and that is a race it cannot win: a
+reopened turn and one that has just finished are indistinguishable from inside the component, the
+same computer is driven by other conversations in between, and a resumed computer starts blank. It
+filed pictures of pages the turn never opened, or none at all. It only reads now.
+
+**Redeploy the computers with the server.** A screenshot only says which page it is of on an
+`agent-computer` built after that field was added, and this is what decides whether a frame is kept.
+Where each Bot has a computer of its own there is nobody to race with, so an old computer's picture is
+accepted and the feature works through a rollout. On ONE SHARED COMPUTER it cannot be: another Bot's
+navigation lands between the navigation and the picture, and a frame that cannot be told apart from
+theirs is refused. So a shared-computer deployment that updates the server and not the computer keeps
+no frames until it does, and says so in the server log each time rather than leaving somebody to
+wonder.
+
+Two things followed from making a past turn a record. Its placeholder is decided by the turn being
+over rather than by whether a live frame happens to be in hand, because a tile that was live a moment
+ago keeps its last screenshot and used to fall through to "Waiting for the assistant's screen…" and
+wait there for ever. And opening one full size shows that same kept frame, with no live stream and no
+wheel: zooming a past turn used to mount the socket and offer Take control, so the one gesture for
+looking closer at what a turn did replaced it with whatever the Bot has open now.
+
+### A conversation keeps the browsing that produced its answers
+
+Every turn in which a Bot used a tool was disappearing from the transcript on reload. The sentence
+the Bot wrote stayed; the browsing that produced it did not, the inline screen went with it, and the
+footer said some messages could not be read.
+
+The history store writes a tool call as `{id, name, args}`. AG-UI describes
+`{id, type: "function", function: {name, arguments}}`. The reader validated against the second,
+treated the first as damage from an interrupted run, and dropped it. It is not damage: it is how
+every tool call is stored, so what looked like a guard against one bad turn was deleting all of the
+real ones. Observed on a live thread where every browsing turn was counted unreadable and every one
+of them was well formed in the store's own dialect.
+
+The two spellings are now read as the same thing. The check stays for turns that really are
+malformed, and a mixed or unrecognised array is still refused rather than half-translated, because a
+reader that rewrites what it does not recognise is worse than one that refuses it.
+
+
+### Run this on Kubernetes
+
+A Helm chart under `charts/openbot`, Bots and all, and the fixes that installing it for real turned
+up. Proven on a real EKS cluster: five workloads, replicas across two nodes, EBS volumes bound, and a
+Bot opening a real page from inside AWS with the decision in the audit trail.
+
+One chart, five targets: EKS with a shared browser, EKS with a computer for each Bot, GKE, AKS and
+somebody's own cluster, with nothing but values between them. There is no cloud branching in any template. Every place the clouds genuinely differ is a
+value whose default is what a plain self-hosted cluster does: the cluster's own default StorageClass,
+no RuntimeClass, a plain Kubernetes Secret, an Ingress. Identity is one `serviceAccount.annotations`
+map, which is all IRSA, Workload Identity and AKS workload identity are. Secrets are a plain Secret
+by default and an ExternalSecret against any backend when asked, so Secrets Manager, Secret Manager
+and Key Vault are a values block rather than three code paths. Gateway API is supported beside
+Ingress rather than instead of it. `charts/openbot/ci` holds a values file per target.
+
+Two replicas by default, because horizontal is the point and one replica hides every bug that is
+not. A bad install is refused at `helm install`, naming the value to change, rather than discovered
+in a crash loop: no database or two of them, nobody who could sign in, nobody who would be an
+administrator, a key of the wrong shape, both routers enabled, or a browser asked for inside more
+than one replica.
+
+**A Bot's computer is not in an API pod.** The image runs one beside the API so that a single
+container works on its own, and `EMBEDDED_COMPUTER=off` turns it off. A replica must not carry a
+browser: it is a few hundred megabytes holding one Bot's logins, so scaling the API would scale
+those with it.
+
+**Migrations no longer need a development tool.** `bun x drizzle-kit migrate` cannot run in the
+shipped image at all. The CLI reads a TypeScript config, which needs the esbuild that
+`bun install --production` correctly leaves out, so it printed "Reading config file", exited 1 and
+said nothing else. `EMBEDDED_POSTGRES=on` was therefore starting a container whose database was
+never migrated, and the first symptom was the API reporting that `users` does not exist.
+`server/scripts/migrate.ts` uses the migrator inside `drizzle-orm`, which is a runtime dependency
+already, and keeps the same journal, so a database migrated by either tool is migrated.
+
+**A computer for each Bot, suspended when idle.** `computers.mode: sandbox` gives every Bot its own
+browser as a `Sandbox` from `kubernetes-sigs/agent-sandbox`, which is built for this workload: an
+isolated, stateful, singleton pod with a stable identity and persistent storage. Suspending is one
+field, and it keeps the volumes, so a computer comes back with its logins rather than signed out of
+everything. `shared` stays the default and needs nothing installed in the cluster.
+
+**The NetworkPolicy would have fenced the API off from its own work.** Its egress named DNS and the
+bundled database and nothing else, so on a cluster that enforces policy the API could not have
+reached a Bot's computer or, with a managed database, the database. Both are allowed now, and turning
+the policy on with an external database and no rule for it is refused rather than shipped. Worth
+knowing either way: EKS runs its CNI with `--enable-network-policy=false`, so a policy there installs,
+looks right, and does nothing at all.
+
+**A cluster with no controller is refused at install.** `computers.mode: sandbox` needs the
+agent-sandbox CRD, and without it the install succeeds, every pod is healthy, and the deployment
+looks finished until the first Bot asks for a browser. The chart reads the cluster and refuses,
+naming the one command that fixes it.
+
+**What decides a computer is idle is the audit trail, not the browser.** Asking the browser would
+wake it, so every computer anything asked about would come back up and the bill would never fall.
+
+**Durable work, claimed by whichever replica gets there first.** `work_items` plus
+`select ... for update skip locked` and a lease: no coordinator, no leader election, and a replica
+added is throughput added. The idle-computer culler is its first user; scheduled routines and
+hand-offs between Bots are the other two, which is why it is written once rather than three times
+slightly differently. A CronJob runs the sweep, because a timer in the API fires in every replica and
+suspending a browser somebody just started using is not something to do five times.
+
+**Which run of a computer this is, across a suspend.** A resumed browser counts snapshot
+generations from one again, so a ref the model still holds from before the suspend would match a row
+nothing has overwritten and the boundary would decide about an element on a page that no longer
+exists. The first answer here used the node and the pod address, and resuming a real computer
+disproved it: a suspended sandbox is very often rescheduled onto the same node and handed the same
+address back, so both were identical across a suspend and resume and the check would have said "same
+run" for the exact case it exists to catch. It reads the `Ready` condition's transition time instead,
+which moves every time a computer starts serving again.
+
+**Which run of a computer this is, on more than one replica.** `sessionOf` answered from a map in
+the process that started the computer, which is right until there are two: the replica that took a
+snapshot is usually not the one handling the click, and the second had nothing to answer with. An
+unknown session means "no opinion" and skips the generation check, so on exactly the deployment
+shape it was written for, the check that stops a ref from a replaced computer resolving against a
+live one was silently absent. It now asks the supervisor when it does not know, by listing rather
+than by ensuring, so asking never starts a computer that had stopped.
+### A routing trail says why a message was not routed, not only that it was not
+
+Every untagged message writes a `channel.routed` row, and that row carried `fallback: true` for two
+completely different situations: the router answering honestly that no specialist was a confident
+match, which is the feature working, and the router not answering at all, which is an endpoint that is
+down. Both read identically, so a deployment whose router had stopped working looked like one whose
+messages were simply hard to route.
+
+That is not hypothetical. The intent router spent an unknown period 404'ing on every deployment that
+set `OPENAI_BASE_URL`, because a `/v1` was appended to a URL that already had one. It was fixed in
+0.0.3, whose own note says untagged messages "silently stopped being routed and nothing said why".
+
+The row now carries `undecided`, naming the cause: `unreachable`, `unparsed`, `off-roster`,
+`unconfident`, or `one-candidate` — and `null` when the router did decide. Named values rather than a
+sentence, because the useful question is how often, and a count needs something to group by.
+
+Two smaller corrections came with it. A message routed to the only coworker that can reach the system
+it names kept that as its reason and threw the cause away, so a router that had been down for a week
+produced rows reading like reach-based routing working as intended; the cause now survives that path.
+And an answer containing no JSON at all — a model replying in prose — was recorded as the router
+naming a coworker off the roster, which sends whoever reads it to look at their roster rather than at
+the model. It is now reported as unparsed, which is what it is.
+
+Nothing changes about where a message goes. Every routing decision is the same decision it was.
+
+### Notion joins the connector catalogue
+
+Notion is now a governed MCP connector, reached through Notion's own hosted server on the
+catalogue's default transport, as the person asking — the same grant, policy and audit machinery
+Google Drive already runs through. Unlike Drive, it ships both read and write tools from the start;
+the writing ones are named in the catalogue, and an advertised tool absent from that list classifies
+as a read — so reconciling the write-tool names against what Notion's hosted server actually calls
+them, on the first Refresh tools, is required, not cosmetic. A tool the server never advertised at
+all still classifies as a write, same as any other connector.
+
+There is no client to register: this deployment introduces itself to Notion on first connect. That
+shortens setup but does not finish it — unlike Drive, whose tool list is this codebase's own code,
+Notion's tool list is an answer from Notion's hosted server, so a deployment has recorded none of it
+until Refresh tools has run at least once; and, like every other connector, a Bot gets nothing until
+its tools are granted to it. Setup is enable at `/admin/plugins/notion`, connect an account at
+`/settings/connected-accounts`, refresh tools, then grant — a bulk **Grant tools…** dialog on
+`/admin/plugins/notion` grants a batch of tools to a batch of Bots in one pass, one grant and one
+audit row per Bot per tool. No migration.
+
+### Refresh tokens rotate in place, and replicas take turns spending them
+
+A vendor that rotates refresh tokens invalidates the one it just handed out, so two replicas racing
+to use a stale token would have the loser refused, or worse: a rotating vendor's reuse detection can
+read that as a stolen token and revoke the whole connection. Every plugin call that mints an access
+token now locks the credential's vault row for the length of the exchange, so a second replica waits
+rather than races, and the rotated token is written back in the same transaction that held the lock.
+Nothing to configure; a connection just stops going stale under concurrent traffic.
+
+### An MCP token is spent only by its own server, and only at the address it was given
+
+Pointing a server at a credential is the one place this deployment takes a reference to a stored
+secret rather than the secret itself. Everywhere else, the value was typed into the same request that
+stores it: a Bot's key is minted from what an administrator pasted and the id it gets is nobody's to
+choose. So this is the one field where which secret and which address could be made to disagree, and
+the add settles the disagreement by spending the credential: the tool refresh runs before the call
+returns and sends what it decrypts to the URL from that same request.
+
+Two ways they could disagree, and both are now refused. A server could be pointed at any `mcp`
+credential in the vault, including one minted for a different vendor, so a token given to one server
+was deliverable to another. And re-adding a server with a different URL rewrote the address while
+keeping the credential, so the same token could be sent somewhere else entirely with no
+cross-server trick at all: the token really did belong to that server, and only the address moved.
+
+The second is why the first was not enough on its own. A credential now has to belong to the server
+it is attached to, and a server that already holds one cannot be re-added at a different address.
+Correcting a title or retrying an interrupted add sends the same URL and is unaffected. A server
+holding no credential can still be re-addressed, because there is nothing to misdirect. Moving a
+server that does hold one means removing it and adding it again with the token the new address is
+meant to have, which is the honest description of what has happened anyway.
+
+This matters more than "an administrator could misconfigure something". A stored credential cannot
+be read back by anybody, by design: the credentials screen answers that a credential exists and
+never what it is. These two shapes were the way around that, so a deployment where somebody has
+used them should treat the credentials involved as disclosed and rotate them.
+
+A token also stops outliving the server it was minted for. Re-adding a server without naming a
+credential used to clear the pointer while leaving the credential live, and removing a server retires
+its token by reading it off that pointer, so a cleared one meant the token survived its server and
+could be attached to a freshly created one at any address, where there was no longer a stored address
+to compare against. Three ordinary acts in a row and the binding above stopped meaning anything. The
+pointer now survives a re-add that names none, removal therefore finds and retires it, and a retired
+credential is refused rather than quietly attached to fail on its next call.
+
+Curated servers keep working as they did. Their URL comes from the catalogue rather than the
+request, and a per-instance hostname is matched against the vendor's own anchored pattern before
+anything is stored, so re-adding one cannot point it at an address of the caller's choosing.
+### A configured egress proxy reaches the browser that uses it
+
+`EGRESS_PROXY_DEFAULT` and `EGRESS_PROXY_<BOT>` were documented as the way to give a Bot a stable
+outbound address, and Compose passed neither to anything. `docker-compose.yml` named no egress
+variable and had no `env_file`, so the shared computer resolved every Bot to no proxy and went out
+directly, and under the supervisor the same emptiness meant there was nothing to forward into the
+computers it creates.
+
+The failure was silent, which for a setting whose purpose is to give a security team a per-Bot
+address for network rules is the worst of the available failures. The stack started, the browser
+left by the host, and the Computers screen reported "Leaves directly" because it was reading the
+same empty environment.
+
+They now live in `egress.env`, which both the computer and the supervisor are given. A file rather
+than more `environment:` entries because `EGRESS_PROXY_<BOT>` is derived from a Bot's id and there
+is no fixed set of names to list; a file of its own rather than `.env` because that one holds the
+deployment's secrets and the container running a browser and a Bot's shell is deliberately not
+given them. It is optional, so a deployment with no proxy is unchanged, and gitignored, because a
+proxy URL can carry a password.
+
+**Move these two out of `.env` and into `egress.env`.** In `.env` they reach no process.
+### Screens without a conversation stop polling for a Bot that does not exist
+
+Every surface asks which components its Bot holds, and asks again every few seconds so a revoked
+grant leaves an open conversation quickly. The Bot it asked about was whichever one the surface
+declared — and on a screen with no conversation at all, that was the placeholder id the routing
+holder falls back to, which no package registers and the server answers 404 for. An admin page left
+open polled a guaranteed miss every five seconds, indefinitely.
+
+Nothing looked wrong. The screen rendered, because an absent grant list and an empty one draw the
+same. The cost was the noise: a request log where the same 404 repeats forever is one where the 404
+that matters is invisible.
+
+The grant queries now wait for a surface to declare a real Bot, and simply do not run while the
+placeholder holds. Conversation surfaces — the Bot page, channels — declare one and are unchanged.
+### A rule can be tested against history before it is saved
+
+A boundary was written blind: an administrator typed a CEL rule, saved it, and learned what it
+actually matches from the refusals it produced in production. The trail already records every judged
+computer action with the same facts the gateway judged it on, so the question "what would this rule
+have done" had an answer nobody could ask.
+
+The Boundaries page now has **Test first** beside **Add rule**. The candidate — the current policy
+plus the drafted rule — is replayed over recent recorded actions, and the reply names each one it
+would have decided differently and the rule that would have decided it. Nothing is saved and nothing
+is decided; no audit row is written, because no action was permitted or refused.
+
+Replay, not simulation: the context is rebuilt from the audit row exactly as the gateway built it at
+decision time, through the same helpers, so a rule behaves here as it will behave live. The scan is
+bounded and biased to recency, and the reply says how many rows it covered.
+
+### A browser refusal names the element again
+
+Every browser context carries a neutral all-empty `mcp` object, so a rule naming `mcp.effect`
+evaluates to false instead of throwing. The refusal copy keyed on that object being present rather
+than on its contents, so every live browser refusal took the tool-call branch and read
+":  on  is blocked" — two empty strings where the element and the page belonged. The tests passed,
+because their contexts omitted the field the gateway always attaches.
+
+The branch now keys on the server and tool being named, which a real tool call always has. A refused
+click reads "“Submit order” on shop.example is blocked by the rule ..." again, which is what the Bot
+relays to the person asking.
+
+### Knowledge searches instead of guessing
+
+A package can say which of its skills each coworker gets, and the fintech example gives Knowledge the
+four document skills it ships.
+
+Knowledge is one of three coworkers in the box, described as answering company questions and citing
+sources. The skills that would let it do that were seeded attached to nobody, so every clone started
+with them paired to no Bot: the per-run narrowing that skills exist for was switched off until
+somebody opened the Skills page and made the pairing by hand, in each deployment, again after each
+new connector. The pairing belongs with the package, which wrote both files and knows which coworker
+it meant them for.
+
+THIS GRANTS NOTHING, which is what makes it safe to seed. A skill is an instruction; what a Bot may
+call is its grants, and the offer each run is the intersection of the two. A skill naming a tool its
+Bot does not hold loads nothing. Seeding an MCP grant would be the opposite, because those reach a
+person's own account, so those stay an administrator's decision and are untouched here.
+
+A redeploy takes back only what the package gave. Grants it made carry `tenant-package`, and a grant
+an administrator made through the Skills page keeps their name and survives, because a deploy quietly
+undoing a deliberate decision is the kind of change nobody traces back to the deploy that caused it.
+A coworker naming a skill its package does not ship is refused at load rather than dropped, the same
+as a channel naming an agent that is not there: a typo that silently attaches nothing looks exactly
+like working.
+
+
+### A Bot's computer is no longer on the same network as the database
+
+Compose declared no networks, so every service shared one and reached the others by service name.
+One of those services is the container a Bot's shell runs in, and another is PostgreSQL, whose
+username and password are in the same file. A shell reaches whatever its container reaches, so a Bot
+could open `postgres:5432` and authenticate: the audit trail, the policy store and the agent tables,
+from the one container whose job is to run what a Bot asks for. The role Compose creates is the
+instance owner, so the trail's append-only trigger was no defence either, being something its owner
+can drop.
+
+PostgreSQL and `migrate`, the only service that reaches it by name, are now on a `data` network of
+their own. Everything else stays where it was. Nothing changes for a deployment that runs the API
+server on the host, which reaches the database through the published port and never used the shared
+network for it. **A deployment that runs the server inside Compose has to join that service to both
+networks**, which is the one place the two are meant to meet.
+
+The published port is now on loopback, as every other port in that file already was. Taking the
+database off the Bots' network removes the name, not the address: a container's default gateway is
+the host, and a port published on every interface answers there. From inside the computer container,
+the gateway on `5432` accepted a connection and began authenticating as `openbot` on `openbot`, with
+the password in the same file. **A deployment that reached the database from another machine over
+this port has to reach it another way**, which is what publishing it on every interface was doing.
+
+This does not reach back in time. A deployment that has been running with the two on one network
+should assume a Bot could have read or written the database, and look at the trail with that in
+mind.
+### A credential in an MCP server address is refused in the query and the fragment too
+
+Refusing `https://user:token@vendor.example/mcp` closed the userinfo spelling of a credential in the
+address and left the two obvious ones open. `?token=`, `?api_key=` and their neighbours were still
+accepted, and the address is stored and named in the trail exactly as given: audit redaction keys on
+the field name, `url` is not a sensitive one, so the secret was written to `mcp_servers` and to an
+append-only audit row in clear text. That is the same disclosure the userinfo rule exists to prevent,
+one character away.
+
+A parameter whose name reads as a credential is now refused, in the query string and in the fragment,
+and the refusal points at the token field without repeating what was typed. The name is read rather
+than matched against a list, so `?auth_token=`, `?x-api-key=` and `?X-Amz-Signature=` are refused
+alongside `?token=`: a rule that only catches the spellings somebody thought of reads as a guard
+while behaving like a gap. The test is on the parameter name rather than on the presence of a query,
+because vendors route and version with parameters and a floor that refused every one of them would
+be one an operator works around instead of with. `https://mcp.example.com/mcp?workspace=acme&version=2`
+is unaffected, and so is an ordinary fragment. A credential written into the *path* is still
+accepted: it is indistinguishable from a route, and at least one hosted provider addresses servers
+that way. **A deployment where somebody has put a credential in an address should treat it as
+disclosed and rotate it**, for the same reason as before: the audit row cannot be deleted.
+
+`metadata.goog` is refused too. It is Google's own short name for the metadata server, published
+beside `metadata.google.internal`, and it carries a dot and none of the suffixes this check lists, so
+it read as an ordinary vendor name. The long spelling was only ever refused incidentally, by the
+`.internal` rule. Both are now named, so the address this check was written for is refused on purpose
+rather than by luck.
+### A curated MCP server is pointed at its own kind of credential too
+
+Adding a server by URL was made to check which credential it is being pointed at. Adding one from the
+catalogue, the other half of the same screen, took the same field from the same request and stored it
+unread, so a credential of any kind could be attached to a curated server and spent by the refresh
+that runs before the add returns.
+
+Worth being plain about the reach, because it is narrower than the path beside it. The column is a
+foreign key, so an id naming nothing was already refused by the database, and the one entry in the
+catalogue is reached with each person's own Google account, whose OAuth client is registered through
+its own call and sent to an address pinned in code. Nothing could be delivered to an address a caller
+chose. What was reachable was a credential of the wrong kind being accepted and spent on behalf of
+somebody who never agreed to it, and a malformed id arriving as a database error rather than as a
+refusal.
+
+The rule now comes from the entry: a server the deployment holds one token for takes that token, and
+a server answered as the person asking takes no credential when it is added, because its client
+arrives through the call that mints it. Both add paths ask the same question in the same words, so a
+credential that does not exist and one of the wrong kind are still refused identically and the
+endpoint cannot be used to ask which ids are real. Adding a curated server the way the admin screen
+does is unchanged.
+
+Adding a curated server that is already there no longer clears the credential it points at. The
+column holds the OAuth client that registering one put there, and re-adding the server to change an
+instance host said nothing about that client, but cleared it anyway: the credential row was left
+behind with nothing pointing at it and nothing to revoke it, and everybody who had connected their
+account was told the deployment has no client registered. A re-add that names no credential now
+leaves the one that is there alone.
+
 ### Name the private addresses an agent may live at
 
 Refusing `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` in production closed a hole and took something with
@@ -31,6 +597,43 @@ It is narrow on purpose:
   one is refused wherever it appears, so a redirect is not a way around registration.
 
 Unset means none, which is what every deployment has today.
+
+### A custom MCP server can only be pointed at its own token
+
+Adding an MCP server by URL takes a credential id alongside the address, and the add is what spends
+it: the tool refresh that runs before the call returns decrypts whatever that id names and sends it
+to the address in the same request. Nothing checked which credential it was, so an administrator
+could name any row in the vault, including one person's connector token, and have that person's
+token delivered in clear text to an address of the administrator's choosing, before any Bot or grant
+was involved. The credentials screen lists every row's id and, for a connector token, the person it
+belongs to, so choosing one was a single read.
+
+A custom server now has to be pointed at a credential of its own kind, the deployment's token for
+that server. A person's connector token and the deployment's OAuth client are both refused, for the
+same reason `POST /api/admin/credentials` already refuses to create either by hand: spending one
+here uses a credential on behalf of somebody who never agreed to it. A credential that does not
+exist is refused in the same words as one of the wrong kind, so the endpoint cannot be used to ask
+which ids are real.
+
+The field is unchanged for the case it exists for, and nothing changes for a server added through
+the admin screen, which mints a token and points at the one it just made. If a deployment has a
+custom server pointing at a credential of another kind, adding it again will now be refused, and the
+answer is to give the server its own token.
+
+### A failed action is recorded the same way it was decided
+
+An action the policy allowed and the computer then failed is recorded twice, once for the decision
+and once for the outcome, so the trail can tell an action that happened from one that was permitted
+and did not. The second row was leaving out the command and the key that the first one carried.
+
+A shell command that failed part-way therefore said a Bot had run something without saying what, in
+the row somebody reading an incident reaches for first. The same omission picked the wrong element
+branch, so that row also claimed the command had been looked for in the page snapshot and not found
+— a page element a shell call never had. A failed file write kept its path throughout and is
+unchanged.
+
+Both rows now carry the same subject. Nothing about the boundary moves: the policy decided on a
+complete context before and after, and no action is permitted that was not permitted before.
 
 ### Upgrading
 
@@ -143,6 +746,116 @@ Both halves were silent. The screen stopped updating, and anything typed afterwa
 without a word, because the input path looks for a viewer before it looks for anything it can report.
 
 A close now stops casting only when the socket closing is the one that was casting.
+
+### A sidebar channel row can be pinned or deleted
+
+Right-click on a channel in the sidebar and a menu opens with two entries: Pin channel and Delete
+channel.
+
+Pin is held per member rather than per channel, so pinning one holds it at the top of your own
+roster — newest first among pinned channels — and leaves every other member's roster unaffected.
+
+Delete is confirmed in a dialog first, and it is soft. The channel disappears from every member's
+roster and from a direct fetch of it, while the row, its transcript, and its Intelligence thread all
+survive. That disappearance is live, not just on next load: every member's open tabs drop the row as
+the delete lands, and a tab parked on the channel itself is sent home. The deletion is audited as its
+own `channel.deleted` row. A channel the deployment package defines is refused, with the reason
+named. Recovery today is clearing `channels.deleted_at` in the database directly; there is no restore
+control in the product.
+
+The deployment gains two nullable columns, via migration `0016`.
+
+### An MCP server address that points inside the deployment is refused in three more spellings
+
+Adding an MCP server by URL is checked before the address is stored, because that form is otherwise a
+way to point the deployment at its own network. The check compared the literal hostname, and three
+spellings of an address it means to refuse were getting through.
+
+A trailing dot is the root-anchored form of the same name and reaches the same place, but it changed
+the string enough that every rule missed it, so `https://localhost./`, `https://printer.local./` and
+`https://metadata.google.internal./` were all accepted. `kubernetes.default.svc`, which is how a
+service is addressed from inside a cluster, carries dots and none of the listed suffixes, so it read
+as an ordinary vendor name.
+
+The third is worth acting on rather than just noting. A credential typed into the address itself,
+`https://user:token@vendor.example/mcp`, was accepted, and the address is stored and named in the
+trail as given. Audit redaction works on field names and `url` is not one of the sensitive ones, so
+the token was written to `mcp_servers` and to an audit row in clear text. The trail is append-only by
+design, so that row cannot be deleted afterwards: **a deployment where somebody has done this should
+treat that credential as disclosed and rotate it.** The address field now refuses a credential and
+points at the token field instead.
+
+A deployment that reaches its MCP servers by ordinary vendor hostnames sees no difference.
+
+### One unreadable turn no longer takes a whole conversation down
+
+Restoring a thread cast whatever the history store held straight to messages and handed it to the
+transcript. A turn stored in a different shape — a tool call written `{id, name, args}` rather than
+AG-UI's `{id, type: "function", function: …}`, which interrupted runs have produced — reached a
+renderer that read `toolCall.function.arguments` and threw, so a single bad turn made the whole
+conversation unopenable rather than that one message unreadable.
+
+Each stored turn is now parsed against the schema AG-UI ships, and one that does not parse is left
+out instead of being drawn. Checked where history enters the app rather than in one renderer, so
+every surface that reads a transcript is covered by the same check.
+
+**A turn that is left out is said out loud.** The conversation shows a line above it naming how many
+earlier messages could not be read, because a record people read back must not have a hole in it that
+nothing accounts for — a turn that silently disappears reads as one that was never sent. Multimodal
+content and every well-formed tool call are unaffected, and a history that cannot be read at all
+still opens the composer rather than blocking it.
+
+### Refreshing no longer flashes white before the theme arrives
+
+A person with the dark theme selected saw a white frame on every reload. The stored preference was
+read early enough, but it was applied one paint too late: the browser had already drawn a frame
+against the light palette by the time the app got to it. The document now decides its theme before
+anything is drawn.
+
+The browser was also drawing its own surfaces — scrollbars, form controls, the overscroll area —
+light under a dark app, for the whole session rather than for a frame. Both themes now declare which
+one they are, so those match too.
+
+No configuration changes and nothing is stored differently; a deployment that was already on the
+light theme sees no difference at all.
+### `start.sh` refuses a port that answers but is not OpenBot
+
+The startup checks asked whether a port answered, and treated that as proof the port belonged to this
+stack. Those are not the same claim. Any single-page app serves its index.html for every path it does
+not recognise, so an unrelated dashboard on a default port answers `200` to `/api/capabilities` as
+readily as this server does.
+
+The cost was not a wrong answer, it was a wrong answer three stages later. `require_free_or_ours`
+reported "already up", so the server was never started; `wait_for` then printed a green
+"server ready"; and the run failed at stage 3 inside `json.loads`, parsing that stranger's HTML. The
+error names `char 0`, which reads like an empty response rather than a `<`, so the visible symptom
+pointed nowhere near the port.
+
+Each surface is now asked for something only it can produce: a `licenseStatus` field for the server,
+its own `<title>` for the app, `/health` for the compose services. When a check gives up it says
+whether the process failed to start or the port belongs to something else.
+
+The root cause was in `.env.example`, and is fixed there too. The server reads `PORT`, this script
+reads `SERVER_PORT`, `docs/configuration.md` documents `SERVER_PORT` as the setting, and only `PORT`
+shipped. Moving the server by editing that one line left the script still looking at 3001. Both names
+are now present, next to each other, saying they have to agree.
+
+**A run may now stop where it used to continue.** That is the point: it stops at the port that is
+wrong, naming it, rather than several steps later on a parse error.
+
+### `docker compose up -d` configures the same stack `scripts/start.sh` does
+
+`SUPERVISOR_TOKEN` and `COMPUTER_TOKEN` defaulted to the empty string in `docker-compose.yml`, so
+which stack you got depended on how you brought it up. `scripts/start.sh` resolves both to their
+`openbot-dev-*` defaults and exports them before calling compose. A plain `docker compose up -d` —
+which this project's own shutdown notes tell you to use — passed an empty string instead.
+
+`agent-computer` refuses to start without one, so that half failed loudly. The supervisor half was
+the quiet one: the server kept the token it started with while the supervisor held an empty string,
+and every call between them was refused at the door.
+
+Both now carry the same defaults `start.sh` applies, as `COMPUTER_IMAGE` already did two lines down.
+A value set in `.env` still wins, and a deployment should set one.
 
 ## 0.0.4
 

@@ -5,8 +5,8 @@ import {
   DEFAULT_ACTION_POLICY,
 } from "../src/computer/policy-store";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import { actionPolicy } from "../src/db/schema";
+import { TEST_POOL } from "./support/database";
 
 /**
  * The boundary has to survive a restart.

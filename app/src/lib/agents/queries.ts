@@ -43,6 +43,22 @@ export const agentKeys = {
   all: ["agents"] as const,
   list: (hidden = false) => ["agents", "list", { hidden }] as const,
   detail: (agentId: string) => ["agents", "detail", agentId] as const,
+  handoff: (agentId: string) => ["agents", "handoff", agentId] as const,
+};
+
+/** Which Bots one Bot may hand work to, and whether this deployment lets it. */
+export type HandoffGrants = {
+  /**
+   * Whether the capability is switched on at all.
+   *
+   * Separate from the grants because the two fail differently: with this false, a grant is a row
+   * nothing will ever read, so the screen says so rather than offering a switch wired to nothing.
+   */
+  enabled: boolean;
+  /** Whether the signed-in person may change any of it. Granting is an administrator's. */
+  canGrant: boolean;
+  /** Bot ids this Bot may address today. */
+  reachable: string[];
 };
 
 export function agentListQueryOptions(hidden = false) {
@@ -61,6 +77,16 @@ export function agentQueryOptions(agentId: string) {
     queryFn: (): Promise<AgentProfile> =>
       client(`/api/agents/${agentId}`, "agent", {
         fallback: "Could not load this coworker",
+      }),
+  });
+}
+
+export function agentHandoffQueryOptions(agentId: string) {
+  return queryOptions({
+    queryKey: agentKeys.handoff(agentId),
+    queryFn: (): Promise<HandoffGrants> =>
+      client(`/api/agents/${agentId}/handoff`, "handoff", {
+        fallback: "Could not load which Bots this one may ask",
       }),
   });
 }

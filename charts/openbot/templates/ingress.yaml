@@ -1,0 +1,44 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "openbot.fullname" . -}}
+{{- $port := .Values.server.service.port -}}
+{{/*
+Getting traffic in, one of two ways.
+
+`className` has no default because the controller differs on every cluster and always will, and the
+annotations that configure it differ with it. Naming one here would be a chart that installs on the
+cluster it was written on.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels:
+{{ include "openbot.labels" . | indent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ $fullname }}-server
+                port:
+                  number: {{ $port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

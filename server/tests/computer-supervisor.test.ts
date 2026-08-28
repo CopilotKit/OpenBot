@@ -236,3 +236,79 @@ describe("Docker supervisor provider", () => {
     expect(await provider.reset("bot")).toEqual({ cleared: false });
   });
 });
+
+/**
+ * Which run of a computer this is, asked by a replica that did not start it.
+ *
+ * `sessionOf` is what stops a ref from a dead container resolving against a live one: a replaced
+ * computer counts generations from one again, so the generation alone cannot tell them apart. It
+ * answers from what the last `/ensure` reported, which is free and correct while one process does
+ * both halves of the work.
+ *
+ * On more than one replica it is neither. The replica that took the snapshot is very often not the
+ * replica handling the click, and the second one has never called `/ensure` for that Bot, so it has
+ * nothing to answer with. `resolve` treats an unknown session as "no opinion" and skips the check by
+ * design, which is right for a provider that cannot tell and wrong here: the check is simply absent,
+ * silently, on exactly the deployment shape it was written for.
+ */
+describe("telling one run of a computer from the next, across replicas", () => {
+  /*
+   * A bot id of its own per test, because the map this reads is module scope.
+   *
+   * Two providers in one process are not two replicas: they share it. A test that located the
+   * computer under one name and then asked under the same name would pass whatever the code did,
+   * which is the shape of a test that proves nothing.
+   */
+  const startedAt = "2026-08-24T09:00:00.000Z";
+
+  function replica(botId: string, seen: string[] = []) {
+    const running = [
+      {
+        botId,
+        container: `openbot-computer-${botId}`,
+        status: "running",
+        url: `http://openbot-computer-${botId}:4100`,
+        startedAt,
+      },
+    ];
+    return createDockerSupervisorProvider({
+      baseUrl: "http://supervisor:4300",
+      token: "t",
+      fetchImpl: (async (url: string | URL | Request) => {
+        const path = new URL(String(url)).pathname;
+        seen.push(path);
+        if (path.endsWith("/ensure")) return Response.json(running[0]);
+        return Response.json({ computers: running });
+      }) as unknown as typeof fetch,
+    });
+  }
+
+  test("a replica that located the computer knows the run", async () => {
+    const client = replica("located");
+    await client.locate("located");
+    expect(await client.sessionOf?.("located")).toBe(startedAt);
+  });
+
+  test("a replica that never located it still knows the run", async () => {
+    /*
+     * The regression. This replica is serving the click; another one took the snapshot. Without an
+     * answer here the generation check is skipped and a ref from a computer that has since been
+     * replaced resolves against the new one, which is the case the check exists for.
+     */
+    const client = replica("never-located");
+    expect(await client.sessionOf?.("never-located")).toBe(startedAt);
+  });
+
+  test("asking does not start a computer that is not running", async () => {
+    /*
+     * The other half, and the easier one to get wrong. `/ensure` starts a computer; answering this
+     * question with it would mean every idle Bot is woken by being asked about, which is how a
+     * deployment ends up never suspending anything and never noticing, because everything works and
+     * only the bill says otherwise.
+     */
+    const seen: string[] = [];
+    const client = replica("asked-about", seen);
+    await client.sessionOf?.("asked-about");
+    expect(seen.some((path) => path.endsWith("/ensure"))).toBe(false);
+  });
+});

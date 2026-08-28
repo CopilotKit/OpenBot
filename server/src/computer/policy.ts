@@ -318,7 +318,12 @@ function describeRefusal(context: PolicyContext, expression: string): string {
     );
   }
 
-  if (context.mcp) {
+  // Present is not enough: the gateway attaches a neutral all-empty `mcp` to every browser context
+  // so a rule naming `mcp.effect` evaluates to false instead of throwing. Testing the object rather
+  // than its contents made this branch fire for every browser refusal, and a person whose click was
+  // refused read ":  on  is blocked" — two empty strings where the element and page belonged. A real
+  // tool call always names its server and its tool, so those are what the branch keys on.
+  if (context.mcp?.server || context.mcp?.tool) {
     return (
       `This deployment's policy does not allow that: ${context.mcp.tool} on ` +
       `${context.mcp.server} is blocked by the rule \`${expression}\`.`

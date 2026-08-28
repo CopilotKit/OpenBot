@@ -114,6 +114,11 @@ const store = createPluginStore({
     create: async () => {
       throw new Error("this suite writes credentials directly");
     },
+    // Google does not rotate, so no exchange here ever reaches the in-place update. Loud, so that
+    // one starting to would show up rather than pass quietly.
+    updateSecret: async () => {
+      throw new Error("this suite writes credentials directly");
+    },
     /*
      * A real revocation, against this suite's own rows.
      *
@@ -155,8 +160,35 @@ const store = createPluginStore({
   },
 });
 
+/**
+ * Retire whatever this key currently holds, the way the product now does.
+ *
+ * These fixtures insert straight into the vault rather than going through the store, and a key holds
+ * at most one live credential since `credentials_active_key_idx`. Re-registering a client or
+ * reconnecting a person is a replacement, so the row it replaces is revoked first; without this the
+ * second test to call either helper meets the index instead of the behaviour it came to check.
+ */
+async function retireLive(
+  kind: "mcp_oauth_client" | "mcp_user_token",
+  keyId: string,
+) {
+  const revokedAt = new Date();
+  await database
+    .update(credentials)
+    .set({ revokedAt, updatedAt: revokedAt })
+    .where(
+      and(
+        eq(credentials.kind, kind),
+        eq(credentials.provider, serverId),
+        eq(credentials.keyId, keyId),
+        isNull(credentials.revokedAt),
+      ),
+    );
+}
+
 /** Register the deployment's OAuth client, which is what `mcp_servers.credential_id` holds. */
 async function registerClient() {
+  await retireLive("mcp_oauth_client", "oauth-client");
   const [credential] = await database
     .insert(credentials)
     .values({
@@ -180,6 +212,7 @@ async function registerClient() {
 }
 
 async function connect(userId: string, refreshToken: string) {
+  await retireLive("mcp_user_token", userId);
   const [credential] = await database
     .insert(credentials)
     .values({

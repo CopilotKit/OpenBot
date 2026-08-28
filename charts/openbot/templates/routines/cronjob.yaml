@@ -1,0 +1,79 @@
+{{- if (.Values.routines).enabled }}
+{{- $component := "routines" -}}
+{{/*
+Firing the routines a Bot was scheduled to run.
+
+A CronJob rather than a timer in the API, for the same reason the culler beside it is one: an
+interval in the server fires in every replica, so five replicas would each offer the same due
+routine to the queue. The queue itself only lets one worker take a given firing, but there is no
+reason to make five pods race for it every tick when one CronJob run does the whole sweep.
+
+`concurrencyPolicy: Forbid` on top, because a schedule that overlaps itself is the cross-replica
+problem in one workload rather than across several.
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" $component) }}
+  labels:
+{{ include "openbot.componentLabels" (dict "root" . "component" $component) | indent 4 }}
+spec:
+  {{- $schedule := "*/5 * * * *" -}}
+  {{- if not (kindIs "invalid" (.Values.routines).schedule) -}}
+  {{- $schedule = (.Values.routines).schedule -}}
+  {{- end }}
+  # The fallback matches values.yaml, and is only reached on an upgrade that reuses values from
+  # before this key existed. It said `* * * * *` for one commit, which is five times more often than
+  # anything documents.
+  schedule: {{ $schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # Under the five-minute schedule period, and load-bearing with `concurrencyPolicy: Forbid`
+      # above: without it a wedged run is never killed, so Forbid suppresses every later sweep and
+      # routines stop firing for good, with only a Running job as evidence.
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+{{ include "openbot.componentSelectorLabels" (dict "root" . "component" $component) | indent 12 }}
+            {{- if .Values.postgresql.enabled }}
+            {{- /*
+              The bundled database admits pods carrying this label and nothing else, which this chart pins on.
+              Anything that opens the database needs it, and only the API server had it: this would have been
+              refused on any cluster that actually enforces a NetworkPolicy. Not caught by hand, because the
+              cluster it was driven on ships enforcement switched off.
+            */}}
+            {{ .Release.Name }}-postgresql-client: "true"
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "openbot.serviceAccountName" . }}
+          {{- /* This sweep reads the database and posts to the API; it never asks the cluster for anything, so it gets no token. */}}
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          containers:
+            - name: routines
+              image: {{ include "openbot.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              workingDir: /app/server
+              command: ["/usr/local/bin/bun", "scripts/fire-routines.ts"]
+              env:
+{{ include "openbot.databaseUrlEnv" . | indent 16 }}
+{{ include "openbot.commonEnv" . | indent 16 }}
+                - name: SERVER_INTERNAL_URL
+                  value: http://{{ include "openbot.componentName" (dict "root" . "component" "server") }}:{{ .Values.server.service.port }}
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+{{- end }}

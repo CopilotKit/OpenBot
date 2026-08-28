@@ -1,0 +1,47 @@
+{{- if eq .Values.computers.mode "sandbox" }}
+{{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
+{{/*
+What the API may do to computers, and nothing else.
+
+A ROLE, NOT A CLUSTERROLE. Scoped to the one namespace the computers live in, so the worst this
+credential can do is manage Bots' browsers in the place they already are. Compare the Docker
+supervisor, which holds the host's Docker socket and is therefore root-equivalent on that host: this
+is a smaller blast radius, granted by the cluster rather than by a shared environment variable.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" "sandbox") }}
+  namespace: {{ $ns }}
+  labels:
+{{ include "openbot.labels" . | indent 4 }}
+rules:
+  - apiGroups: ["agents.x-k8s.io"]
+    resources: ["sandboxes"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  - apiGroups: ["agents.x-k8s.io"]
+    resources: ["sandboxes/status"]
+    verbs: ["get"]
+  {{- if .Values.computers.sandbox.warmPool.enabled }}
+  {{- /* The extension kinds are in their own API group, which a Role must name exactly. */}}
+  - apiGroups: ["extensions.agents.x-k8s.io"]
+    resources: ["sandboxclaims"]
+    verbs: ["get", "list", "create", "delete"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "openbot.componentName" (dict "root" . "component" "sandbox") }}
+  namespace: {{ $ns }}
+  labels:
+{{ include "openbot.labels" . | indent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "openbot.componentName" (dict "root" . "component" "sandbox") }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "openbot.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

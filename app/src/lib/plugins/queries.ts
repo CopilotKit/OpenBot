@@ -42,6 +42,11 @@ export type PluginServer = {
   toolsRefreshedAt: string | null;
   lastError: string | null;
   addedBy: string | null;
+  /**
+   * Whether this server registers its own OAuth client (RFC 7591) rather than waiting on an
+   * administrator to paste one in.
+   */
+  dynamicClient: boolean;
   tools: PluginTool[];
   /** Empty for a healthy connector. See {@link WithdrawnGrant}. */
   withdrawn: WithdrawnGrant[];
@@ -80,9 +85,10 @@ export type CatalogueItem = {
    *
    * `deployment-bearer` is a token an administrator holds for everybody, and the only one this page
    * can collect. `user-oauth` is reached as whoever is asking, so each person connects their own
-   * account and there is no token to type here.
+   * account and there is no token to type here. `builtin` is a first-party capability that runs
+   * inside this deployment — there is nothing to connect and nothing to type.
    */
-  auth: "none" | "deployment-bearer" | "user-oauth";
+  auth: "none" | "deployment-bearer" | "user-oauth" | "builtin";
   /** True for a vendor that gives every customer their own hostname. */
   perInstance: boolean;
 };

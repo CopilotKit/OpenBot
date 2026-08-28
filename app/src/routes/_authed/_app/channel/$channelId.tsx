@@ -1,10 +1,16 @@
 import { IconDeviceDesktop, IconSettings } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef } from "react";
 import { z } from "zod";
 import { AgentProfile } from "@/components/agents/agent-profile";
+import { hasUnseenActivity } from "@/components/app-sidebar/app-sidebar";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ActivityLog } from "@/components/computer/activity-log";
@@ -12,12 +18,12 @@ import { ComputerView } from "@/components/computer/computer-view";
 import { useNeedsYou } from "@/components/computer/needs-you";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { Button } from "@/components/ui/button";
-import { type AgentChannel, channelQueryOptions } from "@/lib/channels/queries";
+import { markChannelReadMutationOptions } from "@/lib/channels/mutations";
 import {
-  activityFor,
-  hasBrowsed,
-  subscribeToActivity,
-} from "@/lib/computers/activity";
+  type AgentChannel,
+  channelListQueryOptions,
+  channelQueryOptions,
+} from "@/lib/channels/queries";
 import { onComputerActivity } from "@/lib/copilot/computer-activity";
 
 const chatSearchSchema = z.object({
@@ -42,13 +48,11 @@ export const Route = createFileRoute("/_authed/_app/channel/$channelId")({
 /**
  * What the Bot is looking at, and what it is doing.
  *
- * Two surfaces rather than one. The screen was the only window into a Bot's computer, so a Bot that
- * spent two minutes in a terminal showed a blank browser and nothing else: the honest answer to
- * "what is it doing" was "something, on a machine holding your logins". The second tab is the shell
- * and the workspace, and it fills up while the screen sits still.
- *
- * The screen stays the default, because most work is browsing and it is the surface somebody has to
- * take the wheel on. The count on the other tab is what says the Bot is busy somewhere else.
+ * Two surfaces, stacked rather than tabbed. The screen was the only window into a Bot's computer,
+ * so a Bot that spent two minutes in a terminal showed a blank browser and nothing else: the honest
+ * answer to "what is it doing" was "something, on a machine holding your logins". The activity —
+ * the shell and the workspace — sits below the screen, so watching one never costs the other and
+ * nothing about what the Bot is doing hides behind a tab nobody clicked.
  */
 function ComputerViewPanel({
   agentId,
@@ -57,77 +61,13 @@ function ComputerViewPanel({
   agentId: string;
   name?: string;
 }) {
-  const activity = useSyncExternalStore(
-    subscribeToActivity,
-    () => activityFor(agentId),
-    () => activityFor(agentId),
-  );
-  const browsed = useSyncExternalStore(
-    subscribeToActivity,
-    () => hasBrowsed(agentId),
-    () => hasBrowsed(agentId),
-  );
-
-  /*
-   * Which surface opens, decided by what the Bot is actually doing.
-   *
-   * The screen belongs to the computer rather than to the conversation: Bots share one and the
-   * profile keeps whatever page was open last. A Bot that spends a whole conversation in a terminal
-   * therefore has a screen showing somebody else's page from an hour ago, and defaulting to it
-   * captions that as what this Bot is doing now.
-   *
-   * So the screen is the default until there is a reason to think otherwise, and work away from the
-   * browser with no page opened is that reason. Once somebody picks a tab, their choice stands.
-   */
-  const [chosen, setChosen] = useState<"screen" | "activity" | null>(null);
-  const showing =
-    chosen ?? (!browsed && activity.length > 0 ? "activity" : "screen");
-
   return (
     <div className="mt-4 px-4">
       <div className="p-4">
-        <div className="mb-3 flex gap-2">
-          <Button
-            onClick={() => setChosen("screen")}
-            size="sm"
-            variant={showing === "screen" ? "default" : "outline"}
-          >
-            Screen
-          </Button>
-          <Button
-            onClick={() => setChosen("activity")}
-            size="sm"
-            variant={showing === "activity" ? "default" : "outline"}
-          >
-            Activity
-            {activity.length > 0 ? (
-              <span className="ml-1.5 tabular-nums opacity-70">
-                {activity.length}
-              </span>
-            ) : null}
-          </Button>
-        </div>
+        <ComputerView active computerId={agentId} name={name} />
 
-        {/*
-          Both mounted, one hidden. Unmounting the screen would drop its socket and its polling, so
-          looking at the terminal for a moment would cost the live view and the take-the-wheel prompt
-          that rides on it.
-        */}
-        <div className={showing === "screen" ? undefined : "hidden"}>
-          <ComputerView active computerId={agentId} />
-          {/*
-            The caption says whose page this is, and it is only this Bot's once it has opened one.
-            Before that the browser still shows whatever was last open on the shared computer, and
-            calling that "General Assistant's screen" states something untrue with confidence.
-          */}
-          <span className="mt-4 flex w-full items-center justify-center text-balance px-4 text-center text-muted-foreground text-sm">
-            {browsed
-              ? `${name || "Agent"}'s screen`
-              : `${name || "Agent"} has not opened a page in this conversation. This is whatever its computer had open last.`}
-          </span>
-        </div>
-
-        <div className={showing === "activity" ? undefined : "hidden"}>
+        <div className="mt-10">
+          <h3 className="mb-2 font-medium text-sm">Activity</h3>
           <ActivityLog computerId={agentId} />
         </div>
       </div>
@@ -145,10 +85,43 @@ function RouteComponent() {
   const isWatching = watch === true;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
-  /** Needs-you state is rendered by the screen when the screen is already open. */
+  /** Only polled while the screen is closed; the screen panel polls control itself. */
   const needsYou = useNeedsYou(agentId, !isWatching);
 
-  // Needs-you prompts auto-open the screen because the actionable prompt is rendered there.
+  const queryClient = useQueryClient();
+  const markRead = useMutation(markChannelReadMutationOptions(queryClient));
+  /*
+   * This channel's roster summary, read out of the same infinite query the sidebar renders.
+   * The detail query deliberately knows nothing about activity; the roster is where the socket
+   * keeps lastMessageAt live, so it is the one honest source for "has something new been said".
+   */
+  const roster = useInfiniteQuery(channelListQueryOptions());
+  const summary = roster.data?.find((row) => row.id === channelId);
+
+  /*
+   * Opening the channel marks it read; the Bot replying while it is open marks it read again.
+   * One effect covers both: the dep changes on navigation and on every activity patch, and the
+   * unseen check keeps it from writing a row per render. No dependency on the mutation object —
+   * its identity changes per render and the effect must not re-fire for that.
+   *
+   * Keyed on primitives, deliberately. The optimistic mark-read patch changes the summary OBJECT's
+   * identity without changing these values, so an object dep would re-fire the effect on its own
+   * write — and when lastMessageAt sits ahead of this browser's clock (another device wrote it),
+   * that re-fire loops into a PUT per render. Primitives hold still under the patch: one PUT.
+   */
+  const unseen = summary !== undefined && hasUnseenActivity(summary);
+  const markReadMutate = markRead.mutate;
+  useEffect(() => {
+    if (unseen) {
+      markReadMutate(channelId);
+    }
+  }, [channelId, unseen, markReadMutate]);
+
+  /*
+   * Needs-you prompts auto-open the screen panel, because the prompt with the reason on it — the
+   * amber "the assistant needs you" row, and the masked field for a credential — is drawn on the
+   * screen card in that panel. Nothing about a stuck Bot is actionable until this pane is open.
+   */
   useEffect(() => {
     if (!needsYou) return;
     show("watch");

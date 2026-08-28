@@ -3,10 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { AgentCard } from "@/components/agents/agent-card";
-import { StaggerItem } from "@/components/layout/stagger";
 import { AgentProfile as AgentProfileDetail } from "@/components/agents/agent-profile";
 import { NewAgent } from "@/components/agents/new-agent";
 import { DetailPanel } from "@/components/layout/detail-panel";
+import { StaggerItem } from "@/components/layout/stagger";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { agentListQueryOptions } from "@/lib/agents/queries";
@@ -25,6 +25,15 @@ export const Route = createFileRoute("/_authed/_app/agents/")({
   component: AgentsScreen,
 });
 
+/*
+ * The roster wraps on the width it actually has, not on the window's.
+ *
+ * A card is a fixed 144px, so four fixed columns overlap the moment the column they sit in is
+ * narrower than the card. That is not a narrow-window case: opening the detail pane takes the width
+ * out of this column at any window size, so the cards behind an open Bot overlapped each other on a
+ * perfectly ordinary screen. `auto-fill` tracks the container instead, which is the thing that
+ * actually changed.
+ */
 function AgentsScreen() {
   const { new: isCreating, agent: selectedAgentId } = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -66,7 +75,7 @@ function AgentsScreen() {
           </div>
           <div className="flex flex-row mt-4">
             {!!mine?.length && (
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(144px,1fr))] gap-4">
                 {mine.map((agent, index) => {
                   return (
                     <StaggerItem index={index} key={agent.id}>
@@ -91,7 +100,7 @@ function AgentsScreen() {
         </div>
         <div className="mt-8 w-full max-w-2xl">
           <h2 className="font-bold text-lg">Explore agents</h2>
-          <div className="grid grid-cols-4 gap-4 mt-4">
+          <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(144px,1fr))] gap-4">
             {!!explore?.length &&
               explore.map((agent, index) => {
                 return (

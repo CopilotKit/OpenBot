@@ -1,5 +1,5 @@
-import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
 import type { ThreadIdentity } from "./thread-identity";
 

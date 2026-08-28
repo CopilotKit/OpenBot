@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { isOpenPath, matchesToken, offeredToken } from "../src/authorisation";
+import {
+  actsOnTheComputer,
+  isOpenPath,
+  matchesToken,
+  offeredToken,
+} from "../src/authorisation";
 
 /**
  * The check that stands in front of a Bot's browser.
@@ -85,6 +90,53 @@ describe("what an unauthenticated caller may reach", () => {
       "/",
     ]) {
       expect(isOpenPath(path)).toBeFalse();
+    }
+  });
+});
+
+/**
+ * Which paths the wheel stops.
+ *
+ * A person takes the wheel at a login wall precisely because they no longer want the Bot acting, and
+ * `control.ts` states the property outright: "While a person holds control every acting call from the
+ * Bot is refused". That was true of the page from the start and untrue of the shell, which arrived
+ * later (#62) and was never wired to the wheel, so a Bot could run a command and rewrite the
+ * workspace underneath somebody mid-sign-in.
+ *
+ * The list lives here, beside the other path decision, rather than in `index.ts`, for the reason the
+ * header of this file gives: a decision next to `chromium.launch()` cannot be tested without Chrome.
+ *
+ * Reading is not acting. `/files/read` and `/files/list` stay open so a Bot waiting to be handed the
+ * wheel back can still say what it was doing.
+ */
+describe("what the wheel stops while a person is driving", () => {
+  test("every path that acts on the computer, the shell and a workspace write included", () => {
+    for (const path of [
+      "/navigate",
+      "/click",
+      "/type",
+      "/key",
+      "/scroll",
+      "/exec",
+      "/files/write",
+    ]) {
+      expect(actsOnTheComputer(path)).toBeTrue();
+    }
+  });
+
+  test("reading, looking and the handover itself are not acting", () => {
+    for (const path of [
+      "/files/read",
+      "/files/list",
+      "/snapshot",
+      "/screenshot",
+      "/health",
+      "/control",
+      "/control/take",
+      "/control/release",
+      "/stream",
+    ]) {
+      expect(actsOnTheComputer(path)).toBeFalse();
     }
   });
 });

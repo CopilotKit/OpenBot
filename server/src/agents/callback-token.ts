@@ -78,6 +78,30 @@ export type RunAssertion = {
   actorId: string;
   /** The run itself, so a trail can tie a tool call to the answer it informed. */
   runId: string;
+  /**
+   * The conversation this run belongs to.
+   *
+   * HERE RATHER THAN IN THE TOOL CALL, because a Bot handing work to another has to say where the
+   * answer goes, and letting the model name it would let one Bot drop a turn into a conversation it
+   * was never part of. This is the deployment's own statement of which thread the run is in, signed
+   * with the rest.
+   *
+   * Optional because an assertion minted before this existed still reads, and a run with no thread
+   * simply cannot hand work on.
+   */
+  threadId?: string;
+  /**
+   * How many Bots deep this run already is. Absent means it began with a person, which is zero.
+   *
+   * IT TRAVELS HERE BECAUSE IT HAS TO CROSS A PROCESS. A Bot handing work to another Bot is A to B to
+   * C, three runs on up to three pods, and a counter held in a variable stops applying the moment the
+   * second hop lands somewhere else. That is also the moment a loop starts costing real money, so the
+   * cap would go quiet exactly when it was needed. This is signed by the deployment and already
+   * crosses every boundary the run does, which makes it the one place a Bot cannot edit it.
+   *
+   * Optional on the way in so an assertion minted before this existed still reads, and read as zero.
+   */
+  depth?: number;
 };
 
 type SignedRun = RunAssertion & { exp: number };
@@ -94,7 +118,11 @@ export function mintRunAssertion(
   encryptionKey: string,
   now: number = Date.now(),
 ): string {
-  const payload: SignedRun = { ...run, exp: now + RUN_TTL_MS };
+  const payload: SignedRun = {
+    ...run,
+    depth: run.depth ?? 0,
+    exp: now + RUN_TTL_MS,
+  };
   const value = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return sign(value, encryptionKey, RUN_LABEL);
 }
@@ -132,6 +160,21 @@ export function readRunAssertion(
       botId: payload.botId,
       actorId: payload.actorId,
       runId: payload.runId,
+      ...(typeof payload.threadId === "string" && payload.threadId
+        ? { threadId: payload.threadId }
+        : {}),
+      /*
+       * A depth that is not a whole number at least zero is not a depth. Read as zero rather than
+       * refused, because the assertion's signature has already been checked: this is a field that
+       * predates the handoff feature being absent, not a caller lying, and the cap that consumes it
+       * refuses on the way out anyway.
+       */
+      depth:
+        typeof payload.depth === "number" &&
+        Number.isInteger(payload.depth) &&
+        payload.depth >= 0
+          ? payload.depth
+          : 0,
     };
   } catch {
     return null;

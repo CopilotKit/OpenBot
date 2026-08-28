@@ -70,16 +70,16 @@ export function activityFor(computerId: string): ComputerActivity[] {
 }
 
 /**
- * Whether this Bot has opened a page since the surface was loaded.
- *
- * The screen is a property of the computer and outlives a conversation: several Bots share one, and
- * the profile keeps whatever page was last open. So a Bot that spends a whole conversation in a
- * terminal still has a screen, showing somebody else's order form from an hour ago, and defaulting
- * the pane to it captions a stale page as what this Bot is doing right now. That is worse than
- * showing nothing, because it is confidently wrong.
+ * Which Bots have opened a page since the surface was loaded.
  *
  * Recorded rather than inferred from the screenshot: a screenshot always succeeds, and "the browser
- * has a page loaded" is a different fact from "this Bot opened one".
+ * has a page loaded" is a different fact from "this Bot opened one" — the screen belongs to the
+ * computer and outlives a conversation, so a Bot that has browsed nothing still has a page on it.
+ *
+ * Nothing reads this today. The screen and the activity log are now stacked rather than tabbed, so
+ * no view has to guess which of the two to open, and the caption that hedged about whose page it
+ * was is gone with it. The note stays because the tool handler is the only place the fact exists and
+ * losing it would mean re-deriving it from a screenshot, which cannot answer it.
  */
 const browsed = new Set<string>();
 
@@ -87,10 +87,6 @@ export function noteBrowsed(computerId: string): void {
   if (browsed.has(computerId)) return;
   browsed.add(computerId);
   for (const listener of listeners) listener();
-}
-
-export function hasBrowsed(computerId: string): boolean {
-  return browsed.has(computerId);
 }
 
 export function subscribeToActivity(listener: () => void): () => void {

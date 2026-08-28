@@ -144,10 +144,16 @@ export function useBotThread(agentId: string): BotThread {
   // Shared between the effect's own resolution mint and `startNew`'s mint so the two can never
   // race each other into two POST /mint calls fighting over the same localStorage slot.
   const mintingRef = useRef(false);
+  // Set once `startNew` has taken over, so the mount-time check that is still in flight does not
+  // then overwrite the fresh thread with the remembered one. `checkKnown` is a read, not a mint, so
+  // `mintingRef` is clear while it runs and would not have stopped `startNew` starting during it.
+  const startedNewRef = useRef(false);
 
   useEffect(() => {
     let current = true;
     mountedRef.current = true;
+    // A new agent resolves from scratch, so any earlier `startNew` no longer speaks for this one.
+    startedNewRef.current = false;
     setThreadId(undefined);
     setHistory("ready");
 
@@ -172,7 +178,10 @@ export function useBotThread(agentId: string): BotThread {
       adoptFresh();
     } else {
       void checkKnown(existing).then((outcome) => {
-        if (!current) return;
+        // `startedNewRef` as well as `current`: the agent may have changed (which `current` catches),
+        // or the person may have pressed New chat while this check was in flight, and a check about
+        // the thread they just left must not put it back.
+        if (!current || startedNewRef.current) return;
         const decision = threadToUse({
           remembered: existing,
           known: outcome.known,
@@ -202,6 +211,20 @@ export function useBotThread(agentId: string): BotThread {
       // end up worse off — mid-conversation and suddenly unable to send — than before they pressed
       // it.
       if (!minted) return;
+      /*
+       * Latched here rather than at the press, and the difference is a blank screen.
+       *
+       * Set on the press, a mint that then fails leaves the mount-time check disarmed with nothing
+       * having replaced the thread: `bot.tsx` renders the chat only when there is one, so the person
+       * is left looking at an empty pane with no message and no way back but a reload. Set here, a
+       * failed mint disarms nothing and the remembered thread is still restored.
+       *
+       * This is not a weaker guard. Assignment and the check below both run to completion on one
+       * thread, so a `checkKnown` that resolves after this sees it, and one that resolves before it
+       * has already restored a thread that this line is about to replace — which is what the person
+       * asked for.
+       */
+      startedNewRef.current = true;
       remember(agentId, minted);
       setThreadId(minted);
       setHistory("ready");

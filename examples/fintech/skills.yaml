@@ -17,8 +17,8 @@
 # file may name tools for connectors this deployment has not added, and should — that is what makes
 # them work the moment somebody does.
 #
-# Refs are `<serverId>/<toolName>`, the same form a grant is written in. `google-drive` is the
-# catalogue connector; a server an administrator adds by URL uses the id it was given.
+# Refs are `<serverId>/<toolName>`, the same form a grant is written in. `google-drive` and `notion`
+# are catalogue connectors; a server an administrator adds by URL uses the id it was given.
 skills:
   - slug: find-a-document
     title: Find a document
@@ -32,6 +32,18 @@ skills:
       - google-drive/search_files
       - google-drive/read_file_content
       - google-drive/get_file_metadata
+
+  - slug: find-a-notion-page
+    title: Find a Notion page
+    summary: Search Notion for a page and read what it says.
+    instructions: >-
+      Find the Notion page the person is asking about before answering anything about its contents.
+      Search first, then fetch the page you found rather than answering from its title. If the search
+      returns nothing, say so and say what you searched for, rather than guessing at what the page
+      might contain. Name the page you used.
+    tools:
+      - notion/notion-search
+      - notion/notion-fetch
 
   - slug: whats-changed
     title: What changed recently

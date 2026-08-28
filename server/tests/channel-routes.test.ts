@@ -1,6 +1,13 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -9,10 +16,13 @@ import {
 } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createApp } from "../src/app";
+import type { AuditEventInput, AuditStore } from "../src/audit";
+import { DEV_ACTOR } from "../src/auth/dev-actor";
 import type { AppVariables } from "../src/auth/guards";
 import {
   type AgentChannel,
   ChannelNotFoundError,
+  ChannelPackageOwnedError,
   type ChannelStore,
   createChannelRoutes,
   createChannelStore,
@@ -21,16 +31,17 @@ import {
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
-import { TEST_POOL } from "./support/database";
 import {
   agentProfiles,
   agents,
   channelAgents,
   channelMemberships,
   channels,
+  deploymentPackages,
   intelligenceChannelMappings,
   users,
 } from "../src/db/schema";
+import { TEST_POOL } from "./support/database";
 import { testEnvironment } from "./support/environment";
 
 const actor = {
@@ -64,6 +75,15 @@ function fakeStore(
     async get(receivedActor, id) {
       calls.push(["get", receivedActor, id]);
       return channel({ id });
+    },
+    async setPinned(receivedActor, id, pinned) {
+      calls.push(["setPinned", receivedActor, id, pinned]);
+    },
+    async markRead(receivedActor, id) {
+      calls.push(["markRead", receivedActor, id]);
+    },
+    async softDelete(receivedActor, id) {
+      calls.push(["softDelete", receivedActor, id]);
     },
   };
 
@@ -290,6 +310,275 @@ describe("channel routes", () => {
     expect(response.status).toBe(599);
     expect(await json(response)).toEqual({ sentinel: "database disconnected" });
   });
+
+  test("pins through the authenticated actor and reports the new state", async () => {
+    const store = fakeStore();
+    const app = appFor(store);
+
+    const response = await app.request("http://openbot.test/channel-1/pin", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pinned: true }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toEqual({ pinned: true });
+    expect(store.calls).toEqual([["setPinned", actor, "channel-1", true]]);
+  });
+
+  test.each([
+    ["{", "Pin input must be a JSON object."],
+    [JSON.stringify([]), "Pin input must be a JSON object."],
+    [JSON.stringify({}), "Pinned must be true or false."],
+    [JSON.stringify({ pinned: "yes" }), "Pinned must be true or false."],
+  ])("rejects malformed pin bodies: %p", async (body, error) => {
+    const store = fakeStore();
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1/pin",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body,
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await json(response)).toEqual({ error });
+    expect(store.calls).toEqual([]);
+  });
+
+  test("keeps authentication in front of pinning", async () => {
+    const store = fakeStore();
+    const denied: MiddlewareHandler<{ Variables: AppVariables }> = (context) =>
+      Promise.resolve(context.json({ error: "denied" }, 401));
+    const app = appFor(store, denied);
+
+    const response = await app.request("http://openbot.test/channel-1/pin", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pinned: true }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(store.calls).toEqual([]);
+  });
+
+  test("marks read through the authenticated actor and answers 204", async () => {
+    const store = fakeStore();
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1/read",
+      { method: "PUT" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(store.calls).toEqual([["markRead", actor, "channel-1"]]);
+  });
+
+  test("maps an unknown channel to 404 for marking read", async () => {
+    const store = fakeStore({
+      markRead: async () => {
+        throw new ChannelNotFoundError("channel-1");
+      },
+    });
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1/read",
+      { method: "PUT" },
+    );
+
+    expect(response.status).toBe(404);
+    expect(await json(response)).toEqual({ error: "Channel not found." });
+  });
+
+  test("keeps authentication in front of marking read", async () => {
+    const store = fakeStore();
+    const denied: MiddlewareHandler<{ Variables: AppVariables }> = (context) =>
+      Promise.resolve(context.json({ error: "denied" }, 401));
+    const response = await appFor(store, denied).request(
+      "http://openbot.test/channel-1/read",
+      { method: "PUT" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(store.calls).toEqual([]);
+  });
+
+  test("deletes through the authenticated actor and answers 204", async () => {
+    const store = fakeStore();
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(store.calls).toEqual([["softDelete", actor, "channel-1"]]);
+  });
+
+  test("maps a package-owned refusal to 409", async () => {
+    const store = fakeStore({
+      softDelete: async () => {
+        throw new ChannelPackageOwnedError("channel-1");
+      },
+    });
+    const response = await appFor(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await json(response)).toEqual({
+      error:
+        "This channel is defined by the deployment package, so it cannot be deleted here.",
+    });
+  });
+
+  test("keeps authentication in front of deleting", async () => {
+    const store = fakeStore();
+    const denied: MiddlewareHandler<{ Variables: AppVariables }> = (context) =>
+      Promise.resolve(context.json({ error: "denied" }, 401));
+    const app = appFor(store, denied);
+
+    const response = await app.request("http://openbot.test/channel-1", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(401);
+    expect(store.calls).toEqual([]);
+  });
+});
+
+/**
+ * The channel row survives a soft delete, but nothing on it says who hid it or when.
+ *
+ * "Where did that conversation go" is the question this answers, and the row is the only thing that
+ * can: `deleted_at` is a timestamp with no actor. Untested, it is also the easiest thing to drop in
+ * a later refactor without anything going red — which is exactly how it was lost once already.
+ */
+describe("channel delete audit", () => {
+  /** Rows written by the route under test, in order. */
+  let audited: AuditEventInput[] = [];
+
+  beforeEach(() => {
+    audited = [];
+  });
+
+  function appWithAudit(
+    store: ChannelStore,
+    auditStore: AuditStore = {
+      insert: async (event) => void audited.push(event),
+    },
+  ) {
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route(
+      "/",
+      createChannelRoutes(store, requireUser, undefined, auditStore),
+    );
+    return app;
+  }
+
+  test("writes an attributed row naming the mechanism", async () => {
+    const response = await appWithAudit(fakeStore()).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(audited).toEqual([
+      {
+        eventType: "channel.deleted",
+        targetType: "channel",
+        targetId: "channel-1",
+        actorUserId: actor.id,
+        payload: { mechanism: "soft" },
+      },
+    ]);
+  });
+
+  /* Same discipline as bot-lifecycle-audit.test.ts: the trail records acts, not attempts. */
+  test("a refused change writes nothing", async () => {
+    const store = fakeStore({
+      softDelete: async () => {
+        throw new ChannelPackageOwnedError("channel-1");
+      },
+    });
+
+    const response = await appWithAudit(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    expect(audited).toEqual([]);
+  });
+
+  test("a delete of somebody else's channel writes nothing", async () => {
+    const store = fakeStore({
+      softDelete: async () => {
+        throw new ChannelNotFoundError("channel-1");
+      },
+    });
+
+    const response = await appWithAudit(store).request(
+      "http://openbot.test/channel-1",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(404);
+    expect(audited).toEqual([]);
+  });
+
+  /*
+   * Single-user is the mode `.env.example` ships switched on, so this is the row a fork sees by
+   * default. The other audited surfaces drop the id here, believing `audit_events.actor_user_id`
+   * has a foreign key into `users`; it has none, and `initializeDevActorUser` writes that row at
+   * start-up regardless. An unattributed row would answer "was this conversation deleted" and not
+   * "by whom", which is the half worth keeping.
+   */
+  test("attributes the local development actor rather than dropping it", async () => {
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route(
+      "/",
+      createChannelRoutes(
+        fakeStore(),
+        async (context, next) => {
+          context.set("actor", DEV_ACTOR);
+          await next();
+        },
+        undefined,
+        { insert: async (event) => void audited.push(event) },
+      ),
+    );
+
+    await app.request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(audited[0]?.actorUserId).toBe(DEV_ACTOR.id);
+  });
+
+  /*
+   * The channel is already hidden and the caller has already been told so by the time this runs. A
+   * trail that is briefly unavailable is not a reason to report a failure that did not happen.
+   */
+  test("still answers when the audit write throws", async () => {
+    const response = await appWithAudit(fakeStore(), {
+      insert: async () => {
+        throw new Error("audit table is unreachable");
+      },
+    }).request("http://openbot.test/channel-1", { method: "DELETE" });
+
+    expect(response.status).toBe(204);
+  });
+
+  test("deletes without a trail when the deployment keeps none", async () => {
+    const store = fakeStore();
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route("/", createChannelRoutes(store, requireUser));
+
+    const response = await app.request("http://openbot.test/channel-1", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(204);
+    expect(store.calls).toEqual([["softDelete", actor, "channel-1"]]);
+  });
 });
 
 describe("channel route composition", () => {
@@ -378,6 +667,7 @@ const testPrefix = `channel-store-${randomUUID()}`;
 const createdUserIds: string[] = [];
 const createdAgentIds: string[] = [];
 const createdChannelIds: string[] = [];
+const createdPackageIds: string[] = [];
 
 afterEach(async () => {
   for (const channelId of createdChannelIds.splice(0)) {
@@ -385,6 +675,11 @@ afterEach(async () => {
       .delete(intelligenceChannelMappings)
       .where(eq(intelligenceChannelMappings.channelId, channelId));
     await database.delete(channels).where(eq(channels.id, channelId));
+  }
+  for (const packageId of createdPackageIds.splice(0)) {
+    await database
+      .delete(deploymentPackages)
+      .where(eq(deploymentPackages.id, packageId));
   }
   for (const agentId of createdAgentIds.splice(0)) {
     await database
@@ -739,6 +1034,436 @@ describe("channel store integration", () => {
       expect(await channelTableSnapshot()).toEqual(before);
     },
   );
+});
+
+describe("channel pinning", () => {
+  test("stamps and clears pinned_at on the caller's own membership", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Pinnable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.setPinned(actor, created.id, true);
+    let [row] = await database
+      .select({ pinnedAt: channelMemberships.pinnedAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, created.id),
+          eq(channelMemberships.userId, actor.id),
+        ),
+      );
+    expect(row?.pinnedAt).not.toBeNull();
+
+    await persistentStore.setPinned(actor, created.id, false);
+    [row] = await database
+      .select({ pinnedAt: channelMemberships.pinnedAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, created.id),
+          eq(channelMemberships.userId, actor.id),
+        ),
+      );
+    expect(row?.pinnedAt).toBeNull();
+  });
+
+  test("refuses to pin a channel the caller is not a member of", async () => {
+    const member = await createPersistentUser();
+    const outsider = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Members-only agent",
+      owner: member,
+    });
+    const created = await persistentStore.create(member, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await expect(
+      persistentStore.setPinned(outsider, created.id, true),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+
+  test("pins and unpins through the caller's own membership", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Pinnable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.setPinned(actor, created.id, true);
+    let page = await persistentStore.list(actor);
+    expect(
+      page.channels.find((channel) => channel.id === created.id)?.pinned,
+    ).toBe(true);
+
+    await persistentStore.setPinned(actor, created.id, false);
+    page = await persistentStore.list(actor);
+    expect(
+      page.channels.find((channel) => channel.id === created.id)?.pinned,
+    ).toBe(false);
+  });
+
+  test("one member's pin is invisible to another member", async () => {
+    const pinner = await createPersistentUser();
+    const other = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Shared pinnable agent",
+      owner: pinner,
+      visibility: "public",
+    });
+    const created = await persistentStore.create(pinner, [agentId]);
+    createdChannelIds.push(created.id);
+    // The store only creates the creator's membership; give the other user one directly,
+    // plus the thread mapping the list join requires.
+    await database.insert(channelMemberships).values({
+      channelId: created.id,
+      userId: other.id,
+    });
+    await database.insert(intelligenceChannelMappings).values({
+      userId: other.id,
+      channelId: created.id,
+      // thread_id is globally unique; the pinner's own mapping row already claimed
+      // created.threadId, so the other member's row needs one of its own.
+      threadId: randomUUID(),
+    });
+
+    await persistentStore.setPinned(pinner, created.id, true);
+
+    const otherPage = await persistentStore.list(other);
+    expect(
+      otherPage.channels.find((channel) => channel.id === created.id)?.pinned,
+    ).toBe(false);
+  });
+
+  test("reports pinned false for a channel nobody pinned", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Unpinned agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    expect(
+      (await persistentStore.list(actor)).channels.find(
+        (channel) => channel.id === created.id,
+      )?.pinned,
+    ).toBe(false);
+  });
+});
+
+describe("channel read markers", () => {
+  // Two members of one channel, which is what a per-member marker has to be tested against.
+  async function sharedChannel() {
+    const reader = await createPersistentUser();
+    const other = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Shared readable agent",
+      owner: reader,
+      visibility: "public",
+    });
+    const created = await persistentStore.create(reader, [agentId]);
+    createdChannelIds.push(created.id);
+    // The store only creates the creator's membership; give the other user one directly,
+    // plus the thread mapping the list join requires.
+    await database.insert(channelMemberships).values({
+      channelId: created.id,
+      userId: other.id,
+    });
+    await database.insert(intelligenceChannelMappings).values({
+      userId: other.id,
+      channelId: created.id,
+      // thread_id is globally unique; the reader's own mapping row already claimed
+      // created.threadId, so the other member's row needs one of its own.
+      threadId: randomUUID(),
+    });
+    return { reader, other, channelId: created.id };
+  }
+
+  test("stamps last_read_at on the caller's own membership only", async () => {
+    const { reader, other, channelId } = await sharedChannel();
+
+    await persistentStore.markRead(reader, channelId);
+
+    const rows = await database
+      .select({
+        userId: channelMemberships.userId,
+        lastReadAt: channelMemberships.lastReadAt,
+      })
+      .from(channelMemberships)
+      .where(eq(channelMemberships.channelId, channelId));
+    expect(
+      rows.find((row) => row.userId === reader.id)?.lastReadAt,
+    ).not.toBeNull();
+    expect(rows.find((row) => row.userId === other.id)?.lastReadAt).toBeNull();
+  });
+
+  test("the list carries the caller's lastReadAt and nobody else's", async () => {
+    const { reader, other, channelId } = await sharedChannel();
+
+    await persistentStore.markRead(reader, channelId);
+
+    const forReader = await persistentStore.list(reader);
+    const forOther = await persistentStore.list(other);
+    expect(
+      forReader.channels.find((channel) => channel.id === channelId)
+        ?.lastReadAt,
+    ).not.toBeNull();
+    expect(
+      forOther.channels.find((channel) => channel.id === channelId)?.lastReadAt,
+    ).toBeNull();
+  });
+
+  test("refuses to mark read a channel the caller is not a member of", async () => {
+    const { channelId } = await sharedChannel();
+    const outsider = await createPersistentUser();
+
+    await expect(
+      persistentStore.markRead(outsider, channelId),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+
+  test("stamps a read no earlier than the channel's own last-message clock", async () => {
+    const { reader, channelId } = await sharedChannel();
+    // last_message_at is written from the reporting browser's clock and is not bounded; simulate
+    // one running ahead of the server so a plain "now" stamp would still read as unseen.
+    const future = new Date(Date.now() + 60_000);
+    await database
+      .update(channels)
+      .set({ lastMessageAt: future })
+      .where(eq(channels.id, channelId));
+
+    await persistentStore.markRead(reader, channelId);
+
+    const [row] = await database
+      .select({ lastReadAt: channelMemberships.lastReadAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, channelId),
+          eq(channelMemberships.userId, reader.id),
+        ),
+      );
+    expect(row?.lastReadAt).not.toBeNull();
+    expect(row?.lastReadAt?.getTime() ?? 0).toBeGreaterThanOrEqual(
+      future.getTime(),
+    );
+  });
+
+  test("refuses to mark a soft-deleted channel read, mirroring setPinned", async () => {
+    const { reader, channelId } = await sharedChannel();
+
+    await persistentStore.softDelete(reader, channelId);
+
+    await expect(
+      persistentStore.markRead(reader, channelId),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+
+    const [row] = await database
+      .select({ lastReadAt: channelMemberships.lastReadAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, channelId),
+          eq(channelMemberships.userId, reader.id),
+        ),
+      );
+    // The membership row outlives the channel, but its marker was never stamped.
+    expect(row?.lastReadAt).toBeNull();
+  });
+});
+
+describe("channel soft delete", () => {
+  test("hides a deleted channel from list and get", async () => {
+    const actor = await createPersistentUser();
+    const other = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Deletable agent",
+      owner: actor,
+      visibility: "public",
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+    // The store only creates the creator's membership; give the other user one directly,
+    // plus the thread mapping the list join requires.
+    await database.insert(channelMemberships).values({
+      channelId: created.id,
+      userId: other.id,
+    });
+    await database.insert(intelligenceChannelMappings).values({
+      userId: other.id,
+      channelId: created.id,
+      // thread_id is globally unique; the actor's own mapping row already claimed
+      // created.threadId, so the other member's row needs one of its own.
+      threadId: randomUUID(),
+    });
+
+    await persistentStore.softDelete(actor, created.id);
+
+    expect(await persistentStore.get(actor, created.id)).toBeNull();
+    const page = await persistentStore.list(actor);
+    expect(
+      page.channels.find((channel) => channel.id === created.id),
+    ).toBeUndefined();
+
+    expect(await persistentStore.get(other, created.id)).toBeNull();
+    const otherPage = await persistentStore.list(other);
+    expect(
+      otherPage.channels.find((channel) => channel.id === created.id),
+    ).toBeUndefined();
+  });
+
+  test("stamps deleted_at on the channel", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Deletable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.softDelete(actor, created.id);
+
+    // Soft: the row is still there, stamped rather than gone.
+    const [row] = await database
+      .select({ deletedAt: channels.deletedAt })
+      .from(channels)
+      .where(eq(channels.id, created.id));
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  test("deleting again is a no-op, not an error", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Twice-deleted agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await persistentStore.softDelete(actor, created.id);
+    await expect(
+      persistentStore.softDelete(actor, created.id),
+    ).resolves.toBeUndefined();
+  });
+
+  test("refuses to delete a channel the caller is not a member of", async () => {
+    const member = await createPersistentUser();
+    const outsider = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Guarded agent",
+      owner: member,
+    });
+    const created = await persistentStore.create(member, [agentId]);
+    createdChannelIds.push(created.id);
+
+    await expect(
+      persistentStore.softDelete(outsider, created.id),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+  });
+
+  /*
+   * A deleted channel is gone as far as every other path is concerned.
+   *
+   * `get` and `list` filter on `deleted_at`, so a member who still has a stale roster row, or a
+   * client that reports the reply to a message sent moments before the delete, would otherwise be
+   * writing to and announcing a channel nobody can see: every member's browser refetches its roster
+   * for a row that resolves to nothing.
+   */
+  test("refuses activity on a deleted channel and leaves the last message alone", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Silenced agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+    await persistentStore.recordActivity(actor, created.id, {
+      agentId,
+      at: new Date(Date.now() - 60_000),
+      text: "Said before the delete.",
+    });
+    await persistentStore.softDelete(actor, created.id);
+
+    await expect(
+      persistentStore.recordActivity(actor, created.id, {
+        agentId,
+        at: new Date(),
+        text: "Said after the delete.",
+      }),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+
+    // Same answer `get` gives, and the row the roster would have shown is untouched.
+    const [row] = await database
+      .select({
+        lastMessage: channels.lastMessage,
+        lastMessageAt: channels.lastMessageAt,
+      })
+      .from(channels)
+      .where(eq(channels.id, created.id));
+    expect(row?.lastMessage).toBe("Said before the delete.");
+  });
+
+  test("refuses to pin a deleted channel and leaves the membership alone", async () => {
+    const actor = await createPersistentUser();
+    const agentId = await createPersistentAgent({
+      name: "Unpinnable agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+    await persistentStore.softDelete(actor, created.id);
+
+    await expect(
+      persistentStore.setPinned(actor, created.id, true),
+    ).rejects.toBeInstanceOf(ChannelNotFoundError);
+
+    const [row] = await database
+      .select({ pinnedAt: channelMemberships.pinnedAt })
+      .from(channelMemberships)
+      .where(
+        and(
+          eq(channelMemberships.channelId, created.id),
+          eq(channelMemberships.userId, actor.id),
+        ),
+      );
+    expect(row?.pinnedAt).toBeNull();
+  });
+
+  test("refuses to delete a package-defined channel", async () => {
+    const actor = await createPersistentUser();
+    const [pkg] = await database
+      .insert(deploymentPackages)
+      .values({
+        tenantId: persistentId("tenant"),
+        sourcePath: "/tmp/none",
+        checksum: "0",
+      })
+      .returning({ id: deploymentPackages.id });
+    if (!pkg) throw new Error("package row was not created");
+    createdPackageIds.push(pkg.id);
+    const channelId = persistentId("package-channel");
+    await database.insert(channels).values({
+      id: channelId,
+      name: "Package channel",
+      description: "Defined by the tenant package.",
+      packageId: pkg.id,
+    });
+    createdChannelIds.push(channelId);
+    await database.insert(channelMemberships).values({
+      channelId,
+      userId: actor.id,
+    });
+
+    await expect(
+      persistentStore.softDelete(actor, channelId),
+    ).rejects.toBeInstanceOf(ChannelPackageOwnedError);
+  });
 });
 
 /**

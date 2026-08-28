@@ -31,7 +31,7 @@ import { TEST_POOL } from "./support/database";
 
 const database = createDatabase(
   process.env.DATABASE_URL ??
-    "postgres://openkai:openkai@localhost:5432/openkai",
+    "postgres://openbot:openbot@localhost:5432/openbot",
   TEST_POOL,
 );
 

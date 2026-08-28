@@ -207,3 +207,47 @@ describe("a history that arrives out of order", () => {
     expect(assistant.tool_calls?.[0]?.function.name).toBe("tool");
   });
 });
+
+/**
+ * A call read back from the thread store arrives in the store's dialect, not AG-UI's.
+ *
+ * `{id, name, args}` rather than `{id, type, function: {name, arguments}}`. Reaching straight for
+ * `call.function` finds nothing there, and the default underneath turned every restored call into a
+ * tool named `tool` with no arguments: the model is shown a call it cannot recognise as the one it
+ * made, so it makes it again. That is the repetition the default was written to prevent.
+ */
+describe("a tool call restored from the thread store", () => {
+  test("keeps the name and arguments it was made with", () => {
+    const messages = toProviderMessages({
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          content: null,
+          toolCalls: [
+            {
+              id: "call_1",
+              name: "computer_navigate",
+              args: '{"url":"https://news.ycombinator.com"}',
+            },
+          ],
+        },
+        {
+          id: "m2",
+          role: "tool",
+          toolCallId: "call_1",
+          content: '{"ok":true}',
+        },
+      ],
+    } as never);
+
+    const withCalls = messages.find(
+      (message: Record<string, unknown>) => message.tool_calls,
+    ) as Record<string, unknown>;
+    const call = (withCalls.tool_calls as Array<Record<string, unknown>>)[0];
+    const fn = call.function as Record<string, unknown>;
+
+    expect(fn.name).toBe("computer_navigate");
+    expect(fn.arguments).toBe('{"url":"https://news.ycombinator.com"}');
+  });
+});

@@ -1,4 +1,5 @@
 import {
+  type CredentialExecutor,
   type CredentialSecretReader,
   type CredentialStore,
   decryptSecret,
@@ -58,16 +59,52 @@ export async function storeAgentAuth(input: {
   agentId: string;
   header: string;
   value: string;
+  /**
+   * The credential the agent's configuration currently names, if any. Present
+   * on an edit that replaces the key, absent on first creation.
+   *
+   * Whether it is still live is checked here rather than assumed, because the
+   * configuration keeps naming a credential an administrator has revoked from
+   * the Credentials page. Rotating onto a revoked row is refused by the vault,
+   * so trusting the reference would leave that agent's key impossible to
+   * replace: every later edit would fail on the same stale id.
+   */
+  previousCredentialId?: string;
+  /**
+   * The transaction to write in, when the caller has one.
+   *
+   * Agent edits are a transaction over `agents` and `agent_profiles`, and the
+   * credential is part of that same change. Written outside it, the key would
+   * commit even where the edit that asked for it rolled back.
+   */
+  executor?: CredentialExecutor;
 }): Promise<AgentAuth> {
-  const credential = await input.store.create({
-    kind: "agent",
+  const value = {
+    kind: "agent" as const,
     provider: "ag-ui",
     keyId: input.agentId,
     // The header name is metadata precisely because it is not a secret; keeping it here makes the
     // vault row self-describing for later audit.
     metadata: { header: input.header },
     encryptedValue: await encryptSecret(input.encryptionKey, input.value),
-  });
+  };
+
+  // A live previous credential is rotated, so the agent never holds two. Any
+  // other case inserts: the partial unique index permits it, because there is
+  // no live row for this agent to collide with.
+  const rotates =
+    input.previousCredentialId !== undefined &&
+    (await input.store.isLive(input.previousCredentialId, input.executor));
+
+  const credential = rotates
+    ? await input.store.rotate(
+        {
+          ...value,
+          previousCredentialId: input.previousCredentialId as string,
+        },
+        input.executor,
+      )
+    : await input.store.create(value, input.executor);
   return { header: input.header, credentialId: credential.id };
 }
 
@@ -86,18 +123,25 @@ export async function storeAgentAuth(input: {
  *
  * Never throws. The new key is already stored and the Bot already works; a vault that would not
  * accept the revocation is worth saying loudly and is not worth failing an edit that has succeeded.
+ *
+ * Takes the caller's transaction where there is one, and must be given it whenever the caller holds
+ * a lock on the row being retired. On a pooled connection the revoke is a second session competing
+ * with the caller's own open transaction: it waits for a lock only that transaction can release, and
+ * the transaction cannot commit while it is awaiting this call. Nothing breaks that, so the edit
+ * hangs to the statement timeout and the timeout is then reported here as a key still live.
  */
 export async function retireReplacedKey(
   store: Pick<CredentialStore, "revoke">,
   previous: Record<string, unknown>,
   next: Record<string, unknown>,
+  executor?: CredentialExecutor,
 ): Promise<void> {
   const before = credentialIdOf(previous);
   const after = credentialIdOf(next);
   if (!before || before === after) return;
 
   try {
-    await store.revoke(before);
+    await store.revoke(before, executor);
   } catch (error) {
     console.error(
       JSON.stringify({

@@ -33,10 +33,19 @@ enable it for you.
 **Not in it:**
 
 **The supervisor.** It gives each Bot its own container, which needs a Docker socket, which no
-serverless container platform permits. Without it every Bot shares the one browser, exactly as they
+serverless container platform permits. Without it, every Bot shares the one browser, exactly as they
 do on a laptop with no supervisor configured. A shared browser means shared logins, shared files and
 shared session between Bots, which is fine for a deployment where one team trusts its own Bots and
 is not fine as a boundary between tenants.
+
+**The routines schedule.** Nothing in this image is scheduled to fire a routine — there is no
+worker service beside the API, and `worker/` (the looping local variant) is not in the image. The
+sweep itself is: `bun scripts/fire-routines.ts` from `/app/server`, one pass then exit, which is what
+the Helm chart's CronJob runs from this same image. So a one-container deployment needs something
+outside the container to run it on a schedule — an external cron, a platform scheduled job, or a
+second container of this image with that command — with `DATABASE_URL`, `SERVER_INTERNAL_URL` and
+`WORKER_SHARED_SECRET` set. Until something does, a routine is stored, its next run time is computed,
+the Routines page shows it, and it never fires. See [routines.md](routines.md).
 
 ## Minimum size
 
@@ -46,7 +55,7 @@ Measured on the real image, one Bot, arm64.
 | --- | --- | --- | --- |
 | Memory | 409 MB idle, 498 MB after three page loads, 548 MB after a snapshot | **2 GB** | **4 GB** |
 | vCPU | 3 to 6 percent at rest, bursty while a page renders | **1** | **2** |
-| Disk | 5.3 GB image | **8 GB** | 10 GB with room for `/workspace` |
+| Disk | 1.4 GB image | **4 GB** | 8 GB with room for `/workspace` |
 
 **Why 2 GB when it measures at 550 MB.** That figure is one Bot with one page open. Every additional
 concurrent page is roughly another 100 to 200 MB, and Playwright's own guidance is to allow about
@@ -79,7 +88,7 @@ against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when 
 reachable from this container. Unset it if your `.env` still has the laptop default
 `http://localhost:4201/ag-ui`.
 
-**Authentication is required.** With no identity provider configured the deployment refuses to start,
+**Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
 Configure Google, Microsoft or Okta, or set `OPENBOT_SINGLE_USER=true` to say you meant an open
 deployment. `NODE_ENV` does not affect this.
@@ -94,7 +103,7 @@ never missing on a laptop. The app does not depend on any of them, but sign-in c
 With `EMBEDDED_POSTGRES=on` they run at start and there is nothing to do. There is exactly one
 process and no deploy pipeline, so the alternative would be a runbook.
 
-With an external database they are a release step, not a start step. Two replicas starting together
+With an external database, they are a release step, not a start step. Two replicas starting together
 would race, and a failed migration should stop a deploy rather than leave a half-migrated database
 serving traffic.
 
@@ -123,6 +132,12 @@ in ECR, and is what AWS points App Runner users at now that App Runner takes no 
 Plain ECS on Fargate behind an ALB is the answer if you want task definitions and fine-grained IAM.
 No shared-memory configuration is needed or possible.
 
+**Kubernetes.** Everything above describes one container run by hand. A cluster is the other shape,
+and it is the only one that gives a Bot a computer of its own, runs the routines schedule without
+something outside the container, and scales the API past a single replica. That is the Helm chart:
+[charts/openbot/README.md](../charts/openbot/README.md), which covers EKS, GKE, AKS and a plain
+self-hosted cluster from the same templates.
+
 **Azure Container Apps.** Managed ingress with TLS and custom domains. Note the **240-second request
 timeout**: the live screen holds a long connection, so expect it to reconnect. Concurrent WebSockets
 are capped at 350 per instance on the basic tier.
@@ -132,6 +147,12 @@ which makes them the shortest path from nothing to a running deployment.
 
 ## Known costs
 
-**The image is 5.3 GB**, most of it the Playwright base, which ships Firefox and WebKit alongside the
-Chromium we use. Deleting them afterwards does not help, because the bytes still ship in the layer
+**The image is 1.4 GB**, and 595 MB of that is Firefox and WebKit, which the Playwright base ships
+alongside the Chromium we use and nothing here ever launches. Deleting them afterwards does not help, because the bytes still ship in the layer
 below. Building Chromium-only onto a slim base would cut this substantially and is not done yet.
+
+**A strict content-security-policy needs a hash or a nonce.** `app/index.html` runs a small inline
+script that decides the theme before the first paint. Nothing in this repo sends a CSP header, so it
+works as shipped; a deployment that adds one at its proxy has to allow that script explicitly, or
+`script-src` blocks it and the page renders with the wrong theme until the app boots. A `'sha256-'`
+hash of the script body is the version that survives a rebuild without a per-request nonce.

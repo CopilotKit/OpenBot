@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   CATALOGUE,
+  type CatalogueEntry,
   catalogueEntry,
   classifyTool,
   customUrlRefusal,
   hostAdmissible,
   resolveServerUrl,
+  serverCredentialKind,
 } from "../src/plugins/catalogue";
 
 /**
@@ -90,6 +92,11 @@ describe("which servers this deployment will talk to", () => {
         // Anchored at both ends or the pattern is decoration.
         expect(entry.hostPattern?.startsWith("^")).toBe(true);
         expect(entry.hostPattern?.endsWith("$")).toBe(true);
+      } else if (entry.auth.kind === "builtin") {
+        // First-party and in-process: there is no host outside this process to reach, so the
+        // https requirement below does not apply. Asserted positively instead, so this branch
+        // cannot quietly become a loophole for a future entry that DOES dial a real host.
+        expect(entry.host).toBe("builtin://routines");
       } else {
         expect(entry.host.startsWith("https://")).toBe(true);
       }
@@ -103,7 +110,7 @@ describe("whose credential a server uses", () => {
     // whose, and a reader who guessed would guess the deployment's, which for a user-oauth vendor
     // is the one answer that breaks the promise the connector exists to keep.
     for (const entry of CATALOGUE) {
-      expect(["none", "deployment-bearer", "user-oauth"]).toContain(
+      expect(["none", "deployment-bearer", "user-oauth", "builtin"]).toContain(
         entry.auth.kind,
       );
     }
@@ -118,8 +125,15 @@ describe("whose credential a server uses", () => {
       expect(entry.auth.tokenUrl.startsWith("https://")).toBe(true);
       expect(entry.auth.revokeUrl.startsWith("https://")).toBe(true);
       // No scopes means consent to nothing, which would fail at the vendor with a message that
-      // does not name us.
-      expect(entry.auth.scopes.length).toBeGreaterThan(0);
+      // does not name us — except for a vendor whose consent screen itself is the scoping
+      // (Notion, with dynamic client registration), where a scope string would assert a control
+      // that does not exist.
+      if (entry.auth.clientRegistration !== "dynamic") {
+        expect(entry.auth.scopes.length).toBeGreaterThan(0);
+      }
+      if (entry.auth.clientRegistration === "dynamic") {
+        expect(entry.auth.registrationUrl?.startsWith("https://")).toBe(true);
+      }
     }
   });
 
@@ -178,6 +192,99 @@ describe("Google Drive", () => {
   });
 });
 
+describe("Notion", () => {
+  const entry = catalogueEntry("notion");
+
+  test("is in the catalogue with the MCP transport", () => {
+    expect(entry).not.toBeNull();
+    // Transport omitted means MCP, which is the point: Drive's REST adapter is the exception.
+    expect(entry?.transport).toBeUndefined();
+    expect(entry?.host).toBe("https://mcp.notion.com");
+    expect(entry?.path).toBe("/mcp");
+  });
+
+  test("registers its client dynamically, with every endpoint pinned to https", () => {
+    if (entry?.auth.kind !== "user-oauth") throw new Error("wrong auth kind");
+    expect(entry.auth.clientRegistration).toBe("dynamic");
+    expect(entry.auth.registrationUrl?.startsWith("https://")).toBe(true);
+    expect(entry.auth.authorizationUrl.startsWith("https://")).toBe(true);
+    expect(entry.auth.tokenUrl.startsWith("https://")).toBe(true);
+    // Notion MCP scoping is the consent screen; scope strings would assert control that
+    // does not exist.
+    expect(entry.auth.scopes).toEqual([]);
+  });
+
+  test("pins the exact write list, so a dropped or renamed entry fails here", () => {
+    // Copied from the catalogue's Notion entry, in its declared order. This list is the
+    // entire write barrier for Notion (see the comment above writeTools in catalogue.ts) —
+    // asserting membership against itself would never catch a silently dropped or renamed
+    // tool, so the fix is to pin the literal names.
+    expect(entry?.writeTools).toEqual([
+      "notion-convert-page-to-skill",
+      "notion-create-attachment",
+      "notion-create-comment",
+      "notion-create-database",
+      "notion-create-file-upload",
+      "notion-create-folder",
+      "notion-create-pages",
+      "notion-create-view",
+      "notion-duplicate-page",
+      "notion-move-pages",
+      "notion-update-data-source",
+      "notion-update-folder",
+      "notion-update-page",
+      "notion-update-view",
+    ]);
+    for (const name of entry?.writeTools ?? []) {
+      expect(classifyTool(entry, name, true)).toBe("write");
+    }
+    expect(classifyTool(entry, "notion-search", true)).toBe("read");
+    expect(classifyTool(entry, "brand-new-tool", false)).toBe("write");
+  });
+});
+
+describe("Routines", () => {
+  const entry = catalogueEntry("routines");
+
+  test("is in the catalogue and resolves to its own builtin address", () => {
+    expect(entry).not.toBeNull();
+    expect(resolveServerUrl("routines")?.url).toBe("builtin://routines");
+  });
+
+  test("has no credential, because there is nothing to authenticate to", () => {
+    expect(entry?.auth.kind).toBe("builtin");
+  });
+
+  test("is reached through the builtin transport, not a vendor", () => {
+    expect(entry?.transport).toBe("builtin-routines");
+  });
+
+  test("pins the exact write list, so a dropped or renamed entry fails here", () => {
+    expect(entry?.writeTools).toEqual([
+      "create_routine",
+      "update_routine",
+      "delete_routine",
+    ]);
+  });
+
+  test("classifies its tools the same way every other vendor's are classified", () => {
+    for (const name of entry?.writeTools ?? []) {
+      expect(classifyTool(entry, name, true)).toBe("write");
+    }
+    expect(classifyTool(entry, "list_routines", true)).toBe("read");
+    // A name nothing here has vouched for is a write, the same as for any other vendor.
+    expect(classifyTool(entry, "brand-new-tool", false)).toBe("write");
+    // Every tool, advertised or not, is a write when the server never said it was advertised.
+    for (const name of [
+      ...(entry?.writeTools ?? []),
+      "list_routines",
+      "brand-new-tool",
+    ]) {
+      expect(classifyTool(entry, name, false)).toBe("write");
+    }
+  });
+});
+
 describe("what a tool does", () => {
   const drive = catalogueEntry("google-drive")!;
 
@@ -232,7 +339,207 @@ describe("a URL an administrator typed", () => {
     expect(customUrlRefusal("https://printer.local/mcp")).not.toBeNull();
   });
 
+  test("the fully qualified spelling of those names is refused too", () => {
+    // A trailing dot is the root-anchored form of the same name and resolves to the same place, so
+    // every rule above has to see through it. It defeats them in two different ways: the suffix
+    // tests stop matching because the string now ends in the dot, and "database." acquires the dot
+    // that the single-label test keys on.
+    expect(customUrlRefusal("https://localhost./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://database./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://vault.internal./mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://printer.local./mcp")).not.toBeNull();
+    expect(
+      customUrlRefusal("https://metadata.google.internal./computeMetadata/v1/"),
+    ).not.toBeNull();
+    // More than one, because stripping a single dot leaves a string that still misses every rule.
+    expect(customUrlRefusal("https://localhost../mcp")).not.toBeNull();
+    expect(customUrlRefusal("https://vault.internal.../mcp")).not.toBeNull();
+  });
+
+  test("an in-cluster service name is refused", () => {
+    // .svc is how a Kubernetes service is addressed from inside the cluster. It has dots and none
+    // of the other suffixes, so it reads as an ordinary vendor name.
+    expect(
+      customUrlRefusal("https://kubernetes.default.svc/mcp"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://kubernetes.default.svc.cluster.local/mcp"),
+    ).not.toBeNull();
+  });
+
+  test("a credential in the URL is refused", () => {
+    // Userinfo is not part of the host, so every rule above passes it, and addCustomServer then
+    // writes the string it was given into mcp_servers.url and into the configuration.changed audit
+    // payload. Audit redaction keys on the field name and "url" is not sensitive, so the secret
+    // would sit in the trail in clear text.
+    expect(
+      customUrlRefusal("https://oauth:s3cret@mcp.example.com/mcp"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://token@mcp.example.com/mcp"),
+    ).not.toBeNull();
+  });
+
+  test("refusing a credential in the URL does not repeat the credential", () => {
+    // The refusal is rendered to the administrator and can reach a log, so it must not carry the
+    // thing it exists to reject.
+    const refusal = customUrlRefusal(
+      "https://oauth:s3cret@mcp.example.com/mcp",
+    );
+    expect(refusal).not.toBeNull();
+    expect(refusal).not.toContain("s3cret");
+    expect(refusal).not.toContain("oauth");
+  });
+
+  test("a credential in the query string is refused", () => {
+    // The same harm as the userinfo case above, reached through the other part of the URL no host
+    // rule looks at. addCustomServer writes the string it was given into mcp_servers.url and into
+    // the configuration.changed audit payload, audit redaction keys on the field name, and "url" is
+    // not a sensitive name, so a token here sits in an append-only trail in clear text.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?token=sk-live-abcdef"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?api_key=SECRET"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?access_token=SECRET"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?client_secret=SECRET"),
+    ).not.toBeNull();
+  });
+
+  test("the names a credential is actually given are refused too", () => {
+    // The first version of this rule listed exact names, which is a corner of the class rather than
+    // the class: every one of these was accepted while `?token=` was refused, and an operator does
+    // not know which spelling the check happens to hold. The match reads the name for what it says.
+    for (const name of [
+      "auth_token",
+      "api_token",
+      "apiToken",
+      "access_key",
+      "secret_key",
+      "private_key",
+      "session_token",
+      "x-api-key",
+      "subscription-key",
+      "X-Amz-Signature",
+      "bearer",
+      "pwd",
+    ]) {
+      expect(
+        customUrlRefusal(`https://mcp.example.com/mcp?${name}=s3cret`),
+      ).not.toBeNull();
+    }
+  });
+
+  test("an ordinary query parameter is still accepted", () => {
+    // The rule reads the parameter name, not the presence of a query, because vendors route and
+    // version with parameters. Refusing every query string would make this floor an outage rather
+    // than a guard, and an operator who cannot add a working server will find a way around it.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?workspace=acme&version=2"),
+    ).toBeNull();
+    // The near misses, which are what a rule that reads names rather than matching them exactly has
+    // to get right: "keyword" is not a key and "author" is not auth.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp?keyword=x&author=jane"),
+    ).toBeNull();
+  });
+
+  test("refusing a credential in the query does not repeat it", () => {
+    // Same property as the userinfo refusal: this string is rendered to an administrator and can
+    // reach a log, so it must not carry the secret it exists to reject.
+    const refusal = customUrlRefusal(
+      "https://mcp.example.com/mcp?token=s3cret",
+    );
+    expect(refusal).not.toBeNull();
+    expect(refusal).not.toContain("s3cret");
+    expect(refusal).not.toContain("mcp.example.com");
+  });
+
+  test("a credential in the fragment is refused too", () => {
+    // The fragment never leaves the browser, but that is not the harm here. addCustomServer stores
+    // and audits the whole string, so a secret written after the hash is as durable and as readable
+    // as one in the query. Refusing one and not the other would leave the same bypass a character
+    // away.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp#token=s3cret"),
+    ).not.toBeNull();
+    // The shapes a fragment is actually written in. A hash route or an OAuth-style callback puts a
+    // path before the question mark, and reading the whole fragment as one query string turns all
+    // of it into a single name that matches nothing.
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp#/callback?token=s3cret"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp#!/x?token=s3cret"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://mcp.example.com/mcp#token%3Ds3cret"),
+    ).not.toBeNull();
+    // An ordinary fragment is not a credential and is left alone.
+    expect(customUrlRefusal("https://mcp.example.com/mcp#section")).toBeNull();
+  });
+
+  test("the short name for the cloud metadata endpoint is refused", () => {
+    // metadata.goog is Google's own alias for the metadata server, published beside
+    // metadata.google.internal and 169.254.169.254. It carries a dot and none of the suffixes
+    // above, so it read as an ordinary vendor name, while the long spelling was caught only
+    // incidentally by the .internal test.
+    expect(
+      customUrlRefusal("https://metadata.goog/computeMetadata/v1/"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://metadata.goog./computeMetadata/v1/"),
+    ).not.toBeNull();
+    expect(
+      customUrlRefusal("https://METADATA.GOOG/computeMetadata/v1/"),
+    ).not.toBeNull();
+  });
+
   test("nonsense is refused rather than thrown", () => {
     expect(customUrlRefusal("not a url")).toBe("That is not a URL.");
+  });
+});
+
+describe("which credential a curated server is given", () => {
+  /**
+   * A synthetic entry, because the catalogue holds one vendor today and it is `user-oauth`.
+   *
+   * The shared-token branch is the one a fork re-enables when it puts a removed vendor back, which
+   * is the case this rule exists for, so it is exercised here rather than left to be discovered
+   * then. The other side of the same argument is why the entry is written out in full rather than
+   * spread from a real one: what is under test is the auth kind deciding the answer.
+   */
+  const sharedToken: CatalogueEntry = {
+    key: "shared-token-vendor",
+    title: "Vendor",
+    vendor: "Vendor",
+    summary: "A server the deployment holds one token for.",
+    host: "https://mcp.vendor.example",
+    path: "/mcp",
+    auth: { kind: "deployment-bearer" },
+    writeTools: [],
+    docsUrl: "https://vendor.example/docs",
+  };
+
+  test("a shared-token server takes the deployment's own token for it", () => {
+    expect(serverCredentialKind(sharedToken)).toBe("mcp");
+  });
+
+  test("a server reached as the asker takes no credential from the caller", () => {
+    // Its OAuth client arrives through registerOAuthClient, which mints the credential itself. An id
+    // offered here is therefore never the right one, whatever kind it names.
+    const drive = catalogueEntry("google-drive");
+    expect(drive?.auth.kind).toBe("user-oauth");
+    expect(serverCredentialKind(drive as CatalogueEntry)).toBeNull();
+  });
+
+  test("a server that needs no credential takes none", () => {
+    expect(
+      serverCredentialKind({ ...sharedToken, auth: { kind: "none" } }),
+    ).toBeNull();
   });
 });

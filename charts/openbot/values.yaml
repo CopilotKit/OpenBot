@@ -1,0 +1,432 @@
+# OpenBot, on any Kubernetes cluster.
+#
+# THE DEFAULTS ARE WHAT A PLAIN CLUSTER CAN DO. Every place the clouds genuinely differ is a value,
+# and its default is whatever a self-hosted cluster with no cloud features does: the cluster's own
+# default StorageClass, no RuntimeClass, a plain Kubernetes Secret, bundled PostgreSQL, an Ingress.
+# A deployment on EKS, GKE or AKS turns things on; a self-hosted one changes nothing and still works.
+# There is no cloud branching anywhere in the templates, and there should never be: a chart that only
+# installs cleanly on a managed cluster has failed the thing this repository is for.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/copilotkit/openbot
+  # Empty means the chart's appVersion, so an upgrade of the chart moves the image with it.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+server:
+  replicaCount: 2
+  # Two by default because horizontal is the point. Everything that has to survive a replica is in
+  # PostgreSQL, and one replica hides every bug that is not.
+
+  # THE BROWSER IS NOT IN THIS POD. The image runs a Bot's computer beside the API for the
+  # one-container case; a replica of the API must not carry one, because a browser is a few hundred
+  # megabytes holding one Bot's logins, and scaling the API would scale those with it.
+  embeddedComputer: false
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
+  # Off by default. Turn it on and set the metric you actually want to scale on.
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: null
+    behavior: {}
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    maxUnavailable: null
+
+  # Spread replicas so a node or zone going away does not take the deployment with it. Soft by
+  # default: a single-node cluster still schedules, which is what a first `helm install` runs on.
+  topologySpreadConstraints: []
+  podAntiAffinity: soft
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+  service:
+    type: ClusterIP
+    port: 3001
+    annotations: {}
+    # WHO MAY REACH IT, when the type is LoadBalancer. Empty means everybody, which is what a cloud
+    # load balancer does by default and almost never what somebody wants for an internal tool. Narrow
+    # it to the addresses your people come from. Not every cloud honours this on every load balancer
+    # type, so treat it as one layer rather than the only one.
+    loadBalancerSourceRanges: []
+
+  # Probes hit the API's own health route.
+  livenessProbe:
+    initialDelaySeconds: 20
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    periodSeconds: 5
+    failureThreshold: 60
+
+serviceAccount:
+  create: true
+  name: ""
+  # ONE MAP, THREE CLOUDS. IRSA on EKS, Workload Identity on GKE and on AKS are all annotations on a
+  # ServiceAccount, so this covers every one of them and the chart needs no idea which it is on.
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
+  #   iam.gke.io/gcp-service-account: <name>@<project>.iam.gserviceaccount.com
+  #   azure.workload.identity/client-id: <client-id>
+  annotations: {}
+  automountServiceAccountToken: false
+
+# The database migrations, run as a Job before the API starts. A pre-upgrade hook, so a rollout
+# never puts a new replica in front of a schema it has not seen.
+migrations:
+  enabled: true
+  backoffLimit: 3
+  # How long to wait for the database to accept connections before giving up. A pre-install hook runs
+  # before the chart's own resources, so on a first install with the bundled database this Job starts
+  # before the database does.
+  waitForDatabaseSeconds: 300
+  # A ceiling on the whole Job, so a migration that hangs fails the release rather than holding it.
+  activeDeadlineSeconds: 900
+  # Kept on failure so somebody can read why. Helm deletes it before the next run.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# What OpenBot needs to run. Anything secret belongs in `secrets` below, never here.
+config:
+  # Where people reach this deployment. Sets the OAuth callback and the trusted origin.
+  publicUrl: ""
+  # Administrators by email address, comma-separated. Required unless singleUser is on.
+  initialAdminEmails: ""
+  # Every request is one fixed administrator. Local trials only; the deployment refuses to start
+  # with no identity provider unless this says somebody meant it.
+  singleUser: false
+
+  # How people sign in. One of these, or `singleUser` above, and nothing else will do: the server
+  # refuses to start rather than serve a deployment where every visitor is an administrator.
+  #
+  # Client secrets go under `secrets` below. Only the public halves belong here.
+  auth:
+    google:
+      clientId: ""
+    microsoft:
+      clientId: ""
+      # `common` is Microsoft's own default and admits personal accounts as well as work ones. A
+      # company that means "our staff" puts its directory GUID here.
+      tenantId: ""
+    okta:
+      clientId: ""
+      issuer: ""
+  tenantPackageDir: /app/examples/fintech
+
+  # CopilotKit Intelligence, which OpenBot requires. All four values are needed together: the server
+  # refuses to start on a partial set, deliberately, because a half-configured Intelligence is a
+  # mistake somebody made rather than a deployment that meant to run without one.
+  intelligence:
+    apiUrl: ""
+    gatewayWsUrl: ""
+    # The two secret halves live under `secrets` below, never here.
+  # How far one Bot may hand work to another.
+  #
+  # A Bot addressing another is a grant an administrator makes, and these are the ceilings on what
+  # that grant can cost. Both are deliberately mean: a hop is a whole agent turn at the other end,
+  # several Bots asked in one turn cost several full runs rather than a fraction each, and with
+  # `computers.mode: sandbox` a hop to a Bot whose browser is asleep also pays a pod resume. A chatty
+  # Bot fanning out to four others wakes four machines.
+  #
+  # `maxDepth: 0` switches the capability off entirely: no Bot is offered the tool and the delivery
+  # loop does not run.
+  handoff:
+    maxDepth: 1
+    maxPerRun: 3
+  # Your own Bot, over AG-UI.
+  #
+  # OpenBot is a shell for somebody else's agent, so this is the seam that matters: point it at a
+  # service you run and coworkers created here reach it. Left empty, this deployment has only the
+  # Bots its tenant package declares as built-in, and a package entry whose endpoint resolves to
+  # nothing is dropped rather than registered as a coworker nobody can talk to.
+  #
+  # The address must be reachable from the server pod, so a Service in this cluster is named as
+  # `http://my-agent.my-namespace:8000/ag-ui`, not as localhost.
+  managedAgent:
+    url: ""
+    # The token travels in `secrets.managedAgentToken`. Required whenever a url is set: the server
+    # refuses to start with one and not the other, because an unauthenticated Bot endpoint is an
+    # open door to whatever that Bot can reach.
+  logLevel: ""
+  # Free-form additions, for anything this chart has no opinion about.
+  extraEnv: []
+  extraEnvFrom: []
+
+# How a Bot gets a computer.
+#
+#   shared    One browser for every Bot, run by this chart. Needs nothing installed in the cluster,
+#             and is what a first install should use.
+#   sandbox   A computer each, as a `Sandbox` from kubernetes-sigs/agent-sandbox, suspended when
+#             idle and resumed with its logins intact. Needs that controller in the cluster.
+#   external  Neither. `url` points at a computer somebody else runs.
+computers:
+  mode: shared
+  # Only for `mode: external`. The other modes derive the address from what they created.
+  url: ""
+  # Never a literal. See `secrets` below.
+  existingTokenSecret: ""
+
+  # gVisor or Kata, where the cluster has one. Unset means an ordinary pod, because the three clouds
+  # do not agree: GKE has managed gVisor, AKS offers Kata and gVisor, and on EKS it is bring your own
+  # node configuration. A chart that assumed a RuntimeClass would fail to install without one.
+  runtimeClassName: ""
+
+  # How many browsers one computer holds at once, and how long an untouched one is kept. Empty means
+  # the process default, which is a handful and thirty minutes.
+  maxBrowsers: ""
+  browserIdleMs: ""
+
+  persistence:
+    # EMPTY MEANS THE CLUSTER'S DEFAULT CLASS. Naming `gp3` or `pd-balanced` is how a chart stops
+    # installing on a bare-metal cluster. Note that the ordinary block volume on every cloud is
+    # zonal, so a computer is pinned to the zone its profile was created in.
+    storageClass: ""
+    profilesSize: 10Gi
+    workspaceSize: 10Gi
+    # What happens to a Bot's logins when the release is deleted. `Retain` keeps them, which is the
+    # safe default; `Delete` is for a trial you want to leave no trace of.
+    whenDeleted: Retain
+
+  resources:
+    requests:
+      cpu: 500m
+      # Chromium is roughly 200-500MB headless and up to 2GB with real pages open.
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+
+  nodeSelector: {}
+  tolerations: []
+  # Free-form additions, and where a Bot's outbound address is set. `EGRESS_PROXY_DEFAULT` covers
+  # every Bot and `EGRESS_PROXY_<BOT>` names one, upper-cased with anything unusual replaced, so
+  # `sales-bot` reads `EGRESS_PROXY_SALES_BOT`. Both reach the computer whichever mode it runs in.
+  # With `networkPolicy.enabled` the proxy also has to be named in
+  # `networkPolicy.computerExtraEgress`, or the computer cannot reach it.
+  extraEnv: []
+
+  # `mode: sandbox` only. Where the per-Bot computers are created and what may create them.
+  sandbox:
+    # Refuse to install when the cluster has no Sandbox CRD, rather than succeeding and failing at
+    # the first browser action. Turn it off only where the CRD arrives after this chart does, such as
+    # a GitOps run that applies both together.
+    requireController: true
+    namespace: ""
+    # Pre-warmed sandboxes, so a Bot's first action after lunch does not wait for Chromium to boot.
+    #
+    # Not usable yet, and the chart refuses to render with it on. A Bot reaches a warm sandbox by
+    # claiming it, and nothing in the server creates a SandboxClaim: `locate` posts a new Sandbox and
+    # waits for it, pool or no pool. Left here, with the template and the RBAC beside it, because the
+    # missing half is the claim rather than any of this.
+    warmPool:
+      enabled: false
+      replicas: 2
+    # Suspend a computer nobody has used for this long. The Sandbox CRD has an absolute expiry, which
+    # is not the same question, so the culler below asks this one.
+    idleAfter: 30m
+    culler:
+      # A ceiling on one sweep. `concurrencyPolicy: Forbid` means a sweep that hangs holds the lock
+      # for ever and culling stops silently, which is the failure this feature exists to prevent.
+      activeDeadlineSeconds: 600
+      enabled: true
+      schedule: "*/5 * * * *"
+
+# Standing instructions a Bot runs on a schedule. The sweep offers due routines to the shared work
+# queue and hands each firing to the API server, which runs the turn as the person who scheduled it.
+routines:
+  # Off by default, because it needs a secret. Without `secrets.workerSharedSecret` the API server
+  # refuses every handoff, and a CronJob whose every run is a 401 is worse than no CronJob at all.
+  enabled: false
+  # Inside the 15-minute floor the tools enforce, so a firing waits at most one tick.
+  schedule: "*/5 * * * *"
+
+database:
+  # Used when `postgresql.enabled` is false. A URL, or a secret holding one.
+  #
+  # PUT `?sslmode=require` ON IT. Every managed database refuses an unencrypted connection: RDS has
+  # `rds.force_ssl` on by default, and Cloud SQL and Azure Database do the same. Without it the
+  # migration fails with `no pg_hba.conf entry for host ... no encryption`, which names the host and
+  # the user and not the actual problem.
+  #
+  #   postgres://user:password@host:5432/openbot?sslmode=require
+  #
+  # Keep it in a Secret rather than here: `url` is readable by anybody who can read the release.
+  url: ""
+  existingSecret: ""
+  existingSecretKey: "database-url"
+
+# The bundled database. Off by default in favour of a managed one.
+# The bundled database.
+#
+# NOT PRODUCTION-GRADE, AND OFF FOR THAT REASON. A database on a pod is a database that goes away
+# when the pod does: a rollout, a node drain or an evicted pod is a restart, and while the volume
+# survives, nothing about this shape gives you backups, failover, point-in-time recovery or a
+# connection that outlives the release. It exists so somebody can try OpenBot in one command.
+#
+# A REAL DEPLOYMENT POINTS `database` ABOVE AT A MANAGED DATABASE: RDS, Cloud SQL, Azure Database, or
+# your own server. That is the same line the Intelligence chart draws, and for the same reason.
+postgresql:
+  enabled: false
+  auth:
+    # THE SUPERUSER, DELIBERATELY, AND ONLY FOR THIS BUNDLED DATABASE.
+    #
+    # The first migration runs `CREATE EXTENSION vector` and a later one drops it again, and only a
+    # superuser can do either. An ordinary role fails the install at migration one with "permission
+    # denied to create extension", which reads like a broken chart rather than a database privilege.
+    #
+    # This is the shape `docker-compose.yml` already ships, where the app user is the cluster
+    # superuser, and it is safe for the same reason: this database exists for this release alone and
+    # nothing else can reach it.
+    #
+    # A MANAGED DATABASE IS NOT THIS. On RDS, Cloud SQL or Azure there is no superuser to hand out,
+    # so create the extension once as the administrative role and grant the migrating role ownership
+    # of it. `CREATE EXTENSION IF NOT EXISTS` then passes for an ordinary user.
+    username: postgres
+    database: openbot
+    # SET ONE, OR UPGRADES FAIL. The subchart generates a password on install and then refuses to
+    # render on upgrade unless it is given the current one, which turns the second `helm upgrade`
+    # into an error about credentials. A password you chose, or a Secret you made, makes the release
+    # repeatable. The chart refuses to install without one rather than letting you find out later.
+    password: ""
+    existingSecret: ""
+  image:
+    # Bitnami moved its unsupported images to this frozen mirror. Nothing new lands here, so the tag
+    # is named rather than inherited from the subchart: with it inherited, bumping the subchart
+    # silently asks for an image the mirror does not have, and the chart still renders perfectly.
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0-debian-12-r4
+  primary:
+    # PINNED, BECAUSE THE SHIPPED DEFAULT ADMITS EVERYTHING.
+    #
+    # The subchart renders its NetworkPolicy whether or not this chart's own is enabled, and with
+    # `allowExternal: true` its ingress rule carries no `from` at all: any pod in any namespace may
+    # open 5432. That includes a Bot's computer, the one pod running a browser on pages a person
+    # named and a shell on commands a model chose. Compose has kept the database off the Bot's
+    # network since the beginning; this is the same boundary in the other deployment's words.
+    #
+    # With this off, the database admits pods labelled `<release>-postgresql-client`, which the API
+    # server carries and nothing else does.
+    networkPolicy:
+      allowExternal: false
+      allowExternalEgress: false
+    persistence:
+      enabled: true
+      # EMPTY MEANS THE CLUSTER'S DEFAULT CLASS, and that is deliberate. Naming `gp3` or
+      # `pd-balanced` here is exactly how a chart stops installing on somebody's bare-metal cluster.
+      storageClass: ""
+      size: 20Gi
+
+# Secrets, without picking a vendor.
+#
+# A plain Kubernetes Secret is the default because that is what a self-hosted cluster has.
+# `externalSecrets` turns the same fields into an ExternalSecret instead, so Secrets Manager, Secret
+# Manager and Key Vault are a values block rather than three code paths.
+secrets:
+  # Point at a Secret you made yourself, and the chart creates none.
+  existingSecret: ""
+  # Created by the chart when `existingSecret` is empty. Pass with --set-string or a values file that
+  # is not in version control; `KEY_ENCRYPTION_KEY` and the model credential are the two that matter
+  # and neither should ever be a literal in a file anybody commits.
+  keyEncryptionKey: ""
+  betterAuthSecret: ""
+  modelApiKey: ""
+  computerToken: ""
+  supervisorToken: ""
+  # Both from the CopilotKit CLI: `npx --yes copilotkit@latest project select` prints the runtime
+  # key, and `npx --yes copilotkit@latest license --print` prints the licence. The chart refuses to
+  # install without them, because there is no mode where this runs with Intelligence missing.
+  intelligenceApiKey: ""
+  licenseToken: ""
+  # Sent to `config.managedAgent.url` on every call. Required when that url is set.
+  managedAgentToken: ""
+  # Required when `routines.enabled`: what the CronJob presents to the API server to be recognised
+  # as the worker rather than as an unauthenticated caller.
+  workerSharedSecret: ""
+  # The client secret for whichever provider is configured above.
+  googleClientSecret: ""
+  microsoftClientSecret: ""
+  oktaClientSecret: ""
+
+externalSecrets:
+  enabled: false
+  # Whatever your cluster's ClusterSecretStore or SecretStore is called. Backend-agnostic on purpose.
+  secretStoreRef:
+    name: ""
+    kind: ClusterSecretStore
+  refreshInterval: 1h
+  # remoteRef keys, one per secret this chart reads.
+  data: []
+
+ingress:
+  enabled: false
+  # The controller differs on every cluster and always will, so this is a value with no default.
+  className: ""
+  annotations: {}
+  hosts:
+    - host: openbot.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Gateway API, as an alternative rather than a replacement. Plenty of self-hosted clusters still run
+# an Ingress controller, so both are here and neither is assumed.
+httpRoute:
+  enabled: false
+  parentRefs: []
+  hostnames: []
+
+networkPolicy:
+  enabled: false
+  # Where the API may reach out to. A deployment with a managed database adds its CIDR here.
+  #
+  # It already reaches HTTP and HTTPS everywhere outside the cluster's private ranges, because that
+  # is where Intelligence, sign-in and the Bots are. This is for anything on the private side.
+  extraEgress: []
+  extraIngress: []
+  # `computers.mode: sandbox` only. The service range the Kubernetes API server answers on, so the
+  # rule that lets the API ask for a Bot's computer can name it instead of being left open.
+  #
+  # Empty means unscoped, which is the only thing a chart can do by default: the range is the
+  # cluster's, not the release's. `kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'` shows
+  # which one yours is on; on EKS it is usually 172.20.0.0/16, on GKE and kubeadm 10.96.0.0/12.
+  kubernetesApiCidr: ""
+  # Where a Bot's computer may reach beyond the public internet. A deployment whose Bots must reach
+  # an internal site adds it here, one address at a time, rather than reopening the private ranges.
+  computerExtraEgress: []
+
+podSecurityContext:
+  runAsNonRoot: false
+  fsGroup: null
+securityContext: {}
+
+# Applied to every pod this chart creates.
+commonLabels: {}
+commonAnnotations: {}

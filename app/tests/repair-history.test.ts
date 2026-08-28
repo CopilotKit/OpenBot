@@ -114,6 +114,62 @@ describe("repairing a history before it is sent", () => {
     expect(results).toHaveLength(1);
   });
 
+  /*
+   * The shape a real thread came back in after one Bot handed work to another: the result three
+   * messages AHEAD of the call that produced it. Collecting results without regard to position
+   * called that call answered, returned the array untouched, and the provider then refused the whole
+   * conversation because nothing followed the call.
+   */
+  test("a result stored before its own call is moved after it", () => {
+    const messages = [
+      { id: "u1", role: "user", content: "ask the other Bot" },
+      {
+        id: "t1",
+        role: "tool",
+        toolCallId: "c1",
+        content: "Handed to Knowledge.",
+      },
+      { id: "a1", role: "assistant", content: "I asked it." },
+      {
+        id: "a2",
+        role: "assistant",
+        content: "",
+        toolCalls: [call("c1", "message_bot")],
+      },
+      { id: "u2", role: "user", content: "what is 2 plus 2" },
+    ] as Message[];
+
+    const repaired = repairUnansweredToolCalls(messages, ids);
+
+    expect(repaired.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "assistant",
+      "tool",
+      "user",
+    ]);
+    const result = repaired[3] as Message & { toolCallId: string };
+    expect(result.toolCallId).toBe("c1");
+    // The real result is moved, not thrown away and apologised for.
+    expect(result.content).toBe("Handed to Knowledge.");
+  });
+
+  test("a result whose call never appears is dropped", () => {
+    const messages = [
+      { id: "u1", role: "user", content: "hello" },
+      { id: "t1", role: "tool", toolCallId: "nobody", content: "orphan" },
+      { id: "a1", role: "assistant", content: "hi" },
+    ] as Message[];
+
+    const repaired = repairUnansweredToolCalls(messages, ids);
+
+    // A result answering no call is refused by a provider for the mirror-image reason.
+    expect(repaired.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+  });
+
   test("a conversation with no tool calls at all is untouched", () => {
     const messages = [
       { id: "u1", role: "user", content: "hello" },

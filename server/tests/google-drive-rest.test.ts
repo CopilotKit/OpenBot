@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { catalogueEntry } from "../src/plugins/catalogue";
 import { callTool, listTools } from "../src/plugins/google-drive-rest";
 import { transportFor } from "../src/plugins/transport";
-import { catalogueEntry } from "../src/plugins/catalogue";
 
 /**
  * The Drive REST adapter, asserted without Google.

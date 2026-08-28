@@ -304,6 +304,8 @@ export async function buildAgents(
    * address a run finally reaches are only the same address while nobody redirects.
    */
   agentFetch?: AgentFetch,
+  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
+  handoff?: HandoffForRun,
 ): Promise<Record<string, AbstractAgent>> {
   const vendors = await loadVendors().catch(() => [] as readonly string[]);
   return Object.fromEntries(
@@ -321,6 +323,7 @@ export async function buildAgents(
           vendors,
           selection,
           agentFetch,
+          handoff,
         ),
       ]),
     ),
@@ -338,6 +341,7 @@ async function buildAgent(
   connectedVendors: readonly string[] = [],
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
+  handoff?: HandoffForRun,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -386,6 +390,17 @@ async function buildAgent(
      * `.use()` middleware is applied by `runAgent`, not by `run`, so an outer agent delegating to
      * `remote.run(input)` skips it: the endpoint would get a run with no standing role, no holdings
      * message, no tools and no signed assertion, and every one of those failures is silent.
+     *
+     * WHICH IS ALSO WHY A REMOTE BOT IS OFFERED NEITHER `message_bot` NOR `ask_person`. Both are
+     * executed here, by the wrapper below, against this deployment's grants and caps. A Bot at an
+     * endpoint runs its own loop and is handed descriptions of tools it may call back for, and the
+     * callback path executes MCP refs only — so a described `message_bot` would be a tool it could
+     * announce and never invoke. Granting one is refused at the door rather than stored dead: see
+     * `enablementRefusal` in plugins/routes.ts.
+     *
+     * Making this work is a feature rather than a fix: the callback would have to carry a run
+     * assertion the endpoint cannot forge, and execute a hop on its behalf. Worth doing; not done
+     * here, and worth knowing it is missing rather than assuming it is not.
      */
     return remoteAgentWithStandingRole(
       agent,
@@ -416,19 +431,47 @@ async function buildAgent(
     );
 
   const whole = withTools(granted);
-  if (!narrowing) return whole;
+  if (!narrowing && !handoff) return whole;
 
-  return new RunSelectedAgent(
+  return new RunBuiltAgent(
     { agentId: agent.id, description: agent.name },
     whole,
     async (input) => {
-      const offered = await offeredFor(input);
-      // Nothing narrowed means nothing to rebuild, and reusing the agent already built for this
-      // request keeps that path allocation-for-allocation what it was.
-      return offered.length === granted.length ? whole : withTools(offered);
+      const offered = narrowing ? await offeredFor(input) : granted;
+      /*
+       * The tool for handing work to another Bot is made per run, not per request.
+       *
+       * It has to know which run is asking: how deep the chain already is, and which conversation an
+       * answer belongs in. Both live on the run rather than on the request, and both have to be this
+       * deployment's own statement rather than anything the model can edit. A request is earlier
+       * than a run and knows neither.
+       */
+      const passing = (await handoff?.(agent.id, input)) ?? [];
+      const tools = passing.length > 0 ? [...offered, ...passing] : offered;
+      // Nothing added and nothing narrowed means nothing to rebuild, and reusing the agent already
+      // built for this request keeps that path allocation-for-allocation what it was.
+      return tools.length === granted.length && passing.length === 0
+        ? whole
+        : withTools(tools);
     },
   );
 }
+
+/**
+ * The tools a run gets for reaching past itself: handing work to another Bot, and asking a person.
+ *
+ * Given the Bot and the run, because the answers depend on both: which Bots this one has been
+ * granted, and how deep the chain it is already part of has gone. Empty means this run reaches
+ * nobody, which is the right shape for a deployment with the capability switched off.
+ *
+ * The two arrive together because a model chooses between them. Offering the way to hand work
+ * sideways without the way to stop and ask leaves the model one exit from a decision it cannot make,
+ * and it takes it: it asks a Bot that cannot settle the question either.
+ */
+export type HandoffForRun = (
+  botId: string,
+  input: RunAgentInput,
+) => Promise<readonly GrantedTool[]>;
 
 /**
  * How a deployment narrows a Bot's tools to the ones a run is about. Absent means it does not.
@@ -596,7 +639,7 @@ function remoteAgentWithStandingRole(
          * one shared secret.
          */
         ...(signRun
-          ? { openbotRun: signRun(agent.id, input.runId) }
+          ? { openbotRun: signRun(agent.id, input.runId, input.threadId) }
           : /*
              * Absent means this deployment cannot sign, so the agent is given nothing to hand back
              * and its tool calls will be refused. That is the right direction to fail: a Bot that
@@ -625,7 +668,7 @@ function remoteAgentWithStandingRole(
 
 /**
  * An agent whose tools are decided when the run starts, because that is the first moment anybody
- * knows what the run is about.
+ * knows what the run is about, and who is asking on whose behalf.
  *
  * WHY A WRAPPER AND NOT A NARROWER `loadTools`. Tools are resolved per request, and a request is
  * earlier than a run: at that point there is a Bot and a person and no message, so there is nothing
@@ -638,7 +681,7 @@ function remoteAgentWithStandingRole(
  * The deferral is per subscription, so a retried run reselects rather than reusing a decision made
  * for a message that is no longer the last one.
  */
-class RunSelectedAgent extends AbstractAgent {
+class RunBuiltAgent extends AbstractAgent {
   /**
    * The agent this run turned into, once there is one.
    *
@@ -692,8 +735,8 @@ class RunSelectedAgent extends AbstractAgent {
    * (`agents[agentId].clone()`), which means the omission is not a corner case: without this, the
    * first message anybody sends fails on a `build` that is not a function.
    */
-  clone(): RunSelectedAgent {
-    const cloned = super.clone() as RunSelectedAgent;
+  clone(): RunBuiltAgent {
+    const cloned = super.clone() as RunBuiltAgent;
     cloned.whole = this.whole;
     cloned.build = this.build;
     // Deliberately not the inner agent. A clone is a new run, and inheriting the last run's agent
@@ -734,13 +777,32 @@ export async function resolveRuntimeAgents(
   loadVendors?: () => Promise<readonly string[]>,
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
+  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
+  handoff?: HandoffForRun,
+  /**
+   * Build only this one, when the caller wants only this one.
+   *
+   * A hop delivery and a routine's turn each want a single Bot, and both were resolving the whole
+   * roster to reach it: every registered Bot constructed, and a granted-tools query for each, with
+   * all but one thrown away. On a hop that is paid again on every retry. The roster is still LOADED
+   * in full, because which Bots exist for this person is what decides whether the one asked for is
+   * theirs to see at all; what narrows is what gets built.
+   */
+  onlyBotId?: string,
 ): Promise<Record<string, AbstractAgent>> {
-  const registered = await loadAgents();
-  if (registered.length === 0) {
+  const all = await loadAgents();
+  if (all.length === 0) {
     throw new Error(
       "No agents are registered. Add one to the tenant package or the agents table.",
     );
   }
+  const registered =
+    onlyBotId === undefined
+      ? all
+      : all.filter((agent) => agent.id === onlyBotId);
+  // Not an error: a caller asking for a Bot this person cannot see gets an empty result and decides
+  // what that means, exactly as it would have from a roster that did not contain it.
+  if (registered.length === 0) return {};
 
   const apiKey = registered.some((agent) => agent.type === "built_in")
     ? await resolveModelApiKey()
@@ -756,6 +818,7 @@ export async function resolveRuntimeAgents(
     loadVendors,
     selection,
     agentFetch,
+    handoff,
   );
 }
 
@@ -769,7 +832,12 @@ export type LoadToolsForBot = (botId: string) => Promise<GrantedTool[]>;
  * configuration and this one never holds a secret. Shaped like `LoadToolsForBot` on purpose: both are
  * per-actor facts resolved once per request and asked per Bot.
  */
-export type SignRun = (botId: string, runId: string) => string;
+export type SignRun = (
+  botId: string,
+  runId: string,
+  /** Which conversation, so a Bot handing work on cannot choose where the answer lands. */
+  threadId: string,
+) => string;
 
 /** Who is asking. Agent visibility is decided per person, so a run has to know this first. */
 export type IdentifyActor = (request: Request) => Promise<AgentActor>;
@@ -814,6 +882,13 @@ export function createRequestAgents(
   selectionForActor?: (actorId: string) => ToolSelection,
   /** The fetch remote agents are dialled with. See {@link buildAgents}. */
   agentFetch?: AgentFetch,
+  /**
+   * How a run gets its tool for handing work to another Bot, resolved for whoever is asking.
+   *
+   * Per actor for the same reason the tools are: which Bots may be reached is decided against the
+   * roster that person can see, so a Bot must never be able to address one they cannot.
+   */
+  handoffForActor?: (actorId: string) => HandoffForRun,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -828,6 +903,7 @@ export function createRequestAgents(
       loadVendors,
       selectionForActor?.(actor.id),
       agentFetch,
+      handoffForActor?.(actor.id),
     );
   };
 }
@@ -908,6 +984,14 @@ class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
   }
 }
 
+/**
+ * How long a conversation's lock is held before it lapses on its own.
+ *
+ * Matches the platform's own default rather than picking a number: this is renewed while a Bot works,
+ * so what it really sets is how long a conversation stays stuck after a process dies mid-run.
+ */
+const THREAD_LOCK_TTL_SECONDS = 120;
+
 export function mountCopilotRuntime(
   config: DeploymentConfig,
   model: RuntimeModel,
@@ -928,8 +1012,63 @@ export function mountCopilotRuntime(
   selectionForActor?: (actorId: string) => ToolSelection,
   /** The fetch remote agents are dialled with. See {@link buildAgents}. */
   agentFetch?: AgentFetch,
+  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
+  handoffForActor?: (actorId: string) => HandoffForRun,
 ) {
   const { intelligence } = config.runtime;
+
+  /**
+   * The same Bot a person's run would get, built without a request.
+   *
+   * Handed out from here rather than assembled again elsewhere, because "built exactly the way a
+   * person's run builds it" is a property worth guaranteeing structurally. A hop delivering to a Bot
+   * assembled by parallel wiring would drift the first time one of these arguments changed, and the
+   * drift would be invisible: the Bot would run, and quietly hold different tools or a different
+   * role from the one the person talks to.
+   */
+  const agentFor = async (input: {
+    /**
+     * The person, WITH THEIR ROLE, rather than an id this rebuilds a role for.
+     *
+     * An administrator sees Bots a user does not. Assumed to be a user here while the desk resolved
+     * the real role, the two disagreed in the worst direction: the desk accepted an administrator's
+     * hop to a Bot only they can see, the model was told it had been handed over, and then every
+     * delivery attempt failed to build that Bot and the person was told it never answered. A
+     * refusal that failed closed became a lie that failed slowly.
+     */
+    actor: AgentActor;
+    botId: string;
+  }): Promise<AbstractAgent | null> => {
+    const { actor } = input;
+    const agents = await resolveRuntimeAgents(
+      () => loadAgents(actor),
+      model,
+      resolveModelApiKey,
+      stallGuard,
+      loadToolsForActor?.(actor.id),
+      signRunForActor?.(actor.id),
+      config.computer ? COMPUTER_GUIDANCE : undefined,
+      loadVendors,
+      selectionForActor?.(actor.id),
+      agentFetch,
+      handoffForActor?.(actor.id),
+      // Only the Bot this hop is for. The roster is still read in full, so a Bot this person cannot
+      // see is still absent; what this skips is constructing the other Bots and asking the database
+      // what each of them was granted, on every delivery and again on every retry.
+      input.botId,
+    );
+    return agents[input.botId] ?? null;
+  };
+
+  /*
+   * One client, used by the runtime and by anything reading a thread beside it, so a hop reads the
+   * history a person's run would read rather than a second view of it that could disagree.
+   */
+  const intelligenceClient = new IntelligenceKnowingANewThread({
+    apiUrl: intelligence.apiUrl,
+    wsUrl: intelligence.gatewayWsUrl,
+    apiKey: intelligence.apiKey,
+  });
 
   const runtime = new CopilotRuntime({
     // `mode` is inferred from the presence of `intelligence`; passing it is a type error.
@@ -940,11 +1079,7 @@ export function mountCopilotRuntime(
     identifyUser,
     // The subclass, not the base: a thread nobody has run yet reads as empty rather than as a 500.
     // See IntelligenceKnowingANewThread.
-    intelligence: new IntelligenceKnowingANewThread({
-      apiUrl: intelligence.apiUrl,
-      wsUrl: intelligence.gatewayWsUrl,
-      apiKey: intelligence.apiKey,
-    }),
+    intelligence: intelligenceClient,
     licenseToken: intelligence.licenseToken,
     // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
     // other deployment's. Adds no events of its own.
@@ -971,8 +1106,109 @@ export function mountCopilotRuntime(
       loadVendors,
       selectionForActor,
       agentFetch,
+      handoffForActor,
     ) as never,
   });
 
-  return createCopilotHonoHandler({ runtime, basePath });
+  return {
+    handler: createCopilotHonoHandler({ runtime, basePath }),
+    /**
+     * How to reach the platform's runner, exactly as the runtime reaches it.
+     *
+     * TAKEN FROM THE CLIENT, NOT FROM CONFIGURATION, and this is the whole of a bug that only a real
+     * gateway could show. Built from `gatewayWsUrl` and the deployment's API key, every join was
+     * refused with `active_lock_mismatch`: a thread's active run is a lock the platform issues, and
+     * the token that holds it is not the API key. The runtime asks the client for both, so anything
+     * else driving a run has to ask the same client the same way.
+     */
+    runnerConnection: () => ({
+      url: intelligenceClient.ɵgetRunnerWsUrl(),
+      authToken: intelligenceClient.ɵgetRunnerAuthToken(),
+    }),
+    /**
+     * The conversation's run lock, as the platform issues it.
+     *
+     * ONE RUN AT A TIME PER CONVERSATION. Taken before anything is streamed, because the gateway
+     * checks every event against the run the lock names: a run that skips this is claiming to be one
+     * nobody was told about, and every event is refused. That refusal reads like a platform
+     * limitation and is a missing step.
+     *
+     * A conversation somebody else is already running in refuses rather than queues, which is right:
+     * the caller waits and tries again rather than two Bots writing over each other.
+     */
+    threadLock: {
+      acquire: async (input: {
+        threadId: string;
+        runId: string;
+        userId: string;
+        agentId: string;
+      }) => {
+        try {
+          const held = await intelligenceClient.ɵacquireThreadLock(input);
+          /*
+           * The run id only. The lock also hands back a join token, which is what a browser presents
+           * to watch the conversation; the runner's socket has its own credential and passing this
+           * one in place of it means a socket that is refused and a run that never starts. See the
+           * note on `runner.run` in handoff-delivery.ts.
+           */
+          return { runId: held.runId };
+        } catch (error) {
+          /*
+           * ONLY A CONFLICT MEANS "NOT NOW". Everything else is raised.
+           *
+           * A conversation somebody is already running in answers 409, and that is ordinary: the hop
+           * waits and is tried again. Anything else is not — a platform that cannot be reached, a
+           * token that stopped working, or one of the underscored APIs below being renamed by a
+           * routine version bump. Returned as `null` those all read as contention: every hop retries
+           * to exhaustion, every person is told their question was never answered, and the only
+           * evidence is a warning line that looks like a busy conversation.
+           *
+           * Raised, the runner writes the real reason onto `agent.handoff_failed`, and the sentence
+           * the person eventually gets names it.
+           */
+          const status =
+            error instanceof Error && "status" in error
+              ? (error as { status?: unknown }).status
+              : undefined;
+          if (status === 409) return null;
+          throw error;
+        }
+      },
+      renew: async (input: { threadId: string; runId: string }) => {
+        await intelligenceClient.ɵrenewThreadLock({
+          ...input,
+          ttlSeconds: THREAD_LOCK_TTL_SECONDS,
+        });
+      },
+      release: async (input: { threadId: string; runId: string }) => {
+        await intelligenceClient.ɵcleanupThreadLock(input);
+      },
+    },
+    agentFor,
+    /**
+     * A thread's messages, as the platform holds them.
+     *
+     * The same client the runtime uses, so a hop reads the history a person's run would read rather
+     * than a second view of it that could disagree.
+     */
+    history: async (input: { threadId: string; actorId: string }) => {
+      /*
+       * The platform's own message type rather than AG-UI's, inferred rather than named: the two are
+       * compatible where it matters and naming the wrong one here would mean converting a history
+       * that does not need converting.
+       */
+      type Read = Awaited<
+        ReturnType<CopilotKitIntelligence["getThreadMessages"]>
+      >;
+      const read = await historyOrEmpty<Read>(
+        () =>
+          intelligenceClient.getThreadMessages({
+            threadId: input.threadId,
+            userId: input.actorId,
+          }),
+        { messages: [] } as Read,
+      );
+      return read.messages;
+    },
+  };
 }

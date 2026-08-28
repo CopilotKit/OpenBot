@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AuditEventInput, AuditStore } from "../src/audit";
+import { StaleSnapshotError } from "../src/computer/client";
 import {
   ActionRefusedError,
   createComputerGateway,
@@ -10,7 +11,6 @@ import type {
   ComputerLocation,
   ComputerProvider,
 } from "../src/computer/provider";
-import { StaleSnapshotError } from "../src/computer/client";
 import type { SnapshotResult } from "../src/computer/schema";
 import {
   createInMemorySnapshotStore,
@@ -201,6 +201,11 @@ async function gatewayWith(
     resetResult?: { cleared: boolean };
     locations?: ComputerLocation[];
     token?: string;
+    /** Endpoints the computer answers differently, for the calls that have to fail. */
+    routes?: Record<
+      string,
+      (init?: RequestInit) => Response | Promise<Response>
+    >;
   },
 ) {
   const { provider, fetchImpl, calls, addressedAs, requests } =
@@ -444,6 +449,68 @@ describe("the computer gateway", () => {
     expect(rows[0]?.payload.command).toBe("cat secrets.txt");
   });
 
+  /**
+   * The two rows describe one action, so they have to describe the same one.
+   *
+   * Asserted as agreement rather than field by field on purpose: the failure row is a second
+   * hand-maintained argument list, and what goes wrong with one of those is not a particular field
+   * being wrong, it is a field being added to one and not the other. Comparing the payloads catches
+   * the next one too.
+   */
+  test("a permitted action that fails is recorded the same way it was decided", async () => {
+    const failing = () =>
+      Response.json({ error: "device or resource busy" }, { status: 500 });
+
+    for (const action of [
+      {
+        what: "a command",
+        route: "/exec",
+        run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
+          gateway.runCommand("bot-1", ACTOR, {
+            command: "rm -rf /workspace/build",
+          }),
+      },
+      {
+        what: "a keypress",
+        route: "/key",
+        run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
+          gateway.key("bot-1", ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            key: "Enter",
+          }),
+      },
+      {
+        what: "a file write",
+        route: "/files/write",
+        run: (gateway: Awaited<ReturnType<typeof gatewayWith>>["gateway"]) =>
+          gateway.writeFile("bot-1", ACTOR, { path: "notes.md", text: "kept" }),
+      },
+    ]) {
+      const { gateway, rows } = await gatewayWith(PERMISSIVE, {
+        routes: { [action.route]: failing },
+      });
+      rows.length = 0;
+
+      await expect(action.run(gateway)).rejects.toThrow();
+
+      const allowed = rows.find(
+        (row) => row.eventType === "computer.action_allowed",
+      );
+      const failed = rows.find(
+        (row) => row.eventType === "computer.action_failed",
+      );
+      expect(allowed, action.what).toBeDefined();
+      expect(failed, action.what).toBeDefined();
+
+      // The outcome is the only thing the failure row adds. Everything describing what was attempted
+      // is the same action and reads the same on both rows.
+      const { failure, ...attempted } = failed?.payload ?? {};
+      expect(failure, action.what).toBeString();
+      expect(attempted, action.what).toEqual(allowed?.payload ?? {});
+    }
+  });
+
   test("the computer is told WHICH Bot is asking", async () => {
     // Every per-Bot behaviour on the computer keys off this id: the profile it opens, the logins it
     // has, the proxy its traffic leaves through, and who holds its wheel.
@@ -531,6 +598,20 @@ describe("the computer gateway", () => {
 
     await gateway.navigate("bot-1", ACTOR, "https://example.com/");
     expect(calls).toEqual(["navigate"]);
+  });
+
+  /*
+   * "not in the current snapshot" is a statement about a ref that could not be resolved, and it used
+   * to be written on every action that never named an element at all. A reader looking at a
+   * navigation row went hunting for a snapshot that was never taken.
+   */
+  test("an action that never named an element records no element", async () => {
+    const { gateway, rows } = await gatewayWith(PERMISSIVE);
+
+    await gateway.navigate("bot-1", ACTOR, "https://example.com/");
+
+    expect(rows.at(-1)?.payload.action).toBe("computer_navigate");
+    expect(rows.at(-1)?.payload.element).toBeUndefined();
   });
 
   test("an action on an unresolvable ref is still decided and still recorded", async () => {

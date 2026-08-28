@@ -9,7 +9,7 @@ import {
   decideComponent,
   type GrantedComponent,
 } from "@/lib/components/queries";
-import { useActiveBotId } from "@/lib/copilot/active-bot";
+import { useActiveBotId, useDeclaredBotId } from "@/lib/copilot/active-bot";
 import {
   GALLERY_COMPONENTS,
   type GalleryComponent,
@@ -32,7 +32,10 @@ export function GalleryTools() {
 
   // Active Bot comes from the route/channel surface currently driving the provider.
   const grantsFor = useActiveBotId();
-  const { data: granted } = useQuery(agentComponentsQueryOptions(grantsFor));
+  // See sandboxed-tools: the placeholder Bot is not fetchable, so the grant query waits for a
+  // surface to declare a real one.
+  const declared = useDeclaredBotId();
+  const { data: granted } = useQuery(agentComponentsQueryOptions(declared));
   const held = useMemo(
     () =>
       new Map(

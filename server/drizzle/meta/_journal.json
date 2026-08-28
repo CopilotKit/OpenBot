@@ -110,15 +110,78 @@
     {
       "idx": 15,
       "version": "7",
-      "when": 1787856779478,
-      "tag": "0015_onboarding",
+      "when": 1787525879804,
+      "tag": "0015_credentials_one_live_key",
       "breakpoints": true
     },
     {
       "idx": 16,
       "version": "7",
-      "when": 1787856801736,
-      "tag": "0016_backfill_existing_users_have_onboarded",
+      "when": 1787581516968,
+      "tag": "0016_pin_and_soft_delete_channels",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787684818682,
+      "tag": "0017_durable_work",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787688017645,
+      "tag": "0018_page_frames",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787744867526,
+      "tag": "0019_channel_read_marker",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787761381038,
+      "tag": "0020_attention_resolutions",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787767359748,
+      "tag": "0021_routines",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787841150017,
+      "tag": "0022_drop_attention_resolutions",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1787841174859,
+      "tag": "0023_routines_owner_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787926466892,
+      "tag": "0024_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787926472382,
+      "tag": "0025_backfill_existing_users_have_onboarded",
       "breakpoints": true
     }
   ]

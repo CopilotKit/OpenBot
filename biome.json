@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
   "files": {
     "includes": [
       "**",
@@ -7,7 +7,8 @@
       "!.",
       "!app/src/components/ui",
       "!app/src/lib/generated/application-config.ts",
-      "!app/src/routeTree.gen.ts"
+      "!app/src/routeTree.gen.ts",
+      "!server/drizzle"
     ]
   },
   "formatter": {

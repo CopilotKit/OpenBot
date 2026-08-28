@@ -107,6 +107,9 @@ function RouteComponent() {
         </Combobox>
       </div>
       <ConversationView
+        // Choosing a coworker answers the "To:" field, so the message is what remains: the caret
+        // lands in the composer the moment a recipient exists, whether picked here or in the URL.
+        autoFocus
         // Commands must be loaded before the first channel message is sent.
         commands={skillCommands}
         disabled={recipients.length === 0}

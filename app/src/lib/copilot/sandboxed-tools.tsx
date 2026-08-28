@@ -12,7 +12,7 @@ import {
   decideComponent,
   type GrantedComponent,
 } from "@/lib/components/queries";
-import { useActiveBotId } from "@/lib/copilot/active-bot";
+import { useActiveBotId, useDeclaredBotId } from "@/lib/copilot/active-bot";
 import {
   type PublishedSandboxed,
   publishedSandboxedQueryOptions,
@@ -24,8 +24,11 @@ import {
  */
 export function SandboxedTools() {
   const botId = useActiveBotId();
+  // Grants are fetched only once a surface has declared its Bot; the placeholder is not one the
+  // server knows, and asking would 404 on every poll.
+  const declared = useDeclaredBotId();
   const { data: published } = useQuery(publishedSandboxedQueryOptions());
-  const { data: granted } = useQuery(agentComponentsQueryOptions(botId));
+  const { data: granted } = useQuery(agentComponentsQueryOptions(declared));
 
   const held = new Map(
     (granted ?? []).map((component: GrantedComponent) => [

@@ -142,6 +142,23 @@ export function createAgentRoutes(
    * address. A hosted deployment sets this and leaves the other off.
    */
   allowedHosts: ReadonlySet<string> = new Set(),
+  /**
+   * Which Bots a Bot may hand work to, for the screen that grants it.
+   *
+   * A named object rather than another positional argument: every parameter above this one is
+   * optional, so a misplaced one typechecks and silently does nothing, and this list is already at
+   * the length where that stops being hypothetical.
+   *
+   * Absent in a deployment with no plugin store, which is a deployment where no Bot may address any
+   * other. The screen is then told the capability is off rather than shown a control that grants
+   * nothing.
+   */
+  handoff?: {
+    /** Whether the deployment's own caps leave the capability switched on at all. */
+    enabled: boolean;
+    /** The Bots this one may address today, read per call so a revoked grant stops showing. */
+    reachableFrom: (agentId: string) => Promise<readonly string[]>;
+  },
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -435,6 +452,37 @@ export function createAgentRoutes(
       await store.softDelete(context.var.actor, context.req.param("agentId"));
       await record(context, "bot.deleted", context.req.param("agentId"));
       return context.body(null, 204);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  /**
+   * Which Bots this Bot may hand work to.
+   *
+   * On the Bot's own screen rather than under the connector catalogue, because it is a fact about
+   * this Bot and not about a vendor: the catalogue's entries have a fixed list of tools, and the
+   * Bots a deployment has are whatever somebody made.
+   *
+   * `enabled` is reported separately from the grants, because the two fail differently. A grant with
+   * the capability switched off is a row in the database that will never be read, and a screen that
+   * offered it without saying so would be a switch wired to nothing.
+   */
+  routes.get("/:agentId/handoff", requireUser, async (context) => {
+    const agentId = context.req.param("agentId");
+    try {
+      // Asked of the store, so a Bot somebody may not see is "not found" here as everywhere else,
+      // rather than a list of who it can reach.
+      const agent = await store.get(context.var.actor, agentId);
+      if (!agent) return context.json({ error: "Agent not found." }, 404);
+      return context.json({
+        handoff: {
+          enabled: handoff?.enabled ?? false,
+          // Granting is an administrator's, the same as it is on every other grant.
+          canGrant: context.var.actor.role === "admin",
+          reachable: handoff ? await handoff.reachableFrom(agentId) : [],
+        },
+      });
     } catch (error) {
       return mapStoreError(context, error);
     }

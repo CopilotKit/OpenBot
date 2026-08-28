@@ -12,6 +12,7 @@
  */
 import { IconFile, IconFolder, IconTerminal2 } from "@tabler/icons-react";
 import { useSyncExternalStore } from "react";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import {
   activityFor,
   type ComputerActivity,
@@ -102,10 +103,14 @@ export function ActivityLog({ computerId }: { computerId: string }) {
 
   if (entries.length === 0) {
     return (
-      <p className="py-6 text-center text-muted-foreground text-sm">
-        Nothing yet. Commands the Bot runs, and files it reads, appear here as
-        they happen.
-      </p>
+      <Empty className="h-[180px] border border-dashed">
+        <EmptyHeader>
+          <EmptyTitle className="text-muted-foreground">
+            Nothing yet. Commands the Bot runs, and files it reads, appear here
+            as they happen.
+          </EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     );
   }
 
