@@ -8,6 +8,30 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Stopping a Bot's computer stops it, and the person watching is told
+
+A computer somebody stopped came back up on its own about a second later, and reset did the same. The
+live screen kept a loop asking for the Bot's current page once a second, asking for a page is what
+starts a browser, and nothing tore that loop down when the browser it was showing went away. The same
+loop kept the browser marked recently used, so a Bot with somebody watching was also immune to the
+idle timeout and came straight back after being closed to stay under the cap on running browsers.
+Those last two never involved a request at all, so nothing on the stop path could have covered them.
+
+Two smaller failures went with it. A person who reconnected, leaving their old window open, could
+have that old window's typing land in the page the new one was watching, with nothing said to either.
+And a window closed while the browser was still starting left a screencast and its loop behind for a
+connection that had already gone.
+
+The screen is now held per connection rather than per Bot, so closing one only ever ends its own, and
+teardown hangs off the browser closing rather than off the two requests that ask for it. A viewer
+whose screen ends is sent a message saying why, whether the computer stopped, was reset, or the
+screen was taken over by another window.
+
+Nothing to configure, and no change for a deployment where nobody watches a Bot work. **The app does
+not yet show that message**: it arrives at the browser and is held in state the live screen does not
+read, so a person still sees the last frame until they reopen the screen. That half is tracked
+separately in #287.
+
 ## 0.0.5
 
 ### One Bot can hand work to another, and reach a person when no Bot will do
