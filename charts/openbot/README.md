@@ -349,5 +349,8 @@ install rather than found as a browser that fails on every page.
 Migrations run as a `pre-install,pre-upgrade` Job, so no replica ever serves in front of a schema it
 has not seen. An init container would mean every replica racing to migrate the same database.
 
-Use `helm upgrade --install --atomic` so a failed upgrade rolls back rather than leaving half a
-rollout.
+Roll back a failed upgrade rather than leaving half a rollout: `helm upgrade --install --atomic` on
+Helm 3, and `--rollback-on-failure` on Helm 4, which renamed the flag. Helm 4 still accepts
+`--atomic` on `upgrade` as a deprecated alias and prints a warning, so the Helm 3 spelling keeps
+working on both today; it is `helm install --atomic` that Helm 4 removed outright, which is one more
+reason this is written as `upgrade --install`.
