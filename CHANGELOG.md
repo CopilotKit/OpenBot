@@ -8,6 +8,31 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### One Bot can hand work to another, and reach a person when no Bot will do
+
+A Bot asked something it is not the right Bot for can now put the question to one that is. The
+addressed Bot answers as itself, with its own tools and its own knowledge, and the answer arrives in
+the conversation the person was already in rather than somewhere they would have to go and look. A
+Bot that judges no other Bot will do can instead reach the person who asked it.
+
+**No Bot may address any other until an administrator says so.** Which Bot may reach which is an
+ordinary grant, made per Bot, and a Bot with no grant is told it cannot rather than quietly trying.
+A Bot addressed by a name two Bots answer to is refused and both are named, because picking one
+would be a guess about which colleague a person meant.
+
+Two ceilings, because a Bot deciding to ask another Bot is a Bot deciding to spend a run:
+`BOT_HANDOFF_MAX_DEPTH` is how many Bots deep a chain may go and defaults to `1`, and **`0` switches
+the capability off entirely** — the tool is not offered rather than offered and refused.
+`BOT_HANDOFF_MAX_PER_RUN` is how many Bots one run may address and defaults to `3`. The Helm chart
+takes the same two as `config.handoff.maxDepth` and `config.handoff.maxPerRun`.
+
+A hop that fails is reported back by the Bot that asked, after its attempts are spent, rather than
+leaving the person watching a conversation that never finishes. One rough edge to know about: a hop
+that is retried leaves one "asked" line per attempt in the addressed Bot's own transcript, so a hop
+that took three attempts reads there as having been asked three times.
+
+No new tables: this uses the work queue that already fires the culler.
+
 ### The framework Bot answers on 5.6-tier models, and can be told how hard to think
 
 Pointing `BOT_MODEL` at a `gpt-5.6-*` model gave a Bot that started, reported healthy, and then said
