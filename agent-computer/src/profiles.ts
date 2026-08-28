@@ -309,6 +309,11 @@ export function createProfiles(
       if (existing) {
         // Half-dead: the browser went away, or its page did. Dropped rather than repaired, because a
         // context whose browser has gone is not usable for anything.
+        //
+        // The one close that does not announce itself, deliberately. A replacement is launched on the
+        // next line and the live screen's follow loop re-attaches to it within the second, so this is
+        // a browser being swapped rather than one going away. Telling the viewer here would end a
+        // screen that is about to be fine, which is the opposite of what the announcement is for.
         await existing.context.close().catch(() => undefined);
         live.delete(botId);
       }

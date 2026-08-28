@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Screencast } from "../src/screencast";
-import { createViewerSlot, isCurrentViewer } from "../src/viewer";
+import { createViewerSlot } from "../src/viewer";
 
 /**
  * Who owns the live screen, and what may act on it.
@@ -466,29 +466,6 @@ describe("the session sweep asking whether anybody is watching", () => {
     await releasing;
 
     expect(slot.occupied()).toBe(true);
-  });
-});
-
-describe("deciding whether a closing socket stops the live screen", () => {
-  // The predicate the slot supersedes. It is still what `index.ts` asks until that moves across, so
-  // it stays under test until it goes.
-  const socket = { id: "a" };
-  const other = { id: "b" };
-
-  test("the socket that is casting stops it", () => {
-    expect(isCurrentViewer({ socket }, socket)).toBe(true);
-  });
-
-  test("a socket that was replaced stops nothing", () => {
-    expect(isCurrentViewer({ socket: other }, socket)).toBe(false);
-  });
-
-  test("a close with no viewer at all stops nothing", () => {
-    expect(isCurrentViewer(undefined, socket)).toBe(false);
-  });
-
-  test("identity, not shape", () => {
-    expect(isCurrentViewer({ socket: { id: "a" } }, { id: "a" })).toBe(false);
   });
 });
 

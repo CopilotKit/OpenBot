@@ -35,22 +35,6 @@ import type { Screencast } from "./screencast";
  */
 
 /**
- * Is this socket the one currently casting?
- *
- * By identity, never by value. Two sockets are distinct objects however alike they look, and an
- * equality that compared their contents would put the bug back for any pair that happened to match.
- *
- * The slot below supersedes this: it answers the same question without a caller having to remember
- * to ask. It stays until `index.ts` moves onto the slot, so that move is one change rather than two.
- */
-export function isCurrentViewer(
-  current: { socket: unknown } | undefined,
-  socket: unknown,
-): boolean {
-  return current?.socket === socket;
-}
-
-/**
  * What a socket may do with the screen right now.
  *
  * Three answers, not two. A socket holding a claim with no cast yet is mid-launch and its screen is
