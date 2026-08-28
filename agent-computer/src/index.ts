@@ -9,18 +9,16 @@ import {
 } from "./authorisation";
 import { isPlainBotId } from "./bot-id";
 import {
-  type Control,
   ControlError,
   ControlRequestError,
-  createControl,
   NO_SECRET_PENDING,
   TAKE_CONTROL_FIRST,
 } from "./control";
 import { identity } from "./identity";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
 import { type InputMessage, startScreencast } from "./screencast";
+import { type BotSession, createSessions } from "./sessions";
 import { createShell } from "./shell";
-import { createViewerSlot, type ViewerSlot } from "./viewer";
 import {
   createWorkspace,
   WorkspaceFileError,
@@ -102,63 +100,12 @@ const TEXT_EXTRACT_LIMIT = 6000;
  * to resolve. Playwright's `aria-ref` engine is the runtime enforcement: it resolves a ref only against
  * the most recent snapshot, only while the element is still connected to the document, and it mints a
  * new ref if an element's role or accessible name changed, so a recycled node cannot inherit an old one.
+ *
+ * The counter, the run it belongs to, and the sessions holding both live in their own module: the
+ * rules about when a run changes are testable there, and not here, because this file launches a
+ * browser the moment it is imported.
  */
-/** Per-Bot browser-control state. Profiles are isolated, but this process is not a security boundary. */
-type BotSession = {
-  control: Control;
-  /** This Bot's snapshot generation. See the note above on staleness. */
-  snapshotId: number;
-  /** The page this Bot was last handed, so a change of page can retire its refs. */
-  livePage?: Page;
-  /**
-   * This Bot's live screen, and who owns it.
-   *
-   * Always present, because the slot is the answer to "is anybody watching" as well as the holder of
-   * whoever is. An empty slot is a Bot nobody is watching; there is no second way to say that.
-   */
-  viewer: ViewerSlot;
-};
-
-const sessions = new Map<string, BotSession>();
-
-/**
- * Forget the sessions of Bots whose browsers are no longer running.
- *
- * The map gained an entry per Bot id this process had ever seen and lost none, so a deployment where
- * every employee has a Bot accumulated one small object per employee for the life of the container.
- * Small, but unbounded, which is the same shape as the browsers themselves.
- *
- * Only entries with no live browser and nobody watching are dropped: the state is the generation
- * counter and the control handover, and both belong to a running browser. A Bot whose browser has
- * been closed starts a fresh session next time, which is what starting a fresh browser means.
- *
- * "Nobody watching" starts at the claim, not at the first frame. A viewer whose browser is still
- * launching holds a claim and no cast, and reading occupancy from the cast would call that Bot idle
- * for the whole cold launch: this runs on the path that adds a session, so another Bot connecting
- * then would drop the control handover out from under a screen that is seconds from live. It stays
- * occupied until teardown finishes, for the same reason at the other end.
- */
-function forgetIdleSessions(): void {
-  for (const [botId, session] of [...sessions.entries()]) {
-    if (session.viewer.occupied()) continue;
-    if (profiles.isLive(botId)) continue;
-    sessions.delete(botId);
-  }
-}
-
-function sessionFor(botId: string): BotSession {
-  const existing = sessions.get(botId);
-  if (existing) return existing;
-  const created: BotSession = {
-    control: createControl(),
-    snapshotId: 0,
-    viewer: createViewerSlot(),
-  };
-  sessions.set(botId, created);
-  // Cheap, and only ever on the path that adds one, so the map cannot grow without this running.
-  if (sessions.size > 32) forgetIdleSessions();
-  return created;
-}
+const sessions = createSessions({ isLive: (botId) => profiles.isLive(botId) });
 
 /**
  * Sent by the server as a header on every call. Absent means the caller does not know or does not
@@ -204,7 +151,7 @@ const workspace = createWorkspace(process.env.WORKSPACE_DIR ?? "/workspace");
  * viewer that outlived one of those kept a 1Hz loop asking for a page, which starts a browser, so
  * the Bot was immune to the idle timeout and came straight back after a cap eviction.
  *
- * `sessions.get`, never `sessionFor`: a Bot with no session has nobody watching, and inventing one
+ * `sessions.get`, never `sessions.for`: a Bot with no session has nobody watching, and inventing one
  * here would put an entry in the map on the path that closes browsers, which is where the map is
  * meant to shrink.
  */
@@ -234,7 +181,7 @@ const DEFAULT_BOT_ID = (() => {
 })();
 
 async function currentPage(botId: string): Promise<Page> {
-  const session = sessionFor(botId);
+  const session = sessions.for(botId);
   const page = await profiles.page(botId);
   // A ref names an element on the page it was taken from, so moving to a window the site opened has
   // to retire the outstanding ones exactly as a navigation does, or a click lands on the wrong document.
@@ -390,7 +337,7 @@ serve<StreamData>({
    */
   websocket: {
     async open(ws) {
-      const session = sessionFor(ws.data.botId);
+      const session = sessions.for(ws.data.botId);
       /*
        * Claimed before anything is awaited, and that order is the fix.
        *
@@ -442,7 +389,7 @@ serve<StreamData>({
         /*
          * Released before the socket is told, because this path is reachable in exactly the timing
          * the claim exists for. A claim left behind here would keep the session occupied for the life
-         * of the process, and `forgetIdleSessions` could never sweep it: the unbounded growth that
+         * of the process, and the sweep in sessions.ts could never take it: the unbounded growth that
          * function was written to stop, reintroduced by the error path of the fix for it.
          */
         await session.viewer.release(ws);
@@ -457,7 +404,7 @@ serve<StreamData>({
     },
 
     async message(ws, raw) {
-      const session = sessionFor(ws.data.botId);
+      const session = sessions.for(ws.data.botId);
       /*
        * Whose screen this is, asked before anything is done with the input.
        *
@@ -526,7 +473,7 @@ serve<StreamData>({
       // Names the socket, so it can only ever give up its own screen. A superseded socket closing
       // after its replacement has started releases nothing; see viewer.ts.
       //
-      // `get`, not `sessionFor`: a socket closing for a Bot with no session has nothing to release,
+      // `get`, not `for`: a socket closing for a Bot with no session has nothing to release,
       // and creating one here would add a map entry on a teardown path, which is the direction the
       // map is meant to shrink in.
       await sessions.get(ws.data.botId)?.viewer.release(ws);
@@ -566,7 +513,7 @@ serve<StreamData>({
     if (!isOpenPath(url.pathname) && !isPlainBotId(botId)) {
       return json({ error: "That is not a usable bot id." }, 400);
     }
-    const session = sessionFor(botId);
+    const session = sessions.for(botId);
 
     /*
      * The wheel, asked once for everything that acts.
@@ -753,6 +700,25 @@ serve<StreamData>({
     }
 
     /**
+     * Which run of this Bot's browser the caller is looking at.
+     *
+     * The server orders snapshots on `(run, generation)`, and the generation alone cannot carry it:
+     * this process mints one at zero for every session that is new, so a restart, a redeploy, an
+     * eviction from the idle sweep and a reset all produce a page at generation one that looks older
+     * than the page the server still has. Ordering on the run as well is what lets the fresh one land
+     * and the dead one stop resolving.
+     *
+     * A read, and deliberately not on the acting list: a person holding the wheel must not turn every
+     * ref the server holds into an unanswerable question.
+     *
+     * Its own endpoint rather than a field on `/computers`, because that one reads the profile
+     * directory and this is asked on the path of every governed action.
+     */
+    if (url.pathname === "/run" && request.method === "GET") {
+      return json({ run: session.run });
+    }
+
+    /**
      * The computers this process holds. The shape is a list because the admin surface is a
      * list, and because a Bot that has a profile has a computer whether or not a browser is running
      * for it this second.
@@ -786,6 +752,16 @@ serve<StreamData>({
       await profiles.reset(botId);
       // Reset releases control because any previous browser session and pending secret request are gone.
       session.control.release();
+      /*
+       * And a new run, because the browser this session described is gone.
+       *
+       * Nothing else here says so. The entry stays in the map and the generation counter carries on,
+       * so a snapshot that was in flight when the wipe landed arrives at the server carrying the same
+       * run and the same generation as the fresh browser's would: the server deletes its row on
+       * reset, the late save inserts the wiped page straight back, and every ref on it goes on
+       * resolving. A new run is what makes those two distinguishable at the far end.
+       */
+      sessions.renewRun(botId);
       return json({ reset: true, botId });
     }
 

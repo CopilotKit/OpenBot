@@ -8,6 +8,23 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A wiped or restarted shared computer no longer leaves refs pointing at the dead page
+
+Snapshots are ordered on the run of the browser that took them as well as the generation, so a
+computer that is replaced cannot have its old page mistaken for its new one. That ordering was
+reaching only the deployments that give each Bot its own container or sandbox, because the run was
+read off the infrastructure and the deployment with one shared computer has none to read.
+
+Two failures followed there, and both are fixed. A snapshot still in flight when somebody pressed
+Reset brought the wiped page back, and the boundary went on deciding about its elements: a rule about
+"Confirm transfer" firing on a click nowhere near one, or failing to fire on one that is. And a
+computer that restarted counted generations from one again, so its first snapshots were dropped as
+stale and refs kept resolving against a page nobody was on until the counter climbed back past it.
+
+The computer now mints a run for each Bot's browser session, mints a new one when the Bot is reset,
+and answers which run it is on. Nothing changes for a deployment that already reports one, and a
+computer too old to answer leaves the ordering exactly where it was rather than refusing anything.
+
 ### Embedded PostgreSQL initialises on a platform volume, and says so when it cannot
 
 `EMBEDDED_POSTGRES=on` could not create its cluster on a platform whose persistent volume is an ext4
