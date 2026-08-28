@@ -31,27 +31,36 @@ export const Route = createFileRoute("/_authed/onboarding")({
 function WelcomeStep() {
   return (
     <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">Welcome to {appConfig.brand.productName}</h1>
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        Welcome to {appConfig.brand.productName}
+      </h1>
       <div className="h-32" />
       <AgentOrb size="72px" />
       <div className="max-w-md w-full mx-auto pointer-events-none mt-10">
-        <Composer compact className="scale-90" editorClassName="text-base" initialValue="Hand off tasks to your team of agents" />
+        <Composer
+          compact
+          className="scale-90"
+          editorClassName="text-base"
+          initialValue="Hand off tasks to your team of agents"
+        />
       </div>
     </div>
-  )
+  );
 }
 
 function ComputerUseStep() {
   return (
     <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">Each agent has its own computer</h1>
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        Each agent has its own computer
+      </h1>
       <div className="h-8" />
       <div className="relative aspect-5/3 w-full max-w-lg rounded-2xl overflow-hidden border border-border">
         <ComputerPlaceholder className="absolute inset-0 h-full w-full" />
         <DesktopIllustration />
       </div>
     </div>
-  )
+  );
 }
 
 /** What a roster card needs — placeholders carry these three fields and nothing more. */
@@ -62,14 +71,23 @@ type RosterCard = Pick<AgentProfile, "id" | "name" | "avatarSeed">;
  * purpose: they illustrate what a roster looks like without claiming any of these exist here.
  */
 const AGENTS_PLACEHOLDER: RosterCard[] = [
-  { id: "placeholder-research", name: "Research Analyst", avatarSeed: "research-analyst" },
+  {
+    id: "placeholder-research",
+    name: "Research Analyst",
+    avatarSeed: "research-analyst",
+  },
   { id: "placeholder-data", name: "Data Analyst", avatarSeed: "data-analyst" },
-  { id: "placeholder-support", name: "Support Agent", avatarSeed: "support-agent" },
+  {
+    id: "placeholder-support",
+    name: "Support Agent",
+    avatarSeed: "support-agent",
+  },
 ];
 
 function RosterStep() {
   const { data: agents } = useQuery(agentListQueryOptions());
-  const explore = agents?.filter((a) => !a.mine && a.visibility === "public") ?? [];
+  const explore =
+    agents?.filter((a) => !a.mine && a.visibility === "public") ?? [];
   // Always three cards: real public agents first, placeholders topping up a sparse deployment.
   // slice past the end is just [], so a roster of three or more takes no placeholders at all.
   const roster: RosterCard[] = [
@@ -79,24 +97,33 @@ function RosterStep() {
 
   return (
     <div className="w-full flex flex-col items-center justify-center">
-      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">Choose from a variety of agents or create your own</h1>
+      <h1 className="text-3xl font-semibold tracking-tight max-w-md text-center">
+        Choose from a variety of agents or create your own
+      </h1>
       <div className="h-8" />
       <div className="w-full max-w-lgoverflow-hidden grid grid-cols-1 md:grid-cols-2 gap-4">
-        {roster.map(a => {
+        {roster.map((a) => {
           return (
-            <div key={a.id} className="bg-card p-4 rounded-lg flex flex-row gap-4 items-center">
+            <div
+              key={a.id}
+              className="bg-card p-4 rounded-lg flex flex-row gap-4 items-center"
+            >
               <Avatar name={a.avatarSeed} size={40} />
-              <h3 className="line-clamp-1 text-base font-medium tracking-tight">{a.name}</h3>
+              <h3 className="line-clamp-1 text-base font-medium tracking-tight">
+                {a.name}
+              </h3>
             </div>
-          )
+          );
         })}
         <div className="bg-card p-4 rounded-lg flex flex-row gap-4 items-center">
           <div className="rounded-full size-[40px] border border-foreground/30 border-dashed" />
-          <h3 className="line-clamp-1 text-base font-medium tracking-tight text-foreground/70">Your own agent</h3>
+          <h3 className="line-clamp-1 text-base font-medium tracking-tight text-foreground/70">
+            Your own agent
+          </h3>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 const STEPS: Array<() => React.ReactNode> = [
@@ -181,7 +208,6 @@ function RouteComponent() {
                 className="mt-20 flex flex-col items-center justify-center max-w-xs gap-4 w-full mx-auto"
                 layout
               >
-
                 <Button
                   className="w-full"
                   disabled={complete.isPending}
@@ -202,14 +228,16 @@ function RouteComponent() {
                       ? "Get started"
                       : "Continue"}
                 </Button>
-                {step !== 0 && (<Button
-                  className="w-full"
-                  onClick={() => go(step - 1)}
-                  variant="secondary"
-                  size="lg"
-                >
-                  Back
-                </Button>)}
+                {step !== 0 && (
+                  <Button
+                    className="w-full"
+                    onClick={() => go(step - 1)}
+                    variant="secondary"
+                    size="lg"
+                  >
+                    Back
+                  </Button>
+                )}
               </motion.div>
             </div>
           </motion.div>
