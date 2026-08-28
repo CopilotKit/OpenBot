@@ -5,8 +5,6 @@ import { authoriseAgentCall } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
-import { createRoutingRoutes } from "./routing/routes";
-import type { IntentRouter } from "./routing/classify";
 import {
   type AuditReader,
   type AuditStore,
@@ -37,10 +35,13 @@ import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createIntelligenceClient } from "./intelligence-client";
+import type { OnboardingStore } from "./people/onboarding";
 import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
 import { REFUSAL_MARKER } from "./plugins/tools";
+import type { IntentRouter } from "./routing/classify";
+import { createRoutingRoutes } from "./routing/routes";
 import type { PackageStatusReader } from "./tenant-package";
 
 /**
@@ -155,6 +156,14 @@ export function createApp(
    * the default coworker, which is exactly the failsafe the router itself falls back to.
    */
   intentRouter?: IntentRouter,
+  /**
+   * Where each person is in first-run onboarding.
+   *
+   * Absent leaves /api/me reporting no onboarding to track, which is the correct degraded
+   * behaviour: a deployment that cannot read the status must not lock everybody behind a gate
+   * nothing can finish.
+   */
+  onboardingStore?: OnboardingStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -241,9 +250,52 @@ export function createApp(
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
 
-  app.get("/api/me", requireUser, (context) =>
-    context.json({ user: context.var.actor }),
+  app.get("/api/me", requireUser, async (context) =>
+    context.json({
+      user: {
+        ...context.var.actor,
+        /*
+         * Read here rather than in the guard, so only this route pays the extra query. Null means
+         * this deployment does not track onboarding, which the app reads as nothing to finish;
+         * a not-yet-completed status is what sends it to /onboarding.
+         */
+        onboarding: onboardingStore
+          ? await onboardingStore.status(context.var.actor.id)
+          : null,
+      },
+    }),
   );
+  app.post("/api/me/onboarding", requireUser, async (context) => {
+    if (!onboardingStore) {
+      return context.json({ error: "Onboarding is not available." }, 503);
+    }
+
+    const body = (await context.req.json().catch(() => undefined)) as
+      | { step?: unknown; completed?: unknown }
+      | undefined;
+
+    if (body?.completed === true) {
+      await onboardingStore.complete(context.var.actor.id);
+    } else if (
+      typeof body?.step === "number" &&
+      Number.isInteger(body.step) &&
+      body.step >= 0 &&
+      // The column's range — the only bound the server knows, since the wizard's length is the
+      // app's fact rather than the deployment's.
+      body.step <= 2_147_483_647
+    ) {
+      await onboardingStore.setStep(context.var.actor.id, body.step);
+    } else {
+      return context.json(
+        { error: "Send the step to move to, or completed: true." },
+        400,
+      );
+    }
+
+    return context.json({
+      onboarding: await onboardingStore.status(context.var.actor.id),
+    });
+  });
   app.get("/api/admin/status", requireUser, (context) => {
     const denied = requireAdmin(context);
     return denied ?? context.json({ status: "ok" });

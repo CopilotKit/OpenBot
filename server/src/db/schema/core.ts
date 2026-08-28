@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
+  integer,
   pgEnum,
   pgTable,
   primaryKey,
@@ -63,6 +64,16 @@ export const users = pgTable("users", {
    * list for everybody.
    */
   groups: text("groups").array().notNull().default([]),
+  /**
+   * Where this person is in first-run onboarding.
+   *
+   * The step is where the wizard resumes if they leave halfway; the null completion timestamp is
+   * what gates the app into /onboarding. Set once — finishing again keeps the first timestamp.
+   */
+  onboardingStep: integer("onboarding_step").notNull().default(0),
+  onboardingCompletedAt: timestamp("onboarding_completed_at", {
+    withTimezone: true,
+  }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

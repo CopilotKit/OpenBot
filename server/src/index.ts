@@ -44,6 +44,7 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
 import { createPluginStore } from "./plugins/store";
 import { grantedSkills, grantedTools } from "./plugins/tools";
@@ -541,6 +542,8 @@ const app = createApp(
   identityProviderStore,
   // Chooses the coworker for an untagged message, on the deployment's own model and key.
   intentRouter,
+  // Where each person is in first-run onboarding, read by /api/me and written by the wizard.
+  createOnboardingStore(database),
 );
 
 /**
