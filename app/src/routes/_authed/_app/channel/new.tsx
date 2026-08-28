@@ -85,6 +85,10 @@ function RouteComponent() {
           value={chosen ?? null}
         >
           <ComboboxInput
+            // The popup opening is not enough on its own: typing filters through this input, so
+            // the caret starts here whenever the recipient question is still open. Same condition
+            // as `defaultOpen` — a recipient from the URL means the composer takes focus instead.
+            autoFocus={!agent}
             placeholder="Choose a coworker…"
             // InputGroup owns focus rings via `has-[…:focus-visible]`; disable that wrapper ring here.
             className="border-none w-full bg-transparent! text-sm has-[[data-slot=input-group-control]:focus-visible]:ring-0"
