@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { AgentFields } from "@/components/agents/agent-fields";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
+import { HandoffPanel } from "@/components/agents/handoff-panel";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -153,6 +154,13 @@ export function AgentProfile({ agentId }: { agentId: string }) {
           hasToken={profile.hasCallbackToken}
         />
       ) : null}
+
+      {/*
+       * Not while editing, for the same reason the panel above is not: the form owns the screen, and
+       * these switches write immediately rather than on save, which would make one half of an open
+       * form apply and the other half not.
+       */}
+      {isEditing ? null : <HandoffPanel agentId={agentId} />}
 
       {actionError ? (
         <p className="text-sm text-destructive" role="alert">

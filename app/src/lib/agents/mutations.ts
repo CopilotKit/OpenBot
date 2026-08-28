@@ -113,3 +113,39 @@ export function revokeCallbackTokenMutationOptions(queryClient: QueryClient) {
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
+
+/**
+ * Whether one Bot may hand work to another.
+ *
+ * The same `plugin_grants` write every other grant makes, with `kind: "bot"`, so the audit row and
+ * the refusals are the ones already in place: an administrator only, never a Bot on itself, and
+ * never onto a Bot that does not exist.
+ *
+ * DIRECTIONAL, and the two ids are easy to swap: `agentId` is the Bot doing the asking and `ref` is
+ * the Bot it may reach. Granted the other way round it reads as working and hands over nothing.
+ */
+export function setHandoffGrantMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: {
+      /** The Bot doing the asking. */
+      agentId: string;
+      /** The Bot it may reach. */
+      ref: string;
+      granted: boolean;
+    }) => {
+      if (variables.granted) {
+        await client("/api/plugins/grants", {
+          method: "POST",
+          body: { kind: "bot", ref: variables.ref, agentId: variables.agentId },
+          fallback: FALLBACK,
+        });
+        return;
+      }
+      await client(
+        `/api/plugins/grants?kind=bot&ref=${encodeURIComponent(variables.ref)}&agentId=${encodeURIComponent(variables.agentId)}`,
+        { method: "DELETE", fallback: FALLBACK },
+      );
+    },
+    onSuccess: () => invalidateAgents(queryClient),
+  });
+}

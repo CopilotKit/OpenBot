@@ -607,3 +607,117 @@ describe("agent route composition", () => {
     expect(response.status).toBe(404);
   });
 });
+
+/*
+ * The screen that grants one Bot the right to address another reads this, so what it renders is
+ * decided here rather than in the browser: whether the capability is on at all, and whether the
+ * person looking may change any of it.
+ */
+describe("which Bots a Bot may hand work to", () => {
+  const admin = {
+    id: "admin-1",
+    email: "a@openbot.test",
+    role: "admin",
+  } as const;
+
+  function appWith(
+    handoff: Parameters<typeof createAgentRoutes>[5],
+    who: { id: string; email: string; role: "admin" | "user" } = admin,
+  ) {
+    const app = new Hono<{ Variables: AppVariables }>();
+    const asWho: MiddlewareHandler<{ Variables: AppVariables }> = async (
+      context,
+      next,
+    ) => {
+      context.set("actor", who);
+      await next();
+    };
+    app.route(
+      "/",
+      createAgentRoutes(
+        fakeStore(),
+        asWho,
+        false,
+        undefined,
+        new Set(),
+        handoff,
+      ),
+    );
+    return app;
+  }
+
+  test("reports the grants and that an administrator may change them", async () => {
+    const app = appWith({
+      enabled: true,
+      reachableFrom: async () => ["knowledge"],
+    });
+
+    const body = (await json(
+      await app.request("/general-assistant/handoff"),
+    )) as {
+      handoff: { enabled: boolean; canGrant: boolean; reachable: string[] };
+    };
+
+    expect(body.handoff).toEqual({
+      enabled: true,
+      canGrant: true,
+      reachable: ["knowledge"],
+    });
+  });
+
+  test("somebody who is not an administrator may read it and not change it", async () => {
+    const app = appWith(
+      { enabled: true, reachableFrom: async () => ["knowledge"] },
+      actor,
+    );
+
+    const body = (await json(
+      await app.request("/general-assistant/handoff"),
+    )) as {
+      handoff: { canGrant: boolean };
+    };
+
+    expect(body.handoff.canGrant).toBe(false);
+  });
+
+  /*
+   * A deployment with the caps at zero, or with no plugin store to read a grant from, has the
+   * capability switched off. Reported rather than left to the screen to infer, because a switch
+   * wired to nothing is the thing this says out loud.
+   */
+  test("says the capability is off when nothing can grant it", async () => {
+    const app = appWith(undefined);
+
+    const body = (await json(
+      await app.request("/general-assistant/handoff"),
+    )) as {
+      handoff: { enabled: boolean; reachable: string[] };
+    };
+
+    expect(body.handoff.enabled).toBe(false);
+    expect(body.handoff.reachable).toEqual([]);
+  });
+
+  test("a Bot the person may not see is not found, rather than described", async () => {
+    const app = new Hono<{ Variables: AppVariables }>();
+    app.route(
+      "/",
+      createAgentRoutes(
+        fakeStore({
+          async get() {
+            return null;
+          },
+        }),
+        requireUser,
+        false,
+        undefined,
+        new Set(),
+        { enabled: true, reachableFrom: async () => ["knowledge"] },
+      ),
+    );
+
+    const response = await app.request("/somebody-elses/handoff");
+
+    expect(response.status).toBe(404);
+  });
+});

@@ -205,21 +205,13 @@ zero or more: a deployment that typed `two` and silently got the default would b
 cap.
 
 Which Bots may address which is a grant, not a variable, and no Bot may address any other until one
-is made. **It has no screen yet.** Every other grant is made at `/admin/plugins`; this one is made
-against the API, by an administrator, naming the Bot doing the addressing and the Bot being
-addressed:
+is made. It is made on the Bot's own screen: open it from **Agents**, and switch on each Bot under
+**Bots it may ask**. The pair is directional: that list is who this Bot may ask, not who may ask it,
+so letting them ask each other is two switches. Only an administrator may change it; anyone who can
+see the Bot can read it.
 
-```sh
-# Let `general-assistant` hand work to `knowledge`.
-curl -X POST "$OPENBOT_URL/api/plugins/grants" \
-  -H 'content-type: application/json' \
-  --cookie "$SESSION" \
-  -d '{"kind":"bot","ref":"knowledge","agentId":"general-assistant"}'
-```
-
-`ref` is the Bot that may be reached and `agentId` is the Bot doing the reaching, so the pair is
-directional: granting the reverse is a second call. `DELETE` the same three as query parameters
-takes it away. A Bot may not be granted itself, and only an administrator may grant at all.
+With both caps above at zero the screen says the capability is switched off, because a grant made
+then is a row nothing will read.
 
 ## Computer and supervisor
 

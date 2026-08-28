@@ -12,7 +12,7 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 A Bot asked something it is not the right Bot for can now put the question to one that is. The
 addressed Bot answers **as itself, in its own conversation**, with its own tools and its own
-knowledge — the asking Bot does not relay text on its behalf, so what you read is the answer that
+knowledge. The asking Bot does not relay text on its behalf, so what you read is the answer that
 Bot actually gave rather than another Bot's summary of it. The asking conversation records that the
 question was put and to whom. A Bot that judges no other Bot will do can instead reach the person
 who asked it.
@@ -24,7 +24,7 @@ would be a guess about which colleague a person meant.
 
 Two ceilings, because a Bot deciding to ask another Bot is a Bot deciding to spend a run:
 `BOT_HANDOFF_MAX_DEPTH` is how many Bots deep a chain may go and defaults to `1`, and **`0` switches
-the capability off entirely** — the tool is not offered rather than offered and refused.
+the capability off entirely**: the tool is not offered rather than offered and refused.
 `BOT_HANDOFF_MAX_PER_RUN` is how many Bots one run may address and defaults to `3`. The Helm chart
 takes the same two as `config.handoff.maxDepth` and `config.handoff.maxPerRun`.
 

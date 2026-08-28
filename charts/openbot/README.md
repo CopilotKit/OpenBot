@@ -9,7 +9,7 @@ Three things this chart assumes and does not create.
 
 **An image the cluster can pull.** A release publishes `ghcr.io/copilotkit/openbot:vX.Y.Z`
 publicly, and that tag is what `image.tag` wants. It is built for **`linux/amd64` only**, so an
-arm64 node group — Graviton on EKS, Tau T2A on GKE, Ampere on AKS — cannot run it: the pods sit in
+arm64 node group (Graviton on EKS, Tau T2A on GKE, Ampere on AKS) cannot run it: the pods sit in
 `ImagePullBackOff`, which is the same thing a wrong tag or a missing pull secret looks like, so the
 node pool being the wrong shape is the last thing anybody checks. Either run amd64 nodes, or build the image for the
 architecture you have and push it somewhere the cluster can reach. Check before assuming:
@@ -19,7 +19,7 @@ docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.4 | grep architecture
 ```
 
 **A default StorageClass**, or a named one. Both a Bot's computer and the bundled database ask for
-a volume, and a fresh cluster often has no class marked default — see
+a volume, and a fresh cluster often has no class marked default. See
 [Check for a default StorageClass first](#check-for-a-default-storageclass-first), which is the
 single most common reason a first install comes up with a pod stuck `Pending` and nothing saying
 why.
@@ -88,7 +88,7 @@ EOF
 ```
 
 The database goes in the same VPC, in the private subnets, with a security group admitting 5432
-from the cluster's own security group — `aws eks describe-cluster` names both. Keep it
+from the cluster's own security group. `aws eks describe-cluster` names both. Keep it
 `--no-publicly-accessible`: the only thing that needs to reach it is in the cluster.
 
 ## Install
