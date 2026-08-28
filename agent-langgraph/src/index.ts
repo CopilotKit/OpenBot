@@ -332,7 +332,9 @@ function buildGraph(input: RunAgentInput) {
 
   return new StateGraph(MessagesAnnotation)
     .addNode("answer", async (state) => ({
-      messages: [withVisibleReply((await bound.invoke(state.messages)) as AIMessage)],
+      messages: [
+        withVisibleReply((await bound.invoke(state.messages)) as AIMessage),
+      ],
     }))
     .addNode("tools", async (state) => {
       const last = state.messages.at(-1) as AIMessage;
