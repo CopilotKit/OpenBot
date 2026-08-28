@@ -10,8 +10,8 @@ Three things this chart assumes and does not create.
 **An image the cluster can pull.** A release publishes `ghcr.io/copilotkit/openbot:vX.Y.Z`
 publicly, and that tag is what `image.tag` wants. It is built for **`linux/amd64` only**, so an
 arm64 node group — Graviton on EKS, Tau T2A on GKE, Ampere on AKS — cannot run it: the pods sit in
-`ImagePullBackOff` and the event says `no match for platform`, which reads like a broken registry
-rather than a node pool of the wrong shape. Either run amd64 nodes, or build the image for the
+`ImagePullBackOff`, which is the same thing a wrong tag or a missing pull secret looks like, so the
+node pool being the wrong shape is the last thing anybody checks. Either run amd64 nodes, or build the image for the
 architecture you have and push it somewhere the cluster can reach. Check before assuming:
 
 ```sh
