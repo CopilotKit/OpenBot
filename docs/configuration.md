@@ -44,11 +44,13 @@ at `agent-langgraph` on a laptop.
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project.          |
 | `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
 | `OPENAI_BASE_URL`    | unset                              | OpenAI-compatible endpoint that key is spent against. See below.    |
-| `BOT_PROVIDER`       | `openai`                           | Provider for `agent-langgraph`: `openai`, `anthropic`, or `google`. |
+| `BOT_PROVIDER`       | `openai`                           | Provider for `agent-langgraph`: `openai`, `anthropic`, `google`, or `orcarouter`. |
 | `ANTHROPIC_API_KEY`  | unset                              | Anthropic key when `BOT_PROVIDER=anthropic`.                        |
 | `ANTHROPIC_BASE_URL` | unset                              | Anthropic-compatible endpoint that key is spent against.            |
 | `GOOGLE_API_KEY`     | unset                              | Google key when `BOT_PROVIDER=google`.                              |
 | `GOOGLE_GENERATIVE_AI_BASE_URL` | unset                   | Google-compatible endpoint that key is spent against.               |
+| `ORCAROUTER_API_KEY` | unset                              | OrcaRouter key when `BOT_PROVIDER=orcarouter`.                      |
+| `ORCAROUTER_BASE_URL`| `https://api.orcarouter.ai/v1`     | OrcaRouter endpoint that key is spent against.                      |
 | `BOT_MODEL`          | provider default from Bot code/env | Model used by the shipped Bots.                                     |
 | `BOT_RESPONSES_API`  | `false`                            | Makes `agent-langgraph` use the OpenAI Responses API.               |
 | `AGENT_STALL_TIMEOUT_MS` | unset (off)                    | How long a Bot's stream may produce nothing before the turn is ended for it. |
@@ -110,6 +112,8 @@ in-cluster Service address.
 It moves the whole deployment rather than one Bot. The API server reads it for package built-in agents, `agent-bot` reads it for the client it constructs, and `agent-langgraph` reads it for `BOT_PROVIDER=openai`.
 
 The other two providers work the same way under their own names, because they are different APIs rather than different URLs for this one: `ANTHROPIC_BASE_URL` and `GOOGLE_GENERATIVE_AI_BASE_URL`. All three are the names the API server already reads, so one line moves the built-in agents and the Bots together and a deployment cannot end up with half of itself pointed somewhere else.
+
+`orcarouter` is a fourth `BOT_PROVIDER` for `agent-langgraph`, and it is the first one that is not a model vendor. OrcaRouter is an OpenAI-compatible gateway that fronts many providers behind one key, so the `openai` integration carries it and the endpoint has a default rather than being unset: `ORCAROUTER_BASE_URL=https://api.orcarouter.ai/v1`. Set `BOT_PROVIDER=orcarouter` with `ORCAROUTER_API_KEY` and a namespaced `BOT_MODEL` the catalogue publishes, for example `orcarouter/fusion`.
 
 Model names travel verbatim, so use whatever the endpoint publishes. An endpoint that namespaces its catalogue wants both halves of the name, in `BOT_MODEL` and in the tenant package's `default_model` alike.
 

@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The LangGraph Bot has a fourth provider: orcarouter
+
+`BOT_PROVIDER=orcarouter` points `agent-langgraph` at [OrcaRouter](https://www.orcarouter.ai), an
+OpenAI-compatible gateway that fronts many providers behind one key. It is wired exactly like the
+existing `openai` provider — the same integration, a key of its own (`ORCAROUTER_API_KEY`), a
+namespaced `BOT_MODEL` such as `orcarouter/fusion`, and a default `ORCAROUTER_BASE_URL` of
+`https://api.orcarouter.ai/v1` that a self-hosted gateway can override. Existing providers are
+unchanged.
+
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the

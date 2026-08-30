@@ -260,6 +260,8 @@ services:
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_GENERATIVE_AI_BASE_URL: ${GOOGLE_GENERATIVE_AI_BASE_URL:-}
+      ORCAROUTER_API_KEY: ${ORCAROUTER_API_KEY:-}
+      ORCAROUTER_BASE_URL: ${ORCAROUTER_BASE_URL:-https://api.orcarouter.ai/v1}
       # gpt-5.5, to stay comparable with agent-bot above rather than because 5.6 does not work:
       # set BOT_MODEL to one and the Responses API is switched on for it automatically.
       BOT_MODEL: ${BOT_MODEL:-gpt-5.5}

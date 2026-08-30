@@ -98,6 +98,13 @@ const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
 const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
 const GOOGLE_BASE_URL =
   process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.trim() || undefined;
+/**
+ * OrcaRouter's endpoint. It speaks the OpenAI API, so this is the same shape as `OPENAI_BASE_URL`,
+ * with a default that names the public gateway rather than OpenAI. A self-hosted gateway can point
+ * it somewhere else, which is why it is a variable at all.
+ */
+const ORCAROUTER_BASE_URL =
+  process.env.ORCAROUTER_BASE_URL?.trim() || "https://api.orcarouter.ai/v1";
 
 /**
  * OpenAI only, and Responses API only: how hard this Bot is allowed to think.
@@ -120,7 +127,7 @@ if (REASONING_PROBLEM) {
  * configuration that goes nowhere is worse than configuration that is absent, because the Bot looks
  * configured either way. Both messages name the variable that would make it work.
  */
-if (REASONING_EFFORT && PROVIDER !== "openai") {
+if (REASONING_EFFORT && PROVIDER !== "openai" && PROVIDER !== "orcarouter") {
   console.error(
     `BOT_REASONING_EFFORT is OpenAI's setting, and BOT_PROVIDER=${PROVIDER}. Unset it, or set BOT_PROVIDER=openai.`,
   );
@@ -136,6 +143,7 @@ if (REASONING_EFFORT && !USE_RESPONSES_API) {
 function defaultModelFor(provider: string): string {
   if (provider === "anthropic") return "claude-sonnet-4-5";
   if (provider === "google") return "gemini-2.5-flash";
+  if (provider === "orcarouter") return "orcarouter/fusion";
   return "gpt-5.5";
 }
 
@@ -150,12 +158,13 @@ const KEY_VARIABLE: Record<string, string> = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   google: "GOOGLE_API_KEY",
+  orcarouter: "ORCAROUTER_API_KEY",
 };
 
 const keyVariable = KEY_VARIABLE[PROVIDER];
 if (!keyVariable) {
   console.error(
-    `BOT_PROVIDER=${PROVIDER} is not one this Bot knows. Use openai, anthropic or google.`,
+    `BOT_PROVIDER=${PROVIDER} is not one this Bot knows. Use openai, anthropic, google or orcarouter.`,
   );
   process.exit(1);
 }
@@ -191,6 +200,21 @@ function toBoundTools(input: RunAgentInput) {
  * rest of this file does not know which one it got.
  */
 function buildModel() {
+  if (PROVIDER === "orcarouter") {
+    /*
+     * OpenAI-compatible, like the `openai` branch: OrcaRouter exposes a provider/model namespace
+     * over the same endpoint, so the same integration serves it. `ORCAROUTER_API_KEY` is its own
+     * key, and `BOT_MODEL` carries the namespaced name the catalogue publishes.
+     */
+    return new ChatOpenAI({
+      model: MODEL,
+      apiKey: API_KEY,
+      streaming: true,
+      configuration: { baseURL: ORCAROUTER_BASE_URL },
+      ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),
+      ...(REASONING_EFFORT ? { reasoning: { effort: REASONING_EFFORT } } : {}),
+    });
+  }
   if (PROVIDER === "anthropic") {
     return new ChatAnthropic({
       model: MODEL,
