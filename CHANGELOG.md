@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A message no longer routes to a specialist because a longer word contained a connector's name
+
+When the intent router falls back — it is unreachable, or it declines — and exactly one coworker can
+reach a system the message names, the message goes to that coworker. The name was matched as a bare
+substring, so "how do I deal with a slacker" matched the **slack** connector and "una jirafa" (a
+giraffe) matched **jira**: a message naming neither system was pinned, for the life of the thread,
+to a specialist that could not answer it. A connector's name now has to appear on a word boundary,
+so a system named on its own still routes and one buried inside another word does not.
+
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the
