@@ -228,6 +228,8 @@ then is a row nothing will read.
 | `AGENT_COMPUTER_POLICY`              | JSON action policy: `{"mode":"enforce","deny":[...],"allow":[...]}`.                      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run supervised computers under gVisor.                                  |
 | `COMPUTER_SANDBOX`                   | Set to `on` to enable Chromium's own sandbox where the host permits user namespaces. Which way it went is printed at start-up. |
+| `COMPUTER_DNS_SERVERS`               | Comma-separated public IPv4 resolvers for supervised computers. They bypass Docker's embedded resolver and reject private, Tailnet, loopback, link-local and multicast addresses. |
+| `COMPUTER_EXTRA_HOSTS`               | Comma-separated `hostname=100.x.y.z` Tailnet mappings for supervised computers. This is an operator-only escape hatch for approved private services, not a general DNS override. |
 
 `agent-computer` also reads:
 

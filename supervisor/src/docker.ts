@@ -292,6 +292,8 @@ export type EnsureOptions = {
   environment: string[];
   /** A network to join, when the supervisor runs alongside a compose stack. */
   network?: string;
+  /** Operator-configured resolvers, bypassing Docker's embedded DNS proxy. */
+  dnsServers?: string[];
   /** Operator-configured static Tailnet host mappings for this computer. */
   extraHosts?: string[];
   /**
@@ -356,6 +358,7 @@ export function computerHostConfig(names: ComputerNames, options: EnsureOptions)
     RestartPolicy: { Name: "unless-stopped" },
     ...(options.network ? { NetworkMode: options.network } : {}),
     ...(options.runtime ? { Runtime: options.runtime } : {}),
+    ...(options.dnsServers?.length ? { Dns: options.dnsServers } : {}),
     ...(options.extraHosts?.length ? { ExtraHosts: options.extraHosts } : {}),
 
     // No path from inside to more privilege than it started with, whatever it manages to run.
