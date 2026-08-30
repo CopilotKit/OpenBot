@@ -10,10 +10,8 @@ import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
 import { defer, from, switchMap } from "rxjs";
 import { z } from "zod";
-import {
-  COMPUTER_GUIDANCE,
-  PROVENANCE_GUIDANCE,
-} from "../../shared/bot-prompt";
+import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
+import type { ActorAgentResolver } from "./agents/agent-resolver";
 import type { AgentActor } from "./agents/profile-types";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
@@ -856,55 +854,10 @@ export type LoadAgentsForActor = (
  */
 export function createRequestAgents(
   identifyActor: IdentifyActor,
-  loadAgents: LoadAgentsForActor,
-  model: RuntimeModel,
-  resolveModelApiKey: () => Promise<string | null>,
-  /**
-   * Shared across every request rather than built per run, because it is the thing that has to
-   * outlive one: the sweep that notices a silent stream has to still be running after the request
-   * that opened it has been answered.
-   */
-  stallGuard?: StallGuard,
-  /** What each Bot may call, resolved for whoever is asking. Absent means no tools. */
-  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
-  /** Resolved per request, because what it signs is who this request turned out to be. */
-  signRunForActor?: (actorId: string) => SignRun,
-  /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
-  computerGuidance?: string,
-  /** Which vendors this deployment connects to, held by a Bot or not. Absent means none. */
-  loadVendors?: () => Promise<readonly string[]>,
-  /**
-   * How a run's tools are narrowed, resolved for whoever is asking.
-   *
-   * Per actor like the tools themselves, because the skills a Bot holds are read through the same
-   * grants, and because the discovery row has to name the person the run belongs to.
-   */
-  selectionForActor?: (actorId: string) => ToolSelection,
-  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
-  agentFetch?: AgentFetch,
-  /**
-   * How a run gets its tool for handing work to another Bot, resolved for whoever is asking.
-   *
-   * Per actor for the same reason the tools are: which Bots may be reached is decided against the
-   * roster that person can see, so a Bot must never be able to address one they cannot.
-   */
-  handoffForActor?: (actorId: string) => HandoffForRun,
+  resolver: ActorAgentResolver,
 ) {
   return async ({ request }: { request: Request }) => {
-    const actor = await identifyActor(request);
-    return resolveRuntimeAgents(
-      () => loadAgents(actor),
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor?.(actor.id),
-      signRunForActor?.(actor.id),
-      computerGuidance,
-      loadVendors,
-      selectionForActor?.(actor.id),
-      agentFetch,
-      handoffForActor?.(actor.id),
-    );
+    return resolver.resolveAgentsForActor(await identifyActor(request));
   };
 }
 
@@ -994,26 +947,10 @@ const THREAD_LOCK_TTL_SECONDS = 120;
 
 export function mountCopilotRuntime(
   config: DeploymentConfig,
-  model: RuntimeModel,
-  loadAgents: LoadAgentsForActor,
-  resolveModelApiKey: () => Promise<string | null>,
+  resolver: ActorAgentResolver,
   identifyUser: IdentifyUser,
   identifyActor: IdentifyActor,
-  /**
-   * The watch on Bot streams. Not optional, unlike the parameter it forwards to: a guard built from
-   * a timeout of zero already watches nothing, so an unconfigured deployment has one to hand and
-   * there is no reason for a caller to have to say `undefined` here to reach `basePath`.
-   */
-  stallGuard: StallGuard,
-  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
-  signRunForActor?: (actorId: string) => SignRun,
   basePath = "/api/copilotkit",
-  loadVendors?: () => Promise<readonly string[]>,
-  selectionForActor?: (actorId: string) => ToolSelection,
-  /** The fetch remote agents are dialled with. See {@link buildAgents}. */
-  agentFetch?: AgentFetch,
-  /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
-  handoffForActor?: (actorId: string) => HandoffForRun,
 ) {
   const { intelligence } = config.runtime;
 
@@ -1039,25 +976,12 @@ export function mountCopilotRuntime(
     actor: AgentActor;
     botId: string;
   }): Promise<AbstractAgent | null> => {
-    const { actor } = input;
-    const agents = await resolveRuntimeAgents(
-      () => loadAgents(actor),
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor?.(actor.id),
-      signRunForActor?.(actor.id),
-      config.computer ? COMPUTER_GUIDANCE : undefined,
-      loadVendors,
-      selectionForActor?.(actor.id),
-      agentFetch,
-      handoffForActor?.(actor.id),
-      // Only the Bot this hop is for. The roster is still read in full, so a Bot this person cannot
-      // see is still absent; what this skips is constructing the other Bots and asking the database
-      // what each of them was granted, on every delivery and again on every retry.
-      input.botId,
-    );
-    return agents[input.botId] ?? null;
+    // Only the Bot this hop is for. The roster is still read in full, so a Bot this person cannot
+    // see is still absent; what this skips is constructing the other Bots and asking the database
+    // what each of them was granted, on every delivery and again on every retry.
+    return await resolver
+      .resolveAgentForActor(input.actor, input.botId)
+      .catch(() => null);
   };
 
   /*
@@ -1088,26 +1012,7 @@ export function mountCopilotRuntime(
       : {}),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
-    agents: createRequestAgents(
-      identifyActor,
-      loadAgents,
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor,
-      signRunForActor,
-      /*
-       * Only when a computer exists. The tools themselves are registered by the surface, so a Bot is
-       * offered them without this and the guidance is what tells it how they go together: snapshot
-       * before acting, and ask a person to take the wheel at a sign-in rather than reporting the task
-       * as impossible. Absent computer, absent guidance: a Bot is not told about hands it has not got.
-       */
-      config.computer ? COMPUTER_GUIDANCE : undefined,
-      loadVendors,
-      selectionForActor,
-      agentFetch,
-      handoffForActor,
-    ) as never,
+    agents: createRequestAgents(identifyActor, resolver) as never,
   });
 
   return {
