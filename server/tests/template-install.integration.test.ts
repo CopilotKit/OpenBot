@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   type BotTemplate,
@@ -13,6 +14,7 @@ import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
   agents,
+  auditEvents,
   pluginGrants,
   skills,
   skillTools,
@@ -23,7 +25,9 @@ import { createPluginStore, type PluginStore } from "../src/plugins/store";
 import {
   createTemplateInstaller,
   TemplateDigestMovedError,
+  TemplateEndpointRefusedError,
   TemplateEndpointRequiredError,
+  TemplateSlugDecisionError,
 } from "../src/templates/install";
 import { createTemplateStore } from "../src/templates/store";
 
@@ -61,7 +65,15 @@ const importer = {
   role: "user" as const,
   email: `importer-${suite}@openbot.local`,
 };
+/** Somebody the grant screen would let reuse a skill this deployment owns. */
+const administrator = {
+  id: `admin_${suite}`,
+  role: "admin" as const,
+  email: `admin-${suite}@openbot.local`,
+};
 const skillSlug = `check-renewal-${suite}`;
+/** A skill this DEPLOYMENT owns: no owner, the shape a tenant package seeds at every boot. */
+const deploymentSkill = `ledger-desk-${suite}`;
 const managedUrl = new URL("https://managed.example.com/agui");
 
 /** Every Bot this file made, so the teardown can take them and their grants with them. */
@@ -71,6 +83,10 @@ function installer(
   options: {
     managedAgent?: boolean;
     pluginStore?: Pick<PluginStore, "installSkill" | "grant">;
+    endpointPolicy?: {
+      allowPrivateHosts?: boolean;
+      allowedHosts?: ReadonlySet<string>;
+    };
   } = {},
 ) {
   return createTemplateInstaller({
@@ -78,6 +94,9 @@ function installer(
     templateStore,
     pluginStore: options.pluginStore ?? pluginStore,
     auditStore,
+    ...(options.endpointPolicy
+      ? { endpointPolicy: options.endpointPolicy }
+      : {}),
     ...(options.managedAgent === false
       ? {}
       : { managedAgentAgUiUrl: managedUrl }),
@@ -89,6 +108,7 @@ function yamlFor(
     runtime?: "managed" | "remote";
     skillSlug?: string;
     instructions?: string;
+    avatarSeed?: string;
   } = {},
 ) {
   const runtime = options.runtime ?? "managed";
@@ -104,7 +124,7 @@ template:
 bot:
   name: Renewal Desk ${suite}
   title: Accounts Receivable
-  role_description: >-
+${options.avatarSeed ? `  avatar_seed: ${options.avatarSeed}\n` : ""}  role_description: >-
     Chase overdue invoices. Draft a follow-up for a person to send, and name every
     document you used.
   runtime: ${runtime}
@@ -146,6 +166,47 @@ boundary:
 `;
 }
 
+/** Two skills in one file, which is how a plan can conflict with itself rather than with here. */
+function yamlForPair(first: string, second: string) {
+  return `openbot_template: 1
+
+template:
+  slug: renewal-pair-${suite}
+  summary: Chases overdue invoices and drafts the follow-up.
+
+bot:
+  name: Renewal Pair ${suite}
+  title: Accounts Receivable
+  role_description: >-
+    Chase overdue invoices and draft a follow-up for a person to send.
+  runtime: managed
+  skills: [${first}, ${second}]
+
+skills:
+${[first, second]
+  .map(
+    (slug) => `  - slug: ${slug}
+    title: Check renewal risk
+    summary: Pull the contract and the recent tickets for one account.
+    instructions: >-
+      A plan that names one slug twice is the bug this file is about.
+    tools:
+      - google-drive/search_files
+`,
+  )
+  .join("")}
+requests:
+  connectors: []
+  components: []
+
+boundary:
+  shell: never
+  files: none
+  browser: read_only
+  mcp: read_only
+`;
+}
+
 async function digested(template: BotTemplate) {
   return botTemplateDigest(template);
 }
@@ -157,10 +218,33 @@ async function grantsFor(agentId: string) {
     .where(eq(pluginGrants.agentId, agentId));
 }
 
+/** Every skill slug this file can leave behind, whichever branch each test took. */
+const touchedSlugs = [
+  skillSlug,
+  `${skillSlug}-2`,
+  `${skillSlug}-3`,
+  `other-${suite}`,
+  `hand-made-${suite}`,
+  `endpoint-${suite}`,
+  `avatar-${suite}`,
+  `plain-${suite}`,
+  `stale-${suite}`,
+  `stale-${suite}-2`,
+  deploymentSkill,
+  `${deploymentSkill}-2`,
+  `pair-${suite}`,
+  `pair-${suite}-2`,
+  `pair-${suite}-2-2`,
+  `audit-${suite}`,
+];
+
 beforeAll(async () => {
   await database
     .insert(users)
-    .values({ id: importer.id, email: importer.email })
+    .values([
+      { id: importer.id, email: importer.email },
+      { id: administrator.id, email: administrator.email },
+    ])
     .onConflictDoNothing();
 });
 
@@ -168,18 +252,10 @@ afterAll(async () => {
   if (created.length > 0) {
     await database.delete(agents).where(inArray(agents.id, created));
   }
+  await database.delete(skills).where(inArray(skills.slug, touchedSlugs));
   await database
-    .delete(skills)
-    .where(
-      inArray(skills.slug, [
-        skillSlug,
-        `${skillSlug}-2`,
-        `${skillSlug}-3`,
-        `other-${suite}`,
-        `hand-made-${suite}`,
-      ]),
-    );
-  await database.delete(users).where(eq(users.id, importer.id));
+    .delete(users)
+    .where(inArray(users.id, [importer.id, administrator.id]));
 });
 
 describe("an import on a deployment that has connected nothing", () => {
@@ -546,5 +622,448 @@ describe("retracting an import", () => {
       await database.select().from(skills).where(eq(skills.slug, skillSlug)),
     ).toHaveLength(1);
     expect(await templateStore.importForAgent(result.agentId)).not.toBeNull();
+  });
+});
+
+describe("a skill this deployment owns, and a template shipping a copy of it", () => {
+  /*
+   * The text of every skill a tenant package seeds is on the Skills page, so producing a
+   * byte-identical copy is something anybody signed in can do. `reuse` then looked like the obvious
+   * resolution and wrote a `plugin_grants` row pairing the importer's Bot to the DEPLOYMENT's skill
+   * — a write `POST /api/plugins/grants` refuses that same person outright, under a `granted_by` of
+   * `template:<digest>` rather than a person's name. The instructions were the ones they consented
+   * to that day; the point is the day after, when an administrator edits that row.
+   */
+  beforeAll(async () => {
+    await database.insert(skills).values({
+      id: deploymentSkill,
+      slug: deploymentSkill,
+      // Null is the whole fixture: this skill belongs to the deployment and nobody else.
+      ownerUserId: null,
+      title: "The deployment's own",
+      summary: "Seeded at boot by the tenant package.",
+      instructions: "Find the contract and read the renewal date from it.",
+      origin: "catalogue",
+      installedBy: "package",
+    });
+    await database.insert(skillTools).values({
+      skillId: deploymentSkill,
+      ref: "google-drive/search_files",
+      declaredBy: "package",
+    });
+  });
+
+  test("gives a non-admin their own copy rather than a pairing nobody decided", async () => {
+    const template = parseBotTemplate(yamlFor({ skillSlug: deploymentSkill }));
+    const [before] = await database
+      .select()
+      .from(skills)
+      .where(eq(skills.slug, deploymentSkill))
+      .limit(1);
+
+    const result = await installer().installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: importer,
+      source: "paste",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    expect(result.skillsReused).toHaveLength(0);
+    expect(result.skillsSuffixed).toEqual([`${deploymentSkill}-2`]);
+
+    // The Bot is paired to the copy, and nothing on this deployment's own row moved.
+    const held = await grantsFor(result.agentId);
+    expect(held).toHaveLength(1);
+    expect(held[0]?.ref).toBe(`${deploymentSkill}-2`);
+    expect(
+      await database
+        .select()
+        .from(pluginGrants)
+        .where(eq(pluginGrants.ref, deploymentSkill)),
+    ).toHaveLength(0);
+
+    const [after] = await database
+      .select()
+      .from(skills)
+      .where(eq(skills.slug, deploymentSkill))
+      .limit(1);
+    expect(after?.ownerUserId).toBeNull();
+    expect(after?.instructions).toBe(before?.instructions);
+    expect(after?.updatedAt).toEqual(before?.updatedAt);
+
+    const [copy] = await database
+      .select()
+      .from(skills)
+      .where(eq(skills.slug, `${deploymentSkill}-2`))
+      .limit(1);
+    // Word for word what the consent screen showed, and theirs.
+    expect(copy?.ownerUserId).toBe(importer.id);
+    expect(copy?.instructions).toBe(before?.instructions);
+  });
+
+  test("lets an administrator, who could grant it by hand, reuse it", async () => {
+    const template = parseBotTemplate(yamlFor({ skillSlug: deploymentSkill }));
+    const result = await installer().installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: administrator,
+      source: "paste",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    expect(result.skillsReused).toEqual([deploymentSkill]);
+    expect(result.skillsSuffixed).toHaveLength(0);
+    expect((await grantsFor(result.agentId))[0]?.ref).toBe(deploymentSkill);
+  });
+});
+
+describe("a reuse decision that no longer describes the deployment", () => {
+  test("is refused rather than pairing the Bot to somebody else's text", async () => {
+    /*
+     * The preview said `identical: true`, so `reuse` was offered and preselected; somebody then
+     * edited that skill, and the client posts the decision it is still holding. Pairing the Bot
+     * anyway gives an imported coworker instructions nobody consented to — the person read text A
+     * and the Bot would run on text B, with `skillsReused` reporting success.
+     */
+    await database.insert(skills).values({
+      id: `stale-${suite}`,
+      slug: `stale-${suite}`,
+      ownerUserId: importer.id,
+      title: "Edited since the preview",
+      summary: "Somebody rewrote this between the screen and the click.",
+      instructions: "Something a person rewrote after the preview was drawn.",
+      origin: "yours",
+      installedBy: importer.email,
+    });
+
+    const template = parseBotTemplate(yamlFor({ skillSlug: `stale-${suite}` }));
+    const before = await database
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.name, `Renewal Desk ${suite}`));
+
+    await expect(
+      installer().installBotTemplate({
+        template,
+        digest: await digested(template),
+        actor: importer,
+        source: "paste",
+        slugDecisions: { [`stale-${suite}`]: "reuse" },
+      }),
+    ).rejects.toBeInstanceOf(TemplateSlugDecisionError);
+
+    // Nothing at all: not the Bot, not a suffixed copy, not a grant.
+    const after = await database
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.name, `Renewal Desk ${suite}`));
+    expect(after).toHaveLength(before.length);
+    expect(
+      await database
+        .select()
+        .from(skills)
+        .where(eq(skills.slug, `stale-${suite}-2`)),
+    ).toHaveLength(0);
+    expect(
+      await database
+        .select()
+        .from(pluginGrants)
+        .where(eq(pluginGrants.ref, `stale-${suite}`)),
+    ).toHaveLength(0);
+  });
+});
+
+describe("two skills in one file that plan into the same name", () => {
+  test("each lands under the name the plan gave it", async () => {
+    /*
+     * The deployment holds `pair-<suite>`; the file ships `pair-<suite>` and `pair-<suite>-2`. The
+     * first suffixes onto the second's own name, and a plan that reads only the `skills` table
+     * hands both of them `pair-<suite>-2`. Install then walked the second to a name that had
+     * appeared on no screen the importer read.
+     */
+    await database.insert(skills).values({
+      id: `pair-${suite}`,
+      slug: `pair-${suite}`,
+      ownerUserId: importer.id,
+      title: "Already here",
+      summary: "Already here.",
+      instructions: "Already here, and not what the file ships.",
+      origin: "yours",
+      installedBy: importer.email,
+    });
+
+    const template = parseBotTemplate(
+      yamlForPair(`pair-${suite}`, `pair-${suite}-2`),
+    );
+    const result = await installer().installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: importer,
+      source: "paste",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    const planned = result.plan.skills.map((entry) => entry.installAs);
+    expect(planned).toEqual([`pair-${suite}-2`, `pair-${suite}-2-2`]);
+    expect(result.skillsSuffixed).toEqual([
+      `pair-${suite}-2`,
+      `pair-${suite}-2-2`,
+    ]);
+    // What the plan said and what the deployment got are the same two names.
+    const written = await database
+      .select({ slug: skills.slug })
+      .from(skills)
+      .where(inArray(skills.slug, [`pair-${suite}-2`, `pair-${suite}-2-2`]));
+    expect(written).toHaveLength(2);
+    const refs = (await grantsFor(result.agentId)).map((row) => row.ref).sort();
+    expect(refs).toEqual([`pair-${suite}-2`, `pair-${suite}-2-2`]);
+  });
+});
+
+describe("an address this deployment will not dial", () => {
+  /*
+   * THE CHECK THAT KEEPS THE ADDRESS OUT OF THE DATABASE. `POST /api/templates/install` forwards
+   * what it was given, so `installBotTemplate` is the whole of the registration-time control on
+   * this path — `createAgentFetch` re-checks the stored address before every dial, so a regression
+   * here is not immediately an SSRF, but it does mean `http://169.254.169.254/` gets written down
+   * as a coworker's endpoint and everything downstream treats a stored agent as trustworthy.
+   * Nothing exercised this at all: dropping the call, passing `allowPrivateHosts: true`, or
+   * drifting off `config.agentEndpointAllowedHosts` were all invisible to the suite.
+   */
+  const cold = () => installer({ managedAgent: false });
+
+  async function botCount() {
+    const rows = await database
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.name, `Renewal Desk ${suite}`));
+    return rows.length;
+  }
+
+  test("refuses the metadata address, and writes nothing", async () => {
+    const template = parseBotTemplate(
+      yamlFor({ skillSlug: `endpoint-${suite}` }),
+    );
+    const before = await botCount();
+
+    await expect(
+      cold().installBotTemplate({
+        template,
+        digest: await digested(template),
+        actor: importer,
+        source: "paste",
+        endpoint: "http://169.254.169.254/agui",
+        slugDecisions: {},
+      }),
+    ).rejects.toBeInstanceOf(TemplateEndpointRefusedError);
+
+    expect(await botCount()).toBe(before);
+    expect(
+      await database
+        .select()
+        .from(skills)
+        .where(eq(skills.slug, `endpoint-${suite}`)),
+    ).toHaveLength(0);
+  });
+
+  test("refuses a private address this deployment has not named", async () => {
+    const template = parseBotTemplate(
+      yamlFor({ skillSlug: `endpoint-${suite}` }),
+    );
+    const before = await botCount();
+
+    await expect(
+      cold().installBotTemplate({
+        template,
+        digest: await digested(template),
+        actor: importer,
+        source: "paste",
+        endpoint: "http://10.0.0.7:8080/agui",
+        slugDecisions: {},
+      }),
+    ).rejects.toBeInstanceOf(TemplateEndpointRefusedError);
+    expect(await botCount()).toBe(before);
+  });
+
+  test("takes the same address once the deployment names it", async () => {
+    /*
+     * A company's own agent legitimately lives at an internal address, and the policy this module
+     * is handed is the one that says so. Naming it host by host is a different act from dropping
+     * the floor for the whole network.
+     */
+    const template = parseBotTemplate(
+      yamlFor({ skillSlug: `endpoint-${suite}` }),
+    );
+    const result = await installer({
+      managedAgent: false,
+      endpointPolicy: { allowedHosts: new Set(["10.0.0.7:8080"]) },
+    }).installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: importer,
+      source: "paste",
+      endpoint: "http://10.0.0.7:8080/agui",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    const [agent] = await database
+      .select({ configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, result.agentId))
+      .limit(1);
+    expect(
+      (agent?.configuration as { endpoint?: string } | null)?.endpoint,
+    ).toBe("http://10.0.0.7:8080/agui");
+    // The host, never the path, is what the ledger row says.
+    expect(result.ledger.find((row) => row.kind === "endpoint")?.ref).toBe(
+      "10.0.0.7:8080",
+    );
+  });
+});
+
+describe("the face on the consent screen", () => {
+  test("is the face the imported Bot arrives with", async () => {
+    /*
+     * The screen draws the avatar from `bot.avatar_seed`, and `create` hardcodes the seed to the
+     * agent id — so a person read one face, pressed the one button, and got a different one, with
+     * no route anywhere that could repair it afterwards.
+     */
+    const template = parseBotTemplate(
+      yamlFor({ skillSlug: `avatar-${suite}`, avatarSeed: "renewal-desk" }),
+    );
+    const result = await installer().installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: importer,
+      source: "paste",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    const [profile] = await database
+      .select({ avatarSeed: agentProfiles.avatarSeed })
+      .from(agentProfiles)
+      .where(eq(agentProfiles.agentId, result.agentId))
+      .limit(1);
+    expect(profile?.avatarSeed).toBe("renewal-desk");
+  });
+
+  test("is the Bot's own id when the file carries no seed", async () => {
+    // `POST /api/agents` is untouched by the above: a Bot nobody gave a seed still gets its id.
+    const template = parseBotTemplate(yamlFor({ skillSlug: `plain-${suite}` }));
+    const result = await installer().installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: importer,
+      source: "paste",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    const [profile] = await database
+      .select({ avatarSeed: agentProfiles.avatarSeed })
+      .from(agentProfiles)
+      .where(eq(agentProfiles.agentId, result.agentId))
+      .limit(1);
+    expect(profile?.avatarSeed).toBe(result.agentId);
+  });
+});
+
+describe("the trail an import leaves", () => {
+  test("carries the slugs and the counts, and never a stranger's prose", async () => {
+    /*
+     * `redactAuditPayload` is a key-NAME filter and would pass a field called `roleDescription` or
+     * `instructions` through verbatim, so the rule is kept at the call site — which is exactly the
+     * kind of rule that decays without a test. The export side has had this assertion since it
+     * shipped; the import side is the one carrying text a stranger wrote.
+     */
+    const template = parseBotTemplate(yamlFor({ skillSlug: `audit-${suite}` }));
+    const result = await installer().installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: importer,
+      source: "paste",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    const rows = await database
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.targetId, result.agentId));
+    const imported = rows.find((row) => row.eventType === "template.imported");
+    const asks = rows.filter(
+      (row) => row.eventType === "template.capability_requested",
+    );
+    expect(imported).toBeDefined();
+    expect(asks.length).toBeGreaterThan(0);
+
+    // Not vacuous: the things that DO travel are here.
+    const payload = imported?.payload as Record<string, unknown>;
+    expect(payload.authorClaim).toBe("acme-revops");
+    expect(payload.digest).toBe(result.imported.digest);
+    expect(payload.skillsCreated).toEqual([`audit-${suite}`]);
+
+    const prose = [
+      // The role description, the skill's instructions, and every author's `why`.
+      "Chase overdue invoices",
+      "Find the contract and read the renewal date",
+      "The invoice ledger export lives in Drive.",
+      "Find the ledger for one customer.",
+      "Ageing buckets.",
+    ];
+    for (const row of [imported, ...asks]) {
+      const serialised = JSON.stringify(row?.payload);
+      for (const sentence of prose) {
+        expect(serialised).not.toContain(sentence);
+      }
+    }
+  });
+});
+
+describe("the import path and MCP grants", () => {
+  test("contains no code that writes one, conditional or otherwise", async () => {
+    /*
+     * A grep rather than a paragraph, and rather than only the behavioural tests either side of it.
+     * Behaviour covers the fixtures somebody thought of; it cannot catch a future conditional path
+     * behind a config flag or for a connector shape no fixture uses. `store.grant` performs no
+     * existence check and `listServers` computes `withdrawn` only for servers that exist, so such a
+     * row would be invisible on every screen and would go live the day somebody added that
+     * connector, with nobody deciding.
+     *
+     * Scoped to the import path. `templates/routes.ts` grants `mcp` on purpose, after an
+     * administrator has decided on a screen that already refuses, and forbidding that would forbid
+     * the thing the feature is for.
+     */
+    for (const path of [
+      "src/templates/install.ts",
+      "src/templates/resolve.ts",
+      "src/templates/store.ts",
+    ]) {
+      const source = await readFile(
+        new URL(`../${path}`, import.meta.url),
+        "utf8",
+      );
+      expect(source).not.toMatch(/grant\(\s*["'`]mcp["'`]/);
+      // And no way around the store either: the import path writes `plugin_grants` through
+      // `pluginStore.grant` or not at all. `install.ts` deletes from that table when it retracts,
+      // which is why only the insert is named.
+      expect(source).not.toMatch(/\.insert\(\s*pluginGrants/);
+    }
+
+    // And the one grant an import does make is the Bot-to-skill pairing, by name.
+    const install = await readFile(
+      new URL("../src/templates/install.ts", import.meta.url),
+      "utf8",
+    );
+    const calls = [
+      ...install.matchAll(/pluginStore\.grant\(\s*["'`](\w+)["'`]/g),
+    ];
+    expect(calls.map((match) => match[1])).toEqual(["skill"]);
   });
 });

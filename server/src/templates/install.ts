@@ -358,6 +358,26 @@ export function createTemplateInstaller(
     return claimed.length > 0;
   }
 
+  /**
+   * Who owns the skill already sitting on a slug, or `undefined` when nothing does.
+   *
+   * Null is a real answer and a different one from absent: a skill with no owner belongs to the
+   * deployment, which is exactly the case the grant route singles out. Read on the install
+   * transaction, so the answer is about the database being written rather than the one the preview
+   * saw.
+   */
+  async function skillOwner(
+    executor: TemplateExecutor,
+    slug: string,
+  ): Promise<string | null | undefined> {
+    const [row] = await executor
+      .select({ ownerUserId: skills.ownerUserId })
+      .from(skills)
+      .where(eq(skills.slug, slug))
+      .limit(1);
+    return row?.ownerUserId;
+  }
+
   return {
     async installBotTemplate(input) {
       /*
@@ -445,6 +465,24 @@ export function createTemplateInstaller(
           const agentId = profile.id;
 
           /*
+           * The face the consent screen drew.
+           *
+           * `create` hardcodes the seed to the agent id, so an imported coworker used to arrive
+           * looking nothing like the avatar the person had just looked at one click earlier — and
+           * because `newAgentId` mints `agent_<uuid>`, which is not a slug, the seed could not even
+           * travel back out on a re-export. A style token is one of the few things a template
+           * legitimately carries, and there is no route that can repair it afterwards, so it is
+           * written here inside the same transaction rather than left to a later PATCH that does not
+           * exist. `POST /api/agents` is untouched: a hand-made Bot still gets its id.
+           */
+          if (template.bot.avatarSeed) {
+            await transaction
+              .update(agentProfiles)
+              .set({ avatarSeed: template.bot.avatarSeed })
+              .where(eq(agentProfiles.agentId, agentId));
+          }
+
+          /*
            * Resolved again, on this transaction. The preview read a database that has since had a
            * skill added to it, a connector connected, or a component published, and the decisions
            * below are about the one being written.
@@ -475,16 +513,11 @@ export function createTemplateInstaller(
              * nothing to reuse and nothing to suffix, so the only decision worth honouring there is
              * skipping the skill entirely.
              */
-            const decision: SlugResolution = resolved.collides
+            let decision: SlugResolution = resolved.collides
               ? (asked ?? resolved.resolution)
               : asked === "skip"
                 ? "skip"
                 : "suffix";
-
-            if (decision === "skip") {
-              skillsSkipped.push(skill.slug);
-              continue;
-            }
 
             if (decision === "reuse") {
               if (!resolved.identical) {
@@ -493,6 +526,36 @@ export function createTemplateInstaller(
                   `The skill already called "${skill.slug}" here is not the one this template ships, so it cannot be reused. Read the plan again.`,
                 );
               }
+              /*
+               * AN IMPORT MAY NOT PAIR A BOT TO A SKILL ITS OWNER COULD NOT PAIR BY HAND.
+               *
+               * `POST /api/plugins/grants` refuses a non-admin the skills they do not own —
+               * "belongs to this deployment. An administrator decides which Bots use it", and "is
+               * somebody else's skill" — and this handler is only permitted to `requireUser`
+               * because its write set is a subset of what those routes already allow. Reuse was the
+               * hole: the text of every skill a tenant package seeds is on the Skills page, so
+               * anybody could ship a byte-identical copy, get `identical: true`, and have the import
+               * pair their Bot to the deployment's own row under a `granted_by` of
+               * `template:<digest>` rather than a person. The instructions were the ones they
+               * consented to that day; the point is the day after, when an administrator edits that
+               * row and the Bot follows it with nobody deciding.
+               *
+               * Suffixed instead of refused. The two skills are byte-identical, so a private copy
+               * says exactly what the consent screen said, and the import degrades rather than
+               * blocks — which is the rule everywhere else on this path.
+               */
+              const owner = await skillOwner(transaction, skill.slug);
+              if (actor.role !== "admin" && owner !== actor.id) {
+                decision = "suffix";
+              }
+            }
+
+            if (decision === "skip") {
+              skillsSkipped.push(skill.slug);
+              continue;
+            }
+
+            if (decision === "reuse") {
               // Nothing is written. The skill already here is paired to the Bot as it stands, which
               // is what reuse means and why it is the default when the two are identical.
               installedAs.set(skill.slug, skill.slug);

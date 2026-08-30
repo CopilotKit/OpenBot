@@ -296,6 +296,37 @@ describe("a skill slug this deployment has already given to somebody", () => {
     expect(resolved.skills[0]?.installAs).toBe(`${skillSlug}-3`);
   });
 
+  test("two skills in one file never plan into the same name", async () => {
+    /*
+     * The deployment holds `<slug>` and `<slug>-2`, and the template ships `<slug>` and `<slug>-3`.
+     * The first suffixes onto `<slug>-3` — which is the second skill's own name. Reading only the
+     * `skills` table for the second one reported it as free and planned both of them into `<slug>-3`;
+     * install then discovered the clash from inside its claim loop and walked the second to
+     * `<slug>-3-2`, a name that had appeared on no screen the importer read, in a deployment-wide
+     * `/` namespace. The working set has to be consulted where the plan is made.
+     */
+    const resolved = await plan(
+      parseBotTemplate(
+        yamlFor({
+          skillSlugs: [skillSlug, `${skillSlug}-3`],
+          instructions: "Something else entirely, a third time.",
+        }),
+      ),
+    );
+
+    const [first, second] = resolved.skills;
+    expect(first?.installAs).toBe(`${skillSlug}-3`);
+    // Still false: the conflict is with the template's own earlier skill and not with anything this
+    // deployment holds, and `collides` is what puts "there is already a skill called /… here" on the
+    // consent screen.
+    expect(second?.collides).toBe(false);
+    expect(second?.installAs).toBe(`${skillSlug}-3-2`);
+    expect(second?.suffixCandidate).toBe(`${skillSlug}-3-2`);
+
+    const planned = resolved.skills.map((entry) => entry.installAs);
+    expect(new Set(planned).size).toBe(planned.length);
+  });
+
   test("never resolves to an overwrite, whatever it resolves to", async () => {
     const resolved = await plan(
       parseBotTemplate(yamlFor({ instructions: "Different again." })),

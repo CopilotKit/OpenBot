@@ -109,7 +109,13 @@ export type ResolvedSkill = {
    * the format's rule. For `skip` it is null and the Bot arrives without that skill.
    */
   installAs: string | null;
-  /** Free suffixes this deployment has, in order, so the screen can offer the radio a real value. */
+  /**
+   * The first free suffix, so the screen can offer the radio a real value.
+   *
+   * Set whenever the slug is gone — because the deployment has it, or because an earlier skill in
+   * this same plan took it. The radio is only drawn for the first of those; for the second this is
+   * simply the name the skill will land under, and it agrees with `installAs`.
+   */
   suffixCandidate: string | null;
   /** Whether the template's own Bot is paired to this skill, or it is merely defined in the file. */
   paired: boolean;
@@ -295,13 +301,28 @@ export async function resolveBotTemplate(
 
   for (const skill of template.skills) {
     const collides = existing.has(skill.slug);
+    /*
+     * The other way a name is gone: an earlier skill in THIS SAME PLAN took it.
+     *
+     * A deployment holding `desk` and a template shipping `desk` and `desk-2` used to plan both of
+     * them into `desk-2` — the first suffixed onto the second's name, and the second read only
+     * `existing`, saw a free slug, and reported `installAs: "desk-2"` as well. Install then walked
+     * the second to `desk-2-2` from inside the claim loop, so the importer consented to one name
+     * and the deployment-wide `/` namespace got another. The working set has to be consulted here,
+     * where the plan is made, and not only there.
+     *
+     * `collides` stays a fact about the DEPLOYMENT rather than absorbing this case, because it is
+     * what puts "there is already a skill called /desk-2 here" on the consent screen and there is
+     * not: the conflict is with the template's own earlier skill.
+     */
+    const claimedInPlan = !collides && taken.has(skill.slug);
     const identical =
       collides &&
       existing.get(skill.slug) === skill.instructions &&
       sameRefs(existingTools.get(skill.slug) ?? [], skill.tools);
 
     let suffixCandidate: string | null = null;
-    if (collides) {
+    if (collides || claimedInPlan) {
       for (let index = 2; index <= MAX_SUFFIX; index += 1) {
         const candidate = suffixedSlug(skill.slug, index);
         if (candidate && !taken.has(candidate)) {
@@ -311,13 +332,15 @@ export async function resolveBotTemplate(
       }
     }
 
-    const resolution: SlugResolution = !collides
-      ? "suffix"
-      : identical
+    const resolution: SlugResolution = collides
+      ? identical
         ? "reuse"
         : suffixCandidate
           ? "suffix"
-          : "skip";
+          : "skip"
+      : claimedInPlan && !suffixCandidate
+        ? "skip"
+        : "suffix";
 
     /*
      * `suffix` is also what a slug nobody has taken resolves to, which reads oddly for a moment and
@@ -330,7 +353,7 @@ export async function resolveBotTemplate(
         ? skill.slug
         : resolution === "skip"
           ? null
-          : collides
+          : collides || claimedInPlan
             ? suffixCandidate
             : skill.slug;
     if (installAs) taken.add(installAs);
