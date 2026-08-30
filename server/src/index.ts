@@ -74,6 +74,8 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
+import { createTemplateInstaller } from "./templates/install";
+import { createTemplateStore } from "./templates/store";
 import { repeatAfterEach } from "./work/loop";
 import { createWorkQueue } from "./work/queue";
 
@@ -981,6 +983,39 @@ repeatAfterEach(
   60 * 60 * 1_000,
 );
 
+/**
+ * Bot templates, built here because this is the only place that holds all four pieces at once.
+ *
+ * Assembled rather than constructed inside `createApp` for the reason every other store here is: the
+ * installer needs the vault, the plugin store, the trail and the deployment's endpoint policy, and
+ * each of those already exists exactly once in this file. Building it there would mean a second
+ * place deciding what a coworker may live at, and the two would eventually disagree.
+ *
+ * The endpoint policy is the same pair `agentFetch` above is given, deliberately read from the same
+ * two config fields rather than defaulted: an import registers an address, and an address registered
+ * through this path must be held to exactly what an address registered through `/api/agents` is.
+ */
+const templateStore = createTemplateStore(database);
+const templates = {
+  store: templateStore,
+  installer: createTemplateInstaller({
+    database,
+    templateStore,
+    pluginStore,
+    auditStore: bootAuditStore,
+    ...(config.managedAgent?.endpoint
+      ? { managedAgentAgUiUrl: config.managedAgent.endpoint }
+      : {}),
+    vault: { store: credentialStore, encryptionKey: config.keyEncryptionKey },
+    endpointPolicy: {
+      allowPrivateHosts: config.computer?.allowPrivateHosts === true,
+      allowedHosts: config.agentEndpointAllowedHosts,
+    },
+  }),
+  // The preview reads on the pool. The install resolves again on its own transaction.
+  executor: database,
+};
+
 const app = createApp(
   config,
   auth,
@@ -1026,6 +1061,9 @@ const app = createApp(
   routineRunner,
   // A person's own standing instructions: the list, and a switch to stop one.
   routineStore,
+  // Packing a coworker into a file, and installing somebody else's. Last, because these arguments
+  // are positional and inserting one anywhere else shifts every call site above it.
+  templates,
 );
 
 /**
