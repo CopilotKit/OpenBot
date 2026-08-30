@@ -270,7 +270,6 @@ Which systems a coworker can reach is weighed by the router alongside what the c
 failed read of that used to be treated as "reaches nothing", which is a statement about the
 deployment rather than an absence of one: a database that blinked quietly re-routed messages away
 from the coworker that could actually do the work. It now fails the request instead.
-
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the

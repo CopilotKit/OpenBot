@@ -85,6 +85,78 @@ describe("the happy path: ask, hand over, hand back", () => {
 });
 
 describe("the crappy paths: two drivers, one page", () => {
+  test("tracks one help generation through supersession and human completion", () => {
+    const { control } = fixture();
+    const first = "11111111-1111-4111-8111-111111111111";
+    const second = "22222222-2222-4222-8222-222222222222";
+    control.requestHelp("First request", first);
+    control.requestHelp("Second request", second);
+    expect(control.assistanceStatus(first)).toBe("superseded");
+    expect(control.assistanceStatus(second)).toBe("pending");
+    control.take();
+    expect(control.assistanceStatus(second)).toBe("human");
+    control.release();
+    expect(control.assistanceStatus(second)).toBe("completed");
+  });
+
+  test("taking control twice preserves the exact human assistance generation", () => {
+    const { control } = fixture();
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    control.requestHelp("Sign in", requestId);
+    control.take();
+    control.take();
+    expect(control.assistanceStatus(requestId)).toBe("human");
+    control.release();
+    expect(control.assistanceStatus(requestId)).toBe("completed");
+  });
+
+  test("cancels only the exact pending help generation", () => {
+    const { control } = fixture();
+    control.requestHelp(
+      "First request",
+      "11111111-1111-4111-8111-111111111111",
+    );
+    control.requestHelp(
+      "Newer request",
+      "22222222-2222-4222-8222-222222222222",
+    );
+
+    expect(
+      control.cancelAssistance("11111111-1111-4111-8111-111111111111"),
+    ).toMatchObject({
+      cancelled: false,
+      state: {
+        holder: "bot",
+        requested: true,
+        reason: "Newer request",
+        helpRequestId: "22222222-2222-4222-8222-222222222222",
+      },
+    });
+    expect(
+      control.cancelAssistance("22222222-2222-4222-8222-222222222222"),
+    ).toMatchObject({
+      cancelled: true,
+      state: { holder: "bot", requested: false },
+    });
+    expect(
+      control.cancelAssistance("22222222-2222-4222-8222-222222222222"),
+    ).toMatchObject({ cancelled: false });
+  });
+
+  test("a late cancellation never takes control from a person", () => {
+    const { control } = fixture();
+    control.requestHelp("Sign in", "11111111-1111-4111-8111-111111111111");
+    control.take();
+
+    const result = control.cancelAssistance(
+      "11111111-1111-4111-8111-111111111111",
+    );
+
+    expect(result.cancelled).toBe(false);
+    expect(result.state.holder).toBe("human");
+    expect(control.humanMayDrive()).toBe(true);
+  });
+
   test("the Bot is refused while a person holds the wheel", () => {
     const { control } = fixture();
     control.take();
@@ -147,6 +219,47 @@ describe("the crappy paths: two drivers, one page", () => {
 });
 
 describe("the crappy paths: secrets", () => {
+  test("expires one unanswered secret generation without touching its successor", () => {
+    let now = Date.parse("2026-08-14T00:00:00.000Z");
+    const control = createControl(() => new Date(now).toISOString());
+    const first = "11111111-1111-4111-8111-111111111111";
+    const second = "22222222-2222-4222-8222-222222222222";
+    control.requestSecret({ ref: "e1", label: "code", requestId: first });
+    control.requestSecret({ ref: "e2", label: "new code", requestId: second });
+    expect(control.assistanceStatus(first)).toBe("superseded");
+    now += 10 * 60 * 1000 + 1;
+    expect(control.assistanceStatus(second)).toBe("expired");
+    expect(control.pendingSecret()).toBeNull();
+  });
+
+  test("cancels only the exact pending secret generation", () => {
+    const { control } = fixture();
+    control.requestSecret({
+      ref: "e12",
+      label: "old code",
+      requestId: "11111111-1111-4111-8111-111111111111",
+    });
+    control.requestSecret({
+      ref: "e13",
+      label: "new code",
+      requestId: "22222222-2222-4222-8222-222222222222",
+    });
+
+    expect(
+      control.cancelAssistance("11111111-1111-4111-8111-111111111111"),
+    ).toMatchObject({
+      cancelled: false,
+      state: {
+        secretWanted: "new code",
+        secretRequestId: "22222222-2222-4222-8222-222222222222",
+      },
+    });
+    expect(
+      control.cancelAssistance("22222222-2222-4222-8222-222222222222"),
+    ).toMatchObject({ cancelled: true });
+    expect(control.pendingSecret()).toBeNull();
+  });
+
   test("a secret request must name the field it goes in", () => {
     const { control } = fixture();
     // The version without this typed the value into whatever happened to have focus, and reported
@@ -233,7 +346,13 @@ describe("the crappy paths: secrets", () => {
       Object.keys(control.get())
         .filter((k) => /secret/i.test(k))
         .sort(),
-    ).toEqual(["secretRef", "secretSnapshotId", "secretWanted"]);
+    ).toEqual([
+      "secretRef",
+      "secretRequestId",
+      "secretRequestedAt",
+      "secretSnapshotId",
+      "secretWanted",
+    ]);
   });
 });
 
@@ -270,6 +389,7 @@ describe("an unanswered request to take the wheel", () => {
     expect(state.requested).toBe(false);
     // The reason is the part that leaked between conversations, so it goes too.
     expect(state.reason).toBeUndefined();
+    expect(state.helpRequestId).toBeUndefined();
   });
 
   test("never takes the wheel back off a person who holds it", () => {

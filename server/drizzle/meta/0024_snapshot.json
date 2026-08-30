@@ -217,6 +217,7 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+
     "public.audit_events": {
       "name": "audit_events",
       "schema": "",
@@ -814,6 +815,7 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+
     "public.intelligence_channel_mappings": {
       "name": "intelligence_channel_mappings",
       "schema": "",

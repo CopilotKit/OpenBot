@@ -164,6 +164,11 @@ export type DeploymentConfig = {
    */
   deploymentId: string | undefined;
   /**
+   * Operator-owned Slack workspace ID used only when managed Channels omits its canonical tenant.
+   * A known managed tenant must still match this value; see slack/tenant-context.ts.
+   */
+  slackTenantId: string | undefined;
+  /**
    * Where this deployment is reached from outside, with no trailing slash.
    *
    * Needed because an OAuth redirect URI has to match what an administrator registered with the
@@ -807,6 +812,17 @@ function accessibilityEnabled(environment: Environment): boolean {
   return off !== "true" && off !== "1";
 }
 
+function slackTenantId(environment: Environment): string | undefined {
+  const tenantId = optional(environment, "OPENBOT_SLACK_TENANT_ID");
+  if (!tenantId) return undefined;
+  if (tenantId.toLowerCase() === "unknown") {
+    throw new Error(
+      "OPENBOT_SLACK_TENANT_ID must be a canonical Slack workspace ID, not unknown",
+    );
+  }
+  return tenantId;
+}
+
 /**
  * Whether a Bot may draw an interface it wrote itself.
  *
@@ -919,6 +935,7 @@ export function loadConfig(
     ...(managedAgent ? { managedAgent } : {}),
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
+    slackTenantId: slackTenantId(environment),
     publicUrl: (
       optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
     )?.replace(/\/+$/, ""),
