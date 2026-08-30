@@ -1,9 +1,10 @@
-import { IconPlus } from "@tabler/icons-react";
+import { IconFileImport, IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { AgentCard } from "@/components/agents/agent-card";
 import { AgentProfile as AgentProfileDetail } from "@/components/agents/agent-profile";
+import { ImportTemplate } from "@/components/agents/import-template";
 import { NewAgent } from "@/components/agents/new-agent";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { StaggerItem } from "@/components/layout/stagger";
@@ -18,6 +19,23 @@ import { agentListQueryOptions } from "@/lib/agents/queries";
 const agentsSearchSchema = z.object({
   new: z.boolean().optional(),
   agent: z.string().optional(),
+  /**
+   * Reading a stranger's file is a place, not a modal.
+   *
+   * The consent screen is long, it is the only thing standing between somebody else's prose and a
+   * model, and a person will leave it half-read to go and look at what they already have. A search
+   * parameter survives that: the roster stays mounted behind it, Back closes it, and the URL can be
+   * handed to a colleague who has to decide.
+   */
+  import: z.boolean().optional(),
+  /**
+   * A draft of this deployment's own, opened as the file to import.
+   *
+   * The round trip an author needs before sending a template anywhere: pack a coworker, then read
+   * the consent screen the person on the other end will read. It is a draft id rather than a
+   * document, so nothing about a template travels through a URL.
+   */
+  template: z.string().optional(),
 });
 
 export const Route = createFileRoute("/_authed/_app/agents/")({
@@ -35,7 +53,12 @@ export const Route = createFileRoute("/_authed/_app/agents/")({
  * actually changed.
  */
 function AgentsScreen() {
-  const { new: isCreating, agent: selectedAgentId } = Route.useSearch();
+  const {
+    new: isCreating,
+    agent: selectedAgentId,
+    import: isImporting,
+    template: templateId,
+  } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { data: agents } = useQuery(agentListQueryOptions());
   const mine = agents?.filter((a) => a.mine);
@@ -43,16 +66,26 @@ function AgentsScreen() {
 
   // Creating wins if both are somehow set: it is the more recent intent.
   const showCreate = isCreating === true;
-  const showProfile = !showCreate && selectedAgentId !== undefined;
+  const showImport = !showCreate && isImporting === true;
+  const showProfile =
+    !showCreate && !showImport && selectedAgentId !== undefined;
   const close = () => navigate({ search: {} });
 
   return (
     <DetailPanel
       onClose={close}
-      open={showCreate || showProfile}
+      open={showCreate || showImport || showProfile}
+      /*
+       * Wider for the import only. The consent screen renders a stranger's instructions verbatim
+       * and unabridged, and prose reflowed into a 400px column is prose people skim — which is the
+       * one behaviour this screen exists to discourage.
+       */
+      detailWidth={showImport ? 560 : undefined}
       detail={
         showCreate ? (
           <NewAgent />
+        ) : showImport ? (
+          <ImportTemplate {...(templateId ? { templateId } : {})} />
         ) : selectedAgentId ? (
           <AgentProfileDetail agentId={selectedAgentId} />
         ) : null
@@ -62,16 +95,33 @@ function AgentsScreen() {
         <div className="mt-12 w-full max-w-2xl">
           <div className="flex flex-row w-full items-center justify-between">
             <h2 className="font-bold text-lg">Your agents</h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              render={(props) => (
-                <Link to="/agents" search={{ new: true }} {...props} />
-              )}
-            >
-              <IconPlus />
-              New agent
-            </Button>
+            <div className="flex flex-row items-center gap-1">
+              {/*
+               * Beside Create rather than behind a menu, because importing one is the other way a
+               * coworker comes to exist here and a person arriving with a file somebody sent them
+               * should not have to guess that this is the page for it.
+               */}
+              <Button
+                variant="ghost"
+                size="sm"
+                render={(props) => (
+                  <Link to="/agents" search={{ import: true }} {...props} />
+                )}
+              >
+                <IconFileImport />
+                Import
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                render={(props) => (
+                  <Link to="/agents" search={{ new: true }} {...props} />
+                )}
+              >
+                <IconPlus />
+                New agent
+              </Button>
+            </div>
           </div>
           <div className="flex flex-row mt-4">
             {!!mine?.length && (

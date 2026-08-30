@@ -4,7 +4,9 @@ import { type ReactNode, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { AgentFields } from "@/components/agents/agent-fields";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
+import { ExportTemplate } from "@/components/agents/export-template";
 import { HandoffPanel } from "@/components/agents/handoff-panel";
+import { TemplateRequests } from "@/components/agents/template-requests";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +18,7 @@ import {
   updateAgentMutationOptions,
 } from "@/lib/agents/mutations";
 import { agentQueryOptions } from "@/lib/agents/queries";
+import { templateImportQueryOptions } from "@/lib/templates/queries";
 
 function Tag({ children }: { children: ReactNode }) {
   return (
@@ -65,6 +68,13 @@ export function AgentProfile({ agentId }: { agentId: string }) {
   const isConfirmingDelete = confirmingDeleteId === agentId;
 
   const agent = useQuery(agentQueryOptions(agentId));
+  /*
+   * Where this coworker came from, or nothing — most were made by hand and this answers null for
+   * them without an error. Read here as well as inside the panel below because the tag belongs in
+   * the header beside the other things that are true of the Bot rather than in a section further
+   * down; both reads are the same cache entry.
+   */
+  const imported = useQuery(templateImportQueryOptions(agentId));
   const updateAgent = useMutation(updateAgentMutationOptions(queryClient));
   const duplicateAgent = useMutation(
     duplicateAgentMutationOptions(queryClient),
@@ -107,6 +117,12 @@ export function AgentProfile({ agentId }: { agentId: string }) {
         <div className="flex flex-wrap justify-center gap-1.5">
           <Tag>{profile.visibility === "private" ? "Private" : "Public"}</Tag>
           {profile.systemOwned ? <Tag>System owned</Tag> : null}
+          {/*
+           * Said out loud, permanently. An imported coworker is an ordinary Bot in every other
+           * respect — owned, editable, deletable — and the one fact that does not follow from
+           * looking at it is that its instructions were written somewhere else by somebody else.
+           */}
+          {imported.data ? <Tag>Imported</Tag> : null}
         </div>
       </header>
 
@@ -162,6 +178,8 @@ export function AgentProfile({ agentId }: { agentId: string }) {
        */}
       {isEditing ? null : <HandoffPanel agentId={agentId} />}
 
+      {isEditing ? null : <TemplateRequests agentId={agentId} />}
+
       {actionError ? (
         <p className="text-sm text-destructive" role="alert">
           {actionError.message}
@@ -193,6 +211,14 @@ export function AgentProfile({ agentId }: { agentId: string }) {
           >
             {duplicateAgent.isPending ? "Duplicating…" : "Duplicate"}
           </Button>
+
+          {/*
+           * Beside Duplicate, because it is the same verb pointed somewhere else: Duplicate makes
+           * another copy here, Export makes one that can leave. A system-owned Bot is offered it as
+           * well as an owned one — those are the most template-worthy things in the product, and
+           * Duplicate already lets anybody fork them.
+           */}
+          <ExportTemplate agentId={agentId} />
 
           <Button
             className="w-full text-sm!"
