@@ -35,6 +35,12 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
+      # The templates that ship in the box, read with the same parser the server runs at preview and
+      # again at install. Nothing else in the build reads them: they are data copied into the image,
+      # so one that does not parse compiles, ships, and is refused for the first time on somebody
+      # else's deployment at the moment they try to install it. This is the only place that failure
+      # is ours rather than theirs.
+      - run: bun scripts/check-bot-templates.ts
 
   # The two packages that are deployables in their own right rather than root workspaces. Root
   # `typecheck` is `bun run --filter '*' typecheck`, and `--filter '*'` enumerates `workspaces`, which
