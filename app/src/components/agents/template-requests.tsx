@@ -38,7 +38,14 @@ export function TemplateRequests({ agentId }: { agentId: string }) {
   );
   if (unmet.length === 0 && declined.length === 0) return null;
 
-  // The server's own flag rather than a rule recomputed here. Granting is an administrator's.
+  /*
+   * A hint for the screen, and nothing more. This is the raw role off `GET /api/me` — the ledger
+   * payload carries no `canGrant` the way an agent carries `canManage` — so it is a rule recomputed
+   * in the browser and it decides nothing. The refusal that counts is `requireAdmin` on the decide
+   * route in `server/src/templates/routes.ts`. The comment that used to sit here claimed this was
+   * the server's own flag, which would have stopped an auditor looking for where granting is
+   * authorized at exactly the wrong line.
+   */
   const isAdmin = user.data?.role === "admin";
 
   return (
@@ -130,6 +137,12 @@ function reason(request: TemplateRequestRecord): string {
  * no tools here — but the answer to it is adding the connector, not writing a grant: a grant for a
  * tool that does not exist is invisible on every screen and would go live the day somebody added
  * that vendor, with nobody having decided anything.
+ *
+ * Neither does a row the deployment cannot satisfy. `unavailable` means the connector is not
+ * connected here and `not_in_build` means no component answers to that name, and the server refuses
+ * to grant either — so offering the button was offering an act that could only end in an error
+ * message. Declining stays available for both, because recording that somebody said no is a real
+ * decision whatever the deployment happens to have installed.
  */
 function Decision({
   request,
@@ -141,8 +154,9 @@ function Decision({
   busy: boolean;
 }) {
   const grantable =
-    request.kind === "component" ||
-    (request.kind === "mcp" && request.ref.includes("/"));
+    request.status === "requested" &&
+    (request.kind === "component" ||
+      (request.kind === "mcp" && request.ref.includes("/")));
 
   return (
     <div className="mt-0.5 flex gap-2">
@@ -156,10 +170,7 @@ function Decision({
           Grant
         </Button>
       ) : (
-        <p className="text-muted-foreground text-xs">
-          Add this connector on the Plugins page, then grant the tools this Bot
-          needs.
-        </p>
+        <p className="text-muted-foreground text-xs">{whyNoGrant(request)}</p>
       )}
       <Button
         disabled={busy}
@@ -171,4 +182,15 @@ function Decision({
       </Button>
     </div>
   );
+}
+
+/** What to do instead of granting, for the three rows that have no grant to write. */
+function whyNoGrant(request: TemplateRequestRecord): string {
+  if (request.status === "unavailable") {
+    return "Connect it on the Plugins page first. There is nothing here yet to grant.";
+  }
+  if (request.status === "not_in_build") {
+    return "A build carrying that component is what unblocks this. There is nothing here to grant.";
+  }
+  return "Add this connector on the Plugins page, then grant the tools this Bot needs.";
 }

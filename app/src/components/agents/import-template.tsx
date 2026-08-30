@@ -10,10 +10,14 @@ import {
   type ConnectionVerdict,
   testAgentConnection,
 } from "@/lib/agents/queries";
-import { actionPolicyQueryOptions } from "@/lib/computers/queries";
+import {
+  type ActionPolicy,
+  actionPolicyQueryOptions,
+} from "@/lib/computers/queries";
 import {
   emptyTemplateImportForm,
   type TemplateImportFormValues,
+  templateImportFormSchema,
   templateInstallInputFrom,
 } from "@/lib/templates/form";
 import { installBotTemplateMutationOptions } from "@/lib/templates/mutations";
@@ -121,11 +125,22 @@ function boundarySentences(boundary: BotTemplateBoundary): string[] {
         ? "It may look at web pages, and may not click, type or submit on them."
         : "It may use a browser fully: clicking, typing and submitting.",
   );
-  sentences.push(
-    boundary.navigateHosts.length === 0
-      ? "The author named no web address it may visit."
-      : `On the web it is confined to ${boundary.navigateHosts.join(", ")}.`,
-  );
+  /*
+   * An empty `navigate_hosts` is the ABSENCE of a host limit rather than a limit of none. The
+   * format documents it as adding no host clause at all, and this repo's own research-desk example
+   * ships `browser: read_only` with no hosts on purpose. The sentence here used to read "The author
+   * named no web address it may visit.", which a reviewer reads as the tightest ceiling the
+   * vocabulary can express while it is in fact the loosest — in the section whose whole job is to
+   * state that ceiling in plain English. Where no browser is permitted there is no host clause to
+   * make, so nothing is said.
+   */
+  if (boundary.browser !== "none") {
+    sentences.push(
+      boundary.navigateHosts.length === 0
+        ? "The author put no limit on which sites it may visit."
+        : `On the web it is confined to ${boundary.navigateHosts.join(", ")}.`,
+    );
+  }
   sentences.push(
     boundary.mcp === "none"
       ? "It may not call connector tools."
@@ -154,11 +169,18 @@ const WILL_NOT_DO = [
   "Nothing is fetched from the network to do any of this. The file in the box above is the whole of it.",
 ];
 
-/** Whether the deployment is still on the shipped policy that permits every action. */
-function permitsEverything(policy: {
-  deny: string[];
-  allow: string[];
-}): boolean {
+/**
+ * Whether nothing this deployment's boundary says actually stops a Bot.
+ *
+ * `mode` is half of that answer and was once left out of it. A dry-run boundary decides and then
+ * forwards anyway — `server/src/computer/policy.ts` returns `forward: true` on a deny match and on
+ * the default refusal alike — so an administrator who added deny rules and chose "Record it and
+ * allow it" was shown the calm sentence saying a boundary applies, on a deployment where no rule
+ * stops anything at all. The rules do exist; that is simply not the fact somebody deciding whether
+ * to run a stranger's Bot needs to be told.
+ */
+function permitsEverything(policy: ActionPolicy): boolean {
+  if (policy.mode === "dry-run") return true;
   return (
     policy.deny.length === 0 &&
     policy.allow.length === 1 &&
@@ -242,8 +264,21 @@ export function ImportTemplate({ templateId }: { templateId?: string }) {
       installError={install.error}
       installing={install.isPending}
       onBack={() => {
+        /*
+         * Reading a different file forgets everything the importer typed for the last one. Only
+         * `verdict` and `connection` used to be cleared, so a key typed for template A survived
+         * into template B and was sent to B's host and then stored in this deployment's vault
+         * attached to B's Bot. It is worse on a deployment that runs a managed Bot, where B's
+         * consent screen renders neither an address box nor a key box: the screen promised a local
+         * coworker while the install pointed one at A's host with A's credential. The file itself
+         * stays, because it is what the paste box is showing.
+         */
         setVerdict(null);
         setConnection(null);
+        setValues((current) => ({
+          ...emptyTemplateImportForm,
+          source: current.source,
+        }));
       }}
       onInstall={async () => {
         const result = await install.mutateAsync(
@@ -367,10 +402,20 @@ function ConsentScreen({
   const { bot, template: meta } = template;
 
   const endpointNeeded = plan.endpoint.required;
-  const typedHost = hostOf(values.endpoint);
+  const typed = values.endpoint.trim();
+  const shapeProblem = endpointProblem(values.endpoint);
+  const typedAddress = shapeProblem ? null : addressOf(values.endpoint);
+  const typedHost = typedAddress ? typedAddress.host : null;
   const claimedHost = plan.endpoint.sendsConversationTo;
+  /*
+   * `hostname` rather than `host`. A claim can never carry a port — the format refuses a
+   * `sends_conversation_to` that is not a bare hostname — so comparing against `host` fired the
+   * amber mismatch warning on `https://renewals.example.com:8443/ag-ui`, about the very host the
+   * template had named. A disclosure that cries wolf on the correct address teaches people to click
+   * past the one case it exists for.
+   */
   const hostDiffers = Boolean(
-    typedHost && claimedHost && typedHost !== claimedHost,
+    typedAddress && claimedHost && typedAddress.hostname !== claimedHost,
   );
 
   const asks =
@@ -403,15 +448,24 @@ function ConsentScreen({
             seed={bot.avatarSeed ?? meta.slug}
             size={48}
           />
+          {/*
+           * Wrapping rather than truncating, for the same reason the Verbatim box below exists.
+           * `standingRoleMessage` builds a Bot's system message as `You are ${name}, ${title}.`, so
+           * both of these are stranger-written text handed to a model on every turn in every
+           * channel. They used to carry `truncate`, which in this panel showed roughly sixty
+           * characters of a title capped at a hundred and twenty: an author could put a sentence of
+           * instruction past the ellipsis and the person consenting would never see it, on the one
+           * screen that exists to show them all of it. Nothing model-visible is clipped here.
+           */}
           <div className="min-w-0">
-            <p className="truncate font-medium text-base">{bot.name}</p>
-            <p className="truncate text-muted-foreground text-sm">
+            <p className="break-words font-medium text-base">{bot.name}</p>
+            <p className="break-words text-muted-foreground text-sm">
               {bot.title}
             </p>
           </div>
         </div>
 
-        <p className="text-sm">{meta.summary}</p>
+        <p className="break-words text-sm">{meta.summary}</p>
 
         <div className="grid gap-0.5 rounded-lg border border-border bg-card p-3">
           <Claim label="Template" value={meta.slug} />
@@ -470,13 +524,22 @@ function ConsentScreen({
                     className="grid gap-2 rounded-lg border border-border bg-card p-3"
                     key={skill.slug}
                   >
+                    {/*
+                     * `break-words` on both, matching Claim and Verbatim. A title and a summary are
+                     * read by the model when it picks a skill for a turn, and a stranger can write
+                     * either as one unbroken run with no space in it — which, left with the default
+                     * `overflow-wrap: normal`, has no break opportunity and lays itself outside a
+                     * fixed-width panel where the reviewer never sees it.
+                     */}
                     <div className="grid gap-0.5">
-                      <p className="font-medium text-sm">{skill.title}</p>
+                      <p className="break-words font-medium text-sm">
+                        {skill.title}
+                      </p>
                       <p className="font-mono text-muted-foreground text-xs">
                         /{skill.slug}
                       </p>
                     </div>
-                    <p className="text-sm">{skill.summary}</p>
+                    <p className="break-words text-sm">{skill.summary}</p>
                     <Verbatim>{skill.instructions}</Verbatim>
                     {skill.tools.length > 0 ? (
                       <p className="text-muted-foreground text-xs">
@@ -527,12 +590,18 @@ function ConsentScreen({
 
             {/*
              * The origin, large, and it is the address that will actually be dialled the moment
-             * there is one — the author's claim only stands in until somebody types over it.
-             * Showing the claim after an address has been typed would put the wrong host in the
-             * largest type on the screen.
+             * there is one — the author's claim only stands in while the box is empty. Showing the
+             * claim after an address has been typed would put the wrong host in the largest type on
+             * the screen, and that is exactly what happened for every schemeless address: `hostOf`
+             * could not parse `renewals-mycopy.example.com/agui`, so the author's `renewals.example
+             * .com` was painted under the sentence saying conversations go there, and `hostDiffers`
+             * had nothing to compare and stayed quiet. The claim now yields to anything typed.
              */}
             <p className="break-all font-mono font-semibold text-lg">
-              {typedHost ?? claimedHost ?? "No address yet"}
+              {typedHost ??
+                (typed
+                  ? "Not a web address"
+                  : (claimedHost ?? "No address yet"))}
             </p>
 
             <p className="text-sm">
@@ -560,7 +629,7 @@ function ConsentScreen({
                 value={values.endpoint}
               />
               <Button
-                disabled={!values.endpoint.trim() || testing}
+                disabled={!typed || testing || Boolean(shapeProblem)}
                 onClick={onTest}
                 type="button"
                 variant="outline"
@@ -568,6 +637,12 @@ function ConsentScreen({
                 {testing ? "Testing…" : "Test"}
               </Button>
             </div>
+
+            {shapeProblem ? (
+              <p className="text-destructive text-sm" role="alert">
+                {shapeProblem}
+              </p>
+            ) : null}
 
             {/*
              * The claim and the address are compared and the difference is said out loud. It is not
@@ -746,6 +821,12 @@ function ConsentScreen({
             <span className="font-medium">
               This deployment currently allows every action.
             </span>{" "}
+            {policy.data.mode === "dry-run" ? (
+              <>
+                Its boundary is set to record what it would have refused rather
+                than refuse it, so no rule in it stops anything.{" "}
+              </>
+            ) : null}
             An imported Bot can browse, read and write files, and run shell
             commands — exactly like a Bot you built yourself.{" "}
             <Link
@@ -785,14 +866,15 @@ function ConsentScreen({
       <Button
         className="w-full text-sm!"
         disabled={
-          installing || (endpointNeeded && values.endpoint.trim().length === 0)
+          installing ||
+          (endpointNeeded && (typed.length === 0 || Boolean(shapeProblem)))
         }
         onClick={onInstall}
       >
         {installing ? "Importing…" : `Import ${bot.name}`}
       </Button>
 
-      {endpointNeeded && values.endpoint.trim().length === 0 ? (
+      {endpointNeeded && typed.length === 0 ? (
         <p className="-mt-4 text-muted-foreground text-xs">
           An address is needed before this coworker can be imported.
         </p>
@@ -878,11 +960,29 @@ function SlugDecision({
   );
 }
 
-/** The host of a typed address, or nothing. A half-typed URL is not an error worth reporting. */
-function hostOf(endpoint: string): string | null {
+/** A typed address, parsed, or nothing. A half-typed URL is not an error worth reporting. */
+function addressOf(endpoint: string): URL | null {
   try {
-    return new URL(endpoint.trim()).host;
+    return new URL(endpoint.trim());
   } catch {
     return null;
   }
+}
+
+/**
+ * What is wrong with the shape of a typed address, in the schema's own words.
+ *
+ * `templateImportFormSchema` was written for this field and then wired to nothing: the screen kept
+ * its own `useState` and validated none of it. So the very common schemeless form
+ * `renewals.example.com/agui` sailed through, failed to parse as a URL, and left the screen falling
+ * back to the author's claimed host in its largest type. An empty box is not a problem — it is a
+ * box nobody has typed in yet, and the sentence under the button already says an address is needed.
+ */
+function endpointProblem(endpoint: string): string | null {
+  const parsed = templateImportFormSchema.shape.endpoint.safeParse(endpoint);
+  if (parsed.success) return null;
+  return (
+    parsed.error.issues[0]?.message ??
+    "Enter a web address starting with http:// or https://."
+  );
 }

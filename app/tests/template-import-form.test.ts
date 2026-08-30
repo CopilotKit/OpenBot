@@ -94,3 +94,36 @@ test("overwrite is not one of the answers a colliding slug has", () => {
   });
   expect(parsed.success).toBeFalse();
 });
+
+/**
+ * The regression: `endpoint` and `auth` were emitted from whatever the form happened to hold.
+ *
+ * One form survives "Read a different file", so an address and a key typed for template A reached
+ * template B's install — and where B is a managed Bot the consent screen renders neither box, so
+ * the screen promised a coworker in the deployment's own container while the install pointed one at
+ * A's host with A's credential in the vault. What the plan did not ask for is not sent.
+ */
+test("a field the consent screen is not showing is never sent", () => {
+  const carried = {
+    ...emptyTemplateImportForm,
+    source: "openbot_template: 1",
+    endpoint: "https://a.example/agui",
+    authValue: "sk-live-1",
+  };
+
+  // A managed Bot on this deployment: neither box is on the screen.
+  const managed = templateInstallInputFrom(carried, planWith({}), {
+    from: "paste",
+  });
+  expect(managed).not.toHaveProperty("endpoint");
+  expect(managed).not.toHaveProperty("auth");
+
+  // An address of its own, sitting behind nothing: the address travels and the key does not.
+  const open = templateInstallInputFrom(
+    carried,
+    planWith({ required: true, reason: "remote", requiresKey: false }),
+    { from: "paste" },
+  );
+  expect(open.endpoint).toBe("https://a.example/agui");
+  expect(open).not.toHaveProperty("auth");
+});

@@ -47,9 +47,21 @@ const FILTERS = [
      * stale or missing secret rather than a policy decision. The same reasoning that put
      * `mcp.callback_refused` here applies unchanged — nobody was judged, something was still turned
      * away, and the saved view a person clicks for "what did this deployment block" should show it.
+     *
+     * `template.import_refused` is the same question asked of a document. It belongs here more than
+     * any of the others do: a refused import leaves nothing behind anywhere else in the product —
+     * no Bot, no skill, no ledger row — so this is the only view in which the attempt can be
+     * counted at all, and counting is the point. One refused paste is somebody's typo. Forty in an
+     * afternoon, each turned away for a different reason, is somebody mapping the edges of the
+     * parser, and that is only ever visible to a reader who can list them together.
+     *
+     * `template.capability_declined` is an administrator turning an ask down, which is a refusal by
+     * a person rather than by a rule. `template.capability_requested` is deliberately NOT here:
+     * nothing was forbidden, the ask simply landed unmet, and padding this filter with the designed
+     * outcome would teach a reader to discount the refusals that are real.
      */
     search:
-      "?eventType=computer.action_refused,mcp.call_rejected,mcp.callback_refused,component.refused,component.function_refused,routines.dispatch_refused",
+      "?eventType=computer.action_refused,mcp.call_rejected,mcp.callback_refused,component.refused,component.function_refused,routines.dispatch_refused,template.import_refused,template.capability_declined",
   },
   {
     label: "Did not happen",
@@ -160,8 +172,23 @@ function Row({
      */
     event.eventType === "mcp.callback_refused" ||
     // The worker turned away at the door, same reasoning as the caller above.
-    event.eventType === "routines.dispatch_refused";
+    event.eventType === "routines.dispatch_refused" ||
+    /*
+     * A document this deployment would not take, and an ask an administrator turned down.
+     *
+     * These two arrived with the template family and this predicate was not told about them, so
+     * they took the fallback: `template.import_refused` painted the word "Allowed" in the muted
+     * foreground on the one row an investigator opens this page to find. A person turning away
+     * forty pasted files in an afternoon read forty rows saying the deployment had allowed them.
+     *
+     * `template.capability_requested` is not here on purpose. Nothing was forbidden — configuration
+     * travels and capability does not, so an ask that lands unmet is the designed behaviour — and
+     * colouring it as a refusal would devalue the refusals that are real.
+     */
+    event.eventType === "template.import_refused" ||
+    event.eventType === "template.capability_declined";
   const stalled = event.eventType === "agent.stream_stalled";
+  const templateSubject = templateSubjectOf(event, payload);
   /*
    * Three different things, and the difference is what somebody comes to this row to find out.
    *
@@ -205,6 +232,15 @@ function Row({
          */}
         {event.eventType === "channel.routed" && event.targetId ? (
           <span title={event.targetId}>{nameFor(event.targetId)}</span>
+        ) : templateSubject ? (
+          <span
+            className="font-mono text-xs"
+            title={
+              typeof payload.digest === "string" ? payload.digest : undefined
+            }
+          >
+            {templateSubject}
+          </span>
         ) : /*
          * A discovery row's subject is the narrowing itself, so the numbers are the subject. A
          * reader asking "why did it not call the tool" needs to see that eleven of thirty were
@@ -300,6 +336,27 @@ function Row({
               : ""}
           </div>
         ) : null}
+        {/*
+         * Why a document was turned away, in the server's own code rather than in the sentence the
+         * person who pasted it read.
+         *
+         * The code is the half that was written to be counted — `templates/routes.ts` records it
+         * instead of the message so rows can be grouped — and grouping is the whole reason a reader
+         * comes to this page rather than reading one refusal at a time. Left off the row entirely,
+         * as it was, forty refusals looked identical and the fact that they were forty DIFFERENT
+         * refusals was unrecoverable.
+         *
+         * Not translated into prose here. The codes are declared on the server, they grow with the
+         * parser, and a lookup table kept in this file would go stale silently and print nothing at
+         * all for a code it had not heard of — which is worse than a slug a reader can read.
+         */}
+        {event.eventType === "template.import_refused" &&
+        typeof payload.reason === "string" ? (
+          <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+            {payload.reason}
+            {typeof payload.field === "string" ? ` · ${payload.field}` : ""}
+          </div>
+        ) : null}
         {event.eventType === "mcp.callback_refused" &&
         typeof payload.refusal === "string" ? (
           <div className="mt-0.5 text-xs text-muted-foreground">
@@ -380,6 +437,38 @@ const DISCOVERY_REASONS: Record<string, string> = {
   selected: "Chosen by skill",
 };
 
+/**
+ * What a template row is about, for the column that had nothing to draw for any of them.
+ *
+ * A template row's target is either an agent id, which this table keeps out of the subject column
+ * on purpose, or a bare digest under the target type `template`, which is not a named target. So
+ * every row in the family — including the refusals, the rows somebody opens this page to count —
+ * showed a dash where the subject goes, and one refused import was indistinguishable from another.
+ *
+ * The slug is what a person recognises: it is what the file is called and what they typed. The
+ * digest goes in the title rather than the cell, because the exact bytes matter to whoever is
+ * chasing a specific document and to nobody else, and it is forty characters of hex in a column
+ * that has to stay scannable. A refusal that never got far enough to be parsed carries neither, and
+ * then the digest alone is all there is; a file refused on its size carries not even that, and a
+ * dash is the honest answer.
+ *
+ * A capability row names the thing that was asked for instead. "Granted" and "declined" are only
+ * worth reading beside the connector or component they answer.
+ */
+function templateSubjectOf(
+  event: AuditEvent,
+  payload: Record<string, unknown>,
+): string | null {
+  if (!event.eventType.startsWith("template.")) return null;
+  if (typeof payload.kind === "string" && typeof payload.ref === "string") {
+    return `${payload.kind}: ${payload.ref}`;
+  }
+  if (typeof payload.templateSlug === "string") return payload.templateSlug;
+  if (typeof payload.slug === "string") return payload.slug;
+  if (event.targetType === "template" && event.targetId) return event.targetId;
+  return null;
+}
+
 const NAMED_TARGETS = new Set([
   "component",
   "mcp_tool",
@@ -424,6 +513,27 @@ const DECISIONS: Record<string, string> = {
   "mcp.call_failed": "The server did not answer",
   // Not "Blocked": nothing about the Bot was judged, because nothing proved which Bot it was.
   "mcp.callback_refused": "Could not prove which Bot it was",
+
+  /*
+   * The template family, all nine, because a table that does not know an event type does not fall
+   * silent — it says "Allowed".
+   *
+   * For the two refusals that was a lie, and for the other seven it was an answer to a question
+   * nobody asked: an export is not a permission, and a row reading "Allowed" against a coworker's
+   * configuration leaving the deployment as a file invites exactly the wrong conclusion about what
+   * was allowed to whom. Every one of them says what happened instead.
+   */
+  "template.exported": "Left here as a file",
+  "template.imported": "Installed from somebody's file",
+  "template.import_refused": "Refused, and nothing was installed",
+  // Not a refusal and not coloured as one. The install succeeded; the ask went unanswered, which is
+  // what "configuration travels and capability does not" looks like on a row.
+  "template.capability_requested": "Asked for, and not granted here",
+  "template.capability_granted": "A person granted this ask",
+  "template.capability_declined": "A person declined this ask",
+  "template.boundary_applied": "The template's boundary, put on this Bot",
+  "template.boundary_removed": "The template's boundary, taken off this Bot",
+  "template.retracted": "The import was taken back",
 
   "configuration.changed": "Configuration changed",
   "credential.created": "Credential saved",

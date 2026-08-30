@@ -71,8 +71,16 @@ export function templateInstallInputFrom(
   plan: TemplatePlan,
   origin: { from: TemplateInstallInput["from"]; sourceRef?: string },
 ): TemplateInstallInput {
-  const endpoint = values.endpoint.trim();
-  const key = values.authValue.trim();
+  /*
+   * Both of these are gated on what the PLAN asked for rather than on whatever the form happens to
+   * be holding. One form outlives "Read a different file", and it used to carry an address and a key
+   * typed for one template into the next one — including into a managed template, whose consent
+   * screen renders neither box, so a value nobody was shown travelled to a host nobody was shown and
+   * was stored in this deployment's vault. The screen clears the fields now; this is the second
+   * lock, so a field the screen is not rendering can never be sent whatever the state does.
+   */
+  const endpoint = plan.endpoint.required ? values.endpoint.trim() : "";
+  const key = plan.endpoint.requiresKey ? values.authValue.trim() : "";
   return {
     source: values.source,
     digest: plan.digest,
