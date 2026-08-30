@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   mkdir,
   mkdtemp,
+  open,
   readFile,
   rm,
   symlink,
@@ -88,6 +89,109 @@ describe("reading and writing inside the workspace", () => {
     // The true size is reported even though the contents were cut, so the Bot can say so rather
     // than believing it has the whole file.
     expect(read.bytes).toBe(16);
+  });
+
+  test("reads at most the configured byte limit plus one from a large file", async () => {
+    let requestedBytes = 0;
+    const ws = createWorkspace(
+      root,
+      { readBytes: 10, writeBytes: 1000, listEntries: 500 },
+      {
+        async openFile(path) {
+          const handle = await open(path, "r");
+          return {
+            async read(buffer, offset, length, position) {
+              requestedBytes = Math.max(requestedBytes, buffer.byteLength);
+              return handle.read(buffer, offset, length, position);
+            },
+            close: () => handle.close(),
+          };
+        },
+      },
+    );
+    await writeFile(join(root, "huge.txt"), "x".repeat(1_000_000));
+
+    const result = await ws.read("huge.txt");
+
+    expect(requestedBytes).toBe(11);
+    expect(result).toEqual({
+      path: "huge.txt",
+      text: "xxxxxxxxxx",
+      truncated: true,
+      bytes: 1_000_000,
+    });
+  });
+
+  test("continues bounded reads when the filesystem returns short chunks", async () => {
+    const source = Buffer.from("abcdef", "utf8");
+    let calls = 0;
+    const ws = createWorkspace(
+      root,
+      { readBytes: 5, writeBytes: 1000, listEntries: 500 },
+      {
+        async openFile() {
+          return {
+            async read(buffer, offset, length, position) {
+              calls += 1;
+              const start = position ?? 0;
+              const bytesRead = Math.min(2, length, source.length - start);
+              if (bytesRead > 0) {
+                source.copy(buffer, offset, start, start + bytesRead);
+              }
+              return { bytesRead };
+            },
+            async close() {},
+          };
+        },
+      },
+    );
+    await writeFile(join(root, "chunked.txt"), "xxxxxx");
+
+    const result = await ws.read("chunked.txt");
+
+    expect(calls).toBe(3);
+    expect(result).toEqual({
+      path: "chunked.txt",
+      text: "abcde",
+      truncated: true,
+      bytes: 6,
+    });
+  });
+
+  test("distinguishes exact-limit reads from limit-plus-one reads", async () => {
+    const ws = createWorkspace(root, {
+      readBytes: 4,
+      writeBytes: 1000,
+      listEntries: 500,
+    });
+    await writeFile(join(root, "exact.txt"), "1234");
+    await writeFile(join(root, "over.txt"), "12345");
+
+    expect(await ws.read("exact.txt")).toMatchObject({
+      text: "1234",
+      truncated: false,
+      bytes: 4,
+    });
+    expect(await ws.read("over.txt")).toMatchObject({
+      text: "1234",
+      truncated: true,
+      bytes: 5,
+    });
+  });
+
+  test("does not emit a replacement artifact when truncation splits UTF-8", async () => {
+    const ws = createWorkspace(root, {
+      readBytes: 5,
+      writeBytes: 1000,
+      listEntries: 500,
+    });
+    await writeFile(join(root, "unicode.txt"), "abc📊tail");
+
+    const result = await ws.read("unicode.txt");
+
+    expect(result.text).toBe("abc");
+    expect(result.text).not.toContain("�");
+    expect(result.truncated).toBe(true);
   });
 
   test("a write that exceeds the limit is refused before it touches the disk", async () => {

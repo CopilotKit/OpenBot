@@ -28,3 +28,7 @@ app/.tanstack/
 # it is what makes that fetch reproducible, and ignoring it meant every build resolved the dependency
 # afresh, so CI and a customer install could take different subchart versions with no diff to show it.
 charts/*/charts/
+
+# Added by CopilotKit CLI: the selected Intelligence project, the declared Channel, and the
+# credentials its guided setup writes. All three are one deployment's, not the template's.
+.copilotkit/

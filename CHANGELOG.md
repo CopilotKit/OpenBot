@@ -216,6 +216,34 @@ failed read of that used to be treated as "reaches nothing", which is a statemen
 deployment rather than an absence of one: a database that blinked quietly re-routed messages away
 from the coworker that could actually do the work. It now fails the request instead.
 
+### A coworker answers in Slack, as the person who asked
+
+A coworker only existed where OpenBot was open, so a question asked in a Slack thread reached one
+only if somebody read it there, opened OpenBot, retyped it, and pasted the answer back. Mentioning
+the deployment's Slack app in a thread now names or describes the coworker wanted, the thread is
+pinned to that coworker, and replies continue with it without another mention.
+
+The deployment stays the authority for everything that decides. Every turn resolves the Slack
+speaker to an OpenBot user and reads THAT person's roster, grants, standing instructions and audit
+identity, so a second person in the same thread who cannot see the pinned coworker is refused in a
+sentence rather than answered as the person who started it, and somebody with no linked account is
+told so and handed an expiring link rather than run as a guess. Secrets, sign-ins and codes are
+never asked for in Slack: the thread gets a link to that coworker's own screen in OpenBot, and the
+bounded wait resumes when control is released there. A Slack turn's computer runs through the same
+gateway a browser turn's does, so the same boundary decides and the same audit row is written.
+
+Off unless configured, and no Slack credential is read by this deployment. The Slack app is
+attached to the same Intelligence project through `npx copilotkit@latest channels setup`, which
+Intelligence then owns; see `docs/slack.md`.
+
+### A Slack conversation is readable, and can be finished, in OpenBot
+
+The Slack side of a conversation was only in Slack. A Slack thread now appears in the conversation
+sidebar beside the channels already listed, labelled, and opens a read-only transcript of the turns
+as they were stored. The account-link confirmation and the secure prompt a Slack turn sends somebody
+to have somewhere to land: both sit behind the existing session guard, and a sign-in on the way
+returns to the confirmation rather than to the roster.
+
 ## 0.0.8
 
 ### A desktop shell that installs OpenBot and then becomes it

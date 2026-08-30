@@ -71,6 +71,39 @@ describe("deployment configuration", () => {
     expect(config.tenantPackageDirectory).toBe("../examples/fintech");
   });
 
+  test("loads a canonical managed Slack tenant fallback", () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        OPENBOT_SLACK_TENANT_ID: " T05QFA4BW9X ",
+      }).slackTenantId,
+    ).toBe("T05QFA4BW9X");
+  });
+
+  test.each(["unknown", " UNKNOWN "])(
+    "rejects the non-canonical managed Slack tenant %j",
+    (tenantId) => {
+      expect(() =>
+        loadConfig({
+          ...baseEnvironment,
+          OPENBOT_SLACK_TENANT_ID: tenantId,
+        }),
+      ).toThrow(
+        "OPENBOT_SLACK_TENANT_ID must be a canonical Slack workspace ID, not unknown",
+      );
+    },
+  );
+
+  test("leaves managed Slack tenant fallback disabled when unset or blank", () => {
+    expect(loadConfig(baseEnvironment).slackTenantId).toBeUndefined();
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        OPENBOT_SLACK_TENANT_ID: "   ",
+      }).slackTenantId,
+    ).toBeUndefined();
+  });
+
   test("allows deployment without an authentication provider, when asked to", () => {
     const config = loadConfig({
       DATABASE_URL: baseEnvironment.DATABASE_URL,

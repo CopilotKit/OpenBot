@@ -24,8 +24,8 @@
 import {
   lstat,
   mkdir,
+  open,
   readdir,
-  readFile,
   readlink,
   realpath,
   stat,
@@ -40,6 +40,7 @@ import {
   resolve,
   sep,
 } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 export class WorkspacePathError extends Error {
   constructor(message: string) {
@@ -90,9 +91,25 @@ export const DEFAULT_WORKSPACE_LIMITS: WorkspaceLimits = {
   listEntries: 500,
 };
 
+type WorkspaceDependencies = {
+  /** Injectable only so tests can prove bounded allocation and short-read handling. */
+  openFile?: (path: string) => Promise<WorkspaceReadHandle>;
+};
+
+type WorkspaceReadHandle = {
+  read(
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number,
+  ): Promise<{ bytesRead: number }>;
+  close(): Promise<void>;
+};
+
 export function createWorkspace(
   rootPath: string,
   limits: WorkspaceLimits = DEFAULT_WORKSPACE_LIMITS,
+  dependencies: WorkspaceDependencies = {},
 ) {
   /**
    * Turn a Bot's requested path into a real one inside the workspace, or refuse.
@@ -268,16 +285,28 @@ export function createWorkspace(
         );
       }
 
-      const buffer = await readFile(full);
-      const slice = buffer.subarray(0, limits.readBytes);
+      // One look-ahead byte independently proves truncation if the file grows after stat. The
+      // returned text remains capped at readBytes and the whole file is never allocated.
+      const sample = await readFileAtMost(
+        full,
+        limits.readBytes + 1,
+        dependencies.openFile,
+      );
+      const slice = sample.subarray(0, limits.readBytes);
+      const truncated =
+        info.size > limits.readBytes || sample.byteLength > limits.readBytes;
+      const decoder = new StringDecoder("utf8");
+      // When truncation bisects a code point, StringDecoder holds that incomplete suffix. Do not
+      // flush it: doing so would invent a replacement glyph that was not in the file.
+      const text = decoder.write(slice) + (truncated ? "" : decoder.end());
       return {
         path: requested,
         // Decoded as UTF-8. A binary file therefore comes back as replacement characters rather
         // than as a base64 blob nothing can read: this tool is for the notes, CSVs and JSON a Bot
         // actually works with, and pretending otherwise would invite it to try images.
-        text: slice.toString("utf8"),
-        truncated: buffer.byteLength > slice.byteLength,
-        bytes: buffer.byteLength,
+        text,
+        truncated,
+        bytes: info.size,
       };
     },
 
@@ -306,6 +335,26 @@ export function createWorkspace(
       return { path: requested, bytes, appended: options.append === true };
     },
   };
+}
+
+async function readFileAtMost(
+  path: string,
+  bytes: number,
+  openFile: WorkspaceDependencies["openFile"],
+): Promise<Buffer> {
+  const handle = openFile ? await openFile(path) : await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(bytes);
+    let total = 0;
+    while (total < bytes) {
+      const result = await handle.read(buffer, total, bytes - total, total);
+      if (result.bytesRead === 0) break;
+      total += result.bytesRead;
+    }
+    return buffer.subarray(0, total);
+  } finally {
+    await handle.close();
+  }
 }
 
 export type Workspace = ReturnType<typeof createWorkspace>;
