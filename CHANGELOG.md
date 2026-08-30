@@ -200,6 +200,22 @@ through the proxy and the proxy no longer offers to carry one. In production the
 app itself and answers the upgrade on the same origin, so the sockets stay on the browser's own
 host, which is what an ingress terminating TLS on 443 requires and a fixed server port would break.
 
+### A coworker named in the message is routed to without asking a model
+
+Naming a coworker in the text — "ask Risk Analyst to review this" — went to the intent router like
+any other message, so the deployment paid a model call to be told what the person had already said,
+and sometimes was told something else. A name that matches exactly one coworker on that person's
+roster now routes straight to them, recorded as `named by the person asking` on the same
+`channel.routed` row. A name that matches more than one is refused with both names rather than
+guessed at, and a name nobody on the roster answers to falls through to the router as before.
+
+### Routing refuses rather than routes on a connector read it could not make
+
+Which systems a coworker can reach is weighed by the router alongside what the coworker is for. A
+failed read of that used to be treated as "reaches nothing", which is a statement about the
+deployment rather than an absence of one: a database that blinked quietly re-routed messages away
+from the coworker that could actually do the work. It now fails the request instead.
+
 ## 0.0.8
 
 ### A desktop shell that installs OpenBot and then becomes it
