@@ -115,6 +115,15 @@ beforeAll(async () => {
     .onConflictDoNothing();
 });
 
+/*
+ * The pool goes back, and this is not tidiness.
+ *
+ * `bun test` runs every file in one process, so a pool left open here is held for the rest of the
+ * suite. Enough files doing that and the deployment's own PostgreSQL runs out of connections
+ * partway through a later file, which reads as the run dying somewhere unrelated rather than as a
+ * connection limit. Every other integration test here closes; these did not, and CI died at a
+ * different file on each run until they did.
+ */
 afterAll(async () => {
   // Nothing is cleaned when the pool is wedged: the rows this file wrote are inside a transaction
   // that will never end, so a delete would either skip them or queue behind it.
@@ -125,6 +134,9 @@ afterAll(async () => {
   await database.delete(agents).where(eq(agents.id, bot));
   await database.delete(users).where(eq(users.id, importer));
   // The trail rows stay. `audit_events` is append-only in the database, which is the point of it.
+
+  await database.$client.close();
+  await pinned.$client.close();
 });
 
 test("an install and a grant inside one transaction never ask for a second connection", async () => {

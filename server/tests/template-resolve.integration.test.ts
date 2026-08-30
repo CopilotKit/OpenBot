@@ -130,6 +130,15 @@ beforeAll(async () => {
     .onConflictDoNothing();
 });
 
+/*
+ * The pool goes back, and this is not tidiness.
+ *
+ * `bun test` runs every file in one process, so a pool left open here is held for the rest of the
+ * suite. Enough files doing that and the deployment's own PostgreSQL runs out of connections
+ * partway through a later file, which reads as the run dying somewhere unrelated rather than as a
+ * connection limit. Every other integration test here closes; these did not, and CI died at a
+ * different file on each run until they did.
+ */
 afterAll(async () => {
   await database
     .delete(skills)
@@ -144,6 +153,8 @@ afterAll(async () => {
   await database.delete(mcpServers).where(eq(mcpServers.id, connector));
   await database.delete(components).where(eq(components.name, componentName));
   await database.delete(users).where(eq(users.id, owner));
+
+  await database.$client.close();
 });
 
 describe("what a template asks for, against this deployment", () => {
