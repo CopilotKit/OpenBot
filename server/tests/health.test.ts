@@ -7,6 +7,36 @@ const app = createApp(
   loadConfig({
     ...testEnvironment(),
   }),
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  () => ({
+    status: "setup_required",
+    transport: "online",
+    provider: "not_attached",
+    token: "managed-provider-secret-must-not-leak",
+    workspaceId: "T-secret-workspace",
+  }),
 );
 
 describe("health endpoint", () => {
@@ -31,6 +61,13 @@ describe("runtime capabilities", () => {
       // A boolean, not a list: naming the registered providers would tell anybody who loads the
       // sign-in page which companies use this deployment.
       ssoConfigured: false,
+      channels: {
+        slack: {
+          status: "setup_required",
+          transport: "online",
+          provider: "not_attached",
+        },
+      },
     });
   });
 
@@ -49,9 +86,12 @@ describe("runtime capabilities", () => {
       "durableHistory",
       "authProviders",
       "ssoConfigured",
+      "channels",
     ]);
     // The provider list is names, never the clients and secrets behind them.
     expect(body).not.toContain("google-client-secret");
+    expect(body).not.toContain("managed-provider-secret-must-not-leak");
+    expect(body).not.toContain("T-secret-workspace");
   });
 });
 

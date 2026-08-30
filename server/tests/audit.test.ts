@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import { createApp } from "../src/app";
 import {
+  type AuditEventType,
   auditEventTypes,
   recordAuditEvent,
   redactAuditPayload,
@@ -45,8 +46,15 @@ describe("audit payload redaction", () => {
         "agent.invoked",
         "mcp.call_succeeded",
         "mcp.call_rejected",
+        "external_identity.linked",
       ]),
     );
+  });
+
+  test("types an external identity link as a canonical audit event", () => {
+    const eventType: AuditEventType = "external_identity.linked";
+
+    expect(eventType).toBe("external_identity.linked");
   });
 
   test("removes secret values and document content recursively", () => {

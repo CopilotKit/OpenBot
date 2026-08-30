@@ -274,6 +274,27 @@ export type ControlState = {
   reason?: string;
   /** The Bot has asked and nobody has taken over yet. */
   requested: boolean;
+  helpRequestId?: string;
+  secretWanted?: string;
+  secretRef?: string;
+  secretSnapshotId?: number;
+  secretRequestedAt?: string;
+  secretRequestId?: string;
+};
+
+export type AssistanceStatus =
+  | "pending"
+  | "human"
+  | "completed"
+  | "expired"
+  | "cancelled"
+  | "superseded"
+  | "unknown";
+
+export type AssistanceCancellationResult = {
+  cancelled: boolean;
+  state: ControlState;
+  status: AssistanceStatus;
 };
 
 /**

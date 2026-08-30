@@ -621,8 +621,9 @@ serve<StreamData>({
     if (url.pathname === "/control/request" && request.method === "POST") {
       const body = (await request.json().catch(() => null)) as {
         reason?: unknown;
+        requestId?: unknown;
       } | null;
-      return json(session.control.requestHelp(body?.reason));
+      return json(session.control.requestHelp(body?.reason, body?.requestId));
     }
 
     // The Bot asking for one value it must not be told. It has already focused the field.
@@ -640,6 +641,34 @@ serve<StreamData>({
         }
         throw error;
       }
+    }
+
+    // Conditional cleanup for an assistance request whose Slack handoff definitely failed. The
+    // state machine matches the opaque generation and refuses to change a human-owned browser.
+    if (
+      url.pathname === "/control/assistance/cancel" &&
+      request.method === "POST"
+    ) {
+      const body = (await request.json().catch(() => null)) as {
+        requestId?: unknown;
+      } | null;
+      if (typeof body?.requestId !== "string" || !body.requestId) {
+        return json({ error: "An assistance request id is required." }, 400);
+      }
+      return json(session.control.cancelAssistance(body.requestId));
+    }
+
+    if (
+      url.pathname === "/control/assistance/status" &&
+      request.method === "POST"
+    ) {
+      const body = (await request.json().catch(() => null)) as {
+        requestId?: unknown;
+      } | null;
+      if (typeof body?.requestId !== "string" || !body.requestId) {
+        return json({ error: "An assistance request id is required." }, 400);
+      }
+      return json({ status: session.control.assistanceStatus(body.requestId) });
     }
 
     /**

@@ -15,6 +15,8 @@ import {
   channels,
   credentialKind,
   credentials,
+  externalThreadBindings,
+  externalThreadMessages,
   intelligenceChannelMappings,
   mcpUserCredentials,
   sessions,
@@ -159,6 +161,62 @@ describe("OpenBot database schema", () => {
     expect(Object.keys(accounts)).toEqual(
       expect.arrayContaining(["userId", "providerId", "accountId"]),
     );
+  });
+
+  test("indexes external Slack thread listing and latest-message lookups", () => {
+    const bindingIndexes = getTableConfig(externalThreadBindings).indexes.map(
+      (index) => ({
+        name: index.config.name,
+        columns: index.config.columns.map((column) => ({
+          name: "name" in column ? column.name : undefined,
+          order:
+            "indexConfig" in column &&
+            typeof column.indexConfig === "object" &&
+            column.indexConfig !== null &&
+            "order" in column.indexConfig
+              ? column.indexConfig.order
+              : "asc",
+        })),
+        unique: index.config.unique,
+        method: index.config.method,
+      }),
+    );
+    const messageIndexes = getTableConfig(externalThreadMessages).indexes.map(
+      (index) => ({
+        name: index.config.name,
+        columns: index.config.columns.map((column) => ({
+          name: "name" in column ? column.name : undefined,
+          order:
+            "indexConfig" in column &&
+            typeof column.indexConfig === "object" &&
+            column.indexConfig !== null &&
+            "order" in column.indexConfig
+              ? column.indexConfig.order
+              : "asc",
+        })),
+        unique: index.config.unique,
+        method: index.config.method,
+      }),
+    );
+
+    expect(bindingIndexes).toContainEqual({
+      name: "external_thread_bindings_creator_thread_idx",
+      columns: [
+        { name: "created_by_user_id", order: "asc" },
+        { name: "channels_thread_id", order: "asc" },
+      ],
+      unique: false,
+      method: "btree",
+    });
+    expect(messageIndexes).toContainEqual({
+      name: "external_thread_messages_thread_sequence_idx",
+      columns: [
+        { name: "channels_thread_id", order: "asc" },
+        { name: "sequence", order: "desc" },
+      ],
+      unique: false,
+      method: "btree",
+    });
   });
 
   test("defines the exact agent profile and roster preference contracts", () => {

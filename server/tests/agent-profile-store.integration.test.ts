@@ -280,6 +280,42 @@ describe("agent profile store integration", () => {
     expect(preference?.hiddenAt).toBeNull();
   });
 
+  test("lists canonical accessible ids without treating hidden as revoked access", async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const admin = await createUser("admin");
+    const ownedPrivate = await createProfileFixture({
+      owner,
+      visibility: "private",
+    });
+    const publicHidden = await createProfileFixture({
+      owner: other,
+      visibility: "public",
+    });
+    const inaccessiblePrivate = await createProfileFixture({
+      owner: other,
+      visibility: "private",
+    });
+    const deletedPublic = await createProfileFixture({
+      owner: other,
+      visibility: "public",
+    });
+    await store.setHidden(owner, publicHidden.agentId, true);
+    await store.softDelete(other, deletedPublic.agentId);
+
+    const ownerIds = await store.listAccessibleIds(owner);
+    const adminIds = await store.listAccessibleIds(admin);
+
+    expect(ownerIds).toContain(ownedPrivate.agentId);
+    expect(ownerIds).toContain(publicHidden.agentId);
+    expect(ownerIds).not.toContain(inaccessiblePrivate.agentId);
+    expect(ownerIds).not.toContain(deletedPublic.agentId);
+    expect(adminIds).toContain(ownedPrivate.agentId);
+    expect(adminIds).toContain(publicHidden.agentId);
+    expect(adminIds).toContain(inaccessiblePrivate.agentId);
+    expect(adminIds).not.toContain(deletedPublic.agentId);
+  });
+
   test("takes the endpoint and ignores every field a caller must not set", async () => {
     const owner = await createUser();
     const deploymentPackage = await createPackage();

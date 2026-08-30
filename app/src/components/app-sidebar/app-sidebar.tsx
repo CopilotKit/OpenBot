@@ -52,18 +52,38 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
+import { externalThreadListQueryOptions } from "@/lib/external/queries";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTime } from "@/lib/relative-time";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Channel } from "./channel";
+import {
+  conversationRoster,
+  matchingRoster,
+  type RosterSourceStatus,
+  rosterKey,
+  shouldShowEmptyRoster,
+  shouldShowSearchEmpty,
+  type SidebarRosterRow,
+} from "./roster";
+import { SlackChannel, SlackRosterProblem } from "./slack-channel";
 
 const appLinkOptions = { to: "/" } satisfies LinkOptions;
 const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
 const settingsLinkOptions = { to: "/settings" } satisfies LinkOptions;
 
 const userMenuItemClassName = "gap-2 px-2 py-1.5";
+
+function rosterSourceStatus(query: {
+  isError: boolean;
+  isSuccess: boolean;
+}): RosterSourceStatus {
+  if (query.isSuccess) return "success";
+  if (query.isError) return "error";
+  return "pending";
+}
 
 function UserAvatar() {
   const { data: currentUser } = useQuery(currentUserQueryOptions());
@@ -86,35 +106,6 @@ function UserAvatar() {
  * Cap layout animation because `layout` measures every animated row on each reorder.
  */
 const MAX_ANIMATED_ROWS = 60;
-
-/**
- * The roster, narrowed to what the person typed.
- *
- * Matches the channel's name and the last thing said in it, because those are the two things the
- * row actually shows — searching against something invisible returns results a person cannot
- * account for. Message history beyond the last line is not here to search: it lives in the thread
- * store, and reaching for it is a server endpoint rather than a filter.
- *
- * An empty query returns the input array unchanged rather than a copy, so typing and clearing does
- * not hand `AnimatePresence` a new array identity and restage the whole list.
- */
-function matchingChannels(
-  channels: ChannelSummary[] | undefined,
-  query: string,
-): ChannelSummary[] {
-  if (!channels) {
-    return [];
-  }
-  const needle = query.trim().toLowerCase();
-  if (!needle) {
-    return channels;
-  }
-  return channels.filter((channel) =>
-    [channel.name, channel.lastMessage].some((field) =>
-      field?.toLowerCase().includes(needle),
-    ),
-  );
-}
 
 /**
  * Pinned channels first, everything else after, newest activity first within each group.
@@ -162,9 +153,11 @@ export function isUnread(
  * moves under the cursor.
  */
 function ChannelRow({
+  animateVisibility,
   channel,
   animateOrder,
 }: {
+  animateVisibility: boolean;
   channel: ChannelSummary;
   animateOrder: boolean;
 }) {
@@ -178,12 +171,18 @@ function ChannelRow({
   });
   return (
     <motion.div
-      animate={{ opacity: 1, transform: "translateY(0px)" }}
-      initial={{
-        opacity: 0,
-        transform: shouldReduceMotion ? "none" : "translateY(-8px)",
-      }}
-      exit={{ opacity: 0 }}
+      animate={
+        animateVisibility ? { opacity: 1, transform: "translateY(0px)" } : false
+      }
+      initial={
+        animateVisibility
+          ? {
+              opacity: 0,
+              transform: shouldReduceMotion ? "none" : "translateY(-8px)",
+            }
+          : false
+      }
+      exit={animateVisibility ? { opacity: 0 } : undefined}
       layout={animateOrder && !shouldReduceMotion ? "position" : false}
       transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
     >
@@ -204,25 +203,68 @@ function ChannelRow({
   );
 }
 
+function SlackRow({
+  animateVisibility,
+  animateOrder,
+  thread,
+}: {
+  animateVisibility: boolean;
+  animateOrder: boolean;
+  thread: SidebarRosterRow & { kind: "slack" };
+}) {
+  const shouldReduceMotion = useReducedMotion();
+  return (
+    <motion.div
+      animate={
+        animateVisibility ? { opacity: 1, transform: "translateY(0px)" } : false
+      }
+      initial={
+        animateVisibility
+          ? {
+              opacity: 0,
+              transform: shouldReduceMotion ? "none" : "translateY(-8px)",
+            }
+          : false
+      }
+      exit={animateVisibility ? { opacity: 0 } : undefined}
+      layout={animateOrder && !shouldReduceMotion ? "position" : false}
+      transition={{ duration: ENTRANCE_SECONDS, ease: EASE_OUT }}
+    >
+      <SlackChannel
+        lastMessageAt={
+          thread.thread.lastMessageAt
+            ? relativeTime(thread.thread.lastMessageAt)
+            : undefined
+        }
+        thread={thread.thread}
+      />
+    </motion.div>
+  );
+}
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { data: currentUser } = useQuery(currentUserQueryOptions());
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const signOut = useMutation(signOutMutationOptions(queryClient));
   const channels = useInfiniteQuery(channelListQueryOptions());
+  const slackThreads = useInfiniteQuery(externalThreadListQueryOptions());
   // One socket for the app, opened where the roster is kept live.
   useChannelEvents();
   const [search, setSearch] = useState("");
   const searching = search.trim().length > 0;
-  const visibleChannels = pinnedFirst(matchingChannels(channels.data, search));
+  const roster = conversationRoster(channels.data, slackThreads.data);
+  const visibleRoster = matchingRoster(roster, search);
+  const channelStatus = rosterSourceStatus(channels);
+  const slackThreadStatus = rosterSourceStatus(slackThreads);
   /*
    * FILTERING DOES NOT ANIMATE. Rows exit and relayout on every keystroke otherwise, which is a
    * list thrashing under somebody who is still typing — and the moving target is the very thing
    * they are trying to read. Order animation is for a channel that was just spoken in, which is
    * occasional; this is not.
    */
-  const animateOrder =
-    !searching && (channels.data?.length ?? 0) <= MAX_ANIMATED_ROWS;
+  const animateOrder = !searching && roster.length <= MAX_ANIMATED_ROWS;
+  const animateVisibility = !searching;
 
   const handleSignOut = async () => {
     await signOut.mutateAsync();
@@ -266,7 +308,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuItem>
               <InputGroup className="bg-background text-sm rounded-lg h-9">
                 <InputGroupInput
-                  aria-label="Search channels"
+                  aria-label="Search conversations"
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search..."
                   value={search}
@@ -283,7 +325,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
              * the box has to say so and quote it back — told "you don't have channels yet" while
              * holding a typo, a person reads their conversations as gone.
              */}
-            {searching && visibleChannels.length === 0 ? (
+            {shouldShowSearchEmpty(
+              visibleRoster,
+              search,
+              channelStatus,
+              slackThreadStatus,
+            ) ? (
               <div className="py-4">
                 <Empty className="border border-dashed min-h-[40dvh]">
                   <EmptyHeader>
@@ -296,7 +343,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </Empty>
               </div>
             ) : null}
-            {!searching && channels.data?.length === 0 ? (
+            {!searching &&
+            shouldShowEmptyRoster(
+              channels.data,
+              slackThreads.data,
+              channels.isSuccess,
+              slackThreads.isSuccess,
+            ) ? (
               <div className="py-4">
                 <Empty className="border border-dashed min-h-[40dvh]">
                   <EmptyHeader>
@@ -309,14 +362,32 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 </Empty>
               </div>
             ) : null}
+            {slackThreads.isError ? (
+              <SlackRosterProblem
+                isRetrying={slackThreads.isFetching}
+                onRetry={() => {
+                  void slackThreads.refetch();
+                }}
+              />
+            ) : null}
             <AnimatePresence initial={false}>
-              {visibleChannels.map((channel) => (
-                <ChannelRow
-                  key={channel.id}
-                  animateOrder={animateOrder}
-                  channel={channel}
-                />
-              ))}
+              {visibleRoster.map((row) =>
+                row.kind === "openbot" ? (
+                  <ChannelRow
+                    key={rosterKey(row)}
+                    animateVisibility={animateVisibility}
+                    animateOrder={animateOrder}
+                    channel={row.channel}
+                  />
+                ) : (
+                  <SlackRow
+                    key={rosterKey(row)}
+                    animateVisibility={animateVisibility}
+                    animateOrder={animateOrder}
+                    thread={row}
+                  />
+                ),
+              )}
             </AnimatePresence>
           </SidebarGroup>
         </SidebarMenu>
