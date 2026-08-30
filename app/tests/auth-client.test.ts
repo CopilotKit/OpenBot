@@ -7,7 +7,16 @@ import { providerName, signInWith } from "@/lib/auth/client";
  * is the browser's own business, and threading it through as an argument would only move the same
  * value to the caller.
  */
-(globalThis as { window?: unknown }).window = {
+/*
+ * Only when there is not a window already, which there now sometimes is.
+ *
+ * Assigning unconditionally used to be harmless because nothing in this suite installed a DOM. The
+ * rendered tests do, and this stub has a `location` and nothing else — no `history`, no `document`
+ * behind it — so overwriting a registered window left `document` defined and `window.history`
+ * undefined. `app/src/router.tsx` builds its history at module scope from exactly that pair, and
+ * threw while being imported by whichever file reached it next.
+ */
+(globalThis as { window?: unknown }).window ??= {
   location: { origin: "http://localhost:3010" },
 };
 
