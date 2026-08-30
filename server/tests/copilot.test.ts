@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { HttpAgent } from "@ag-ui/client";
+import type { AbstractAgent, RunAgentInput } from "@ag-ui/client";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import { createActorAgentResolver } from "../src/agents/agent-resolver";
@@ -7,11 +7,18 @@ import {
   buildAgents,
   builtInAgentConfiguration,
   createRequestAgents,
+  type mountCopilotRuntime,
   registeredAgentFromRow,
   resolveRuntimeAgents,
   standingRoleMessage,
 } from "../src/copilot";
 import { grantedToolGuidance } from "../src/plugins/tools";
+
+test("mountCopilotRuntime preserves the positional custom base path", () => {
+  const customBasePath: Parameters<typeof mountCopilotRuntime>[4] =
+    "/custom/copilotkit";
+  expect(customBasePath).toBe("/custom/copilotkit");
+});
 
 // Every agent row now joins its profile, so the row a coworker is built from always names it.
 const assistantRow = {
@@ -165,7 +172,7 @@ describe("registered Copilot agents", () => {
     );
 
     expect(agents["general-assistant"]).toBeInstanceOf(BuiltInAgent);
-    expect(agents.risk).toBeInstanceOf(HttpAgent);
+    expect(agents.risk?.agentId).toBe("risk");
   });
 
   /*
@@ -207,7 +214,7 @@ describe("registered Copilot agents", () => {
     );
 
     expect(watched).toEqual([{ id: "risk", name: "Risk" }]);
-    expect(agents.risk).toBeInstanceOf(HttpAgent);
+    expect(agents.risk?.agentId).toBe("risk");
   });
 
   /*
@@ -219,7 +226,11 @@ describe("registered Copilot agents", () => {
    * goes.
    */
   test("dials a remote Bot with the fetch it was given, guarded or not", async () => {
-    const dialler = async () => new Response(null);
+    let dialled = 0;
+    const dialler = async (_url: string, request: RequestInit) => {
+      dialled += 1;
+      return completeAgUiResponse(request);
+    };
     const registered = [
       {
         id: "risk",
@@ -244,9 +255,9 @@ describe("registered Copilot agents", () => {
         dialler,
       )
     ).risk;
-    if (!(plain instanceof HttpAgent))
-      throw new Error("Expected the remote agent");
-    expect(plain.fetch).toBe(dialler);
+    if (!plain) throw new Error("Expected the remote agent");
+    await runDirect(plain);
+    expect(dialled).toBe(1);
 
     // With a timeout configured the watch wraps it, so the guard is handed the dialling fetch rather
     // than replacing it. A deployment gets both, not whichever was wired last.
@@ -271,8 +282,7 @@ describe("registered Copilot agents", () => {
         dialler,
       )
     ).risk;
-    if (!(watched instanceof HttpAgent))
-      throw new Error("Expected the remote agent");
+    expect(watched?.agentId).toBe("risk");
     expect(handed).toBe(dialler);
   });
 
@@ -285,7 +295,11 @@ describe("registered Copilot agents", () => {
    * redirect anywhere.
    */
   test("carries the dialling fetch through resolveRuntimeAgents", async () => {
-    const dialler = async () => new Response(null);
+    let dialled = 0;
+    const dialler = async (_url: string, request: RequestInit) => {
+      dialled += 1;
+      return completeAgUiResponse(request);
+    };
     const agents = await resolveRuntimeAgents(
       async () => [
         {
@@ -307,9 +321,9 @@ describe("registered Copilot agents", () => {
     );
 
     const risk = agents.risk;
-    if (!(risk instanceof HttpAgent))
-      throw new Error("Expected the remote agent");
-    expect(risk.fetch).toBe(dialler);
+    if (!risk) throw new Error("Expected the remote agent");
+    await runDirect(risk);
+    expect(dialled).toBe(1);
   });
 
   /*
@@ -321,7 +335,16 @@ describe("registered Copilot agents", () => {
    * could have produced and then without one, and the two are compared.
    */
   test("leaves a remote Bot's fetch alone when no timeout is configured", async () => {
-    const sentinel = async () => new Response(null);
+    let guardedCalls = 0;
+    let unguardedCalls = 0;
+    const sentinel = async (_url: string, request: RequestInit) => {
+      guardedCalls += 1;
+      return completeAgUiResponse(request);
+    };
+    const ordinary = async (_url: string, request: RequestInit) => {
+      unguardedCalls += 1;
+      return completeAgUiResponse(request);
+    };
     const registered = [
       {
         id: "risk",
@@ -341,13 +364,25 @@ describe("registered Copilot agents", () => {
         stop: () => undefined,
       })
     ).risk;
-    const unguarded = (await buildAgents(registered, model, null)).risk;
-    if (!(guarded instanceof HttpAgent) || !(unguarded instanceof HttpAgent)) {
-      throw new Error("Expected the remote agent");
-    }
-
-    expect(guarded.fetch).toBe(sentinel);
-    expect(unguarded.fetch).not.toBe(sentinel);
+    const unguarded = (
+      await buildAgents(
+        registered,
+        model,
+        null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ordinary,
+      )
+    ).risk;
+    if (!guarded || !unguarded) throw new Error("Expected remote agents");
+    await runDirect(guarded);
+    await runDirect(unguarded);
+    expect(guardedCalls).toBe(1);
+    expect(unguardedCalls).toBe(1);
   });
 
   test("resolves fresh built-in agents and credentials for every request", async () => {
@@ -406,7 +441,7 @@ describe("registered Copilot agents", () => {
       },
     );
 
-    expect(agents.risk).toBeInstanceOf(HttpAgent);
+    expect(agents.risk?.agentId).toBe("risk");
     expect(resolverInvoked).toBe(false);
   });
 });
@@ -534,7 +569,7 @@ describe("standing agent roles", () => {
 
     expect(seen.request).toBe(request);
     expect(seen.actors).toEqual([{ id: "user-7", role: "user" }]);
-    expect(resolved.agent_expense).toBeInstanceOf(HttpAgent);
+    expect(resolved.agent_expense?.agentId).toBe("agent_expense");
   });
 
   test("rebuilds each agent from the loader so an edited role applies to the next run", async () => {
@@ -583,6 +618,37 @@ describe("standing agent roles", () => {
 
 function userMessage(content: string) {
   return { id: `user-${content}`, role: "user" as const, content };
+}
+
+async function runDirect(agent: AbstractAgent) {
+  const input: RunAgentInput = {
+    threadId: "direct-thread",
+    runId: "direct-run",
+    state: {},
+    messages: [],
+    tools: [],
+    context: [],
+    forwardedProps: {},
+  };
+  await new Promise<void>((resolve, reject) => {
+    agent.run(input).subscribe({ complete: resolve, error: reject });
+  });
+}
+
+function completeAgUiResponse(request: RequestInit) {
+  const input = JSON.parse(String(request.body)) as {
+    threadId: string;
+    runId: string;
+  };
+  return new Response(
+    [
+      { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+      { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+    ]
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join(""),
+    { headers: { "content-type": "text/event-stream" } },
+  );
 }
 
 /**

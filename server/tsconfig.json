@@ -7,5 +7,9 @@
   // type-checked and turning it on surfaces a few hundred years of accumulated `any`. It is what let
   // a test pass an options object where a connection string belongs and hear nothing back. Its own
   // change, because it is a sweep and not a fix.
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@copilotkit/channels"
+  },
   "include": ["src", "scripts"]
 }

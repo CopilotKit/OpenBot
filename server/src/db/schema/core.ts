@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  bigserial,
   boolean,
+  check,
   index,
   pgEnum,
   pgTable,
@@ -203,6 +205,34 @@ export const revokedAccess = pgTable("revoked_access", {
   revokedBy: text("revoked_by").notNull(),
 });
 
+/** An external workspace identity, permanently associated with one OpenBot user. */
+export const externalUserLinks = pgTable(
+  "external_user_links",
+  {
+    provider: text("provider").notNull(),
+    providerTenantId: text("provider_tenant_id").notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    openbotUserId: text("openbot_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    providerEmail: text("provider_email"),
+    linkedAt: timestamp("linked_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.provider, table.providerTenantId, table.providerUserId],
+    }),
+    uniqueIndex("external_user_links_openbot_workspace_idx").on(
+      table.provider,
+      table.providerTenantId,
+      table.openbotUserId,
+    ),
+  ],
+);
+
 export const deploymentPackages = pgTable("deployment_packages", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: text("tenant_id").notNull().unique(),
@@ -225,6 +255,72 @@ export const agents = pgTable("agents", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/** A provider thread is permanently assigned to the Channels thread and agent that first claims it. */
+export const externalThreadBindings = pgTable(
+  "external_thread_bindings",
+  {
+    channelsThreadId: text("channels_thread_id").primaryKey(),
+    provider: text("provider").notNull(),
+    providerTenantId: text("provider_tenant_id").notNull(),
+    providerConversationId: text("provider_conversation_id").notNull(),
+    providerThreadId: text("provider_thread_id").notNull(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "restrict" }),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      "external_thread_bindings_provider_slack_check",
+      sql`${table.provider} = 'slack'`,
+    ),
+    uniqueIndex("external_thread_bindings_provider_thread_idx").on(
+      table.provider,
+      table.providerTenantId,
+      table.providerConversationId,
+      table.providerThreadId,
+    ),
+    index("external_thread_bindings_creator_thread_idx").on(
+      table.createdByUserId,
+      table.channelsThreadId,
+    ),
+  ],
+);
+
+/** OpenBot-owned copy of provider-visible turns for the read-only cross-surface transcript. */
+export const externalThreadMessages = pgTable(
+  "external_thread_messages",
+  {
+    sequence: bigserial("sequence", { mode: "number" }).primaryKey(),
+    channelsThreadId: text("channels_thread_id")
+      .notNull()
+      .references(() => externalThreadBindings.channelsThreadId, {
+        onDelete: "cascade",
+      }),
+    messageId: text("message_id").notNull(),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      "external_thread_messages_role_check",
+      sql`${table.role} IN ('user', 'assistant')`,
+    ),
+    uniqueIndex("external_thread_messages_thread_message_idx").on(
+      table.channelsThreadId,
+      table.messageId,
+    ),
+    index("external_thread_messages_thread_sequence_idx").on(
+      table.channelsThreadId,
+      table.sequence.desc(),
+    ),
+  ],
+);
 
 export const channels = pgTable(
   "channels",
@@ -403,6 +499,34 @@ export const auditEvents = pgTable(
       table.id.desc(),
     ),
   ],
+);
+
+/** One durable winner for the two actions rendered by an approval presentation. */
+export const approvalDecisions = pgTable(
+  "approval_decisions",
+  {
+    presentationId: uuid("presentation_id").primaryKey(),
+    channelsThreadId: text("channels_thread_id")
+      .notNull()
+      .references(() => externalThreadBindings.channelsThreadId, {
+        onDelete: "cascade",
+      }),
+    conversationKey: text("conversation_key").notNull(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "restrict" }),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    actionId: text("action_id"),
+    approved: boolean("approved"),
+    decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [index("approval_decisions_created_at_idx").on(table.createdAt)],
 );
 
 export const intelligenceChannelMappings = pgTable(

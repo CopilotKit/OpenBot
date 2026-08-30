@@ -8,22 +8,6 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
-### A coworker named in the message is routed to without asking a model
-
-Naming a coworker in the text — "ask Risk Analyst to review this" — went to the intent router like
-any other message, so the deployment paid a model call to be told what the person had already said,
-and sometimes was told something else. A name that matches exactly one coworker on that person's
-roster now routes straight to them, recorded as `named by the person asking` on the same
-`channel.routed` row. A name that matches more than one is refused with both names rather than
-guessed at, and a name nobody on the roster answers to falls through to the router as before.
-
-### Routing refuses rather than routes on a connector read it could not make
-
-Which systems a coworker can reach is weighed by the router alongside what the coworker is for. A
-failed read of that used to be treated as "reaches nothing", which is a statement about the
-deployment rather than an absence of one: a database that blinked quietly re-routed messages away
-from the coworker that could actually do the work. It now fails the request instead.
-
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the

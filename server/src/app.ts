@@ -45,6 +45,7 @@ import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import { createCoworkerRoutingService } from "./routing/service";
+import type { SlackStatus } from "./slack/status";
 import type { PackageStatusReader } from "./tenant-package";
 
 /**
@@ -191,6 +192,19 @@ export function createApp(
    * has no door for this at all, not a locked one.
    */
   routineStore?: RoutineStore,
+  /**
+   * Authenticated confirmation routes for identities that arrived from an external provider.
+   *
+   * Appended last: callers build these routes with the deployment's encryption key, the shared
+   * user guard, and its audit store before handing the completed surface to the app.
+   */
+  externalLinkRoutes?: HonoApp<{ Variables: AppVariables }>,
+  /** Credential-free managed Slack readiness, appended to preserve positional callers. */
+  slackStatus: () => SlackStatus = () => ({
+    status: "stopped",
+    transport: "stopped",
+    provider: "unknown",
+  }),
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -198,8 +212,9 @@ export function createApp(
   // Projected, never the raw runtime. config.runtime carries the Intelligence contract, including
   // INTELLIGENCE_API_KEY and the licence token, and this endpoint is reachable by anyone. Returning
   // the object wholesale would serve deployment secrets to the browser. Add fields here explicitly.
-  app.get("/api/capabilities", async (context) =>
-    context.json({
+  app.get("/api/capabilities", async (context) => {
+    const slack = slackStatus();
+    return context.json({
       mode: config.runtime.mode,
       durableHistory: config.runtime.durableHistory,
       /*
@@ -221,8 +236,15 @@ export function createApp(
        * companies use this deployment, which is not theirs to have before they sign in.
        */
       ssoConfigured: ((await identityProviders?.list()) ?? []).length > 0,
-    }),
-  );
+      channels: {
+        slack: {
+          status: slack.status,
+          transport: slack.transport,
+          provider: slack.provider,
+        },
+      },
+    });
+  });
   /*
    * Registering an identity provider is an administrator's decision, not a signed-in one.
    *
@@ -828,6 +850,10 @@ export function createApp(
 
   if (routineStore) {
     app.route("/api/routines", createRoutineRoutes(routineStore, requireUser));
+  }
+
+  if (externalLinkRoutes) {
+    app.route("/api/external-links", externalLinkRoutes);
   }
 
   if (componentStore) {

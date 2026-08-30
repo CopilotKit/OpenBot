@@ -32,6 +32,7 @@ export type ProfileReadExecutor = DatabaseExecutor;
 
 export type AgentProfileStore = {
   list(actor: AgentActor, hidden?: boolean): Promise<AgentProfile[]>;
+  listAccessibleIds(actor: AgentActor): Promise<string[]>;
   get(actor: AgentActor, id: string): Promise<AgentProfile | null>;
   /**
    * `get`, but on the caller's own transaction and holding the profile against deletion until that
@@ -290,6 +291,14 @@ export function createAgentProfileStore(
         ),
       );
       return rows.map(mapProfile);
+    },
+
+    async listAccessibleIds(actor) {
+      const rows = await database
+        .select({ id: agentProfiles.agentId })
+        .from(agentProfiles)
+        .where(and(isNull(agentProfiles.deletedAt), accessFilter(actor)));
+      return rows.map((row) => row.id);
     },
 
     get(actor, id) {

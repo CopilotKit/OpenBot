@@ -196,6 +196,7 @@ export const auditEventTypes = [
   // useful fact for an investigator is that a human drove this browser between these two times, and
   // logging every click a person made would bury it while telling nobody anything.
   "computer.help_requested",
+  "computer.assistance_cancelled",
   "computer.control_taken",
   "computer.control_released",
   // A credential a person entered by hand. The row records that it happened, what it was called and
@@ -318,6 +319,7 @@ export const auditEventTypes = [
    */
   "identity_provider.registered",
   "identity_provider.removed",
+  "external_identity.linked",
   /*
    * What a Bot is and what it may reach.
    *
@@ -402,6 +404,15 @@ export type AuditStore = {
   insert: (event: AuditEventInput) => Promise<void>;
 };
 
+export type AuditTransaction = Parameters<
+  Parameters<Database["transaction"]>[0]
+>[0];
+
+/** An audit writer rebound to a caller's transaction, so the event commits with its subject. */
+export type TransactionalAuditStore = AuditStore & {
+  inTransaction: (transaction: AuditTransaction) => AuditStore;
+};
+
 export type AuditEvent = {
   id: string;
   actorUserId: string | null;
@@ -480,11 +491,16 @@ export async function recordAuditEvent(
   });
 }
 
-export function createAuditStore(database: Database): AuditStore {
+export function createAuditStore(database: Database): TransactionalAuditStore {
   return {
     insert: async (event) => {
       await database.insert(auditEvents).values(event);
     },
+    inTransaction: (transaction) => ({
+      insert: async (event) => {
+        await transaction.insert(auditEvents).values(event);
+      },
+    }),
   };
 }
 

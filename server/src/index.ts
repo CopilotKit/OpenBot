@@ -20,8 +20,12 @@ import { createApp } from "./app";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth } from "./auth";
-import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
-import { createRoleRepository } from "./auth/guards";
+import {
+  createDevRequireUser,
+  DEV_ACTOR,
+  initializeDevActorUser,
+} from "./auth/dev-actor";
+import { createRequireUser, createRoleRepository } from "./auth/guards";
 import { createIdentityProviderStore } from "./auth/identity-provider-store";
 import type { OpenBotRole } from "./auth/roles";
 import {
@@ -60,6 +64,9 @@ import {
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
+import { createExternalLinkStore } from "./external/link-store";
+import { createExternalLinkRoutes } from "./external/routes";
+import { createExternalThreadStore } from "./external/thread-store";
 import { createPeopleStore } from "./people/store";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { redirectUriFor } from "./plugins/oauth";
@@ -70,6 +77,14 @@ import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
+import { createCoworkerRoutingService } from "./routing/service";
+import { createApprovalAuthorizer } from "./slack/approval-authorizer";
+import { createApprovalDecisionStore } from "./slack/approval-store";
+import { createOpenBotSlackChannel } from "./slack/channel";
+import { configureApprovalDecisionStore } from "./slack/components";
+import { SlackIdentityLinker } from "./slack/identity-linker";
+import { SlackIngressRegistry } from "./slack/ingress-registry";
+import { projectSlackStatus, startManagedChannelHost } from "./slack/status";
 import {
   createPackageStatusReader,
   loadTenantPackage,
@@ -153,6 +168,23 @@ const agentProfileStore = createAgentProfileStore(
   config.managedAgent?.endpoint,
   agentVault,
 );
+const externalLinkStore = createExternalLinkStore(database);
+const externalThreadStore = createExternalThreadStore(database);
+/*
+ * Who a Slack approval belongs to, decided here rather than by the card that renders it.
+ *
+ * The components are drawn inside a Slack surface and are handed a presentation id and nothing
+ * else, so a person clicking one proves only that they can reach the message. The authoriser reads
+ * the link, the thread binding and the coworker's visibility for whoever actually clicked, so an
+ * approval is refused for anybody the coworker is not visible to.
+ */
+configureApprovalDecisionStore(createApprovalDecisionStore(database), {
+  authorize: createApprovalAuthorizer({
+    links: externalLinkStore,
+    threads: externalThreadStore,
+    profiles: agentProfileStore,
+  }),
+});
 // Read here rather than beside the synchronise below, because the package names the deployment and
 // the channel store needs that name before it can mint a thread id.
 const tenantPackage = await loadTenantPackage(config.tenantPackageDirectory);
@@ -804,6 +836,60 @@ const routineRunner = createRoutineRunner({
 });
 
 /**
+ * The Slack surface, and the runtime both surfaces share.
+ *
+ * One Channel declaration, handed to the same `CopilotRuntime` the browser talks to, so a Slack
+ * turn and a web turn resolve the same coworker for the same person through the same resolver,
+ * policy and audit store. Nothing about Slack reaches further in than this: the channel is handed
+ * a routing service, a thread store and the resolver, and builds no Bot of its own.
+ */
+const slackRouting = createCoworkerRoutingService({
+  store: agentProfileStore,
+  router: intentRouter,
+  auditStore: bootAuditStore,
+  /*
+   * Which systems a coworker can reach, for the router to weigh alongside what it is for.
+   *
+   * Read from the grants rather than held, because a grant made a minute ago has to count. A read
+   * that fails stops the routing rather than routing on a false statement about what a coworker can
+   * reach: see `CoworkerReachabilityUnavailableError`.
+   */
+  reachableSystems: async (agentId) => {
+    const granted = await pluginStore.listForAgent(agentId);
+    return [
+      ...new Set(
+        granted.tools.map(
+          (tool) =>
+            tool.toolName.replace(/^mcp__/, "").split("__")[0] ?? tool.toolName,
+        ),
+      ),
+    ];
+  },
+});
+const slackIngress = new SlackIngressRegistry();
+const openbotSlackChannel = createOpenBotSlackChannel({
+  appUrl: config.appUrl,
+  configuredTenantId: config.slackTenantId,
+  identityLinker: new SlackIdentityLinker({
+    store: externalLinkStore,
+    encryptionKey: config.keyEncryptionKey,
+    appUrl: config.appUrl,
+  }),
+  ingressRegistry: slackIngress,
+  agentDeps: {
+    routing: slackRouting,
+    store: externalThreadStore,
+    resolver: actorAgentResolver,
+  },
+  computerGateway,
+  // Secrets, sign-in control and 2FA are asked for on OpenBot's own surface, never in Slack. Absent
+  // an app URL there is nowhere to send somebody, so the channel offers no assistance at all.
+  assistance: config.appUrl
+    ? { appUrl: config.appUrl, encryptionKey: config.keyEncryptionKey }
+    : undefined,
+});
+
+/**
  * The runtime, and the two things beside it a hop needs.
  *
  * `agentFor` builds the addressed Bot exactly the way a person's run builds it, and `history` reads
@@ -817,7 +903,32 @@ const copilotRuntime = mountCopilotRuntime(
   actorAgentResolver,
   identifyUser,
   identifyActor,
+  "/api/copilotkit",
+  [openbotSlackChannel],
 );
+
+/*
+ * The guard the account-link confirmation runs behind: a person's own session, never Slack's word.
+ *
+ * `loadConfig` permits no-provider operation only in explicit single-user mode. The invariant is
+ * checked again here so this route can never be handed an undefined auth service.
+ */
+const requireExternalUser = config.singleUser
+  ? createDevRequireUser()
+  : (() => {
+      if (!auth) {
+        throw new Error("Slack account linking requires authentication.");
+      }
+      return createRequireUser(auth, roleRepository);
+    })();
+const externalLinkRoutes = createExternalLinkRoutes({
+  store: externalLinkStore,
+  encryptionKey: config.keyEncryptionKey,
+  requireUser: requireExternalUser,
+  auditStore: bootAuditStore,
+  agentProfileStore,
+  threadStore: externalThreadStore,
+});
 
 /**
  * Delivering hops, on every replica.
@@ -1039,6 +1150,10 @@ const app = createApp(
   routineRunner,
   // A person's own standing instructions: the list, and a switch to stop one.
   routineStore,
+  // Where somebody confirms that a Slack account is theirs, behind their own OpenBot session.
+  externalLinkRoutes,
+  // A narrow public projection: never hand `/api/capabilities` the runtime snapshot itself.
+  () => projectSlackStatus(copilotRuntime.channels?.status()),
 );
 
 /**
@@ -1087,7 +1202,7 @@ const isProxiedStream = (data: SocketData): data is StreamData =>
 const asChannelSocket = (ws: { data: SocketData }) =>
   ws as unknown as ChannelSocket;
 
-serve<SocketData>({
+const serverOptions = {
   port,
   async fetch(request, server) {
     const url = new URL(request.url);
@@ -1185,6 +1300,31 @@ serve<SocketData>({
       ws.data.inward?.close();
     },
   },
+} satisfies Bun.Serve.Options<SocketData>;
+const startWeb = () => serve<SocketData>(serverOptions);
+
+/**
+ * The listener, started and stopped by the managed Slack host rather than at import.
+ *
+ * Managed Slack delivery arrives over an outbound socket this process opens, so the channel host
+ * has to be running before a Slack turn can reach a coworker, and the HTTP listener has to be up
+ * before the host so that setup and health stay reachable while attachment settles. Ownership of
+ * both is handed to one place so a signal stops them in that order, rather than a signal handler
+ * here racing an attachment that is still in progress.
+ */
+const managedHost = startManagedChannelHost({
+  startWeb,
+  stopWeb: (server) => server.stop(true),
+  channels: copilotRuntime.channels,
+  signals: process,
+  // Each listener holds a connection of its own for the life of the process. Released on the way
+  // out, so a watch-mode restart does not leave two behind on every reload.
+  stopOthers: [
+    () => channelActivityListener.stop(),
+    () => policyListener.stop(),
+    () => retentionSweeps.stop(),
+  ],
+  exit: (code) => process.exit(code),
 });
 
 if (config.singleUser) {
@@ -1196,16 +1336,8 @@ if (config.singleUser) {
   );
 }
 
-// Each listener holds a connection of its own for the life of the process. Released on the way out,
-// so a watch-mode restart does not leave two behind on every reload.
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    void Promise.allSettled([
-      channelActivityListener.stop(),
-      policyListener.stop(),
-      Promise.resolve(retentionSweeps.stop()),
-    ]).finally(() => process.exit(0));
-  });
-}
-
 console.info(`OpenBot server listening on http://localhost:${port}`);
+
+// Activation is allowed to settle after HTTP starts. A missing provider or gateway outage must
+// leave the setup and health surfaces reachable, with the projected status explaining why.
+await managedHost;

@@ -1,5 +1,6 @@
 import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { AbstractAgent, HttpAgent } from "@ag-ui/client";
+import type { Channel } from "@copilotkit/channels";
 import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
 import {
   BuiltInAgent,
@@ -8,7 +9,7 @@ import {
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
-import { defer, from, switchMap } from "rxjs";
+import { defer, finalize, from, switchMap } from "rxjs";
 import { z } from "zod";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import type { ActorAgentResolver } from "./agents/agent-resolver";
@@ -396,6 +397,9 @@ async function buildAgent(
      * announce and never invoke. Granting one is refused at the door rather than stored dead: see
      * `enablementRefusal` in plugins/routes.ts.
      *
+     * The wrapper composes every direct `run(input)` too, which is the path a channel delegation
+     * takes, so a Slack turn reaches the same composition a browser turn does.
+     *
      * Making this work is a feature rather than a fix: the callback would have to carry a run
      * assertion the endpoint cannot forge, and execute a hop on its behalf. Worth doing; not done
      * here, and worth knowing it is missing rather than assuming it is not.
@@ -417,7 +421,7 @@ async function buildAgent(
    * what keeps a narrowed run from being told it holds something it was not offered.
    */
   const withTools = (tools: GrantedTool[]) =>
-    new BuiltInAgent(
+    new GovernedBuiltInAgent(
       builtInAgentConfiguration(
         agent,
         model,
@@ -426,6 +430,9 @@ async function buildAgent(
         computerGuidance,
         connectedVendors,
       ),
+      agent,
+      tools,
+      signRun,
     );
 
   const whole = withTools(granted);
@@ -518,22 +525,14 @@ function remoteAgentWithStandingRole(
   /** As for the built-in path: what this deployment connects to, held or not. */
   connectedVendors: readonly string[] = [],
   /**
-   * Which of those tools this run is about, decided once the message is known.
-   *
-   * NARROWED HERE RATHER THAN BY WRAPPING THE AGENT, and the difference is not cosmetic. Middleware
-   * registered with `.use()` is applied by `runAgent`, not by `run`: an outer agent that delegated
-   * to `remote.run(input)` would skip this whole function's work, and the endpoint would receive a
-   * run with no standing role, no holdings message, no tools and no signed assertion. Every one of
-   * those is silent — the Bot simply answers worse — so the narrowing goes inside the middleware
-   * that is already here.
-   *
-   * Absent means no narrowing, which is the behaviour every deployment had before this existed.
+   * Which of those tools this run is about, decided once the message is known. The composed wrapper
+   * invokes it on subscription for both web `runAgent()` and direct delegated `run()` calls.
    */
   narrow?: (input: RunAgentInput) => Promise<GrantedTool[]>,
   /** The fetch this agent is dialled with. See {@link buildAgents}. */
   agentFetch?: AgentFetch,
 ) {
-  const remote = new HttpAgent({
+  const raw = new HttpAgent({
     url: agent.endpoint,
     agentId: agent.id,
     // The customer's own key, if their agent sits behind one. `HttpAgentConfig` is
@@ -578,13 +577,9 @@ function remoteAgentWithStandingRole(
       : null;
   };
 
-  const runWith = (
-    tools: GrantedTool[],
-    input: RunAgentInput,
-    next: AbstractAgent,
-  ) => {
+  const compose = (tools: GrantedTool[], input: RunAgentInput) => {
     const holdingsMessage = holdingsMessageFor(tools);
-    return next.run({
+    return {
       ...input,
       messages: [
         agent.standingMessage,
@@ -613,55 +608,165 @@ function remoteAgentWithStandingRole(
           >,
         })),
       ],
-      // Who the Bot is calling back as, so the audit row names it rather than "an agent".
-      forwardedProps: {
-        ...(input.forwardedProps ?? {}),
-        openbotBotId: agent.id,
-        /*
-         * Which of those tools this deployment runs, as opposed to the surface.
-         *
-         * `tools` mixes two kinds that a name cannot tell apart: the Bot's grants, which execute
-         * here through the policy and the audit trail, and the components the browser draws. A Bot
-         * that ran the second kind through this deployment asked it to execute a chart, was told it
-         * could not, and then apologised to the person for not showing the chart that was on screen
-         * in front of them. Only this side knows which is which, so only this side can say.
-         */
-        openbotDeploymentTools: tools.map((tool) => tool.name),
-        /*
-         * This deployment's own statement of what this run is.
-         *
-         * Signed, short-lived, and naming the Bot and the person. The agent hands it back when it
-         * calls a tool, and that is where the Bot and the actor come from: its own token says which
-         * agent is calling, and this says who it is calling for. Neither is taken from the request
-         * body any more, which is what used to make the audit trail forgeable by anything holding
-         * one shared secret.
-         */
-        ...(signRun
-          ? { openbotRun: signRun(agent.id, input.runId, input.threadId) }
-          : /*
-             * Absent means this deployment cannot sign, so the agent is given nothing to hand back
-             * and its tool calls will be refused. That is the right direction to fail: a Bot that
-             * cannot prove whose run it is should not be spending anybody's grants.
-             */
-            {}),
-      },
-    } as never);
+      forwardedProps: governedRunForwardedProps(
+        input,
+        agent.id,
+        tools,
+        signRun,
+      ),
+    } as RunAgentInput;
   };
 
-  /*
-   * Deferred, because choosing the tools is a model call and middleware has to answer with a stream
-   * straight away. `defer` puts the work on the subscription, which is where the run actually
-   * begins, so nothing happens until somebody is listening and a retried run chooses again.
-   */
-  remote.use((input, next) =>
-    defer(() =>
-      from(narrow ? narrow(input) : Promise.resolve(tools)).pipe(
-        switchMap((offered) => runWith(offered, input, next)),
-      ),
-    ),
+  return new ComposedRemoteAgent(
+    { agentId: agent.id, description: agent.name },
+    raw,
+    async (input) =>
+      compose(await (narrow ? narrow(input) : Promise.resolve(tools)), input),
   );
+}
 
-  return remote;
+function governedRunForwardedProps(
+  input: RunAgentInput,
+  botId: string,
+  tools: GrantedTool[],
+  signRun?: SignRun,
+): Record<string, unknown> {
+  return {
+    ...(input.forwardedProps ?? {}),
+    // Who the Bot is calling back as, so the audit row names it rather than "an agent".
+    openbotBotId: botId,
+    /*
+     * Which of those tools this deployment runs, as opposed to the surface.
+     *
+     * `tools` mixes two kinds that a name cannot tell apart: the Bot's grants, which execute
+     * here through the policy and the audit trail, and the components the browser draws. A Bot
+     * that ran the second kind through this deployment asked it to execute a chart, was told it
+     * could not, and then apologised to the person for not showing the chart that was on screen
+     * in front of them. Only this side knows which is which, so only this side can say.
+     */
+    openbotDeploymentTools: tools.map((tool) => tool.name),
+    /*
+     * This deployment's own statement of what this run is.
+     *
+     * Signed, short-lived, and naming the Bot and the person. The agent hands it back when it
+     * calls a tool, and that is where the Bot and the actor come from: its own token says which
+     * agent is calling, and this says who it is calling for. Neither is taken from the request
+     * body any more, which is what used to make the audit trail forgeable by anything holding
+     * one shared secret.
+     *
+     * Absent means this deployment cannot sign, so the agent is given nothing to hand back and its
+     * tool calls fail closed. Built-ins carry the same assertion in their private AG-UI input even
+     * though their granted tools execute locally rather than through the callback endpoint.
+     */
+    ...(signRun
+      ? { openbotRun: signRun(botId, input.runId, input.threadId) }
+      : {}),
+  };
+}
+
+/** Keep built-in and remote coworkers on the same actor-scoped AG-UI run boundary. */
+class GovernedBuiltInAgent extends BuiltInAgent {
+  private configuration: BuiltInAgentConfiguration;
+  private registeredAgent: RegisteredBuiltInAgent;
+  private botId: string;
+  private deploymentTools: GrantedTool[];
+  private signRun?: SignRun;
+  private governedMiddlewares: Parameters<AbstractAgent["use"]> = [];
+
+  constructor(
+    configuration: BuiltInAgentConfiguration,
+    agent: RegisteredBuiltInAgent,
+    tools: GrantedTool[],
+    signRun?: SignRun,
+  ) {
+    super(configuration);
+    this.configuration = configuration;
+    this.registeredAgent = agent;
+    this.botId = agent.id;
+    this.deploymentTools = tools;
+    this.signRun = signRun;
+  }
+
+  use(...middlewares: Parameters<AbstractAgent["use"]>): this {
+    this.governedMiddlewares.push(...middlewares);
+    return super.use(...middlewares);
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    return super.run({
+      ...input,
+      forwardedProps: governedRunForwardedProps(
+        input,
+        this.botId,
+        this.deploymentTools,
+        this.signRun,
+      ),
+    });
+  }
+
+  clone(): GovernedBuiltInAgent {
+    const cloned = new GovernedBuiltInAgent(
+      this.configuration,
+      this.registeredAgent,
+      this.deploymentTools,
+      this.signRun,
+    );
+    if (this.governedMiddlewares.length > 0) {
+      cloned.use(...this.governedMiddlewares);
+    }
+    return cloned;
+  }
+}
+
+/**
+ * A remote AG-UI agent whose direct `run` path is the full OpenBot composition boundary.
+ *
+ * `AbstractAgent` only applies `.use()` middleware in `runAgent()`, while channel delegation calls
+ * `run(input)` to forward AG-UI events unchanged. Keeping composition here makes both entrances
+ * equivalent without trying to reconstruct a run from `runAgent()` output.
+ */
+class ComposedRemoteAgent extends AbstractAgent {
+  private raw: HttpAgent;
+  private compose: (input: RunAgentInput) => Promise<RunAgentInput>;
+  private active?: HttpAgent;
+
+  constructor(
+    identity: { agentId: string; description: string },
+    raw: HttpAgent,
+    compose: (input: RunAgentInput) => Promise<RunAgentInput>,
+  ) {
+    super(identity);
+    this.raw = raw;
+    this.compose = compose;
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    return defer(() => {
+      // `HttpAgent.abortRun()` aborts its current controller permanently. A fresh raw clone per
+      // wrapper run gives a cancelled turn its own controller and leaves the next turn runnable.
+      const raw = this.raw.clone() as HttpAgent;
+      this.active = raw;
+      return from(this.compose(input)).pipe(
+        switchMap((composed) => raw.run(composed)),
+        finalize(() => {
+          if (this.active === raw) this.active = undefined;
+        }),
+      );
+    });
+  }
+
+  clone(): ComposedRemoteAgent {
+    const cloned = super.clone() as ComposedRemoteAgent;
+    cloned.raw = this.raw.clone() as HttpAgent;
+    cloned.compose = this.compose;
+    cloned.active = undefined;
+    return cloned;
+  }
+
+  abortRun(): void {
+    this.active?.abortRun();
+    super.abortRun();
+  }
 }
 
 /**
@@ -951,6 +1056,7 @@ export function mountCopilotRuntime(
   identifyUser: IdentifyUser,
   identifyActor: IdentifyActor,
   basePath = "/api/copilotkit",
+  channels: Channel[] = [],
 ) {
   const { intelligence } = config.runtime;
 
@@ -1001,6 +1107,7 @@ export function mountCopilotRuntime(
     // returns, so omitting it puts every person in the deployment in the same thread space and one
     // person's conversations become another's.
     identifyUser,
+    channels,
     // The subclass, not the base: a thread nobody has run yet reads as empty rather than as a 500.
     // See IntelligenceKnowingANewThread.
     intelligence: intelligenceClient,
@@ -1015,8 +1122,18 @@ export function mountCopilotRuntime(
     agents: createRequestAgents(identifyActor, resolver) as never,
   });
 
+  const honoHandler = createCopilotHonoHandler({ runtime, basePath });
+
   return {
-    handler: createCopilotHonoHandler({ runtime, basePath }),
+    handler: honoHandler,
+    /**
+     * The managed channel host, when a Channel was declared, and otherwise nothing.
+     *
+     * Handed back rather than started here: an outbound socket that has to be up before a Slack
+     * turn can reach a coworker, and down before this process exits, is process lifecycle rather
+     * than a route, and the caller is the only place that already owns the HTTP listener beside it.
+     */
+    channels: honoHandler.channels,
     /**
      * How to reach the platform's runner, exactly as the runtime reaches it.
      *
