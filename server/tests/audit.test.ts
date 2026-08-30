@@ -49,6 +49,64 @@ describe("audit payload redaction", () => {
     );
   });
 
+  /**
+   * A template's whole life, both outcomes at every step.
+   *
+   * Named one by one rather than by prefix, because the list is closed and the pairs are the point:
+   * dropping `_declined` while keeping `_granted` would leave a trail on which every administrator
+   * appeared to have approved everything they were ever asked about.
+   */
+  test("records both ends of a template's life", () => {
+    expect(auditEventTypes).toEqual(
+      expect.arrayContaining([
+        "template.exported",
+        "template.import_refused",
+        "template.imported",
+        "template.capability_requested",
+        "template.capability_granted",
+        "template.capability_declined",
+        "template.boundary_applied",
+        "template.boundary_removed",
+        "template.retracted",
+      ]),
+    );
+  });
+
+  /**
+   * What the redaction below does and does not do for a template payload.
+   *
+   * Pinned because the temptation on this surface is to treat the key list as the thing that keeps a
+   * stranger's prose off the trail, and it is not. It matches key NAMES: `prompt` and `content` are
+   * dropped wherever they appear, and a field called `description`, `instructions` or `title` sails
+   * through untouched. So the rule that a template row carries the slug, the digest and the counts
+   * and never the words is enforced where the payload is BUILT, and this test says which half of
+   * that is mechanical.
+   *
+   * `authorClaim` surviving is the intended half. It is an unverified claim, deliberately named as
+   * one, and it is exactly the sort of thing a reader needs to see.
+   */
+  test("keeps a template row's identifying fields and drops the prose it must never carry", () => {
+    expect(
+      redactAuditPayload({
+        templateSlug: "standup-bot",
+        authorClaim: "someone@example.test",
+        digest: "sha256:0f0f",
+        hasKey: false,
+        stripped: ["endpoint", "key"],
+        prompt: "You are a helpful assistant with access to…",
+        content: "the whole document",
+      }),
+    ).toEqual({
+      templateSlug: "standup-bot",
+      authorClaim: "someone@example.test",
+      digest: "sha256:0f0f",
+      hasKey: false,
+      stripped: ["endpoint", "key"],
+      prompt: "[REDACTED]",
+      content: "[REDACTED]",
+    });
+  });
+
   test("removes secret values and document content recursively", () => {
     expect(
       redactAuditPayload({
