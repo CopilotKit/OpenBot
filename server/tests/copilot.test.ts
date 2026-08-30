@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { HttpAgent } from "@ag-ui/client";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
+import { createActorAgentResolver } from "../src/agents/agent-resolver";
 import {
   buildAgents,
   builtInAgentConfiguration,
@@ -518,12 +519,14 @@ describe("standing agent roles", () => {
         seen.request = request;
         return { id: "user-7", role: "user" as const };
       },
-      async (actor) => {
-        seen.actors.push(actor);
-        return [remoteAgent("http://coworker.internal/ag-ui")];
-      },
-      { provider: "openai", defaultModel: "gpt-5.6-terra" },
-      async () => null,
+      createActorAgentResolver({
+        loadAgents: async (actor) => {
+          seen.actors.push(actor);
+          return [remoteAgent("http://coworker.internal/ag-ui")];
+        },
+        model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+        resolveModelApiKey: async () => null,
+      }),
     );
 
     const request = new Request("http://openbot.test/api/copilotkit");
@@ -538,11 +541,13 @@ describe("standing agent roles", () => {
     let roleDescription = "Review receipts.";
     const factory = createRequestAgents(
       async () => ({ id: "user-7", role: "user" as const }),
-      async () => [
-        remoteAgent("http://coworker.internal/ag-ui", { roleDescription }),
-      ],
-      { provider: "openai", defaultModel: "gpt-5.6-terra" },
-      async () => null,
+      createActorAgentResolver({
+        loadAgents: async () => [
+          remoteAgent("http://coworker.internal/ag-ui", { roleDescription }),
+        ],
+        model: { provider: "openai", defaultModel: "gpt-5.6-terra" },
+        resolveModelApiKey: async () => null,
+      }),
     );
     const request = new Request("http://openbot.test/api/copilotkit");
 
