@@ -5,4 +5,5 @@ export * from "./computer";
 export * from "./core";
 export * from "./coworker";
 export * from "./plugins";
+export * from "./templates";
 export * from "./work";
