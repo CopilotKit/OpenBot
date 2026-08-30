@@ -142,6 +142,20 @@ describe("the refusals that read bytes rather than a document", () => {
     ["a tag character", "\u{E0041}"],
     ["a C0 control", "\u0007"],
     ["a C1 control", "\u0085"],
+    // The half of the variation-selector alphabet the enumerated ranges used to let through. Two of
+    // these per byte carries arbitrary data invisibly inside prose the consent screen calls verbatim.
+    ["the first variation selector", "\uFE00"],
+    ["the sixteenth variation selector", "\uFE0F"],
+    ["a variation selector from the supplement", "\u{E0100}"],
+    // Format characters outside the nine blocks the list happened to name.
+    ["an Arabic number mark", "\u0605"],
+    ["an Arabic end of ayah", "\u06DD"],
+    ["a Syriac abbreviation mark", "\u070F"],
+    ["a musical symbol format character", "\u{1D173}"],
+    ["an Egyptian hieroglyph format control", "\u{13430}"],
+    // Kept from the ranges the property classes replaced, so the rewrite cannot have narrowed them.
+    ["a supplementary private use codepoint", "\u{F0000}"],
+    ["an unpaired surrogate", "\uD800"],
   ] as const)("an invisible codepoint is refused: %s", (_name, character) => {
     expect(refusalOf(withRoot(`notes: hello${character}world\n`))).toBe(
       "invisible_character",
@@ -256,6 +270,38 @@ skills:
       ).toBe("too_long");
     },
   );
+
+  test("a role description is measured in the units the edit form measures it in", () => {
+    // 501 astral characters is 501 codepoints and 1002 UTF-16 code units. `parseAgentInput` and the
+    // browser form both count code units, so counting codepoints here let a template land a Bot
+    // whose owner could not save it from its own edit form until they shortened prose they had
+    // never written. 500 of the same character is exactly the limit and still imports.
+    const overLimit = "\u{1F600}".repeat(
+      TEMPLATE_LIMITS.ROLE_DESCRIPTION / 2 + 1,
+    );
+    expect(
+      refusalOf(
+        MINIMAL.replace(
+          /role_description: .*/,
+          `role_description: ${overLimit}`,
+        ),
+      ),
+    ).toBe("too_long");
+
+    const atLimit = "\u{1F600}".repeat(TEMPLATE_LIMITS.ROLE_DESCRIPTION / 2);
+    expect(
+      parseBotTemplate(
+        MINIMAL.replace(/role_description: .*/, `role_description: ${atLimit}`),
+      ).bot.roleDescription.length,
+    ).toBe(TEMPLATE_LIMITS.ROLE_DESCRIPTION);
+  });
+
+  test("a padded value lands trimmed, the way every later save would store it", () => {
+    const template = parseBotTemplate(
+      MINIMAL.replace("name: Renewal Desk", 'name: "  Renewal Desk  "'),
+    );
+    expect(template.bot.name).toBe("Renewal Desk");
+  });
 
   test("the same slug twice in one file is refused", () => {
     expect(
@@ -387,6 +433,35 @@ requests:
       ),
     ).toBe("bad_tool_ref");
   });
+
+  test.each([
+    [
+      "a tool ref wearing a connector's clothes",
+      "google-drive/read_file_content",
+    ],
+    ["a sentence", "Google Drive (connected)"],
+    ["upper case", "Google-Drive"],
+    ["a single character", "x"],
+    ["a trailing hyphen", "google-drive-"],
+  ])(
+    "a connector id that could never name an MCP server is refused: %s",
+    (_name, id) => {
+      // With no tools filed under it the per-tool check below never runs, so this id is the whole of
+      // what a person is shown and the whole of what is written to the ledger. Nothing downstream
+      // tags a request as connector-level or tool-level: both the server and the profile screen ask
+      // whether the string contains a slash. This is the only place that shape can be made true.
+      expect(
+        refusalOf(
+          withRoot(`
+requests:
+  connectors:
+    - id: ${JSON.stringify(id)}
+      why: Reading the ledger.
+`),
+        ),
+      ).toBe("bad_slug");
+    },
+  );
 
   test("an ask is read as an ask, with the author's reason attached", () => {
     const template = parseBotTemplate(

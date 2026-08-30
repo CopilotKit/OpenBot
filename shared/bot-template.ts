@@ -219,6 +219,15 @@ const HOSTNAME =
  * showing a role description "verbatim" would be showing text the reader cannot see all of. This is
  * the GlassWorm vector, and a review control that can be made invisible is not a control.
  *
+ * Written as Unicode property classes rather than as a hand-kept list of ranges, because the list
+ * drifted narrower than the sentence it defends. It enumerated nine format blocks and missed nine
+ * others — U+0600-0605, U+06DD, U+070F, U+08E2, U+110BD, U+110CD, U+13430-1343F, U+1BCA0-1BCA3 and
+ * U+1D173-1D17A all passed. Worse, it blocked the variation selector supplement U+E0100-E01EF only
+ * as a side effect of the tag-character clause, while VS1-VS16 at U+FE00-FE0F passed: nobody had
+ * decided that the top 240 selectors were hostile and the bottom 16 were fine, and two selectors per
+ * byte is an invisible channel through the very string the consent screen presents unabridged and
+ * then hands to a model. A property class cannot fall behind Unicode the way a list can.
+ *
  * Built from escapes rather than written literally, because a source file containing these
  * characters has the same problem it is here to solve. Checked against the raw bytes, so it covers
  * keys, values and comments together. Tab, newline and carriage return are the three controls a YAML
@@ -226,17 +235,22 @@ const HOSTNAME =
  */
 const INVISIBLE = new RegExp(
   [
+    /* C0 and C1, less the three a YAML document legitimately contains. */
     "[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F]",
-    "[\\u00AD\\u061C\\u180E]",
-    "[\\u200B-\\u200F]",
-    "[\\u202A-\\u202E]",
-    "[\\u2060-\\u2064]",
-    "[\\u2066-\\u2069]",
-    "[\\uFEFF\\uFFF9-\\uFFFB]",
-    "[\\uE000-\\uF8FF]",
-    "[\\uDB80-\\uDBBF][\\uDC00-\\uDFFF]",
-    "\\uDB40[\\uDC00-\\uDFFF]",
+    /* Every format character, every private-use codepoint in all three planes, every surrogate. */
+    "\\p{Cf}",
+    "\\p{Co}",
+    "\\p{Cs}",
+    /* Variation selectors, both halves of the alphabet and not only the half a tag rule caught. */
+    "[\\uFE00-\\uFE0F]",
+    /*
+     * The tag plane whole, rather than only its assigned codepoints. `\\p{Cf}` covers U+E0001 and
+     * U+E0020-E007F but leaves the unassigned neighbours through, and an unassigned codepoint is
+     * exactly as unreadable to a reviewer as an assigned one.
+     */
+    "[\\u{E0000}-\\u{E03FF}]",
   ].join("|"),
+  "u",
 );
 
 /**
@@ -327,6 +341,22 @@ function onlyKnownKeys(
   }
 }
 
+/**
+ * A required string: trimmed, NFC-normalised, and bounded in the units everything downstream counts.
+ *
+ * The bound used to be counted in codepoints (`[...normalised].length`) over the untrimmed value,
+ * and that was a different rule from the one the rest of the product applies to the same three
+ * strings. `parseAgentInput` and the browser's own form schema both trim and both count
+ * `String.length`, which is UTF-16 code units. So a `role_description` of 700 emoji — 700 codepoints
+ * and 1400 code units — parsed, imported, and created a Bot whose owner then could not save it from
+ * its own edit form until they shortened prose they had never written. A template must never land a
+ * Bot the edit form would refuse. Trimming for the same reason: `name: "  Renewal Desk  "` used to
+ * reach `agents.name` with its padding intact and sit that way on the roster until some later save
+ * silently trimmed it.
+ *
+ * Measured after normalising rather than before, because the NFC form is the one that is stored and
+ * the one those later checks will see.
+ */
 function text(
   block: Record<string, unknown>,
   key: string,
@@ -337,8 +367,8 @@ function text(
   if (typeof value !== "string" || !value.trim()) {
     refuse("missing_field", `${where}.${key} must be a non-empty string`);
   }
-  const normalised = value.normalize("NFC");
-  if ([...normalised].length > max) {
+  const normalised = value.normalize("NFC").trim();
+  if (normalised.length > max) {
     refuse("too_long", `${where}.${key} is longer than ${max} characters`);
   }
   return normalised;
@@ -697,7 +727,22 @@ function parseRequests(value: unknown): BotTemplateRequests {
     const where = `requests.connectors[${index}]`;
     const connector = record(entry, where);
     onlyKnownKeys(connector, CONNECTOR_KEYS, where);
+    /*
+     * A connector id is a slug, held to the rule `pluginStore` already holds an MCP server's id to,
+     * because nothing downstream carries a tag saying whether a request names a connector or a tool.
+     * Both the server and the profile screen re-derive that from the string's shape — a slash means a
+     * tool ref — so the shape has to be trustworthy, and this parser is the only place that can make
+     * it so. Checked only for non-emptiness, `id: google-drive/read_file_content` on a connector that
+     * lists no tools parsed cleanly, skipped the per-tool check below, and arrived downstream looking
+     * like a grantable tool ref. A value carrying a slash or a space could never name a server here.
+     */
     const id = text(connector, "id", where, TEMPLATE_LIMITS.SLUG);
+    if (!SLUG.test(id)) {
+      refuse(
+        "bad_slug",
+        `${where}.id "${id}" must be lowercase letters, digits and hyphens, at least two characters, and must not start or end with a hyphen. A connector id names an MCP server on the importing deployment, and no server can be named that.`,
+      );
+    }
 
     const tools = (
       connector.tools === undefined || connector.tools === null
