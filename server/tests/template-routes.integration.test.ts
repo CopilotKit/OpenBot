@@ -8,6 +8,7 @@ import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAgentRoutes } from "../src/agents/routes";
 import { createAuditStore } from "../src/audit";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
+import { createComponentStore } from "../src/components/store";
 import type { ActionPolicy } from "../src/computer/policy";
 import { createDatabase } from "../src/db/client";
 import {
@@ -15,6 +16,7 @@ import {
   agents,
   auditEvents,
   botTemplates,
+  components,
   deploymentPackages,
   mcpServers,
   mcpTools,
@@ -60,6 +62,14 @@ const pluginStore = createPluginStore({
   encryptionKey: "x".repeat(44),
   policy: () => policy,
 });
+/**
+ * The REAL component store, not a stub that cannot fail.
+ *
+ * `{ grant: async () => {} }` was here, and it is exactly why a green suite hid the bug this file
+ * now covers: the only path that reaches `requireComponent` was tested against a fake that grants
+ * anything, so granting a component no build has looked like a 200 rather than the throw it was.
+ */
+const componentStore = createComponentStore(database);
 const templateStore = createTemplateStore(database);
 const managedUrl = new URL("https://managed.example.com/agui");
 const profileStore = createAgentProfileStore(database, managedUrl);
@@ -92,6 +102,31 @@ const templateSlug = `renewal-desk-${suite}`;
 const skillSlug = `check-renewal-${suite}`;
 const connectorId = `acme-ledger-${suite}`;
 const toolRef = `${connectorId}/search_files`;
+/**
+ * A component that is really in this build, scoped to the suite.
+ *
+ * `showBarChart` was hard-coded here and is in no build the test creates, so every component grant
+ * this file made was a grant of a name that does not exist — which the stubbed store accepted. The
+ * name is suffixed because `components.name` is the primary key and a shared one would make two
+ * suites running at once fight over the same row.
+ */
+const componentName = `showAgeing${suite}`;
+
+/**
+ * The connectors and components the "inert ask" suite below moves in and out of the deployment.
+ *
+ * Declared up here so the teardown can take them whatever the tests did with them: two of them are
+ * created after an import and one of them is destroyed after an import, which is the whole point —
+ * a ledger row's status is a snapshot and the deployment underneath it moves.
+ */
+const lateConnector = `late-ledger-${suite}`;
+const lateToolRef = `${lateConnector}/read_file_content`;
+const lateComponent = `showLateChart${suite}`;
+const goneConnector = `gone-ledger-${suite}`;
+const goneToolRef = `${goneConnector}/search_files`;
+const goneComponent = `showGoneChart${suite}`;
+const lateSkill = `read-late-${suite}`;
+const goneSkill = `read-gone-${suite}`;
 
 /** Every Bot and draft this file made, so the teardown takes them and their grants with them. */
 const createdAgents: string[] = [];
@@ -129,9 +164,7 @@ function appFor(
         executor: database,
         managedAgent: true,
         grants: pluginStore,
-        ...(options.components
-          ? { components: { grant: async () => {} } }
-          : {}),
+        ...(options.components ? { components: componentStore } : {}),
       },
       requireUser,
       async (asking, botId) => (await profileStore.get(asking, botId)) !== null,
@@ -194,7 +227,7 @@ requests:
         - ref: ${toolRef}
           why: Find the ledger for one customer.
   components:
-    - name: showBarChart
+    - name: ${componentName}
       why: Ageing buckets.
 
 boundary:
@@ -323,6 +356,20 @@ beforeAll(async () => {
       inputSchema: {},
     })
     .onConflictDoNothing();
+
+  // A component this build really has, so the component ask resolves as `available` and the grant
+  // route has something the real store will accept.
+  await database
+    .insert(components)
+    .values({
+      name: componentName,
+      title: "Ageing buckets",
+      kind: "chart",
+      draftDescription: "Draw the ageing buckets for one customer.",
+      publishedDescription: "Draw the ageing buckets for one customer.",
+      published: true,
+    })
+    .onConflictDoNothing();
 });
 
 afterAll(async () => {
@@ -334,10 +381,19 @@ afterAll(async () => {
       .delete(deploymentPackages)
       .where(inArray(deploymentPackages.id, packageIds));
   }
-  await database.delete(mcpServers).where(eq(mcpServers.id, connectorId));
+  await database
+    .delete(mcpServers)
+    .where(inArray(mcpServers.id, [connectorId, lateConnector, goneConnector]));
+  await database
+    .delete(components)
+    .where(
+      inArray(components.name, [componentName, lateComponent, goneComponent]),
+    );
   await database
     .delete(skills)
-    .where(inArray(skills.slug, [skillSlug, `other-${suite}`]));
+    .where(
+      inArray(skills.slug, [skillSlug, `other-${suite}`, lateSkill, goneSkill]),
+    );
   await database
     .delete(users)
     .where(inArray(users.id, [owner.id, stranger.id, administrator.id]));
@@ -569,7 +625,9 @@ describe("reading a stranger's file", () => {
     // The connector exists here and advertises the tool, so the plan says the ask is satisfiable —
     // which is a statement about the deployment and not a grant.
     expect(body.plan.connectors[0]?.tools[0]?.verdict).toBe("available");
-    expect(body.plan.components[0]?.verdict).toBe("not_in_build");
+    // The component is in this build too, which is what makes the grant below a real one. The
+    // `not_in_build` verdict has its own suite at the foot of this file, where it is the point.
+    expect(body.plan.components[0]?.verdict).toBe("available");
     expect(body.plan.endpoint.required).toBe(false);
 
     // A preview is somebody reading. Nothing is written and nothing is filed as a refusal.
@@ -776,7 +834,7 @@ describe("installing", () => {
 
   test("a component ask cannot be granted where there is no component store", async () => {
     const response = await appFor(administrator).request(
-      `/api/templates/imports/${agentId}/requests/component/showBarChart/grant`,
+      `/api/templates/imports/${agentId}/requests/component/${componentName}/grant`,
       { method: "POST" },
     );
     // Fail closed: the deployment cannot make the grant, so it says so rather than recording a
@@ -786,14 +844,14 @@ describe("installing", () => {
     const withStore = await appFor(administrator, {
       components: true,
     }).request(
-      `/api/templates/imports/${agentId}/requests/component/showBarChart/grant`,
+      `/api/templates/imports/${agentId}/requests/component/${componentName}/grant`,
       { method: "POST" },
     );
     expect(withStore.status).toBe(200);
   });
 
   test("declining records the no, and is also an administrator's", async () => {
-    const path = `/api/templates/imports/${agentId}/requests/component/showBarChart/decline`;
+    const path = `/api/templates/imports/${agentId}/requests/component/${componentName}/decline`;
     expect(
       (await appFor(stranger).request(path, { method: "POST" })).status,
     ).toBe(403);
@@ -948,5 +1006,287 @@ requests:
     // Declining it is refused for the same reason. The row records that the importer answered, and
     // repointing a coworker is an edit of the Bot rather than a decision on this screen.
     expect(declined.status).toBe(400);
+  });
+});
+
+/**
+ * The consent screen's promise, kept at the moment somebody presses the button.
+ *
+ * An `unavailable` ask is told to a person twice — the consent screen says "Nothing will be granted
+ * and nothing will be written", the Bot's profile says there is nothing yet to grant — and the route
+ * used to check nothing but whether the ref contained a slash, so one administrator click wrote a
+ * live `plugin_grants` row beside both of those sentences. Two properties are covered here and
+ * neither is enough alone: the stored status is honoured, because a person was told that ask was
+ * inert; and the two tables are read again at decision time, because that status is a snapshot from
+ * resolve time and the deployment underneath it moves.
+ */
+describe("an ask this deployment could not satisfy stays inert", () => {
+  let lateBot = "";
+  let goneBot = "";
+
+  const sourceFor = (input: {
+    slug: string;
+    name: string;
+    skill: string;
+    connector: string;
+    ref: string;
+    component: string;
+  }) => `openbot_template: 1
+
+template:
+  slug: ${input.slug}
+  summary: Names a connector and a component, and asks for a tool under each.
+
+bot:
+  name: ${input.name}
+  title: Accounts Receivable
+  role_description: >-
+    Chase overdue invoices and draft the follow-up for a person to send.
+  runtime: managed
+  skills: [${input.skill}]
+
+skills:
+  - slug: ${input.skill}
+    title: Read the contract
+    summary: Pull the contract for one account.
+    instructions: >-
+      Find the contract and read the renewal date from it.
+    tools: []
+
+requests:
+  connectors:
+    - id: ${input.connector}
+      why: The invoice ledger export lives there.
+      tools:
+        - ref: ${input.ref}
+          why: Read the amounts and the due dates.
+  components:
+    - name: ${input.component}
+      why: Ageing buckets.
+`;
+
+  async function install(source: string) {
+    const preview = (await (
+      await appFor(owner).request("/api/templates/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source }),
+      })
+    ).json()) as { digest: string };
+    const installed = await appFor(owner).request("/api/templates/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source, digest: preview.digest }),
+    });
+    expect(installed.status).toBe(201);
+    const body = (await installed.json()) as {
+      agentId: string;
+      requests: { kind: string; ref: string; status: string }[];
+    };
+    createdAgents.push(body.agentId);
+    return body;
+  }
+
+  /** What the ledger says about one ask right now, read back rather than remembered. */
+  async function statusOf(agentId: string, kind: string, ref: string) {
+    const response = await appFor(owner).request(
+      `/api/templates/imports/${agentId}`,
+    );
+    const body = (await response.json()) as {
+      requests: { kind: string; ref: string; status: string }[];
+    };
+    return body.requests.find((row) => row.kind === kind && row.ref === ref)
+      ?.status;
+  }
+
+  beforeAll(async () => {
+    // Installed against a deployment that has neither, so both asks land as the plan resolved them:
+    // the tool `unavailable` and the component `not_in_build`.
+    const late = await install(
+      sourceFor({
+        slug: `late-desk-${suite}`,
+        name: `Late Desk ${suite}`,
+        skill: lateSkill,
+        connector: lateConnector,
+        ref: lateToolRef,
+        component: lateComponent,
+      }),
+    );
+    lateBot = late.agentId;
+    expect(late.requests.find((row) => row.ref === lateToolRef)?.status).toBe(
+      "unavailable",
+    );
+    expect(late.requests.find((row) => row.ref === lateComponent)?.status).toBe(
+      "not_in_build",
+    );
+
+    // The other direction. Both are here while the template is read, so the ledger records
+    // `requested` for each — and both are taken away afterwards, which is what the stored status
+    // cannot see and the reason the decision re-reads.
+    await database.insert(mcpServers).values({
+      id: goneConnector,
+      title: "Gone Ledger",
+      vendor: "Acme",
+      url: "https://gone.example.com/mcp",
+      summary: "The ledger, while it lasted.",
+      docsUrl: "https://gone.example.com/docs",
+      provenance: "custom",
+      addedBy: administrator.email,
+    });
+    await database.insert(mcpTools).values({
+      serverId: goneConnector,
+      name: "search_files",
+      description: "Find a ledger export.",
+      inputSchema: {},
+    });
+    await database.insert(components).values({
+      name: goneComponent,
+      title: "Ageing buckets",
+      kind: "chart",
+      draftDescription: "Draw the ageing buckets for one customer.",
+      publishedDescription: "Draw the ageing buckets for one customer.",
+      published: true,
+    });
+
+    const gone = await install(
+      sourceFor({
+        slug: `gone-desk-${suite}`,
+        name: `Gone Desk ${suite}`,
+        skill: goneSkill,
+        connector: goneConnector,
+        ref: goneToolRef,
+        component: goneComponent,
+      }),
+    );
+    goneBot = gone.agentId;
+    expect(gone.requests.find((row) => row.ref === goneToolRef)?.status).toBe(
+      "requested",
+    );
+    expect(gone.requests.find((row) => row.ref === goneComponent)?.status).toBe(
+      "requested",
+    );
+
+    await database
+      .delete(mcpServers)
+      .where(eq(mcpServers.id, goneConnector))
+      .execute();
+    await database
+      .delete(components)
+      .where(eq(components.name, goneComponent))
+      .execute();
+  });
+
+  test("a tool under a connector this deployment does not have is refused, and nothing is written", async () => {
+    const response = await appFor(administrator).request(
+      `/api/templates/imports/${lateBot}/requests/mcp/${encodeURIComponent(lateToolRef)}/grant`,
+      { method: "POST" },
+    );
+    // The case the slash test missed. `google-drive/read_file_content` has a slash in it and is an
+    // advertised Drive tool on some other deployment; that is not a reason to write a grant here.
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain(
+      "was not connected here when this template was read",
+    );
+    expect(
+      await database
+        .select()
+        .from(pluginGrants)
+        .where(eq(pluginGrants.ref, lateToolRef)),
+    ).toHaveLength(0);
+    // And the row is still the undecided one the profile shows, not a decision nobody made.
+    expect(await statusOf(lateBot, "mcp", lateToolRef)).toBe("unavailable");
+  });
+
+  test("connecting a server with that id afterwards does not make the inert ask grantable", async () => {
+    await database.insert(mcpServers).values({
+      id: lateConnector,
+      title: "Late Ledger",
+      vendor: "Acme",
+      url: "https://late.example.com/mcp",
+      summary: "Connected long after somebody read the template.",
+      docsUrl: "https://late.example.com/docs",
+      provenance: "custom",
+      addedBy: administrator.email,
+    });
+    await database.insert(mcpTools).values({
+      serverId: lateConnector,
+      name: "read_file_content",
+      description: "Read one document.",
+      inputSchema: {},
+    });
+
+    const response = await appFor(administrator).request(
+      `/api/templates/imports/${lateBot}/requests/mcp/${encodeURIComponent(lateToolRef)}/grant`,
+      { method: "POST" },
+    );
+    /*
+     * The half a live existence check alone would not cover. The tool exists this second, so the
+     * only thing standing between the person who was told "nothing will be granted" and a grant is
+     * the ledger's own status. Granting it is still possible — on the Plugins page, where nobody was
+     * promised otherwise.
+     */
+    expect(response.status).toBe(400);
+    expect(
+      await database
+        .select()
+        .from(pluginGrants)
+        .where(eq(pluginGrants.ref, lateToolRef)),
+    ).toHaveLength(0);
+    expect(await statusOf(lateBot, "mcp", lateToolRef)).toBe("unavailable");
+  });
+
+  test("a component no build here answers to is refused with the sentence the ledger already carries", async () => {
+    const response = await appFor(administrator, { components: true }).request(
+      `/api/templates/imports/${lateBot}/requests/component/${lateComponent}/grant`,
+      { method: "POST" },
+    );
+    // 400 and a sentence, where an uncaught `ComponentNotFoundError` used to be an opaque 500 that
+    // left the row undecided with nothing on the screen saying why.
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain(
+      `There is no component called ${lateComponent} in this build`,
+    );
+    expect(await statusOf(lateBot, "component", lateComponent)).toBe(
+      "not_in_build",
+    );
+  });
+
+  test("a tool the ledger still calls requested is re-checked, and refused once its connector is gone", async () => {
+    const response = await appFor(administrator).request(
+      `/api/templates/imports/${goneBot}/requests/mcp/${encodeURIComponent(goneToolRef)}/grant`,
+      { method: "POST" },
+    );
+    /*
+     * The half the stored status alone would not cover. This row resolved cleanly at import and says
+     * `requested`; the connector left afterwards, and a grant written on the strength of that
+     * snapshot would be invisible on every screen and would come back to life the day somebody
+     * connected that id again.
+     */
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain(
+      "is not connected on this deployment",
+    );
+    expect(
+      await database
+        .select()
+        .from(pluginGrants)
+        .where(eq(pluginGrants.ref, goneToolRef)),
+    ).toHaveLength(0);
+    expect(await statusOf(goneBot, "mcp", goneToolRef)).toBe("requested");
+  });
+
+  test("a component that left the build after the import is refused rather than thrown", async () => {
+    const response = await appFor(administrator, { components: true }).request(
+      `/api/templates/imports/${goneBot}/requests/component/${goneComponent}/grant`,
+      { method: "POST" },
+    );
+    // Same snapshot problem, arriving as a throw from `requireComponent` rather than as a verdict.
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain(
+      `There is no component called ${goneComponent} in this build`,
+    );
+    expect(await statusOf(goneBot, "component", goneComponent)).toBe(
+      "requested",
+    );
   });
 });

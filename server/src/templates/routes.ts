@@ -19,12 +19,23 @@
  * IMPORT: `install.ts` has no code path that writes an MCP grant, not a conditional one and not one
  * behind a flag, because `store.grant` performs no existence check and an optimistic row for an
  * absent connector would be invisible on every screen and would go live the day somebody added that
- * connector, with nobody deciding. The call on line ~610 is the opposite of that in every respect:
- * it is behind `requireAdmin`, it acts on a ledger row a person already consented to, it names a
- * tool that exists, and it is exactly the act the grant screen performs. Scope the grep to the
- * import path rather than to the directory, or it will forbid the thing the feature is for.
+ * connector, with nobody deciding. The call in `decide` below is the opposite of that in every
+ * respect: it is behind `requireAdmin`, it acts on a ledger row a person already consented to, it
+ * names a tool this file has just read out of `mcp_servers` and `mcp_tools`, and it is exactly the
+ * act the grant screen performs. Scope the grep to the import path rather than to the directory, or
+ * it will forbid the thing the feature is for.
+ *
+ * "IT NAMES A TOOL THAT EXISTS" USED TO BE A CLAIM RATHER THAN A CHECK, and that is the bug this
+ * file was carrying. The only guard was that the ref contained a slash, so a ledger row recorded
+ * `unavailable` — the row whose consent screen said "Nothing will be granted and nothing will be
+ * written" and whose caption on the Bot's profile says there is nothing yet to grant — was one
+ * administrator click away from a live `plugin_grants` row for a connector this deployment does not
+ * have. Two guards now stand where the claim did, and both are needed: the ledger's own status,
+ * because a person was told that ask was inert and connecting a server with that id afterwards is
+ * not their consent; and a fresh read of the two tables, because the status is a snapshot from
+ * resolve time and a connector can leave the deployment the day after an import.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -43,8 +54,11 @@ import {
   recordAuditEvent,
 } from "../audit";
 import { type AppVariables, requireAdmin } from "../auth/guards";
-import type { ComponentStore } from "../components/store";
-import { agents } from "../db/schema";
+import {
+  ComponentNotFoundError,
+  type ComponentStore,
+} from "../components/store";
+import { agents, mcpServers, mcpTools } from "../db/schema";
 import type { PluginStore } from "../plugins/store";
 import {
   type TemplateActor,
@@ -593,21 +607,39 @@ export function createTemplateRoutes(
       }
 
       if (verdict === "granted") {
+        /*
+         * A bare connector id is an ask with nothing grantable behind it — the template named a
+         * connector that listed no tools — and the answer to it is adding the connector, not writing
+         * a grant. `store.grant` performs no existence check, so a row written here would be
+         * invisible on every screen and would go live the day somebody added that connector.
+         *
+         * FIRST, ahead of the status check below, because it is the more specific thing to say about
+         * the same row: a bare id always resolves `unavailable`, and telling somebody their ask was
+         * not satisfiable would leave them looking for a tool that was never named.
+         */
+        if (kind === "mcp" && !ref.includes("/")) {
+          return context.json(
+            {
+              error: `${ref} is a connector, not a tool. Add it on the Plugins page, then grant the tools this Bot needs.`,
+            },
+            400,
+          );
+        }
+
+        /*
+         * AN ASK THIS DEPLOYMENT COULD NOT SATISFY IS NOT AN ASK AN ADMINISTRATOR CAN ANSWER HERE,
+         * and the reason is what the person was told rather than what the database holds. The
+         * consent screen said of this row "Nothing will be granted and nothing will be written" and
+         * the Bot's profile says there is nothing yet to grant; a button beside that sentence that
+         * wrote a live grant would make both of those statements false. It stays refused even once
+         * somebody connects a server with that id, because nobody has read a screen saying it would
+         * grant anything — reinstalling the template is how that ask gets asked again.
+         */
+        if (row.status === "unavailable" || row.status === "not_in_build") {
+          return context.json({ error: unsatisfiedAsk(kind, ref) }, 400);
+        }
+
         if (kind === "mcp") {
-          /*
-           * A bare connector id is an ask with nothing grantable behind it — the template named a
-           * connector that listed no tools — and the answer to it is adding the connector, not
-           * writing a grant. `store.grant` performs no existence check, so a row written here would
-           * be invisible on every screen and would go live the day somebody added that connector.
-           */
-          if (!ref.includes("/")) {
-            return context.json(
-              {
-                error: `${ref} is a connector, not a tool. Add it on the Plugins page, then grant the tools this Bot needs.`,
-              },
-              400,
-            );
-          }
           if (!deps.grants) {
             return context.json(
               {
@@ -616,6 +648,19 @@ export function createTemplateRoutes(
               },
               503,
             );
+          }
+          /*
+           * Read now rather than taken from `row.status`. That status is a snapshot from the moment
+           * the plan was resolved, so a ref recorded `requested` while the connector was here is
+           * still `requested` the week after somebody removed it — and `store.grant` performs no
+           * existence check, so the grant would be a row invisible on every screen that comes back
+           * to life on its own the day that id is connected again. Both tables, the pair
+           * `resolve.ts` calls `available`: a connected server that has never been refreshed
+           * advertises no tools, and a grant naming one of its refs is one `listForAgent` can never
+           * resolve.
+           */
+          if (!(await mcpRefIsLive(deps.executor, ref))) {
+            return context.json({ error: connectorMissing(ref) }, 400);
           }
           await deps.grants.grant("mcp", ref, agentId, actorEmail(context));
         } else {
@@ -628,7 +673,22 @@ export function createTemplateRoutes(
               503,
             );
           }
-          await deps.components.grant(ref, agentId);
+          try {
+            await deps.components.grant(ref, agentId);
+          } catch (error) {
+            /*
+             * The component half of the same snapshot problem, and it arrives as a throw rather than
+             * as a false. `componentStore.grant` calls `requireComponent`, which raises for any name
+             * absent from the build at this moment — including a row recorded `requested` whose
+             * component has since left. Uncaught, that was an opaque 500 with no sentence, and
+             * `decideRequest` never ran, so the row stayed undecided with nothing on the screen
+             * saying why.
+             */
+            if (error instanceof ComponentNotFoundError) {
+              return context.json({ error: componentMissing(ref) }, 400);
+            }
+            throw error;
+          }
         }
       }
 
@@ -950,6 +1010,66 @@ const REQUEST_KINDS: readonly TemplateRequestKind[] = [
  */
 function asRequestKind(value: string | undefined): TemplateRequestKind | null {
   return REQUEST_KINDS.find((kind) => kind === value) ?? null;
+}
+
+/**
+ * What an administrator is told when the ledger already says this deployment could not satisfy an
+ * ask. Written in the past tense on purpose: it is a fact about the moment the plan was resolved,
+ * and it stays true even on a deployment that has since connected the thing.
+ */
+function unsatisfiedAsk(kind: TemplateRequestKind, ref: string): string {
+  /*
+   * The component half is `componentMissing` rather than its own copy of the sentence. The two
+   * refusals answer the same question a snapshot apart — one from the ledger, one from the throw the
+   * store raises a moment later — and a reader who saw them worded differently would go looking for
+   * a difference that is not there.
+   */
+  return kind === "mcp"
+    ? `${ref} was not connected here when this template was read, so nothing was going to be granted for it. Add it on the Plugins page, then grant the tools this Bot needs there.`
+    : componentMissing(ref);
+}
+
+/** The bare-connector sentence, for a ref that names a tool this deployment does not have either. */
+function connectorMissing(ref: string): string {
+  return `${ref} is not connected on this deployment. Add it on the Plugins page, then grant the tools this Bot needs.`;
+}
+
+/** The same refusal for a component name no build here answers to. */
+function componentMissing(ref: string): string {
+  return `There is no component called ${ref} in this build, so there is nothing to grant.`;
+}
+
+/**
+ * Whether this ref names a tool that exists on this deployment RIGHT NOW.
+ *
+ * A read of two tables rather than a call into the resolver, because the resolver answers about a
+ * whole document and this question is about one row somebody is about to act on. Split on the FIRST
+ * slash, matching how `resolve.ts` takes a ref apart and how `plugins/store.ts` matches a grant
+ * against `serverId/toolName`; a second copy that split on the last one would disagree with both.
+ */
+async function mcpRefIsLive(
+  executor: TemplateReadExecutor,
+  ref: string,
+): Promise<boolean> {
+  const separator = ref.indexOf("/");
+  if (separator <= 0) return false;
+  const serverId = ref.slice(0, separator);
+  const toolName = ref.slice(separator + 1);
+  if (!toolName) return false;
+
+  const [server] = await executor
+    .select({ id: mcpServers.id })
+    .from(mcpServers)
+    .where(eq(mcpServers.id, serverId))
+    .limit(1);
+  if (!server) return false;
+
+  const [tool] = await executor
+    .select({ name: mcpTools.name })
+    .from(mcpTools)
+    .where(and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)))
+    .limit(1);
+  return tool !== undefined;
 }
 
 /**
