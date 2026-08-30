@@ -25,7 +25,23 @@ import { afterAll, afterEach, expect, test } from "bun:test";
  * already there. Registering unconditionally made the second such file throw during import, which
  * takes its whole suite with it and reports nothing.
  */
-if (!GlobalRegistrator.isRegistered) GlobalRegistrator.register();
+/*
+ * Registered with an address, and only if nothing else has registered already.
+ *
+ * Happy DOM defaults to `about:blank`, whose origin is the STRING "null". Better Auth builds its
+ * base URL from `window.location.origin` when it is not given one, so the first file in the suite to
+ * pull in `@/lib/auth/client` under a bare registration throws `Invalid base URL: null` while it is
+ * still being imported — taking that file's tests with it and reporting an unhandled error rather
+ * than a failure anybody can place.
+ *
+ * It stayed hidden locally because `auth-client.test.ts` stubs a window with a real origin and, when
+ * it happens to run first, the auth client is already constructed and cached by the time anything
+ * here renders. That is an ordering accident, not a guarantee: on CI the order differs and this is
+ * where it landed. An explicit address makes the origin real however the suite is walked.
+ */
+if (!GlobalRegistrator.isRegistered) {
+  GlobalRegistrator.register({ url: "http://localhost:3010" });
+}
 /*
  * A DOM before Testing Library. `screen` binds its queries to `document.body` at import time, so a
  * static import would be hoisted above the line above and bind to nothing.
