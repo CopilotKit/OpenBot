@@ -1,5 +1,10 @@
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { type AuditStore, recordAuditEvent } from "../audit";
+import {
+  type AuditEventInput,
+  type AuditStore,
+  recordAuditEvent,
+  redactAuditPayload,
+} from "../audit";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
@@ -17,6 +22,7 @@ import type { Database } from "../db/client";
 import {
   agentProfiles,
   agents,
+  auditEvents,
   // Aliased: `credentials` is already the injected vault interface in this module, and the table and
   // the interface are two different things to reach for.
   credentials as credentialRows,
@@ -573,6 +579,45 @@ export type PluginStoreOptions = {
 
 export function createPluginStore(options: PluginStoreOptions) {
   const { database, auditStore, credentials, encryptionKey } = options;
+
+  /**
+   * A trail row for a change, written on the caller's transaction when there is one.
+   *
+   * WHY THE TRANSACTION AND NOT ALWAYS THE INJECTED STORE. The injected store writes on the pool's
+   * own handle. A caller inside `database.transaction(...)` is already holding one pooled
+   * connection, so a row written that way needs a SECOND connection while the first is not free.
+   * Bun's `SQL` has no acquisition timeout — `connectionTimeout` covers opening a socket, not
+   * waiting for a free connection — so once every pooled connection is inside such a transaction
+   * the waiter never resolves: the transaction never commits, never rolls back, and never gives its
+   * connection back. Ten concurrent template imports were enough to wedge the whole deployment,
+   * every later request on every route with it, and only a restart unwedged it. That is exactly the
+   * deadlock `db/client.ts` names and the one {@link PluginExecutor} tells callers not to walk into;
+   * writing the trail on the pool walked into it on the caller's behalf.
+   *
+   * Without an executor — the Skills page, the package sync, every test — nothing changes. The
+   * injected store writes where it always wrote, so a fork or a test that redirects the trail
+   * somewhere other than this database still gets those rows, and a failed trail write still cannot
+   * take back a change that has already committed on its own statement.
+   *
+   * With one, the row commits or rolls back with the change it describes. That is a stronger
+   * reading than the pool gave — a `skill_installed` row now means the install stuck rather than
+   * that it was attempted — and it is only available because the caller handed us the transaction.
+   */
+  async function recordChange(
+    executor: PluginExecutor,
+    event: AuditEventInput,
+  ): Promise<void> {
+    if (executor === database) {
+      await recordAuditEvent(auditStore, event);
+      return;
+    }
+
+    await executor.insert(auditEvents).values({
+      ...event,
+      payload: redactAuditPayload(event.payload) as Record<string, unknown>,
+    });
+  }
+
   /*
    * Held rather than resolved, because the transport is a property of the entry and is not known
    * until a call names one. An injected vendor still wins over both, which is what keeps a test able
@@ -2351,21 +2396,21 @@ export function createPluginStore(options: PluginStoreOptions) {
       }
 
       /*
-       * On the audit store's own handle, deliberately NOT on `executor`.
+       * On `executor`, so an install inside a transaction never needs a second connection.
        *
-       * Same trade `recordClientRegistered` makes and for the same reason: the store is injected, so
-       * a fork or a test may have given us one that writes somewhere other than this database, and
-       * quietly bypassing it when a transaction is present would make the trail depend on how the
-       * caller happened to be wired.
+       * This row used to go to the audit store's own pooled handle even when the caller was inside
+       * a transaction, on the argument that the store is injected and bypassing it would make the
+       * trail depend on how the caller was wired. That argument cost more than it bought: an import
+       * holding a pooled connection and then waiting for another one is the hang described on
+       * {@link recordChange}, and a trail nobody can reach because the server is wedged is worth
+       * less than one a fork can redirect. Callers with no transaction still go through the
+       * injected store.
        *
-       * The consequence has to be said out loud, because it is the kind of thing a reader is
-       * entitled to be misled by otherwise. With an executor this row commits whether or not the
-       * caller's transaction does, so a `skill_installed` row is evidence that an install was
-       * ATTEMPTED, not that it stuck. A caller wrapping this in a transaction is expected to write
-       * its own row after the commit — for the template import that is `template.imported` — and a
-       * `skill_installed` with no such row following it is precisely how a reader spots the rollback.
+       * The reading of the row changes with it, and that is the better half of the trade: written
+       * on the caller's transaction, a `skill_installed` row commits only if the install did, so it
+       * is evidence the install STUCK rather than that it was attempted.
        */
-      await recordAuditEvent(auditStore, {
+      await recordChange(executor, {
         eventType: "configuration.changed",
         targetType: "skill",
         targetId: input.slug,
@@ -2433,8 +2478,8 @@ export function createPluginStore(options: PluginStoreOptions) {
      * is the pool, so every existing caller — the grant route, the package sync, the tests — writes
      * exactly where it wrote before.
      *
-     * The trail row is on the audit store's own handle either way; see the note in `installSkill`
-     * for why, and for what that means for a caller whose transaction rolls back.
+     * The trail row goes on the same executor; see {@link recordChange} for why a row written on
+     * the pool instead would hang an import that is already holding a connection.
      */
     async grant(
       kind: PluginKind,
@@ -2451,7 +2496,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           set: { grantedBy: by, updatedAt: new Date() },
         });
 
-      await recordAuditEvent(auditStore, {
+      await recordChange(executor, {
         eventType: "configuration.changed",
         targetType: grantTargetType(kind),
         targetId: ref,
