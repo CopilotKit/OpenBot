@@ -45,6 +45,13 @@ import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import type { PackageStatusReader } from "./tenant-package";
+import type { TemplateInstaller } from "./templates/install";
+import {
+  createTemplateExport,
+  createTemplateRoutes,
+  type TemplateRoutesDeps,
+} from "./templates/routes";
+import type { TemplateReadExecutor, TemplateStore } from "./templates/store";
 
 /**
  * One row for something an administrator did to somebody's access.
@@ -190,6 +197,31 @@ export function createApp(
    * has no door for this at all, not a locked one.
    */
   routineStore?: RoutineStore,
+  /**
+   * Bot templates: the drafts this deployment authored, and the one act that installs somebody's.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Only the three things this module cannot build for itself. The trail, the grant stores and
+   * whether there is a Bot in the box are all already in scope here, and passing them in again would
+   * be a second place for them to disagree with the rest of the app.
+   *
+   * Absent leaves the routes unmounted rather than mounted and refusing every call, and leaves the
+   * export button off a coworker's panel: a deployment that never built the template store has no
+   * door for this at all, not a locked one.
+   */
+  templates?: {
+    store: TemplateStore;
+    installer: TemplateInstaller;
+    /**
+     * A read handle on this deployment's own tables, for the resolver.
+     *
+     * The install path resolves again on its own transaction; this one serves the preview, which
+     * writes nothing and may read on the pool.
+     */
+    executor: TemplateReadExecutor;
+  },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -779,6 +811,30 @@ export function createApp(
                 pluginStore.botsReachableFrom(agentId),
             }
           : undefined,
+        /*
+         * Packing a coworker into a template draft, mounted on the Bot rather than under
+         * /api/templates because that is what it is done to.
+         *
+         * Requires the trail as well as the store. An export is the moment a coworker's whole
+         * configuration becomes a file somebody can send anywhere, and `template.exported` is the
+         * only record that it happened — so a deployment that cannot write the row does not get the
+         * button, rather than getting a button that leaves no trace.
+         */
+        templates && auditStore
+          ? createTemplateExport({
+              executor: templates.executor,
+              templateStore: templates.store,
+              auditStore,
+              ...(pluginStore ? { plugins: pluginStore } : {}),
+              ...(componentStore ? { components: componentStore } : {}),
+              // What tells `managed` from `remote`: a coworker that runs in the box carries this
+              // deployment's own address in its configuration, so having an endpoint is not the
+              // distinction. See templates/pack.ts.
+              ...(config.managedAgent
+                ? { managedAgentAgUiUrl: config.managedAgent.endpoint }
+                : {}),
+            })
+          : undefined,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the
@@ -831,6 +887,38 @@ export function createApp(
     app.route(
       "/api/components",
       createComponentRoutes(componentStore, requireUser, auditStore, canUseBot),
+    );
+  }
+
+  /*
+   * Reading a stranger's file, and turning it into an ordinary Bot.
+   *
+   * The trail is a condition of mounting rather than an optional extra, which is not the shape the
+   * other surfaces here take. Every act on these routes is either somebody consenting to text a
+   * stranger wrote or an administrator answering what that text asked for, and both are only
+   * accountable afterwards through `template.import_refused`, `template.imported` and
+   * `template.capability_granted`. A template surface with no trail is the one shape of this feature
+   * that must not exist, so a deployment that cannot write one gets no import at all.
+   *
+   * The grant stores are passed as the narrow `grant` seam each of them already has. There is no new
+   * grant route anywhere in this feature: satisfying a capability goes through the code that already
+   * refuses, and handing these routes anything wider would be an invitation to grow a second path.
+   */
+  if (templates && auditStore) {
+    const templateDeps: TemplateRoutesDeps = {
+      templateStore: templates.store,
+      installer: templates.installer,
+      auditStore,
+      executor: templates.executor,
+      // Whether a coworker with `runtime: managed` has anywhere to run. False on the recommended
+      // one-container image, which is why an import of a managed template asks for an address.
+      managedAgent: Boolean(config.managedAgent),
+      ...(pluginStore ? { grants: pluginStore } : {}),
+      ...(componentStore ? { components: componentStore } : {}),
+    };
+    app.route(
+      "/api/templates",
+      createTemplateRoutes(templateDeps, requireUser, canUseBot),
     );
   }
 

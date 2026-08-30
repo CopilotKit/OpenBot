@@ -1,8 +1,12 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { TemplateRefusedError } from "../../../shared/bot-template";
 import type { AuditEventType, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import { SecretInTemplateError } from "../templates/pack";
+import type { TemplateExport } from "../templates/routes";
+import { TemplateSlugTakenError } from "../templates/store";
 import { testAgentConnection } from "./connection-test";
 import { checkAgentEndpoint } from "./endpoint";
 import { canManageAgent } from "./profile-policy";
@@ -159,6 +163,19 @@ export function createAgentRoutes(
     /** The Bots this one may address today, read per call so a revoked grant stops showing. */
     reachableFrom: (agentId: string) => Promise<readonly string[]>;
   },
+  /**
+   * Packing this coworker into a template draft.
+   *
+   * Mounted here rather than under `/api/templates` because it is a thing done TO a Bot, beside
+   * Duplicate, and the question it has to answer first — may this person manage this coworker — is
+   * this file's question. Everything below that question lives in `templates/routes.ts`, so the two
+   * halves are not two copies of the same authorization rule.
+   *
+   * Absent leaves the route unmounted rather than mounted and refusing, the same shape every other
+   * optional capability here takes: a deployment that never built the template store has no door for
+   * this, not a locked one.
+   */
+  templateExport?: TemplateExport,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -370,6 +387,68 @@ export function createAgentRoutes(
       });
       return context.json({ agent: agentDto(context.var.actor, agent) }, 201);
     } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  /**
+   * Export this coworker as a template draft.
+   *
+   * EXPORTING A PACKAGE BOT IS DELIBERATELY ALLOWED, which is why the check below is not simply
+   * `canManageAgent`. A system-owned Bot is ownerless and public, it is the most template-worthy
+   * thing in the product, and `POST /:agentId/duplicate` already lets any signed-in person fork one
+   * — so refusing here would protect nothing while withholding the only Bots worth writing a
+   * catalogue from. Nothing about the export changes the Bot it read.
+   *
+   * The refusals are the packer's, and they are refusals rather than warnings on purpose: a coworker
+   * with a skill slug the format does not admit, or prose past a ceiling, cannot be expressed as a
+   * template, and a silently truncated instruction is an instruction nobody wrote. A secret shape in
+   * its text is refused for the harder reason — the file is about to be handed to somebody.
+   */
+  routes.post("/:agentId/template", requireUser, async (context) => {
+    if (!templateExport) {
+      return context.json(
+        { error: "This deployment cannot author templates." },
+        503,
+      );
+    }
+    const agentId = context.req.param("agentId");
+    try {
+      const agent = await store.get(context.var.actor, agentId);
+      if (!agent) return context.json({ error: "Agent not found." }, 404);
+      if (!canManageAgent(context.var.actor, agent) && !agent.systemOwned) {
+        return context.json(
+          { error: "You do not have permission to manage this agent." },
+          403,
+        );
+      }
+      return context.json(
+        await templateExport.exportAgent(context.var.actor, agent),
+        201,
+      );
+    } catch (error) {
+      /*
+       * Both refusals carry their machine-readable half beside the sentence, because the export
+       * screen has to tell an author which of the two happened: one is a Bot to rename or shorten,
+       * the other is a key to take out of somebody's prose. Neither body echoes the offending text.
+       */
+      if (error instanceof TemplateRefusedError) {
+        return context.json(
+          { error: error.message, reason: error.reason },
+          400,
+        );
+      }
+      if (error instanceof SecretInTemplateError) {
+        return context.json(
+          { error: error.message, reason: "secret_shape", field: error.field },
+          400,
+        );
+      }
+      if (error instanceof TemplateSlugTakenError) {
+        // Never overwritten. An export produces a draft the author edits, and a second export of the
+        // same coworker landing on top of it would throw those edits away without saying so.
+        return context.json({ error: error.message }, 409);
+      }
       return mapStoreError(context, error);
     }
   });
