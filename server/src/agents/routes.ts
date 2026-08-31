@@ -445,8 +445,12 @@ export function createAgentRoutes(
         );
       }
       if (error instanceof TemplateSlugTakenError) {
-        // Never overwritten. An export produces a draft the author edits, and a second export of the
-        // same coworker landing on top of it would throw those edits away without saying so.
+        /*
+         * Two coworkers, one name. The same coworker packed twice no longer reaches this branch —
+         * the export seam hands back the draft that already exists, edits intact — so what is left
+         * here is a genuine clash between two different Bots, and only a person can decide which of
+         * them keeps the name.
+         */
         return context.json({ error: error.message }, 409);
       }
       return mapStoreError(context, error);

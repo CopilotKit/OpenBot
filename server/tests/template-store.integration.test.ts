@@ -197,6 +197,54 @@ describe("a template draft", () => {
     await store.deleteDraft(stranger, theirs.id);
   });
 
+  /*
+   * The lookup that tells a repeat press apart from a genuine clash.
+   *
+   * The unique index is on `(owner_user_id, slug)` and knows nothing about which Bot a draft came
+   * from, so `createDraft` refuses both cases with one sentence. Exporting the same coworker a second
+   * time is not two files fighting over a name, and this is the question that says so.
+   */
+  test("the draft a coworker was packed into is found by that coworker, and by nothing else", async () => {
+    const spare = `agent_twin_${suite}`;
+    await database
+      .insert(agents)
+      .values({ id: spare, name: spare, type: "built_in", configuration: {} });
+    const packed = await store.createDraft(owner, {
+      agentId: bot,
+      document: template,
+    });
+
+    const found = await store.draftForAgent(owner, {
+      agentId: bot,
+      slug: draftSlug,
+    });
+    expect(found?.id).toBe(packed.id);
+
+    // A different coworker under the same name is the case that must keep refusing, so it is not a
+    // match here either.
+    expect(
+      await store.draftForAgent(owner, { agentId: spare, slug: draftSlug }),
+    ).toBeNull();
+    // Somebody else's name space entirely. The index is per author and so is this.
+    expect(
+      await store.draftForAgent(stranger, { agentId: bot, slug: draftSlug }),
+    ).toBeNull();
+
+    await store.deleteDraft(owner, packed.id);
+    /*
+     * A pasted draft carries no `agent_id`, and a coworker that happens to slugify to its name has
+     * not been exported before. Returning it would hand somebody a file they typed by hand when they
+     * asked for one packed from a Bot.
+     */
+    const pasted = await store.createDraft(owner, { document: template });
+    expect(
+      await store.draftForAgent(owner, { agentId: bot, slug: draftSlug }),
+    ).toBeNull();
+
+    await store.deleteDraft(owner, pasted.id);
+    await database.delete(agents).where(eq(agents.id, spare));
+  });
+
   test("an edit replaces the document and moves the slug with it", async () => {
     const draft = await store.createDraft(owner, { document: template });
     const renamed = parseBotTemplate(

@@ -189,9 +189,17 @@ export type TemplateExport = {
   /**
    * Pack, store the draft, and record `template.exported`.
    *
+   * PRESSING EXPORT TWICE ON ONE COWORKER IS NOT AN ERROR, and that is the interesting part of this
+   * contract. The second press answers with the draft that already exists rather than refusing, and
+   * `repack` on the response carries the file a fresh pack would have written so the panel can offer
+   * the overwrite as a separate act. Nothing is written over on its own: a draft is the thing an
+   * author edits by hand — which is the entire reason an export produces one instead of a download —
+   * and a re-pack landing on top of those edits would throw away work nobody was asked about.
+   *
    * Throws `TemplateRefusedError` when the coworker cannot be expressed in the format,
    * `SecretInTemplateError` when its prose carries something shaped like a credential, and
-   * `TemplateSlugTakenError` when this person already has a draft by that name.
+   * `TemplateSlugTakenError` when the name is taken by a draft for a DIFFERENT Bot — which is two
+   * files fighting over one name, and a person really does have to choose.
    */
   exportAgent(
     actor: TemplateActor,
@@ -204,8 +212,23 @@ export type ExportedTemplate = {
   /** The file itself, so the author can read what left the building before anything else does. */
   yaml: string;
   digest: string;
+  /** The parsed document, so the panel can inventory what travelled without a second parser. */
+  template: BotTemplate;
   /** What was left behind, in sentences. The interesting half of an export. */
   stripped: string[];
+  /**
+   * The file a re-pack would write, and the flag that says this draft was already here.
+   *
+   * Present ONLY when this call packed the coworker and then found a draft of that name for that
+   * same Bot, so `yaml` above is the author's version rather than what was just packed. Carried
+   * rather than applied, because applying it is a decision: the panel says the draft already existed,
+   * offers to re-pack from the coworker, and sends this text back through the ordinary draft edit —
+   * the one that re-runs the parser and the secret scanner — if somebody presses it.
+   *
+   * Absent on every export that wrote a draft, including a re-pack, since after either of those the
+   * stored document IS the fresh pack and there is nothing to offer.
+   */
+  repack?: string;
 };
 
 export type TemplateExportDeps = {
@@ -283,12 +306,68 @@ export function createTemplateExport(deps: TemplateExportDeps): TemplateExport {
           : {}),
       });
 
-      const draft = await deps.templateStore.createDraft(actor, {
-        agentId: profile.id,
-        document: packed.template,
-      });
-      const yaml = serializeBotTemplate(packed.template);
-      const digest = await botTemplateDigest(packed.template);
+      /*
+       * The insert first, and the question about who took the name only if it fails.
+       *
+       * The read that would have "checked first" is not here for the reason `createDraft` gives —
+       * two exports a second apart would both read a free slug — and it would be a query on the
+       * ordinary path to answer a question the ordinary path does not have. The index decides; this
+       * asks what it decided.
+       */
+      let draft: TemplateDraft;
+      let existing: TemplateDraft | null = null;
+      try {
+        draft = await deps.templateStore.createDraft(actor, {
+          agentId: profile.id,
+          document: packed.template,
+        });
+      } catch (error) {
+        if (!(error instanceof TemplateSlugTakenError)) throw error;
+        /*
+         * WHICH BOT TOOK THE NAME IS THE WHOLE DISTINCTION. A draft for this same coworker is this
+         * same coworker being packed again, and the person gets it back — pressing Export twice must
+         * not dead-end on a panel that has no rename control and does not show them the draft they
+         * already have. A draft for a different Bot, or one somebody pasted, is two files fighting
+         * over one name, and the refusal below is the honest answer to that.
+         */
+        existing = await deps.templateStore.draftForAgent(actor, {
+          agentId: profile.id,
+          slug: packed.template.template.slug,
+        });
+        if (!existing) throw error;
+        draft = existing;
+      }
+
+      /*
+       * The stored document, which on the reuse is the author's version rather than what was just
+       * packed. `yaml` and `digest` have to be of the same bytes the file route will serve, or the
+       * panel offers a Download of something other than what it is showing.
+       *
+       * `stripped` stays the fresh pack's either way, and that is not an oversight. It says which of
+       * this COWORKER'S fields no template can carry — the address, the key, the callback token, a
+       * package Bot's behaviour — which is true of the Bot in front of the person whichever document
+       * they are looking at.
+       */
+      const document = existing ? existing.document : packed.template;
+      const yaml = serializeBotTemplate(document);
+      const digest = await botTemplateDigest(document);
+
+      if (existing) {
+        /*
+         * NO TRAIL ROW, because nothing was exported. The document that goes back is the one the
+         * earlier `template.exported` already named, and a second row would count one export twice
+         * — while a row carrying this pack's `stripped` beside the stored document's digest would
+         * describe two different files as though they were one.
+         */
+        return {
+          templateId: draft.id,
+          yaml,
+          digest,
+          stripped: packed.stripped,
+          template: document,
+          repack: serializeBotTemplate(packed.template),
+        };
+      }
 
       /*
        * NEVER THE PROSE. `stripped` is a list of sentences this repository wrote about fields, the

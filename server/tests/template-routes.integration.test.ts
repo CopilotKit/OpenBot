@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import { parseBotTemplate } from "../../shared/bot-template";
+import {
+  parseBotTemplate,
+  serializeBotTemplate,
+} from "../../shared/bot-template";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import { createAgentRoutes } from "../src/agents/routes";
 import { createAuditStore } from "../src/audit";
@@ -411,6 +414,9 @@ afterAll(async () => {
 });
 
 describe("exporting a coworker", () => {
+  /** The draft the package Bot's export wrote, so the presses after it can be about that draft. */
+  let packedDraftId = "";
+
   test("a Bot you cannot see is not found, and a Bot you cannot manage is refused", async () => {
     const hidden = await appFor(stranger).request(
       `/api/agents/${privateBot}/template`,
@@ -439,7 +445,11 @@ describe("exporting a coworker", () => {
       yaml: string;
       digest: string;
       stripped: string[];
+      repack?: string;
     };
+    packedDraftId = body.templateId;
+    // Nothing was here to reuse, so nothing is offered to re-pack.
+    expect(body.repack).toBeUndefined();
 
     // The draft is the stranger's, not the deployment's: exporting is authoring.
     const [draft] = await database
@@ -468,15 +478,118 @@ describe("exporting a coworker", () => {
     expect(JSON.stringify(payload)).not.toContain("Chase overdue invoices");
   });
 
-  test("a second export does not overwrite the draft the author has been editing", async () => {
+  /*
+   * The press that used to dead-end.
+   *
+   * A draft is unique per author and name, so a second export of one coworker collided with the
+   * first and was refused with "rename one of them" — on the one screen where somebody is trying to
+   * hand their work to somebody else, which has no rename control and does not show the draft it is
+   * complaining about. The draft comes back instead. What is asserted here is that it comes back
+   * UNCHANGED, because the edits are the whole reason an export produces a draft rather than a file.
+   */
+  test("a second export returns the draft the author has been editing, untouched", async () => {
+    const first = await appFor(stranger).request(
+      `/api/templates/${packedDraftId}/file`,
+    );
+    const edited = parseBotTemplate(await first.text());
+    const byHand = serializeBotTemplate({
+      ...edited,
+      template: {
+        ...edited.template,
+        summary: "Edited before anybody sent it.",
+      },
+    });
+    expect(
+      (
+        await appFor(stranger).request(`/api/templates/${packedDraftId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ source: byHand }),
+          headers: { "content-type": "application/json" },
+        })
+      ).status,
+    ).toBe(200);
+
     const again = await appFor(stranger).request(
       `/api/agents/${packagedBot}/template`,
       { method: "POST" },
     );
-    expect(again.status).toBe(409);
-    expect(((await again.json()) as { error: string }).error).toContain(
+    expect(again.status).toBe(201);
+    const body = (await again.json()) as {
+      templateId: string;
+      yaml: string;
+      digest: string;
+      repack?: string;
+    };
+
+    // The same draft, not a second one, and not the packer's version of it.
+    expect(body.templateId).toBe(packedDraftId);
+    expect(parseBotTemplate(body.yaml).template.summary).toBe(
+      "Edited before anybody sent it.",
+    );
+    // Read back as the file it is, so the assertion is about the stored row rather than about what
+    // the export happened to answer with.
+    const stored = await appFor(stranger).request(
+      `/api/templates/${packedDraftId}/file`,
+    );
+    expect(parseBotTemplate(await stored.text()).template.summary).toBe(
+      "Edited before anybody sent it.",
+    );
+
+    /*
+     * The pack that was NOT applied, carried so the overwrite can be offered as a press of its own.
+     * It is the coworker as it is now, which is why its summary is the packer's rather than the
+     * author's.
+     */
+    expect(typeof body.repack).toBe("string");
+    expect(parseBotTemplate(body.repack ?? "").template.summary).not.toBe(
+      "Edited before anybody sent it.",
+    );
+
+    // One export, one trail row. The second press packed nothing and says nothing.
+    const rows = await trail("template.exported");
+    expect(rows.filter((entry) => entry.targetId === packagedBot)).toHaveLength(
+      1,
+    );
+
+    // Re-packing is the ordinary draft edit, with the file the response handed over — so the
+    // parser and the secret scanner run over it exactly as they do over anything an author types.
+    const repacked = await appFor(stranger).request(
+      `/api/templates/${packedDraftId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ source: body.repack }),
+        headers: { "content-type": "application/json" },
+      },
+    );
+    expect(repacked.status).toBe(200);
+    expect(
+      parseBotTemplate(((await repacked.json()) as { yaml: string }).yaml)
+        .template.summary,
+    ).not.toBe("Edited before anybody sent it.");
+  });
+
+  test("a draft of that name for a different coworker is still refused", async () => {
+    /*
+     * The case the refusal is FOR, and the reason the fix is a distinction rather than a removal.
+     * Two coworkers whose names slugify to one template slug really are two files fighting over a
+     * name, and nobody but a person can decide which keeps it. A draft with no Bot behind it at all
+     * is the same answer for the same reason.
+     */
+    const taken = await templateStore.createDraft(owner, {
+      agentId: privateBot,
+      document: parseBotTemplate(yamlFor({ slug: `public-desk-${suite}` })),
+    });
+
+    const refused = await appFor(owner).request(
+      `/api/agents/${publicBot}/template`,
+      { method: "POST" },
+    );
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: string }).error).toContain(
       "already have a template draft",
     );
+
+    await templateStore.deleteDraft(owner, taken.id);
   });
 });
 

@@ -23,6 +23,13 @@ import { queryClient } from "@/query-client";
  * than leaving the absence to be noticed. A person about to hand this to somebody needs to be told
  * that the address, the key and the callback token did not travel — and, for one of the Bots that
  * ship in the box, that its behaviour did not either.
+ *
+ * PRESSING EXPORT TWICE IS THE THIRD THING, and it used to be a dead end. The draft is unique per
+ * author and name, so the second press came back refused — rename one of them — which is not
+ * something anybody can do from here: there is no rename control on this panel and the draft being
+ * complained about is not shown on it either. The server now answers with that draft instead, edits
+ * and all, and hands over the pack it did not apply; re-packing is a button that says what it
+ * replaces.
  */
 export function ExportTemplate({ agentId }: { agentId: string }) {
   const exportTemplate = useMutation(
@@ -33,6 +40,17 @@ export function ExportTemplate({ agentId }: { agentId: string }) {
   );
 
   const [draft, setDraft] = useState<ExportedTemplate | null>(null);
+  /**
+   * The fresh pack the server held back, or null when this draft was written by this press.
+   *
+   * EXPORTING THE SAME COWORKER TWICE USED TO DEAD-END HERE. The second press was refused with "you
+   * already have a template draft called X, rename one of them" — on a panel with no rename control,
+   * which does not show the draft in question, and at the one moment somebody is trying to hand
+   * their work to somebody else. Now the draft comes back instead, and the pack that was not applied
+   * sits in here so the overwrite is a thing a person chooses rather than something that happened
+   * to their edits.
+   */
+  const [repack, setRepack] = useState<string | null>(null);
   /** What is in the box, which is the draft until somebody types in it. */
   const [text, setText] = useState("");
   /** What the server last accepted, so Download is never offered a file nobody has parsed. */
@@ -52,8 +70,12 @@ export function ExportTemplate({ agentId }: { agentId: string }) {
           onClick={async () => {
             const packed = await exportTemplate.mutateAsync(agentId);
             setDraft(packed);
+            // The stored document, which is the author's version when the draft was already here.
+            // Showing the fresh pack instead would put text on screen that the Download button does
+            // not serve.
             setText(packed.yaml);
             setSaved(packed.yaml);
+            setRepack(packed.repack ?? null);
           }}
           variant="outline"
         >
@@ -81,6 +103,43 @@ export function ExportTemplate({ agentId }: { agentId: string }) {
       <h2 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
         Template draft
       </h2>
+
+      {/*
+       * SAID PLAINLY, because the alternative is somebody wondering why their edits are back.
+       *
+       * A person who presses Export twice is not asking for two files. They get the one they already
+       * have, and this says so rather than leaving them to notice that the draft is not what the
+       * packer would write today. The re-pack is offered right underneath, and it says what it
+       * costs: the fresh pack replaces the document, edits included.
+       */}
+      {repack !== null ? (
+        <div className="grid gap-2 rounded-lg border border-border bg-muted/40 p-3">
+          <p className="text-muted-foreground text-xs">
+            You had already exported this coworker. This is that draft, with the
+            changes you made to it — nothing was packed over them.
+          </p>
+          <Button
+            className="w-full text-sm!"
+            disabled={saveDraft.isPending}
+            onClick={async () => {
+              const next = await saveDraft.mutateAsync({
+                templateId: draft.templateId,
+                source: repack,
+              });
+              setText(next.yaml);
+              setSaved(next.yaml);
+              setRepack(null);
+            }}
+            variant="outline"
+          >
+            {saveDraft.isPending ? "Re-packing…" : "Re-pack from the coworker"}
+          </Button>
+          <p className="text-muted-foreground text-xs">
+            Re-packing replaces this draft with the coworker as it is now. What
+            you wrote in it goes with it.
+          </p>
+        </div>
+      ) : null}
 
       <p className="text-muted-foreground text-sm">
         Read it before you send it. Widen the boundary to what this coworker

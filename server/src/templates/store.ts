@@ -172,7 +172,14 @@ export class TemplateNotFoundError extends Error {
   }
 }
 
-/** Two drafts of one name, for one person. The unique index decides; this names what it decided. */
+/**
+ * Two drafts of one name, for one person. The unique index decides; this names what it decided.
+ *
+ * The sentence tells somebody to rename one of them, which is only useful when there really are two
+ * files. Exporting the same coworker twice used to arrive here as well, and told a person to rename
+ * something on a panel with no rename control and no sight of the draft they already had. That case
+ * is now sorted out before this is thrown, by asking `draftForAgent` which Bot took the name.
+ */
 export class TemplateSlugTakenError extends Error {
   readonly slug: string;
   constructor(slug: string) {
@@ -289,6 +296,29 @@ export type TemplateStore = {
       document: BotTemplate;
     },
   ): Promise<TemplateDraft>;
+  /**
+   * The draft this person already packed this coworker into, under this name, or null.
+   *
+   * THE ONE QUESTION `createDraft`'S REFUSAL CANNOT ANSWER, and the reason it exists. The unique
+   * index is on `(owner_user_id, slug)` and says nothing about which Bot a draft was packed from, so
+   * a person pressing Export a second time on the same coworker and a person exporting two different
+   * coworkers that slugify to one name hit the identical error. The first is somebody repeating
+   * themselves and must not be told to rename anything — there is no rename control on that panel and
+   * the draft they already have is not on it either, so the refusal is a dead end. The second really
+   * is two files fighting for a name and a person has to choose.
+   *
+   * Scoped to `actor.id` rather than through `mayReach`, because the collision a caller is trying to
+   * explain is always the actor's own: `createDraft` writes `ownerUserId: actor.id`, so the row that
+   * took the name is theirs even when an administrator is exporting somebody else's Bot.
+   *
+   * A draft with no `agent_id` is never a match. A pasted document that happens to share the name is
+   * not this coworker being packed again, and returning it would hand somebody a file they wrote by
+   * hand when they asked for one packed from a Bot.
+   */
+  draftForAgent(
+    actor: AgentActor,
+    input: { agentId: string; slug: string },
+  ): Promise<TemplateDraft | null>;
   /** Yours, or the deployment's if you are an administrator. Newest first. */
   listDrafts(actor: AgentActor): Promise<TemplateDraft[]>;
   getDraft(actor: AgentActor, templateId: string): Promise<TemplateDraft>;
@@ -540,6 +570,21 @@ export function createTemplateStore(database: Database): TemplateStore {
         }
         return draftWithin(transaction, actor, id);
       });
+    },
+
+    async draftForAgent(actor, input) {
+      const [row] = await database
+        .select(draftProjection)
+        .from(botTemplates)
+        .where(
+          and(
+            eq(botTemplates.ownerUserId, actor.id),
+            eq(botTemplates.slug, input.slug),
+            eq(botTemplates.agentId, input.agentId),
+          ),
+        )
+        .limit(1);
+      return row ? draftFrom(row) : null;
     },
 
     async listDrafts(actor) {

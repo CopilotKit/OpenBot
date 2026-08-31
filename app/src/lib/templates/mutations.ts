@@ -36,6 +36,15 @@ export type ExportedTemplate = {
    * behaviour is not either.
    */
   stripped: string[];
+  /**
+   * The file a re-pack would write, present only when this draft was already here.
+   *
+   * Its presence is how the panel knows nothing was packed: a second Export of the same coworker
+   * answers with the draft that already exists — edits and all — rather than refusing or writing
+   * over it. This is the fresh pack, offered as a separate press, and it reaches the server through
+   * the ordinary draft edit below rather than through a second write of its own.
+   */
+  repack?: string;
 };
 
 /**
@@ -45,6 +54,10 @@ export type ExportedTemplate = {
  * requirements and which were an afternoon's experiment, and because `boundary:` is written out at
  * its strictest so the author widens what the coworker actually needs. Both of those are edits, and
  * an edit needs something to edit.
+ *
+ * Which is also why pressing it twice is safe. The second press comes back with the draft from the
+ * first — `repack` set, the author's edits intact — instead of the refusal it used to answer with,
+ * which told somebody to rename a file on a panel that shows no files and has no rename control.
  */
 export function exportAgentTemplateMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
