@@ -236,9 +236,14 @@ export type DeploymentConfig = {
    * Narrowing the middleware to some Bots would leave the rest able to call the tool and draw
    * nothing at all, which is a worse answer than never offering it.
    *
+   * Off until a deployment sets OPENBOT_GENERATIVE_UI. A capability that runs code a model wrote is
+   * one an operator should choose, not one they should discover after an upgrade — and a deployment
+   * that builds its default branch automatically would otherwise acquire it without a decision.
+   *
    * What it runs is sandboxed by the SDK, in an iframe with no same-origin access to this app, so a
    * generated interface reaches this deployment's data only through what the host hands it. This
-   * deployment hands it nothing.
+   * deployment hands it nothing. It can load libraries from a CDN, which is the part a deployment
+   * that must not reach the public internet from a browser tab needs to weigh.
    */
   generativeUi: boolean;
   /**
@@ -793,17 +798,25 @@ function accessibilityEnabled(environment: Environment): boolean {
 /**
  * Whether a Bot may draw an interface it wrote itself.
  *
- * On unless told otherwise, the same shape as OPENBOT_ACCESSIBILITY_DISABLED above it: a capability
- * a fork gets without having to ask for it, and one an operator takes away in a single variable.
+ * ASKED FOR, NOT INHERITED, which is the one place this deliberately breaks the symmetry with
+ * OPENBOT_ACCESSIBILITY_DISABLED above it. That flag names a deployment out of an analytics label,
+ * so defaulting it on costs a fork nothing it would mind. This one decides whether a model may put
+ * code it wrote on somebody's screen and pull libraries from a CDN to run it. Written as a disable
+ * switch, absence would be the permissive answer, and a deployment acquires the capability by
+ * upgrading rather than by choosing it — which is exactly how a deployment that auto-deploys its
+ * default branch would find out.
  *
- * The off switch has to reach the browser as well as the runtime, which is why this ends up on
- * /api/capabilities rather than staying server-side. Turning off only the runtime half would leave
- * the browser still offering the tool, and a Bot would generate a whole interface that nothing
- * renders. See DeploymentConfig.generativeUi.
+ * Only "true" or "1" turn it on. Anything else is not a way of saying yes, and a value nobody
+ * intended should leave a capability off rather than on.
+ *
+ * The answer has to reach the browser as well as the runtime, which is why it ends up on
+ * /api/capabilities rather than staying server-side. Enabling only the runtime half would leave the
+ * browser never offering the tool; enabling only the browser half would have a Bot generate a whole
+ * interface that nothing renders. See DeploymentConfig.generativeUi.
  */
 function generativeUiEnabled(environment: Environment): boolean {
-  const off = optional(environment, "OPENBOT_GENERATIVE_UI_DISABLED");
-  return off !== "true" && off !== "1";
+  const on = optional(environment, "OPENBOT_GENERATIVE_UI");
+  return on === "true" || on === "1";
 }
 
 /**

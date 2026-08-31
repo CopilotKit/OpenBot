@@ -608,34 +608,47 @@ describe("accessibility", () => {
  * renders rather than merely leaving a capability on.
  */
 describe("generated interfaces", () => {
-  test("are on when nothing is set", () => {
-    expect(loadConfig(baseEnvironment).generativeUi).toBe(true);
+  /*
+   * The default is the whole point of this block. Written as a disable switch, an upgrade would hand
+   * every existing deployment the ability to run code a model wrote, and a deployment that builds
+   * its default branch automatically would acquire it without anybody deciding to.
+   */
+  test("are off when nothing is set", () => {
+    expect(loadConfig(baseEnvironment).generativeUi).toBe(false);
   });
 
-  test.each(["true", "1"])(
-    "are off on OPENBOT_GENERATIVE_UI_DISABLED=%p",
+  test.each(["true", "1"])("are on for OPENBOT_GENERATIVE_UI=%p", (value) => {
+    expect(
+      loadConfig({ ...baseEnvironment, OPENBOT_GENERATIVE_UI: value })
+        .generativeUi,
+    ).toBe(true);
+  });
+
+  /*
+   * Anything else is not a way of saying yes. A value nobody intended — a stray "false", an empty
+   * variable left behind by a template — should leave the capability off, which is the direction
+   * that cannot surprise anybody.
+   */
+  test.each(["false", "no", "", "yes", "TRUE", "on"])(
+    "stay off for OPENBOT_GENERATIVE_UI=%p",
     (value) => {
       expect(
-        loadConfig({
-          ...baseEnvironment,
-          OPENBOT_GENERATIVE_UI_DISABLED: value,
-        }).generativeUi,
+        loadConfig({ ...baseEnvironment, OPENBOT_GENERATIVE_UI: value })
+          .generativeUi,
       ).toBe(false);
     },
   );
 
-  // Anything else is not a way of saying off, exactly as above.
-  test.each(["false", "no", "", "yes"])(
-    "stay on for OPENBOT_GENERATIVE_UI_DISABLED=%p",
-    (value) => {
-      expect(
-        loadConfig({
-          ...baseEnvironment,
-          OPENBOT_GENERATIVE_UI_DISABLED: value,
-        }).generativeUi,
-      ).toBe(true);
-    },
-  );
+  // The old spelling was a disable switch. It must not still work, or a deployment that set it
+  // would read as having made a choice it has not made under the new name.
+  test("ignore the disable switch this replaced", () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        OPENBOT_GENERATIVE_UI_DISABLED: "false",
+      }).generativeUi,
+    ).toBe(false);
+  });
 });
 
 /**
