@@ -834,6 +834,9 @@ export function createApp(
                 pluginStore.botsReachableFrom(agentId),
             }
           : undefined,
+        // Whether "built-in" is a kind of coworker this deployment can actually make: the create
+        // path falls back to the managed Bot's endpoint, so without one it can only refuse.
+        config.managedAgent !== undefined,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the

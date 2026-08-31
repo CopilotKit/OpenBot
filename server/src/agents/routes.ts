@@ -159,6 +159,13 @@ export function createAgentRoutes(
     /** The Bots this one may address today, read per call so a revoked grant stops showing. */
     reachableFrom: (agentId: string) => Promise<readonly string[]>;
   },
+  /**
+   * Whether a coworker can run on this deployment's own Bot, i.e. be created with no endpoint.
+   *
+   * The store already refuses such a create on a deployment with no managed Bot; this exists so a
+   * screen can say so before somebody fills in three steps of a form that was always going to fail.
+   */
+  builtInAvailable = false,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -221,6 +228,16 @@ export function createAgentRoutes(
       return mapStoreError(context, error);
     }
   });
+
+  /**
+   * What kinds of coworker this deployment can create, for the screen that asks.
+   *
+   * Static per process: whether a managed Bot exists is deployment configuration, not data. Above
+   * the parameterised route on purpose, so "capabilities" can never be read as an agent id.
+   */
+  routes.get("/capabilities", requireUser, (context) =>
+    context.json({ capabilities: { builtInAvailable } }),
+  );
 
   routes.get("/:agentId", requireUser, async (context) => {
     try {

@@ -44,7 +44,26 @@ export const agentKeys = {
   list: (hidden = false) => ["agents", "list", { hidden }] as const,
   detail: (agentId: string) => ["agents", "detail", agentId] as const,
   handoff: (agentId: string) => ["agents", "handoff", agentId] as const,
+  capabilities: () => ["agents", "capabilities"] as const,
 };
+
+/** What kinds of coworker this deployment can create. */
+export type AgentCapabilities = {
+  /** Whether a coworker can run on the deployment's own Bot, with no endpoint of its own. */
+  builtInAvailable: boolean;
+};
+
+export function agentCapabilitiesQueryOptions() {
+  return queryOptions({
+    queryKey: agentKeys.capabilities(),
+    queryFn: (): Promise<AgentCapabilities> =>
+      client("/api/agents/capabilities", "capabilities", {
+        fallback: "Could not load what this deployment supports",
+      }),
+    // Deployment configuration, not data: it cannot change without the server restarting.
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
 
 /** Which Bots one Bot may hand work to, and whether this deployment lets it. */
 export type HandoffGrants = {
