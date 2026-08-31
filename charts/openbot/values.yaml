@@ -141,6 +141,22 @@ config:
       issuer: ""
   tenantPackageDir: /app/examples/fintech
 
+  # The templates shipped in the image. `COPY examples/` puts them there, so a cluster with no egress
+  # at all still opens a populated gallery.
+  templateDir: /app/examples/templates
+
+  # The GitHub repositories an administrator may register as a template source, comma-separated as
+  # `owner/repo`. EMPTY, and empty means this deployment fetches nothing from anybody: a registration
+  # naming a repository that is not here is refused. The pin — the commit sha — is registered in the
+  # product rather than here, because moving it is an administrator's deliberate act and not a
+  # redeploy. The reference catalogue is jerelvelarde/awesome-openbot-templates.
+  templateSources: ""
+
+  # Who may install a template: "anyone" (the default) or "admin". A floor rather than a setting —
+  # the admin screen may raise it and may never lower it, so a cluster that writes "admin" here can
+  # rely on it holding.
+  templateInstallers: ""
+
   # CopilotKit Intelligence, which OpenBot requires. All four values are needed together: the server
   # refuses to start on a partial set, deliberately, because a half-configured Intelligence is a
   # mistake somebody made rather than a deployment that meant to run without one.
