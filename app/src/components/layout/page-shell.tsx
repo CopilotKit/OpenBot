@@ -57,7 +57,26 @@ export function PageShell({
   };
 }) {
   return (
-    <>
+    /*
+     * THE PANE'S OWN SCROLLER, and without it this component cannot show a long page.
+     *
+     * The two layouts that host these screens disagree about who scrolls, and PageShell used to
+     * answer for neither. `_app.tsx` is `h-svh overflow-hidden` and says so in its own comment —
+     * "one viewport, never scrolls: panes scroll inside it" — so a pane that provides no scroller
+     * is simply cut off at the fold, silently, with no scrollbar to suggest anything is missing.
+     * `admin` is ordinary flow, where the document scrolls and a pane needs to do nothing.
+     *
+     * This satisfies both. Under `_app` it is the flex child that fills the viewport and scrolls
+     * inside it; under `admin` nothing constrains its height, so `overflow-y-auto` never engages
+     * and the document scrolls as before. `min-h-0` is the part that is easy to drop and is
+     * load-bearing: a flex child defaults to `min-height: auto`, which refuses to shrink below its
+     * content and hands the overflow back to a parent that has already hidden it.
+     *
+     * Measured rather than eyeballed, because this failed quietly: the templates gallery was 5763px
+     * of content in a 900px viewport and the template reading page 6546px, with four of its fourteen
+     * sections reachable and no scrollbar anywhere.
+     */
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {!!backButton && (
         <div className="max-w-7xl w-full h-14 flex items-center px-3">
           <Button
@@ -90,7 +109,7 @@ export function PageShell({
         </header>
         {children}
       </div>
-    </>
+    </div>
   );
 }
 
