@@ -107,7 +107,7 @@ half-understood by an older deployment.
 | `template.version` | no | 40 | The author's string. Nothing reads it; there is no update channel. |
 | `template.author` | no | 80 | A claim, rendered as one, never verified. |
 | `template.source` | no | 200 | Must be `https://` with a plain host and no credential. Rendered as text, never dialled. |
-| `template.summary` | yes | 300 | One line, shown in a list. |
+| `template.summary` | yes | 300 | Up to three lines on a gallery card, the description heading the template's own page, and in full on the consent screen. |
 | `template.license` | no | 40 | A claim like the rest of the block. |
 | `bot.name` | yes | 80 | Checked by the same helper the edit form uses, so an import can never land a Bot that screen would refuse to save. |
 | `bot.title` | yes | 120 | |
@@ -196,14 +196,90 @@ whatever this deployment allows — which, on the shipped policy, is everything.
 to record what it would have refused rather than refuse it does not enforce these clauses either:
 that setting governs the whole evaluation, and they are judged by it like any other rule.
 
+## The screens
+
+Reading a stranger's template changes nothing, and the shape of these screens is where that is
+enforced rather than promised. Browsing, reading and installing are three separate URLs: the middle
+one exists so that "let me see what this is" and "I am installing this" are not the same
+gesture, and a card never opens the consent screen directly.
+
+```text
+Bot templates — what leads to what. A branch is the control a person presses.
+
+  ·  this screen writes nothing at all        !  this control writes
+
+ANYONE SIGNED IN
+
+·  /agents                                     the coworkers you have
+   ├──   "Templates"                        →  the gallery, below
+   ├──   "Import"                           →  the consent panel, below,
+   │                                           at /agents?import=true[&template=<id>]
+   ├──   "Start channel"                    →  /channel/new
+   └──   a coworker                         →  its profile panel, below
+
+·  /agents/gallery                             what it offers, and what it would not list
+   ├──   "Coworkers"                        →  /agents
+   └──   "Read this template"               →  /agents/gallery/$slug
+
+·  /agents/gallery/$slug                       read in full. Nothing is decided here.
+   ├──   "Templates"                        →  /agents/gallery
+   └──   "Use this template"                →  the consent panel, at ?use=<slug>
+
+!  the consent panel                           one component, two URLs, not a route
+   ├──   "Read this template"                  previews the pasted file; persists nothing
+   ├──   "Test"                                dials what you typed; persists nothing
+   ├──   "Read a different file"               back to the paste box
+   ├──   "Set a boundary"                   →  /admin/boundaries (administrator only)
+   └── ! "Import <Bot name>"                   the install, then → /agents?agent=<id>
+
+!  /agents?agent=<id>                          one coworker, in a panel over the roster
+   ├── ! "Grant" / "Decline"                   answers one ask. Administrator only.
+   ├── ! "Export template"                     packs this coworker into a draft
+   ├── ! "Re-pack from the coworker"           replaces the draft, your edits and all
+   ├── ! "Save changes"                        saves your edits to the draft
+   ├──   "Show the file" / "Hide the file"     reveals it; "Copy" copies it
+   └──   "Download"                            the saved file; off while edits are unsaved
+
+ADMINISTRATOR ONLY
+
+·  /admin                                      Templates sits under "What Bots can reach"
+   └──   "Templates"                        →  /admin/templates
+
+!  /admin/templates                            who may install, sources, every import
+   ├── ! "Administrators only"                 the switch; an env floor can hold it
+   ├──   "Register a source"                →  a dialog: ! "Register", "Cancel"
+   ├── ! "Forget"                              drops a pinned source
+   └──   an imported coworker               →  its ledger: the asks, the ceiling applied
+       ├──   "Boundaries"                   →  /admin/boundaries
+       ├── ! "Retract"                         takes back that import's grants and ceiling
+       └──   "Close"
+
+!  /admin/boundaries                           its own rules; import clauses are read-only
+   ├── ! "Add rule" / "Remove"                 the deployment's own, never an import's
+   ├──   "Audit"                            →  /admin/audit
+   └──   the coworker's name                →  /agents
+
+·  /admin/audit                                the "Blocked" and "Did not happen" filters
+```
+
+The consent panel is the same component at both of its URLs — a slide-over rather than a route —
+and only its last button writes. An install grants nothing, so **Grant** and **Decline** live on
+the coworker's own profile against the live grant tables, never in the administrator's ledger.
+
 ## Export
 
 `POST /api/agents/:agentId/template`, from **Export template** on a coworker's profile panel.
 
 It produces a **draft** the author reads and edits before it leaves the building, not a one-shot
 download. The response carries the file, its digest, and — the interesting half — a list of what was
-stripped, in sentences. The draft is stored per author and per slug; a second export of the same
-coworker answers 409 rather than throwing away the edits made to the first.
+stripped, in sentences. The draft is stored per author and per slug.
+
+A second export of the same coworker hands back the draft that already exists, edits intact, and
+carries the file a fresh pack would have written as `repack`. The panel says the draft was already
+there and offers **Re-pack from the coworker**, which replaces the document — edits included — back
+through the draft route that re-parses and re-scans it, so bytes this server produced are trusted no
+further than a stranger's. Only a name taken by a draft for a *different* Bot answers 409, because
+only a person can decide which of the two keeps it.
 
 Exporting a package Bot is deliberately allowed. They are ownerless, public, and the most
 template-worthy things in the product.
@@ -229,7 +305,9 @@ permissiveness would travel to everyone who imported the file.
 
 ## Import
 
-Paste or drop the file. Nothing is written until the last button.
+Paste the file. Nothing is written until the last button. There is no drop target and no file
+picker: the import screen is a paste box, and a gallery entry or one of your own drafts seeds that
+same box with the YAML this server serialised from the document it parsed.
 
 `POST /api/templates/preview` writes nothing and, on success, records nothing — a preview that left a
 row would make reading a stranger's file indistinguishable from installing it. It returns the parsed
