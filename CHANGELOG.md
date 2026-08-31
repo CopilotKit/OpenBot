@@ -16,6 +16,65 @@ refused, a hop retried, and a hop that failed for good — were not, so they sho
 Bot belongs. Those are the rows somebody actually opens the trail for: a hop that happened is visible
 in the transcript anyway, and a refused or lost one is visible nowhere else. All four now name the
 asking Bot, exactly as the accepted pair and `agent.escalated` already did.
+### A failed tool refresh no longer leaves a connector offering nothing
+
+Refreshing a connector's tools replaced the list with a delete and then an insert, as two separate
+statements. Whenever the second did not land — a pod killed mid-refresh, a dropped connection, or a
+server answering `tools/list` with the same tool name twice, which the table refuses — the delete had
+already committed on its own. The table is shared, so every replica lost that connector's tools at
+once, every grant an administrator had made was silently un-offered, and the Bot was told it holds
+none of that vendor's tools. Nothing brought them back until somebody read the error on the Plugins
+page and pressed Refresh. The two statements are now one, so a bad refresh is recorded and the tools
+already held are left alone, which is what the code always claimed to do.
+### A rule tried in dry-run now says what it would have refused a Bot's tools
+
+`dry-run` exists so a boundary can be measured against live traffic before it starts refusing
+anybody. It worked that way for the browser, and not for connectors: a tool call the rule matched was
+recorded only as the call that then went out, so `Blocked` on the audit page — and any query behind
+it — answered "this rule would have refused none of them" about calls it would have refused. A rule
+about `mcp.server`, `mcp.tool` or `mcp.effect` therefore looked inert, and enforcing it started
+refusing Bots with nothing in the trail to have warned anybody. A refused tool call is now recorded
+whatever the mode does with it, carrying `carriedOut` so a reader can tell a call this deployment
+stopped from one dry-run recorded and let past. Enforcing deployments behave exactly as before.
+### A policy dry-run no longer counts a failed action twice, or invents a change it did not make
+
+Testing a boundary against recent history replayed three kinds of audit row, and one of them is a
+duplicate: a permitted action that fails is recorded both as the decision that allowed it and as a
+separate failure row, so every failed action was scanned and scored twice. Worse, a dry-run policy
+carries a refused action out, so a refused action can fail too — and its two rows disagree, the
+decision row saying "refused" and the failure row reading as "allowed", so a candidate policy that
+refused it identically was reported as a new refusal it never introduced. The replay now scores each
+action once, from the row that recorded its decision.
+### A message no longer routes to a specialist because a longer word contained a connector's name
+
+When the intent router falls back — it is unreachable, or it declines — and exactly one coworker can
+reach a system the message names, the message goes to that coworker. The name was matched as a bare
+substring, so "how do I deal with a slacker" matched the **slack** connector and "una jirafa" (a
+giraffe) matched **jira**: a message naming neither system was pinned, for the life of the thread,
+to a specialist that could not answer it. A connector's name now has to appear on a word boundary,
+so a system named on its own still routes and one buried inside another word does not.
+### The audit page no longer says "Allowed" about six kinds of refusal
+
+A hop one Bot was not allowed to make, an endpoint this deployment would not dial, a rotation the
+vault refused and a sign-in it turned away were all drawn as **Allowed**, in the muted colour every
+ordinary row uses, and none of them appeared under **Blocked**. The same for a hop that ran out of
+attempts and a question that reached nobody, which are "Did not happen" rather than allowed. The
+page recognised six refusal types and the six added since were never added to it. Refusals now read
+as refusals, the two saved views are built from the same lists the rows are labelled from, and a
+refusal added later is added in one place or in none.
+### A conversation deleted while a server was reconnecting no longer lingers on the screen
+
+Announcements between servers travel as Postgres notifications, which reach whoever is subscribed at
+the moment they are sent and are never replayed. While a server's subscription was down — a database
+restart, a failover, a rolling upgrade — every channel deletion, pin and message announced in that
+window was lost, and nothing afterwards asked for it again.
+
+The browser could not notice. Its own connection to the server stayed open throughout, so the
+refetch it already does when that connection comes back was never triggered, and the roster went on
+showing a conversation that had been deleted until the page was reloaded.
+
+A server now tells the browsers it is holding to refetch when its subscription is re-established.
+Nothing to configure, and no change for a deployment whose database connection never drops.
 ### A Bot's answer comes back to the conversation that asked
 
 **This reverses what 0.0.5 shipped.** The 0.0.5 notes below say the asking Bot does not relay text
