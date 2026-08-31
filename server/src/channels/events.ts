@@ -12,12 +12,9 @@ import postgres from "postgres";
  * silently wrong the moment a second server instance exists: the writer is on one and the listener
  * on the other, and the message is never delivered.
  *
- * A NOTIFY reaches whoever is subscribed at the time and is never replayed, so an announcement made
- * while this server's subscription is down is gone. "Recovers by refetching on reconnect" is the
- * client's rule for ITS OWN socket dropping, and that socket is not the one at risk here: the
- * browser's connection to this server is untouched while the server's connection to Postgres is
- * away, so nothing on the client ever learns it missed anything. `resyncAll` below is that missing
- * signal, sent when the subscription is re-established. See `startChannelActivityListener`.
+ * A NOTIFY is never replayed, so an announcement made while this subscription is down is gone. The
+ * client's own "refetch on reconnect" does not cover it: the socket that dropped is this server's,
+ * not the browser's. `resyncAll` is the signal that closes that gap.
  */
 
 export const CHANNEL_ACTIVITY_TOPIC = "channel_activity";
@@ -40,14 +37,7 @@ export type ChannelActivityEvent = {
   pinned?: boolean;
 };
 
-/**
- * Told to every connection that this server may have missed announcements.
- *
- * Carries no channel and no delta, because a missed NOTIFY cannot be reconstructed: what was lost is
- * per-member and Postgres does not keep it. All this says is "the roster you hold may be wrong", and
- * the client answers it by refetching the roster — the same recovery it already runs when its own
- * socket reconnects, reached from the one direction that had no way to trigger it.
- */
+/** "The roster you hold may be wrong." Carries no delta, because what was lost is not recoverable. */
 export type ChannelResyncEvent = { resync: true };
 
 const RESYNC_PAYLOAD = JSON.stringify({
@@ -61,12 +51,7 @@ export type ChannelEventHub = {
   register(userId: string, send: Send): () => void;
   /** Fan one event out to this instance's own connections. */
   deliver(event: ChannelActivityEvent): void;
-  /**
-   * Tell every connection on this instance to refetch, because announcements may have been missed.
-   *
-   * Everybody rather than a member list, because what was missed is not known: the events that were
-   * lost named their own recipients and those events are gone.
-   */
+  /** Tell every connection to refetch. Everybody, because the lost events named their own members. */
   resyncAll(): void;
   connectionCount(userId: string): number;
 };
@@ -109,8 +94,7 @@ export function createChannelEventHub(): ChannelEventHub {
           try {
             send(RESYNC_PAYLOAD);
           } catch {
-            // A connection that cannot be written to is one that is closing, and its own close
-            // handler detaches it. Failing here would deny the resync to everybody after it.
+            // Closing, and detached by its own close handler. See `deliver`.
           }
         }
       }
@@ -137,25 +121,13 @@ export async function startChannelActivityListener(
   const connection = postgres(databaseUrl, { max: 1 });
 
   /*
-   * Every establish after the first, which is the moment this server could have missed something.
+   * `onlisten` fires on every establish, reconnects included — the same hook `policy-listener.ts`
+   * uses to re-read its row. There is no row to re-read here, so the browsers are told to refetch
+   * instead.
    *
-   * `onlisten` fires when the driver establishes the subscription and again on every reconnect, so
-   * this is the same hook the action policy listener uses to re-read its row. What it cannot do here
-   * is re-read anything: the policy is one row and this is a stream of per-member deltas Postgres
-   * does not keep. So the recovery is handed to the browsers, which already know how to do it — the
-   * resync tells them to refetch the roster, exactly as their own `onopen` does.
-   *
-   * THE FIRST ESTABLISH IS SKIPPED, and the flag is what keeps the message meaning one thing. A
-   * resync says "there was a gap, and something announced in it may have been yours". The first
-   * establish has no gap behind it: there is no earlier subscription for anything to have been
-   * missed between. Sending one anyway would ask every connection to refetch on a boot where nothing
-   * was lost, and would make the message mean "possibly a gap", which is not a thing a client can
-   * act on differently.
-   *
-   * The cost is one roster refetch per connected tab per reconnect. That is the same burst the
-   * deployment already absorbs whenever this server restarts and every browser's own socket
-   * reconnects at once, so it is a shape the roster query is already sized for, and a Postgres
-   * reconnect is rarer than a deploy.
+   * The first establish is skipped so the message means one thing. It has no earlier subscription
+   * behind it, so nothing can have been missed, and a resync there would say "possibly a gap" — not
+   * something a client can act on differently.
    */
   let subscribed = false;
   const resync = () => {

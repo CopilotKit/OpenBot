@@ -68,10 +68,7 @@ describe("channel event hub", () => {
   });
 
   test("a resync reaches every connection, whoever it belongs to", () => {
-    /*
-     * Everybody, not a member list. A resync is sent because announcements were missed and those
-     * announcements are gone, so there is no list of who they were for left to narrow it down with.
-     */
+    // Everybody, not a member list: the events that were lost named their own members.
     const hub = createChannelEventHub();
     const first: string[] = [];
     const second: string[] = [];
@@ -507,22 +504,13 @@ describe("channel change delivery", () => {
 });
 
 /**
- * A NOTIFY reaches whoever is subscribed at the time, and Postgres never replays it.
+ * An announcement made while this server's subscription is down is lost, and the connection that
+ * dropped is not the browser's — so the client's own `onopen` recovery never fires and the roster
+ * goes on rendering a channel that no longer resolves.
  *
- * So an announcement made while this server's subscription is down is lost — and the connection that
- * dropped is not the browser's. Its socket to this server stays open throughout, so the client's own
- * `onopen` recovery in `app/src/lib/channels/use-channel-events.ts` never fires and nothing on
- * either side ever finds out. The roster then renders a channel that no longer resolves.
- *
- * The action policy listener answers the same problem with `onlisten`, which fires on every
- * establish including a reconnect; see the sibling test "catches up when its subscription comes
- * back" in policy-fanout.integration.test.ts. There is nothing to re-read here, so this half hands
- * the recovery to the browsers instead: they are told to refetch, which is what they already do when
- * their own socket comes back.
- *
- * The drop is a real one rather than a simulated one. The subscription's backend is terminated and
- * held down until `pg_stat_activity` shows it gone, so the announcement below is published into a
- * gap that is known to exist rather than assumed to.
+ * The drop is real rather than simulated: the backend is terminated and held down until
+ * `pg_stat_activity` shows it gone, so the announcement lands in a gap known to exist. Compare
+ * "catches up when its subscription comes back" in policy-fanout.integration.test.ts.
  */
 describe("a server whose subscription dropped", () => {
   test("tells its connections to refetch when the subscription comes back", async () => {
@@ -584,12 +572,8 @@ describe("a server whose subscription dropped", () => {
 });
 
 /**
- * Backends subscribed to THIS topic, which is how a subscription is found in order to be broken.
- *
- * Scoped to the topic rather than to `listen%`, because the action policy listener is a subscription
- * too and a test that terminates other people's connections is a test that breaks whatever is
- * running beside it. `pg_stat_activity.query` holds the statement, which for a subscription is
- * `listen "channel_activity"`, so the two are told apart by name rather than by timing.
+ * Backends subscribed to THIS topic, scoped by name rather than `listen%` so that terminating them
+ * can never reach the action policy listener's subscription running beside it.
  */
 async function listenBackendPids(): Promise<number[]> {
   const rows = await database.$client<{ pid: number }[]>`
@@ -598,13 +582,7 @@ async function listenBackendPids(): Promise<number[]> {
   return rows.map((row) => Number(row.pid));
 }
 
-/**
- * The listener this test started, and nothing else.
- *
- * Both halves are load-bearing. The topic filter in `listenBackendPids` keeps this off the policy
- * listener; `before` keeps it off any channel subscription that was already up when this test began,
- * including one left behind by a process sharing the database.
- */
+/** The listener this test started: the topic filter excludes the policy listener, `before` the rest. */
 async function ourPids(before: Set<number>): Promise<number[]> {
   return (await listenBackendPids()).filter((pid) => !before.has(pid));
 }
@@ -613,10 +591,7 @@ function announce(activity: ChannelActivityEvent) {
   return database.$client`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(activity)})`;
 }
 
-/**
- * Polled rather than slept, so the test is not a fixed delay that is either flaky or slow. The same
- * helper policy-fanout.integration.test.ts uses, for the same reason.
- */
+/** Polled rather than slept, so the test is neither flaky nor slow. As policy-fanout does. */
 async function until(
   condition: () => boolean | Promise<boolean>,
   timeoutMs = 8_000,
