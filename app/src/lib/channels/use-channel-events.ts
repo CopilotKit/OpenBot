@@ -8,7 +8,30 @@ import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
  *
  * The query remains the source of truth; socket events only patch its cache. Reconnects refetch the
  * list to recover events missed while disconnected.
+ *
+ * TWO CONNECTIONS CAN DROP, AND ONLY ONE OF THEM IS THIS ONE. `onopen` below covers this socket
+ * going away. The other is the server's own subscription to Postgres, which carries every event
+ * before it reaches this socket: while that is away the announcements are lost and never replayed,
+ * and this socket stays open throughout, so nothing here would ever know. The server sends a resync
+ * when its subscription is re-established, and it is answered with the same refetch `onopen` makes.
  */
+
+/**
+ * The server telling us it may have missed announcements, so the roster we hold may be wrong.
+ *
+ * It carries nothing else, because nothing else is knowable: what was lost was per-member and
+ * Postgres does not keep it. The only answer is to ask again.
+ */
+export type ChannelResyncEvent = { resync: true };
+
+/** What arrives on the socket. `resync` is the discriminant; an activity event never carries it. */
+export type ChannelSocketMessage = ChannelActivityEvent | ChannelResyncEvent;
+
+export function isResync(
+  message: ChannelSocketMessage,
+): message is ChannelResyncEvent {
+  return (message as ChannelResyncEvent).resync === true;
+}
 
 export type ChannelActivityEvent = {
   channelId: string;
@@ -132,12 +155,26 @@ export function useChannelEvents() {
       };
 
       socket.onmessage = (message) => {
-        let activity: ChannelActivityEvent;
+        let parsed: ChannelSocketMessage;
         try {
-          activity = JSON.parse(message.data as string);
+          parsed = JSON.parse(message.data as string);
         } catch {
           return;
         }
+
+        /*
+         * The server's subscription came back, so it may have missed announcements while it was
+         * away. Refetch rather than patch: there is no delta to apply, which is the whole reason
+         * this message exists rather than a replay of what was lost.
+         *
+         * Checked before anything reads `channelId`, because this message has none.
+         */
+        if (isResync(parsed)) {
+          void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
+          return;
+        }
+
+        const activity = parsed;
 
         /*
          * The list is paged, so the cache holds pages rather than one array.

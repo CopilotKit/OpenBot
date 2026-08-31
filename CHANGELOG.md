@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A conversation deleted while a server was reconnecting no longer lingers on the screen
+
+Announcements between servers travel as Postgres notifications, which reach whoever is subscribed at
+the moment they are sent and are never replayed. While a server's subscription was down — a database
+restart, a failover, a rolling upgrade — every channel deletion, pin and message announced in that
+window was lost, and nothing afterwards asked for it again.
+
+The browser could not notice. Its own connection to the server stayed open throughout, so the
+refetch it already does when that connection comes back was never triggered, and the roster went on
+showing a conversation that had been deleted until the page was reloaded.
+
+A server now tells the browsers it is holding to refetch when its subscription is re-established.
+Nothing to configure, and no change for a deployment whose database connection never drops.
+
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the
