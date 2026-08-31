@@ -8,20 +8,31 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { type AgentFormValues, agentFormSchema } from "@/lib/agents/form";
 import {
   type ConnectionVerdict,
   testAgentConnection,
 } from "@/lib/agents/queries";
+
+/** The two ways a coworker can be seen, as a card each. */
+const VISIBILITY_OPTIONS: Array<{
+  value: AgentFormValues["visibility"];
+  title: string;
+  description: string;
+}> = [
+  {
+    value: "private",
+    title: "Private",
+    description: "Only you can see it and start channels with it.",
+  },
+  {
+    value: "public",
+    title: "Public",
+    description: "Everyone in the deployment can find and use it.",
+  },
+];
 
 export function AgentFields({
   defaultValues,
@@ -143,27 +154,35 @@ export function AgentFields({
         <form.Field name="visibility">
           {(field) => (
             <Field>
-              <FieldLabel htmlFor={field.name}>Visibility</FieldLabel>
-              <Select
+              <FieldLabel>Visibility</FieldLabel>
+              <RadioGroup
+                className="grid-cols-2 gap-3"
                 onValueChange={(value) =>
                   field.handleChange(value as AgentFormValues["visibility"])
                 }
                 value={field.state.value}
               >
-                <SelectTrigger id={field.name}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="private">
-                      Private, only you can see it
-                    </SelectItem>
-                    <SelectItem value="public">
-                      Public, everybody can see it
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+                {VISIBILITY_OPTIONS.map((option) => (
+                  <label
+                    className="flex cursor-pointer flex-col gap-1 rounded-lg border border-border bg-card p-3 transition-colors has-data-checked:border-primary has-data-checked:ring-2 has-data-checked:ring-primary/30"
+                    htmlFor={`visibility-${option.value}`}
+                    key={option.value}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-sm">
+                        {option.title}
+                      </span>
+                      <RadioGroupItem
+                        id={`visibility-${option.value}`}
+                        value={option.value}
+                      />
+                    </div>
+                    <span className="text-muted-foreground text-xs">
+                      {option.description}
+                    </span>
+                  </label>
+                ))}
+              </RadioGroup>
             </Field>
           )}
         </form.Field>
