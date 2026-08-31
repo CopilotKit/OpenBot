@@ -146,6 +146,7 @@ describe("a hop, from the tool call to the delivery", () => {
       delivery: {
         deliver: async ({ work, message }) => {
           delivered.push({ work, message });
+          return { answer: null };
         },
       },
     });
@@ -195,6 +196,7 @@ describe("a hop, from the tool call to the delivery", () => {
           delivery: {
             deliver: async ({ work }) => {
               seen.push(work.toBotId);
+              return { answer: null };
             },
           },
         }),
@@ -231,7 +233,7 @@ describe("a hop, from the tool call to the delivery", () => {
       owner: `replica-${suite}`,
       sign: () => "signed",
       auditStore,
-      delivery: { deliver: async () => {} },
+      delivery: { deliver: async () => ({ answer: null }) },
     });
     await runner.sweep();
 

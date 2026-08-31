@@ -119,7 +119,7 @@ export function handoffTool(options: {
        * way, and the model is owed something it can say out loud.
        */
       return outcome.ok
-        ? `${HANDED_OVER}${outcome.toName}. It will answer in its own conversation with this person, so tell them you have asked it and what for, and do not answer on its behalf.`
+        ? `${HANDED_OVER}${outcome.toName}. Its answer will be relayed back into this conversation when it finishes, so tell the person you have asked it and what for, and do not answer on its behalf.`
         : outcome.refusal;
     },
   };
