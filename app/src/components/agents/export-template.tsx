@@ -38,6 +38,8 @@ export function ExportTemplate({ agentId }: { agentId: string }) {
   /** What the server last accepted, so Download is never offered a file nobody has parsed. */
   const [saved, setSaved] = useState("");
   const [copied, setCopied] = useState(false);
+  /** Whether the bytes are on screen. The inventory answers the usual question; this answers the rest. */
+  const [showFile, setShowFile] = useState(false);
 
   const dirty = draft !== null && text !== saved;
 
@@ -72,8 +74,10 @@ export function ExportTemplate({ agentId }: { agentId: string }) {
     );
   }
 
+  const packed = draft.template;
+
   return (
-    <section className="grid gap-2">
+    <section className="grid gap-3">
       <h2 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
         Template draft
       </h2>
@@ -83,20 +87,46 @@ export function ExportTemplate({ agentId }: { agentId: string }) {
         actually needs, and cut anything in the requests it does not.
       </p>
 
-      <Textarea
-        aria-label="Template file"
-        className="max-h-[50vh] min-h-48 overflow-y-auto font-mono text-xs"
-        onChange={(event) => {
-          setCopied(false);
-          setText(event.target.value);
-        }}
-        spellCheck={false}
-        value={text}
-      />
+      {/*
+       * AN INVENTORY BEFORE THE FILE, and the ordering is the change worth stating.
+       *
+       * This panel used to open with the YAML, which answered "what are the bytes" when the question
+       * somebody actually has at this moment is "what did I just hand over". A wall of configuration
+       * is a poor answer to that, and it pushed the half that reassures — what did NOT travel —
+       * below the fold on a panel nobody scrolled. The file is still here, one press away, because a
+       * person about to send this to somebody must be able to read every byte of it.
+       */}
+      <div className="grid gap-2 rounded-lg border border-border bg-card p-3">
+        <p className="font-medium text-xs">What travels</p>
+        <ul className="grid gap-1 text-muted-foreground text-xs">
+          <li>Its name, its role, and the instructions you wrote for it.</li>
+          <li>
+            {packed.skills.length === 0
+              ? "No skills."
+              : `${packed.skills.length === 1 ? "1 skill" : `${packed.skills.length} skills`}: ${packed.skills
+                  .map((skill) => skill.slug)
+                  .join(", ")}. They become the importer's own.`}
+          </li>
+          <li>
+            {packed.requests.connectors.length === 0
+              ? "It asks for no connectors."
+              : `It ASKS for ${packed.requests.connectors
+                  .map((connector) => connector.id)
+                  .join(", ")}. An ask is not a grant.`}
+          </li>
+          <li>
+            A ceiling: shell {packed.boundary.shell}, files{" "}
+            {packed.boundary.files}, browser {packed.boundary.browser}, mcp{" "}
+            {packed.boundary.mcp}.
+          </li>
+        </ul>
+      </div>
 
       {draft.stripped.length > 0 ? (
         <div className="grid gap-1 rounded-lg border border-border bg-muted/40 p-3">
-          <p className="font-medium text-xs">What did not travel</p>
+          <p className="font-medium text-xs">
+            What did not travel ({draft.stripped.length})
+          </p>
           <ul className="grid gap-1">
             {draft.stripped.map((line) => (
               <li className="text-muted-foreground text-xs" key={line}>
@@ -105,6 +135,31 @@ export function ExportTemplate({ agentId }: { agentId: string }) {
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {/*
+       * The file, behind one press rather than gone. Open by default the moment there are unsaved
+       * edits, so a person never has to hunt for the box they are being told to save.
+       */}
+      <Button
+        className="w-full text-sm!"
+        onClick={() => setShowFile((open) => !open)}
+        variant="ghost"
+      >
+        {showFile || dirty ? "Hide the file" : "Show the file"}
+      </Button>
+
+      {showFile || dirty ? (
+        <Textarea
+          aria-label="Template file"
+          className="max-h-[50vh] min-h-48 overflow-y-auto font-mono text-xs"
+          onChange={(event) => {
+            setCopied(false);
+            setText(event.target.value);
+          }}
+          spellCheck={false}
+          value={text}
+        />
       ) : null}
 
       {saveDraft.error ? (

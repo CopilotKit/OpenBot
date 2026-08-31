@@ -134,6 +134,24 @@ export function TemplateDetail({ slug }: { slug: string }) {
         <Verbatim>{template.bot.roleDescription}</Verbatim>
       </PageSection>
 
+      {/*
+       * SETUP, ABOVE THE SKILLS RATHER THAN AT THE BOTTOM.
+       *
+       * This is the author's note to whoever imports it, and for anything beyond a simple coworker it
+       * is the part that decides whether the thing works on arrival: which folder to point it at,
+       * which connector to grant, what has to exist first. At the foot of a long page it was read
+       * after the decision it was meant to inform. It is not given to a model, which is the one thing
+       * about it worth saying out loud, because everything above it is.
+       */}
+      {template.notes ? (
+        <PageSection
+          description="From the author, to whoever imports it. This one is not given to a model."
+          title="Setup and notes"
+        >
+          <Verbatim>{template.notes}</Verbatim>
+        </PageSection>
+      ) : null}
+
       {template.skills.length > 0 ? (
         <PageSection
           description="A skill is an instruction somebody invokes with a slash. It grants nothing: what a Bot may call is its grants, and naming a tool here only narrows what is offered out of what it already holds."
@@ -258,15 +276,6 @@ export function TemplateDetail({ slug }: { slug: string }) {
           />
         </div>
       </PageSection>
-
-      {template.notes ? (
-        <PageSection
-          description="A note from the author to whoever imports it. It is not given to a model."
-          title="Notes"
-        >
-          <Verbatim>{template.notes}</Verbatim>
-        </PageSection>
-      ) : null}
 
       {/*
        * THE FILE ITSELF, last and in full.

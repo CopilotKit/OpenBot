@@ -3,6 +3,7 @@ import { agentKeys } from "@/lib/agents/queries";
 import { client } from "@/lib/client";
 import { componentKeys } from "@/lib/components/queries";
 import { pluginKeys } from "@/lib/plugins/queries";
+import type { BotTemplate } from "@/lib/templates/queries";
 import {
   galleryKeys,
   type SlugResolution,
@@ -25,6 +26,8 @@ export type ExportedTemplate = {
   templateId: string;
   yaml: string;
   digest: string;
+  /** The parsed document, so the panel can inventory what travelled without re-parsing the file. */
+  template: BotTemplate;
   /**
    * Every field that did not travel, as sentences.
    *

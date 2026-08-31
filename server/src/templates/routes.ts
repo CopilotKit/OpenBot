@@ -70,8 +70,8 @@ import type { PluginStore } from "../plugins/store";
 import {
   type CatalogueEntry,
   type CatalogueListing,
-  type CatalogueSkip,
   CatalogueRefusedError,
+  type CatalogueSkip,
   isTemplateInstallers,
   type TemplateCatalogue,
   type TemplateInstallers,
@@ -319,7 +319,21 @@ export function createTemplateExport(deps: TemplateExportDeps): TemplateExport {
         },
       });
 
-      return { templateId: draft.id, yaml, digest, stripped: packed.stripped };
+      /*
+       * The parsed document travels back beside the file.
+       *
+       * The panel leads with an inventory — the skills, the asks, the ceiling — rather than with the
+       * YAML, because "what did I just package up" is the question somebody has at that moment and a
+       * wall of configuration is a poor answer to it. Deriving that inventory in the browser would
+       * mean a second parser in front of the same bytes; this is the one the server already has.
+       */
+      return {
+        templateId: draft.id,
+        yaml,
+        digest,
+        stripped: packed.stripped,
+        template: packed.template,
+      };
     },
   };
 }
