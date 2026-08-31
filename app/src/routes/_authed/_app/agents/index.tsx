@@ -1,4 +1,4 @@
-import { IconFileImport, IconPlus } from "@tabler/icons-react";
+import { IconBoxSeam, IconFileImport, IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
@@ -96,6 +96,19 @@ function AgentsScreen() {
           <div className="flex flex-row w-full items-center justify-between">
             <h2 className="font-bold text-lg">Your agents</h2>
             <div className="flex flex-row items-center gap-1">
+              {/*
+               * The gallery, first of the three, because it is the only one of them that answers
+               * "what could I have?" — Import assumes a file already in hand and Create assumes a
+               * coworker already designed. Somebody arriving with neither has nowhere else to go.
+               */}
+              <Button
+                variant="ghost"
+                size="sm"
+                render={(props) => <Link to="/agents/gallery" {...props} />}
+              >
+                <IconBoxSeam />
+                Templates
+              </Button>
               {/*
                * Beside Create rather than behind a menu, because importing one is the other way a
                * coworker comes to exist here and a person arriving with a file somebody sent them

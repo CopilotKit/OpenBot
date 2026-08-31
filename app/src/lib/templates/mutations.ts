@@ -4,6 +4,7 @@ import { client } from "@/lib/client";
 import { componentKeys } from "@/lib/components/queries";
 import { pluginKeys } from "@/lib/plugins/queries";
 import {
+  galleryKeys,
   type SlugResolution,
   type TemplatePlan,
   type TemplateRequestKind,
@@ -173,6 +174,9 @@ export function decideTemplateRequestMutationOptions(queryClient: QueryClient) {
         queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
         queryClient.invalidateQueries({ queryKey: componentKeys.all }),
         invalidateTemplates(queryClient),
+        // The deployment's own roster renders the same ledger row, so a decision made on a Bot's
+        // page and the Templates screen's copy of it must not be able to disagree.
+        invalidateGallery(queryClient),
       ]);
     },
   });
@@ -203,7 +207,90 @@ export function retractTemplateImportMutationOptions(queryClient: QueryClient) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
         invalidateTemplates(queryClient),
+        // What a retraction took back is a row on the deployment's Templates screen too.
+        invalidateGallery(queryClient),
       ]);
     },
   });
+}
+
+/**
+ * Raise who may install a template here.
+ *
+ * `mutationFn` returns the settings the server answers with rather than the value that was sent,
+ * because the floor can refuse: `OPENBOT_TEMPLATE_INSTALLERS` is a floor an administrator may raise
+ * and may not lower, and a screen that trusted its own optimism would show the control moved to a
+ * position the deployment never accepted. A refusal arrives as a thrown `Error` carrying the
+ * server's sentence, and the value still in force is on the response beside it.
+ */
+export function setTemplateInstallersMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (
+      installers: "anyone" | "admin",
+    ): Promise<{ installers: "anyone" | "admin" }> =>
+      client("/api/admin/templates/settings", {
+        method: "PUT",
+        body: { installers },
+        fallback: FALLBACK,
+      }).then(
+        (response) =>
+          response.json() as Promise<{ installers: "anyone" | "admin" }>,
+      ),
+    onSuccess: () => invalidateGallery(queryClient),
+  });
+}
+
+/**
+ * Pin a repository the gallery may read from.
+ *
+ * The allowlist, the `owner/repo` spelling and the full-sha rule are all decided on the server and
+ * none of them is re-derived here — this sends two strings and renders whichever refusal comes
+ * back. Moving the pin is done by registering the same repository again, because moving the pin is
+ * what an update to a source IS.
+ */
+export function registerTemplateSourceMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: async (variables: { handle: string; sha: string }) => {
+      await client("/api/admin/templates/sources", {
+        method: "POST",
+        body: variables,
+        fallback: FALLBACK,
+      });
+    },
+    onSuccess: () => invalidateGallery(queryClient),
+  });
+}
+
+/**
+ * Forget a source.
+ *
+ * Nothing already installed changes, and that is worth knowing before pressing it: an imported Bot
+ * is an ordinary Bot and no longer refers to where its template came from. What this stops is the
+ * gallery reading from that repository again.
+ */
+export function forgetTemplateSourceMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (id: string) => {
+      await client("/api/admin/templates/sources", {
+        method: "DELETE",
+        body: { id },
+        fallback: FALLBACK,
+      });
+    },
+    onSuccess: () => invalidateGallery(queryClient),
+  });
+}
+
+/**
+ * The gallery, its settings and the deployment's import roster, all invalidated together.
+ *
+ * One helper rather than three call sites choosing, because these three reads are one screen's worth
+ * of state and every write here moves at least two of them: registering a source changes the
+ * settings AND what the gallery lists, and raising `installers` changes the settings AND whether the
+ * gallery draws its button.
+ */
+function invalidateGallery(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: galleryKeys.all });
 }

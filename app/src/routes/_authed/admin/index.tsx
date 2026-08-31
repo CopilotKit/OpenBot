@@ -7,6 +7,7 @@ import {
   IconKey,
   IconLayoutGrid,
   IconListDetails,
+  IconPackageImport,
   IconPuzzle,
   IconShieldCheck,
   IconUsers,
@@ -73,6 +74,16 @@ const SECTIONS: {
         description: "The machines Bots run their tools on.",
         icon: IconDeviceDesktop,
         linkOptions: { to: "/admin/computers" },
+      },
+      /*
+       * Added here as well as to the rail, because the rail's own comment states that the two
+       * orderings must agree: two different arrangements of the same links is worse than either.
+       */
+      {
+        title: "Templates",
+        description: "Where imported coworkers came from, and who may import.",
+        icon: IconPackageImport,
+        linkOptions: { to: "/admin/templates" },
       },
     ],
   },
