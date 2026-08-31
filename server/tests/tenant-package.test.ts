@@ -307,7 +307,13 @@ describe("tenant YAML validation", () => {
         systemPrompt:
           "You are a helpful general assistant. Give clear, concise, and accurate answers.",
       },
-      skills: [],
+      /*
+       * Authoring, and only on this Bot. Holding `skill-creator` is what makes the app offer the four
+       * tools that turn an interview into a saved skill, so this pairing is the feature rather than a
+       * detail of the example: a package that shipped the skill and granted it to nobody would boot a
+       * deployment where writing a skill in a conversation quietly does not work.
+       */
+      skills: ["skill-creator"],
     });
     // The pairing the shipped package makes, which is the whole reason Knowledge narrows to document
     // tools rather than being offered everything its grants hold.
@@ -319,6 +325,19 @@ describe("tenant YAML validation", () => {
       "whats-changed",
       "who-owns-this",
     ]);
+    /*
+     * The skill that writes skills, shipped with no declared tools on purpose. Its tools are the app's
+     * own rather than a connector's, so they are not `serverId/toolName` refs; a declaration here would
+     * name nothing, and selection only ever narrows MCP tools.
+     */
+    const creator = tenantPackage.skills.find(
+      (skill) => skill.slug === "skill-creator",
+    );
+    expect(creator?.title).toBe("Write a skill");
+    expect(creator?.tools).toEqual([]);
+    // The instruction is the whole feature, so pin the two ends of the loop it prescribes.
+    expect(creator?.instructions).toContain("Interview first");
+    expect(creator?.instructions).toContain("save_skill");
     expect(tenantPackage.channels).toContainEqual({
       id: "general-assistant",
       name: "General Assistant",

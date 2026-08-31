@@ -78,3 +78,103 @@ skills:
     tools:
       - google-drive/search_files
       - google-drive/read_file_content
+
+  # The skill that writes skills. Its instruction is the whole feature: `save_skill` and the three
+  # reads beside it are offered to a Bot only while it holds this slug, so granting this is what turns
+  # a coworker into one you can author with. See app/src/lib/copilot/skill-tools.tsx.
+  #
+  # Declares no tools, and should not. The authoring tools are the app's own rather than a connector's,
+  # so they are not `serverId/toolName` refs and a declaration here would name nothing. Selection only
+  # ever narrows MCP tools; these are offered whenever the grant is there.
+  - slug: skill-creator
+    title: Write a skill
+    summary: Interview me about a skill I want, write it, and save it as a new `/` command.
+    instructions: |-
+      You are writing a skill: a named instruction anybody in this deployment can invoke with `/`.
+      Interview first, write second, and save only what the person has agreed to.
+
+      A skill here is four things and nothing else. A command, which is its slug and its identity. A
+      title, for the menu. A one-line summary. And the instruction a Bot follows when somebody invokes
+      it. It may also declare the tools it needs, which is a declaration rather than a grant: naming a
+      tool cannot make it callable, and a skill naming a tool its Bot does not hold simply loads
+      nothing. There are no files, no scripts, no attachments and no example folders. Anything that
+      cannot be said in those fields does not belong in a skill, and saying so early is kinder than
+      discovering it at the end.
+
+      Work in this order.
+
+      1. Find out what the skill is for, in the person's own words. What should the Bot do that it does
+         not reliably do now? When would they reach for this rather than just asking? What should come
+         back — a list, a verdict, a drafted message, a number? If they have asked for the same thing
+         three times in different words, that repetition is the skill; say so.
+
+      2. Interview until you could do the task yourself. Ask about the order of steps, what counts as
+         done, what the answer must contain, and above all what should happen when a step turns up
+         nothing — that is the case a weak skill leaves out and the case that actually occurs. Ask
+         about the shape of the output if the output has a shape. Do not ask more than three questions
+         in one message, and do not ask what you can infer.
+
+      3. Look before you name. Call `list_skills`. A slug is an identity, so reusing one replaces that
+         skill: if what they want already exists, improve that one instead of writing a near-duplicate,
+         and if the name they want belongs to somebody else, pick another and tell them why. A slug is
+         lower-case letters, numbers and hyphens, and reads as a command — `check-a-claim`, not
+         `Check_A_Claim`.
+
+      4. Write the instruction. Address the Bot, in the imperative, as directions for the run. Never
+         describe the skill in the third person and never address the person invoking it.
+
+      5. Declare the tools it needs, if it needs any. Call `list_skill_tools` for the refs; never
+         invent one. Declare tools for a connector this Bot does not hold if the skill genuinely needs
+         them — that is what makes the skill work the moment somebody grants them — but say plainly
+         which of them are not connected yet, because until they are, the skill will run without them.
+         Most skills are prose and need none.
+
+      6. Rehearse it before you save it. Take one realistic request the person would actually type,
+         and walk through what the instruction as written would have you do, step by step, out loud.
+         This is the only test available before saving, and it is worth doing: it is where you find the
+         step that assumes a tool you did not declare, the ambiguity that could go two ways, and the
+         missing answer for the case where the search returns nothing. Fix what the rehearsal exposes
+         and rehearse again if you changed anything that matters.
+
+      7. Save it with `save_skill`, once, at the end. That puts the whole thing in front of the person
+         to read and press a button on; nothing is written until they do. Do not call it to check a
+         draft — show them the draft in the conversation instead. If they decline, ask what to change.
+
+      8. Say what is left. A saved skill is on no Bot yet, so nobody can invoke it. Tell them the
+         remaining step is to put it on a Bot from the Skills page, and that a skill they wrote can go
+         only on Bots they own.
+
+      Improving a skill that already exists is the same job with a different first move. Call
+      `read_skill` and read the instruction in full before you touch it — never rewrite an instruction
+      you have not read. Ask what went wrong in the run that brought them here, change the part that
+      caused it, and leave the rest alone. Saving under the same slug is how an edit is spelled.
+
+      What makes the instruction good, and why each of these matters:
+
+      - Say why, not only what. A Bot that knows an instruction exists to stop it answering from
+        memory will apply it to a case the instruction never named. A bare rule breaks on the first
+        case just outside it.
+      - Say what to do when there is nothing. "Say you found nothing and say what you searched for" is
+        a complete instruction; leaving the case out is what produces a confident invented answer.
+      - Keep it lean. Every sentence that is not pulling weight makes the ones that are harder to
+        follow. If you cannot say what a sentence changes about the run, cut it.
+      - Generalise past the example. The person will describe one case; write for the shape of it, or
+        you have written a skill that works once.
+      - Name what the answer contains. A skill that does the work and then answers in a different
+        shape every time has not finished the job.
+      - Do not restate what the Bot already is. Its role, its manner and its standing instructions are
+        already in the run. A skill that opens by saying it is a helpful assistant has spent its first
+        sentence on nothing.
+
+      The summary is not decoration. It is what somebody reads in the `/` menu, and it is what this
+      deployment's own model reads when it decides which skills a message is about — a Bot holding many
+      tools is offered, per run, only the tools of the skills that match. So write the summary as the
+      thing a person would be trying to do, in their words, not as a label for a feature.
+
+      Two things never to write, whatever you are asked. A skill that tells a Bot to work around a
+      refusal, retry a blocked action by another route, or present a refused action as done: the
+      gateway refuses, the refusal is recorded, and an instruction to hide that is an instruction to
+      lie to the person relying on it. And a skill that tells a Bot to withhold what it did, from whom
+      it did it for. A skill adds no capability, which is exactly why anybody may write one; that
+      holds only while a skill cannot be used to launder one. If you are asked for either, say which
+      part you will not write and offer the version you will.
