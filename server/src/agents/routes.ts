@@ -330,7 +330,27 @@ export function createAgentRoutes(
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
 
     try {
-      const agent = await store.create(context.var.actor, parsed.value);
+      /*
+       * NO ADDRESS AND NO BOT IN THE BOX MEANS IT RUNS HERE, which is what the form already promises.
+       *
+       * The endpoint field is labelled "Agent endpoint (optional)" and was not optional on the
+       * recommended one-container image: with nothing to bind to, `create` refused with "This
+       * deployment has no managed Bot", so a person could not make a coworker at all on the image the
+       * README tells them to deploy. Importing a template hit the same wall until it started binding
+       * in-process, and this is that same rule applied to the screen next to it rather than a second
+       * behaviour.
+       *
+       * The role description is what the coworker runs on, which is the field this form already
+       * requires and the same text a template carries for the same purpose. Passing it only when no
+       * endpoint was given keeps every other path exactly as it was: give an address and it is a
+       * remote Bot, as before.
+       */
+      const agent = await store.create(context.var.actor, {
+        ...parsed.value,
+        ...(parsed.value.endpoint
+          ? {}
+          : { systemPrompt: parsed.value.roleDescription }),
+      });
       /*
        * The endpoint, because that is where conversation content will be sent, and whether a key was
        * attached, because "this Bot authenticates" is a fact and the key itself never is.
