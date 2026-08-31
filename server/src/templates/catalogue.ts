@@ -22,13 +22,18 @@
  * skipped" rather than being left to infer an absence. A file that silently vanishes from a
  * catalogue reads as a file that was never there.
  *
- * WHAT THIS FILE DOES NOT DO. It never installs anything, never writes a grant and never touches the
- * database. It hands a parsed document and its digest to the resolver and the installer, which is
- * the same document a paste would have produced — a gallery entry is a stranger's file that happened
- * to arrive by a different road, and it goes through every refusal that road already has.
+ * WHAT THIS FILE DOES NOT DO. It never installs anything and never writes a grant. The one thing it
+ * does write is `template_sources`, which is the administrator's list of pinned repositories and
+ * nothing else — no document, no capability, nothing an install reads. That row exists because a
+ * registration held only in memory disappeared at the next restart with nothing saying so; see the
+ * comment on `registry` below. What this file hands onwards is a parsed document and its digest, to
+ * the resolver and the installer, and that is the same document a paste would have produced — a
+ * gallery entry is a stranger's file that happened to arrive by a different road, and it goes
+ * through every refusal that road already has.
  */
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { asc, eq } from "drizzle-orm";
 import {
   type BotTemplate,
   botTemplateDigest,
@@ -37,6 +42,8 @@ import {
   TemplateRefusedError,
 } from "../../../shared/bot-template";
 import type { AgentActor } from "../agents/profile-types";
+import type { Database } from "../db/client";
+import { templateSources } from "../db/schema";
 
 /**
  * Who may install a template on this deployment.
@@ -550,6 +557,17 @@ export type TemplateCatalogueOptions = {
   installerFloor: TemplateInstallers;
   /** Defaults to the global. Given by a test, and by nothing else. */
   fetch?: TemplateFetch;
+  /**
+   * Where registrations are kept, so a pin survives a restart.
+   *
+   * Optional, and absent keeps everything in memory. `createPolicyStore` takes its database the same
+   * way and for the same reason: the rules about which repository may be registered, what a pin must
+   * look like and who may say so are decided before anything is written, so the tests that prove
+   * them need no Postgres. A catalogue with no database still registers, still lists and still
+   * fetches — it simply forgets at the end of the process, which is exactly the deployment behaviour
+   * this option exists to end.
+   */
+  database?: Database;
 };
 
 export type TemplateCatalogue = {
@@ -560,13 +578,36 @@ export type TemplateCatalogue = {
 
   /** The `owner/repo` values this deployment's environment permits. Never widened here. */
   allowedSources(): string[];
-  /** The sources an administrator has actually registered. Empty until one does. */
+  /**
+   * The sources an administrator has actually registered. Empty until one does.
+   *
+   * SYNCHRONOUS, and it stays that way. Every route that lists sources, resolves one or refuses an
+   * unregistered id reads this, and turning it into a query would put an await into the middle of
+   * `sourceOrRefuse` and change the shape of half of `routes.ts` for nothing. Memory is the cache
+   * and `template_sources` is the record, which is the arrangement `computer/policy-store.ts` uses
+   * for the same reason.
+   */
   sources(): RegisteredSource[];
+  /**
+   * Persisted before the in-memory registry changes, so a reported success is a saved pin.
+   *
+   * Asynchronous because of that ordering and not for any other reason. An administrator told the
+   * registration succeeded must not be looking at a source that disappears at the next restart,
+   * which is the whole of the bug this table closed.
+   */
   registerSource(
     actor: AgentActor,
     input: { handle: string; sha: string },
-  ): RegisteredSource;
-  forgetSource(actor: AgentActor, id: string): boolean;
+  ): Promise<RegisteredSource>;
+  /** Takes the row out and then the memory copy. True when this deployment was serving that source. */
+  forgetSource(actor: AgentActor, id: string): Promise<boolean>;
+  /**
+   * Read the registered sources at boot, which the composition root calls before it serves.
+   *
+   * A row whose handle is no longer in `OPENBOT_TEMPLATE_SOURCES` is NOT loaded, and the skip is
+   * logged by handle rather than passed over quietly.
+   */
+  load(): Promise<void>;
   /** What one registered source holds at its pin. Fetched server-side. */
   fromSource(id: string): Promise<CatalogueListing>;
   fromSourceBySlug(id: string, slug: string): Promise<CatalogueEntry | null>;
@@ -599,13 +640,22 @@ export function createTemplateCatalogue(
 ): TemplateCatalogue {
   const fetcher: TemplateFetch = options.fetch ?? ((url) => fetch(url));
 
+  const database = options.database;
+
   /*
-   * REGISTERED SOURCES LIVE FOR AS LONG AS THIS PROCESS DOES, and that is a known gap rather than a
-   * design: persisting them needs a table, and the schema for this feature is owned elsewhere. The
-   * consequence to be aware of is that a restart forgets the pin and the gallery falls back to the
-   * in-box directory, which is the safe direction to fail — a deployment that has forgotten a source
-   * fetches nothing, where one that had remembered a stale pin would fetch on somebody's behalf
-   * without them having asked again.
+   * The registrations this process is serving, which is a CACHE of `template_sources` and not the
+   * record of it.
+   *
+   * This map used to be the record, and that was the bug. Nothing persisted a registration, so an
+   * administrator pinned `owner/repo` to a sha, the deployment restarted, and the gallery silently
+   * narrowed to the templates baked into the image while
+   * `GET /api/admin/templates/settings` answered `sources: []` — no error, no log line, nothing
+   * anywhere saying the pin had ever existed. It was observed directly on a deployment minutes after
+   * a source had been registered on it.
+   *
+   * Memory is kept because `sources()` and `sourceOrRefuse` are synchronous and are asked on every
+   * gallery read; the write goes to the table first and the map is only updated once it has. Same
+   * arrangement, and the same reasoning, as `computer/policy-store.ts`.
    */
   const registry = new Map<string, RegisteredSource>();
 
@@ -686,7 +736,51 @@ export function createTemplateCatalogue(
       );
     },
 
-    registerSource(actor, input) {
+    async load() {
+      if (!database) return;
+      const rows = await database
+        .select()
+        .from(templateSources)
+        .orderBy(asc(templateSources.id));
+
+      registry.clear();
+      for (const row of rows) {
+        /*
+         * THE ENVIRONMENT IS THE FLOOR AND THE TABLE IS NOT, which is why this check is here as well
+         * as in `registerSource`. A deployment that took a repository out of
+         * `OPENBOT_TEMPLATE_SOURCES` has withdrawn permission to fetch from it, and that act must
+         * take effect on the next boot rather than being overruled by a row recording that an
+         * administrator once said yes. Loading it would let a registration outlive the configuration
+         * that permitted it — a server-side fetch to a third party nobody currently allows.
+         *
+         * The row is left where it is rather than deleted. Putting the repository back into the
+         * environment is then all it takes to have the pin again, and a boot that silently destroyed
+         * registrations because somebody edited a variable would be a worse surprise than a
+         * registration that is dormant.
+         */
+        if (!options.allowedSources.has(row.id)) {
+          announce(
+            {
+              where: row.id,
+              reason: "not_allowlisted",
+              message: `"${row.id}" is registered on this deployment but is no longer named in OPENBOT_TEMPLATE_SOURCES, so nothing will be fetched from it. Put it back in the environment to use it again.`,
+            },
+            "template-source-not-allowlisted",
+          );
+          continue;
+        }
+        registry.set(row.id, {
+          id: row.id,
+          owner: row.owner,
+          repo: row.repo,
+          sha: row.sha,
+          registeredBy: row.registeredBy,
+          registeredAt: row.registeredAt,
+        });
+      }
+    },
+
+    async registerSource(actor, input) {
       requireAdministrator(actor, "register a template source");
 
       const handle = parseSourceHandle(input.handle);
@@ -734,18 +828,57 @@ export function createTemplateCatalogue(
         registeredBy: actor.id,
         registeredAt: new Date(),
       };
+
+      if (database) {
+        /*
+         * Saved before it is served. A write that fails throws out of here and the route reports a
+         * failure, which is the honest outcome — an administrator told the source was registered
+         * must not be looking at a pin that is gone at the next restart.
+         *
+         * `onConflictDoUpdate` on the handle is what makes moving a pin a MOVE. The handle is the
+         * identity of a source, so a second registration of the same repository at a different sha
+         * replaces the row rather than inserting beside it, and there is never a moment where one
+         * repository has two live pins for `fromSource` to choose between.
+         */
+        await database
+          .insert(templateSources)
+          .values(source)
+          .onConflictDoUpdate({
+            target: templateSources.id,
+            set: {
+              owner: source.owner,
+              repo: source.repo,
+              sha: source.sha,
+              registeredBy: source.registeredBy,
+              registeredAt: source.registeredAt,
+            },
+          });
+      }
       registry.set(id, source);
       return source;
     },
 
-    forgetSource(actor, id) {
+    async forgetSource(actor, id) {
       requireAdministrator(actor, "forget a template source");
+      const key = id.trim().toLowerCase();
       /*
+       * The row goes first, and it goes whether or not this process has that source in memory.
+       * `load` refuses to bring in a row whose handle has left the allowlist, and an unconditional
+       * delete is what keeps such a row removable at all — the alternative is a registration that
+       * cannot be got rid of without a hand-written SQL statement. The return value answers the
+       * narrower question the route asks, which is whether this deployment was serving that source,
+       * so an id nobody registered still reads as a 404.
+       *
        * The cached listing is deliberately left where it is. It is keyed by the pin, so it is not
        * reachable without a registration naming that pin again, and dropping it would mean a
        * deployment that forgot and re-registered the same source paid for the whole fetch twice.
        */
-      return registry.delete(id.trim().toLowerCase());
+      if (database) {
+        await database
+          .delete(templateSources)
+          .where(eq(templateSources.id, key));
+      }
+      return registry.delete(key);
     },
 
     fromSource,

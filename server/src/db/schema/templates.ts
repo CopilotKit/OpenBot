@@ -351,3 +351,69 @@ export const templateBoundaries = pgTable(
     index("template_boundaries_agent_idx").on(table.agentId, table.removedAt),
   ],
 );
+
+/**
+ * A git repository an administrator pinned, so that the pin is still there after a restart.
+ *
+ * IT WAS IN MEMORY AND ONLY IN MEMORY, which is the bug this table exists to close. The catalogue
+ * kept its registrations in a `Map`, so an administrator registered `owner/repo` at a sha, the
+ * deployment restarted, and every source was gone: the gallery quietly narrowed to the templates
+ * baked into the image and `GET /api/admin/templates/settings` answered `sources: []` minutes after
+ * one had been registered. Nothing said why, because nothing had failed — a registration that
+ * vanishes leaves no trace of having existed.
+ *
+ * ONE ROW PER REPOSITORY, and the handle is the primary key rather than a surrogate beside a unique
+ * index. `owner/repo` IS the identity of a source: a second pin on the same repository is that
+ * source's pin being MOVED, not a second source, and moving the pin is the only update mechanism
+ * this design has. A surrogate id would make two live pins on one repository representable, and then
+ * `fromSource("owner/repo")` has to pick one of them.
+ *
+ * THIS TABLE IS NOT AN ALLOWLIST. `OPENBOT_TEMPLATE_SOURCES` is, it comes from the environment, and
+ * a row here that is no longer named there is not loaded — see `load` in `templates/catalogue.ts`.
+ * A deployment that took a repository out of its configuration has withdrawn permission to fetch
+ * from it, and a row remembering an administrator once said yes must not be able to give that
+ * permission back.
+ */
+export const templateSources = pgTable("template_sources", {
+  /**
+   * `owner/repo`, lowercased. The handle is the id, so registering the same repository again
+   * conflicts here and updates the pin rather than inserting beside it.
+   */
+  id: text("id").primaryKey(),
+  /**
+   * The two halves, stored as well as the handle they compose.
+   *
+   * Redundant on purpose. The handle is what an allowlist and a URL are both built from, and a
+   * reader of this table should not have to split a string on `/` and trust that nothing ever put
+   * something else in it. `parseSourceHandle` is the one place that split happens.
+   */
+  owner: text("owner").notNull(),
+  repo: text("repo").notNull(),
+  /**
+   * A full 40-character commit sha, validated before this row is written.
+   *
+   * Never a branch. `main` is a name whoever owns that repository can repoint after an administrator
+   * has read the files, which turns a reviewed catalogue into an update channel — the mechanism
+   * behind the Cyberhaven and Coze compromises. The column takes what registration validated; it is
+   * not a second parser.
+   */
+  sha: text("sha").notNull(),
+  /**
+   * Who registered it, and NOT a foreign key.
+   *
+   * The `plugin_grants.granted_by` and `template_imports.imported_by` convention. A trail records
+   * who acted, and removing that person must not rewrite what happened: `cascade` would delete the
+   * registration a live gallery is still serving from, and `set null` would leave it claiming
+   * nobody registered it. Under `OPENBOT_SINGLE_USER` there is frequently no `users` row worth
+   * pointing at in the first place.
+   */
+  registeredBy: text("registered_by").notNull(),
+  /**
+   * When, spelled out rather than taken from the shared `createdAt()` helper, which fixes the column
+   * name to `created_at`. Same choice `template_imports.imported_at` made and for the same reason:
+   * this row records an act somebody performed, and the column is worth naming the act.
+   */
+  registeredAt: timestamp("registered_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

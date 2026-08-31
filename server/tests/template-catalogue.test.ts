@@ -103,7 +103,7 @@ function catalogueWith(options: {
 
 async function registered(fetcher: TemplateFetch) {
   const catalogue = catalogueWith({ fetch: fetcher });
-  catalogue.registerSource(admin, { handle: ALLOWED, sha: SHA });
+  await catalogue.registerSource(admin, { handle: ALLOWED, sha: SHA });
   return catalogue;
 }
 
@@ -201,18 +201,18 @@ describe("the in-box directory", () => {
 });
 
 describe("registering a source", () => {
-  test("a repository not on the allowlist is refused", () => {
+  test("a repository not on the allowlist is refused", async () => {
     const catalogue = catalogueWith({ allowed: [ALLOWED] });
 
-    expect(() =>
+    await expect(
       catalogue.registerSource(admin, {
         handle: "attacker/templates",
         sha: SHA,
       }),
-    ).toThrow(/OPENBOT_TEMPLATE_SOURCES/);
+    ).rejects.toThrow(/OPENBOT_TEMPLATE_SOURCES/);
 
     try {
-      catalogue.registerSource(admin, {
+      await catalogue.registerSource(admin, {
         handle: "attacker/templates",
         sha: SHA,
       });
@@ -222,25 +222,25 @@ describe("registering a source", () => {
     expect(catalogue.sources()).toEqual([]);
   });
 
-  test("the allowlist is not evaded by capitalising the handle", () => {
+  test("the allowlist is not evaded by capitalising the handle", async () => {
     const catalogue = catalogueWith({ allowed: [ALLOWED] });
 
     // The same repository, spelled the way GitHub also accepts it.
-    const source = catalogue.registerSource(admin, {
+    const source = await catalogue.registerSource(admin, {
       handle: "JerelVelarde/Awesome-OpenBot-Templates",
       sha: SHA,
     });
     expect(source.id).toBe(ALLOWED);
 
-    expect(() =>
+    await expect(
       catalogue.registerSource(admin, {
         handle: "Attacker/Templates",
         sha: SHA,
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  test("a ref that is not a 40-character sha is refused", () => {
+  test("a ref that is not a 40-character sha is refused", async () => {
     const catalogue = catalogueWith({});
 
     for (const sha of [
@@ -251,7 +251,7 @@ describe("registering a source", () => {
       "z".repeat(40),
     ]) {
       try {
-        catalogue.registerSource(admin, { handle: ALLOWED, sha });
+        await catalogue.registerSource(admin, { handle: ALLOWED, sha });
         throw new Error(`"${sha}" was accepted as a pin`);
       } catch (error) {
         expect(refusal(error)).toBe("bad_ref");
@@ -260,7 +260,7 @@ describe("registering a source", () => {
     expect(catalogue.sources()).toEqual([]);
   });
 
-  test("a handle that is not owner/repo is refused before the allowlist is consulted", () => {
+  test("a handle that is not owner/repo is refused before the allowlist is consulted", async () => {
     const catalogue = catalogueWith({});
 
     for (const handle of [
@@ -270,7 +270,7 @@ describe("registering a source", () => {
       "jerelvelarde/..",
     ]) {
       try {
-        catalogue.registerSource(admin, { handle, sha: SHA });
+        await catalogue.registerSource(admin, { handle, sha: SHA });
         throw new Error(`"${handle}" was accepted as a handle`);
       } catch (error) {
         expect(refusal(error)).toBe("bad_handle");
@@ -278,10 +278,10 @@ describe("registering a source", () => {
     }
   });
 
-  test("moving the pin replaces the registration rather than adding a second", () => {
+  test("moving the pin replaces the registration rather than adding a second", async () => {
     const catalogue = catalogueWith({});
-    catalogue.registerSource(admin, { handle: ALLOWED, sha: SHA });
-    const moved = catalogue.registerSource(admin, {
+    await catalogue.registerSource(admin, { handle: ALLOWED, sha: SHA });
+    const moved = await catalogue.registerSource(admin, {
       handle: ALLOWED,
       sha: "f".repeat(40),
     });
@@ -290,19 +290,19 @@ describe("registering a source", () => {
     expect(moved.sha).toBe("f".repeat(40));
   });
 
-  test("only an administrator may register or forget a source", () => {
+  test("only an administrator may register or forget a source", async () => {
     const catalogue = catalogueWith({});
 
     try {
-      catalogue.registerSource(user, { handle: ALLOWED, sha: SHA });
+      await catalogue.registerSource(user, { handle: ALLOWED, sha: SHA });
       throw new Error("a plain user registered a source");
     } catch (error) {
       expect(refusal(error)).toBe("not_admin");
     }
 
-    catalogue.registerSource(admin, { handle: ALLOWED, sha: SHA });
-    expect(() => catalogue.forgetSource(user, ALLOWED)).toThrow();
-    expect(catalogue.forgetSource(admin, ALLOWED)).toBe(true);
+    await catalogue.registerSource(admin, { handle: ALLOWED, sha: SHA });
+    await expect(catalogue.forgetSource(user, ALLOWED)).rejects.toThrow();
+    expect(await catalogue.forgetSource(admin, ALLOWED)).toBe(true);
     expect(catalogue.sources()).toEqual([]);
   });
 

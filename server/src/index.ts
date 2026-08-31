@@ -69,14 +69,14 @@ import { createRoutineRunner } from "./routines/runner";
 import { createRoutineStore } from "./routines/store";
 import { createIntentRouter } from "./routing/classify";
 import { createModelCompleter } from "./routing/model";
+import { createTemplateCatalogue } from "./templates/catalogue";
+import { createTemplateInstaller } from "./templates/install";
+import { createTemplateStore } from "./templates/store";
 import {
   createPackageStatusReader,
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
-import { createTemplateCatalogue } from "./templates/catalogue";
-import { createTemplateInstaller } from "./templates/install";
-import { createTemplateStore } from "./templates/store";
 import { repeatAfterEach } from "./work/loop";
 import { createWorkQueue } from "./work/queue";
 
@@ -1031,8 +1031,24 @@ const templates = {
     directory: config.templateDirectory,
     allowedSources: config.templateSources,
     installerFloor: config.templateInstallers,
+    database,
   }),
 };
+
+/*
+ * The sources an administrator registered are read back before anything is served.
+ *
+ * Without this the registrations lived in one process's memory and a restart forgot every one of
+ * them: the gallery narrowed to the templates in the image and the settings screen answered with an
+ * empty list, with nothing anywhere saying a pin had ever existed. Awaited for the reason
+ * `policyStore.load` is — a screen that comes up before this has run shows an administrator a
+ * deployment with no sources on it, which is the same wrong answer the restart used to give.
+ *
+ * A row whose repository is no longer named in `OPENBOT_TEMPLATE_SOURCES` is passed over and logged
+ * by handle. The environment is the floor; a registration cannot outlive the configuration that
+ * permitted it.
+ */
+await templates.catalogue.load();
 
 const app = createApp(
   config,

@@ -1168,7 +1168,7 @@ export function createTemplateAdminRoutes(
       return context.json(
         {
           source: sourceDto(
-            gallery.catalogue.registerSource(context.var.actor, {
+            await gallery.catalogue.registerSource(context.var.actor, {
               handle,
               sha,
             }),
@@ -1209,7 +1209,7 @@ export function createTemplateAdminRoutes(
       return context.json({ error: "A source is required." }, 400);
     }
     try {
-      if (!gallery.catalogue.forgetSource(context.var.actor, id)) {
+      if (!(await gallery.catalogue.forgetSource(context.var.actor, id))) {
         return context.json({ error: "No such source is registered." }, 404);
       }
     } catch (error) {
