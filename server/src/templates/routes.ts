@@ -1513,6 +1513,16 @@ function galleryEntryDto(entry: CatalogueEntry) {
     name: document.bot.name,
     title: document.bot.title,
     summary: document.template.summary,
+    /*
+     * The drawing the coworker will actually have, so a card previews what importing produces.
+     *
+     * `boring-avatars` hashes this into a figure, which is why the same seed is the same picture on
+     * every deployment and why a gallery of otherwise identical cards becomes scannable. It is an
+     * opaque style token and never an id: the parser holds it to the slug rule, nothing resolves it,
+     * and falling back to the template's own slug means a template that omitted one still draws
+     * something stable rather than everything drawing the same thing.
+     */
+    avatarSeed: document.bot.avatarSeed ?? entry.slug,
     author: document.template.author ?? null,
     version: document.template.version ?? null,
     license: document.template.license ?? null,

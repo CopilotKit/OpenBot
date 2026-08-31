@@ -167,7 +167,7 @@ test("a card carries the name, the claim, the summary and what it asks for", asy
   const body = document.body.textContent ?? "";
   expect(body).toContain("Chases overdue invoices and drafts the follow-up.");
   // The word that makes the author a claim rather than a fact.
-  expect(body).toContain("Author claim:");
+  expect(body).toContain("Author claim");
   expect(body).toContain("acme-revops");
   // What it WANTS, said as a want.
   expect(body).toContain("google-drive");

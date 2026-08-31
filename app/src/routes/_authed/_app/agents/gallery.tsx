@@ -1,8 +1,8 @@
-import { IconBoxSeam, IconPlugConnected } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { ImportTemplate } from "@/components/agents/import-template";
+import { TemplateCard } from "@/components/agents/template-card";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import {
   PageEmpty,
@@ -11,21 +11,14 @@ import {
   PageShell,
 } from "@/components/layout/page-shell";
 import { StaggerItem } from "@/components/layout/stagger";
-import { Button } from "@/components/ui/button";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDescription,
-  ItemFooter,
-  ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
-import {
-  type GalleryTemplateCard,
-  galleryListQueryOptions,
-} from "@/lib/templates/queries";
+import { galleryListQueryOptions } from "@/lib/templates/queries";
 
 /**
  * The gallery: the coworkers this deployment ships with, plus any repository an administrator pinned.
@@ -103,8 +96,18 @@ export function TemplateGallery({
       onClose={onClose}
       open={Boolean(reading)}
     >
+      {/*
+       * WIDER THAN EVERY OTHER SCREEN, and `openbot-screen-layout` asks for that to be justified.
+       *
+       * Prose width is right for configuration, where a person reads one line and decides one thing.
+       * This is the only browse surface in the product: somebody is comparing coworkers they have
+       * never seen against each other, and at prose width that comparison is a scroll. It is the same
+       * exception the audit log takes for the same reason — a surface for scanning rather than
+       * reading gets the width scanning needs.
+       */}
       <PageShell
         backButton={{ label: "Coworkers", linkProps: { to: "/agents" } }}
+        width="wide"
         description="Coworkers somebody has already configured, as files. Nothing here is connected to anything: a template is prose and a list of asks, and what it can actually reach is decided afterwards, by somebody, on the screens that already decide it."
         title="Templates"
       >
@@ -123,14 +126,13 @@ export function TemplateGallery({
           ) : shipped.length === 0 ? (
             <PageEmpty>This deployment ships no templates.</PageEmpty>
           ) : (
-            <PageRows>
+            <TemplateGrid>
               {shipped.map((card, index) => (
-                <StaggerItem index={index} key={card.slug}>
-                  <TemplateRow card={card} />
-                  {index < shipped.length - 1 ? <Separator /> : null}
+                <StaggerItem className="h-full" index={index} key={card.slug}>
+                  <TemplateCard card={card} />
                 </StaggerItem>
               ))}
-            </PageRows>
+            </TemplateGrid>
           )}
         </PageSection>
 
@@ -145,14 +147,13 @@ export function TemplateGallery({
             description="Fetched by this server from a repository an administrator registered, at the exact commit they pinned. Your browser never talked to it."
             title="From a pinned source"
           >
-            <PageRows>
+            <TemplateGrid>
               {pinned.map((card, index) => (
-                <StaggerItem index={index} key={card.slug}>
-                  <TemplateRow card={card} />
-                  {index < pinned.length - 1 ? <Separator /> : null}
+                <StaggerItem className="h-full" index={index} key={card.slug}>
+                  <TemplateCard card={card} />
                 </StaggerItem>
               ))}
-            </PageRows>
+            </TemplateGrid>
           </PageSection>
         ) : null}
 
@@ -210,75 +211,23 @@ export function TemplateGallery({
 }
 
 /**
- * One template, as much as a card should say.
+ * The grid the cards sit in.
  *
- * The whole row does not navigate. "Use this template" is a separate control on purpose: the row
- * carries a stranger's name and a stranger's summary, and a card that opened the consent screen
- * anywhere somebody clicked would make reading the card and starting the import the same gesture.
- * They are different decisions and they get different targets.
+ * Two columns from `sm` and no more, even at the wide shell's 960px. Three would put each card near
+ * 300px, which truncates the summary to a line and a half and turns the author's claim into an
+ * ellipsis — and the claim is one of the three things somebody reads to decide whether to open the
+ * template at all. A gallery of this size is read, not swept.
  */
-function TemplateRow({ card }: { card: GalleryTemplateCard }) {
+function TemplateGrid({ children }: { children: React.ReactNode }) {
+  /*
+   * `items-stretch` and `h-full` all the way down, or the cards in a row end at different heights.
+   *
+   * A grid stretches its items by default, but each card is wrapped in the stagger's `motion.div`,
+   * and a wrapper that does not pass the height on leaves the card sized to its own content. Two
+   * cards side by side with different summaries then finish at different points and the row reads as
+   * a mistake rather than as a pair.
+   */
   return (
-    <Item size="sm">
-      <ItemMedia variant="icon">
-        <IconBoxSeam className="size-4" />
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle className="break-words">{card.name}</ItemTitle>
-        <ItemDescription className="line-clamp-none break-words">
-          {card.summary}
-        </ItemDescription>
-        {/*
-         * THE CLAIM, labelled as one, in the row rather than under the name.
-         *
-         * `author` and `source` are attacker-controlled strings sitting a centimetre from a Bot's
-         * name while somebody decides whether to trust it. Both are rendered as plain text and
-         * NEVER as an anchor — an address that is a link is a thing somebody clicks before they
-         * have finished reading, and this one has been verified by nobody. `break-all` so a long
-         * one wraps rather than pushing the card wide, which would hide the rest of the row.
-         */}
-        <ItemDescription className="line-clamp-none">
-          <span className="text-muted-foreground">Author claim: </span>
-          <span className="break-all font-mono text-xs">
-            {card.author ?? "not stated"}
-          </span>
-          {card.source ? (
-            <>
-              <span className="text-muted-foreground"> · from </span>
-              <span className="break-all font-mono text-xs">{card.source}</span>
-            </>
-          ) : null}
-        </ItemDescription>
-      </ItemContent>
-      {/*
-       * The connectors it WANTS, on their own line rather than crammed beside the button. A set
-       * belongs in the footer, which is `basis-full`; in `ItemActions` it fights the name for width
-       * and wraps badly the moment a template asks for two.
-       */}
-      {card.connectors.length > 0 ? (
-        <ItemFooter className="gap-1.5 text-muted-foreground text-xs">
-          <IconPlugConnected className="size-3.5" />
-          <span>
-            Asks for {card.connectors.join(", ")}. Nothing is granted by
-            importing it.
-          </span>
-        </ItemFooter>
-      ) : (
-        <ItemFooter className="text-muted-foreground text-xs">
-          Asks for no connectors.
-        </ItemFooter>
-      )}
-      <ItemActions>
-        <Button
-          render={(props) => (
-            <Link search={{ use: card.slug }} to="/agents/gallery" {...props} />
-          )}
-          size="sm"
-          variant="outline"
-        >
-          Use this template
-        </Button>
-      </ItemActions>
-    </Item>
+    <div className="grid items-stretch gap-3 sm:grid-cols-2">{children}</div>
   );
 }

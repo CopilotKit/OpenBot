@@ -407,6 +407,8 @@ export type GalleryTemplateCard = {
   name: string;
   title: string;
   summary: string;
+  /** The drawing the imported coworker will have. An opaque style token, never an id. */
+  avatarSeed: string;
   author: string | null;
   version: string | null;
   license: string | null;
