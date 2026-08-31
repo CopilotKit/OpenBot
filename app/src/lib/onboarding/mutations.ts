@@ -1,5 +1,6 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
 import { authKeys, type OnboardingStatus } from "@/lib/auth/queries";
+import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
 
 /** The sentence for every write here, since they all fail the same way to a reader. */
@@ -43,6 +44,19 @@ export function completeOnboardingMutationOptions(queryClient: QueryClient) {
         body: { completed: true },
         fallback: FALLBACK,
       }),
-    onSuccess: () => invalidateCurrentUser(queryClient),
+    /*
+     * The roster too, not just the user: finishing the wizard navigates straight into the app, and
+     * a channel list cached from before it — or mid-fetch while the wizard held the screen — lands
+     * the person on an empty sidebar their reload then fixes. `refetchType: "all"` for the same
+     * reason as the user: nothing is observing these queries while the wizard is up.
+     */
+    onSuccess: () =>
+      Promise.all([
+        invalidateCurrentUser(queryClient),
+        queryClient.invalidateQueries({
+          queryKey: channelKeys.list(),
+          refetchType: "all",
+        }),
+      ]),
   });
 }
