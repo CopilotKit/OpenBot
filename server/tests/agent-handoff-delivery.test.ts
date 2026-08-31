@@ -44,7 +44,17 @@ function delivery(
   events: BaseEvent[],
   agent: AbstractAgent | null = stubAgent(),
   lockHeld = true,
-  options: { history?: readonly unknown[]; deadlineMs?: number } = {},
+  options: {
+    history?: readonly unknown[];
+    deadlineMs?: number;
+    /**
+     * The platform refusing to hand back the asking conversation.
+     *
+     * `historyOrEmpty` answers a missing thread with nothing and rethrows everything else, on
+     * purpose: a 500 is an outage or a bad key, not an empty conversation.
+     */
+    historyError?: Error;
+  } = {},
 ) {
   const requests: Array<{
     threadId: string;
@@ -62,7 +72,10 @@ function delivery(
         ? {}
         : { deadlineMs: options.deadlineMs }),
       agentFor: async () => agent,
-      history: async () => options.history ?? PRIOR,
+      history: async () => {
+        if (options.historyError) throw options.historyError;
+        return options.history ?? PRIOR;
+      },
       newRunId: () => "run-2",
       answerIn: async () => ({ threadId: "answer-thread" }),
       lock: {
@@ -99,6 +112,37 @@ function delivery(
 }
 
 describe("turning a hop into a turn", () => {
+  /*
+   * A hop that cannot read the conversation it was asked in has to fail without taking anything with
+   * it. The lock is on the conversation being ANSWERED in, the read is of the one that ASKED, so the
+   * lock never protected this read — and holding one across it means the failure costs a person the
+   * use of a conversation they are not even part of, for as long as the platform's own TTL.
+   */
+  test("a history the platform will not hand back leaves no lock behind", async () => {
+    const { delivery: deliver, lockCalls } = delivery(
+      FINISHED,
+      stubAgent(),
+      true,
+      { historyError: new Error("the platform answered 500") },
+    );
+
+    await expect(
+      deliver.deliver({
+        work: WORK,
+        message: "m",
+        shown: "s",
+        assertion: "signed",
+      }),
+    ).rejects.toThrow("the platform answered 500");
+
+    /*
+     * Nothing was taken, so nothing was left held. Asserting the whole sequence rather than the
+     * absence of a release: a delivery that acquired and then released would also be correct, and
+     * this says which of the two happened.
+     */
+    expect(lockCalls).toEqual([]);
+  });
+
   test("the addressed Bot reads the conversation before the ask", async () => {
     const { delivery: deliver, requests } = delivery(FINISHED);
 

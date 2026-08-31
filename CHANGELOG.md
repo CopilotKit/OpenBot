@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A hop that cannot read the conversation no longer locks one on its way out
+
+Delivering a hop took the run lock on the conversation the answer lands in, and only then read the
+conversation that asked. A platform that answers that read with anything other than a missing thread
+— an outage, a bad key, a dropped connection — threw from between the lock and the `finally` that
+gives it back, so the lock was left held and unrenewed. For the next couple of minutes the person
+could not start a run in that conversation, and the hop's own retry collided with the lock it was
+still holding itself and spent one of its attempts reporting the conversation as busy. The read now
+happens before the lock is taken, which it never needed: it is a different conversation.
+
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the

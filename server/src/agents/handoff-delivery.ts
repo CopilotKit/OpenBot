@@ -203,6 +203,23 @@ export function createHandoffDelivery(options: {
         : await answerIn({ actorId: work.actorId, botId: work.toBotId });
 
       /*
+       * The conversation that ASKED, read BEFORE the lock is taken.
+       *
+       * The addressed Bot is joining something already in progress and has to have read it; its own
+       * conversation is new and empty, and reading that would tell it nothing. This is a different
+       * thread from the one about to be locked, so the lock never protected this read — and holding
+       * one across it means a read that throws leaks it. `historyOrEmpty` answers a missing thread
+       * with nothing and rethrows everything else on purpose ("a 500 from the platform means an
+       * outage or a bad key"), so one 500 left the addressed Bot's conversation locked, unrenewed and
+       * unreleasable until the platform's own TTL expired. For those two minutes the person could not
+       * start a run there, and the hop's own retry a minute later collided with the lock it was still
+       * holding itself, reported the conversation as busy, and spent one of its five attempts on it.
+       */
+      const prior = conversationOnly(
+        await history({ threadId: work.threadId, actorId: work.actorId }),
+      );
+
+      /*
        * The conversation's lock, before a single event is streamed.
        *
        * The platform's run id is the one it hands back, not the one asked for: it is the identity the
@@ -239,14 +256,7 @@ export function createHandoffDelivery(options: {
        * displayed the question directly above the answer.
        */
       const asked = [
-        /*
-         * The conversation that ASKED, not the one it is answering in. The addressed Bot is joining
-         * something already in progress and has to have read it; its own conversation is new and
-         * empty, and reading that would tell it nothing.
-         */
-        ...conversationOnly(
-          await history({ threadId: work.threadId, actorId: work.actorId }),
-        ),
+        ...prior,
         { id: `handoff-${runId}`, role: "user", content: message },
       ];
       agent.threadId = where.threadId;
