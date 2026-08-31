@@ -46,7 +46,9 @@ import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import type { PackageStatusReader } from "./tenant-package";
 import type { TemplateInstaller } from "./templates/install";
+import type { TemplateCatalogue } from "./templates/catalogue";
 import {
+  createTemplateAdminRoutes,
   createTemplateExport,
   createTemplateRoutes,
   type TemplateRoutesDeps,
@@ -221,6 +223,15 @@ export function createApp(
      * writes nothing and may read on the pool.
      */
     executor: TemplateReadExecutor;
+    /**
+     * The gallery this deployment reads templates out of.
+     *
+     * Optional in the same way everything else here is, and its absence is an empty gallery rather
+     * than a missing screen. Built beside the store rather than here, because it reads the three
+     * `OPENBOT_TEMPLATE_*` settings and a directory off disk, and this module builds nothing that
+     * touches the filesystem.
+     */
+    catalogue?: TemplateCatalogue;
   },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
@@ -915,10 +926,35 @@ export function createApp(
       managedAgent: Boolean(config.managedAgent),
       ...(pluginStore ? { grants: pluginStore } : {}),
       ...(componentStore ? { components: componentStore } : {}),
+      /*
+       * The floor comes off the same `config` field the catalogue's own floor was built from, one
+       * call site apart, so the value the admin screen renders as immovable and the value
+       * `setInstallers` refuses to go below are the same fact rather than two copies of it.
+       */
+      ...(templates.catalogue
+        ? {
+            gallery: {
+              catalogue: templates.catalogue,
+              installerFloor: config.templateInstallers,
+            },
+          }
+        : {}),
     };
     app.route(
       "/api/templates",
       createTemplateRoutes(templateDeps, requireUser, canUseBot),
+    );
+    /*
+     * The administrator's half, on its own prefix.
+     *
+     * Same dependencies, different guard on every handler: who may install, which repositories the
+     * gallery may read from, and what this deployment has imported. Mounted here rather than folded
+     * into the surface above so that the authorization of a route is visible from where it is
+     * mounted.
+     */
+    app.route(
+      "/api/admin/templates",
+      createTemplateAdminRoutes(templateDeps, requireUser),
     );
   }
 

@@ -35,7 +35,7 @@
  * not their consent; and a fresh read of the two tables, because the status is a snapshot from
  * resolve time and a connector can leave the deployment the day after an import.
  */
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import {
@@ -58,8 +58,24 @@ import {
   ComponentNotFoundError,
   type ComponentStore,
 } from "../components/store";
-import { agents, mcpServers, mcpTools } from "../db/schema";
+import {
+  agents,
+  mcpServers,
+  mcpTools,
+  templateBoundaries,
+  templateImports,
+  templateRequests,
+} from "../db/schema";
 import type { PluginStore } from "../plugins/store";
+import {
+  type CatalogueEntry,
+  type CatalogueListing,
+  type CatalogueSkip,
+  CatalogueRefusedError,
+  isTemplateInstallers,
+  type TemplateCatalogue,
+  type TemplateInstallers,
+} from "./catalogue";
 import {
   type TemplateActor,
   TemplateDigestMovedError,
@@ -141,6 +157,24 @@ export type TemplateRoutesDeps = {
   grants?: Pick<PluginStore, "grant">;
   /** The existing component path, on the same terms and for the same reason. */
   components?: Pick<ComponentStore, "grant">;
+  /**
+   * The gallery, and the setting that decides who may install out of it.
+   *
+   * Optional, and its absence is an EMPTY gallery rather than a missing route. A deployment built
+   * without a catalogue still has an /agents/gallery screen and still has to say something on it,
+   * and "no templates are shipped here" is a truthful answer where a 404 would read to the person
+   * in front of it as the product being broken.
+   *
+   * `installerFloor` is the value `OPENBOT_TEMPLATE_INSTALLERS` set, carried alongside the catalogue
+   * rather than asked of it. The catalogue holds the floor privately because its whole job is to
+   * refuse a demotion below it; the admin screen needs to know the floor for a different reason —
+   * to render the control disabled and say why, the `INITIAL_ADMIN_EMAILS` pattern. Both values come
+   * off the same `config` field at the one call site that builds either, so they cannot disagree.
+   */
+  gallery?: {
+    catalogue: TemplateCatalogue;
+    installerFloor: TemplateInstallers;
+  };
 };
 
 /**
@@ -353,6 +387,100 @@ export function createTemplateRoutes(
   });
 
   /**
+   * The gallery: what this deployment ships in the box, plus whatever a registered source holds.
+   *
+   * READ-ONLY, and there is deliberately no POST anywhere near it. Publishing a template is a git
+   * push to a repository an administrator pinned, not a call somebody's browser makes — a write
+   * endpoint here would be a hosted registry with none of the curation, moderation or takedown
+   * machinery a hosted registry needs, growing out of a feature whose entire premise is that OpenBot
+   * operates no such service.
+   *
+   * The listing is best effort by construction. One file that will not parse is a named skip beside
+   * the templates that did, because a gallery that goes blank over one bad document teaches an
+   * operator that the feature is unreliable rather than that one file is wrong.
+   */
+  routes.get("/gallery", requireUser, async (context) => {
+    const gallery = deps.gallery;
+    if (!gallery) {
+      return context.json({ templates: [], skipped: [], installers: "anyone" });
+    }
+    const listing = await galleryListing(gallery.catalogue);
+    return context.json({
+      templates: listing.entries.map(galleryEntryDto),
+      skipped: listing.skipped,
+      /*
+       * The setting travels with the list rather than being asked for separately, because the one
+       * question the screen has about it is whether to draw the button — and a screen that drew the
+       * button and learned the answer from a 403 would have taught somebody to press it first.
+       */
+      installers: gallery.catalogue.installers(),
+    });
+  });
+
+  /**
+   * One gallery template, as the document it is and as the file it came from.
+   *
+   * Both renderings go back on purpose. The parsed document is what the consent screen renders field
+   * by field; the YAML is what goes in the paste box, so that what a person reads before agreeing is
+   * a file they could have been sent by hand rather than a form this screen assembled for them.
+   * `serializeBotTemplate` writes it out of the document this deployment parsed, so nothing a source
+   * wrote outside the format — a comment, an ordering, a stray key the parser refused — reaches the
+   * box.
+   */
+  routes.get("/gallery/:slug", requireUser, async (context) => {
+    const gallery = deps.gallery;
+    const entry = gallery
+      ? await findGalleryEntry(gallery.catalogue, context.req.param("slug"))
+      : null;
+    if (!entry) {
+      return context.json({ error: "There is no such template here." }, 404);
+    }
+    return context.json({
+      entry: galleryEntryDto(entry),
+      template: entry.document,
+      digest: entry.digest,
+      yaml: serializeBotTemplate(entry.document),
+    });
+  });
+
+  /**
+   * Every ceiling an import applied and has not retracted, across the deployment.
+   *
+   * Administrator only, because it names every Bot in the deployment and one row of it is enough to
+   * tell a stranger which coworkers exist and which of them somebody bounded. It is a separate read
+   * from `action_policy` for the reason the storage is separate: these clauses are composed into the
+   * evaluation and are not in the array the Boundaries screen POSTs, precisely so an ordinary save
+   * on that screen cannot erase them.
+   *
+   * The join is written here rather than added to the store because the row this answers with is not
+   * an entity — it is a clause with the coworker's NAME on it, which is a rendering decision the
+   * screen made, and the store has no business holding a projection built for one screen.
+   */
+  routes.get("/boundaries", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
+    /*
+     * `removed_at IS NULL`, so a retracted clause does not appear on a screen about what is
+     * enforced. What a retraction did belongs in Audit, which is where a history belongs.
+     */
+    const rows = await deps.executor
+      .select({
+        importId: templateBoundaries.importId,
+        agentId: templateBoundaries.agentId,
+        agentName: agents.name,
+        expression: templateBoundaries.expression,
+        sourceKey: templateBoundaries.sourceKey,
+        appliedAt: templateBoundaries.appliedAt,
+      })
+      .from(templateBoundaries)
+      .innerJoin(agents, eq(agents.id, templateBoundaries.agentId))
+      .where(isNull(templateBoundaries.removedAt))
+      .orderBy(templateBoundaries.appliedAt);
+    return context.json({ boundaries: rows });
+  });
+
+  /**
    * What a file would do here. Writes nothing, and on success records nothing.
    *
    * A preview that left a row would make reading a template indistinguishable from installing one,
@@ -403,11 +531,31 @@ export function createTemplateRoutes(
 
     const source = typeof body?.source === "string" ? body.source : "";
     const digest = typeof body?.digest === "string" ? body.digest.trim() : "";
-    if (!source.trim() || !digest) {
+    const from = readSource(body?.from);
+    const sourceRef =
+      typeof body?.sourceRef === "string" ? body.sourceRef.trim() : "";
+    if (!digest) {
       return context.json(
         { error: "A template and the digest you were shown are required." },
         400,
       );
+    }
+
+    /*
+     * WHO MAY INSTALL AT ALL, asked before the document is even parsed.
+     *
+     * `installers: 'admin'` is the deployment saying that reading a stranger's file is fine but
+     * turning one into a coworker is an administrator's act. It is checked here rather than by
+     * mounting a different guard because the setting can change while this process runs, and a
+     * guard captured at mount time would keep answering the question it was asked at boot.
+     *
+     * The preview above is deliberately NOT gated by it. Somebody who cannot install still has
+     * every reason to read a template and hand the URL to somebody who can, and gating the read
+     * would only mean the decision gets made from a screenshot.
+     */
+    if (deps.gallery?.catalogue.installers() === "admin") {
+      const denied = requireAdmin(context);
+      if (denied) return denied;
     }
 
     const auth = readAuth(body?.auth);
@@ -422,11 +570,39 @@ export function createTemplateRoutes(
       );
     }
 
+    /*
+     * A GALLERY INSTALL IS READ FROM THE GALLERY, never from the body.
+     *
+     * The browser posts a slug and the digest it was shown; the document comes back out of the
+     * catalogue on this side of the wire. Trusting a posted document would make `from: "gallery"` a
+     * way to write "gallery" into the provenance column for a file that never was in one — and that
+     * column is what an administrator reads on the Templates screen when deciding whether a coworker
+     * came from somewhere the deployment vouches for. The digest still has to match, so a source
+     * that moved between the consent screen and the button is a 409 exactly as a file that changed
+     * on disk is.
+     */
     let template: BotTemplate;
-    try {
-      template = parseBotTemplate(source);
-    } catch (error) {
-      return refuse(context, error);
+    if (from === "gallery") {
+      const gallery = deps.gallery;
+      const entry = gallery
+        ? await findGalleryEntry(gallery.catalogue, sourceRef)
+        : null;
+      if (!entry) {
+        return context.json({ error: "There is no such template here." }, 404);
+      }
+      template = entry.document;
+    } else {
+      if (!source.trim()) {
+        return context.json(
+          { error: "A template and the digest you were shown are required." },
+          400,
+        );
+      }
+      try {
+        template = parseBotTemplate(source);
+      } catch (error) {
+        return refuse(context, error);
+      }
     }
 
     /*
@@ -440,10 +616,8 @@ export function createTemplateRoutes(
         template,
         digest,
         actor: context.var.actor,
-        source: readSource(body?.from),
-        ...(typeof body?.sourceRef === "string" && body.sourceRef.trim()
-          ? { sourceRef: body.sourceRef.trim() }
-          : {}),
+        source: from,
+        ...(sourceRef ? { sourceRef } : {}),
         ...(typeof body?.endpoint === "string" && body.endpoint.trim()
           ? { endpoint: body.endpoint.trim() }
           : {}),
@@ -849,6 +1023,258 @@ export function createTemplateRoutes(
 }
 
 /**
+ * The deployment's own view of templates: what has been imported, who may import, and where the
+ * gallery is allowed to read from.
+ *
+ * A SECOND ROUTER rather than more paths on the one above, mounted at `/api/admin/templates`, and
+ * the split is the authorization rather than the tidiness. Everything here is `requireAdmin` on
+ * every handler; everything above is `requireUser` with one delegated exception. Two prefixes make
+ * that legible from the mount in `app.ts` — a reader can see which surface an administrator alone
+ * reaches without reading a guard on each handler — and it means a route added here later inherits
+ * the right neighbourhood rather than the wrong one.
+ *
+ * `requireAdmin` is still called INSIDE each handler rather than once as middleware, matching
+ * `decide` above and `plugins/routes.ts`: the guard returns a response instead of throwing, so it
+ * has to be returned from the handler that owns the request.
+ */
+export function createTemplateAdminRoutes(
+  deps: TemplateRoutesDeps,
+  requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+) {
+  const routes = new Hono<{ Variables: AppVariables }>();
+
+  /**
+   * The setting, the floor it cannot go below, and the sources the environment permits.
+   *
+   * All four in one answer, because they are one screen and three of them are only meaningful
+   * beside each other: `installers` alone cannot tell an administrator why the control is disabled,
+   * and a registered source alone cannot tell them why they may not register another.
+   */
+  routes.get("/settings", requireUser, (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    const gallery = deps.gallery;
+    if (!gallery) {
+      return context.json({
+        installers: "anyone",
+        floor: "anyone",
+        allowedSources: [],
+        sources: [],
+        configured: false,
+      });
+    }
+    return context.json({
+      installers: gallery.catalogue.installers(),
+      floor: gallery.installerFloor,
+      allowedSources: gallery.catalogue.allowedSources(),
+      sources: gallery.catalogue.sources().map(sourceDto),
+      configured: true,
+    });
+  });
+
+  /**
+   * Raise who may install, or fail and say what is still in force.
+   *
+   * REFUSES RATHER THAN COERCES. An unrecognised value is not read as the nearest thing it looks
+   * like and it is not read as the default: a screen that sent `"Admin"` and got back `"anyone"`
+   * would have quietly widened who may install a stranger's Bot, which is the exact opposite of
+   * what whoever typed it meant. The refusal carries the value STILL IN FORCE, so the screen can
+   * put the control back where it was rather than leaving it showing a choice nobody made.
+   */
+  routes.put("/settings", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    const gallery = deps.gallery;
+    if (!gallery) {
+      return context.json(
+        { error: "This deployment has no template gallery to configure." },
+        503,
+      );
+    }
+
+    const body = (await context.req.json().catch(() => null)) as {
+      installers?: unknown;
+    } | null;
+    const wanted = typeof body?.installers === "string" ? body.installers : "";
+    if (!isTemplateInstallers(wanted)) {
+      return context.json(
+        {
+          error: "Who may install is either everybody or administrators only.",
+          installers: gallery.catalogue.installers(),
+        },
+        400,
+      );
+    }
+
+    try {
+      return context.json({
+        installers: gallery.catalogue.setInstallers(context.var.actor, wanted),
+        floor: gallery.installerFloor,
+      });
+    } catch (error) {
+      return refuseCatalogue(context, error, {
+        installers: gallery.catalogue.installers(),
+      });
+    }
+  });
+
+  /**
+   * Pin a repository the gallery may read from.
+   *
+   * The allowlist and the sha rule are both the catalogue's, and neither is restated here. What this
+   * handler owns is that a refusal reaches the person as a sentence and a reason rather than as a
+   * 500 — every one of `bad_handle`, `not_allowlisted` and `bad_ref` is somebody typing something,
+   * and each of them needs a different correction.
+   */
+  routes.post("/sources", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    const gallery = deps.gallery;
+    if (!gallery) {
+      return context.json(
+        { error: "This deployment has no template gallery to configure." },
+        503,
+      );
+    }
+
+    const body = (await context.req.json().catch(() => null)) as {
+      handle?: unknown;
+      sha?: unknown;
+    } | null;
+    const handle = typeof body?.handle === "string" ? body.handle.trim() : "";
+    const sha = typeof body?.sha === "string" ? body.sha.trim() : "";
+    if (!handle || !sha) {
+      return context.json(
+        { error: "A repository and the commit to pin it to are required." },
+        400,
+      );
+    }
+
+    try {
+      return context.json(
+        {
+          source: sourceDto(
+            gallery.catalogue.registerSource(context.var.actor, {
+              handle,
+              sha,
+            }),
+          ),
+        },
+        201,
+      );
+    } catch (error) {
+      return refuseCatalogue(context, error);
+    }
+  });
+
+  /**
+   * Forget a source, which is the whole of un-registering one.
+   *
+   * The id travels in the BODY rather than the path, and that is the id's shape rather than a
+   * preference: a source is `owner/repo`, a slash is a path separator, and a percent-encoded one in
+   * a DELETE path is the kind of thing a proxy in front of this deployment normalises without
+   * telling anybody. Nothing already installed changes — an imported Bot is an ordinary Bot and no
+   * longer refers to where its template came from.
+   */
+  routes.delete("/sources", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+    const gallery = deps.gallery;
+    if (!gallery) {
+      return context.json(
+        { error: "This deployment has no template gallery to configure." },
+        503,
+      );
+    }
+
+    const body = (await context.req.json().catch(() => null)) as {
+      id?: unknown;
+    } | null;
+    const id = typeof body?.id === "string" ? body.id.trim() : "";
+    if (!id) {
+      return context.json({ error: "A source is required." }, 400);
+    }
+    try {
+      if (!gallery.catalogue.forgetSource(context.var.actor, id)) {
+        return context.json({ error: "No such source is registered." }, 404);
+      }
+    } catch (error) {
+      return refuseCatalogue(context, error);
+    }
+    return context.body(null, 204);
+  });
+
+  /**
+   * Every Bot in this deployment that arrived as somebody's file, with what it asked for and the
+   * ceiling it is under.
+   *
+   * The document is deliberately NOT in it. A roster where every row carries a whole template makes
+   * opening the page cost as much as opening every file on it, which is the judgement `draftDto`
+   * makes for drafts; the Bot's own page is where one import is read in full.
+   *
+   * Three queries rather than one join or one per row. A join would multiply each import by its
+   * requests and its clauses and leave this file un-multiplying them; a read per import is an N+1
+   * on a page that lists the whole deployment. Selecting the two child tables by the ids just read
+   * and grouping in memory is neither, and it needs no projection this file would have to keep in
+   * step with the store's.
+   */
+  routes.get("/imports", requireUser, async (context) => {
+    const denied = requireAdmin(context);
+    if (denied) return denied;
+
+    const rows = await deps.executor
+      .select({
+        id: templateImports.id,
+        agentId: templateImports.agentId,
+        agentName: agents.name,
+        digest: templateImports.digest,
+        slug: templateImports.slug,
+        templateVersion: templateImports.templateVersion,
+        authorClaim: templateImports.authorClaim,
+        source: templateImports.source,
+        sourceRef: templateImports.sourceRef,
+        importedBy: templateImports.importedBy,
+        importedAt: templateImports.importedAt,
+      })
+      .from(templateImports)
+      .innerJoin(agents, eq(agents.id, templateImports.agentId))
+      .orderBy(desc(templateImports.importedAt));
+
+    if (rows.length === 0) return context.json({ imports: [] });
+
+    const ids = rows.map((row) => row.id);
+    const [requests, boundaries] = await Promise.all([
+      deps.executor
+        .select()
+        .from(templateRequests)
+        .where(inArray(templateRequests.importId, ids)),
+      deps.executor
+        .select()
+        .from(templateBoundaries)
+        .where(
+          and(
+            inArray(templateBoundaries.importId, ids),
+            // In force, not "was once applied". See the /boundaries read above.
+            isNull(templateBoundaries.removedAt),
+          ),
+        ),
+    ]);
+
+    return context.json({
+      imports: rows.map((row) => ({
+        ...row,
+        requests: requests.filter((request) => request.importId === row.id),
+        boundaries: boundaries.filter(
+          (boundary) => boundary.importId === row.id,
+        ),
+      })),
+    });
+  });
+
+  return routes;
+}
+
+/**
  * A draft on the wire.
  *
  * The document is not in it. A list of drafts is a roster, and every entry carrying a whole template
@@ -986,6 +1412,153 @@ async function recordTemplateEvent(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The whole gallery, in-box first and then every registered source, with one slug per entry.
+ *
+ * FIRST TAKER KEEPS THE SLUG, and the directory is asked first, so a source cannot shadow a
+ * template that ships in the image by naming a file the same thing. The loser is not dropped
+ * silently: it becomes a skip carrying both sides, because an operator who pinned a repository and
+ * cannot find one of its templates needs to be told it collided rather than left to conclude the
+ * pin is wrong.
+ *
+ * ONE FUNCTION FOR THE LIST AND THE LOOKUP. `findGalleryEntry` reads through this rather than
+ * asking the catalogue directly, so the entry that installs is by construction the entry that was
+ * listed — a lookup with its own precedence rule would eventually disagree with the list somebody
+ * chose from, and the thing they chose from is the thing they consented to.
+ */
+async function galleryListing(
+  catalogue: TemplateCatalogue,
+): Promise<CatalogueListing> {
+  const entries: CatalogueEntry[] = [];
+  const skipped: CatalogueSkip[] = [];
+  const claimed = new Map<string, CatalogueEntry>();
+
+  const take = (listing: CatalogueListing, where: string) => {
+    skipped.push(...listing.skipped);
+    for (const entry of listing.entries) {
+      const held = claimed.get(entry.slug);
+      if (held) {
+        skipped.push({
+          where,
+          reason: "duplicate_slug",
+          message: `${entry.slug} is already offered by ${describeOrigin(held.origin)}, so this copy is not listed.`,
+        });
+        continue;
+      }
+      claimed.set(entry.slug, entry);
+      entries.push(entry);
+    }
+  };
+
+  take(await catalogue.directory(), "directory");
+  for (const source of catalogue.sources()) {
+    try {
+      take(await catalogue.fromSource(source.id), source.id);
+    } catch (error) {
+      /*
+       * EVERY failure, not only the catalogue's own refusals. A source is a third-party host over a
+       * network, so the ways this call ends badly include a DNS failure, a timeout and a proxy
+       * returning something that is not a response at all — and none of those is a reason for a
+       * deployment's in-box templates to vanish from the screen. The source is named in the skip, so
+       * a gallery that is quietly short of one repository says which one.
+       */
+      skipped.push({
+        where: source.id,
+        reason: "source_unreadable",
+        message:
+          error instanceof CatalogueRefusedError
+            ? error.message
+            : `${source.id} could not be read at its pinned commit.`,
+      });
+    }
+  }
+  return { entries, skipped };
+}
+
+/** One gallery template by its slug, through the same precedence the list was built with. */
+async function findGalleryEntry(
+  catalogue: TemplateCatalogue,
+  slug: string,
+): Promise<CatalogueEntry | null> {
+  if (!slug) return null;
+  const listing = await galleryListing(catalogue);
+  return listing.entries.find((entry) => entry.slug === slug) ?? null;
+}
+
+/** Where a template came from, in a sentence, for a skip that has to name two of them. */
+function describeOrigin(origin: CatalogueEntry["origin"]): string {
+  return origin.kind === "directory"
+    ? `the templates shipped here (${origin.filename})`
+    : `${origin.sourceId} (${origin.path})`;
+}
+
+/**
+ * A gallery entry as the roster shows it.
+ *
+ * The document is not in it, and neither is a single line of the author's prose: the summary is one
+ * sentence the format caps, and `role_description` and every skill's `instructions` are read on the
+ * consent screen where they are rendered verbatim under a heading saying whose words they are. A
+ * card is where somebody decides whether to open a template, not where they decide to run it.
+ *
+ * `author` and `source` are CLAIMS and are named as such all the way down. Nothing on this side
+ * verifies either, nothing decides anything from either, and the screen renders both as plain text.
+ */
+function galleryEntryDto(entry: CatalogueEntry) {
+  const document = entry.document;
+  return {
+    slug: entry.slug,
+    digest: entry.digest,
+    name: document.bot.name,
+    title: document.bot.title,
+    summary: document.template.summary,
+    author: document.template.author ?? null,
+    version: document.template.version ?? null,
+    license: document.template.license ?? null,
+    source: document.template.source ?? null,
+    runtime: document.bot.runtime,
+    /*
+     * What the template ASKS FOR, which is not what it gets. These ids are the interesting half of
+     * a gallery card — a coworker that wants a connector this deployment does not have is worth
+     * knowing about before opening it — and they are inert here exactly as they are everywhere else.
+     */
+    connectors: document.requests.connectors.map((connector) => connector.id),
+    components: document.requests.components.map((component) => component.name),
+    skills: document.skills.map((skill) => skill.slug),
+    origin: entry.origin,
+  };
+}
+
+/** A registered source on the wire. The pin is the whole of it; there is nothing secret in a pin. */
+function sourceDto(source: {
+  id: string;
+  owner: string;
+  repo: string;
+  sha: string;
+  registeredBy: string;
+  registeredAt: Date;
+}) {
+  return { ...source };
+}
+
+/**
+ * A catalogue refusal as a status and a sentence.
+ *
+ * `not_admin` is 403 and everything else is 400, because they are two different answers: one says
+ * the person may not do this at all, and the rest say the thing they typed is wrong. The extras are
+ * merged in so a failed setting write can carry the value still in force.
+ */
+function refuseCatalogue(
+  context: Context<{ Variables: AppVariables }>,
+  error: unknown,
+  extra: Record<string, unknown> = {},
+): Response {
+  if (!(error instanceof CatalogueRefusedError)) throw error;
+  return context.json(
+    { error: error.message, reason: error.reason, ...extra },
+    error.reason === "not_admin" ? 403 : 400,
+  );
 }
 
 /**

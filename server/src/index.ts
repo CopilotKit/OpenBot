@@ -74,6 +74,7 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
+import { createTemplateCatalogue } from "./templates/catalogue";
 import { createTemplateInstaller } from "./templates/install";
 import { createTemplateStore } from "./templates/store";
 import { repeatAfterEach } from "./work/loop";
@@ -1014,6 +1015,23 @@ const templates = {
   }),
   // The preview reads on the pool. The install resolves again on its own transaction.
   executor: database,
+  /*
+   * The gallery: the templates shipped in this image, plus any repository an administrator pinned.
+   *
+   * Built here beside the store rather than inside `createApp` for the same reason everything else
+   * in this block is — the three settings it reads live on `config`, which is assembled once in this
+   * file, and a second place deriving a directory path or an allowlist would eventually derive a
+   * different one. `installerFloor` is handed to `createApp` separately off the same field, so what
+   * the admin screen renders as immovable and what `setInstallers` refuses to go below are one fact.
+   *
+   * NOTHING IS FETCHED BECAUSE THIS EXISTS. `templateSources` ships empty, so a deployment that
+   * registers no source reads its own directory and reaches no network at all.
+   */
+  catalogue: createTemplateCatalogue({
+    directory: config.templateDirectory,
+    allowedSources: config.templateSources,
+    installerFloor: config.templateInstallers,
+  }),
 };
 
 const app = createApp(
