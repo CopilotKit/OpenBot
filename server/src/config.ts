@@ -222,6 +222,26 @@ export type DeploymentConfig = {
   /** Names OpenBot on the analytics the runtime already sends. Off with OPENBOT_ACCESSIBILITY_DISABLED. */
   accessibility: boolean;
   /**
+   * Whether a Bot may answer with an interface it wrote itself.
+   *
+   * This is not the component catalogue. A component is something this deployment holds: it was
+   * either compiled into the build or authored in the playground, an administrator granted it to a
+   * Bot, and all a Bot decides is which of them to draw. Here there is nothing to grant, because
+   * there is nothing yet — the Bot writes the markup, the styles and the script for this one answer,
+   * and they are gone when the conversation moves on.
+   *
+   * A deployment switch rather than a per-Bot grant because the SDK offers no seam for one. The
+   * interface is painted from activity events that only the runtime middleware emits, and the tool
+   * the model calls is registered by the browser for every Bot the moment that middleware is on.
+   * Narrowing the middleware to some Bots would leave the rest able to call the tool and draw
+   * nothing at all, which is a worse answer than never offering it.
+   *
+   * What it runs is sandboxed by the SDK, in an iframe with no same-origin access to this app, so a
+   * generated interface reaches this deployment's data only through what the host hands it. This
+   * deployment hands it nothing.
+   */
+  generativeUi: boolean;
+  /**
    * Where the built app is, when this process serves it.
    *
    * Set in a container image that carries both. Unset in development, where Vite serves the app and
@@ -771,6 +791,22 @@ function accessibilityEnabled(environment: Environment): boolean {
 }
 
 /**
+ * Whether a Bot may draw an interface it wrote itself.
+ *
+ * On unless told otherwise, the same shape as OPENBOT_ACCESSIBILITY_DISABLED above it: a capability
+ * a fork gets without having to ask for it, and one an operator takes away in a single variable.
+ *
+ * The off switch has to reach the browser as well as the runtime, which is why this ends up on
+ * /api/capabilities rather than staying server-side. Turning off only the runtime half would leave
+ * the browser still offering the tool, and a Bot would generate a whole interface that nothing
+ * renders. See DeploymentConfig.generativeUi.
+ */
+function generativeUiEnabled(environment: Environment): boolean {
+  const off = optional(environment, "OPENBOT_GENERATIVE_UI_DISABLED");
+  return off !== "true" && off !== "1";
+}
+
+/**
  * How long the audit trail is kept.
  *
  * Refused rather than coerced, like everything else here. "We accepted your retention policy but not
@@ -840,6 +876,7 @@ export function loadConfig(
       configuredAuthProviders(auth).length > 0,
     ),
     accessibility: accessibilityEnabled(environment),
+    generativeUi: generativeUiEnabled(environment),
     ...(optional(environment, "APP_DIST_DIR")
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),

@@ -56,6 +56,29 @@ at `agent-langgraph` on a laptop.
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
 | `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
+| `OPENBOT_GENERATIVE_UI_DISABLED` | unset (capability on)        | `true` or `1` stops a Bot answering with an interface it wrote itself. |
+
+**`OPENBOT_GENERATIVE_UI_DISABLED`** turns off generated interfaces. Left unset, a Bot may answer
+by writing the markup, styles and script for an interface and streaming it into the transcript, where
+it renders in a sandboxed iframe.
+
+This is not the component catalogue. A component is something the deployment holds — compiled into
+the build or authored in the playground — and an administrator grants it per Bot. A generated
+interface has nothing to grant: it does not exist until the Bot writes it, and it is gone when the
+conversation moves on. That is also why this is one switch for the deployment rather than a grant per
+Bot. The interface is painted from activity events that only the runtime middleware emits, and the
+tool the model calls is registered by the browser for every Bot the moment that middleware runs, so
+enabling it for some Bots would leave the rest able to call the tool and draw nothing.
+
+The switch reaches both halves. The server stops passing `openGenerativeUI` to the runtime, and
+`/api/capabilities` reports the capability as off so the app stops offering the tool. Turning off
+only one half is the one configuration worth avoiding: a Bot would generate a whole interface that
+nothing renders.
+
+What a generated interface can reach is what the sandbox hands it, and this deployment hands it
+nothing — no session, no same-origin access to the app, no route into your data. It can load
+libraries from a CDN, which is the reason a deployment that must not reach the public internet from a
+browser tab would turn this off.
 
 **`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
 show: a stream that stops producing anything. Every other audit row is something that happened, and

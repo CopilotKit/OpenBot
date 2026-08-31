@@ -26,6 +26,9 @@ describe("runtime capabilities", () => {
     await expect(response.json()).resolves.toEqual({
       mode: "intelligence",
       durableHistory: true,
+      // On unless an operator turned it off. The browser reads this to decide whether to offer the
+      // tool that generates an interface, so it has to be here and not only in the runtime.
+      generativeUi: true,
       // Names only. The sign-in screen reads this to know which buttons to draw.
       authProviders: ["google"],
       // A boolean, not a list: naming the registered providers would tell anybody who loads the
@@ -47,11 +50,33 @@ describe("runtime capabilities", () => {
     expect(Object.keys(parsed)).toEqual([
       "mode",
       "durableHistory",
+      "generativeUi",
       "authProviders",
       "ssoConfigured",
     ]);
     // The provider list is names, never the clients and secrets behind them.
     expect(body).not.toContain("google-client-secret");
+  });
+
+  /*
+   * Off has to reach the browser, not just the runtime.
+   *
+   * The app offers the model the tool that generates an interface, and it decides whether to from
+   * this field. A deployment that switched the runtime half off while this still said `true` would
+   * have Bots writing whole interfaces that nothing renders, which is the one configuration this
+   * capability must not be able to end up in.
+   */
+  test("reports generated interfaces as off when the deployment disabled them", async () => {
+    const disabled = createApp(
+      loadConfig(testEnvironment({ OPENBOT_GENERATIVE_UI_DISABLED: "true" })),
+    );
+
+    const response = await disabled.request(
+      "http://openbot.local/api/capabilities",
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).generativeUi).toBe(false);
   });
 });
 

@@ -600,6 +600,45 @@ describe("accessibility", () => {
 });
 
 /**
+ * Whether a Bot may answer with an interface it wrote itself.
+ *
+ * Same shape as accessibility above, and tested to the same bar for the same reason: the off switch
+ * has a second reader. It is projected on /api/capabilities so the browser stops offering the tool
+ * too, so a value that silently failed to mean "off" would leave Bots generating interfaces nothing
+ * renders rather than merely leaving a capability on.
+ */
+describe("generated interfaces", () => {
+  test("are on when nothing is set", () => {
+    expect(loadConfig(baseEnvironment).generativeUi).toBe(true);
+  });
+
+  test.each(["true", "1"])(
+    "are off on OPENBOT_GENERATIVE_UI_DISABLED=%p",
+    (value) => {
+      expect(
+        loadConfig({
+          ...baseEnvironment,
+          OPENBOT_GENERATIVE_UI_DISABLED: value,
+        }).generativeUi,
+      ).toBe(false);
+    },
+  );
+
+  // Anything else is not a way of saying off, exactly as above.
+  test.each(["false", "no", "", "yes"])(
+    "stay on for OPENBOT_GENERATIVE_UI_DISABLED=%p",
+    (value) => {
+      expect(
+        loadConfig({
+          ...baseEnvironment,
+          OPENBOT_GENERATIVE_UI_DISABLED: value,
+        }).generativeUi,
+      ).toBe(true);
+    },
+  );
+});
+
+/**
  * Naming the private addresses an agent may live at.
  *
  * The refusal cases matter as much as the parse: a list written as URLs or with a wildcard is a

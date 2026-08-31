@@ -202,6 +202,16 @@ export function createApp(
       mode: config.runtime.mode,
       durableHistory: config.runtime.durableHistory,
       /*
+       * Whether a Bot may answer with an interface it wrote itself.
+       *
+       * Projected because the browser holds half of this capability. The runtime middleware turns a
+       * generated interface into the events that paint it, and the SDK's provider registers the tool
+       * that produces one; a deployment that switched the runtime half off while the browser went on
+       * offering the tool would have Bots writing interfaces nothing ever draws. One flag, read by
+       * both halves, so off means off.
+       */
+      generativeUi: config.generativeUi,
+      /*
        * Which identity providers this deployment can sign somebody in with.
        *
        * Ids only, never the credentials: `configuredAuthProviders` returns names, and the clients
