@@ -11,6 +11,7 @@ import {
   CeilingGrid,
   ConnectorAsk,
   Glance,
+  hueFor,
   SkillCard,
 } from "@/components/agents/template-anatomy";
 import {
@@ -112,6 +113,7 @@ export function TemplateDetail({ slug }: { slug: string }) {
 
   const { entry, template, digest, yaml } = detail.data;
   const seed = entry.avatarSeed || entry.slug;
+  const hue = hueFor(seed);
   const ceiling = describeBoundary(template.boundary);
   const categoryLabel = entry.category
     ? (templateCategoryLabel(entry.category) ?? "Not filed")
@@ -138,112 +140,96 @@ export function TemplateDetail({ slug }: { slug: string }) {
       title={entry.name}
     >
       {/*
-       * The drawing and the role, together, because this page is about one coworker rather than about
-       * a file. It is the avatar the imported Bot will actually have — the same seed — so the page is
-       * a preview of the thing rather than a description of it.
+       * WHO THIS COWORKER IS, given the weight the rest of the page borrows from.
+       *
+       * A person arriving here is deciding whether this is the right template at all, and the four
+       * facts that answer it — the drawing, the job title, where it runs, and what it brings — were
+       * previously a thin strip indistinguishable from the sections under it. It is one block now,
+       * with the identity and the three counts inside a single bordered card, so the top of the page
+       * reads as a description of a coworker rather than as the first of nine equal sections.
+       *
+       * `mt-8` because `PageShell`'s header supplies no bottom margin and this is the first child:
+       * without it the card sits flush against the summary, and the tiles sat flush against the card.
+       * Every gap here is deliberate rather than inherited.
        */}
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
-        <AbstractAvatar name={entry.name} seed={seed} size={40} />
-        <div className="min-w-0">
-          <p className="font-medium text-sm">{entry.title}</p>
-          <p className="text-muted-foreground text-xs">
-            {entry.runtime === "managed"
-              ? "Runs on this deployment itself."
-              : "Runs at an address the importer supplies."}
-          </p>
+      <div className="mt-8 overflow-hidden rounded-xl border border-border bg-card">
+        <div
+          className="flex items-center gap-4 px-5 py-5"
+          style={{
+            backgroundImage: `radial-gradient(80% 140% at 10% 0%, oklch(0.72 0.11 ${hue} / 0.13), transparent 60%)`,
+          }}
+        >
+          <AbstractAvatar name={entry.name} seed={seed} size={56} />
+          <div className="min-w-0">
+            <p className="font-semibold text-base leading-tight">
+              {entry.title}
+            </p>
+            <p className="mt-0.5 text-muted-foreground text-sm">
+              {entry.runtime === "managed"
+                ? "Runs on this deployment itself."
+                : "Runs at an address the importer supplies."}
+            </p>
+          </div>
+        </div>
+
+        {/*
+         * THE THREE QUESTIONS SOMEBODY ARRIVES WITH, answered before any prose starts.
+         *
+         * Everything below this card is a stranger's words and deserves to be read slowly. This is
+         * not: it is the format's own structured fields, and a person deciding whether this template
+         * is even the right one should not have to read four screens of instructions to learn that
+         * it asks for two connectors and brings three skills.
+         */}
+        <div className="grid gap-px border-border border-t bg-border sm:grid-cols-3">
+          <Glance
+            icon={<IconSparkles className="size-4" />}
+            label="Skills it brings"
+            value={
+              template.skills.length === 1
+                ? "1 skill"
+                : `${template.skills.length} skills`
+            }
+          />
+          <Glance
+            icon={<IconPlugConnected className="size-4" />}
+            label="Connectors it asks for"
+            value={
+              template.requests.connectors.length === 0
+                ? "None"
+                : template.requests.connectors
+                    .map((connector) => connector.id)
+                    .join(", ")
+            }
+          />
+          <Glance
+            icon={<IconTag className="size-4" />}
+            label="Kind of work"
+            value={categoryLabel}
+          />
         </div>
       </div>
 
-      {/*
-       * THE THREE QUESTIONS SOMEBODY ARRIVES WITH, answered before the prose starts.
-       *
-       * Everything below this row is a stranger's words and deserves to be read slowly. This row is
-       * not: it is the format's own structured fields, and a person deciding whether this template
-       * is even the right one should not have to read four screens of instructions to learn that it
-       * asks for two connectors and cannot touch a file.
-       */}
-      <div className="grid gap-2 sm:grid-cols-3">
-        <Glance
-          icon={<IconSparkles className="size-4" />}
-          label="Skills it brings"
-          value={
-            template.skills.length === 1
-              ? "1 skill"
-              : `${template.skills.length} skills`
-          }
-        />
-        <Glance
-          icon={<IconPlugConnected className="size-4" />}
-          label="Connectors it asks for"
-          value={
-            template.requests.connectors.length === 0
-              ? "None"
-              : template.requests.connectors
-                  .map((connector) => connector.id)
-                  .join(", ")
-          }
-        />
-        <Glance
-          icon={<IconTag className="size-4" />}
-          label="Kind of work"
-          value={categoryLabel}
-        />
-      </div>
-
       <PageSection
-        description={STRANGER_WROTE_IT}
-        title="The instructions it carries"
+        description="The ceiling the author wrote into the file. This deployment compiles it into rules scoped to this one coworker when it is imported, and they only ever subtract from what a Bot may already do."
+        title="What it will be allowed to do"
       >
-        {/*
-         * FIRST, and that ordering is the argument. What a Bot will be TOLD is a larger fact about it
-         * than what it may reach, and a page that led with a capability list would be teaching people
-         * to skim the prose on the way to the part that looks like the security-relevant one.
-         */}
-        <Verbatim capped={false}>{template.bot.roleDescription}</Verbatim>
-      </PageSection>
-
-      {/*
-       * SETUP, ABOVE THE SKILLS RATHER THAN AT THE BOTTOM.
-       *
-       * This is the author's note to whoever imports it, and for anything beyond a simple coworker it
-       * is the part that decides whether the thing works on arrival: which folder to point it at,
-       * which connector to grant, what has to exist first. At the foot of a long page it was read
-       * after the decision it was meant to inform. It is not given to a model, which is the one thing
-       * about it worth saying out loud, because everything above it is.
-       */}
-      {template.notes ? (
-        <PageSection
-          description="From the author, to whoever imports it. This one is not given to a model."
-          title="Setup and notes"
-        >
-          <Verbatim capped={false}>{template.notes}</Verbatim>
-        </PageSection>
-      ) : null}
-
-      {template.skills.length > 0 ? (
-        <PageSection
-          description="A skill is an instruction somebody invokes with a slash. It grants nothing: what a Bot may call is its grants, and naming a tool here only narrows what is offered out of what it already holds."
-          title={
-            template.skills.length === 1
-              ? "Its skill"
-              : `Its ${template.skills.length} skills`
-          }
-        >
-          <div className="grid gap-2">
-            {template.skills.map((skill) => (
-              <SkillCard
-                instructions={skill.instructions}
-                key={skill.slug}
-                slug={skill.slug}
-                summary={skill.summary}
-                title={skill.title}
-                tools={skill.tools}
-              />
+        <div className="grid gap-3">
+          <CeilingGrid boundary={template.boundary} />
+          {/*
+           * The sentences stay, and they are the authority. `describeBoundary` is shared with the
+           * consent screen and the Boundaries screen precisely so one ceiling is never described
+           * two ways, and the grid above is an index over the same object rather than a second
+           * wording — it compresses, it does not paraphrase.
+           */}
+          <ul className="grid gap-1">
+            {ceiling.map((sentence) => (
+              <li className="text-muted-foreground text-sm" key={sentence}>
+                {sentence}
+              </li>
             ))}
-          </div>
-        </PageSection>
-      ) : null}
-
+          </ul>
+        </div>
+      </PageSection>
       <PageSection
         description="What the author says this coworker needs. Every line is a request and none of it is a grant: importing writes these to a ledger as asked-for, and somebody decides each one afterwards on the screens that already decide grants."
         title="What it can reach"
@@ -277,29 +263,65 @@ export function TemplateDetail({ slug }: { slug: string }) {
           ) : null}
         </div>
       </PageSection>
-
-      <PageSection
-        description="The ceiling the author wrote into the file. This deployment compiles it into rules scoped to this one coworker when it is imported, and they only ever subtract from what a Bot may already do."
-        title="What it will be allowed to do"
-      >
-        <div className="grid gap-3">
-          <CeilingGrid boundary={template.boundary} />
-          {/*
-           * The sentences stay, and they are the authority. `describeBoundary` is shared with the
-           * consent screen and the Boundaries screen precisely so one ceiling is never described
-           * two ways, and the grid above is an index over the same object rather than a second
-           * wording — it compresses, it does not paraphrase.
-           */}
-          <ul className="grid gap-1">
-            {ceiling.map((sentence) => (
-              <li className="text-muted-foreground text-sm" key={sentence}>
-                {sentence}
-              </li>
+      {template.skills.length > 0 ? (
+        <PageSection
+          description="A skill is an instruction somebody invokes with a slash. It grants nothing: what a Bot may call is its grants, and naming a tool here only narrows what is offered out of what it already holds."
+          title={
+            template.skills.length === 1
+              ? "Its skill"
+              : `Its ${template.skills.length} skills`
+          }
+        >
+          <div className="grid gap-2">
+            {template.skills.map((skill) => (
+              <SkillCard
+                instructions={skill.instructions}
+                key={skill.slug}
+                slug={skill.slug}
+                summary={skill.summary}
+                title={skill.title}
+                tools={skill.tools}
+              />
             ))}
-          </ul>
-        </div>
+          </div>
+        </PageSection>
+      ) : null}
+      <PageSection
+        description={STRANGER_WROTE_IT}
+        title="The instructions it carries"
+      >
+        {/*
+         * AFTER THE CAPABILITIES, WHICH REVERSES WHAT THIS PAGE USED TO ARGUE, deliberately.
+         *
+         * The old ordering put this first on the grounds that what a Bot will be TOLD is a larger
+         * fact than what it may reach. That holds for somebody who has already chosen this template
+         * and is now reading it closely. It does not hold for the far commoner arrival: somebody
+         * deciding whether this is the right template at all, for whom four screens of a stranger's
+         * prose stood between them and the two facts that answer it in a glance.
+         *
+         * Nothing is hidden by the change and nothing is skimmed past — the capability sections
+         * above are short and structured, and this text is still whole, still verbatim, and still
+         * the substance of the page rather than an appendix to it.
+         */}
+        <Verbatim capped={false}>{template.bot.roleDescription}</Verbatim>
       </PageSection>
-
+      {/*
+       * SETUP, ABOVE THE SKILLS RATHER THAN AT THE BOTTOM.
+       *
+       * This is the author's note to whoever imports it, and for anything beyond a simple coworker it
+       * is the part that decides whether the thing works on arrival: which folder to point it at,
+       * which connector to grant, what has to exist first. At the foot of a long page it was read
+       * after the decision it was meant to inform. It is not given to a model, which is the one thing
+       * about it worth saying out loud, because everything above it is.
+       */}
+      {template.notes ? (
+        <PageSection
+          description="From the author, to whoever imports it. This one is not given to a model."
+          title="Setup and notes"
+        >
+          <Verbatim capped={false}>{template.notes}</Verbatim>
+        </PageSection>
+      ) : null}
       <PageSection
         description="Where this came from, as far as anything here can tell. The author and the address are the author's own words and nothing has checked either."
         title="Provenance"
@@ -329,7 +351,6 @@ export function TemplateDetail({ slug }: { slug: string }) {
           />
         </div>
       </PageSection>
-
       {/*
        * THE FILE ITSELF, last and in full.
        *

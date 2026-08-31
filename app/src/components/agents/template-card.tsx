@@ -9,28 +9,8 @@ import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
 import { templateCategoryLabel } from "@/lib/templates/categories";
 import type { GalleryTemplateCard } from "@/lib/templates/queries";
+import { hueFor } from "@/components/agents/template-anatomy";
 import { cn } from "@/lib/utils";
-
-/**
- * A hue for one template, taken from its own seed.
- *
- * The gallery's problem is that every card used the same box icon, so twelve templates were twelve
- * identical rows and the eye had nothing to land on. The avatar solves that — `boring-avatars` draws
- * a different figure per seed — and this washes the same seed across the surface behind it so the
- * card is distinguishable before the drawing itself is legible.
- *
- * Deterministic and content-free. It is a hash of the seed, so the same template is the same colour
- * on every deployment and nothing about the colour means anything: it is not a category, not a
- * status, and not a signal about trust. A colour that meant something would be a colour a template's
- * author could choose, and every value on this card that an author chooses is labelled as a claim.
- */
-function hueFor(seed: string): number {
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = (hash * 31 + seed.charCodeAt(index)) % 360_000;
-  }
-  return hash % 360;
-}
 
 /**
  * One template in the gallery.

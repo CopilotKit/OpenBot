@@ -29,6 +29,27 @@ import { Verbatim } from "@/components/agents/template-prose";
  * rather than read.
  */
 
+/**
+ * A hue for one template, taken from its own seed.
+ *
+ * The gallery's problem is that every card used the same box icon, so twelve templates were twelve
+ * identical rows and the eye had nothing to land on. The avatar solves that — `boring-avatars` draws
+ * a different figure per seed — and this washes the same seed across the surface behind it so the
+ * card is distinguishable before the drawing itself is legible.
+ *
+ * Deterministic and content-free. It is a hash of the seed, so the same template is the same colour
+ * on every deployment and nothing about the colour means anything: it is not a category, not a
+ * status, and not a signal about trust. A colour that meant something would be a colour a template's
+ * author could choose, and every value on this card that an author chooses is labelled as a claim.
+ */
+export function hueFor(seed: string): number {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) % 360_000;
+  }
+  return hash % 360;
+}
+
 /** One fact about the template, sized to be read in passing rather than studied. */
 export function Glance({
   icon,
@@ -46,9 +67,13 @@ export function Glance({
         <span className="block text-[11px] text-muted-foreground leading-tight">
           {label}
         </span>
-        <span className="block truncate font-medium text-sm leading-tight">
-          {value}
-        </span>
+        {/*
+         * WRAPS RATHER THAN TRUNCATES. These values are short by construction — a count, a category
+         * label, a connector list — and an ellipsis on "Customer Success & Support" hides the half
+         * that distinguishes it while saving nothing. A second line costs one row of height; a
+         * truncated category costs the reader the answer they came for.
+         */}
+        <span className="block font-medium text-sm leading-tight">{value}</span>
       </span>
     </div>
   );
