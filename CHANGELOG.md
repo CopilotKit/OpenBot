@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A failed tool refresh no longer leaves a connector offering nothing
+
+Refreshing a connector's tools replaced the list with a delete and then an insert, as two separate
+statements. Whenever the second did not land — a pod killed mid-refresh, a dropped connection, or a
+server answering `tools/list` with the same tool name twice, which the table refuses — the delete had
+already committed on its own. The table is shared, so every replica lost that connector's tools at
+once, every grant an administrator had made was silently un-offered, and the Bot was told it holds
+none of that vendor's tools. Nothing brought them back until somebody read the error on the Plugins
+page and pressed Refresh. The two statements are now one, so a bad refresh is recorded and the tools
+already held are left alone, which is what the code always claimed to do.
+
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the

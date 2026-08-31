@@ -1924,17 +1924,37 @@ export function createPluginStore(options: PluginStoreOptions) {
           token,
         });
 
-        await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
-        if (tools.length > 0) {
-          await database.insert(mcpTools).values(
-            tools.map((tool) => ({
-              serverId,
-              name: tool.name,
-              description: tool.description,
-              inputSchema: tool.inputSchema,
-            })),
-          );
-        }
+        /*
+         * ONE STEP, because the catch below promises that it is one.
+         *
+         * "The tools already held are left alone" is only true while nothing has been written yet.
+         * As two auto-committed statements the delete landed on its own whenever the insert did not:
+         * a pod killed mid-refresh, a dropped connection, a statement timeout — or, with no crash at
+         * all, a server that answers `tools/list` with the same `name` twice, which `mcp_tools`'
+         * `(server_id, name)` primary key refuses as one multi-row insert. `mcp_tools` is shared, so
+         * that is every replica at once, and nothing repopulates it: `refreshTools` is only ever
+         * called by `addServer`, `addCustomServer` and an administrator pressing Refresh. The
+         * connector kept every grant an administrator had made and offered none of them, and
+         * `grantedToolGuidance` then told the Bot outright that it holds none of that vendor's tools.
+         *
+         * Rolled back together, the vendor's bad answer is recorded in `lastError` and the Bots go
+         * on using what they were granted, which is what the comment said all along.
+         */
+        await database.transaction(async (transaction) => {
+          await transaction
+            .delete(mcpTools)
+            .where(eq(mcpTools.serverId, serverId));
+          if (tools.length > 0) {
+            await transaction.insert(mcpTools).values(
+              tools.map((tool) => ({
+                serverId,
+                name: tool.name,
+                description: tool.description,
+                inputSchema: tool.inputSchema,
+              })),
+            );
+          }
+        });
 
         await database
           .update(mcpServers)
