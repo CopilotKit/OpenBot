@@ -1,6 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import {
   Claim,
@@ -170,7 +177,7 @@ export function ImportTemplate({
     );
   }, [seeded]);
 
-  const read = async (source: string) => {
+  const read = useCallback(async (source: string) => {
     setReading(true);
     try {
       const next = await previewBotTemplate(source);
@@ -187,7 +194,33 @@ export function ImportTemplate({
     } finally {
       setReading(false);
     }
-  };
+    // Stable, so the effect below can depend on it without re-reading on every render. The state
+    // setters are the only closure and React guarantees those never change identity.
+  }, []);
+
+  /**
+   * The file this screen was opened ON, already read.
+   *
+   * "Use this template" used to land here, on a paste box, showing a file nobody pasted, above a
+   * button repeating the words the person had just pressed on the card. Three presses to reach a
+   * decision and the middle one bought nothing — and the box was worse than redundant, because an
+   * install from the gallery posts the SLUG and the server re-reads its own copy: anybody who
+   * edited a character got a 409 saying the template had changed since they read it, blaming the
+   * file for their own edit.
+   *
+   * A ref rather than `verdict` in the dependencies, and that is the whole subtlety. `verdict` is
+   * cleared by "Read a different file", so a dependency on it would re-read this same document
+   * immediately and bounce the person back to the consent screen — silently discarding the address
+   * and key they had typed. Keyed on the document instead, so it reads once per file and a genuinely
+   * different one still reads.
+   */
+  const alreadyRead = useRef<string | null>(null);
+  useEffect(() => {
+    if (!gallerySlug || !seeded || reading) return;
+    if (alreadyRead.current === seeded) return;
+    alreadyRead.current = seeded;
+    void read(seeded);
+  }, [gallerySlug, seeded, reading, read]);
 
   if (!verdict?.ok) {
     return (
@@ -206,6 +239,7 @@ export function ImportTemplate({
               ? "Could not open that template."
               : null
         }
+        readOnly={Boolean(gallerySlug)}
         source={values.source}
       />
     );
@@ -284,6 +318,7 @@ function PasteStep({
   reading,
   error,
   seedError,
+  readOnly,
 }: {
   source: string;
   onSourceChange: (source: string) => void;
@@ -291,22 +326,30 @@ function PasteStep({
   reading: boolean;
   error: string | null;
   seedError: string | null;
+  readOnly: boolean;
 }) {
   return (
     <div className="flex w-full flex-col gap-6 p-8">
       <header>
         <h1 className="font-semibold text-2xl">Import a coworker</h1>
         <p className="mt-1 text-muted-foreground text-sm">
-          Paste a template file. Nothing is written until you have read it and
-          pressed the button at the end.
+          {readOnly
+            ? "This is the file this deployment holds under that name. Nothing is written until you have read it and pressed the button at the end."
+            : "Paste a template file. Nothing is written until you have read it and pressed the button at the end."}
         </p>
       </header>
 
+      {/*
+       * READ-ONLY when the file came from the catalogue, because an edit here cannot install. The
+       * install posts the slug and the server reads its own copy, so a changed character produces a
+       * 409 about the template having changed rather than anything about what was typed.
+       */}
       <Textarea
         aria-label="Template file"
         className="max-h-[50vh] min-h-48 overflow-y-auto font-mono text-xs"
         onChange={(event) => onSourceChange(event.target.value)}
         placeholder={"openbot_template: 1\n\ntemplate:\n  slug: …"}
+        readOnly={readOnly}
         spellCheck={false}
         value={source}
       />
@@ -713,7 +756,7 @@ function ConsentScreen({
                       </p>
                     </div>
                   ))}
-                  <p className="font-medium text-amber-600 text-xs dark:text-amber-500">
+                  <p className="font-medium text-amber-700 text-xs dark:text-amber-500">
                     Not granted by this install.
                   </p>
                 </div>
@@ -739,7 +782,7 @@ function ConsentScreen({
                       Bot reaching for it is told so, and nothing is written.
                     </p>
                   ) : null}
-                  <p className="font-medium text-amber-600 text-xs dark:text-amber-500">
+                  <p className="font-medium text-amber-700 text-xs dark:text-amber-500">
                     Not granted by this install.
                   </p>
                 </div>

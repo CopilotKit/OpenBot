@@ -12,6 +12,24 @@
  * guessed the envelope would be a client that had to be argued with.
  */
 
+/**
+ * A failed request, carrying the status the server actually answered.
+ *
+ * The message alone cannot tell a screen the difference between "there is no such thing" and "this
+ * request did not work", and those are different facts to put in front of a person: one is about
+ * their URL and the other is about the deployment. Every existing call site reads `.message` and is
+ * unaffected; only a screen that wants to branch has to know this exists.
+ */
+export class ClientError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ClientError";
+    this.status = status;
+  }
+}
+
 export type ClientOptions = {
   /** Absent means GET. */
   method?: string;
@@ -93,7 +111,10 @@ export async function client<T>(
       .json()
       .then((body: { error?: string }) => body.error)
       .catch(() => undefined);
-    throw new Error(message ?? options.fallback ?? "That request failed.");
+    throw new ClientError(
+      message ?? options.fallback ?? "That request failed.",
+      response.status,
+    );
   }
 
   if (key === undefined) return response;

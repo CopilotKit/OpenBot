@@ -11,19 +11,73 @@
 /**
  * A stranger's text, shown as the characters it is.
  *
- * Monospace and pre-wrapped, in a box that scrolls rather than one that truncates: an ellipsis in
- * the middle of an instruction is the one rendering this may not do, because the part it hides is
- * the part worth hiding something in. No markdown renderer touches it either — a heading and a link
- * are formatting a model never sees, and the reader needs to read what the model reads. React's own
- * text escaping is what makes `<script>` and `&lt;` appear as themselves rather than disappearing
- * into the document; the parser has already refused the characters that would be invisible here
- * whatever this box did.
+ * Monospace and pre-wrapped: an ellipsis in the middle of an instruction is the one rendering this
+ * may not do, because the part it hides is the part worth hiding something in. No markdown renderer
+ * touches it either — a heading and a link are formatting a model never sees, and the reader needs
+ * to read what the model reads. React's own text escaping is what makes `<script>` and `&lt;` appear
+ * as themselves rather than disappearing into the document; the parser has already refused the
+ * characters that would be invisible here whatever this box did.
+ *
+ * WHETHER IT IS A BOX OR A DOCUMENT IS THE CALLER'S TO SAY, and neither answer touches the three
+ * properties above. The height cap arrived here with the consent panel, which is a 560px side
+ * surface where a 155-line block wedged between two decisions is worse than a scroll well. It then
+ * came along when this component was extracted, and turned the template's own page — whose entire
+ * argument is that "read it before you install it" is only honest advice if there is somewhere to
+ * read it — into six or seven twelve-line portholes, each with a nested scroller that hands
+ * scrolling back to the page at its end. A reader auditing a stranger's YAML could not see the
+ * shape of the document. So the page that is a document passes `capped={false}`, and the panel that
+ * is a decision surface keeps the cap.
+ *
+ * When it IS capped it scrolls, so it must be reachable by keyboard: a scroll container that no
+ * key can reach hides the second half of a stranger's instructions from anybody not using a mouse.
+ * `tabIndex` and the name are applied only in that case, because an uncapped block scrolls nothing
+ * and would be a tab stop that goes nowhere. `role="group"` rather than `region` — the reading page
+ * draws six or more of these, and each one as a landmark would bury the page's real structure.
  */
-export function Verbatim({ children }: { children: string }) {
+const PROSE =
+  "whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed";
+
+export function Verbatim({
+  children,
+  capped = true,
+  label,
+}: {
+  children: string;
+  capped?: boolean;
+  /** Names the box when it scrolls, so a keyboard reader knows whose words they landed in. */
+  label?: string;
+}) {
+  /*
+   * TWO SHAPES RATHER THAN ONE WITH THREE TERNARIES, because the scrolling one carries an
+   * interaction contract that has to hold together: a tab stop, a role that gives it a name, and
+   * the name itself. Written as conditional props, a lint rule cannot see that the role and the
+   * label always arrive together, and neither can a reader — which is how one of the three goes
+   * missing later. The class list is shared, so the three properties that are a security control
+   * (verbatim, unabridged, unformatted) cannot drift between them.
+   */
+  if (!capped) {
+    return <pre className={PROSE}>{children}</pre>;
+  }
+  /*
+   * A NAMED SECTION AROUND THE SCROLLER, rather than a role and a tabindex on the `pre` itself.
+   * A `section` with an accessible name is already a region, so the scroll container is reachable
+   * and announced without asserting a role by hand — which is what both `useSemanticElements` and
+   * `noNoninteractiveTabindex` are pointing at when they refuse the shorter spelling. The `pre`
+   * keeps every property that is the security control; the wrapper only owns the scrolling.
+   */
   return (
-    <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
-      {children}
-    </pre>
+    <section
+      aria-label={label ?? "A stranger's text"}
+      className="max-h-64 overflow-y-auto rounded-lg border border-border bg-muted/40"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll container that no key can reach hides the second half of a stranger's instructions from anybody not using a mouse.
+      tabIndex={0}
+    >
+      <pre
+        className={`whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed`}
+      >
+        {children}
+      </pre>
+    </section>
   );
 }
 

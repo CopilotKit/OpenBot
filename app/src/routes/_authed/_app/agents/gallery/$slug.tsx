@@ -8,6 +8,7 @@ import {
 } from "@/components/agents/template-prose";
 import { PageSection, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
+import { ClientError } from "@/lib/client";
 import { describeBoundary } from "@/lib/templates/boundary";
 import { galleryTemplateQueryOptions } from "@/lib/templates/queries";
 
@@ -67,14 +68,29 @@ export function TemplateDetail({ slug }: { slug: string }) {
   }
 
   if (detail.error || !detail.data) {
+    /*
+     * TWO DIFFERENT FACTS, and they were being reported as one.
+     *
+     * A 404 is about the name in the URL: this deployment offers no template by it. Anything else —
+     * a 500, an expired session, a dropped connection, the catalogue throwing — is about the
+     * deployment, and saying "does not offer a template by that name" for those sends somebody off
+     * to check a slug that was never the problem, on the screen where they were about to decide
+     * whether to trust a file.
+     */
+    const missing =
+      detail.error instanceof ClientError && detail.error.status === 404;
     return (
       <PageShell
         backButton={{
           label: "Templates",
           linkProps: { to: "/agents/gallery" },
         }}
-        description="This deployment does not offer a template by that name. It may have been in a source whose pin has since moved."
-        title="Not here"
+        description={
+          missing
+            ? "This deployment does not offer a template by that name. It may have been in a source whose pin has since moved."
+            : "This deployment could not be asked for that template just now. Nothing has changed, and nothing was installed."
+        }
+        title={missing ? "Not here" : "Could not read it"}
       >
         {null}
       </PageShell>
@@ -131,7 +147,7 @@ export function TemplateDetail({ slug }: { slug: string }) {
          * than what it may reach, and a page that led with a capability list would be teaching people
          * to skim the prose on the way to the part that looks like the security-relevant one.
          */}
-        <Verbatim>{template.bot.roleDescription}</Verbatim>
+        <Verbatim capped={false}>{template.bot.roleDescription}</Verbatim>
       </PageSection>
 
       {/*
@@ -148,7 +164,7 @@ export function TemplateDetail({ slug }: { slug: string }) {
           description="From the author, to whoever imports it. This one is not given to a model."
           title="Setup and notes"
         >
-          <Verbatim>{template.notes}</Verbatim>
+          <Verbatim capped={false}>{template.notes}</Verbatim>
         </PageSection>
       ) : null}
 
@@ -171,7 +187,7 @@ export function TemplateDetail({ slug }: { slug: string }) {
                   </p>
                 </div>
                 <p className="text-muted-foreground text-sm">{skill.summary}</p>
-                <Verbatim>{skill.instructions}</Verbatim>
+                <Verbatim capped={false}>{skill.instructions}</Verbatim>
                 {skill.tools.length > 0 ? (
                   <p className="text-muted-foreground text-xs">
                     It names {skill.tools.join(", ")}. Naming a tool is not
@@ -290,7 +306,7 @@ export function TemplateDetail({ slug }: { slug: string }) {
         description="Serialised from the document this deployment parsed. It is what the consent screen would show you, and what you could have been handed by any other means."
         title="The file"
       >
-        <Verbatim>{yaml}</Verbatim>
+        <Verbatim capped={false}>{yaml}</Verbatim>
       </PageSection>
     </PageShell>
   );
