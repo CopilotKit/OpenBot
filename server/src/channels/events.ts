@@ -35,6 +35,14 @@ export type ChannelActivityEvent = {
    * hub's delivery rule does the rest: nobody else in the channel hears a pin they did not make.
    */
   pinned?: boolean;
+  /**
+   * A turn started or ended in this channel. Absent on an ordinary activity event.
+   *
+   * Transient and message-less: it is never written to a table, only announced, so the roster can
+   * show a working indicator for a headless turn — a handoff hop, a relay — that no browser
+   * streams. A missed one costs at most a stuck-looking dot until the next real event, never data.
+   */
+  busy?: boolean;
 };
 
 /** "The roster you hold may be wrong." Carries no delta, because what was lost is not recoverable. */

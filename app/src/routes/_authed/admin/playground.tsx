@@ -2,6 +2,7 @@ import { OpenGenerativeUIActivityRenderer } from "@copilotkit/react-core/v2";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useId, useState } from "react";
+import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -127,12 +128,18 @@ function PlaygroundPage() {
      */
     <div className="flex h-screen flex-col">
       <header className="flex flex-wrap items-start justify-between gap-4 border-border border-b px-6 py-4">
-        <div>
-          <h1 className="font-bold text-2xl">Playground</h1>
-          <p className="mt-1 max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
-            Write a component here and publish it without a deployment. What you
-            edit is a draft; a conversation only ever draws what is published.
-          </p>
+        {/* Inline rather than in a band of its own: this screen is an editor beside a live preview
+            and every 48px of height is taken from the thing being previewed. */}
+        <div className="flex items-start gap-2">
+          <SidebarToggle className="-ml-2 shrink-0" />
+          <div>
+            <h1 className="font-bold text-2xl">Playground</h1>
+            <p className="mt-1 max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
+              Write a component here and publish it without a deployment. What
+              you edit is a draft; a conversation only ever draws what is
+              published.
+            </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button

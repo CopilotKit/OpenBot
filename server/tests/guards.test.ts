@@ -70,6 +70,8 @@ describe("server authorization", () => {
         name: "OpenBot Member",
         image: "https://example.test/member.png",
         role: "user",
+        // No store was passed, so this deployment tracks no onboarding and the app gates nobody.
+        onboarding: null,
       },
     });
   });

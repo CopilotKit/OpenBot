@@ -600,6 +600,58 @@ describe("accessibility", () => {
 });
 
 /**
+ * Whether a Bot may answer with an interface it wrote itself.
+ *
+ * Same shape as accessibility above, and tested to the same bar for the same reason: the off switch
+ * has a second reader. It is projected on /api/capabilities so the browser stops offering the tool
+ * too, so a value that silently failed to mean "off" would leave Bots generating interfaces nothing
+ * renders rather than merely leaving a capability on.
+ */
+describe("generated interfaces", () => {
+  /*
+   * The default is the whole point of this block. Written as a disable switch, an upgrade would hand
+   * every existing deployment the ability to run code a model wrote, and a deployment that builds
+   * its default branch automatically would acquire it without anybody deciding to.
+   */
+  test("are off when nothing is set", () => {
+    expect(loadConfig(baseEnvironment).generativeUi).toBe(false);
+  });
+
+  test.each(["true", "1"])("are on for OPENBOT_GENERATIVE_UI=%p", (value) => {
+    expect(
+      loadConfig({ ...baseEnvironment, OPENBOT_GENERATIVE_UI: value })
+        .generativeUi,
+    ).toBe(true);
+  });
+
+  /*
+   * Anything else is not a way of saying yes. A value nobody intended — a stray "false", an empty
+   * variable left behind by a template — should leave the capability off, which is the direction
+   * that cannot surprise anybody.
+   */
+  test.each(["false", "no", "", "yes", "TRUE", "on"])(
+    "stay off for OPENBOT_GENERATIVE_UI=%p",
+    (value) => {
+      expect(
+        loadConfig({ ...baseEnvironment, OPENBOT_GENERATIVE_UI: value })
+          .generativeUi,
+      ).toBe(false);
+    },
+  );
+
+  // The old spelling was a disable switch. It must not still work, or a deployment that set it
+  // would read as having made a choice it has not made under the new name.
+  test("ignore the disable switch this replaced", () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        OPENBOT_GENERATIVE_UI_DISABLED: "false",
+      }).generativeUi,
+    ).toBe(false);
+  });
+});
+
+/**
  * Naming the private addresses an agent may live at.
  *
  * The refusal cases matter as much as the parse: a list written as URLs or with a wildcard is a

@@ -25,8 +25,6 @@ import {
 } from "@/components/ui/tooltip";
 import { IconLayoutSidebar } from "@tabler/icons-react";
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state";
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
 const SIDEBAR_WIDTH_ICON = "3rem";
@@ -53,6 +51,27 @@ function useSidebar() {
   return context;
 }
 
+/**
+ * The sidebar's state, or null where there is no sidebar.
+ *
+ * `useSidebar` throwing is right for a part OF a sidebar, where its absence is a wiring bug. A
+ * control that merely offers to toggle one is the other case: `PageShell` sits inside the three
+ * shells today, and a screen that renders it outside one is a layout choice rather than a defect.
+ * Throwing there would take a whole screen down over a button that should simply not be drawn.
+ */
+function useOptionalSidebar() {
+  return React.useContext(SidebarContext);
+}
+
+/**
+ * Sidebar state, uncontrolled by default.
+ *
+ * This vendored file used to write a `sidebar_state` cookie on every toggle, so a server-rendered
+ * shell could paint the right width on its first byte. Nothing renders this app on a server and
+ * nothing ever read the cookie back, so the preference lives in `lib/sidebar.ts` and the shells
+ * drive `open`/`onOpenChange` through `layout/sidebar-shell.tsx` instead. Re-adding the cookie would
+ * stand a second, staler answer beside that one.
+ */
 function SidebarProvider({
   defaultOpen = true,
   open: openProp,
@@ -81,9 +100,6 @@ function SidebarProvider({
       } else {
         _setOpen(openState);
       }
-
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
     },
     [setOpenProp, open],
   );
@@ -719,5 +735,6 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  useOptionalSidebar,
   useSidebar,
 };

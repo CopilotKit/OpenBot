@@ -86,7 +86,7 @@ export function createHandoffDelivery(options: {
   runner: ThreadRunner;
   lock: ThreadLock;
   /**
-   * Where the addressed Bot answers: a conversation of its own with the same person.
+   * A fresh thread of the addressed Bot's own, where its working happens out of sight.
    *
    * NOT THE CONVERSATION THAT ASKED, and this is a property of the platform rather than a choice. An
    * Intelligence thread is owned by exactly one agent: `assertThreadAgentOwnership` refuses any other
@@ -94,29 +94,43 @@ export function createHandoffDelivery(options: {
    * second Bot answering inside the first Bot's thread is not something this platform can express
    * today, whatever the caller does.
    *
-   * So the answer lands where that Bot can speak, and the conversation that asked says where it went.
-   * The person gets both halves; they are two conversations rather than one, which is the honest
-   * shape of what actually happened.
+   * A scratch thread rather than the Bot's own channel with the person, which is where answers used
+   * to land. Two conversations for one question meant the person read the answer somewhere they
+   * never asked anything; now the runner relays what came back through the Bot that asked, in the
+   * conversation they are actually watching, and the scratch thread is never mapped to a channel so
+   * nobody is shown it. It still exists on the platform, which is what makes the turn a recorded
+   * run rather than an unlogged model call.
    */
-  answerIn: (input: {
-    actorId: string;
-    botId: string;
-  }) => Promise<{ threadId: string; channelId?: string }>;
+  mintThreadId: () => string;
   /**
-   * Tell the roster this conversation moved.
+   * Tell the roster a conversation moved, when a turn put words in it.
    *
-   * A HOP HAS NOBODY WATCHING, which is exactly why this is needed here. A conversation's place in
-   * the list and the line under its name are written by the browser when somebody's own run
-   * finishes; a hop finishes on a server with no browser attached, so without this the answer lands
-   * in a conversation that still says it was last used yesterday and sits where it was. The person
-   * is never told, and the whole point of a hop is that they find out.
+   * A HOP HAS NOBODY WATCHING. A conversation's place in the list and the line under its name are
+   * written by the browser when somebody's own run finishes; a hop finishes on a server with no
+   * browser attached, so without this a relayed answer lands in a conversation that never bumps,
+   * never reads as unread, and is found by accident. Routines have the same problem and the same
+   * answer: `recordActivity`, from the server, when the turn is on record.
+   *
+   * Keyed by thread rather than channel, because the thread is all a delivery knows. The wiring
+   * resolves which channel shows that thread — and a scratch thread resolves to nothing, which is
+   * a no-op rather than a mistake.
    */
   announce?: (input: {
     actorId: string;
-    channelId: string;
+    threadId: string;
     agentId: string;
     text: string;
   }) => Promise<void>;
+  /**
+   * Show the asking conversation as working while a FORWARD hop runs, and stop when it is over.
+   *
+   * Only the forward leg, and keyed on the asking thread — `work.threadId`, the conversation the
+   * person is waiting in — because that leg runs in a scratch thread nobody watches. A backwards
+   * hop runs in the asking thread itself, whose lock the runtime already lights through its own
+   * busy signal, so this leaves that leg alone rather than double it. Best-effort and paired in a
+   * `finally`, so a channel never stays lit because a run threw.
+   */
+  setBusy?: (input: { threadId: string; busy: boolean }) => Promise<void>;
   newRunId: () => string;
   /**
    * How long one delivery may take before it is given up on.
@@ -135,8 +149,9 @@ export function createHandoffDelivery(options: {
     history,
     runner,
     lock,
-    answerIn,
+    mintThreadId,
     announce,
+    setBusy,
     newRunId,
     deadlineMs = DEFAULT_DELIVERY_DEADLINE_MS,
   } = options;
@@ -170,6 +185,17 @@ export function createHandoffDelivery(options: {
        * calls its methods, and a stand-in that proxies them is a second thing to keep in step.
        */
       const seen = { count: 0, last: "" };
+      /*
+       * What the addressed Bot said, gathered from the stream as it goes past.
+       *
+       * The runner publishes the turn to the platform rather than back through the observable, so
+       * the text exists nowhere this function can read after the fact — the events are the one
+       * chance to hear it. It is what the relay carries back to the conversation that asked, and
+       * with the answer no longer landing in a channel of its own, this is the only copy a person
+       * will ever be shown.
+       */
+      const said: string[] = [];
+      let saying = "";
       const runAgent =
         typeof agent.runAgent === "function"
           ? agent.runAgent.bind(agent)
@@ -183,173 +209,226 @@ export function createHandoffDelivery(options: {
             input as never,
             {
               ...(config ?? {}),
-              onEvent: (emitted: { event?: { type?: unknown } }) => {
+              onEvent: (emitted: {
+                event?: { type?: unknown; delta?: unknown };
+              }) => {
                 seen.count += 1;
-                seen.last = String(emitted?.event?.type ?? "");
+                const type = String(emitted?.event?.type ?? "");
+                seen.last = type;
+                if (type === "TEXT_MESSAGE_START") saying = "";
+                if (type === "TEXT_MESSAGE_CONTENT")
+                  saying += String(emitted?.event?.delta ?? "");
+                if (type === "TEXT_MESSAGE_END" && saying.trim().length > 0)
+                  said.push(saying.trim());
                 config?.onEvent?.(emitted);
               },
             } as never,
           );
 
       /*
-       * The conversation this answer belongs in.
+       * The conversation this turn runs in.
        *
-       * Named on the hop for the one kind that goes backwards: telling the asking Bot, where the
-       * person is watching, that the Bot it asked never came back. Every other hop lands in the
-       * addressed Bot's own conversation, because a thread has exactly one agent.
+       * Named on the hop for the kind that goes backwards — the asking Bot speaking in the
+       * conversation the person is watching, to relay an answer or a failure. Every forward hop
+       * runs in a scratch thread of the addressed Bot's own, because a thread has exactly one
+       * agent; what it says there comes back to the person through the relay, not the thread.
        */
-      const where: { threadId: string; channelId?: string } = work.answerIn
+      const where: { threadId: string } = work.answerIn
         ? { threadId: work.answerIn }
-        : await answerIn({ actorId: work.actorId, botId: work.toBotId });
+        : { threadId: mintThreadId() };
 
       /*
-       * The conversation's lock, before a single event is streamed.
-       *
-       * The platform's run id is the one it hands back, not the one asked for: it is the identity the
-       * gateway will check every streamed event against, so using the local one would be claiming to
-       * be a run that does not exist.
+       * A forward hop lights the asking channel while it runs, because its own run is in a scratch
+       * thread nobody sees. A backwards hop — a relay or a notice — runs in the asking thread
+       * itself, so the runtime's own thread lock already lights it through `onRunBusy`, and
+       * signalling here too would double up. So this covers only the leg the lock cannot: the
+       * addressed Bot thinking, off-screen, on behalf of a channel the person is watching.
        */
-      const held = await lock.acquire({
-        threadId: where.threadId,
-        runId: newRunId(),
-        userId: work.actorId,
-        agentId: work.toBotId,
-      });
-      if (!held) {
-        /*
-         * Somebody else is running in this conversation. Thrown so the hop goes back on the queue
-         * and is tried again: a person mid-question, or the Bot that asked still finishing its own
-         * sentence, is a wait rather than a failure.
-         */
-        throw new Error(
-          `${where.threadId} is busy with another run; the hop will be tried again`,
+      const lightsAskingChannel = !work.answerIn;
+      if (lightsAskingChannel) {
+        await setBusy?.({ threadId: work.threadId, busy: true }).catch(
+          () => {},
         );
       }
-
-      const runId = held.runId;
-
-      /*
-       * THE CONVERSATION GOES ON THE AGENT, NOT IN THE RUN.
-       *
-       * `runAgent` takes `runId`, `tools`, `context` and `forwardedProps` and nothing else: AG-UI
-       * keeps the messages and the thread on the agent itself, and builds the run's input from them.
-       * A `messages` array passed as a parameter is silently ignored, which is the worst shape a
-       * mistake can take. Nothing failed. The addressed Bot ran, against an empty conversation, and
-       * answered "how can I help?" to a question it had never been shown, in a transcript that
-       * displayed the question directly above the answer.
-       */
-      const asked = [
+      try {
         /*
          * The conversation that ASKED, not the one it is answering in. The addressed Bot is joining
          * something already in progress and has to have read it; its own conversation is new and
          * empty, and reading that would tell it nothing.
+         *
+         * READ BEFORE THE LOCK IS TAKEN, deliberately. The lock is on `where.threadId` and this read
+         * is of `work.threadId` — a conversation the lock never protected — and the read is the one
+         * call here that throws on a platform error. Thrown while holding the lock it would leak it
+         * until the TTL: on a relay that lock is the asking conversation itself, so the person could
+         * not type for two minutes and the retry would collide with the hop's own leftover hold.
          */
-        ...conversationOnly(
+        const prior = conversationOnly(
           await history({ threadId: work.threadId, actorId: work.actorId }),
-        ),
-        { id: `handoff-${runId}`, role: "user", content: message },
-      ];
-      agent.threadId = where.threadId;
-      // The platform's own message type rather than AG-UI's, which is what `history` returns: the
-      // two agree where it matters, and converting between them is a place to lose a message.
-      agent.setMessages(asked as Parameters<AbstractAgent["setMessages"]>[0]);
-      /*
-       * Renewed while the addressed Bot works, because the lock expires on its own. A run is minutes
-       * and the platform's window is short; a lock that lapses mid-answer lets a second run into the
-       * conversation, which is the thing it exists to prevent.
-       */
-      const heartbeat = setInterval(() => {
-        void lock.renew({ threadId: where.threadId, runId }).catch(() => {});
-      }, LOCK_RENEW_EVERY_MS);
-
-      try {
-        await settled(
-          runner.run({
-            threadId: where.threadId,
-            agent,
-            /*
-             * What the conversation KEEPS, which is not what the model was sent.
-             *
-             * The runner persists whatever it is given here, and given nothing it persists the whole
-             * prompt: the asking conversation's history repeated into a second conversation, and a
-             * paragraph of instructions to a model sitting in a bubble that looks like something the
-             * person typed. What belongs in a transcript is the one line saying why this Bot spoke.
-             */
-            persistedInputMessages: shown
-              ? [{ id: `handoff-${runId}`, role: "user", content: shown }]
-              : [],
-            /*
-             * NOTHING IS PASSED FOR THE CONNECTION, and that is load-bearing.
-             *
-             * The lock hands back a join token as well as a run id, and it reads like the thing to
-             * present here. It is not: it is what a BROWSER presents to join a conversation and
-             * watch it, and the runner's socket is a different connection with its own credential.
-             * Handing it in overrides that credential, the socket is refused, and because the runner
-             * treats a socket that will not connect as something to keep retrying rather than as a
-             * failed run, nothing is ever emitted and nothing ever completes. The hop hangs, in
-             * total silence, until the deadline below ends it.
-             *
-             * What makes this run legitimate is the lock itself: the gateway compares the run id on
-             * every event to the one the lock holds. Taking the lock is the whole of the ceremony.
-             */
-            input: {
-              threadId: where.threadId,
-              runId,
-              /*
-               * The same conversation the agent was given, so the run's own record of what it was
-               * asked agrees with what it read.
-               */
-              messages: asked,
-              tools: [],
-              context: [],
-              state: {},
-              /*
-               * The deployment's own statement of what this run is, carrying how deep the chain has
-               * gone. It is what stops the addressed Bot handing the work on for ever, and it is
-               * signed, so the Bot cannot edit its own depth on the way past.
-               */
-              forwardedProps: { openbotRun: assertion },
-            },
-          }),
-          deadlineMs,
-          () =>
-            `${work.toBotId} did not finish within ${Math.round(deadlineMs / 1000)}s ${
-              seen.count === 0
-                ? "and never reached its model"
-                : `after ${seen.count} events, the last ${seen.last}`
-            }`,
         );
+
         /*
-         * Only once the run is on record. A conversation lifted to the top of somebody's list for an
-         * answer that then failed is worse than one that did not move: they open it and find
-         * nothing, and nothing says why.
+         * The conversation's lock, before a single event is streamed.
+         *
+         * The platform's run id is the one it hands back, not the one asked for: it is the identity the
+         * gateway will check every streamed event against, so using the local one would be claiming to
+         * be a run that does not exist.
          */
-        if (announce && where.channelId && shown) {
-          await announce({
-            actorId: work.actorId,
-            channelId: where.channelId,
-            agentId: work.toBotId,
-            text: shown,
-          }).catch(() => {
-            // The turn happened. A roster that has not caught up is worth less than a hop reported
-            // as failed and run a second time.
-          });
+        const held = await lock.acquire({
+          threadId: where.threadId,
+          runId: newRunId(),
+          userId: work.actorId,
+          agentId: work.toBotId,
+        });
+        if (!held) {
+          /*
+           * Somebody else is running in this conversation. Thrown so the hop goes back on the queue
+           * and is tried again: a person mid-question, or the Bot that asked still finishing its own
+           * sentence, is a wait rather than a failure.
+           */
+          throw new Error(
+            `${where.threadId} is busy with another run; the hop will be tried again`,
+          );
+        }
+
+        const runId = held.runId;
+
+        /*
+         * THE CONVERSATION GOES ON THE AGENT, NOT IN THE RUN.
+         *
+         * `runAgent` takes `runId`, `tools`, `context` and `forwardedProps` and nothing else: AG-UI
+         * keeps the messages and the thread on the agent itself, and builds the run's input from them.
+         * A `messages` array passed as a parameter is silently ignored, which is the worst shape a
+         * mistake can take. Nothing failed. The addressed Bot ran, against an empty conversation, and
+         * answered "how can I help?" to a question it had never been shown, in a transcript that
+         * displayed the question directly above the answer.
+         */
+        const asked = [
+          /*
+           * A backwards hop gets the tail, not the whole. Its task already carries everything it has
+           * to say — the answer, or the failure — and the person is waiting through this run's
+           * time-to-first-token: a long channel read in full would make relaying an answer slower
+           * the longer the conversation that wanted it. A few recent turns keep the voice and the
+           * pronouns right; the rest is weight.
+           */
+          ...(work.answerIn ? prior.slice(-RELAY_CONTEXT_MESSAGES) : prior),
+          { id: `handoff-${runId}`, role: "user", content: message },
+        ];
+        agent.threadId = where.threadId;
+        // The platform's own message type rather than AG-UI's, which is what `history` returns: the
+        // two agree where it matters, and converting between them is a place to lose a message.
+        agent.setMessages(asked as Parameters<AbstractAgent["setMessages"]>[0]);
+        /*
+         * Renewed while the addressed Bot works, because the lock expires on its own. A run is minutes
+         * and the platform's window is short; a lock that lapses mid-answer lets a second run into the
+         * conversation, which is the thing it exists to prevent.
+         */
+        const heartbeat = setInterval(() => {
+          void lock.renew({ threadId: where.threadId, runId }).catch(() => {});
+        }, LOCK_RENEW_EVERY_MS);
+
+        try {
+          await settled(
+            runner.run({
+              threadId: where.threadId,
+              agent,
+              /*
+               * What the conversation KEEPS, which is not what the model was sent.
+               *
+               * The runner persists whatever it is given here, and given nothing it persists the whole
+               * prompt: the asking conversation's history repeated into a second conversation, and a
+               * paragraph of instructions to a model sitting in a bubble that looks like something the
+               * person typed. What belongs in a transcript is the one line saying why this Bot spoke.
+               */
+              persistedInputMessages: shown
+                ? [{ id: `handoff-${runId}`, role: "user", content: shown }]
+                : [],
+              /*
+               * NOTHING IS PASSED FOR THE CONNECTION, and that is load-bearing.
+               *
+               * The lock hands back a join token as well as a run id, and it reads like the thing to
+               * present here. It is not: it is what a BROWSER presents to join a conversation and
+               * watch it, and the runner's socket is a different connection with its own credential.
+               * Handing it in overrides that credential, the socket is refused, and because the runner
+               * treats a socket that will not connect as something to keep retrying rather than as a
+               * failed run, nothing is ever emitted and nothing ever completes. The hop hangs, in
+               * total silence, until the deadline below ends it.
+               *
+               * What makes this run legitimate is the lock itself: the gateway compares the run id on
+               * every event to the one the lock holds. Taking the lock is the whole of the ceremony.
+               */
+              input: {
+                threadId: where.threadId,
+                runId,
+                /*
+                 * The same conversation the agent was given, so the run's own record of what it was
+                 * asked agrees with what it read.
+                 */
+                messages: asked,
+                tools: [],
+                context: [],
+                state: {},
+                /*
+                 * The deployment's own statement of what this run is, carrying how deep the chain has
+                 * gone. It is what stops the addressed Bot handing the work on for ever, and it is
+                 * signed, so the Bot cannot edit its own depth on the way past.
+                 */
+                forwardedProps: { openbotRun: assertion },
+              },
+            }),
+            deadlineMs,
+            () =>
+              `${work.toBotId} did not finish within ${Math.round(deadlineMs / 1000)}s ${
+                seen.count === 0
+                  ? "and never reached its model"
+                  : `after ${seen.count} events, the last ${seen.last}`
+              }`,
+          );
+          /*
+           * Only once the run is on record, and only when it said something: a conversation lifted to
+           * the top of somebody's list for a turn that failed, or said nothing, is a conversation
+           * they open to find nothing new.
+           */
+          if (announce && said.length > 0) {
+            await announce({
+              actorId: work.actorId,
+              threadId: where.threadId,
+              agentId: work.toBotId,
+              text: said.join("\n\n"),
+            }).catch(() => {
+              // The turn happened. A roster that has not caught up is worth less than a hop reported
+              // as failed and run a second time.
+            });
+          }
+        } finally {
+          clearInterval(heartbeat);
+          /*
+           * Given back whatever happened. Left held, the conversation is unusable by anybody until the
+           * lock expires: the person cannot ask a follow-up and the next hop is refused, which turns
+           * one failed delivery into a conversation that has stopped working.
+           */
+          /*
+           * The conversation the lock was taken on, which is the one being answered in and NOT the one
+           * that asked. Releasing the asking conversation's lock instead leaves this one held until it
+           * lapses: the person cannot type in it and the next hop to the same Bot is refused, while a
+           * lock somebody else may be holding on the asking side is dropped from under them.
+           */
+          await lock
+            .release({ threadId: where.threadId, runId })
+            .catch(() => {});
         }
       } finally {
-        clearInterval(heartbeat);
-        /*
-         * Given back whatever happened. Left held, the conversation is unusable by anybody until the
-         * lock expires: the person cannot ask a follow-up and the next hop is refused, which turns
-         * one failed delivery into a conversation that has stopped working.
-         */
-        /*
-         * The conversation the lock was taken on, which is the one being answered in and NOT the one
-         * that asked. Releasing the asking conversation's lock instead leaves this one held until it
-         * lapses: the person cannot type in it and the next hop to the same Bot is refused, while a
-         * lock somebody else may be holding on the asking side is dropped from under them.
-         */
-        await lock.release({ threadId: where.threadId, runId }).catch(() => {});
+        if (lightsAskingChannel) {
+          await setBusy?.({ threadId: work.threadId, busy: false }).catch(
+            () => {},
+          );
+        }
       }
+
+      /*
+       * What came back, for the runner to relay. Null when the turn produced no words at all —
+       * a run that only called tools — which the runner treats as nothing worth carrying back.
+       */
+      return { answer: said.length > 0 ? said.join("\n\n") : null };
     },
   };
 }
@@ -379,6 +458,14 @@ function conversationOnly(messages: readonly unknown[]): readonly unknown[] {
     return textOf(content).length > 0;
   });
 }
+
+/**
+ * How much of the asking conversation a backwards hop reads.
+ *
+ * Six messages is about three exchanges: enough for the relaying Bot to keep its footing in the
+ * conversation it is speaking into, and small enough that the read never grows with the channel.
+ */
+const RELAY_CONTEXT_MESSAGES = 6;
 
 /**
  * How often the conversation's lock is refreshed while a Bot is working.
