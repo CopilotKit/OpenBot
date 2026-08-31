@@ -59,6 +59,11 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 ## Quick start
 
+> **Setting up with an AI assistant?** Paste [`prompt.txt`](prompt.txt) into it first. It carries the
+> same steps as below plus the things that are easy to get wrong: which of the ten blank keys in
+> `.env.example` are actually yours to fill (three), which the start script generates for you, and
+> what each start-up refusal means. Every claim in it is checked against this repository.
+
 1. Create `.env`:
 
    ```sh
