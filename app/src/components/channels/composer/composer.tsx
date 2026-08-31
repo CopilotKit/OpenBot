@@ -34,6 +34,12 @@ const COMPACT_MAX_HEIGHT_PX = 96;
 
 export type ComposerProps = {
   className?: string;
+  /**
+   * Classes for the editor itself rather than the frame. `className` styles the box — border,
+   * background, width; the type inside it is PromptArea's, so changing it (a hero composer's
+   * `text-lg`) goes through here, where tailwind-merge lets it beat the built-in `text-sm`.
+   */
+  editorClassName?: string;
   compact?: boolean;
   /** Agents that `@` can address. Empty means the mention menu reports an empty channel. */
   agents?: readonly AgentOption[];
@@ -94,10 +100,12 @@ export type ComposerProps = {
    * Defaults to `pending`, which is the right answer for a caller with no gap between the two.
    */
   stoppable?: boolean;
+  initialValue?: string;
 };
 
 export function Composer({
   className,
+  editorClassName,
   compact = false,
   agents = [],
   commands = PLACEHOLDER_COMMANDS,
@@ -108,8 +116,11 @@ export function Composer({
   pending = false,
   autoFocus = false,
   stoppable,
+  initialValue,
 }: ComposerProps) {
-  const [value, setValue] = useState<Segment[]>([]);
+  const [value, setValue] = useState<Segment[]>(
+    initialValue ? [{ type: "text", text: initialValue }] : [],
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitInFlight = useRef(false);
   const promptAreaRef = useRef<PromptAreaHandle>(null);
@@ -292,7 +303,10 @@ export function Composer({
         </Button>
         <PromptArea
           aria-label="Message"
-          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm shadow-none"
+          className={cn(
+            "min-w-0 flex-1 border-0 bg-transparent p-0 text-sm shadow-none",
+            editorClassName,
+          )}
           disabled={disabled}
           maxHeight={COMPACT_MAX_HEIGHT_PX}
           minHeight={COMPACT_MIN_HEIGHT_PX}
@@ -342,7 +356,10 @@ export function Composer({
           <PromptArea
             aria-label="Message"
             autoGrow
-            className="w-full border-0 bg-transparent p-0 text-sm shadow-none"
+            className={cn(
+              "w-full border-0 bg-transparent p-0 text-sm shadow-none",
+              editorClassName,
+            )}
             disabled={disabled}
             maxHeight={MAX_HEIGHT_PX}
             onChange={handleChange}

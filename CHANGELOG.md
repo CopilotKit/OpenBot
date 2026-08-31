@@ -18,6 +18,33 @@ about `mcp.server`, `mcp.tool` or `mcp.effect` therefore looked inert, and enfor
 refusing Bots with nothing in the trail to have warned anybody. A refused tool call is now recorded
 whatever the mode does with it, carrying `carriedOut` so a reader can tell a call this deployment
 stopped from one dry-run recorded and let past. Enforcing deployments behave exactly as before.
+### A Bot's answer comes back to the conversation that asked
+
+**This reverses what 0.0.5 shipped.** The 0.0.5 notes below say the asking Bot does not relay text
+on the addressed Bot's behalf, and the answer lands in that Bot's own conversation. In practice
+that meant reading the answer somewhere you never asked anything, so it is now the other way
+around: the addressed Bot works in a scratch conversation nobody is shown, and the asking Bot
+relays what came back — attributed by name — into the conversation you are watching. What you read
+is the asking Bot's account of the answer rather than the answer verbatim; very long answers are
+clipped to keep the relay itself from failing.
+
+### Channels say when a Bot is working in them
+
+A channel whose Bot is mid-turn shows a working indicator on its roster avatar — including turns no
+browser started, such as a handoff running on the server or a routine. An open conversation also
+picks up turns that arrived while nobody here streamed them, so a relayed answer appears without
+leaving and coming back.
+
+### First sign-in gets an onboarding wizard
+
+A new person lands in a short welcome wizard before the app; everyone who signed in before this
+upgrade is stamped as already onboarded by the migration and sees nothing.
+
+### Shift+N starts a new chat from anywhere
+
+Bound across the signed-in app, shown under **Settings → Keyboard shortcuts**, and inert while you
+are typing in a field. Handoff work is also picked up the moment it is queued rather than at the
+next poll, so an answer's round trip no longer pays up to two seconds per leg.
 
 ### A Bot's shell can no longer reach the embedded database without a password
 
@@ -124,9 +151,10 @@ separately in #287.
 A Bot asked something it is not the right Bot for can now put the question to one that is. The
 addressed Bot answers **as itself, in its own conversation**, with its own tools and its own
 knowledge. The asking Bot does not relay text on its behalf, so what you read is the answer that
-Bot actually gave rather than another Bot's summary of it. The asking conversation records that the
-question was put and to whom. A Bot that judges no other Bot will do can instead reach the person
-who asked it.
+Bot actually gave rather than another Bot's summary of it. *(Reversed since: see Unreleased — the
+answer is now relayed back into the conversation that asked.)* The asking conversation records
+that the question was put and to whom. A Bot that judges no other Bot will do can instead reach
+the person who asked it.
 
 **No Bot may address any other until an administrator says so.** Which Bot may reach which is an
 ordinary grant, made per Bot on that Bot's own screen under **Bots it may ask**, and a Bot with no

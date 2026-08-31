@@ -1,5 +1,8 @@
-import type { Message } from "@ag-ui/core";
-import { useRenderToolCall } from "@copilotkit/react-core/v2";
+import type { ActivityMessage, Message } from "@ag-ui/core";
+import {
+  useRenderActivityMessage,
+  useRenderToolCall,
+} from "@copilotkit/react-core/v2";
 import { IconBox } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
 import { memo, useEffect, useMemo, useRef } from "react";
@@ -465,6 +468,52 @@ const TranscriptMessage = memo(function TranscriptMessage({
 });
 
 /**
+ * What a failed activity is called on screen.
+ *
+ * An `activityType` is a protocol name and reads like one, so the boundary's sentence gets a phrase
+ * a person can read instead. An unknown type falls back to its own name rather than to something
+ * vague: whoever registered it will recognise it, and nobody else can act on either wording.
+ */
+function activityName(activityType: string): string {
+  return activityType === "open-generative-ui"
+    ? "This Bot's generated interface"
+    : activityType;
+}
+
+/**
+ * One activity, drawn by whichever renderer claims its type.
+ *
+ * The renderer comes from the SDK's registry, so an activity nobody registered draws nothing and
+ * this returns null rather than an empty row — unlike a tool call, which always has a line to fall
+ * back to because a call that happened is worth reporting even undrawn. An activity is the drawing;
+ * with no renderer there is nothing to say about it.
+ *
+ * The memo boundary earns its place differently here than on a tool call. It cannot spare this
+ * component its own churn — a generated interface streams, and `content` is a new object on every
+ * chunk, which is exactly when it must re-render — but it does stop the sentence being typed after it
+ * from re-rendering a mounted iframe.
+ */
+const TranscriptActivity = memo(function TranscriptActivity({
+  delay,
+  message,
+}: {
+  delay: number;
+  message: ActivityMessage;
+}) {
+  const { renderActivityMessage } = useRenderActivityMessage();
+  const drawn = renderActivityMessage(message);
+  if (!drawn) return null;
+
+  return (
+    <Arriving delay={delay}>
+      <ToolRenderBoundary name={activityName(message.activityType)}>
+        {drawn}
+      </ToolRenderBoundary>
+    </Arriving>
+  );
+});
+
+/**
  * One drawn tool call, memoised on the same terms.
  *
  * The `toolCall` object is rebuilt here from its parts rather than passed down, because the one on
@@ -651,6 +700,13 @@ export function ChatTranscript({
                     name={item.toolCall.function.name}
                     result={item.result}
                     toolCallId={item.toolCall.id}
+                  />
+                </MessageScrollerItem>
+              ) : item.kind === "activity" ? (
+                <MessageScrollerItem key={item.id} messageId={item.id}>
+                  <TranscriptActivity
+                    delay={delays.delayFor(item.id, index, items.length)}
+                    message={item.message}
                   />
                 </MessageScrollerItem>
               ) : (

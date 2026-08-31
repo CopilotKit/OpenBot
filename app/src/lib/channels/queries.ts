@@ -28,6 +28,15 @@ export type ChannelSummary = AgentChannel & {
   pinned: boolean;
   /** ISO-8601 when this member last had the channel open, or null for never. The caller's, only. */
   lastReadAt: string | null;
+  /**
+   * Whether a turn is running in this channel right now.
+   *
+   * Socket-only and transient: the server never persists it and the roster query never returns it,
+   * so it is undefined until a busy event arrives and is dropped whenever the roster is refetched.
+   * A headless turn — a handoff hop, a relay — sets it, which is how the roster shows work the
+   * browser never streamed.
+   */
+  busy?: boolean;
 };
 
 export const channelKeys = {
