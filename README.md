@@ -104,7 +104,7 @@ One image carries the app, the API, the browser the Bots drive, and optionally P
 ```sh
 docker build -t openbot .
 docker run -p 3001:3001 --env-file .env \
-  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql/data openbot
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql openbot
 ```
 
 Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
