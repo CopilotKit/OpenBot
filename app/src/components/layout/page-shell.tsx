@@ -3,6 +3,7 @@ import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
+import { SidebarToggle } from "./sidebar-toggle";
 
 /**
  * The frame every configuration screen sits in.
@@ -58,8 +59,15 @@ export function PageShell({
 }) {
   return (
     <>
-      {!!backButton && (
-        <div className="max-w-7xl w-full h-14 flex items-center px-3">
+      {/*
+       * The bar is unconditional. The sidebar toggle has to sit at the pane's left edge in both
+       * states, and the prose column is centred — a toggle inside it would be 400px from the edge it
+       * belongs to on a wide screen. Six screens already drew exactly this bar for their Back link,
+       * so this is that bar always rendered rather than a second one above it.
+       */}
+      <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
+        <SidebarToggle />
+        {!!backButton && (
           <Button
             variant="ghost"
             render={(props) => <Link {...backButton.linkProps} {...props} />}
@@ -67,12 +75,11 @@ export function PageShell({
             <IconChevronLeft />
             {backButton.label}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
       <div
         className={cn(
-          "mx-auto flex w-full flex-col px-4 py-12",
-          { "pt-8": !!backButton },
+          "mx-auto flex w-full flex-col px-4 pt-8 pb-12",
           WIDTHS[width],
           className,
         )}
