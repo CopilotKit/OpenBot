@@ -41,10 +41,12 @@ import {
   type AuditStore,
   recordAuditEvent,
 } from "../audit";
+import { announceActionPolicyChange } from "../computer/policy-store";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import { agentProfiles, pluginGrants, skills } from "../db/schema";
 import type { PluginStore } from "../plugins/store";
+import { compileBoundary } from "./boundary";
 import {
   MAX_SUFFIX,
   resolveBotTemplate,
@@ -53,6 +55,7 @@ import {
   type TemplatePlan,
 } from "./resolve";
 import type {
+  TemplateBoundaryRow,
   TemplateExecutor,
   TemplateImportRow,
   TemplateImportSource,
@@ -100,6 +103,8 @@ export type InstallBotTemplateResult = {
   ledger: TemplateRequestRow[];
   /** The plan as it was resolved server-side, which may differ from the preview the person saw. */
   plan: TemplatePlan;
+  /** The ceiling this import put on the Bot, as it was written. Empty when the file asked for none. */
+  boundaries: TemplateBoundaryRow[];
   skillsCreated: string[];
   skillsReused: string[];
   skillsSuffixed: string[];
@@ -671,6 +676,42 @@ export function createTemplateInstaller(
             transaction,
           );
 
+          /*
+           * The author's ceiling, compiled here and stored apart from the deployment's own policy.
+           *
+           * Inside the transaction because it is part of the same act: a Bot that exists without the
+           * ceiling its file described, even for the moment between two commits, is a Bot running
+           * looser than the screen the person read. `compileBoundary` refuses a clause that would not
+           * behave like a rule and `recordBoundaries` refuses it again at the column, and either
+           * refusal reaches here as a throw that rolls the whole import back. That is the direction
+           * to fail in: no Bot at all, rather than a Bot whose ceiling nobody could write down.
+           *
+           * NEVER `action_policy.deny`. That is one row for the whole deployment, replaced wholesale
+           * by the next administrator who saves the Boundaries screen, so a clause put there would be
+           * erased by an unrelated save and this Bot would quietly come uncaged. The clauses go in
+           * `template_boundaries`, which `policyStore.get()` composes in for evaluation and which a
+           * retraction can retire in one act.
+           */
+          const boundaries = await templateStore.recordBoundaries(
+            compileBoundary(agentId, template.boundary).map((clause) => ({
+              importId: imported.id,
+              ...clause,
+            })),
+            transaction,
+          );
+          /*
+           * Every server re-reads, this one included.
+           *
+           * The clauses are held in memory on each server and refreshed on an announcement, because
+           * the policy is asked on every single action and a query there would be a query per
+           * keystroke. Without this the new ceiling would apply from the next restart onwards, which
+           * is the fleet-wide version of a boundary that looks like it works. Issued on this
+           * transaction so it is delivered on commit: an import that rolls back announces nothing.
+           */
+          if (boundaries.length > 0) {
+            await announceActionPolicyChange(transaction);
+          }
+
           await templateStore.recordRequests(
             ledgerFor(imported.id, plan, endpoint, actorLabel),
             transaction,
@@ -690,6 +731,7 @@ export function createTemplateInstaller(
             imported,
             plan,
             ledger,
+            boundaries,
             skillsCreated,
             skillsReused,
             skillsSuffixed,
@@ -736,6 +778,21 @@ export function createTemplateInstaller(
         ...(endpointHost ? { endpointHost } : {}),
         hasKey: Boolean(input.auth),
       });
+      /*
+       * What the Bot may not do, in the words the engine will actually evaluate.
+       *
+       * The expressions go in verbatim, and that is safe in a way the prose above is not: a clause is
+       * this compiler's own output over a closed vocabulary, so it carries no stranger's sentence and
+       * nothing a template author chose the wording of. A reader of the trail can compare what was
+       * applied against what the consent screen said, character for character, which is the only way
+       * to check that claim from outside the code.
+       */
+      if (outcome.boundaries.length > 0) {
+        await record("template.boundary_applied", actor, outcome.agentId, {
+          importId: outcome.imported.id,
+          clauses: outcome.boundaries.map((row) => row.expression),
+        });
+      }
       /*
        * One row per unmet ask, written even though the install SUCCEEDED. A Bot that silently cannot
        * work has to be distinguishable from one nobody asked to work: an imported coworker routinely
@@ -803,6 +860,16 @@ export function createTemplateInstaller(
             imported.id,
             transaction,
           );
+          /*
+           * And every server stops enforcing them, rather than at its next restart.
+           *
+           * The same announcement the install makes, for the direction that matters more: a ceiling
+           * that outlives its retraction is a coworker that goes on being refused actions its owner
+           * has just been told it may take again, on some servers and not others.
+           */
+          if (boundaries.length > 0) {
+            await announceActionPolicyChange(transaction);
+          }
 
           /*
            * The Bot stays, and so does every skill. Retracting an import takes back what the import

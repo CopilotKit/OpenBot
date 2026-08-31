@@ -29,6 +29,7 @@ import {
   templateImports,
   templateRequests,
 } from "../db/schema";
+import { refuseUnsafeClauses } from "./boundary";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
@@ -136,6 +137,22 @@ export type TemplateBoundaryRow = {
   sourceKey: TemplateBoundarySource;
   appliedAt: Date;
   removedAt: Date | null;
+};
+
+/**
+ * A compiled clause on the way in.
+ *
+ * Structurally the compiler's `CompiledClause` with the import it belongs to, and deliberately not
+ * an import of that type: this file knows what the column holds and does not need to know which
+ * module produced it. `appliedAt` and `removedAt` are the database's to decide — a clause is in
+ * force from the moment it is written, and nothing may arrive claiming to have been in force
+ * earlier.
+ */
+export type TemplateBoundarySeed = {
+  importId: string;
+  agentId: string;
+  expression: string;
+  sourceKey: TemplateBoundarySource;
 };
 
 /**
@@ -323,6 +340,23 @@ export type TemplateStore = {
     decidedBy: string;
   }): Promise<TemplateRequestRow | null>;
 
+  /**
+   * Write the compiled ceiling, refusing anything that would not behave like a rule.
+   *
+   * THE LAST GATE BEFORE THE COLUMN, and the reason validation is here rather than only in the
+   * compiler. A clause that throws sits in a deny position, and `evaluateActionPolicy` counts a
+   * throw as a match, so a malformed row would not be a bad rule — it would be a coworker that is
+   * refused every action it ever attempts, permanently, with an audit trail blaming an expression
+   * nobody can read. The compiler already refuses its own output; this refuses its input, so a
+   * second caller written later cannot reach the table by another door. Both checks cost a few
+   * evaluations against a synthetic context nobody is waiting on.
+   *
+   * Returns the rows it wrote, so the trail can name the clauses verbatim.
+   */
+  recordBoundaries(
+    rows: readonly TemplateBoundarySeed[],
+    executor?: TemplateExecutor,
+  ): Promise<TemplateBoundaryRow[]>;
   /** The clauses in force for this import. Written by the boundary phase; read by retraction. */
   boundariesFor(
     importId: string,
@@ -644,6 +678,38 @@ export function createTemplateStore(database: Database): TemplateStore {
           .returning();
         return row ? requestFrom(row) : null;
       });
+    },
+
+    async recordBoundaries(rows, executor = database) {
+      if (rows.length === 0) return [];
+      /*
+       * One row per distinct clause, first source_key wins.
+       *
+       * The primary key is `(import_id, expression)`, so two vocabulary lines that compiled to the
+       * same clause would collide and abort the import over what is in fact agreement — the same
+       * restriction stated twice is the same restriction. Collapsed here instead, which is what the
+       * schema comment on that key already describes, at the cost that `source_key` then names only
+       * one of the two lines that asked for it.
+       */
+      const distinct = new Map<string, TemplateBoundarySeed>();
+      for (const row of rows) {
+        if (!distinct.has(row.expression)) distinct.set(row.expression, row);
+      }
+      const seeds = [...distinct.values()];
+      refuseUnsafeClauses(seeds);
+
+      const written = await executor
+        .insert(templateBoundaries)
+        .values(
+          seeds.map((row) => ({
+            importId: row.importId,
+            agentId: row.agentId,
+            expression: row.expression,
+            sourceKey: row.sourceKey,
+          })),
+        )
+        .returning();
+      return written.map(boundaryFrom);
     },
 
     async boundariesFor(importId, executor = database) {
