@@ -16,6 +16,28 @@ substring, so "how do I deal with a slacker" matched the **slack** connector and
 giraffe) matched **jira**: a message naming neither system was pinned, for the life of the thread,
 to a specialist that could not answer it. A connector's name now has to appear on a word boundary,
 so a system named on its own still routes and one buried inside another word does not.
+### The audit page no longer says "Allowed" about six kinds of refusal
+
+A hop one Bot was not allowed to make, an endpoint this deployment would not dial, a rotation the
+vault refused and a sign-in it turned away were all drawn as **Allowed**, in the muted colour every
+ordinary row uses, and none of them appeared under **Blocked**. The same for a hop that ran out of
+attempts and a question that reached nobody, which are "Did not happen" rather than allowed. The
+page recognised six refusal types and the six added since were never added to it. Refusals now read
+as refusals, the two saved views are built from the same lists the rows are labelled from, and a
+refusal added later is added in one place or in none.
+### A conversation deleted while a server was reconnecting no longer lingers on the screen
+
+Announcements between servers travel as Postgres notifications, which reach whoever is subscribed at
+the moment they are sent and are never replayed. While a server's subscription was down — a database
+restart, a failover, a rolling upgrade — every channel deletion, pin and message announced in that
+window was lost, and nothing afterwards asked for it again.
+
+The browser could not notice. Its own connection to the server stayed open throughout, so the
+refetch it already does when that connection comes back was never triggered, and the roster went on
+showing a conversation that had been deleted until the page was reloaded.
+
+A server now tells the browsers it is holding to refetch when its subscription is re-established.
+Nothing to configure, and no change for a deployment whose database connection never drops.
 ### A Bot's answer comes back to the conversation that asked
 
 **This reverses what 0.0.5 shipped.** The 0.0.5 notes below say the asking Bot does not relay text
