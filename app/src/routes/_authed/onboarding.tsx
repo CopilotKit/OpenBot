@@ -1,19 +1,19 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import Avatar from "boring-avatars";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import * as React from "react";
 import useMeasure from "react-use-measure";
-import { Button } from "@/components/ui/button";
-import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
-import { completeOnboardingMutationOptions } from "@/lib/onboarding/mutations";
-import { queryClient } from "@/query-client";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import { appConfig } from "@/lib/generated/application-config";
 import { Composer } from "@/components/channels/composer";
 import { DesktopIllustration } from "@/components/computer/desktop-illustration";
 import { ComputerPlaceholder } from "@/components/computer/placeholder";
+import { Button } from "@/components/ui/button";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
-import Avatar from "boring-avatars";
+import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
+import { appConfig } from "@/lib/generated/application-config";
+import { completeOnboardingMutationOptions } from "@/lib/onboarding/mutations";
+import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/onboarding")({
   beforeLoad: async ({ context }) => {
@@ -90,9 +90,12 @@ function RosterStep() {
     agents?.filter((a) => !a.mine && a.visibility === "public") ?? [];
   // Always three cards: real public agents first, placeholders topping up a sparse deployment.
   // slice past the end is just [], so a roster of three or more takes no placeholders at all.
-  const roster: RosterCard[] = [
+  const roster: Array<RosterCard & { example?: boolean }> = [
     ...explore.slice(0, 3),
-    ...AGENTS_PLACEHOLDER.slice(explore.length),
+    ...AGENTS_PLACEHOLDER.slice(explore.length).map((placeholder) => ({
+      ...placeholder,
+      example: true,
+    })),
   ];
 
   return (
@@ -101,17 +104,23 @@ function RosterStep() {
         Choose from a variety of agents or create your own
       </h1>
       <div className="h-8" />
-      <div className="w-full max-w-lgoverflow-hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="w-full max-w-lg overflow-hidden grid grid-cols-1 md:grid-cols-2 gap-4">
         {roster.map((a) => {
           return (
             <div
               key={a.id}
-              className="bg-card p-4 rounded-lg flex flex-row gap-4 items-center"
+              // Dimmed and labelled, so an invented name never reads as a Bot this deployment has.
+              className={`bg-card p-4 rounded-lg flex flex-row gap-4 items-center ${a.example ? "opacity-70" : ""}`}
             >
               <Avatar name={a.avatarSeed} size={40} />
-              <h3 className="line-clamp-1 text-base font-medium tracking-tight">
-                {a.name}
-              </h3>
+              <div className="flex min-w-0 flex-col">
+                <h3 className="line-clamp-1 text-base font-medium tracking-tight">
+                  {a.name}
+                </h3>
+                {a.example ? (
+                  <span className="text-xs text-muted-foreground">Example</span>
+                ) : null}
+              </div>
             </div>
           );
         })}
