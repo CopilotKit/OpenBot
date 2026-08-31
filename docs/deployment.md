@@ -11,7 +11,7 @@ docker run -p 3001:3001 --env-file .env openbot
 
 # Or one inside the container. Nothing else to provision.
 docker run -p 3001:3001 --env-file .env \
-  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql/data openbot
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql openbot
 ```
 
 ## What is in the image, and what is not
@@ -24,8 +24,16 @@ process beside it.
 the database and the `vector` extension the first time, and runs the migrations on every start. It
 listens on loopback only and is never published, so there is no password to manage.
 
-Give it a volume at `/var/lib/postgresql/data`. Without one, a redeploy takes the audit trail with
-it, and the audit trail is the product. Platforms that offer no persistent volume are the ones to
+Give it a volume at `/var/lib/postgresql` — the parent, not the data directory itself. Without one,
+a redeploy takes the audit trail with it, and the audit trail is the product.
+
+**Mount the parent, not `/var/lib/postgresql/data`.** On any platform whose volume is an ext4 mount,
+and that is most of them, the mount arrives holding a `lost+found` directory. `initdb` will not
+initialise into a directory that has anything in it, so mounting it directly on the data directory
+leaves the cluster uncreated — and because `api` waits on `postgres` and `migrate`, the container
+starts, the platform reports the deploy a success, and the URL serves a 502. Mounting the parent
+leaves `data` as an ordinary subdirectory, which is what PostgreSQL asks for. A Docker named volume
+works either way; a platform volume does not. Platforms that offer no persistent volume are the ones to
 point at a managed database instead: set `DATABASE_URL` and leave `EMBEDDED_POSTGRES` off. The
 `vector` extension must be enabled there; RDS, Cloud SQL and Azure Database all support it, none
 enable it for you.

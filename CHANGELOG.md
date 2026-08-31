@@ -36,6 +36,104 @@ Bound across the signed-in app, shown under **Settings → Keyboard shortcuts**,
 are typing in a field. Handoff work is also picked up the moment it is queued rather than at the
 next poll, so an answer's round trip no longer pays up to two seconds per leg.
 
+### A Bot's shell can no longer reach the embedded database without a password
+
+In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the
+same container: it could `psql -h 127.0.0.1 -U openbot` with no password and read the audit trail,
+the policy store, and the credential vault as the instance owner. The cluster now uses
+`scram-sha-256` with a password generated on first init and kept beside the data, handed to the API
+over the container environment. The shell has no way to learn it, so the connection is refused. An
+external `DATABASE_URL` deployment is unaffected.
+
+### A live screen that ends says so, instead of freezing the last frame
+
+When a Bot's live screen ended — the computer stopped, or the socket failed — the message explaining
+why was drawn only by a component the take-the-wheel view does not mount, so the screen sat frozen on
+its last frame with nothing said. The reason is now shown where the live screen is.
+
+### A Bot's browser drops the automation flags a person needs gone to sign in
+
+The browser announced itself as automated (`navigator.webdriver`, the enable-automation switch),
+which sites like Google refuse even when a real person has taken the wheel. Those flags are now off
+at the source — the browser flag, not a script that patches `navigator.webdriver` and leaves the
+other tells. A headless build still reports `HeadlessChrome` in its user agent, which only running
+headed under a virtual display removes; that heavier change is tracked separately.
+
+### An empty model reply, or a run with no question, no longer ends in silence
+
+Two failures on strict OpenAI-compatible providers (z.ai GLM, Anthropic): a follow-up run that
+carried only tool deltas and no human turn was refused outright, and a reply with no text and no tool
+call ended the run with nothing on screen. A run with no human turn now carries a neutral
+continuation, and an empty reply ends on a visible line rather than in silence. OpenAI, which
+tolerated both, is unchanged.
+
+### Embedded PostgreSQL initialises on a platform volume, and says so when it cannot
+
+`EMBEDDED_POSTGRES=on` could not create its cluster on a platform whose persistent volume is an ext4
+mount — Railway, and by the same mechanism most others — and it failed differently depending on where
+the volume was mounted. Neither of the two paths this repo suggested worked, and the two suggestions
+disagreed with each other: `docs/deployment.md` said `/var/lib/postgresql/data`, the `Dockerfile`
+comment said `/var/lib/postgresql`.
+
+Mounted at the parent, the mount arrives owned by root, `data` is not in it, and the image's
+build-time `chown` is hidden underneath — so `initdb`, which has already dropped to the `postgres`
+user, cannot create the directory. `postgres-init` now creates and chowns it first, as root, which is
+the only step in a position to. This also fixes the plain
+`docker run -v openbot-data:/var/lib/postgresql` case, which relied entirely on that hidden chown.
+
+Mounted directly on the data directory, the mount arrives holding a `lost+found`, and `initdb` will
+not initialise into a directory with anything in it. **The documented mount is now the parent,
+`/var/lib/postgresql`**, which leaves `data` an ordinary subdirectory — what PostgreSQL's own hint
+asks for, and what the `Dockerfile` already said. A volume already mounted at
+`/var/lib/postgresql/data` and working — a Docker named volume, which arrives empty rather than with a
+`lost+found` — keeps working and needs no change.
+
+**The failure said nothing useful.** `api` waits on `postgres` and `migrate`, so neither started, the
+container came up anyway, the platform reported the deploy a success, and the public URL served a
+persistent 502 with the real reason visible only in the container log. A data directory that holds no
+cluster and is not empty is now refused with a sentence naming the mount to use instead.
+
+Reported by [@jerelvelarde](https://github.com/CopilotKit/OpenBot/issues/269) with the container logs
+for both mount paths, which is what made the two failure modes separable.
+### A sign-in a site opens in a new window is shown, and can be clicked
+
+A Bot's browser was bound to the page it launched with, and to nothing the site opened afterwards.
+Anything arriving in a new window or tab was invisible on the live screen and unreachable by input,
+so the popup sign-ins that a person takes the wheel to complete were exactly the ones they could not
+complete. Worse than invisible: a click at the place the popup's button was drawn went to the page
+underneath it, so a person trying to finish a sign-in could navigate the page the Bot was working on
+without seeing either result.
+
+The browser now follows the window the site opens, and returns to the opener when it closes, which is
+what a sign-in popup does when it succeeds. A snapshot taken before the change of page is refused
+afterwards with the same "take a new snapshot" it already gives after a navigation, so a stale ref
+cannot act on the wrong document.
+
+Nothing to configure.
+### Stopping a Bot's computer stops it, and the person watching is told
+
+A computer somebody stopped came back up on its own about a second later, and reset did the same. The
+live screen kept a loop asking for the Bot's current page once a second, asking for a page is what
+starts a browser, and nothing tore that loop down when the browser it was showing went away. The same
+loop kept the browser marked recently used, so a Bot with somebody watching was also immune to the
+idle timeout and came straight back after being closed to stay under the cap on running browsers.
+Those last two never involved a request at all, so nothing on the stop path could have covered them.
+
+Two smaller failures went with it. A person who reconnected, leaving their old window open, could
+have that old window's typing land in the page the new one was watching, with nothing said to either.
+And a window closed while the browser was still starting left a screencast and its loop behind for a
+connection that had already gone.
+
+The screen is now held per connection rather than per Bot, so closing one only ever ends its own, and
+teardown hangs off the browser closing rather than off the two requests that ask for it. A viewer
+whose screen ends is sent a message saying why, whether the computer stopped, was reset, or the
+screen was taken over by another window.
+
+Nothing to configure, and no change for a deployment where nobody watches a Bot work. **The app does
+not yet show that message**: it arrives at the browser and is held in state the live screen does not
+read, so a person still sees the last frame until they reopen the screen. That half is tracked
+separately in #287.
+
 ## 0.0.5
 
 ### One Bot can hand work to another, and reach a person when no Bot will do

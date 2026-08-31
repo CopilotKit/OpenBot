@@ -332,7 +332,9 @@ function buildGraph(input: RunAgentInput) {
 
   return new StateGraph(MessagesAnnotation)
     .addNode("answer", async (state) => ({
-      messages: [await bound.invoke(state.messages)],
+      messages: [
+        withVisibleReply((await bound.invoke(state.messages)) as AIMessage),
+      ],
     }))
     .addNode("tools", async (state) => {
       const last = state.messages.at(-1) as AIMessage;
@@ -383,6 +385,37 @@ function buildGraph(input: RunAgentInput) {
     .addEdge("tools", "answer")
     .compile();
 }
+
+/**
+ * A reply with nothing in it ends the run in silence, so give it a line to end on.
+ *
+ * When a model returns no text and no tool call, the conditional edge sees no calls and returns END,
+ * and the person is left looking at a turn that produced no answer and no reason. Strict providers do
+ * this on a run they will not answer. Re-asking tends to get the same empty reply, so rather than
+ * loop, the run ends on a visible message saying what happened. Only a genuinely empty reply is
+ * touched: a reply with any text, or any tool call, is returned exactly as the model produced it.
+ */
+function withVisibleReply(reply: AIMessage): AIMessage {
+  const hasCall = (reply.tool_calls ?? []).length > 0;
+  if (hasCall || hasVisibleText(reply.content)) return reply;
+  return new AIMessage({ content: EMPTY_REPLY_FALLBACK });
+}
+
+function hasVisibleText(content: AIMessage["content"]): boolean {
+  if (typeof content === "string") return content.trim().length > 0;
+  if (Array.isArray(content)) {
+    return content.some((part) =>
+      typeof part === "string"
+        ? part.trim().length > 0
+        : typeof (part as { text?: unknown }).text === "string" &&
+          (part as { text: string }).text.trim().length > 0,
+    );
+  }
+  return false;
+}
+
+const EMPTY_REPLY_FALLBACK =
+  "The model returned an empty reply and the run ended without an answer. This can happen with a strict provider; try asking again.";
 
 async function runAgent(input: RunAgentInput): Promise<Response> {
   const encoder = new EventEncoder();
