@@ -737,3 +737,49 @@ describe("a conversation that is not all plain strings", () => {
     ]);
   });
 });
+
+/*
+ * The one call that throws on a platform error is the history read, and on a relay the lock is the
+ * asking conversation itself. Read while holding it, a failed read leaked the lock until its TTL:
+ * the person could not type for two minutes, and the retry collided with the hop's own hold.
+ */
+describe("a history read that fails", () => {
+  test("takes no lock, so nothing is leaked for the retry to collide with", async () => {
+    const lockCalls: string[] = [];
+    const deliver = createHandoffDelivery({
+      agentFor: async () => stubAgent(),
+      history: async () => {
+        throw new Error("the platform answered 500");
+      },
+      newRunId: () => "run-2",
+      mintThreadId: () => "scratch-thread",
+      lock: {
+        acquire: async () => {
+          lockCalls.push("acquire");
+          return { runId: "platform-run" };
+        },
+        renew: async () => {
+          lockCalls.push("renew");
+        },
+        release: async () => {
+          lockCalls.push("release");
+        },
+      },
+      runner: {
+        run: () =>
+          new Observable<BaseEvent>((subscriber) => {
+            subscriber.complete();
+          }),
+      },
+    });
+
+    await expect(
+      deliver.deliver({
+        work: { ...WORK, answerIn: WORK.threadId },
+        message: "you asked researcher; it answered",
+        assertion: "signed",
+      }),
+    ).rejects.toThrow("the platform answered 500");
+    expect(lockCalls).toEqual([]);
+  });
+});
