@@ -92,9 +92,10 @@ the container, so there is nothing to share it with.
 
 `MANAGED_AGENT_AG_UI_URL` is not required here. The image does not carry `agent-langgraph` or
 `agent-bot`. Leave it unset and the shipped Risk Analyst coworker is omitted rather than registered
-against a host that is not there. Set it, with `MANAGED_AGENT_TOKEN`, only when a Bot is actually
-reachable from this container. Unset it if your `.env` still has the laptop default
-`http://localhost:4201/ag-ui`.
+against a host that is not there. Bot templates still import with it unset: one whose runtime is
+`managed` binds its coworker in-process rather than asking for an address. Set it, with
+`MANAGED_AGENT_TOKEN`, only when a Bot is actually reachable from this container. Unset it if your
+`.env` still has the laptop default `http://localhost:4201/ag-ui`.
 
 **Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.

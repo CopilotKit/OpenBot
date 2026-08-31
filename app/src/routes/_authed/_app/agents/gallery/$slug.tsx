@@ -164,6 +164,13 @@ export function TemplateDetail({ slug }: { slug: string }) {
             <p className="font-semibold text-base leading-tight">
               {entry.title}
             </p>
+            {/*
+             * One sentence for both ways a deployment honours `runtime: managed` — on the managed
+             * Bot it runs, or in its own process — because from here the difference is invisible and
+             * ought to be. A card carries no plan, so it knows what the file asked for and not what
+             * this deployment would do about it; the consent screen has the plan and says which of
+             * the two it will be.
+             */}
             <p className="mt-0.5 text-muted-foreground text-sm">
               {entry.runtime === "managed"
                 ? "Runs on this deployment itself."

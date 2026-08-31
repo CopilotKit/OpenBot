@@ -127,14 +127,17 @@ export type ResolvedEndpoint = {
   /**
    * Why a slot is being shown.
    *
-   * `remote` is the ordinary case. `no_managed_agent` is the one that matters: `store.create` throws
-   * `ManagedAgentUnavailableError` when there is neither an endpoint nor a managed agent, and the
-   * recommended one-container image carries no managed agent, so routing `runtime: managed` straight
-   * through `create` would 400 on the default install after a preview that reported nothing to
-   * rebind. That is the same coupling that makes `duplicate` unusable on that image today, and the
-   * import path must not inherit it.
+   * `remote` is the only reason there is. A template that says `runtime: remote` describes a
+   * coworker that lives at somebody's own address, and the file cannot carry one — there is no url
+   * field — so the importer types it or the Bot has nowhere to run.
+   *
+   * `runtime: managed` never lands here, on any deployment. A deployment without a managed agent
+   * runs that coworker in-process from the role description the file already carries, which is text
+   * the consent screen already renders verbatim; asking for an address instead pushed people to
+   * register a third party just to try a template, and sent their conversations off the network to
+   * do it.
    */
-  reason: "remote" | "no_managed_agent" | null;
+  reason: "remote" | null;
   /** The author says the importer will be asked for a key. A claim, not a capability. */
   requiresKey: boolean;
   /** The header NAME the author uses, if any. A header name is not a secret. */
@@ -145,6 +148,16 @@ export type ResolvedEndpoint = {
   sendsConversationTo?: string;
 };
 
+/**
+ * Where the coworker this file describes will actually run, once it is here.
+ *
+ * Three answers rather than the endpoint slot's two, because "the importer is not being asked for an
+ * address" covers two different outcomes and a consent screen may not blur them: the deployment's
+ * own Bot answers this coworker, or this server does, in-process, from the role description. Both
+ * keep the conversation on this deployment; they are different processes and the screen says which.
+ */
+export type TemplateRuntimeHome = "managed_agent" | "in_process" | "address";
+
 export type TemplatePlan = {
   /** What a preview and an install agree they are talking about. */
   digest: string;
@@ -152,6 +165,8 @@ export type TemplatePlan = {
   components: ResolvedComponent[];
   skills: ResolvedSkill[];
   endpoint: ResolvedEndpoint;
+  /** Which of the three the install will produce. Derived, and never a second opinion about it. */
+  runsOn: TemplateRuntimeHome;
   /**
    * The defaults, keyed by the slug the template names, ready to be handed straight back to
    * `installBotTemplate` as `slugDecisions`. A screen that changes one radio changes one entry.
@@ -372,8 +387,21 @@ export async function resolveBotTemplate(
   }
 
   const remote = template.bot.remote;
-  const endpointRequired =
-    template.bot.runtime === "remote" || !options.managedAgent;
+  /*
+   * The file decides this, and nothing about the deployment does.
+   *
+   * `remote` means the coworker lives at an address the file cannot carry, so somebody types it.
+   * `managed` means it runs on this deployment, and it does — on the Bot in the box where there is
+   * one, in-process where there is not. A deployment lacking a managed agent used to be asked for an
+   * address here, which contradicted the page the importer had just read and pushed them to register
+   * a stranger's endpoint to get past it.
+   */
+  const endpointRequired = template.bot.runtime === "remote";
+  const runsOn: TemplateRuntimeHome = endpointRequired
+    ? "address"
+    : options.managedAgent
+      ? "managed_agent"
+      : "in_process";
 
   return {
     digest: options.digest,
@@ -406,13 +434,10 @@ export async function resolveBotTemplate(
       published: presentComponents.get(component.name) ?? false,
     })),
     skills: resolvedSkills,
+    runsOn,
     endpoint: {
       required: endpointRequired,
-      reason: !endpointRequired
-        ? null
-        : template.bot.runtime === "remote"
-          ? ("remote" as const)
-          : ("no_managed_agent" as const),
+      reason: endpointRequired ? ("remote" as const) : null,
       requiresKey: remote?.requiresKey ?? false,
       ...(remote?.authHeader ? { authHeader: remote.authHeader } : {}),
       ...(remote?.exampleUrl ? { exampleUrl: remote.exampleUrl } : {}),

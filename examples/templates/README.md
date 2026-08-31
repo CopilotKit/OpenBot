@@ -10,14 +10,18 @@ copies `examples/` into the image, so they travel with a deployment that has no 
 can be imported by opening one and pasting it in. They are also the worked examples: a template
 somebody writes by hand is read against these.
 
-The set is deliberately varied rather than uniform — some ask for no connectors at all, one runs
+The set is deliberately varied rather than uniform — some ask for no connectors at all, four run
 remote, one buys exactly a single write — so that it demonstrates the boundary vocabulary instead of
 repeating one shape 27 times. What each one is really carrying is a rule about judgement: what it
 must not conclude, and what it says when the evidence is thin.
 
-They are deliberately **written rather than exported**. A template may not carry `type: built_in`
-with a `system_prompt`, so exporting one of the shipped fintech Bots is not a faithful round trip —
-which means the first catalogue entries have to be written, and that is what these are.
+They are deliberately **written rather than exported**. Neither `type: built_in` nor `system_prompt`
+is a field, so exporting one of the shipped fintech Bots drops the prompt that is the whole of its
+behaviour, which is not a faithful round trip. A written template puts that behaviour in
+`role_description`, which does travel — and which a deployment with no Bot in the box hands the
+coworker as its standing instruction, so the twenty-three here that say `runtime: managed` ask the
+importer for no address at all. The first catalogue entries have to be written, and that is what
+these are.
 
 | File | Category | What it is for |
 | --- | --- | --- |

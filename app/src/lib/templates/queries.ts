@@ -132,17 +132,32 @@ export type ResolvedSkill = {
 export type ResolvedEndpoint = {
   required: boolean;
   /**
-   * Why an address is being asked for.
+   * Why an address is being asked for, and there is only one reason left.
    *
-   * `no_managed_agent` is not the remote case: the template says the coworker runs in the box, and
-   * this deployment has no box to run it in — the recommended one-container image is exactly that.
+   * `no_managed_agent` used to be the other one: a template that said the coworker runs here, on a
+   * deployment with no managed Bot to run it, was answered by asking the importer for an address.
+   * That made somebody register a third-party endpoint in order to try a template, and their
+   * conversations then left the network — the opposite of what the file said. A template that says
+   * it runs here now runs in this deployment's own process, so the only coworker that still needs
+   * an address is the one whose file says it runs at one.
    */
-  reason: "remote" | "no_managed_agent" | null;
+  reason: "remote" | null;
   requiresKey: boolean;
   authHeader?: string;
   exampleUrl?: string;
   sendsConversationTo?: string;
 };
+
+/**
+ * Where the coworker will actually run, which is a different question from what the file asked for.
+ *
+ * `runtime: managed` is the author saying "run this yourself", and a deployment can honour that two
+ * ways: on the managed Bot it runs, or in this process on its own model. Which of the two is a fact
+ * about the deployment rather than about the file, so the plan answers it and the consent screen
+ * says it — a screen that read `bot.runtime` could only say what was asked for. `address` is the one
+ * case where the importer has to supply something before the coworker can exist at all.
+ */
+export type TemplateRuntimeHome = "managed_agent" | "in_process" | "address";
 
 /** What this file would do on this deployment. The server writes nothing to produce it. */
 export type TemplatePlan = {
@@ -151,6 +166,7 @@ export type TemplatePlan = {
   components: ResolvedComponent[];
   skills: ResolvedSkill[];
   endpoint: ResolvedEndpoint;
+  runsOn: TemplateRuntimeHome;
   slugDecisions: Record<string, SlugResolution>;
 };
 

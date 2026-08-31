@@ -47,7 +47,23 @@ export type AgentProfileStore = {
     actor: AgentActor,
     id: string,
   ): Promise<AgentProfile | null>;
-  create(actor: AgentActor, input: CreateAgentInput): Promise<AgentProfile>;
+  create(
+    actor: AgentActor,
+    input: CreateAgentInput & {
+      /**
+       * The standing instruction for a coworker with nowhere else to run.
+       *
+       * Only consulted when there is neither an endpoint nor a Bot in the box, and it is what makes
+       * that a `built_in` coworker rather than a refusal. `POST /api/agents` never sends it — the
+       * form has no such field — so a hand-made Bot on a deployment without a managed agent is
+       * refused exactly as it is today.
+       *
+       * Not on `CreateAgentInput`, so `update` cannot take it: changing an existing Bot's type is a
+       * different act with different consequences, and this is the creation path.
+       */
+      systemPrompt?: string;
+    },
+  ): Promise<AgentProfile>;
   update(
     actor: AgentActor,
     id: string,
@@ -307,34 +323,58 @@ export function createAgentProfileStore(
         const endpoint = input.endpoint
           ? { endpoint: input.endpoint }
           : managedConfiguration;
-        if (!endpoint) {
+        const systemPrompt = input.systemPrompt?.trim();
+        if (endpoint) {
+          await transaction.insert(agents).values({
+            id,
+            name: input.name,
+            type: "remote_ag_ui",
+            // Their endpoint if they gave one, ours if they did not. Validated before it reaches
+            // here; see endpoint.ts for why a stored URL is a security decision and not a text
+            // field.
+            //
+            // The key, if there is one, goes to the vault and only its reference is stored here. See
+            // auth-header.ts for why a bearer token must not sit next to the endpoint.
+            configuration: {
+              ...endpoint,
+              ...(input.auth && vault
+                ? {
+                    auth: await storeAgentAuth({
+                      store: vault.store,
+                      encryptionKey: vault.encryptionKey,
+                      agentId: id,
+                      header: input.auth.header,
+                      value: input.auth.value,
+                      executor: transaction,
+                    }),
+                  }
+                : {}),
+            },
+          });
+        } else if (systemPrompt) {
+          /*
+           * Nowhere to send it, so it runs here.
+           *
+           * This is the shape General Assistant and Knowledge already have, and the shape
+           * `registeredAgentFromRow` reads: `built_in` plus a non-empty `configuration.systemPrompt`.
+           * A key is deliberately not written on this branch — a key authenticates to an address and
+           * this coworker has none, so storing one would leave a live credential in the vault that
+           * nothing can ever present.
+           */
+          await transaction.insert(agents).values({
+            id,
+            name: input.name,
+            type: "built_in",
+            configuration: { systemPrompt },
+          });
+        } else {
+          /*
+           * No address, no Bot in the box, and no instruction to run on. There is nothing to create:
+           * a `built_in` row with an empty prompt is a coworker `registeredAgentFromRow` drops on
+           * the floor, and the Bot would exist on every screen while answering nobody.
+           */
           throw new ManagedAgentUnavailableError();
         }
-        await transaction.insert(agents).values({
-          id,
-          name: input.name,
-          type: "remote_ag_ui",
-          // Their endpoint if they gave one, ours if they did not. Validated before it reaches here;
-          // see endpoint.ts for why a stored URL is a security decision and not a text field.
-          //
-          // The key, if there is one, goes to the vault and only its reference is stored here. See
-          // auth-header.ts for why a bearer token must not sit next to the endpoint.
-          configuration: {
-            ...endpoint,
-            ...(input.auth && vault
-              ? {
-                  auth: await storeAgentAuth({
-                    store: vault.store,
-                    encryptionKey: vault.encryptionKey,
-                    agentId: id,
-                    header: input.auth.header,
-                    value: input.auth.value,
-                    executor: transaction,
-                  }),
-                }
-              : {}),
-          },
-        });
         await transaction.insert(agentProfiles).values({
           agentId: id,
           ownerUserId: actor.id,

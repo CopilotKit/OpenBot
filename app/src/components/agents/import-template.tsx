@@ -412,7 +412,15 @@ function ConsentScreen({
   const policy = useQuery(actionPolicyQueryOptions());
   const { bot, template: meta } = template;
 
-  const endpointNeeded = plan.endpoint.required;
+  /*
+   * One field decides the box and the button alike, so the two can never disagree on screen.
+   *
+   * `plan.endpoint.required` is the same fact arriving under another name, and it stays the lock on
+   * what `templateInstallInputFrom` may send. Reading it here as well would be two answers to one
+   * question, which is how this screen came to demand an address for a coworker it had just said
+   * runs on this deployment.
+   */
+  const endpointNeeded = plan.runsOn === "address";
   const typed = values.endpoint.trim();
   const shapeProblem = endpointProblem(values.endpoint);
   const typedAddress = shapeProblem ? null : addressOf(values.endpoint);
@@ -584,19 +592,33 @@ function ConsentScreen({
 
       {/* 3 ─────────────────────────────────────────────────────────────── */}
       <Section step={3} title="Where it runs">
-        {!endpointNeeded ? (
+        {plan.runsOn === "in_process" ? (
+          /*
+           * The case that used to demand an address, so it is said at length rather than in four
+           * words. Somebody arriving here was previously told to go and register an endpoint for a
+           * coworker the file said runs here; the sentence that replaced that has to be specific
+           * enough that they can tell the difference at a glance.
+           */
+          <>
+            <p className="text-sm">
+              It runs on this deployment itself, on the model this deployment is
+              configured with. There is no address to supply and no other host
+              is dialled: nothing leaves your network.
+            </p>
+            <p className="text-muted-foreground text-sm">
+              Nothing had to be arranged for it: the text above under
+              &ldquo;What this Bot is&rdquo; becomes its standing instructions,
+              and its skills are given to it the same way they are to a coworker
+              you built yourself.
+            </p>
+          </>
+        ) : plan.runsOn === "managed_agent" ? (
           <p className="text-sm">
-            On this deployment's own Bot. Nothing leaves your network.
+            It runs on the Bot this deployment already runs. Nothing leaves your
+            network.
           </p>
         ) : (
           <>
-            {plan.endpoint.reason === "no_managed_agent" ? (
-              <p className="text-muted-foreground text-sm">
-                The template says this coworker runs in the box, and this
-                deployment does not run one. It needs an address of its own.
-              </p>
-            ) : null}
-
             {/*
              * The origin, large, and it is the address that will actually be dialled the moment
              * there is one — the author's claim only stands in while the box is empty. Showing the

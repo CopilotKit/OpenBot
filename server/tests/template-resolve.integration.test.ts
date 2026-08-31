@@ -391,27 +391,37 @@ describe("where the coworker runs", () => {
     // The header NAME is not a secret and travels; the value never does.
     expect(resolved.endpoint.authHeader).toBe("Authorization");
     expect(resolved.endpoint.sendsConversationTo).toBe("renewals.example.com");
+    expect(resolved.runsOn).toBe("address");
   });
 
-  test("a managed template asks too, when this deployment has no Bot in the box", async () => {
+  test("a managed template asks for no address when this deployment has no Bot in the box, and runs in this process", async () => {
     /*
-     * The row that is not a nicety. `store.create` throws `ManagedAgentUnavailableError` when there
-     * is neither an endpoint nor a managed agent, and the recommended one-container image carries no
-     * managed agent — so routing `runtime: managed` straight through `create` would 400 on the
-     * default install after a preview that reported nothing to rebind.
+     * The bug this reads for. The template page says "Runs on this deployment itself" and the
+     * consent screen used to demand an address on the very same field, on the recommended
+     * one-container image — which is the deployment almost everybody has. Asking pushed people to
+     * register a third party's endpoint to try a template, and their conversations then left the
+     * network. `role_description` is already handed to a model as the standing instruction and
+     * already rendered verbatim on the consent screen, so running it here exposes nothing new.
      */
     const resolved = await plan(parseBotTemplate(yamlFor({})), {
       managedAgent: false,
     });
-    expect(resolved.endpoint.required).toBe(true);
-    expect(resolved.endpoint.reason).toBe("no_managed_agent");
+    expect(resolved.endpoint.required).toBe(false);
+    expect(resolved.endpoint.reason).toBeNull();
+    expect(resolved.runsOn).toBe("in_process");
   });
 
-  test("and does not, when there is one", async () => {
+  test("a managed template binds to the Bot in the box when there is one", async () => {
     const resolved = await plan(parseBotTemplate(yamlFor({})), {
       managedAgent: true,
     });
     expect(resolved.endpoint.required).toBe(false);
     expect(resolved.endpoint.reason).toBeNull();
+    /*
+     * The half `endpoint.required` cannot say. Both managed cases ask the importer for nothing, and
+     * they are two different processes answering the coworker — which is what the consent screen
+     * has to be able to tell somebody.
+     */
+    expect(resolved.runsOn).toBe("managed_agent");
   });
 });

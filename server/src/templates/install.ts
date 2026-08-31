@@ -145,17 +145,19 @@ export class TemplateDigestMovedError extends Error {
   }
 }
 
-/** A coworker with nowhere to run. The importer has to type an address. */
+/**
+ * A coworker that lives somewhere else, with nobody having said where.
+ *
+ * Only `runtime: remote` reaches this. A `managed` template runs on this deployment whether or not
+ * there is a Bot in the box, so the absence of one is no longer a reason to ask anybody for an
+ * address.
+ */
 export class TemplateEndpointRequiredError extends Error {
-  readonly reason: "remote" | "no_managed_agent";
-  constructor(reason: "remote" | "no_managed_agent") {
+  constructor() {
     super(
-      reason === "remote"
-        ? "This template's coworker runs somewhere else. Type the address it runs at."
-        : "This deployment has no Bot in the box, so this coworker needs an address of its own.",
+      "This template's coworker runs somewhere else. Type the address it runs at.",
     );
     this.name = "TemplateEndpointRequiredError";
-    this.reason = reason;
   }
 }
 
@@ -243,9 +245,10 @@ export type TemplateInstallerDeps = {
   /**
    * The Bot in the box, if this deployment has one. `config.managedAgent?.endpoint`.
    *
-   * Absent is the recommended one-container image, and it is why an import of a `managed` template
-   * still asks the importer for an address: `store.create` throws `ManagedAgentUnavailableError`
-   * when there is neither.
+   * Absent is the recommended one-container image, and there it decides which process answers a
+   * `managed` template rather than whether the import can happen at all: with one the coworker is
+   * bound to that address, without one it is created `built_in` on the role description the file
+   * carries. Either way the importer is asked for nothing.
    */
   managedAgentAgUiUrl?: URL;
   vault?: { store: CredentialStore; encryptionKey: string };
@@ -412,12 +415,13 @@ export function createTemplateInstaller(
         );
       }
 
-      const endpointRequired =
-        template.bot.runtime === "remote" || !managedAgentAgUiUrl;
+      /*
+       * The same rule `resolve.ts` applies, restated here because this module is callable without
+       * going through a preview and the two must not be able to disagree about who gets asked.
+       */
+      const endpointRequired = template.bot.runtime === "remote";
       if (endpointRequired && !input.endpoint?.trim()) {
-        throw new TemplateEndpointRequiredError(
-          template.bot.runtime === "remote" ? "remote" : "no_managed_agent",
-        );
+        throw new TemplateEndpointRequiredError();
       }
 
       /*
@@ -466,6 +470,22 @@ export function createTemplateInstaller(
             visibility: "private",
             ...(endpoint ? { endpoint } : {}),
             ...(input.auth ? { auth: input.auth } : {}),
+            /*
+             * THE SAME TEXT, USED THE SAME WAY. A `managed` template with no Bot in the box and no
+             * address is created `built_in` on its own `role_description` — which is already handed
+             * to a model as the standing instruction for a remote coworker, and already rendered
+             * verbatim on the consent screen under a heading saying a stranger wrote it. So nothing
+             * new is exposed, and the outcome is the safer one: the alternative was pushing somebody
+             * to register a third-party endpoint to try a template, after which their conversations
+             * leave the network.
+             *
+             * Passed only for `managed`. A `remote` template has already been refused above without
+             * an address, and handing `create` a prompt there would give a stranger's file a second
+             * way to land — quietly in-process, on a document that said it runs somewhere else.
+             */
+            ...(template.bot.runtime === "managed"
+              ? { systemPrompt: template.bot.roleDescription }
+              : {}),
           });
           const agentId = profile.id;
 
@@ -961,11 +981,15 @@ function ledgerFor(
     });
   }
 
-  if (plan.endpoint.required && endpoint) {
+  if (endpoint) {
     /*
      * The one ask an import answers on the spot, because the importer answered it: they typed the
      * address. Recorded as decided by them rather than left `requested`, or the profile's amber
      * "requested, not granted" list would forever show a slot that is filled.
+     *
+     * Written whenever an address was actually stored, rather than only when the plan asked for
+     * one. A `managed` template is not asked for an address and may still be given one, and a
+     * coworker dialling somewhere the ledger does not mention is the trail lying by omission.
      *
      * The ref is the host rather than the whole address. A ledger row is rendered on a screen and
      * read back out of the database by people, and the path and query of an AG-UI endpoint are

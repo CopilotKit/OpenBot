@@ -12,7 +12,7 @@ wanted instead lands in a ledger as *requested and not granted*, and an administ
 afterwards on the grant screens that already exist.
 
 The vocabulary is the tenant package's, so anybody who has read [configuration.md](configuration.md)
-and `examples/fintech/` can read a template. Three worked examples ship in
+and `examples/fintech/` can read a template. Twenty-seven worked examples ship in
 [`examples/templates/`](../examples/templates/README.md).
 
 ## What travels
@@ -21,12 +21,12 @@ and `examples/fintech/` can read a template. Three worked examples ship in
 | --- | --- | --- |
 | Name, title, role description | Carried | The standing role, sent with every run. |
 | `avatar_seed` | Carried | An opaque style token, never an id. |
-| Runtime kind | Carried as `managed` or `remote` | A `built_in` Bot with a system prompt cannot be expressed in v1. |
+| Runtime kind | Carried as `managed` or `remote` | Neither `type: built_in` nor a system prompt is a field. `managed` says *this deployment*; which of the two ways of running here that becomes is this deployment's decision, not the file's. |
 | Skills: slug, title, summary, instructions | Carried | Pure text. A skill is an instruction and confers nothing. |
 | Skill tool declarations | Carried, unvalidated | Shipping refs for connectors nobody has added yet is the point. |
 | The Bot-to-skill pairing | Carried | The one grant an import makes, without which per-run narrowing never switches on. |
 | The boundary block | Carried | A closed vocabulary the author writes, compiled locally. |
-| The endpoint | Never carried, rebound | The importer types the address, checked against *this* deployment's allowlist. |
+| The endpoint | Never carried, rebound | A `remote` template's address is typed by the importer and checked against *this* deployment's allowlist. A `managed` one is never asked for. |
 | The auth header *name* | Carried | A header name is not a secret; the value is typed by the importer. |
 | A credential, a key, a vault pointer | Never | No field can hold one, and the key names are refused by name. |
 | Agent id, package id, owner, visibility | Never | Minted, forced private, and owned by whoever imported it. |
@@ -115,7 +115,7 @@ half-understood by an older deployment.
 | `bot.title` | yes | 120 | |
 | `bot.role_description` | yes | 1000 | Given to a model as instructions. Rendered verbatim on the consent screen. |
 | `bot.avatar_seed` | no | 40 | An opaque style token. Never an id. |
-| `bot.runtime` | yes | — | `managed` or `remote`. |
+| `bot.runtime` | yes | — | `managed` or `remote`. Only `remote` asks the importer for an address; see below. |
 | `bot.skills` | no | 25 | Slugs, every one of which this same file must define. |
 | `bot.remote` | only for `remote` | — | See below. |
 | `skills[].slug` | yes | 40 | |
@@ -136,6 +136,30 @@ both install cleanly through a package and are then permanently uneditable throu
 because the API refuses to save what the package was allowed to create.
 
 The whole document is capped at 128 KiB, 25 skills, 40 tool refs and 40 requested things.
+
+### `bot.runtime`
+
+`managed` means this deployment and `remote` means somewhere else, and only `remote` asks the
+importer for an address.
+
+A deployment configured with a Bot in the box registers a `managed` coworker against it, the way the
+Coworkers screen does. A deployment with no such Bot — which is what the recommended one-container
+image is — binds the coworker in-process instead, on the `role_description` the file already
+carries. Where it runs differs between the two; what it is told does not.
+
+Asking for an address in the second case would be wrong twice over. It contradicts the template's
+own page, which says the coworker runs on this deployment: a consent screen demanding an address two
+clicks later reads the same field and disagrees with it. And the cheapest way past such a demand is
+to register a third party's endpoint in order to try a template, after which every message anybody
+sends that coworker leaves the network — the position the rest of this format is written to keep
+people out of.
+
+Nothing about what travels changes here. `type: built_in` is still not expressible, `system_prompt`
+is still refused by name, and exporting a coworker whose behaviour lives in a system prompt is still
+not a faithful round trip. `role_description` is not a second way to write one: it is the field that
+was already given to a model as the standing role, and already rendered verbatim on the consent
+screen under the sentence saying a stranger wrote it. Binding it in-process shows a model nothing it
+was not going to be shown.
 
 ### `bot.remote`
 
@@ -314,8 +338,9 @@ same box with the YAML this server serialised from the document it parsed.
 `POST /api/templates/preview` writes nothing and, on success, records nothing — a preview that left a
 row would make reading a stranger's file indistinguishable from installing it. It returns the parsed
 document, a digest, and a plan: which connectors exist here, which skill slugs are already taken and
-how each collision would be resolved, which named components are in this build, and whether an
-address is needed.
+how each collision would be resolved, which named components are in this build, and where the
+coworker would run — the Bot in the box, in-process here, or an address the importer has yet to
+type.
 
 The consent screen has a fixed order, and the first section is the one that matters:
 
@@ -324,8 +349,10 @@ The consent screen has a fixed order, and the first section is the one that matt
    and was written by a stranger. You cannot consent to text you were not shown.
 2. **Its skills.** Each with its full instructions shown the same way, and how a colliding slug will
    be resolved.
-3. **Where it runs.** For `managed`, on this deployment's own Bot. For `remote`, the origin in large
-   type and the sentence that every message anyone sends this coworker is sent to that address.
+3. **Where it runs.** For `managed`, on this deployment: its own Bot where one is configured, and
+   in-process here where none is, in which case the role description above is the whole of what the
+   coworker is told. Neither asks for an address. For `remote`, the origin in large type and the
+   sentence that every message anyone sends this coworker is sent to that address.
 4. **What it is asking for.** Every request with the author's `why`, each tagged as not granted by
    this install. There is no checkbox; granting is a separate act on a separate screen.
 5. **What it will be allowed to do.** The boundary in plain English, said as sentences rather than in
@@ -431,9 +458,9 @@ Three ways, and none of them is a service OpenBot runs.
 
 1. **A file somebody sends you.** Slack, a gist, a pull request comment. Import is a paste box, and
    this needs no infrastructure at all.
-2. **The seed in the image.** [`examples/templates/`](../examples/templates/README.md) ships three
-   worked templates, copied into the container, so a deployment with no network has something to
-   start from. Its README carries the rules a new one is reviewed against.
+2. **The seed in the image.** [`examples/templates/`](../examples/templates/README.md) ships
+   twenty-seven worked templates, copied into the container, so a deployment with no network has
+   something to start from. Its README carries the rules a new one is reviewed against.
 3. **A curated repository**, `jerelvelarde/awesome-openbot-templates`: `*.openbot.yaml` files an
    administrator registers as a source, pinned to a commit sha and fetched server-side, so the
    browser never acquires a third-party origin and the source never sees an end user's address.

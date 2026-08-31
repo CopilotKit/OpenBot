@@ -222,10 +222,16 @@ async function racePackageAttachment(
 }
 
 describe("agent profile store integration", () => {
-  test("refuses to create a coworker with no endpoint when this deployment has no managed Bot", async () => {
+  test("refuses to create a coworker with no endpoint, no managed Bot and no system prompt", async () => {
     const owner = await createUser();
     const withoutManaged = createAgentProfileStore(database, undefined);
 
+    /*
+     * `POST /api/agents` is this path: its parser builds the input field by field and has no system
+     * prompt to send. There is nothing to create here — a `built_in` row with an empty prompt is a
+     * coworker `registeredAgentFromRow` drops, so the Bot would sit on every screen answering
+     * nobody.
+     */
     await expect(
       withoutManaged.create(owner, {
         name: "No Endpoint",
@@ -234,6 +240,32 @@ describe("agent profile store integration", () => {
         visibility: "private",
       }),
     ).rejects.toBeInstanceOf(ManagedAgentUnavailableError);
+  });
+
+  test("creates a built_in coworker from a system prompt when there is no endpoint and no managed Bot", async () => {
+    const owner = await createUser();
+    const withoutManaged = createAgentProfileStore(database, undefined);
+
+    const created = await withoutManaged.create(owner, {
+      name: "Runs Here",
+      title: "Accounts Receivable",
+      roleDescription: "Chase overdue invoices and name every document used.",
+      visibility: "private",
+      systemPrompt: "Chase overdue invoices and name every document used.",
+    });
+    createdAgentIds.push(created.id);
+
+    const [row] = await database
+      .select({ type: agents.type, configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, created.id))
+      .limit(1);
+    expect(row?.type).toBe("built_in");
+    expect(
+      (row?.configuration as { systemPrompt?: string } | null)?.systemPrompt,
+    ).toBe("Chase overdue invoices and name every document used.");
+    // Nothing to dial, and the profile says so rather than carrying a borrowed address.
+    expect(created.endpoint).toBeNull();
   });
 
   test("lets an owner and admin get and list a private profile but hides it from another user", async () => {

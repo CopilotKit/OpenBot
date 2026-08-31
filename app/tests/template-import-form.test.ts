@@ -18,6 +18,8 @@ function planWith(endpoint: Partial<TemplatePlan["endpoint"]>): TemplatePlan {
       requiresKey: false,
       ...endpoint,
     },
+    // The two agree by construction on the server, and this helper is only interesting when they do.
+    runsOn: endpoint.required ? "address" : "in_process",
     slugDecisions: {},
   };
 }

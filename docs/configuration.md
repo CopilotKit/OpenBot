@@ -30,7 +30,9 @@ All four Intelligence values are required together. Missing any of them stops se
 `MANAGED_AGENT_AG_UI_URL` names the Bot in the box: the default endpoint for coworkers created in
 the product. It needs `MANAGED_AGENT_TOKEN` beside it, or the server refuses to start. Unset, the
 server starts without a managed Bot, the shipped Risk Analyst coworker is omitted, and creating a
-coworker without its own endpoint is refused. A leftover token with no URL is ignored. The
+coworker on the Coworkers screen without its own endpoint is refused. Importing a `runtime: managed`
+Bot template is the exception: it binds the coworker in-process on the role description the file
+carries, rather than asking the importer for an address. A leftover token with no URL is ignored. The
 one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
 at `agent-langgraph` on a laptop.
 

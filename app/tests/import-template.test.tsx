@@ -165,8 +165,31 @@ const plan = {
     exampleUrl: "https://renewals.example.com/agui",
     sendsConversationTo: "renewals.example.com",
   },
+  runsOn: "address",
   slugDecisions: { "check-renewal-risk": "suffix" },
 };
+
+/**
+ * The same file, written by an author who said the coworker runs on the importer's deployment.
+ *
+ * Two plans rather than one, because `runsOn` is the deployment's answer and not the file's: the
+ * identical document resolves to `in_process` where there is no managed Bot and to `managed_agent`
+ * where there is. Neither asks for an address, and that is the whole of what these fixtures pin.
+ */
+function managedTemplate(): Json {
+  const managed = copy(template);
+  const bot = managed.bot as Json;
+  bot.runtime = "managed";
+  delete bot.remote;
+  return managed;
+}
+
+function managedPlan(runsOn: "in_process" | "managed_agent"): Json {
+  const resolved = copy(plan);
+  resolved.endpoint = { required: false, reason: null, requiresKey: false };
+  resolved.runsOn = runsOn;
+  return resolved;
+}
 
 /** The shipped policy, which is what the amber block is generated from. */
 const SHIPPED_POLICY = { mode: "enforce", deny: [], allow: ["true"] };
@@ -450,6 +473,81 @@ test("a genuinely different host is still said out loud", async () => {
   expect(document.body.textContent ?? "").toContain(
     "The template says conversations go to",
   );
+});
+
+/**
+ * The bug this pins, in the reporter's words: creating a Bot from a template required an address.
+ *
+ * A file saying the coworker runs on the importer's own deployment got an address box on every
+ * deployment with no managed Bot — which is the recommended one-container image, so most of them.
+ * The gallery card said it runs here and the next screen demanded a stranger's host, and somebody
+ * following that instruction sent their conversations off their network to try a template that
+ * never needed to leave it. There is nothing to type now, and nothing stopping the button.
+ */
+test("a template that runs here asks for no address and imports as it stands", async () => {
+  servedTemplate = managedTemplate();
+  servedPlan = managedPlan("in_process");
+
+  await readTemplate();
+
+  expect(screen.queryByLabelText("Address this coworker runs at")).toBeNull();
+  expect(screen.queryByLabelText("Key for this address")).toBeNull();
+  expect(
+    (screen.getByText("Import Renewal Desk") as HTMLButtonElement).disabled,
+  ).toBe(false);
+
+  const body = document.body.textContent ?? "";
+  expect(body).toContain("It runs on this deployment itself");
+  // The paragraph that described the behaviour being removed, asserted rather than paraphrased.
+  expect(body).not.toContain("this deployment does not run one");
+  expect(body).not.toContain(
+    "An address is needed before this coworker can be imported.",
+  );
+});
+
+/**
+ * The same file on a deployment that does run a managed Bot: no address either, and a different
+ * sentence, because the two are not the same place and the screen is the only thing that says which.
+ */
+test("a deployment that runs a managed Bot says so instead", async () => {
+  servedTemplate = managedTemplate();
+  servedPlan = managedPlan("managed_agent");
+
+  await readTemplate();
+
+  expect(screen.queryByLabelText("Address this coworker runs at")).toBeNull();
+
+  const body = document.body.textContent ?? "";
+  expect(body).toContain("It runs on the Bot this deployment already runs.");
+  expect(body).not.toContain("It runs on this deployment itself");
+});
+
+/**
+ * The half that did not change, and the reason this file asserts it: a coworker whose file says it
+ * runs at somebody else's address cannot be imported without one, and the button stays shut until
+ * there is one. Loosening the managed case is only defensible while this stays exactly as it was.
+ */
+test("a template that runs at an address still needs one", async () => {
+  await readTemplate();
+
+  expect(screen.getByLabelText("Address this coworker runs at")).toBeDefined();
+  expect(
+    (screen.getByText("Import Renewal Desk") as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(
+    screen.getByText(
+      "An address is needed before this coworker can be imported.",
+    ),
+  ).toBeDefined();
+
+  await userEvent.type(
+    field("Address this coworker runs at"),
+    "https://renewals.example.com/ag-ui",
+  );
+
+  expect(
+    (screen.getByText("Import Renewal Desk") as HTMLButtonElement).disabled,
+  ).toBe(false);
 });
 
 /**

@@ -225,6 +225,9 @@ const touchedSlugs = [
   `${skillSlug}-3`,
   `other-${suite}`,
   `hand-made-${suite}`,
+  `in-box-${suite}`,
+  `far-away-${suite}`,
+  `typed-${suite}`,
   `endpoint-${suite}`,
   `avatar-${suite}`,
   `plain-${suite}`,
@@ -528,33 +531,119 @@ describe("a skill slug this deployment has already given to somebody", () => {
   });
 });
 
-describe("a managed template on a deployment with no Bot in the box", () => {
-  test("refuses without an address, and installs with the one the importer typed", async () => {
+/**
+ * WHERE AN IMPORTED COWORKER RUNS, and the address nobody should have been asked for.
+ *
+ * A template says `managed` to mean "runs on this deployment". The recommended one-container image
+ * has no managed agent process, and the import path used to answer that by demanding an address —
+ * on the same screen that had just said the coworker runs here. The way past it was to register a
+ * third party's endpoint, at which point the conversations left the network to satisfy a form.
+ *
+ * Nothing about the boundary moves here. `role_description` is the text `standingRoleMessage`
+ * already hands a model for a remote coworker, and the text the consent screen already renders
+ * verbatim under a heading saying a stranger wrote it; the ceiling is compiled exactly as before,
+ * and no grant, credential or policy rule travels either way.
+ */
+describe("where an imported coworker runs", () => {
+  async function agentRow(agentId: string) {
+    const [row] = await database
+      .select({ type: agents.type, configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .limit(1);
+    return row as
+      | {
+          type: "built_in" | "remote_ag_ui";
+          configuration: { endpoint?: string; systemPrompt?: string } | null;
+        }
+      | undefined;
+  }
+
+  test("a managed template with no Bot in the box installs with no address, as a built_in coworker on the template's role description", async () => {
     const template = parseBotTemplate(
       yamlFor({ skillSlug: `hand-made-${suite}` }),
     );
-    const digest = await digested(template);
-    const cold = installer({ managedAgent: false });
+    const result = await installer({ managedAgent: false }).installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: importer,
+      source: "paste",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    expect(result.plan.endpoint.required).toBe(false);
+    expect(result.plan.runsOn).toBe("in_process");
 
     /*
-     * `store.create` throws `ManagedAgentUnavailableError` when there is neither an endpoint nor a
-     * managed agent, and the recommended one-container image carries no managed agent. Said here as
-     * a slot the importer fills rather than as a 400 after a preview that reported nothing to
-     * rebind.
+     * The shape `registeredAgentFromRow` reads, which is the same shape General Assistant and
+     * Knowledge have: `built_in` plus a non-empty `configuration.systemPrompt`. A `built_in` row
+     * with an empty prompt is a coworker the runtime drops, so the text matters as much as the type.
      */
+    const row = await agentRow(result.agentId);
+    expect(row?.type).toBe("built_in");
+    expect(row?.configuration?.systemPrompt).toBe(template.bot.roleDescription);
+    expect(row?.configuration?.endpoint).toBeUndefined();
+
+    // Nobody was asked for an address, so the ledger has no slot claiming somebody answered one.
+    expect(result.ledger.find((entry) => entry.kind === "endpoint")).toBe(
+      undefined,
+    );
+  });
+
+  test("the same managed template binds to the Bot in the box when this deployment has one", async () => {
+    const template = parseBotTemplate(
+      yamlFor({ skillSlug: `in-box-${suite}` }),
+    );
+    const result = await installer().installBotTemplate({
+      template,
+      digest: await digested(template),
+      actor: importer,
+      source: "paste",
+      slugDecisions: {},
+    });
+    created.push(result.agentId);
+
+    expect(result.plan.runsOn).toBe("managed_agent");
+    const row = await agentRow(result.agentId);
+    expect(row?.type).toBe("remote_ag_ui");
+    expect(row?.configuration?.endpoint).toBe(managedUrl.toString());
+    // The prose travelled as the standing role message, not as a system prompt on a Bot that has one.
+    expect(row?.configuration?.systemPrompt).toBeUndefined();
+  });
+
+  test("a remote template still refuses to install without an address", async () => {
+    /*
+     * The half of the old rule that was right. A `remote` template describes a coworker living at
+     * somebody's own address, the format has no field that could carry one, and importing it
+     * anyway would silently produce a coworker running here on prose that said it runs elsewhere.
+     */
+    const template = parseBotTemplate(
+      yamlFor({ runtime: "remote", skillSlug: `far-away-${suite}` }),
+    );
     await expect(
-      cold.installBotTemplate({
+      installer().installBotTemplate({
         template,
-        digest,
+        digest: await digested(template),
         actor: importer,
         source: "paste",
         slugDecisions: {},
       }),
     ).rejects.toBeInstanceOf(TemplateEndpointRequiredError);
 
-    const result = await cold.installBotTemplate({
+    expect(
+      await database
+        .select()
+        .from(skills)
+        .where(eq(skills.slug, `far-away-${suite}`)),
+    ).toHaveLength(0);
+  });
+
+  test("an address the importer types is taken, and recorded in the ledger, even where none was asked for", async () => {
+    const template = parseBotTemplate(yamlFor({ skillSlug: `typed-${suite}` }));
+    const result = await installer({ managedAgent: false }).installBotTemplate({
       template,
-      digest,
+      digest: await digested(template),
       actor: importer,
       source: "paste",
       endpoint: "https://renewals.example.com/agui",
@@ -562,21 +651,19 @@ describe("a managed template on a deployment with no Bot in the box", () => {
     });
     created.push(result.agentId);
 
-    const [agent] = await database
-      .select({ configuration: agents.configuration })
-      .from(agents)
-      .where(eq(agents.id, result.agentId))
-      .limit(1);
-    expect(
-      (agent?.configuration as { endpoint?: string } | null)?.endpoint,
-    ).toBe("https://renewals.example.com/agui");
+    const row = await agentRow(result.agentId);
+    expect(row?.type).toBe("remote_ag_ui");
+    expect(row?.configuration?.endpoint).toBe(
+      "https://renewals.example.com/agui",
+    );
 
     /*
-     * The one ask an import answers on the spot, because the importer answered it. The ref is the
+     * Recorded because an address was STORED, not because the plan asked for one. A coworker
+     * dialling somewhere the ledger does not mention is the trail lying by omission. The ref is the
      * host rather than the whole address: a ledger row is read back by people, and the path of an
      * AG-UI endpoint is neither interesting nor always free of something somebody put there.
      */
-    const slot = result.ledger.find((row) => row.kind === "endpoint");
+    const slot = result.ledger.find((entry) => entry.kind === "endpoint");
     expect(slot?.ref).toBe("renewals.example.com");
     expect(slot?.status).toBe("granted");
     expect(slot?.decidedBy).toBe(importer.email);

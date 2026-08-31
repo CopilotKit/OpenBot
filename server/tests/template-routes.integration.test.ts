@@ -83,6 +83,13 @@ const installer = createTemplateInstaller({
   auditStore,
   managedAgentAgUiUrl: managedUrl,
 });
+/** The same installer on the image that has no managed agent process. `appFor` mounts it. */
+const coldInstaller = createTemplateInstaller({
+  database,
+  templateStore,
+  pluginStore,
+  auditStore,
+});
 
 const suite = randomUUID().slice(0, 8);
 const owner: AuthenticatedActor = {
@@ -153,19 +160,29 @@ function actorMiddleware(
  */
 function appFor(
   actor: AuthenticatedActor,
-  options: { components?: boolean } = {},
+  options: {
+    components?: boolean;
+    /**
+     * The recommended one-container image: no managed agent process anywhere.
+     *
+     * The default deployment, and the one the endpoint bug was reported on, so it is mountable here
+     * rather than reachable only through the installer's unit-level seam.
+     */
+    managedAgent?: boolean;
+  } = {},
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   const requireUser = actorMiddleware(actor);
+  const managedAgent = options.managedAgent !== false;
   app.route(
     "/api/templates",
     createTemplateRoutes(
       {
         templateStore,
-        installer,
+        installer: managedAgent ? installer : coldInstaller,
         auditStore,
         executor: database,
-        managedAgent: true,
+        managedAgent,
         grants: pluginStore,
         ...(options.components ? { components: componentStore } : {}),
       },
@@ -404,7 +421,13 @@ afterAll(async () => {
   await database
     .delete(skills)
     .where(
-      inArray(skills.slug, [skillSlug, `other-${suite}`, lateSkill, goneSkill]),
+      inArray(skills.slug, [
+        skillSlug,
+        `other-${suite}`,
+        `cold-${suite}`,
+        lateSkill,
+        goneSkill,
+      ]),
     );
   await database
     .delete(users)
@@ -1021,6 +1044,84 @@ describe("installing", () => {
       .from(pluginGrants)
       .where(eq(pluginGrants.agentId, agentId));
     expect(held.map((row) => row.ref)).toEqual([toolRef]);
+  });
+});
+
+/**
+ * The deployment almost everybody has, on the wire.
+ *
+ * The recommended one-container image runs no managed agent process, and the consent screen used to
+ * demand an address there for a template whose own page said "Runs on this deployment itself." The
+ * two read the same field and disagreed, and the way past the form was to register a stranger's
+ * endpoint — which sent the conversations off the network.
+ */
+describe("installing on a deployment with no Bot in the box", () => {
+  const coldSkill = `cold-${suite}`;
+  const coldSlug = `cold-desk-${suite}`;
+  const source = () => yamlFor({ slug: coldSlug, skill: coldSkill });
+
+  test("the preview asks for no address and says the coworker runs in this process", async () => {
+    const response = await appFor(owner, { managedAgent: false }).request(
+      "/api/templates/preview",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: source() }),
+      },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      plan: {
+        runsOn: string;
+        endpoint: { required: boolean; reason: string | null };
+      };
+    };
+    expect(body.plan.endpoint.required).toBe(false);
+    expect(body.plan.endpoint.reason).toBeNull();
+    expect(body.plan.runsOn).toBe("in_process");
+  });
+
+  test("and the install goes through with no endpoint in the body", async () => {
+    const cold = appFor(owner, { managedAgent: false });
+    const preview = (await (
+      await cold.request("/api/templates/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: source() }),
+      })
+    ).json()) as { digest: string };
+
+    const response = await cold.request("/api/templates/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source: source(),
+        digest: preview.digest,
+        from: "paste",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as {
+      agentId: string;
+      requests: { kind: string }[];
+      plan: { runsOn: string };
+    };
+    createdAgents.push(body.agentId);
+    expect(body.plan.runsOn).toBe("in_process");
+    // No slot was asked for, so the ledger carries no endpoint row claiming somebody filled one.
+    expect(body.requests.some((row) => row.kind === "endpoint")).toBe(false);
+
+    const [row] = await database
+      .select({ type: agents.type, configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, body.agentId))
+      .limit(1);
+    expect(row?.type).toBe("built_in");
+    expect(
+      (row?.configuration as { systemPrompt?: string } | null)?.systemPrompt,
+    ).toBe(
+      "Chase overdue invoices and draft a follow-up for a person to send.",
+    );
   });
 });
 

@@ -142,8 +142,9 @@ export type TemplateRoutesDeps = {
   /**
    * Whether this deployment has a Bot in the box.
    *
-   * A boolean rather than the URL, because the only question the plan asks is whether a coworker
-   * with `runtime: managed` has anywhere to run. The address itself is the installer's business.
+   * A boolean rather than the URL, because the only question the plan asks is WHICH process answers
+   * a coworker with `runtime: managed` — the Bot in the box, or this server in-process. Neither
+   * answer asks the importer for anything, and the address itself is the installer's business.
    */
   managedAgent: boolean;
   /**
