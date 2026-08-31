@@ -1607,6 +1607,17 @@ function galleryEntryDto(entry: CatalogueEntry) {
     title: document.bot.title,
     summary: document.template.summary,
     /*
+     * The SLUG the document carries, never a label. The closed list belongs to the format and the
+     * words beside each entry belong to the screen that draws the chips, so the wire says `sales` and
+     * what "sales" is called is a rendering decision this side has no business making.
+     *
+     * Omitted rather than sent as null, because absence is uncategorised — a template that belongs to
+     * no group, rather than one whose group has no value.
+     */
+    ...(document.template.category
+      ? { category: document.template.category }
+      : {}),
+    /*
      * The drawing the coworker will actually have, so a card previews what importing produces.
      *
      * `boring-avatars` hashes this into a figure, which is why the same seed is the same picture on

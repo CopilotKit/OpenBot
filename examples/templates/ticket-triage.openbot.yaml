@@ -14,6 +14,7 @@ template:
   summary: >-
     Reads an incoming ticket, works out what it actually is, and hands a person a draft reply and a
     reason. Never answers the customer itself.
+  category: customer-success
   license: MIT
 
 bot:

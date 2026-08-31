@@ -501,10 +501,16 @@ export function packBotTemplate(input: PackInput): PackResult {
       version: "1.0",
       summary: draftSummary(roleDescription, title),
       /*
-       * No `author`, `source` or `license`. `template.author` is a claim, and the packer is not the
-       * one entitled to make it: filling it from the owner would put a person's name into a file that
-       * travels, on their behalf, because they pressed Export. A licence is a decision about somebody
-       * else's words. Both are keys the author adds to the draft.
+       * No `author`, `source`, `category` or `license`. `template.author` is a claim, and the packer
+       * is not the one entitled to make it: filling it from the owner would put a person's name into
+       * a file that travels, on their behalf, because they pressed Export. A licence is a decision
+       * about somebody else's words.
+       *
+       * `category` is omitted because a Bot on a deployment has no category to carry — nothing in
+       * `agents` or `agent_profiles` records what kind of work a coworker does, so there is no value
+       * here to pack. Deriving one from the name or the role description would be the packer
+       * guessing, and a guess in this field is a grouping the gallery then files a stranger's
+       * template under on the author's behalf. All are keys the author adds to the draft.
        */
     },
     bot: {

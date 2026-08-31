@@ -12,6 +12,7 @@ template:
   author: openbot
   source: https://github.com/CopilotKit/openbot
   summary: Reads around a question and writes a short brief that names every source it used.
+  category: general
   license: MIT
 
 bot:

@@ -413,6 +413,17 @@ export type GalleryTemplateCard = {
   version: string | null;
   license: string | null;
   source: string | null;
+  /**
+   * Which of the nine categories the file put itself in, as the SLUG. Optional: absent means the
+   * author did not say, and the gallery calls that uncategorised.
+   *
+   * The one field on this card an author supplies that is not free text. The vocabulary is closed
+   * and the server refuses anything outside it, which is why the gallery can group and count by it
+   * without a stranger being able to invent a group, put prose in a chip, or name itself something
+   * that sorts to the front. The words drawn for it are this app's, in `lib/templates/categories`;
+   * a label that travelled would be a second string somebody else controls.
+   */
+  category?: string;
   runtime: TemplateRuntime;
   /** The connector ids it ASKS for. Inert: an ask lands on a ledger, never on a grant table. */
   connectors: string[];

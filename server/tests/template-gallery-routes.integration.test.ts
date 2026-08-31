@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
@@ -120,6 +123,45 @@ function catalogueFor(floor: TemplateInstallers = "anyone"): TemplateCatalogue {
 }
 
 /**
+ * A written-here catalogue, for the properties that are about the FORMAT rather than about the files
+ * this image happens to ship.
+ *
+ * The shipped templates are the right fixture for the round trip and for provenance, and the wrong
+ * one for the category: which group each of them claims is an editorial decision that will change,
+ * and a test asserting a card is filed under `general` would fail the day somebody refiles it.
+ */
+async function catalogueOverDirectory(
+  files: Record<string, string>,
+): Promise<TemplateCatalogue> {
+  const directory = await mkdtemp(join(tmpdir(), "openbot-gallery-"));
+  for (const [name, body] of Object.entries(files)) {
+    await writeFile(join(directory, name), body, "utf8");
+  }
+  return createTemplateCatalogue({
+    directory,
+    allowedSources: new Set(),
+    installerFloor: "anyone",
+    fetch: async () => {
+      throw new Error("No test may reach the network.");
+    },
+  });
+}
+
+/** One template, filed under a group or under none. */
+function templateYaml(slug: string, category?: string): string {
+  return `openbot_template: 1
+template:
+  slug: ${slug}
+  summary: A coworker that does one thing.
+${category ? `  category: ${category}\n` : ""}bot:
+  name: ${slug}
+  title: Desk
+  role_description: Do the one thing, and say which document you used.
+  runtime: managed
+`;
+}
+
+/**
  * The app as it is mounted, one actor and one catalogue at a time.
  *
  * The catalogue is a parameter rather than a module-level singleton because `installers` is state it
@@ -155,6 +197,7 @@ type GalleryCard = {
   name: string;
   author: string | null;
   summary: string;
+  category?: string;
   connectors: string[];
   origin: { kind: string; filename?: string };
 };
@@ -210,6 +253,33 @@ describe("the gallery", () => {
      */
     expect(JSON.stringify(body.templates)).not.toContain("roleDescription");
     expect(JSON.stringify(body.templates)).not.toContain("instructions");
+  });
+
+  test("carries a template's category as the slug, and omits it when there is none", async () => {
+    const catalogue = await catalogueOverDirectory({
+      "filed.openbot.yaml": templateYaml("filed-desk", "operations-finance"),
+      "unfiled.openbot.yaml": templateYaml("unfiled-desk"),
+    });
+    const { body } = await gallery(person, catalogue);
+
+    const filed = body.templates.find((card) => card.slug === "filed-desk");
+    /*
+     * The SLUG, never the label. The gallery groups and filters by this, and the words beside it are
+     * the app's; a card carrying "Operations & Finance" would mean a file got to write the heading.
+     */
+    expect(filed?.category).toBe("operations-finance");
+
+    // Absent rather than null: uncategorised is no group, not a group with no name.
+    const unfiled = body.templates.find((card) => card.slug === "unfiled-desk");
+    expect(unfiled).toBeDefined();
+    expect(unfiled?.category).toBeUndefined();
+
+    // The detail route answers with the same card, so opening a template does not lose its group.
+    const response = await appFor(person, catalogue).request(
+      "/api/templates/gallery/filed-desk",
+    );
+    const detail = (await response.json()) as { entry: GalleryCard };
+    expect(detail.entry.category).toBe("operations-finance");
   });
 
   test("names what it could not read instead of going blank", async () => {

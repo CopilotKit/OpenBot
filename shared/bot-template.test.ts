@@ -6,6 +6,7 @@ import {
   parseBotTemplate,
   serializeBotTemplate,
   STRICT_BOUNDARY,
+  TEMPLATE_CATEGORIES,
   TEMPLATE_LIMITS,
   TemplateRefusedError,
   templateGrantMark,
@@ -31,15 +32,28 @@ function withRoot(extra: string): string {
   return `${MINIMAL}${extra}`;
 }
 
-/** Asserts the refusal code as well as the fact of refusal: a refusal for the wrong reason is a bug. */
-function refusalOf(source: string): string {
+/** The same document filed under one group, for the tests about the closed list. */
+function withCategory(category: string): string {
+  return MINIMAL.replace(
+    "  summary: Chases overdue invoices.",
+    `  summary: Chases overdue invoices.\n  category: ${category}`,
+  );
+}
+
+/** The whole refusal, for the tests that care what its sentence leaves an author able to do. */
+function refusalFor(source: string): TemplateRefusedError {
   try {
     parseBotTemplate(source);
   } catch (error) {
-    if (error instanceof TemplateRefusedError) return error.reason;
+    if (error instanceof TemplateRefusedError) return error;
     throw error;
   }
   throw new Error("the document was accepted, and the test expected a refusal");
+}
+
+/** Asserts the refusal code as well as the fact of refusal: a refusal for the wrong reason is a bug. */
+function refusalOf(source: string): string {
+  return refusalFor(source).reason;
 }
 
 describe("a document the format accepts", () => {
@@ -51,6 +65,20 @@ describe("a document the format accepts", () => {
     expect(template.bot.runtime).toBe("managed");
     expect(template.skills).toEqual([]);
     expect(template.requests).toEqual({ connectors: [], components: [] });
+  });
+
+  test("every category in the closed list travels as the slug it was written as", () => {
+    for (const category of TEMPLATE_CATEGORIES) {
+      expect(parseBotTemplate(withCategory(category)).template.category).toBe(
+        category,
+      );
+    }
+  });
+
+  test("an absent category is uncategorised rather than defaulted to a group", () => {
+    // The difference matters on the gallery: a template nobody filed must not appear under a
+    // heading, and "general" is a group an author chooses rather than one they fall into.
+    expect(parseBotTemplate(MINIMAL).template.category).toBeUndefined();
   });
 
   test("an absent boundary is the strictest one, not the most permissive", () => {
@@ -211,6 +239,27 @@ bot:
     "a forbidden field is named rather than quietly dropped: %s",
     (_name, line) => {
       expect(refusalOf(withRoot(`${line}\n`))).toBe("forbidden_field");
+    },
+  );
+
+  test.each([
+    ["a group nobody defined", "growth-hacking"],
+    ["a sentence where a chip goes", "The best sales bot on the internet"],
+    ["a label instead of a slug", "Customer Success & Support"],
+    ["a value that sorts itself to the top", "aaa-sales"],
+  ])(
+    "a category outside the closed list is refused rather than folded into a group: %s",
+    (_name, value) => {
+      const refusal = refusalFor(withCategory(JSON.stringify(value)));
+      expect(refusal.reason).toBe("bad_type");
+      /*
+       * The message has to carry the list. A refusal that only says the value is wrong leaves an
+       * author guessing at a vocabulary they have no other way to read, and guessing at a closed list
+       * is how a file ends up filed under whichever near-miss happened to parse somewhere else.
+       */
+      for (const category of TEMPLATE_CATEGORIES) {
+        expect(refusal.message).toContain(category);
+      }
     },
   );
 
@@ -531,6 +580,20 @@ template:
     );
   });
 
+  test("moves when the category does, so a refiled template is a changed one", async () => {
+    // The category is on the card a person browses by, so a document that quietly changed groups
+    // between the preview somebody read and the install would be a different document to them.
+    const uncategorised = parseBotTemplate(MINIMAL);
+    const sales = parseBotTemplate(withCategory("sales"));
+    const marketing = parseBotTemplate(withCategory("marketing"));
+    expect(await botTemplateDigest(sales)).not.toBe(
+      await botTemplateDigest(uncategorised),
+    );
+    expect(await botTemplateDigest(sales)).not.toBe(
+      await botTemplateDigest(marketing),
+    );
+  });
+
   test("is stable across Unicode forms, so the digest read is the digest installed", async () => {
     // The same name written two ways: precomposed U+00E9, and e followed by a combining acute. A
     // reviewer sees one string; without normalisation the install would recompute a different digest
@@ -562,6 +625,7 @@ template:
   author: acme-revops
   source: https://github.com/acme/openbot-templates
   summary: Chases overdue invoices and drafts the follow-up.
+  category: sales
   license: Apache-2.0
 bot:
   name: Renewal Desk
@@ -611,6 +675,7 @@ notes: Point this at whichever Drive folder holds your contracts.
   test("omits absent optional keys rather than writing them as null", () => {
     const written = serializeBotTemplate(parseBotTemplate(MINIMAL));
     expect(written).not.toContain("null");
+    expect(written).not.toContain("category");
     expect(written).not.toContain("license");
     expect(written).not.toContain("remote");
   });

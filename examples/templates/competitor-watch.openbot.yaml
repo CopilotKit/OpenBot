@@ -14,6 +14,7 @@ template:
   summary: >-
     Watches a fixed list of competitor pages, says what actually changed since last week, and
     refuses to dress a change up as a conclusion.
+  category: marketing
   license: MIT
 
 bot:

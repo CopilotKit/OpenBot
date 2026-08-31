@@ -2,10 +2,12 @@ import {
   IconBoxSeam,
   IconPlugConnected,
   IconSparkles,
+  IconTag,
 } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
+import { templateCategoryLabel } from "@/lib/templates/categories";
 import type { GalleryTemplateCard } from "@/lib/templates/queries";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +62,7 @@ export function TemplateCard({ card }: { card: GalleryTemplateCard }) {
    */
   const seed = card.avatarSeed || card.slug;
   const hue = hueFor(seed);
+  const category = templateCategoryLabel(card.category);
 
   return (
     <article
@@ -131,6 +134,27 @@ export function TemplateCard({ card }: { card: GalleryTemplateCard }) {
               <span className="min-w-0 truncate font-mono text-[11px] leading-5 text-muted-foreground">
                 {card.source}
               </span>
+            </p>
+          ) : null}
+
+          {/*
+           * THE CATEGORY, and the reason it is not labelled a claim like the two lines above it.
+           *
+           * `author` and `source` are free text and could say anything, which is why each is
+           * introduced by the word that makes it somebody's assertion. A category is one of nine
+           * slugs; the file chose which, and could not have written anything else. There is
+           * nothing here for a reader to doubt, so there is nothing to caveat — and a caveat on
+           * every line teaches people to skip the ones that matter.
+           *
+           * Grouped with the other two facts about what the template IS rather than beside the
+           * name, where a small coloured word next to a Bot's title reads as a badge and starts
+           * competing with the thing somebody came to the card to read. Quiet on purpose: it earns
+           * its place by making the filter chips legible on the card, not by being noticed.
+           */}
+          {category ? (
+            <p className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+              <IconTag aria-hidden className="size-3.5 shrink-0" />
+              <span className="truncate">{category}</span>
             </p>
           ) : null}
 

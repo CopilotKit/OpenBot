@@ -49,6 +49,7 @@ if (!GlobalRegistrator.isRegistered) {
 const { cleanup, render, screen, waitFor } = await import(
   "@testing-library/react"
 );
+const userEvent = (await import("@testing-library/user-event")).default;
 
 /**
  * A card whose author claim is an address, which is the hostile shape.
@@ -67,6 +68,7 @@ const CARD = {
   version: "1.3",
   license: "Apache-2.0",
   source: "https://github.com/acme/openbot-templates",
+  category: "sales",
   runtime: "managed",
   connectors: ["google-drive"],
   components: [],
@@ -260,4 +262,276 @@ test("an empty gallery says so; a failed read says something else", async () => 
       "The template gallery could not be read.",
     ),
   );
+});
+
+/**
+ * A CATALOGUE RATHER THAN A HANDFUL, which is the case the browse controls exist for.
+ *
+ * Five templates in four groups, two of them sharing a category and one carrying none, and one
+ * arriving from a pinned source rather than from the disk. That is the smallest list where every
+ * rule on this screen is observable at once: a count that must match what a chip draws, a search
+ * that must narrow, a category that must not exist because nobody used it, and an origin section
+ * that must disappear when a filter empties it.
+ */
+const CATALOGUE = [
+  { ...CARD },
+  {
+    ...CARD,
+    slug: "pipeline-coach",
+    name: "Pipeline Coach",
+    title: "Deal Desk",
+    summary: "Reads the week's deals and writes the standup note.",
+    category: "sales",
+    origin: { kind: "directory", filename: "pipeline-coach.openbot.yaml" },
+  },
+  {
+    ...CARD,
+    slug: "build-warden",
+    name: "Build Warden",
+    title: "Release Engineering",
+    summary: "Watches the build and explains what broke.",
+    category: "engineering",
+    origin: { kind: "directory", filename: "build-warden.openbot.yaml" },
+  },
+  {
+    ...CARD,
+    slug: "night-porter",
+    name: "Night Porter",
+    title: "On Call",
+    summary: "Takes the pager overnight and writes up the morning.",
+    category: undefined,
+    origin: { kind: "directory", filename: "night-porter.openbot.yaml" },
+  },
+  {
+    ...CARD,
+    slug: "hedge-trimmer",
+    name: "Hedge Trimmer",
+    title: "Platform",
+    summary: "Prunes branches nobody has touched since the spring.",
+    category: "engineering",
+    origin: {
+      kind: "source",
+      sourceId: "acme",
+      sha: "b".repeat(40),
+      path: "hedge-trimmer.openbot.yaml",
+    },
+  },
+];
+
+/** One rendered card is one `<article>`, which is what makes counting them a fair reading. */
+function cardsOnScreen(): string[] {
+  return [...document.querySelectorAll("article")].map(
+    (card) => card.querySelector("h3")?.textContent ?? "",
+  );
+}
+
+/**
+ * The property that makes a count worth drawing at all.
+ *
+ * A chip says a number and then draws a grid, and those two are produced by different code — the
+ * number by a tally, the grid by a filter. If they ever disagree the chip is lying about the only
+ * thing it claims, so this presses every chip in the row and checks the grid against the number the
+ * chip announced rather than against a number written into this test.
+ */
+test("every chip draws exactly as many cards as its count says", async () => {
+  servedTemplates = CATALOGUE;
+  await renderGallery();
+  await screen.findByText("Renewal Desk");
+
+  const names = screen
+    .getAllByRole("button", { pressed: false })
+    .concat(screen.getAllByRole("button", { pressed: true }))
+    .map((chip) => chip.textContent ?? "");
+  // The vocabulary's own order, and only the categories somebody actually used.
+  expect(names).toContain("All5");
+  expect(names).toContain("Sales2");
+  expect(names).toContain("Engineering2");
+  expect(names).toContain("Uncategorised1");
+  // Nothing draws a chip for a category no template is in.
+  expect(names.some((name) => name.startsWith("Marketing"))).toBe(false);
+
+  for (const [label, count] of [
+    ["All", 5],
+    ["Sales", 2],
+    ["Engineering", 2],
+    ["Uncategorised", 1],
+  ] as const) {
+    await userEvent.click(
+      screen.getByRole("button", { name: `${label} ${count}` }),
+    );
+    expect(cardsOnScreen()).toHaveLength(count);
+  }
+});
+
+/** The selected chip says so in the DOM, not only in its colour. */
+test("one chip is selected at a time, and it is marked as pressed", async () => {
+  servedTemplates = CATALOGUE;
+  await renderGallery();
+  await screen.findByText("Renewal Desk");
+
+  await userEvent.click(screen.getByRole("button", { name: "Sales 2" }));
+  expect(
+    screen
+      .getByRole("button", { name: "Sales 2" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("button", { name: "All 5" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+
+  await userEvent.click(screen.getByRole("button", { name: "Engineering 2" }));
+  expect(
+    screen
+      .getByRole("button", { name: "Sales 2" })
+      .getAttribute("aria-pressed"),
+  ).toBe("false");
+  expect(
+    screen
+      .getByRole("button", { name: "Engineering 2" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+});
+
+test("typing narrows the grid to the templates that answer it", async () => {
+  servedTemplates = CATALOGUE;
+  await renderGallery();
+  await screen.findByText("Renewal Desk");
+
+  await userEvent.type(screen.getByLabelText("Search templates"), "pipeline");
+  await waitFor(() => expect(cardsOnScreen()).toEqual(["Pipeline Coach"]));
+
+  // The summary is searched too, not only the name.
+  await userEvent.clear(screen.getByLabelText("Search templates"));
+  await userEvent.type(screen.getByLabelText("Search templates"), "pager");
+  await waitFor(() => expect(cardsOnScreen()).toEqual(["Night Porter"]));
+});
+
+/**
+ * The counts follow the search, which is the same promise as before under a narrower list: a chip
+ * that still said 2 while the search had left one would be a number disagreeing with the screen
+ * beside it.
+ */
+test("a search restates the chip counts rather than leaving them stale", async () => {
+  servedTemplates = CATALOGUE;
+  await renderGallery();
+  await screen.findByText("Renewal Desk");
+
+  await userEvent.type(screen.getByLabelText("Search templates"), "standup");
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Sales 1" })).not.toBeNull(),
+  );
+  /*
+   * The categories the search emptied keep their place and say so. They are not removed, because a
+   * chip row that reshuffles under the cursor on every keystroke is a row somebody misclicks.
+   */
+  const emptied = screen.getByRole("button", { name: "Engineering 0" });
+  expect(emptied.hasAttribute("disabled")).toBe(true);
+  await userEvent.click(screen.getByRole("button", { name: "Sales 1" }));
+  expect(cardsOnScreen()).toEqual(["Pipeline Coach"]);
+});
+
+test("a search that matches nothing says what was searched for, and the control clears it", async () => {
+  servedTemplates = CATALOGUE;
+  await renderGallery();
+  await screen.findByText("Renewal Desk");
+
+  await userEvent.type(screen.getByLabelText("Search templates"), "sourdough");
+  await waitFor(() => expect(cardsOnScreen()).toHaveLength(0));
+
+  const body = document.body.textContent ?? "";
+  expect(body).toContain("No template matches");
+  // The words that produced the emptiness, said back rather than left for the reader to recall.
+  expect(body).toContain("sourdough");
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "Clear the search" }),
+  );
+  await waitFor(() => expect(cardsOnScreen()).toHaveLength(5));
+  expect(document.body.textContent ?? "").not.toContain("No template matches");
+});
+
+test("a chip that matches nothing says so too, and the control shows everything again", async () => {
+  servedTemplates = CATALOGUE;
+  await renderGallery();
+  await screen.findByText("Renewal Desk");
+
+  await userEvent.click(screen.getByRole("button", { name: "Sales 2" }));
+  await userEvent.type(screen.getByLabelText("Search templates"), "pager");
+  await waitFor(() => expect(cardsOnScreen()).toHaveLength(0));
+
+  const body = document.body.textContent ?? "";
+  expect(body).toContain("pager");
+  expect(body).toContain("Sales");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Clear the search and the filter" }),
+  );
+  await waitFor(() => expect(cardsOnScreen()).toHaveLength(5));
+});
+
+/**
+ * WHERE A TEMPLATE CAME FROM SURVIVES THE FILTER.
+ *
+ * "In the box" and "From a pinned source" are provenance — code on this disk against a repository
+ * somebody registered — and no amount of narrowing by job may blur the two. Filtering happens
+ * INSIDE the sections, and a section a filter has emptied disappears rather than standing as a
+ * heading over nothing.
+ */
+test("filtering narrows inside the origin sections, and empties one out of existence", async () => {
+  servedTemplates = CATALOGUE;
+  await renderGallery();
+  await screen.findByText("Hedge Trimmer");
+  expect(screen.queryByText("From a pinned source")).not.toBeNull();
+
+  await userEvent.click(screen.getByRole("button", { name: "Sales 2" }));
+  await waitFor(() =>
+    expect(screen.queryByText("From a pinned source")).toBeNull(),
+  );
+  expect(screen.queryByText("In the box")).not.toBeNull();
+
+  // And the other way: an engineering cut keeps both, one card in each.
+  await userEvent.click(screen.getByRole("button", { name: "Engineering 2" }));
+  await waitFor(() =>
+    expect(screen.queryByText("From a pinned source")).not.toBeNull(),
+  );
+  expect(cardsOnScreen()).toEqual(["Build Warden", "Hedge Trimmer"]);
+});
+
+/**
+ * The closed vocabulary, asserted where it matters: at the point a slug becomes something drawn.
+ *
+ * The server refuses a category outside the list, so a strange one here means the two halves are
+ * different versions. The browser must not paper over that by printing the file's own string as a
+ * label — that would be an author writing the words in a chip, which is the whole thing the closed
+ * list prevents.
+ */
+test("a category this build does not know is uncategorised, never a chip of its own", async () => {
+  servedTemplates = [
+    { ...CARD },
+    {
+      ...CARD,
+      slug: "wildcat",
+      name: "Wildcat",
+      title: "Unknown",
+      summary: "Carries a category this build has never heard of.",
+      category: "cryptomining",
+      origin: { kind: "directory", filename: "wildcat.openbot.yaml" },
+    },
+  ];
+  await renderGallery();
+  await screen.findByText("Wildcat");
+
+  expect(document.body.textContent ?? "").not.toContain("cryptomining");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Uncategorised 1" }),
+  );
+  expect(cardsOnScreen()).toEqual(["Wildcat"]);
+});
+
+/** The card carries the words for its category, so a chip and a card agree about what a template is. */
+test("the card states its category in this app's words, not the file's slug", async () => {
+  servedTemplates = CATALOGUE;
+  await renderGallery();
+  const card = (await screen.findByText("Renewal Desk")).closest("article");
+  expect(card?.textContent ?? "").toContain("Sales");
+  expect(card?.textContent ?? "").not.toContain("sales");
 });

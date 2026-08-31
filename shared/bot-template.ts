@@ -80,6 +80,36 @@ export type TemplateFiles = "none" | "read_only" | "read_write";
 export type TemplateBrowser = "none" | "read_only" | "full";
 export type TemplateMcp = "none" | "read_only" | "read_write";
 
+/**
+ * The groups a template may file itself under, and the whole of them.
+ *
+ * A CLOSED LIST rather than free text, because a category is not a description — it is what the
+ * gallery groups and filters by, so it is a control surface and a stranger's file gets to write into
+ * it. Free text would let a document invent a grouping nobody chose, put a sentence of prose where a
+ * chip goes, or name itself something that sorts to the top of the list. A value outside this list is
+ * refused rather than folded into "general", so an author who meant a group that does not exist is
+ * told, instead of quietly landing somewhere they did not pick.
+ *
+ * SLUGS ONLY. The words a person reads beside each one are a rendering decision and live with the
+ * surface that renders them: a template says `sales`, and what "sales" is called in a chip is not
+ * something a file gets to have an opinion about.
+ *
+ * Absent is uncategorised, which is a real answer and not a defaulted one.
+ */
+export const TEMPLATE_CATEGORIES = [
+  "general",
+  "sales",
+  "marketing",
+  "customer-success",
+  "recruiting",
+  "operations-finance",
+  "product",
+  "engineering",
+  "life",
+] as const;
+
+export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
+
 export type BotTemplateRemote = {
   /**
    * The header NAME only. `auth-header.ts` already keeps it in unencrypted metadata because a header
@@ -143,6 +173,8 @@ export type BotTemplateMeta = {
   author?: string;
   source?: string;
   summary: string;
+  /** Which group the gallery files this under. Absent is uncategorised. */
+  category?: TemplateCategory;
   license?: string;
 };
 
@@ -448,6 +480,24 @@ function choice<T extends string>(
   return value as T;
 }
 
+/**
+ * A value from a closed list that a document is allowed to leave out.
+ *
+ * Absence is the only thing this decides. Anything actually written goes through `choice`, so a value
+ * outside the list is refused with the same code and the same sentence as every other closed list in
+ * the format, naming what was allowed — the distinction between "did not say" and "said something
+ * that is not a thing" is exactly the one an optional closed list has to keep.
+ */
+function optionalChoice<T extends string>(
+  block: Record<string, unknown>,
+  key: string,
+  where: string,
+  allowed: readonly T[],
+): T | undefined {
+  if (block[key] === undefined || block[key] === null) return undefined;
+  return choice(block, key, where, allowed);
+}
+
 function strings(value: unknown, where: string, max: number): string[] {
   const entries = list(value, where);
   if (entries.length > max)
@@ -502,6 +552,7 @@ const META_KEYS = [
   "author",
   "source",
   "summary",
+  "category",
   "license",
 ] as const;
 const BOT_KEYS = [
@@ -563,6 +614,12 @@ function parseMeta(value: unknown): BotTemplateMeta {
     author: optionalText(block, "author", "template", 80),
     source: optionalHttpsUrl(block, "source", "template"),
     summary: text(block, "summary", "template", TEMPLATE_LIMITS.SUMMARY),
+    category: optionalChoice(
+      block,
+      "category",
+      "template",
+      TEMPLATE_CATEGORIES,
+    ),
     license: optionalText(block, "license", "template", 40),
   };
 }
@@ -1002,6 +1059,7 @@ export function serializeBotTemplate(template: BotTemplate): string {
   if (template.template.author) meta.author = template.template.author;
   if (template.template.source) meta.source = template.template.source;
   meta.summary = template.template.summary;
+  if (template.template.category) meta.category = template.template.category;
   if (template.template.license) meta.license = template.template.license;
 
   const bot: Record<string, unknown> = {

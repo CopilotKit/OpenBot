@@ -171,6 +171,20 @@ describe("what a template carries", () => {
     expect(template.template.source).toBeUndefined();
     expect(template.template.license).toBeUndefined();
   });
+
+  test("no category, because a Bot on a deployment has none to carry", () => {
+    /*
+     * Nothing in `agents` or `agent_profiles` records what kind of work a coworker does, so a
+     * category here could only be the packer guessing from a name or a paragraph of prose — and the
+     * guess would file a stranger's template under a gallery heading the author never chose. Left
+     * for the author to write into the draft.
+     */
+    const { template } = packBotTemplate(
+      packInput({ profile: profile({ name: "Sales Desk" }) }),
+    );
+    expect(template.template.category).toBeUndefined();
+    expect(serializeBotTemplate(template)).not.toContain("category");
+  });
 });
 
 describe("where the coworker runs", () => {

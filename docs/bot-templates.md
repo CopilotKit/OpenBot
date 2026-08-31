@@ -47,6 +47,7 @@ template:
   author: acme-revops               # a CLAIM. Rendered as a claim. Never verified.
   source: https://github.com/acme/openbot-templates
   summary: Chases overdue invoices and drafts the follow-up.
+  category: sales                   # a CLOSED list. Any other value is refused.
   license: Apache-2.0
 
 bot:
@@ -108,6 +109,7 @@ half-understood by an older deployment.
 | `template.author` | no | 80 | A claim, rendered as one, never verified. |
 | `template.source` | no | 200 | Must be `https://` with a plain host and no credential. Rendered as text, never dialled. |
 | `template.summary` | yes | 300 | Up to three lines on a gallery card, the description heading the template's own page, and in full on the consent screen. |
+| `template.category` | no | — | One of `general`, `sales`, `marketing`, `customer-success`, `recruiting`, `operations-finance`, `product`, `engineering`, `life`. A closed list rather than free text, because the gallery groups and filters by it: a stranger's file must not be able to invent a grouping, put prose in a chip, or sort itself to the top. Absent is uncategorised. |
 | `template.license` | no | 40 | A claim like the rest of the block. |
 | `bot.name` | yes | 80 | Checked by the same helper the edit form uses, so an import can never land a Bot that screen would refuse to save. |
 | `bot.title` | yes | 120 | |
