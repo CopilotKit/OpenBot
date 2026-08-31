@@ -14,8 +14,15 @@ import {
   transcriptMessages,
 } from "@/components/channels/transcript-messages";
 import { agentListQueryOptions } from "@/lib/agents/queries";
-import { recordChannelActivityMutationOptions } from "@/lib/channels/mutations";
-import type { AgentChannel } from "@/lib/channels/queries";
+import {
+  recordChannelActivityMutationOptions,
+  setChannelBusyMutationOptions,
+} from "@/lib/channels/mutations";
+import {
+  type AgentChannel,
+  type ChannelSummary,
+  channelKeys,
+} from "@/lib/channels/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { ConversationProvider } from "@/lib/copilot/conversation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
@@ -23,6 +30,7 @@ import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
 import { readThreadMessages } from "@/lib/copilot/thread-messages";
 import { useSkillCommands } from "@/lib/plugins/skill-commands";
+import { queryClient } from "@/query-client";
 import { newId } from "../../lib/new-id";
 
 /**
@@ -182,6 +190,73 @@ export function ChannelChat({
     };
   }, [copilotkit, agent, isReady, channel.threadId, runtimeAgentId]);
 
+  /*
+   * A turn nobody here streamed, surfaced while the channel is open.
+   *
+   * A relayed handoff answer runs on the server and lands in this thread with no browser attached.
+   * The roster hears about it — the activity socket patches the channel-list cache — but this
+   * transcript restores history once, on mount, and would show the new turn only after leaving and
+   * coming back. So it watches that same cache: when this channel's `lastMessageAt` advances to a
+   * moment a Bot authored, the durable history is read again. Riding the roster's own cache rather
+   * than a second subscription means "the sidebar updated" and "the transcript refreshes" are the
+   * one signal, and cannot drift apart.
+   *
+   * APPENDED BY ID, NOT COMPARED BY LENGTH. The stored history is not the local transcript: it
+   * keeps only what `readableTurns` can parse, and the local side keeps tool lines the platform
+   * does not hand back — so after a headless turn the stored read can be shorter than the screen
+   * and still hold the news. What is new is exactly the messages whose ids this transcript has
+   * never seen; appending them leaves everything local intact, and this tab's own turns echo back
+   * with ids already on screen and append nothing.
+   *
+   * Retried briefly, because the roster is patched when the turn is on record with the runner and
+   * the platform's read of the thread can be a beat behind it.
+   */
+  useEffect(() => {
+    const authoredAt = () => {
+      const cache = queryClient.getQueryData<{
+        pages: { channels: ChannelSummary[] }[];
+      }>(channelKeys.list());
+      const summary = cache?.pages
+        .flatMap((page) => page.channels)
+        .find((row) => row.id === channel.id);
+      // Only a Bot's turn is news here; a person's own line arrives through the run that sent it.
+      if (!summary || summary.lastMessageAgentId === null) return null;
+      return summary.lastMessageAt;
+    };
+
+    let lastSeen = authoredAt();
+
+    const pull = () => {
+      void (async () => {
+        for (const delayMs of [0, 750, 1500]) {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+          const stored = await readThreadMessages(
+            channel.threadId,
+            runtimeAgentId,
+          );
+          const current = agentRef.current;
+          const seen = new Set(current.messages.map((message) => message.id));
+          const fresh = stored.messages.filter(
+            (message) => !seen.has(message.id),
+          );
+          if (fresh.length === 0) continue;
+          current.setMessages([...current.messages, ...fresh]);
+          return;
+        }
+      })();
+    };
+
+    return queryClient.getQueryCache().subscribe(() => {
+      const at = authoredAt();
+      if (at && at !== lastSeen) {
+        lastSeen = at;
+        pull();
+      }
+    });
+  }, [channel.id, channel.threadId, runtimeAgentId]);
+
   // Tool calls from this conversation act on this coworker's own computer.
   useActiveBot(runtimeAgentId);
 
@@ -222,6 +297,24 @@ export function ChannelChat({
    * Tell the roster what was just said. Failures here must not block the conversation.
    */
   const recordActivity = useMutation(recordChannelActivityMutationOptions());
+
+  /*
+   * Show this channel as working on the roster while its own turn runs.
+   *
+   * The server cannot see a person's turn begin — the runtime does not tell it — so the browser
+   * reports it, keyed on whether a turn is in flight. The server broadcasts it to every member, so
+   * the row shows the dots even on a tab that has since navigated elsewhere; a run that outlives
+   * this tab clears itself when the roster next refetches, which is the acceptable failure for a
+   * transient hint. Not cleared on unmount on purpose: a turn keeps running server-side after the
+   * person leaves the channel, and clearing here would drop the indicator while the work goes on.
+   */
+  const setBusy = useMutation(setChannelBusyMutationOptions());
+  const busy = turnsInFlight > 0;
+  // Keyed on the busy transition alone; `setBusy.mutate` is a stable handle, not a dependency.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: firing on the busy transition only.
+  useEffect(() => {
+    setBusy.mutate({ channelId: channel.id, busy });
+  }, [busy, channel.id]);
   const report = (text: string, agentId: string | null) => {
     const trimmed = text.trim();
     if (!trimmed) return;

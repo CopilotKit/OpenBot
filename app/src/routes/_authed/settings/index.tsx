@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import React from "react";
 import {
   PageRows,
   PageSection,
@@ -12,7 +13,9 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
 
 export const Route = createFileRoute("/_authed/settings/")({
   component: RouteComponent,
@@ -51,6 +54,38 @@ function RouteComponent() {
               />
             </ItemActions>
           </Item>
+        </PageRows>
+      </PageSection>
+      {/*
+       * Drawn from the same registry the listeners match against, so this list is what the keys
+       * actually do rather than what somebody remembered they did. Read-only on purpose: these
+       * are not rebindable, and a row with nothing to click says so by having nothing to click.
+       */}
+      <PageSection title="Keyboard shortcuts">
+        <PageRows>
+          {HOTKEYS.map((hotkey, index) => (
+            <React.Fragment key={hotkey.id}>
+              <Item size="sm">
+                <ItemContent>
+                  <ItemTitle>{hotkey.label}</ItemTitle>
+                  <ItemDescription>{hotkey.description}</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <span className="flex gap-1">
+                    {formatHotkey(hotkey.combo).map((part) => (
+                      <kbd
+                        className="rounded-md border bg-muted px-1.5 py-0.5 font-sans text-xs text-muted-foreground"
+                        key={part}
+                      >
+                        {part}
+                      </kbd>
+                    ))}
+                  </span>
+                </ItemActions>
+              </Item>
+              {index !== HOTKEYS.length - 1 && <Separator />}
+            </React.Fragment>
+          ))}
         </PageRows>
       </PageSection>
     </PageShell>

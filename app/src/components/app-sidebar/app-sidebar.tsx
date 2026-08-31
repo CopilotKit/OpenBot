@@ -199,6 +199,7 @@ function ChannelRow({
         }
         pinned={channel.pinned}
         unread={unread}
+        busy={channel.busy ?? false}
       />
     </motion.div>
   );
