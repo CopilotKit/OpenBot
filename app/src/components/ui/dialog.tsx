@@ -47,13 +47,27 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 
 function DialogContent({
   className,
+  overlayClassName,
   children,
   showCloseButton = true,
   ...props
-}: DialogPrimitive.Popup.Props & { showCloseButton?: boolean }) {
+}: DialogPrimitive.Popup.Props & {
+  showCloseButton?: boolean;
+  /**
+   * Restyles the backdrop behind this popup. A dialog stacked over another passes a heavier one
+   * here, so the dialog underneath reads as background rather than as a competing surface.
+   *
+   * Setting this also forces the backdrop to exist: Base UI skips backdrops on nested dialogs,
+   * and a stacked dialog is precisely the caller that asks for one.
+   */
+  overlayClassName?: string;
+}) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay
+        className={overlayClassName}
+        forceRender={overlayClassName !== undefined}
+      />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
