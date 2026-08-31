@@ -122,7 +122,11 @@ describe("dryRunAgainstHistory", () => {
     expect(report.changes[0]?.would).toBe("allowed");
   });
 
-  test("a failed action was permitted first, so it counts as allowed", () => {
+  test("a permitted action that failed is counted once, from its decision row", () => {
+    // The gateway records a permitted-but-failed action twice: the decision row written before the
+    // attempt, and a failure row written when it did not succeed. Both carry the same action, and
+    // both are returned by the trail query, so scoring the failure row too would count the action a
+    // second time. Its baseline is still "allowed" — from the decision row that permitted it.
     const deny: ActionPolicy = {
       mode: "enforce",
       deny: ['tool.name == "computer_click"'],
@@ -130,13 +134,48 @@ describe("dryRunAgainstHistory", () => {
     };
     const report = dryRunAgainstHistory(deny, [
       event({
-        id: "f",
+        id: "dec",
+        eventType: "computer.action_allowed",
+        payload: CLICK_SUBMIT,
+      }),
+      event({
+        id: "fail",
         eventType: "computer.action_failed",
         payload: CLICK_SUBMIT,
       }),
     ]);
+    expect(report.scanned).toBe(1);
     expect(report.wouldRefuse).toBe(1);
+    expect(report.changes).toHaveLength(1);
+    expect(report.changes[0]?.id).toBe("dec");
     expect(report.changes[0]?.was).toBe("allowed");
+  });
+
+  test("a dry-run refusal that was carried out and then failed invents no change", () => {
+    // In dry-run mode a refused action is still carried out, so a refused action can also fail. The
+    // decision row says "refused"; the failure row, read on its own, would read as "allowed" and a
+    // candidate that refuses the same action would then look like a new refusal. Skipping the failure
+    // row leaves only the honest baseline: it was refused, a policy that refuses it changes nothing.
+    const denyClicks: ActionPolicy = {
+      mode: "enforce",
+      deny: ['tool.name == "computer_click"'],
+      allow: ["true"],
+    };
+    const report = dryRunAgainstHistory(denyClicks, [
+      event({
+        id: "dec",
+        eventType: "computer.action_refused",
+        payload: CLICK_SUBMIT,
+      }),
+      event({
+        id: "fail",
+        eventType: "computer.action_failed",
+        payload: CLICK_SUBMIT,
+      }),
+    ]);
+    expect(report.scanned).toBe(1);
+    expect(report.wouldRefuse).toBe(0);
+    expect(report.unchanged).toBe(1);
   });
 
   test("a rule naming a command does not refuse a click, because absent facts are neutral", () => {
