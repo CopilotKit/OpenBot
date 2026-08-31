@@ -2895,18 +2895,34 @@ export function createPluginStore(options: PluginStoreOptions) {
       };
 
       /*
-       * A refusal is written here, because there is no attempt to wait for.
+       * A refusal is written on the POLICY's answer, not on whether the call was then let through.
        *
        * This deployment declining is the whole event, and it is recorded before the throw so that a
        * refusal cannot be lost by the caller's error handling.
+       *
+       * In `dry-run` the policy still refuses and the mode forwards anyway, which is the whole point
+       * of the mode: `evaluateActionPolicy` returns `allowed: false` with `forward: true` so a rule
+       * can be tried against live traffic before it starts refusing anybody. Writing this row on
+       * `forward` therefore recorded nothing at all on this surface for exactly the traffic an
+       * operator switched dry-run on to measure — the browser gateway keys its row on
+       * `decision.allowed` and does record it — so `Blocked` on the audit page, and every
+       * `eventType=mcp.call_rejected` query behind it, answered "this rule would refuse none of your
+       * tool calls" about calls it would refuse. The rule then looked inert, and enforcing it
+       * started refusing Bots with no warning in the trail.
+       *
+       * `decision.carriedOut` is what tells the two rows apart: false is a call this deployment
+       * stopped, true is one dry-run recorded and let past. The outcome row below is unchanged, so a
+       * forwarded call still says separately whether the vendor answered.
        */
-      if (!verdict.forward) {
+      if (!verdict.allowed) {
         await recordAuditEvent(auditStore, {
           eventType: "mcp.call_rejected",
           targetType: "mcp_tool",
           targetId: input.ref,
           payload: decided,
         });
+      }
+      if (!verdict.forward) {
         throw new PluginRefusedError(verdict.reason, verdict.matched);
       }
 

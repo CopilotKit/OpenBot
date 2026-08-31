@@ -8,7 +8,23 @@ import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
  *
  * The query remains the source of truth; socket events only patch its cache. Reconnects refetch the
  * list to recover events missed while disconnected.
+ *
+ * Two connections can drop and only one is this one. `onopen` covers this socket. The other is the
+ * server's subscription to Postgres, which stays invisible here — so the server sends a resync when
+ * it comes back, answered with the same refetch.
  */
+
+/** The server saying it may have missed announcements, so the roster we hold may be wrong. */
+export type ChannelResyncEvent = { resync: true };
+
+/** What arrives on the socket. `resync` is the discriminant; an activity event never carries it. */
+export type ChannelSocketMessage = ChannelActivityEvent | ChannelResyncEvent;
+
+export function isResync(
+  message: ChannelSocketMessage,
+): message is ChannelResyncEvent {
+  return (message as ChannelResyncEvent).resync === true;
+}
 
 export type ChannelActivityEvent = {
   channelId: string;
@@ -155,12 +171,21 @@ export function useChannelEvents() {
       };
 
       socket.onmessage = (message) => {
-        let activity: ChannelActivityEvent;
+        let parsed: ChannelSocketMessage;
         try {
-          activity = JSON.parse(message.data as string);
+          parsed = JSON.parse(message.data as string);
         } catch {
           return;
         }
+
+        // Refetch rather than patch: there is no delta to apply. Checked before anything reads
+        // `channelId`, because this message has none.
+        if (isResync(parsed)) {
+          void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
+          return;
+        }
+
+        const activity = parsed;
 
         /*
          * The list is paged, so the cache holds pages rather than one array.
