@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The audit page no longer says "Allowed" about six kinds of refusal
+
+A hop one Bot was not allowed to make, an endpoint this deployment would not dial, a rotation the
+vault refused and a sign-in it turned away were all drawn as **Allowed**, in the muted colour every
+ordinary row uses, and none of them appeared under **Blocked**. The same for a hop that ran out of
+attempts and a question that reached nobody, which are "Did not happen" rather than allowed. The
+page recognised six refusal types and the six added since were never added to it. Refusals now read
+as refusals, the two saved views are built from the same lists the rows are labelled from, and a
+refusal added later is added in one place or in none.
+
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the
