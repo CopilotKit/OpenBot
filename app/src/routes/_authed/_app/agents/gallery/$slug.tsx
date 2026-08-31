@@ -1,6 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  IconChevronRight,
+  IconPlugConnected,
+  IconSparkles,
+  IconTag,
+} from "@tabler/icons-react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import {
+  CeilingGrid,
+  ConnectorAsk,
+  Glance,
+  SkillCard,
+} from "@/components/agents/template-anatomy";
 import {
   Claim,
   STRANGER_WROTE_IT,
@@ -10,6 +22,7 @@ import { PageSection, PageShell } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { ClientError } from "@/lib/client";
 import { describeBoundary } from "@/lib/templates/boundary";
+import { templateCategoryLabel } from "@/lib/templates/categories";
 import { galleryTemplateQueryOptions } from "@/lib/templates/queries";
 
 /**
@@ -100,6 +113,9 @@ export function TemplateDetail({ slug }: { slug: string }) {
   const { entry, template, digest, yaml } = detail.data;
   const seed = entry.avatarSeed || entry.slug;
   const ceiling = describeBoundary(template.boundary);
+  const categoryLabel = entry.category
+    ? (templateCategoryLabel(entry.category) ?? "Not filed")
+    : "Not filed";
 
   return (
     <PageShell
@@ -132,10 +148,46 @@ export function TemplateDetail({ slug }: { slug: string }) {
           <p className="font-medium text-sm">{entry.title}</p>
           <p className="text-muted-foreground text-xs">
             {entry.runtime === "managed"
-              ? "Runs on this deployment's own Bot."
+              ? "Runs on this deployment itself."
               : "Runs at an address the importer supplies."}
           </p>
         </div>
+      </div>
+
+      {/*
+       * THE THREE QUESTIONS SOMEBODY ARRIVES WITH, answered before the prose starts.
+       *
+       * Everything below this row is a stranger's words and deserves to be read slowly. This row is
+       * not: it is the format's own structured fields, and a person deciding whether this template
+       * is even the right one should not have to read four screens of instructions to learn that it
+       * asks for two connectors and cannot touch a file.
+       */}
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Glance
+          icon={<IconSparkles className="size-4" />}
+          label="Skills it brings"
+          value={
+            template.skills.length === 1
+              ? "1 skill"
+              : `${template.skills.length} skills`
+          }
+        />
+        <Glance
+          icon={<IconPlugConnected className="size-4" />}
+          label="Connectors it asks for"
+          value={
+            template.requests.connectors.length === 0
+              ? "None"
+              : template.requests.connectors
+                  .map((connector) => connector.id)
+                  .join(", ")
+          }
+        />
+        <Glance
+          icon={<IconTag className="size-4" />}
+          label="Kind of work"
+          value={categoryLabel}
+        />
       </div>
 
       <PageSection
@@ -177,65 +229,41 @@ export function TemplateDetail({ slug }: { slug: string }) {
               : `Its ${template.skills.length} skills`
           }
         >
-          <div className="grid gap-5">
+          <div className="grid gap-2">
             {template.skills.map((skill) => (
-              <div className="grid gap-2" key={skill.slug}>
-                <div>
-                  <p className="font-medium text-sm">{skill.title}</p>
-                  <p className="font-mono text-muted-foreground text-xs">
-                    /{skill.slug}
-                  </p>
-                </div>
-                <p className="text-muted-foreground text-sm">{skill.summary}</p>
-                <Verbatim capped={false}>{skill.instructions}</Verbatim>
-                {skill.tools.length > 0 ? (
-                  <p className="text-muted-foreground text-xs">
-                    It names {skill.tools.join(", ")}. Naming a tool is not
-                    being given it.
-                  </p>
-                ) : null}
-              </div>
+              <SkillCard
+                instructions={skill.instructions}
+                key={skill.slug}
+                slug={skill.slug}
+                summary={skill.summary}
+                title={skill.title}
+                tools={skill.tools}
+              />
             ))}
           </div>
         </PageSection>
       ) : null}
 
-      {/*
-       * THE ASKS, WITH THE AUTHOR'S OWN REASONS, and resolved against nothing.
-       *
-       * Whether this deployment has Drive is a question about the deployment, and it is answered on
-       * the consent screen where it changes what the button does. Answering it here as well would put
-       * a second resolution path in front of a stranger's file, and two paths that must agree are two
-       * paths that eventually do not.
-       */}
       <PageSection
         description="What the author says this coworker needs. Every line is a request and none of it is a grant: importing writes these to a ledger as asked-for, and somebody decides each one afterwards on the screens that already decide grants."
-        title="What it asks for"
+        title="What it can reach"
       >
-        <div className="grid gap-4">
+        <div className="grid gap-2">
           {template.requests.connectors.map((connector) => (
-            <div className="grid gap-1.5" key={connector.id}>
-              <p className="font-mono font-medium text-sm">{connector.id}</p>
-              <p className="text-muted-foreground text-sm">{connector.why}</p>
-              {connector.tools.length > 0 ? (
-                <ul className="grid gap-1">
-                  {connector.tools.map((tool) => (
-                    <li className="text-xs" key={tool.ref}>
-                      <span className="font-mono">{tool.ref}</span>
-                      <span className="text-muted-foreground">
-                        {" "}
-                        — {tool.why}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
+            <ConnectorAsk
+              id={connector.id}
+              key={connector.id}
+              tools={connector.tools}
+              why={connector.why}
+            />
           ))}
 
           {template.requests.components.map((component) => (
-            <div className="grid gap-1.5" key={component.name}>
-              <p className="font-mono font-medium text-sm">{component.name}</p>
+            <div
+              className="grid gap-1.5 rounded-lg border border-border bg-card p-3"
+              key={component.name}
+            >
+              <p className="font-medium font-mono text-sm">{component.name}</p>
               <p className="text-muted-foreground text-sm">{component.why}</p>
             </div>
           ))}
@@ -254,13 +282,22 @@ export function TemplateDetail({ slug }: { slug: string }) {
         description="The ceiling the author wrote into the file. This deployment compiles it into rules scoped to this one coworker when it is imported, and they only ever subtract from what a Bot may already do."
         title="What it will be allowed to do"
       >
-        <ul className="grid gap-1">
-          {ceiling.map((sentence) => (
-            <li className="text-muted-foreground text-sm" key={sentence}>
-              {sentence}
-            </li>
-          ))}
-        </ul>
+        <div className="grid gap-3">
+          <CeilingGrid boundary={template.boundary} />
+          {/*
+           * The sentences stay, and they are the authority. `describeBoundary` is shared with the
+           * consent screen and the Boundaries screen precisely so one ceiling is never described
+           * two ways, and the grid above is an index over the same object rather than a second
+           * wording — it compresses, it does not paraphrase.
+           */}
+          <ul className="grid gap-1">
+            {ceiling.map((sentence) => (
+              <li className="text-muted-foreground text-sm" key={sentence}>
+                {sentence}
+              </li>
+            ))}
+          </ul>
+        </div>
       </PageSection>
 
       <PageSection
@@ -306,7 +343,18 @@ export function TemplateDetail({ slug }: { slug: string }) {
         description="Serialised from the document this deployment parsed. It is what the consent screen would show you, and what you could have been handed by any other means."
         title="The file"
       >
-        <Verbatim capped={false}>{yaml}</Verbatim>
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-1 text-muted-foreground text-sm hover:text-foreground">
+            <IconChevronRight
+              aria-hidden
+              className="size-4 transition-transform group-open:rotate-90"
+            />
+            Show the file
+          </summary>
+          <div className="mt-2">
+            <Verbatim capped={false}>{yaml}</Verbatim>
+          </div>
+        </details>
       </PageSection>
     </PageShell>
   );
