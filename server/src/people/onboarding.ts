@@ -5,8 +5,10 @@ import { users } from "../db/schema";
 /**
  * Where one person is in first-run onboarding.
  *
- * A null `completedAt` is what gates the app into /onboarding; `step` is where the wizard resumes
- * if they left halfway through.
+ * A null `completedAt` is what gates the app into /onboarding. `step` is stored and served but
+ * NOTHING RESUMES FROM IT YET: the wizard keeps its step in browser state while its content is
+ * still being designed, so this stays 0 through a whole run. It exists so resuming is a frontend
+ * change when the wizard settles, not a migration.
  */
 export type OnboardingStatus = {
   step: number;

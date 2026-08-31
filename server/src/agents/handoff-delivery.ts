@@ -252,6 +252,21 @@ export function createHandoffDelivery(options: {
       }
       try {
         /*
+         * The conversation that ASKED, not the one it is answering in. The addressed Bot is joining
+         * something already in progress and has to have read it; its own conversation is new and
+         * empty, and reading that would tell it nothing.
+         *
+         * READ BEFORE THE LOCK IS TAKEN, deliberately. The lock is on `where.threadId` and this read
+         * is of `work.threadId` — a conversation the lock never protected — and the read is the one
+         * call here that throws on a platform error. Thrown while holding the lock it would leak it
+         * until the TTL: on a relay that lock is the asking conversation itself, so the person could
+         * not type for two minutes and the retry would collide with the hop's own leftover hold.
+         */
+        const prior = conversationOnly(
+          await history({ threadId: work.threadId, actorId: work.actorId }),
+        );
+
+        /*
          * The conversation's lock, before a single event is streamed.
          *
          * The platform's run id is the one it hands back, not the one asked for: it is the identity the
@@ -287,14 +302,6 @@ export function createHandoffDelivery(options: {
          * answered "how can I help?" to a question it had never been shown, in a transcript that
          * displayed the question directly above the answer.
          */
-        /*
-         * The conversation that ASKED, not the one it is answering in. The addressed Bot is joining
-         * something already in progress and has to have read it; its own conversation is new and
-         * empty, and reading that would tell it nothing.
-         */
-        const prior = conversationOnly(
-          await history({ threadId: work.threadId, actorId: work.actorId }),
-        );
         const asked = [
           /*
            * A backwards hop gets the tail, not the whole. Its task already carries everything it has

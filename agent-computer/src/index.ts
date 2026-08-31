@@ -18,13 +18,9 @@ import {
 } from "./control";
 import { identity } from "./identity";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
-import {
-  type InputMessage,
-  type Screencast,
-  startScreencast,
-} from "./screencast";
+import { type InputMessage, startScreencast } from "./screencast";
 import { createShell } from "./shell";
-import { isCurrentViewer } from "./viewer";
+import { createViewerSlot, type ViewerSlot } from "./viewer";
 import {
   createWorkspace,
   WorkspaceFileError,
@@ -112,13 +108,15 @@ type BotSession = {
   control: Control;
   /** This Bot's snapshot generation. See the note above on staleness. */
   snapshotId: number;
-  /** The one live screen viewer for this Bot, if a person is watching. */
-  viewer?: {
-    socket: unknown;
-    cast: Screencast;
-    /** Stops the loop that keeps the cast pointed at whatever page the Bot is actually on. */
-    follow?: ReturnType<typeof setInterval>;
-  };
+  /** The page this Bot was last handed, so a change of page can retire its refs. */
+  livePage?: Page;
+  /**
+   * This Bot's live screen, and who owns it.
+   *
+   * Always present, because the slot is the answer to "is anybody watching" as well as the holder of
+   * whoever is. An empty slot is a Bot nobody is watching; there is no second way to say that.
+   */
+  viewer: ViewerSlot;
 };
 
 const sessions = new Map<string, BotSession>();
@@ -133,10 +131,16 @@ const sessions = new Map<string, BotSession>();
  * Only entries with no live browser and nobody watching are dropped: the state is the generation
  * counter and the control handover, and both belong to a running browser. A Bot whose browser has
  * been closed starts a fresh session next time, which is what starting a fresh browser means.
+ *
+ * "Nobody watching" starts at the claim, not at the first frame. A viewer whose browser is still
+ * launching holds a claim and no cast, and reading occupancy from the cast would call that Bot idle
+ * for the whole cold launch: this runs on the path that adds a session, so another Bot connecting
+ * then would drop the control handover out from under a screen that is seconds from live. It stays
+ * occupied until teardown finishes, for the same reason at the other end.
  */
 function forgetIdleSessions(): void {
   for (const [botId, session] of [...sessions.entries()]) {
-    if (session.viewer) continue;
+    if (session.viewer.occupied()) continue;
     if (profiles.isLive(botId)) continue;
     sessions.delete(botId);
   }
@@ -145,7 +149,11 @@ function forgetIdleSessions(): void {
 function sessionFor(botId: string): BotSession {
   const existing = sessions.get(botId);
   if (existing) return existing;
-  const created: BotSession = { control: createControl(), snapshotId: 0 };
+  const created: BotSession = {
+    control: createControl(),
+    snapshotId: 0,
+    viewer: createViewerSlot(),
+  };
   sessions.set(botId, created);
   // Cheap, and only ever on the path that adds one, so the map cannot grow without this running.
   if (sessions.size > 32) forgetIdleSessions();
@@ -187,7 +195,23 @@ const workspace = createWorkspace(process.env.WORKSPACE_DIR ?? "/workspace");
  * `chromium.launch()` gives a fresh anonymous profile every time. Persistent profiles live on a
  * mounted volume so sign-in state survives the container.
  */
-const profiles = createProfiles(process.env.PROFILES_DIR ?? "/profiles");
+/**
+ * The browsers, and what a closing one takes with it.
+ *
+ * Every close announces itself here, whether it came from a request, the cap, or the idle sweep, and
+ * the live screen watching that Bot comes down with it. Hanging this off the close rather than
+ * calling it from the stop and reset handlers is what covers the two closes no request makes: a
+ * viewer that outlived one of those kept a 1Hz loop asking for a page, which starts a browser, so
+ * the Bot was immune to the idle timeout and came straight back after a cap eviction.
+ *
+ * `sessions.get`, never `sessionFor`: a Bot with no session has nobody watching, and inventing one
+ * here would put an entry in the map on the path that closes browsers, which is where the map is
+ * meant to shrink.
+ */
+const profiles = createProfiles(
+  process.env.PROFILES_DIR ?? "/profiles",
+  (botId) => sessions.get(botId)?.viewer.releaseAll(COMPUTER_STOPPED),
+);
 // Rooted in the same workspace the file tools use, so a command and a written file see one
 // directory rather than two.
 const shell = createShell(process.env.WORKSPACE_DIR ?? "/workspace");
@@ -210,7 +234,13 @@ const DEFAULT_BOT_ID = (() => {
 })();
 
 async function currentPage(botId: string): Promise<Page> {
-  return profiles.page(botId);
+  const session = sessionFor(botId);
+  const page = await profiles.page(botId);
+  // A ref names an element on the page it was taken from, so moving to a window the site opened has
+  // to retire the outstanding ones exactly as a navigation does, or a click lands on the wrong document.
+  if (session.livePage && session.livePage !== page) session.snapshotId += 1;
+  session.livePage = page;
+  return page;
 }
 
 /**
@@ -330,19 +360,17 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/**
- * One live viewer at a time per Bot, so a reconnect replaces rather than stacks, and two people
- * watching two different Bots do not fight over one cast.
- *
- * A second cast on the same page would have Chrome encoding every frame twice and both sockets acking
- * independently, which stalls both. One person drives; one cast.
- */
-async function stopViewer(session: BotSession): Promise<void> {
-  const current = session.viewer;
-  session.viewer = undefined;
-  if (current?.follow) clearInterval(current.follow);
-  await current?.cast.stop();
-}
+/** What a person watching is told when the browser they were watching went away. */
+const COMPUTER_STOPPED =
+  "This computer stopped, so the screen ended. Start it again to carry on watching.";
+
+/** What a person is told when their screen is still opening and they have already started typing. */
+const SCREEN_STILL_STARTING =
+  "This screen is still starting. Try that again in a moment.";
+
+/** What a person is told when they act on a screen that is no longer theirs, or no longer anything. */
+const SCREEN_NO_LONGER_LIVE =
+  "This screen is no longer live. Reopen it to carry on watching.";
 
 /** How often the cast checks that it is still showing the page the Bot is on. */
 const FOLLOW_INTERVAL_MS = 1_000;
@@ -363,15 +391,31 @@ serve<StreamData>({
   websocket: {
     async open(ws) {
       const session = sessionFor(ws.data.botId);
+      /*
+       * Claimed before anything is awaited, and that order is the fix.
+       *
+       * Below this line the Bot's browser may have to be launched, which takes long enough for a
+       * client to connect and go away inside it. A close arriving in that window used to find nothing
+       * installed and so did nothing, while this function carried on to install a cast and a 1Hz
+       * interval for a socket that had already gone: no second close ever came, and the interval went
+       * on relaunching a browser somebody had stopped. With the claim taken first there is always
+       * something for that close to release, and everything below goes through the claim and is
+       * refused once it is gone.
+       */
+      const claim = session.viewer.claim(ws, (reason) => {
+        try {
+          ws.send(JSON.stringify({ type: "error", error: reason }));
+        } catch {
+          // Best effort. The socket may already be gone, which is not a reason to stop tearing down.
+        }
+      });
       try {
-        await stopViewer(session);
-
         const send = (frame: unknown) => {
           // A closed socket starts a fresh cast on the next connection.
           try {
             ws.send(JSON.stringify(frame));
           } catch {
-            void stopViewer(session);
+            void session.viewer.release(ws);
           }
         };
 
@@ -383,20 +427,25 @@ serve<StreamData>({
         const attach = async () => {
           const target = await currentPage(ws.data.botId);
           if (target === casting) return;
-          const previous = session.viewer;
           const cast = await startScreencast(target, send);
+          // The claim stops a cast it refuses, so a launch that lost the screen leaks nothing.
+          if (!(await claim.install(cast))) return;
           casting = target;
-          session.viewer = { socket: ws, cast, follow: previous?.follow };
-          // The old cast stops after the replacement is running, so the screen does not go blank.
-          await previous?.cast.stop().catch(() => undefined);
         };
 
         await attach();
         const follow = setInterval(() => {
           void attach().catch(() => undefined);
         }, FOLLOW_INTERVAL_MS);
-        if (session.viewer) session.viewer.follow = follow;
+        if (!claim.setFollow(() => clearInterval(follow))) return;
       } catch (error) {
+        /*
+         * Released before the socket is told, because this path is reachable in exactly the timing
+         * the claim exists for. A claim left behind here would keep the session occupied for the life
+         * of the process, and `forgetIdleSessions` could never sweep it: the unbounded growth that
+         * function was written to stop, reintroduced by the error path of the fix for it.
+         */
+        await session.viewer.release(ws);
         ws.send(
           JSON.stringify({
             type: "error",
@@ -409,7 +458,30 @@ serve<StreamData>({
 
     async message(ws, raw) {
       const session = sessionFor(ws.data.botId);
-      if (!session.viewer) return;
+      /*
+       * Whose screen this is, asked before anything is done with the input.
+       *
+       * A superseded socket used to dispatch through whatever the session held, so a replaced
+       * window's typing landed in the page the current viewer was watching. It heard nothing about
+       * it either, because the old missing-viewer check returned before reaching anything that could
+       * report, which is why this answers the sender rather than returning quietly.
+       *
+       * Starting and gone are told apart deliberately. Both own no cast, and answering them the same
+       * way tells somebody whose screen is still opening that their session ended.
+       */
+      const standing = session.viewer.standingOf(ws);
+      if (standing.state !== "casting") {
+        ws.send(
+          JSON.stringify({
+            type: "error",
+            error:
+              standing.state === "starting"
+                ? SCREEN_STILL_STARTING
+                : SCREEN_NO_LONGER_LIVE,
+          }),
+        );
+        return;
+      }
       let message: InputMessage;
       try {
         message = JSON.parse(String(raw)) as InputMessage;
@@ -420,13 +492,17 @@ serve<StreamData>({
       // without this check, anything that could reach this port could drive the browser while a Bot
       // was working, which is the one thing the control state exists to prevent.
       //
+      // Owning the screen is not permission either, which is why this stands after the ownership
+      // question above and not instead of it: the two refuse different things, and the one asked
+      // first only decides whether the input has anywhere to land.
+      //
       // Refuse with an error so the surface can explain why input is ignored.
       if (!session.control.humanMayDrive()) {
         ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
         return;
       }
       try {
-        await session.viewer.cast.send(message);
+        await standing.cast.send(message);
       } catch (error) {
         // Reported rather than swallowed. A dispatch that fails means the person's input did nothing,
         // and they must not be left believing it landed.
@@ -447,11 +523,13 @@ serve<StreamData>({
     },
 
     async close(ws) {
-      const session = sessionFor(ws.data.botId);
-      // Only the socket that is casting. A superseded one closing after its replacement has started
-      // would otherwise stop the new viewer; see viewer.ts.
-      if (!isCurrentViewer(session.viewer, ws)) return;
-      await stopViewer(session);
+      // Names the socket, so it can only ever give up its own screen. A superseded socket closing
+      // after its replacement has started releases nothing; see viewer.ts.
+      //
+      // `get`, not `sessionFor`: a socket closing for a Bot with no session has nothing to release,
+      // and creating one here would add a map entry on a teardown path, which is the direction the
+      // map is meant to shrink in.
+      await sessions.get(ws.data.botId)?.viewer.release(ws);
     },
   },
   async fetch(request, server) {

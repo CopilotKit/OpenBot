@@ -103,8 +103,31 @@ export function toLangChainMessages(input: RunAgentInput): BaseMessage[] {
     }
   }
 
+  /*
+   * A run that carries no human turn is answered by OpenAI and refused by the strict providers.
+   *
+   * OpenAI tolerates a history that opens on an assistant or tool message. Anthropic and the strict
+   * OpenAI-compatible providers (z.ai GLM among them) require the first non-system message to be a
+   * human one, and will not answer a history that is only deltas: an assistant turn and its tool
+   * results with nothing a person said to respond to. A follow-up run continuing after a tool result
+   * is exactly that shape, so on those providers it came back empty and the run ended in silence.
+   *
+   * A neutral continuation turn gives them one to answer. It is appended only when the history holds
+   * no human turn at all, so a normal conversation is untouched, and OpenAI — which already answered
+   * the same history — sees no change beyond one trailing line asking it to continue.
+   */
+  const hasHumanTurn = messages.some(
+    (message): message is HumanMessage => message instanceof HumanMessage,
+  );
+  if (!hasHumanTurn) {
+    messages.push(new HumanMessage(CONTINUE_TURN));
+  }
+
   return messages;
 }
+
+/** The continuation a strict provider needs when a run carries only deltas. See toLangChainMessages. */
+const CONTINUE_TURN = "Continue from where the conversation above left off.";
 
 function parseArguments(raw: string): Record<string, unknown> {
   try {
