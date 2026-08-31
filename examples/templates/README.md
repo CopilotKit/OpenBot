@@ -74,6 +74,21 @@ CI runs the same command in the `static` job, so a file that does not parse fail
 rather than somebody else's import — where the refusal is correct, arrives at the worst possible
 moment, and is the author's mistake being reported to a stranger.
 
+Nothing downstream fails loudly either, which is the other half of why the check matters. The
+gallery reads this directory a file at a time: one that does not parse is logged as
+`template-skipped` with the parser's own reason and passed over, and every other file still loads.
+That is deliberate, because one author's typo must not stop somebody else's deployment booting —
+but it means the consequence of shipping a broken file is a template that is quietly not in the
+gallery, which nobody goes looking for. The check is where that becomes something a person sees.
+The same is true of a second file claiming a slug another one here already uses: the first keeps
+the name and the second is passed over, so name the file after the template inside it and the check
+will hold you to it.
+
 The wider catalogue is not this directory. Templates beyond the seed belong in
 `jerelvelarde/awesome-openbot-templates`, curated on its own cadence; this directory stays small
-enough that a reviewer can hold all of it in their head.
+enough that a reviewer can hold all of it in their head. A file there is held to the list above and
+to this same script, vendored there as an Action so the two cannot drift. Two things differ. A
+deployment reads that repository through a manifest at `openbot-templates.json` and reads nothing
+else, so a template added without being named in it is invisible — generate the manifest from the
+directory rather than keeping it by hand. And a deployment is pinned to a commit, so a fix lands
+for somebody only when an administrator moves their pin.

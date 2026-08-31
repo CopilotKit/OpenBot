@@ -41,6 +41,9 @@ at `agent-langgraph` on a laptop.
 | `PORT`               | `3001`                             | API server port.                                                    |
 | `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
 | `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
+| `OPENBOT_TEMPLATE_DIR` | `../examples/templates`          | Bot templates shipped in the image, resolved from `server/`. A directory that is not there is an empty gallery, and a file that does not parse is named in the log and passed over, rather than either stopping the deployment. |
+| `OPENBOT_TEMPLATE_SOURCES` | empty                        | Comma-separated `owner/repo` an administrator may register as a template source. Nothing is fetched from the network until a repository is both named here and pinned to a commit in the product. The screen renders this list and cannot widen it. |
+| `OPENBOT_TEMPLATE_INSTALLERS` | `anyone`                  | Who may install a template: `anyone` or `admin`. A floor the product may raise and may never lower. |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project.          |
 | `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
 | `OPENAI_BASE_URL`    | unset                              | OpenAI-compatible endpoint that key is spent against. See below.    |

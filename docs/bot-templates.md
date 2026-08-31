@@ -166,11 +166,35 @@ An author who wrote no boundary did not decide one, and the safe reading of "did
 "may do anything". `mcp` is the exception, and is `read_only` rather than `none`, because an MCP
 grant is refused by absence anyway.
 
-**The ceiling is not yet enforced.** Computer actions are gated by who may use the Bot plus the
-deployment-wide action policy, and the shipped default permits everything. Until the boundary
-compiler ships, an imported Bot can browse, read and write files and run shell commands exactly like
-a Bot you built yourself. Write the block anyway — it is what the consent screen shows and what the
-compiler will read — and narrow the deployment on `/admin/boundaries` in the meantime.
+**The ceiling is enforced.** Each line of the vocabulary is compiled at import into a deny clause
+this deployment wrote, scoped to the one Bot the file arrived with: `bot.id == "<the new Bot>" &&
+(…)`. The permissive end of a key compiles to nothing at all, because a ceiling only ever subtracts
+and a stored rule saying a coworker *may* run commands would read on the Boundaries screen as though
+a stranger's file had conferred something. Host lists compile to equality tests rather than to
+patterns: a pattern function throws on something it cannot parse, a throwing expression in a deny
+list counts as a match, and a generated clause that matched everything would refuse every action the
+coworker ever attempted rather than the navigation it was about.
+
+The clauses are not written into the deployment's own action policy, and that is a storage decision
+rather than a tidy one. That policy is one row for everybody, replaced wholesale by the next
+administrator who saves the Boundaries screen with no version column in between — so a per-Bot clause
+kept there would be erased by an unrelated save and the coworker would quietly come uncaged, with
+nothing anywhere saying it had happened. They live in `template_boundaries` instead. The policy store
+composes the two lists for evaluation and for nothing else, and `/admin/boundaries` renders them in a
+read-only group, **Applied by an import**, which says in a sentence that saving that screen neither
+adds nor removes any of them. Retracting the import retires them in one act.
+
+Every clause is evaluated before the import commits, against a synthetic context and through the same
+engine that will judge it afterwards, and one that throws or answers with anything other than a
+boolean refuses the whole import rather than being stored. No Bot at all is the right outcome there:
+a coworker running looser than the screen its importer read is worse than an import that did not
+land.
+
+Two limits on all of this, both said on the consent screen and both read from the live policy. The
+ceiling only subtracts, so wherever the author left a key at its permissive end the coworker inherits
+whatever this deployment allows — which, on the shipped policy, is everything. And a deployment set
+to record what it would have refused rather than refuse it does not enforce these clauses either:
+that setting governs the whole evaluation, and they are judged by it like any other rule.
 
 ## Export
 
@@ -224,8 +248,9 @@ The consent screen has a fixed order, and the first section is the one that matt
    type and the sentence that every message anyone sends this coworker is sent to that address.
 4. **What it is asking for.** Every request with the author's `why`, each tagged as not granted by
    this install. There is no checkbox; granting is a separate act on a separate screen.
-5. **What it will be allowed to do.** The boundary in plain English, with anything looser than the
-   strict default flagged.
+5. **What it will be allowed to do.** The boundary in plain English, said as sentences rather than in
+   the vocabulary's words, with what this deployment does about it read from the live policy: whether
+   it refuses what it matches, and whether the deployment allows everything around it.
 6. **What this install will not do.**
 
 `POST /api/templates/install` carries the digest the preview returned, and the server recomputes it
@@ -254,7 +279,9 @@ Imported skills are the importer's, with `origin: 'template'`. Grants an import 
 `granted_by = template:<first twelve characters of the digest>`, mirroring the tenant package's own
 sentinel, which is what makes retraction exact: `DELETE /api/templates/imports/:agentId` takes back
 only what this import gave and leaves a grant an administrator made by hand untouched. It does not
-delete the Bot or any skill.
+delete the Bot or any skill. The ceiling goes with the grants, in the same act: a coworker that no
+longer holds what the template gave it is not left narrowed by what that template asked for, and the
+retired clauses stay on the trail as `template.boundary_removed` rather than disappearing.
 
 | Route | Who | Purpose |
 | --- | --- | --- |
@@ -311,7 +338,7 @@ and readable afterwards. There is no allowlist of names and no escaping.
 | A template overwrites somebody's `/` command | An import never installs onto a slug that is taken. |
 | A template ships executable component code | Component source is not a key, in any phase. |
 | Auto-update turns one bad template into mass compromise | There is no update channel. Re-importing creates a separate Bot, and an installed Bot no longer refers to its template. |
-| Prompt injection in the prose steers the Bot | Only partly closed. Nothing evaluates prose; the firewall is at the tool call. What is closed: the invisible-character refusal, verbatim unabridged rendering, an importer-owned private Bot, and — once it ships — the compiled per-Bot boundary. |
+| Prompt injection in the prose steers the Bot | Only partly closed. Nothing evaluates prose; the firewall is at the tool call. What is closed: the invisible-character refusal, verbatim unabridged rendering, an importer-owned private Bot, and the compiled per-Bot boundary, which is this deployment's own rules rather than the author's. |
 | Publisher compromise, typosquatting | Not defended, and not defensible without identity infrastructure. `template.author` is a claim. For a file somebody hands you, the model is that you read it. |
 
 Under `OPENBOT_SINGLE_USER` every authorization gate here is vacuous, because everyone is the
@@ -334,3 +361,109 @@ Three ways, and none of them is a service OpenBot runs.
 
 Moving a pin is the only update mechanism, it is a deliberate act, and it changes nothing already
 installed. That is what makes the absence of an update channel safe rather than merely cheap.
+
+The second and third are the catalogue: what `/agents/gallery` lists, and what `/admin/templates`
+configures. A gallery entry is a stranger's file that arrived by a different road, so opening one
+runs the preview and the install through every refusal a paste goes through. There is no search, no
+install count and no rating: there is nothing to count, and a count is a thing to forge.
+
+### The directory in the image
+
+`OPENBOT_TEMPLATE_DIR` names it, defaulting to `../examples/templates` and resolved from `server/`
+exactly as `TENANT_PACKAGE_DIR` is. The `Dockerfile` copies `examples/` into the image, so this is
+populated on a deployment that has no network at all and never registers a source.
+
+Every `.yaml` and `.yml` file in it is measured before it is read and parsed on its own. **A file
+that does not parse is passed over, named, and logged as `template-skipped` with the parser's own
+refusal reason, and the rest of the directory still loads.** That is the one deliberate divergence
+from the tenant package loader, which lets a malformed `agents.yaml` stop the process before it
+serves. A package is one operator's own configuration and a deployment running half of it is worse
+than one that did not come up; a template directory is many authors' files, and one person's typo
+must not stop somebody else's deployment booting. It is the judgement the package sync already makes
+for a colliding skill slug: name what was passed over, and keep going.
+
+Two files claiming one slug is the same case — first taker keeps the name, the second is passed over
+as `duplicate_slug` — because the alternative makes what a gallery shows depend on the order a
+directory happened to come back in. A directory that is not there at all is an empty gallery with a
+skip naming it, never a refusal to start.
+
+A skip is data as well as a log line. Every listing carries what it could not read alongside what it
+could, so the gallery can say "three templates, one skipped" rather than leaving somebody to notice
+an absence.
+
+### A pinned git source
+
+The catalogue beyond the seed is `jerelvelarde/awesome-openbot-templates`, a public repository of
+`*.openbot.yaml` files curated on its own cadence. An administrator registers it on
+`/admin/templates` as `owner/repo` **pinned to a full 40-character commit sha**.
+
+**Nothing is fetched from the network unless an administrator has registered a source**, and two
+things have to be true before one can be. The repository must be named in `OPENBOT_TEMPLATE_SOURCES`,
+a comma-separated allowlist that **ships empty** and that the screen renders but cannot widen — the
+`INITIAL_ADMIN_EMAILS` shape, where the deployment's configuration decides and the product shows the
+decision. And the registration must carry a commit, not a branch or a tag: `main` is a name whoever
+owns that repository can repoint after an administrator has read the files, which is exactly the
+mechanism behind the supply-chain compromises this format has no version of. Handles are lowercased
+by the same function on both sides, so the allowlist cannot be evaded by capitalising a letter.
+
+The reason for the allowlist is that a self-hosted product which reaches a third party on first boot
+because its vendor shipped a default has made that decision on its operator's behalf. This one does
+not.
+
+Fetching is server-side, always, from `raw.githubusercontent.com` at the pinned sha. A gallery
+rendered from the browser would give everybody looking at it a third-party origin they did not
+choose, and would show the source each viewer's address.
+
+`raw.githubusercontent.com` serves one file at a time and cannot list a directory, so a source says
+what it holds in a manifest at `openbot-templates.json`, an object with a `templates` array of paths.
+A source that publishes no manifest holds nothing, rather than this deployment falling back to
+something looser. The caps are numbers this deployment chose rather than ones the source did: 200
+files, 4 MiB across a listing, 64 KiB of manifest and 200 characters of path. A breached cap or a
+manifest that is not one refuses the whole listing, because a manifest read only as far as the cap
+would drop files silently and let the source decide which survived. A single file that cannot be
+fetched, names a path that is not a plain relative path to a YAML file inside the repository, or does
+not parse is skipped and named, exactly as in the directory.
+
+A listing is cached under `owner/repo@sha`. That is sound precisely because a sha names one immutable
+tree: moving the pin produces a different key rather than an invalidation somebody has to remember to
+perform, and it is the only way the contents a deployment sees ever change.
+
+### Who may install
+
+`OPENBOT_TEMPLATE_INSTALLERS` is `anyone` or `admin`, and `anyone` is the default. Everything an
+install writes — the Bot, its skills, and the grants that pair the two — is what `POST /api/agents`,
+`POST /api/plugins/skills` and `POST /api/plugins/grants` already permit the same person one act at a
+time. There is no fourth call, so requiring an administrator would be a ceremony around acts that
+person can already perform.
+
+A deployment that wants the ceremony anyway sets the variable, and what it sets is a **floor**: the
+screen may raise the setting to `admin` and may never lower it back. An operator who wrote
+`OPENBOT_TEMPLATE_INSTALLERS=admin` into their configuration has to be able to rely on it holding,
+and a restriction any administrator can click away is one that will be clicked away by whoever finds
+it inconvenient. Where the floor is in force the control is rendered disabled, saying where it came
+from, as an administrator named in `INITIAL_ADMIN_EMAILS` is.
+
+### The gallery, and installing out of it
+
+The gallery is the directory first and then each registered source in turn, with a slug going to
+whoever offered it first and every later claim listed as skipped beside the name of what already
+holds it. A source that cannot be read at all — a refusal, a timeout, a proxy answering with
+something that is not a response — is reported the same way rather than emptying the screen: a
+deployment's own in-box templates do not vanish because a third party is having a bad morning.
+
+Installing from the gallery posts a slug and the digest that was shown, and **the document comes
+back out of the catalogue on the server** rather than off the wire. Trusting a posted document would
+make "this came from the gallery" a thing anybody could write into the provenance row that an
+administrator later reads when deciding whether a coworker came from somewhere this deployment
+vouches for. The digest still has to match, so a source that moved between the consent screen and
+the button is a 409 exactly as an edited paste is.
+
+| Route | Who | Purpose |
+| --- | --- | --- |
+| `GET /api/templates/gallery` | Signed in | What this deployment offers, and what it could not read. |
+| `GET /api/templates/gallery/:slug` | Signed in | One entry, as the document it is and the file it came from. |
+| `GET /api/admin/templates/settings` | Administrator | Who may install, the floor beneath that, the repositories the environment permits, and the ones registered. |
+| `PUT /api/admin/templates/settings` | Administrator | Raise who may install. A refusal names what is still in force. |
+| `POST /api/admin/templates/sources` | Administrator | Pin a repository the gallery may read from. |
+| `DELETE /api/admin/templates/sources` | Administrator | Forget one. |
+| `GET /api/admin/templates/imports` | Administrator | What this deployment has imported. |
