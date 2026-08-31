@@ -17,6 +17,7 @@ import { ActivityLog } from "@/components/computer/activity-log";
 import { ComputerView } from "@/components/computer/computer-view";
 import { useNeedsYou } from "@/components/computer/needs-you";
 import { DetailPanel } from "@/components/layout/detail-panel";
+import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { markChannelReadMutationOptions } from "@/lib/channels/mutations";
 import {
@@ -177,6 +178,7 @@ function RouteComponent() {
         <div className="h-12 border-b border-border sticky top-0 flex flex-row items-center justify-between px-3 gap-2">
           {/* Keyed on the displayed name so cold channel loads animate the resolved name, not the id. */}
           <div className="flex min-w-0 items-center gap-1.5">
+            <SidebarToggle />
             <motion.div
               animate={{ opacity: 1 }}
               className="shrink-0"

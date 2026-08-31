@@ -2,6 +2,7 @@ import { CopilotChat } from "@copilotkit/react-core/v2";
 import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
@@ -76,6 +77,7 @@ function BotChat({ agentId, name }: { agentId: string; name: string }) {
 
   return (
     <div className="flex h-screen flex-col">
+      <SidebarToggleBar />
       <header className="border-b px-6 py-3">
         <div className="flex items-baseline justify-between">
           {/*

@@ -24,6 +24,13 @@ export type ChannelActivityEvent = {
    * made in another tab or on another replica.
    */
   pinned?: boolean;
+  /**
+   * A turn started or ended in this channel. Absent on an ordinary activity event.
+   *
+   * Carries no message: it patches only the row's `busy` flag, so the roster can show a working
+   * indicator without disturbing the preview or the order.
+   */
+  busy?: boolean;
 };
 
 /** The infinite query's cache, which holds pages rather than one array. */
@@ -83,6 +90,22 @@ export function applyChannelEvent(
     if (previous.pinned === activity.pinned) return data;
     const channels = page.channels.slice();
     channels[index] = { ...previous, pinned: activity.pinned };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
+
+  /*
+   * A busy signal patches the one field it is about, and never re-sorts.
+   *
+   * The spread below would carry this event's null message onto the row and wipe the preview. Busy
+   * is also not activity — a channel does not jump to the top of the roster because a turn started
+   * in it — so the order is left exactly as it was.
+   */
+  if (activity.busy !== undefined) {
+    if ((previous.busy ?? false) === activity.busy) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, busy: activity.busy };
     const pages = data.pages.slice();
     pages[holdingPage] = { ...page, channels };
     return { ...data, pages };

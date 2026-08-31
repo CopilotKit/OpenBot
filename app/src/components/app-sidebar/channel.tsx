@@ -43,6 +43,7 @@ export const Channel = memo(function Channel({
   lastMessageAt,
   pinned,
   unread,
+  busy,
 }: {
   channelId: string;
   participantIds: string[];
@@ -51,6 +52,7 @@ export const Channel = memo(function Channel({
   lastMessageAt?: string;
   pinned: boolean;
   unread: boolean;
+  busy: boolean;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -110,7 +112,11 @@ export const Channel = memo(function Channel({
             }}
           >
             <div className="">
-              <ChannelAvatar participantIds={participantIds} size={32} />
+              <ChannelAvatar
+                participantIds={participantIds}
+                size={32}
+                typing={busy}
+              />
             </div>
             <div className="flex-col min-w-0 flex-1">
               <div className="flex flex-row items-center justify-between gap-2">

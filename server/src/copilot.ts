@@ -1014,6 +1014,15 @@ export function mountCopilotRuntime(
   agentFetch?: AgentFetch,
   /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
   handoffForActor?: (actorId: string) => HandoffForRun,
+  /**
+   * Told when a run starts and ends on a thread, so a channel can show it is working.
+   *
+   * The universal seam: every run the runtime processes — a person's own turn, a headless hop —
+   * takes and gives back the thread lock, and it does so on the server, so a person who sends a
+   * message and navigates away still lights the channel they left. A side effect only: it is never
+   * awaited in the lock path and a failure in it never touches whether the lock was taken.
+   */
+  onRunBusy?: (input: { threadId: string; busy: boolean }) => void,
 ) {
   const { intelligence } = config.runtime;
 
@@ -1086,6 +1095,23 @@ export function mountCopilotRuntime(
     ...(config.accessibility
       ? { telemetryProperties: { accessibility_title: "OpenBot" } }
       : {}),
+    /*
+     * What lets a Bot answer with an interface it wrote itself.
+     *
+     * This one flag is the whole difference between a Bot that draws and a Bot that describes
+     * markup it cannot show. The middleware it turns on does not give the model the tool — the
+     * browser does that — it reads the arguments of the `generateSandboxedUi` call as they stream
+     * and re-emits them as `open-generative-ui` activity events. Those events are the only thing
+     * that paints: the tool's own renderer shows the waiting message and then returns nothing. So a
+     * deployment with the browser half and not this one has Bots generating whole interfaces that
+     * never appear, which is the shape this capability arrived in.
+     *
+     * `true` rather than a list of Bots. The list narrows only the event transform, and the tool
+     * stays offered to every Bot regardless, so naming some Bots here would leave the others able to
+     * call it and draw nothing. Whether the capability exists at all is the switch this deployment
+     * has; see DeploymentConfig.generativeUi.
+     */
+    ...(config.generativeUi ? { openGenerativeUI: true } : {}),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(
@@ -1145,6 +1171,11 @@ export function mountCopilotRuntime(
       }) => {
         try {
           const held = await intelligenceClient.ɵacquireThreadLock(input);
+          // A run started on this thread. Side effect only, never awaited: a channel showing it is
+          // working is worth nothing next to the lock the run depends on.
+          try {
+            onRunBusy?.({ threadId: input.threadId, busy: true });
+          } catch {}
           /*
            * The run id only. The lock also hands back a join token, which is what a browser presents
            * to watch the conversation; the runner's socket has its own credential and passing this
@@ -1181,6 +1212,11 @@ export function mountCopilotRuntime(
         });
       },
       release: async (input: { threadId: string; runId: string }) => {
+        // The run on this thread is over. Cleared here rather than trusting a browser: the run may
+        // have outlived the tab that started it, and this is where the platform is told it ended.
+        try {
+          onRunBusy?.({ threadId: input.threadId, busy: false });
+        } catch {}
         await intelligenceClient.ɵcleanupThreadLock(input);
       },
     },

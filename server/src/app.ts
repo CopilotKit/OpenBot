@@ -36,6 +36,7 @@ import { createComputerRoutes } from "./computer/routes";
 import { configuredAuthProviders, type DeploymentConfig } from "./config";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
 import { createIntelligenceClient } from "./intelligence-client";
+import type { OnboardingStore } from "./people/onboarding";
 import type { PeopleStore } from "./people/store";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
@@ -190,6 +191,17 @@ export function createApp(
    * has no door for this at all, not a locked one.
    */
   routineStore?: RoutineStore,
+  /**
+   * Where each person is in first-run onboarding.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves /api/me reporting no onboarding to track, which is the correct degraded
+   * behaviour: a deployment that cannot read the status must not lock everybody behind a gate
+   * nothing can finish.
+   */
+  onboardingStore?: OnboardingStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -201,6 +213,16 @@ export function createApp(
     context.json({
       mode: config.runtime.mode,
       durableHistory: config.runtime.durableHistory,
+      /*
+       * Whether a Bot may answer with an interface it wrote itself.
+       *
+       * Projected because the browser holds half of this capability. The runtime middleware turns a
+       * generated interface into the events that paint it, and the SDK's provider registers the tool
+       * that produces one; a deployment that switched the runtime half off while the browser went on
+       * offering the tool would have Bots writing interfaces nothing ever draws. One flag, read by
+       * both halves, so off means off.
+       */
+      generativeUi: config.generativeUi,
       /*
        * Which identity providers this deployment can sign somebody in with.
        *
@@ -276,9 +298,52 @@ export function createApp(
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
 
-  app.get("/api/me", requireUser, (context) =>
-    context.json({ user: context.var.actor }),
+  app.get("/api/me", requireUser, async (context) =>
+    context.json({
+      user: {
+        ...context.var.actor,
+        /*
+         * Read here rather than in the guard, so only this route pays the extra query. Null means
+         * this deployment does not track onboarding, which the app reads as nothing to finish;
+         * a not-yet-completed status is what sends it to /onboarding.
+         */
+        onboarding: onboardingStore
+          ? await onboardingStore.status(context.var.actor.id)
+          : null,
+      },
+    }),
   );
+  app.post("/api/me/onboarding", requireUser, async (context) => {
+    if (!onboardingStore) {
+      return context.json({ error: "Onboarding is not available." }, 503);
+    }
+
+    const body = (await context.req.json().catch(() => undefined)) as
+      | { step?: unknown; completed?: unknown }
+      | undefined;
+
+    if (body?.completed === true) {
+      await onboardingStore.complete(context.var.actor.id);
+    } else if (
+      typeof body?.step === "number" &&
+      Number.isInteger(body.step) &&
+      body.step >= 0 &&
+      // The column's range — the only bound the server knows, since the wizard's length is the
+      // app's fact rather than the deployment's.
+      body.step <= 2_147_483_647
+    ) {
+      await onboardingStore.setStep(context.var.actor.id, body.step);
+    } else {
+      return context.json(
+        { error: "Send the step to move to, or completed: true." },
+        400,
+      );
+    }
+
+    return context.json({
+      onboarding: await onboardingStore.status(context.var.actor.id),
+    });
+  });
   app.get("/api/admin/status", requireUser, (context) => {
     const denied = requireAdmin(context);
     return denied ?? context.json({ status: "ok" });

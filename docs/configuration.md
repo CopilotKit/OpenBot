@@ -56,6 +56,36 @@ at `agent-langgraph` on a laptop.
 | `APP_DIST_DIR`       | unset                              | Where the built app is, when this process serves it. Set inside the container image; unset in development, where Vite serves the app. |
 | `AUDIT_RETENTION_DAYS` | unset                            | Whole number of days to keep audit rows; older ones are removed. Unset keeps the trail forever. |
 | `WORKER_SHARED_SECRET` | unset; `start.sh` uses a fixed local default | The secret the routines worker presents to fire a due routine. Without it the server refuses every handoff, whether or not a worker exists to send one. |
+| `OPENBOT_GENERATIVE_UI` | unset (capability off)              | `true` or `1` lets a Bot answer with an interface it wrote itself. |
+
+**`OPENBOT_GENERATIVE_UI`** turns on generated interfaces. Set it, and a Bot may answer by writing
+the markup, styles and script for an interface and streaming it into the transcript, where it renders
+in a sandboxed iframe. Left unset, a Bot answers in prose and with the components this deployment
+holds, as before.
+
+It is asked for rather than inherited, which is deliberate and unlike most switches here. This one
+decides whether a model may put code it wrote on somebody's screen and load libraries from a CDN to
+run it, so a deployment should choose it rather than acquire it by upgrading — including a deployment
+that builds its default branch automatically. Only `true` or `1` count as yes; anything else leaves it
+off.
+
+This is not the component catalogue. A component is something the deployment holds — compiled into
+the build or authored in the playground — and an administrator grants it per Bot. A generated
+interface has nothing to grant: it does not exist until the Bot writes it, and it is gone when the
+conversation moves on. That is also why this is one switch for the deployment rather than a grant per
+Bot. The interface is painted from activity events that only the runtime middleware emits, and the
+tool the model calls is registered by the browser for every Bot the moment that middleware runs, so
+enabling it for some Bots would leave the rest able to call the tool and draw nothing.
+
+The switch reaches both halves. The server passes `openGenerativeUI` to the runtime, and
+`/api/capabilities` reports the capability so the app offers the tool. The halves disagreeing is the
+one configuration worth avoiding: runtime-only means the tool is never offered, and browser-only
+means a Bot generates a whole interface that nothing renders.
+
+What a generated interface can reach is what the sandbox hands it, and this deployment hands it
+nothing — no session, no same-origin access to the app, no route into your data. It can load
+libraries from a CDN, which is the reason a deployment that must not reach the public internet from a
+browser tab should leave this unset.
 
 **`AGENT_STALL_TIMEOUT_MS`** watches for the failure a Bot has that nothing else in the trail can
 show: a stream that stops producing anything. Every other audit row is something that happened, and
