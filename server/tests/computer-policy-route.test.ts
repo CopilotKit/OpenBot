@@ -30,6 +30,15 @@ function app(role: "admin" | "user" = "admin") {
   };
 
   const policyStore = {
+    /*
+     * Two readers, and the screen route reads the second.
+     *
+     * `get` is what the engine enforces: the operator's rules with every clause an imported Bot
+     * brought with it composed in. `authored` is what an administrator wrote, and it is the one this
+     * screen edits and posts back — a fake with only `get` would let the route serve a clause the
+     * screen cannot remove.
+     */
+    authored: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     get: () => ({ mode: "enforce", deny: [], allow: ["true"] }),
     set: async () => undefined,
   } as unknown as PolicyStore;

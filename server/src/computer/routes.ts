@@ -587,7 +587,15 @@ export function createComputerRoutes(
    */
   routes.get("/policy", requireUser, (context) => {
     const denied = requireAdmin(context);
-    return denied ?? context.json({ policy: policyStore.get() });
+    /*
+     * The operator's own rules, not what is in force.
+     *
+     * This is the list the screen edits and posts back, so it must contain only what an
+     * administrator wrote. Composed in are the clauses imported Bots brought with them, which are
+     * shown separately and read-only: served here they would appear in the editable list beside a
+     * Remove that `set` filters back out, and the rule would stay enforced with nothing saying so.
+     */
+    return denied ?? context.json({ policy: policyStore.authored() });
   });
 
   routes.put("/policy", requireUser, async (context) => {
@@ -616,9 +624,9 @@ export function createComputerRoutes(
         503,
       );
     }
-    // Echoed back so a caller can see exactly what is now in force rather than assuming its request
-    // was stored verbatim.
-    return context.json({ policy: policyStore.get() });
+    // Echoed back so a caller can see exactly what was stored rather than assuming its request was
+    // kept verbatim — `set` drops any rule that duplicates a clause an import already applies.
+    return context.json({ policy: policyStore.authored() });
   });
 
   /**

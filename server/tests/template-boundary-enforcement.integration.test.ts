@@ -452,7 +452,21 @@ describe("an administrator saving an unrelated rule", () => {
     const shown = (await read.json()) as {
       policy: { mode: string; deny: string[]; allow: string[] };
     };
-    expect(shown.policy.deny.some((rule) => rule.includes(agentId))).toBe(true);
+
+    /*
+     * THE SCREEN IS SERVED WHAT AN ADMINISTRATOR WROTE, NEVER WHAT IS IN FORCE.
+     *
+     * This asserted the opposite once, and the opposite is what shipped for an afternoon: the route
+     * answered with the composed policy, so a clause an import applied appeared in the list the
+     * screen edits, with a Remove button beside it. `set` filters those back out, so pressing it
+     * saved successfully, changed nothing, and left the rule enforced with nothing on screen saying
+     * why. The clauses are shown on the same page in their own read-only group; they are not in this
+     * array.
+     */
+    expect(shown.policy.deny.some((rule) => rule.includes(agentId))).toBe(
+      false,
+    );
+    expect(shown.policy.deny).toEqual([]);
 
     const operatorRule = 'contains(element.name, "submit")';
     const saved = await screen.request("http://t/api/computers/policy", {

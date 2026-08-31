@@ -74,6 +74,16 @@ export type PolicyStore = {
    */
   get: () => ActionPolicy;
   /**
+   * What an administrator wrote, without the clauses imports brought with them.
+   *
+   * The screen that edits the policy has to read THIS one. `get` composes the two halves for the
+   * engine, and a screen served that value shows a per-Bot clause in the list it edits, beside a
+   * Remove button that cannot remove it: `set` filters generated clauses back out, so the rule
+   * stays enforced and the person who pressed the button is told nothing. A screen that offers an
+   * action it will not take is worse than a screen that does not offer it.
+   */
+  authored: () => ActionPolicy;
+  /**
    * Persisted before the in-memory copy changes, so a reported success is a saved rule.
    *
    * Only the operator's own rules are ever written. A clause that came from an import is dropped from
@@ -157,6 +167,8 @@ export function createPolicyStore(
 
   return {
     get: () => composed,
+
+    authored: () => clone(stored),
 
     set: async (policy, by) => {
       /*

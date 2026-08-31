@@ -63,7 +63,10 @@ describe("the computer surface", () => {
 
     const routes = createComputerRoutes(
       gateway,
-      { get: () => ({ mode: "enforce", deny: [], allow: [] }) } as never,
+      {
+        authored: () => ({ mode: "enforce", deny: [], allow: [] }),
+        get: () => ({ mode: "enforce", deny: [], allow: [] }),
+      } as never,
       signedIn(actorId, role),
       ownedBy("owner"),
     );
@@ -164,7 +167,10 @@ describe("a path that starts with a deployment route", () => {
     } as never;
     const routes = createComputerRoutes(
       gateway,
-      { get: () => ({ mode: "enforce", deny: [], allow: [] }) } as never,
+      {
+        authored: () => ({ mode: "enforce", deny: [], allow: [] }),
+        get: () => ({ mode: "enforce", deny: [], allow: [] }),
+      } as never,
       signedIn("somebody", role),
       // Denies everything, so anything that answers got past the guard rather than through it.
       async (_actor, botId: string) => {
@@ -234,7 +240,10 @@ describe("the computer surface, unauthenticated", () => {
           return { text: "" };
         },
       } as never,
-      { get: () => ({ mode: "enforce", deny: [], allow: [] }) } as never,
+      {
+        authored: () => ({ mode: "enforce", deny: [], allow: [] }),
+        get: () => ({ mode: "enforce", deny: [], allow: [] }),
+      } as never,
       async (context) =>
         context.json({ error: "Authentication required." }, 401),
       async (_actor, botId) => {
