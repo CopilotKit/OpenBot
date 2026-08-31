@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A rule tried in dry-run now says what it would have refused a Bot's tools
+
+`dry-run` exists so a boundary can be measured against live traffic before it starts refusing
+anybody. It worked that way for the browser, and not for connectors: a tool call the rule matched was
+recorded only as the call that then went out, so `Blocked` on the audit page — and any query behind
+it — answered "this rule would have refused none of them" about calls it would have refused. A rule
+about `mcp.server`, `mcp.tool` or `mcp.effect` therefore looked inert, and enforcing it started
+refusing Bots with nothing in the trail to have warned anybody. A refused tool call is now recorded
+whatever the mode does with it, carrying `carriedOut` so a reader can tell a call this deployment
+stopped from one dry-run recorded and let past. Enforcing deployments behave exactly as before.
+
 ### A Bot's shell can no longer reach the embedded database without a password
 
 In the all-in-one image the cluster was `trust`-auth on loopback, and the Bot's shell runs in the
