@@ -38,13 +38,15 @@ export function SidebarToggle({ className }: { className?: string }) {
   const sidebar = useOptionalSidebar();
   // No sidebar in scope, so nothing to toggle and nothing to draw.
   if (!sidebar) return null;
-  const { isMobile, open, toggleSidebar } = sidebar;
+  const { isMobile, open, openMobile, toggleSidebar } = sidebar;
   /*
    * The label says what the click will do, not what is on screen. Below 768px the sidebar is an
    * overlay Sheet with its own open state, and `open` describes the desktop pane — reading it there
    * would name the wrong action.
    */
-  const label = isMobile || !open ? "Show sidebar" : "Hide sidebar";
+  const label = (isMobile ? openMobile : open)
+    ? "Hide sidebar"
+    : "Show sidebar";
 
   return (
     <Tooltip>
