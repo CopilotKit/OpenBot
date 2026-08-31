@@ -1,19 +1,19 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import Avatar from "boring-avatars";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import * as React from "react";
 import useMeasure from "react-use-measure";
-import { Button } from "@/components/ui/button";
-import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
-import { completeOnboardingMutationOptions } from "@/lib/onboarding/mutations";
-import { queryClient } from "@/query-client";
 import AgentOrb from "@/components/agents/orb/agent-orb";
-import { appConfig } from "@/lib/generated/application-config";
 import { Composer } from "@/components/channels/composer";
 import { DesktopIllustration } from "@/components/computer/desktop-illustration";
 import { ComputerPlaceholder } from "@/components/computer/placeholder";
+import { Button } from "@/components/ui/button";
 import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
-import Avatar from "boring-avatars";
+import { currentUserQueryOptions, needsOnboarding } from "@/lib/auth/queries";
+import { appConfig } from "@/lib/generated/application-config";
+import { completeOnboardingMutationOptions } from "@/lib/onboarding/mutations";
+import { queryClient } from "@/query-client";
 
 export const Route = createFileRoute("/_authed/onboarding")({
   beforeLoad: async ({ context }) => {
