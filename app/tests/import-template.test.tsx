@@ -226,6 +226,12 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
 
 const { ImportTemplate } = await import("@/components/agents/import-template");
 
+/*
+ * The compiler's own copy of the sentences, imported the same way the screen imports it. Static
+ * rather than dynamic because it touches no DOM: it builds strings and calls nothing.
+ */
+const { describeBoundary } = await import("@/lib/templates/boundary");
+
 /** A real router over a memory history, so `Link` and `useNavigate` resolve without a mock. */
 function routed(node: ReactNode) {
   const rootRoute = createRootRoute({ component: Outlet });
@@ -508,4 +514,85 @@ test("a Bot with no browser is given no host sentence at all", async () => {
   expect(body).toContain("It may not use a browser.");
   expect(body).not.toContain("no limit on which sites");
   expect(body).not.toContain("The author named no web address it may visit.");
+});
+
+/**
+ * The regression this file exists to prevent from coming back: a screen reassuring somebody that
+ * the ceiling above it is decorative.
+ *
+ * Section 5 shipped for two phases carrying "This deployment does not yet enforce that ceiling.
+ * Until it does, an imported Bot has exactly the computer reach of any other Bot here." That was
+ * true and worth saying while nothing compiled the `boundary:` block into rules. It became false
+ * the moment the compiler shipped, and a stale reassurance is worse than no sentence at all —
+ * somebody reads that the ceiling does not bind, stops reading, and never learns what was applied
+ * to their coworker. The exact strings are asserted rather than a paraphrase, because a paraphrase
+ * is what a half-finished edit leaves behind.
+ */
+test("the consent screen does not claim the ceiling goes unenforced", async () => {
+  await readTemplate();
+
+  const body = document.body.textContent ?? "";
+  expect(body).not.toContain("does not yet enforce");
+  expect(body).not.toContain(
+    "an imported Bot has exactly the computer reach of any other Bot here",
+  );
+  expect(body).toContain(
+    "This ceiling is applied to this coworker when you import it",
+  );
+  expect(body).toContain("enforced by this deployment");
+});
+
+/**
+ * The amber block stays, and it stays because a ceiling only ever SUBTRACTS.
+ *
+ * Nothing in section 5 grants anything, so a deployment that permits everything still permits
+ * everything wherever the author left a key at its permissive end. What had to change is the
+ * dry-run half: `mode` governs the whole evaluation and the compiled clauses are composed into the
+ * same deny list, so "Record it and allow it" does not enforce the ceiling either. Saying the
+ * ceiling is enforced one paragraph above and leaving that unsaid here would be the same
+ * comfortable half-truth the test above removes.
+ */
+test("a dry-run deployment is told the ceiling is not enforced either", async () => {
+  servedPolicy = { mode: "dry-run", deny: [], allow: ["true"] };
+
+  await readTemplate();
+  await screen.findByText("This deployment currently allows every action.");
+
+  const body = document.body.textContent ?? "";
+  expect(body).toContain("that setting decides the ceiling above too");
+});
+
+test("an all-permitting deployment is told the ceiling is the only limit", async () => {
+  await readTemplate();
+
+  const body = document.body.textContent ?? "";
+  expect(body).toContain("This deployment currently allows every action.");
+  expect(body).toContain("Nothing narrows this coworker except the ceiling");
+});
+
+/**
+ * The sentences on this screen are the compiler's, character for character.
+ *
+ * `describeBoundary` lives beside the thing that turns the same block into CEL, and this screen
+ * imports it rather than keeping a copy. That import is the anti-drift mechanism and this test is
+ * what proves the mechanism is still wired: a second copy reintroduced here would keep every other
+ * assertion in this file green while the consent screen and the administrator's screen began
+ * describing the same Bot differently.
+ *
+ * Every sentence, not a sample. A copy that drifted in one branch of one key is exactly the shape
+ * this failure takes.
+ */
+test("the ceiling is rendered in the compiler's own sentences", async () => {
+  await readTemplate();
+
+  const body = document.body.textContent ?? "";
+  const sentences = describeBoundary({
+    shell: "never",
+    files: "read_only",
+    browser: "read_only",
+    navigateHosts: ["billing.acme.example"],
+    mcp: "read_only",
+  });
+  expect(sentences.length).toBeGreaterThan(0);
+  for (const sentence of sentences) expect(body).toContain(sentence);
 });

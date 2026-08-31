@@ -14,6 +14,7 @@ import {
   type ActionPolicy,
   actionPolicyQueryOptions,
 } from "@/lib/computers/queries";
+import { describeBoundary } from "@/lib/templates/boundary";
 import {
   emptyTemplateImportForm,
   type TemplateImportFormValues,
@@ -23,12 +24,12 @@ import {
 import { installBotTemplateMutationOptions } from "@/lib/templates/mutations";
 import {
   type BotTemplate,
-  type BotTemplateBoundary,
   previewBotTemplate,
   type ResolvedSkill,
   type SlugResolution,
   type TemplatePlan,
   type TemplatePreviewVerdict,
+  galleryTemplateQueryOptions,
   templateDraftSourceQueryOptions,
 } from "@/lib/templates/queries";
 import { queryClient } from "@/query-client";
@@ -103,54 +104,6 @@ function Claim({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** The author's ceiling, said in sentences rather than in the vocabulary's words. */
-function boundarySentences(boundary: BotTemplateBoundary): string[] {
-  const sentences: string[] = [];
-  sentences.push(
-    boundary.shell === "never"
-      ? "It may not run shell commands."
-      : "It may run shell commands.",
-  );
-  sentences.push(
-    boundary.files === "none"
-      ? "It may not read or write files."
-      : boundary.files === "read_only"
-        ? "It may read files, and may not change them."
-        : "It may read and write files.",
-  );
-  sentences.push(
-    boundary.browser === "none"
-      ? "It may not use a browser."
-      : boundary.browser === "read_only"
-        ? "It may look at web pages, and may not click, type or submit on them."
-        : "It may use a browser fully: clicking, typing and submitting.",
-  );
-  /*
-   * An empty `navigate_hosts` is the ABSENCE of a host limit rather than a limit of none. The
-   * format documents it as adding no host clause at all, and this repo's own research-desk example
-   * ships `browser: read_only` with no hosts on purpose. The sentence here used to read "The author
-   * named no web address it may visit.", which a reviewer reads as the tightest ceiling the
-   * vocabulary can express while it is in fact the loosest — in the section whose whole job is to
-   * state that ceiling in plain English. Where no browser is permitted there is no host clause to
-   * make, so nothing is said.
-   */
-  if (boundary.browser !== "none") {
-    sentences.push(
-      boundary.navigateHosts.length === 0
-        ? "The author put no limit on which sites it may visit."
-        : `On the web it is confined to ${boundary.navigateHosts.join(", ")}.`,
-    );
-  }
-  sentences.push(
-    boundary.mcp === "none"
-      ? "It may not call connector tools."
-      : boundary.mcp === "read_only"
-        ? "It may call connector tools that read, and not ones that write."
-        : "It may call connector tools that read and write.",
-  );
-  return sentences;
-}
-
 /**
  * What this install will not do.
  *
@@ -164,7 +117,7 @@ const WILL_NOT_DO = [
   "No connector, credential or key is added to this deployment.",
   "No component code is installed. A component name that names nothing here simply does not answer when the Bot reaches for it.",
   "No skill you already have is overwritten, renamed or changed.",
-  "No deployment setting changes: not the boundary, not the connectors, not the channels, not the model.",
+  "No deployment setting changes: not the boundary every Bot is judged by, not the connectors, not the channels, not the model. The ceiling above is written per coworker, in a place a deployment-wide save cannot reach.",
   "The coworker is private and yours. Nobody else sees it until you make it public.",
   "Nothing is fetched from the network to do any of this. The file in the box above is the whole of it.",
 ];
@@ -188,7 +141,22 @@ function permitsEverything(policy: ActionPolicy): boolean {
   );
 }
 
-export function ImportTemplate({ templateId }: { templateId?: string }) {
+export function ImportTemplate({
+  templateId,
+  gallerySlug,
+}: {
+  templateId?: string;
+  /**
+   * A template from this deployment's gallery, opened as the file it is.
+   *
+   * A SLUG rather than a document, and the difference is the whole reason this prop exists rather
+   * than a `source` string. What installs is re-read from the catalogue on the server, so the YAML
+   * seeded here is what a person READS and the digest is what pins it — a browser that could hand
+   * over the document would be able to write "gallery" into the provenance of a file that never was
+   * in one.
+   */
+  gallerySlug?: string;
+}) {
   const navigate = useNavigate();
   const [values, setValues] = useState<TemplateImportFormValues>(
     emptyTemplateImportForm,
@@ -212,12 +180,26 @@ export function ImportTemplate({ templateId }: { templateId?: string }) {
     enabled: Boolean(templateId),
   });
 
+  /*
+   * A gallery template, on the same terms: opened as a file, read like any other.
+   *
+   * The YAML the server serialised out of the document it parsed, so what somebody reads before
+   * agreeing is a file they could have been sent by hand rather than a form this screen assembled.
+   * It goes through the same preview and the same consent screen as a paste, because a template
+   * shipped in the image deserves exactly as much reading as one a stranger emailed.
+   */
+  const galleryEntry = useQuery({
+    ...galleryTemplateQueryOptions(gallerySlug ?? ""),
+    enabled: Boolean(gallerySlug),
+  });
+
+  const seeded = seed.data ?? galleryEntry.data?.yaml;
   useEffect(() => {
-    if (!seed.data) return;
+    if (!seeded) return;
     setValues((current) =>
-      current.source ? current : { ...current, source: seed.data },
+      current.source ? current : { ...current, source: seeded },
     );
-  }, [seed.data]);
+  }, [seeded]);
 
   const read = async (source: string) => {
     setReading(true);
@@ -249,7 +231,11 @@ export function ImportTemplate({ templateId }: { templateId?: string }) {
         }}
         reading={reading}
         seedError={
-          templateId && seed.error ? "Could not open that draft." : null
+          templateId && seed.error
+            ? "Could not open that draft."
+            : gallerySlug && galleryEntry.error
+              ? "Could not open that template."
+              : null
         }
         source={values.source}
       />
@@ -281,10 +267,23 @@ export function ImportTemplate({ templateId }: { templateId?: string }) {
         }));
       }}
       onInstall={async () => {
+        /*
+         * WHERE THIS FILE CAME FROM, as the provenance row will record it.
+         *
+         * `gallery` is now a server-side re-read rather than a label: the install route ignores the
+         * document in the body and takes the one the catalogue holds under this slug. A draft of
+         * this deployment's own is therefore `file` — it used to be sent as `gallery` with the draft
+         * id as its ref, which under the new rule would look up a gallery slug that does not exist
+         * and answer 404.
+         */
         const result = await install.mutateAsync(
           templateInstallInputFrom(values, plan, {
-            from: templateId ? "gallery" : "paste",
-            ...(templateId ? { sourceRef: templateId } : {}),
+            from: gallerySlug ? "gallery" : templateId ? "file" : "paste",
+            ...(gallerySlug
+              ? { sourceRef: gallerySlug }
+              : templateId
+                ? { sourceRef: templateId }
+                : {}),
           }),
         );
         await navigate({ search: { agent: result.agentId }, to: "/agents" });
@@ -789,7 +788,7 @@ function ConsentScreen({
           The ceiling the author wrote into the file.
         </p>
         <ul className="grid gap-1">
-          {boundarySentences(template.boundary).map((sentence) => (
+          {describeBoundary(template.boundary).map((sentence) => (
             <li className="text-sm" key={sentence}>
               {sentence}
             </li>
@@ -797,14 +796,26 @@ function ConsentScreen({
         </ul>
 
         {/*
-         * The honest sentence, and it stays until the compiler that enforces this ceiling ships.
-         * The vocabulary above is the author's statement of what the coworker needs; nothing on
-         * this deployment yet turns it into a rule, so a screen that showed it without saying so
-         * would be describing a cage that is not there.
+         * This block used to say the opposite, and the change is the whole of phase 4.
+         *
+         * It read "This deployment does not yet enforce that ceiling. Until it does, an imported
+         * Bot has exactly the computer reach of any other Bot here." — honest while the vocabulary
+         * above was only the author's statement of what the coworker needs. It stopped being
+         * honest the moment the compiler shipped, and a stale reassurance on a consent screen is
+         * worse than none: somebody reads that the ceiling is decorative, declines to look further,
+         * and never learns what was actually applied to their coworker.
+         *
+         * What is true now is deliberately specific about WHO enforces it. The clauses are this
+         * deployment's, compiled here from a closed vocabulary — a template never writes CEL — and
+         * judged by the same engine as the administrator's own rules. Naming the engine is what
+         * makes the next block below meaningful rather than contradictory: a ceiling evaluated by
+         * an engine that refuses nothing still refuses nothing.
          */}
         <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
-          This deployment does not yet enforce that ceiling. Until it does, an
-          imported Bot has exactly the computer reach of any other Bot here.
+          This ceiling is applied to this coworker when you import it, and to no
+          other. It is enforced by this deployment&rsquo;s own policy engine,
+          from rules this deployment compiles — the file never carries a rule of
+          its own. Retracting the import takes them away again.
         </p>
 
         {policy.isPending ? null : policy.error ? (
@@ -817,6 +828,19 @@ function ConsentScreen({
             yourself.
           </p>
         ) : policy.data && permitsEverything(policy.data) ? (
+          /*
+           * Still worth saying now that the ceiling is real, because a ceiling only ever
+           * SUBTRACTS. Nothing above grants anything, so wherever the author left a key at its
+           * permissive end this coworker inherits whatever the deployment permits — which here is
+           * everything.
+           *
+           * The dry-run half needed rewriting rather than keeping. `mode` governs the whole
+           * evaluation and the compiled clauses are composed into the same deny list, so a
+           * deployment set to "Record it and allow it" does not enforce the ceiling either:
+           * `policy.ts` returns `forward: true` on a deny match in that mode. Saying "this ceiling
+           * is enforced" a paragraph above and leaving that unsaid here would be the same
+           * comfortable half-truth this section was just rewritten to remove.
+           */
           <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
             <span className="font-medium">
               This deployment currently allows every action.
@@ -824,11 +848,18 @@ function ConsentScreen({
             {policy.data.mode === "dry-run" ? (
               <>
                 Its boundary is set to record what it would have refused rather
-                than refuse it, so no rule in it stops anything.{" "}
+                than refuse it, and that setting decides the ceiling above too —
+                nothing in it stops anything until this deployment is switched
+                to stopping actions.{" "}
               </>
-            ) : null}
-            An imported Bot can browse, read and write files, and run shell
-            commands — exactly like a Bot you built yourself.{" "}
+            ) : (
+              <>
+                Nothing narrows this coworker except the ceiling above. Wherever
+                that ceiling permits something, it can browse, read and write
+                files, and run shell commands exactly like a Bot you built
+                yourself.{" "}
+              </>
+            )}
             <Link
               className="underline underline-offset-2"
               to="/admin/boundaries"
@@ -839,8 +870,9 @@ function ConsentScreen({
           </p>
         ) : (
           <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
-            This deployment has a boundary of its own, and it applies to this
-            coworker exactly as it applies to every other one.
+            This deployment has a boundary of its own. It applies to this
+            coworker exactly as it applies to every other one, on top of the
+            ceiling above.
           </p>
         )}
       </Section>
