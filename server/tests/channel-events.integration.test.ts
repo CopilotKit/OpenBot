@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import {
+  CHANNEL_ACTIVITY_TOPIC,
   type ChannelActivityEvent,
   type ChannelEventHub,
   createChannelEventHub,
@@ -64,6 +65,46 @@ describe("channel event hub", () => {
 
     expect(received).toHaveLength(2);
     expect(hub.connectionCount("user-1")).toBe(2);
+  });
+
+  test("a resync reaches every connection, whoever it belongs to", () => {
+    // Everybody, not a member list: the events that were lost named their own members.
+    const hub = createChannelEventHub();
+    const first: string[] = [];
+    const second: string[] = [];
+    const other: string[] = [];
+    hub.register("user-1", (payload) => first.push(payload));
+    hub.register("user-1", (payload) => second.push(payload));
+    hub.register("user-2", (payload) => other.push(payload));
+
+    hub.resyncAll();
+
+    expect(first).toEqual(['{"resync":true}']);
+    expect(second).toEqual(['{"resync":true}']);
+    expect(other).toEqual(['{"resync":true}']);
+  });
+
+  test("a detached connection receives no resync", () => {
+    const hub = createChannelEventHub();
+    const received: string[] = [];
+    const detach = hub.register("user-1", (payload) => received.push(payload));
+    detach();
+
+    hub.resyncAll();
+
+    expect(received).toEqual([]);
+  });
+
+  test("one failing connection does not deny the resync to the rest", () => {
+    const hub = createChannelEventHub();
+    const received: string[] = [];
+    hub.register("user-1", () => {
+      throw new Error("this connection is closing");
+    });
+    hub.register("user-1", (payload) => received.push(payload));
+
+    expect(() => hub.resyncAll()).not.toThrow();
+    expect(received).toEqual(['{"resync":true}']);
   });
 
   test("stops delivering once a connection detaches, and forgets the person", () => {
@@ -461,3 +502,103 @@ describe("channel change delivery", () => {
     expect(watched.of(other.id)).toEqual([]);
   });
 });
+
+/**
+ * An announcement made while this server's subscription is down is lost, and the connection that
+ * dropped is not the browser's — so the client's own `onopen` recovery never fires and the roster
+ * goes on rendering a channel that no longer resolves.
+ *
+ * The drop is real rather than simulated: the backend is terminated and held down until
+ * `pg_stat_activity` shows it gone, so the announcement lands in a gap known to exist. Compare
+ * "catches up when its subscription comes back" in policy-fanout.integration.test.ts.
+ */
+describe("a server whose subscription dropped", () => {
+  test("tells its connections to refetch when the subscription comes back", async () => {
+    const hub = createChannelEventHub();
+    // The browser's end, registered once and never touched again: its socket does not drop.
+    const received: string[] = [];
+    hub.register("user-1", (payload) => received.push(payload));
+
+    const before = new Set(await listenBackendPids());
+    const listener = await startChannelActivityListener(databaseUrl, hub);
+    try {
+      await until(async () => (await ourPids(before)).length === 1);
+
+      // Control: while connected, an announcement arrives. Without this the test could pass on a
+      // hub that was never wired to the database at all.
+      await announce(event({ channelId: "channel_connected" }));
+      await until(() =>
+        received.some((raw) => raw.includes("channel_connected")),
+      );
+      expect(received.some((raw) => raw.includes("channel_connected"))).toBe(
+        true,
+      );
+
+      // Terminated in a loop, because the driver reconnects in tens of milliseconds. The publish
+      // happens only once no LISTEN backend of ours is connected.
+      let published = false;
+      const holdUntil = Date.now() + 5_000;
+      while (Date.now() < holdUntil && !published) {
+        for (const pid of await ourPids(before)) {
+          await database.$client`select pg_terminate_backend(${pid})`;
+        }
+        if ((await ourPids(before)).length === 0) {
+          await announce(
+            event({ channelId: "channel_in_the_gap", deleted: true }),
+          );
+          published = true;
+        }
+      }
+      expect(published).toBe(true);
+
+      // The subscription is live again, proven by an event that arrives after it.
+      await until(async () => (await ourPids(before)).length === 1);
+      await until(async () => {
+        await announce(event({ channelId: "channel_after" }));
+        return received.some((raw) => raw.includes("channel_after"));
+      }, 10_000);
+      expect(received.some((raw) => raw.includes("channel_after"))).toBe(true);
+
+      // The lost announcement is not recoverable and is deliberately not asserted for. What must
+      // reach the browser is the instruction to ask again.
+      expect(received.some((raw) => raw.includes("channel_in_the_gap"))).toBe(
+        false,
+      );
+      expect(received).toContain('{"resync":true}');
+    } finally {
+      await listener.stop().catch(() => undefined);
+    }
+  }, 30_000);
+});
+
+/**
+ * Backends subscribed to THIS topic, scoped by name rather than `listen%` so that terminating them
+ * can never reach the action policy listener's subscription running beside it.
+ */
+async function listenBackendPids(): Promise<number[]> {
+  const rows = await database.$client<{ pid: number }[]>`
+    select pid from pg_stat_activity
+    where query = ${`listen "${CHANNEL_ACTIVITY_TOPIC}"`} and pid <> pg_backend_pid()`;
+  return rows.map((row) => Number(row.pid));
+}
+
+/** The listener this test started: the topic filter excludes the policy listener, `before` the rest. */
+async function ourPids(before: Set<number>): Promise<number[]> {
+  return (await listenBackendPids()).filter((pid) => !before.has(pid));
+}
+
+function announce(activity: ChannelActivityEvent) {
+  return database.$client`select pg_notify(${CHANNEL_ACTIVITY_TOPIC}, ${JSON.stringify(activity)})`;
+}
+
+/** Polled rather than slept, so the test is neither flaky nor slow. As policy-fanout does. */
+async function until(
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 8_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
