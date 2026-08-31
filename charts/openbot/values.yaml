@@ -143,6 +143,11 @@ config:
 
   # The templates shipped in the image. `COPY examples/` puts them there, so a cluster with no egress
   # at all still opens a populated gallery.
+  #
+  # Emitted only when set, like every other key added after v0.0.5: a release upgrading from a values
+  # file written before this existed must still render, and an absent variable is not the same as an
+  # empty one — the server's own default resolves to this same directory, and an empty string would
+  # be a deployment told to read templates from nowhere.
   templateDir: /app/examples/templates
 
   # The GitHub repositories an administrator may register as a template source, comma-separated as

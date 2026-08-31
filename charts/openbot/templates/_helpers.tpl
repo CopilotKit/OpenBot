@@ -134,8 +134,10 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   value: {{ ternary "on" "off" .Values.server.embeddedComputer | quote }}
 - name: TENANT_PACKAGE_DIR
   value: {{ .Values.config.tenantPackageDir | quote }}
+{{- if .Values.config.templateDir }}
 - name: OPENBOT_TEMPLATE_DIR
   value: {{ .Values.config.templateDir | quote }}
+{{- end }}
 {{- if .Values.config.templateSources }}
 - name: OPENBOT_TEMPLATE_SOURCES
   value: {{ .Values.config.templateSources | quote }}
