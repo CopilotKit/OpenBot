@@ -136,7 +136,14 @@ function AgentsScreen() {
               </Button>
             </div>
           </div>
-          <div className="flex flex-row mt-4">
+          {/*
+           * A BLOCK, NOT A FLEX ROW. Both children below are full-width things — a grid that
+           * auto-fills its columns, or the empty state — and a flex item defaults to `flex: 0 1 auto`,
+           * which sizes it to its content rather than to the row. That made the grid collapse to a
+           * single 144px column stacked down the left with the rest of the width unused, while
+           * "Explore agents" beneath it, which has no such wrapper, filled the row correctly.
+           */}
+          <div className="mt-4">
             {!!mine?.length && (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(144px,1fr))] gap-4">
                 {mine.map((agent, index) => {
