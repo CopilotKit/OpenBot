@@ -1,3 +1,4 @@
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -8,7 +9,6 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { afterAll, afterEach, expect, test } from "bun:test";
 import type { ReactNode } from "react";
 
 /**
@@ -171,7 +171,7 @@ test("a card carries the name, the claim, the summary and what it asks for", asy
   expect(body).toContain("acme-revops");
   // What it WANTS, said as a want.
   expect(body).toContain("google-drive");
-  expect(body).toContain("Nothing is granted by importing it.");
+  expect(body).toContain("Nothing is granted by reading it.");
 });
 
 /**
@@ -192,11 +192,19 @@ test("the author's address is text, and there is no link to it anywhere", async 
   }
 });
 
-test("the only link off a card is the one that opens the consent screen", async () => {
+/*
+ * A card leads to READING, not to installing.
+ *
+ * It used to open the consent screen directly, which put "let me see what this is" and "I am
+ * importing this" behind one gesture. The card now goes to the template's own page, where the whole
+ * of a stranger's instructions can be read and closed without writing anything; the button that
+ * installs lives there.
+ */
+test("the only link off a card is the one that opens the template's own page", async () => {
   await renderGallery();
-  const use = await screen.findByText("Use this template");
-  expect(use.closest("a")?.getAttribute("href")).toBe(
-    "/agents/gallery?use=renewal-desk",
+  const read = await screen.findByText("Read this template");
+  expect(read.closest("a")?.getAttribute("href")).toBe(
+    "/agents/gallery/renewal-desk",
   );
 });
 

@@ -2,6 +2,11 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import {
+  Claim,
+  STRANGER_WROTE_IT,
+  Verbatim,
+} from "@/components/agents/template-prose";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Radio, RadioGroup } from "@/components/ui/radio-group";
@@ -24,12 +29,12 @@ import {
 import { installBotTemplateMutationOptions } from "@/lib/templates/mutations";
 import {
   type BotTemplate,
+  galleryTemplateQueryOptions,
   previewBotTemplate,
   type ResolvedSkill,
   type SlugResolution,
   type TemplatePlan,
   type TemplatePreviewVerdict,
-  galleryTemplateQueryOptions,
   templateDraftSourceQueryOptions,
 } from "@/lib/templates/queries";
 import { queryClient } from "@/query-client";
@@ -49,25 +54,6 @@ import { queryClient } from "@/query-client";
  * fields no template can carry.
  */
 
-/**
- * A stranger's text, shown as the characters it is.
- *
- * Monospace and pre-wrapped, in a box that scrolls rather than one that truncates: an ellipsis in
- * the middle of an instruction is the one rendering a consent screen may not do, because the part
- * it hides is the part worth hiding something in. No markdown renderer touches it either — a
- * heading and a link are formatting a model never sees, and the reviewer needs to read what the
- * model reads. React's own text escaping is what makes `<script>` and `&lt;` appear as themselves
- * rather than disappearing into the document; the parser has already refused the characters that
- * would be invisible here whatever this box did.
- */
-function Verbatim({ children }: { children: string }) {
-  return (
-    <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
-      {children}
-    </pre>
-  );
-}
-
 function Section({
   step,
   title,
@@ -84,23 +70,6 @@ function Section({
       </h2>
       {children}
     </section>
-  );
-}
-
-/** A claim the author typed. Never an anchor, and labelled as a claim wherever it appears. */
-function Claim({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-      <span className="text-muted-foreground text-xs">{label}</span>
-      {/*
-       * `source` and `example_url` arrive looking like addresses and are rendered as text on
-       * purpose. They are attacker-controlled strings sitting a centimetre from a Bot's name while
-       * somebody decides whether to trust it, and a link is a thing that can be clicked by
-       * somebody who has not finished reading. `break-all` because a long one must wrap rather
-       * than push the panel wide.
-       */}
-      <span className="break-all font-mono text-xs">{value}</span>
-    </div>
   );
 }
 
@@ -484,10 +453,8 @@ function ConsentScreen({
           ) : null}
         </div>
 
-        <p className="font-medium text-sm">
-          This text is given to a model as instructions. It was written by a
-          stranger.
-        </p>
+        {/* The same sentence the template's own page uses, from one place, so neither can soften it. */}
+        <p className="font-medium text-sm">{STRANGER_WROTE_IT}</p>
         <Verbatim>{bot.roleDescription}</Verbatim>
 
         {template.notes ? (

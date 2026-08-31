@@ -30,7 +30,6 @@ import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/sk
 import { Route as AuthedAdminTemplatesRouteImport } from './routes/_authed/admin/templates'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedAppAgentsIndexRouteImport } from './routes/_authed/_app/agents/index'
-import { Route as AuthedAppAgentsGalleryRouteImport } from './routes/_authed/_app/agents/gallery'
 import { Route as AuthedAppChannelChannelIdRouteImport } from './routes/_authed/_app/channel/$channelId'
 import { Route as AuthedAppChannelNewRouteImport } from './routes/_authed/_app/channel/new'
 import { Route as AuthedAdminComponentsIndexRouteImport } from './routes/_authed/admin/components/index'
@@ -41,6 +40,8 @@ import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './rout
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
 import { Route as AuthedSettingsConnectedAccountsKeyRouteImport } from './routes/_authed/settings/connected-accounts/$key'
+import { Route as AuthedAppAgentsGalleryIndexRouteImport } from './routes/_authed/_app/agents/gallery/index'
+import { Route as AuthedAppAgentsGallerySlugRouteImport } from './routes/_authed/_app/agents/gallery/$slug'
 import { Route as AuthedAdminPluginsKeyToolsToolRouteImport } from './routes/_authed/admin/plugins/$key_.tools.$tool'
 
 const AuthedRoute = AuthedRouteImport.update({
@@ -147,11 +148,6 @@ const AuthedAppAgentsIndexRoute = AuthedAppAgentsIndexRouteImport.update({
   path: '/agents/',
   getParentRoute: () => AuthedAppRoute,
 } as any)
-const AuthedAppAgentsGalleryRoute = AuthedAppAgentsGalleryRouteImport.update({
-  id: '/agents/gallery',
-  path: '/agents/gallery',
-  getParentRoute: () => AuthedAppRoute,
-} as any)
 const AuthedAppChannelChannelIdRoute =
   AuthedAppChannelChannelIdRouteImport.update({
     id: '/channel/$channelId',
@@ -209,6 +205,18 @@ const AuthedSettingsConnectedAccountsKeyRoute =
     path: '/connected-accounts/$key',
     getParentRoute: () => AuthedSettingsRouteRoute,
   } as any)
+const AuthedAppAgentsGalleryIndexRoute =
+  AuthedAppAgentsGalleryIndexRouteImport.update({
+    id: '/agents/gallery/',
+    path: '/agents/gallery/',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
+const AuthedAppAgentsGallerySlugRoute =
+  AuthedAppAgentsGallerySlugRouteImport.update({
+    id: '/agents/gallery/$slug',
+    path: '/agents/gallery/$slug',
+    getParentRoute: () => AuthedAppRoute,
+  } as any)
 const AuthedAdminPluginsKeyToolsToolRoute =
   AuthedAdminPluginsKeyToolsToolRouteImport.update({
     id: '/plugins/$key_/tools/$tool',
@@ -235,7 +243,6 @@ export interface FileRoutesByFullPath {
   '/admin/templates': typeof AuthedAdminTemplatesRoute
   '/admin/': typeof AuthedAdminIndexRoute
   '/settings/': typeof AuthedSettingsIndexRoute
-  '/agents/gallery': typeof AuthedAppAgentsGalleryRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/channel/new': typeof AuthedAppChannelNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -247,6 +254,8 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/agents/gallery/$slug': typeof AuthedAppAgentsGallerySlugRoute
+  '/agents/gallery/': typeof AuthedAppAgentsGalleryIndexRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRoutesByTo {
@@ -266,7 +275,6 @@ export interface FileRoutesByTo {
   '/admin/templates': typeof AuthedAdminTemplatesRoute
   '/admin': typeof AuthedAdminIndexRoute
   '/settings': typeof AuthedSettingsIndexRoute
-  '/agents/gallery': typeof AuthedAppAgentsGalleryRoute
   '/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/channel/new': typeof AuthedAppChannelNewRoute
   '/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -278,6 +286,8 @@ export interface FileRoutesByTo {
   '/admin/plugins': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/agents/gallery/$slug': typeof AuthedAppAgentsGallerySlugRoute
+  '/agents/gallery': typeof AuthedAppAgentsGalleryIndexRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRoutesById {
@@ -302,7 +312,6 @@ export interface FileRoutesById {
   '/_authed/_app/': typeof AuthedAppIndexRoute
   '/_authed/admin/': typeof AuthedAdminIndexRoute
   '/_authed/settings/': typeof AuthedSettingsIndexRoute
-  '/_authed/_app/agents/gallery': typeof AuthedAppAgentsGalleryRoute
   '/_authed/_app/channel/$channelId': typeof AuthedAppChannelChannelIdRoute
   '/_authed/_app/channel/new': typeof AuthedAppChannelNewRoute
   '/_authed/admin/components/$name': typeof AuthedAdminComponentsNameRoute
@@ -314,6 +323,8 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/_authed/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
+  '/_authed/_app/agents/gallery/$slug': typeof AuthedAppAgentsGallerySlugRoute
+  '/_authed/_app/agents/gallery/': typeof AuthedAppAgentsGalleryIndexRoute
   '/_authed/admin/plugins/$key_/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRouteTypes {
@@ -337,7 +348,6 @@ export interface FileRouteTypes {
     | '/admin/templates'
     | '/admin/'
     | '/settings/'
-    | '/agents/gallery'
     | '/channel/$channelId'
     | '/channel/new'
     | '/admin/components/$name'
@@ -349,6 +359,8 @@ export interface FileRouteTypes {
     | '/admin/plugins/'
     | '/settings/components-gallery/'
     | '/settings/connected-accounts/'
+    | '/agents/gallery/$slug'
+    | '/agents/gallery/'
     | '/admin/plugins/$key/tools/$tool'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -368,7 +380,6 @@ export interface FileRouteTypes {
     | '/admin/templates'
     | '/admin'
     | '/settings'
-    | '/agents/gallery'
     | '/channel/$channelId'
     | '/channel/new'
     | '/admin/components/$name'
@@ -380,6 +391,8 @@ export interface FileRouteTypes {
     | '/admin/plugins'
     | '/settings/components-gallery'
     | '/settings/connected-accounts'
+    | '/agents/gallery/$slug'
+    | '/agents/gallery'
     | '/admin/plugins/$key/tools/$tool'
   id:
     | '__root__'
@@ -403,7 +416,6 @@ export interface FileRouteTypes {
     | '/_authed/_app/'
     | '/_authed/admin/'
     | '/_authed/settings/'
-    | '/_authed/_app/agents/gallery'
     | '/_authed/_app/channel/$channelId'
     | '/_authed/_app/channel/new'
     | '/_authed/admin/components/$name'
@@ -415,6 +427,8 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/'
     | '/_authed/settings/components-gallery/'
     | '/_authed/settings/connected-accounts/'
+    | '/_authed/_app/agents/gallery/$slug'
+    | '/_authed/_app/agents/gallery/'
     | '/_authed/admin/plugins/$key_/tools/$tool'
   fileRoutesById: FileRoutesById
 }
@@ -572,13 +586,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedAppAgentsIndexRouteImport
       parentRoute: typeof AuthedAppRoute
     }
-    '/_authed/_app/agents/gallery': {
-      id: '/_authed/_app/agents/gallery'
-      path: '/agents/gallery'
-      fullPath: '/agents/gallery'
-      preLoaderRoute: typeof AuthedAppAgentsGalleryRouteImport
-      parentRoute: typeof AuthedAppRoute
-    }
     '/_authed/_app/channel/$channelId': {
       id: '/_authed/_app/channel/$channelId'
       path: '/channel/$channelId'
@@ -648,6 +655,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/connected-accounts/$key'
       preLoaderRoute: typeof AuthedSettingsConnectedAccountsKeyRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
+    }
+    '/_authed/_app/agents/gallery/': {
+      id: '/_authed/_app/agents/gallery/'
+      path: '/agents/gallery'
+      fullPath: '/agents/gallery/'
+      preLoaderRoute: typeof AuthedAppAgentsGalleryIndexRouteImport
+      parentRoute: typeof AuthedAppRoute
+    }
+    '/_authed/_app/agents/gallery/$slug': {
+      id: '/_authed/_app/agents/gallery/$slug'
+      path: '/agents/gallery/$slug'
+      fullPath: '/agents/gallery/$slug'
+      preLoaderRoute: typeof AuthedAppAgentsGallerySlugRouteImport
+      parentRoute: typeof AuthedAppRoute
     }
     '/_authed/admin/plugins/$key_/tools/$tool': {
       id: '/_authed/admin/plugins/$key_/tools/$tool'
@@ -726,10 +747,11 @@ interface AuthedAppRouteChildren {
   AuthedAppRoutinesRoute: typeof AuthedAppRoutinesRoute
   AuthedAppSkillsRoute: typeof AuthedAppSkillsRoute
   AuthedAppIndexRoute: typeof AuthedAppIndexRoute
-  AuthedAppAgentsGalleryRoute: typeof AuthedAppAgentsGalleryRoute
   AuthedAppChannelChannelIdRoute: typeof AuthedAppChannelChannelIdRoute
   AuthedAppChannelNewRoute: typeof AuthedAppChannelNewRoute
   AuthedAppAgentsIndexRoute: typeof AuthedAppAgentsIndexRoute
+  AuthedAppAgentsGallerySlugRoute: typeof AuthedAppAgentsGallerySlugRoute
+  AuthedAppAgentsGalleryIndexRoute: typeof AuthedAppAgentsGalleryIndexRoute
 }
 
 const AuthedAppRouteChildren: AuthedAppRouteChildren = {
@@ -737,10 +759,11 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppRoutinesRoute: AuthedAppRoutinesRoute,
   AuthedAppSkillsRoute: AuthedAppSkillsRoute,
   AuthedAppIndexRoute: AuthedAppIndexRoute,
-  AuthedAppAgentsGalleryRoute: AuthedAppAgentsGalleryRoute,
   AuthedAppChannelChannelIdRoute: AuthedAppChannelChannelIdRoute,
   AuthedAppChannelNewRoute: AuthedAppChannelNewRoute,
   AuthedAppAgentsIndexRoute: AuthedAppAgentsIndexRoute,
+  AuthedAppAgentsGallerySlugRoute: AuthedAppAgentsGallerySlugRoute,
+  AuthedAppAgentsGalleryIndexRoute: AuthedAppAgentsGalleryIndexRoute,
 }
 
 const AuthedAppRouteWithChildren = AuthedAppRoute._addFileChildren(

@@ -6,8 +6,8 @@ import {
 import { Link } from "@tanstack/react-router";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import type { GalleryTemplateCard } from "@/lib/templates/queries";
+import { cn } from "@/lib/utils";
 
 /**
  * A hue for one template, taken from its own seed.
@@ -164,35 +164,31 @@ export function TemplateCard({ card }: { card: GalleryTemplateCard }) {
         </div>
 
         {/*
-         * The card does not navigate; this does.
+         * READ IT, and only that. The button that installs is on the template's own page.
          *
-         * Reading the card and starting the import are different decisions, so they get different
-         * targets. A card that opened the consent screen anywhere somebody clicked would collapse the
-         * two into one gesture, on the one screen in the product where the thing being clicked was
-         * written by somebody else.
+         * A card used to open the consent screen directly, which put "let me see what this is" and
+         * "I am importing this" behind one gesture — on the one screen in the product whose contents
+         * were written by somebody else. Now the card leads to a page where a person can read the
+         * whole of a stranger's instructions, close it, and have changed nothing. The extra click is
+         * the point rather than a cost.
          */}
         <Button
           className="mt-auto w-full"
           render={(props) => (
-            <Link search={{ use: card.slug }} to="/agents/gallery" {...props} />
+            <Link
+              params={{ slug: card.slug }}
+              to="/agents/gallery/$slug"
+              {...props}
+            />
           )}
           size="sm"
           variant="outline"
         >
-          Use this template
+          Read this template
         </Button>
 
-        {/*
-         * Under the button rather than in a strip of its own.
-         *
-         * It was a bordered footer and it cost more than it gave: a rule across every card at this
-         * density reads as a warning band, and the strip is what left two cards in a row finishing at
-         * different heights. It is the sentence somebody needs at the moment they reach for the
-         * button, so it sits against the button — a person who scrolled to the third card still
-         * meets it there, which is the reason it is on every card rather than once at the top.
-         */}
         <p className="text-center text-[11px] text-muted-foreground">
-          Nothing is granted by importing it.
+          Nothing is granted by reading it.
         </p>
       </div>
     </article>

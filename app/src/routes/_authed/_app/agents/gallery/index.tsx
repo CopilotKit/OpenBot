@@ -44,7 +44,7 @@ const gallerySearchSchema = z.object({
   use: z.string().optional(),
 });
 
-export const Route = createFileRoute("/_authed/_app/agents/gallery")({
+export const Route = createFileRoute("/_authed/_app/agents/gallery/")({
   validateSearch: gallerySearchSchema,
   component: GalleryRoute,
 });
