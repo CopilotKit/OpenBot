@@ -255,3 +255,37 @@ body {
 [data-slot="item-description"] {
   text-wrap: pretty;
 }
+
+/*
+ * A generated interface is never allowed to occupy nothing.
+ *
+ * The SDK sizes the frame it draws into from a single measurement taken inside the sandbox, and it
+ * writes the result as an inline height on the frame's own container. Two races in that code make
+ * the number wrong, and both were reproduced against @copilotkit/react-core 1.69.0:
+ *
+ *   - The measurement is queued alongside the expressions that build the interface. When it runs
+ *     first the body it measures is still empty, the container is set to `height: 0px`, and because
+ *     the container also clips, the interface is invisible. Nothing retries: the measurement is
+ *     one-shot and its listener is removed after the first reply.
+ *   - The effect that measures bails out when the sandbox has not finished loading, and its only
+ *     dependency is "generation finished". An interface restored from thread history is already
+ *     finished on its first render, while the sandbox is still being imported, so the effect bails
+ *     and never runs again.
+ *
+ * A floor is the smallest thing that removes the failure that matters. `min-height` clamps above an
+ * inline `height`, so a collapsed measurement can no longer render nothing, and a measurement that
+ * came back correct and larger is left alone. The reader gets an interface that is present and may
+ * be cut off, instead of a turn that looks like the Bot said nothing at all.
+ *
+ * Selected through the frame rather than through a class of ours because both chat surfaces render
+ * this container and only one of them is ours: the packaged chat builds it too, and a rule that
+ * needed our wrapper would fix the transcript and leave the other surface broken. `websandbox__frame`
+ * is the class the sandbox library puts on the frame it creates.
+ *
+ * DELETE THIS WHEN THE SDK IS FIXED. It compensates for someone else's arithmetic, so it should not
+ * outlive the bug: once the measurement re-runs on sandbox-ready and after the queue drains, this
+ * rule can only make small interfaces taller than they asked to be.
+ */
+:where(div:has(> iframe.websandbox__frame)) {
+  min-height: 200px;
+}

@@ -25,6 +25,8 @@ your own machine.
 
 </div>
 
+> **A template, not a product.** OpenBot is meant to be cloned and made your own. There is no hosted version to sign up for, and nothing here is published as a package to depend on: every workspace in this repository is private. You take the repository, replace the example tenant package under `examples/` with your own coworkers, channels and skills, and run it. Everything below describes a starting point, not a finished thing somebody operates for you.
+
 > **Alpha, and under active development.** OpenBot is early. Expect rough edges and bugs, and expect things to move. Issues and pull requests are welcome.
 
 > **Runs on your machine.** Everything below is written for a laptop. `.env.example` carries `OPENBOT_SINGLE_USER=true`, which admits every request as one administrator, so a fresh clone reaches the product without registering an OAuth client first. [Sign-in](#sign-in) turns that off, and is required before anybody else can reach the deployment.
@@ -56,6 +58,11 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 - A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
 
 ## Quick start
+
+> **Setting up with an AI assistant?** Paste [`prompt.txt`](prompt.txt) into it first. It carries the
+> same steps as below plus the things that are easy to get wrong: which of the ten blank keys in
+> `.env.example` are actually yours to fill (three), which the start script generates for you, and
+> what each start-up refusal means. Every claim in it is checked against this repository.
 
 1. Create `.env`:
 
@@ -104,7 +111,7 @@ One image carries the app, the API, the browser the Bots drive, and optionally P
 ```sh
 docker build -t openbot .
 docker run -p 3001:3001 --env-file .env \
-  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql/data openbot
+  -e EMBEDDED_POSTGRES=on -v openbot-data:/var/lib/postgresql openbot
 ```
 
 Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
