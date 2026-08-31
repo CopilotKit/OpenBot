@@ -52,6 +52,18 @@ function useSidebar() {
 }
 
 /**
+ * The sidebar's state, or null where there is no sidebar.
+ *
+ * `useSidebar` throwing is right for a part OF a sidebar, where its absence is a wiring bug. A
+ * control that merely offers to toggle one is the other case: `PageShell` sits inside the three
+ * shells today, and a screen that renders it outside one is a layout choice rather than a defect.
+ * Throwing there would take a whole screen down over a button that should simply not be drawn.
+ */
+function useOptionalSidebar() {
+  return React.useContext(SidebarContext);
+}
+
+/**
  * Sidebar state, uncontrolled by default.
  *
  * This vendored file used to write a `sidebar_state` cookie on every toggle, so a server-rendered
@@ -723,5 +735,6 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  useOptionalSidebar,
   useSidebar,
 };

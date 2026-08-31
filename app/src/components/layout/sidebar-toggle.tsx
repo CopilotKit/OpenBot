@@ -1,7 +1,7 @@
 import { IconLayoutSidebar } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
-import { useSidebar } from "@/components/ui/sidebar";
+import { useOptionalSidebar } from "@/components/ui/sidebar";
 import {
   Tooltip,
   TooltipContent,
@@ -35,7 +35,10 @@ const SHORTCUT_LABEL = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
  * contradict the label below. The state still belongs to the primitive: `toggleSidebar` is its hook.
  */
 export function SidebarToggle({ className }: { className?: string }) {
-  const { isMobile, open, toggleSidebar } = useSidebar();
+  const sidebar = useOptionalSidebar();
+  // No sidebar in scope, so nothing to toggle and nothing to draw.
+  if (!sidebar) return null;
+  const { isMobile, open, toggleSidebar } = sidebar;
   /*
    * The label says what the click will do, not what is on screen. Below 768px the sidebar is an
    * overlay Sheet with its own open state, and `open` describes the desktop pane — reading it there
