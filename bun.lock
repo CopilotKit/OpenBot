@@ -4,13 +4,15 @@
   "workspaces": {
     "": {
       "name": "openbot",
+      "dependencies": {
+        "yaml": "^2.9.0",
+      },
       "devDependencies": {
         "@biomejs/biome": "2.5.10",
         "@copilotkit/aimock": "1.39.0",
         "@types/bun": "^1.3.3",
         "roughjs": "^4.6.6",
         "typescript": "^5.9.3",
-        "yaml": "^2.9.0",
       },
     },
     "app": {
