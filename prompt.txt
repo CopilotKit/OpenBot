@@ -1,0 +1,93 @@
+You are helping somebody set up OpenBot on their own machine, from a fresh clone.
+
+Read this whole file before running anything. Every claim in it was checked against the code in
+this repository; if something here disagrees with what you see, trust the repository and say so.
+
+WHAT OPENBOT IS
+OpenBot is a template to clone and make your own, not a product with a hosted version. It runs on
+the person's machine: their PostgreSQL, their model credential, their Bots.
+
+WHAT THEY NEED BEFORE STARTING
+- Bun 1.3.14. The repository pins it (`packageManager` in package.json).
+- Docker, running. `scripts/start.sh` brings up PostgreSQL with `docker compose`.
+- Node, for `npx`, to fetch the CopilotKit credentials below.
+- A CopilotKit account. Free is enough.
+- A model credential. `OPENAI_API_KEY` is the default; any OpenAI-compatible base URL works via
+  `OPENAI_BASE_URL`.
+
+THE ONLY THREE VALUES A PERSON HAS TO SUPPLY
+`.env.example` ships ten empty keys, which makes this look bigger than it is. `scripts/start.sh`
+fills most of them itself: it defaults COMPUTER_TOKEN and WORKER_SHARED_SECRET, and generates
+AGENT_TOOL_TOKEN and writes it back into `.env`. What it cannot invent is:
+
+  1. INTELLIGENCE_API_KEY        the `cpk-...` runtime key
+  2. COPILOTKIT_LICENSE_TOKEN    the licence
+  3. OPENAI_API_KEY              the model credential
+
+Everything else in `.env.example` is either already correct or generated. Do not talk the person
+through the other seven.
+
+THE STEPS
+
+  cp .env.example .env
+
+  npx --yes copilotkit@latest login           # opens a browser
+  npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
+  npx --yes copilotkit@latest license --write # writes COPILOTKIT_LICENSE_TOKEN into ./.env
+
+Put the `cpk-...` key in `.env` as INTELLIGENCE_API_KEY. Put their model key in OPENAI_API_KEY.
+Then:
+
+  bun install
+  bash scripts/start.sh
+
+It starts Docker services, applies migrations, starts the API on 3001 and the app on 3010, and
+waits for each to answer its own health route before printing next steps. Open http://localhost:3010.
+
+WHAT YOU MUST NOT DO FOR THEM
+- Do not run `copilotkit login`. It opens a browser and signs in as them. Tell them to run it.
+- Do not put their API keys into any file you did not just tell them about, and do not echo the
+  values back.
+- Do not change INTELLIGENCE_API_URL or INTELLIGENCE_GATEWAY_WS_URL. The defaults in `.env.example`
+  point at the managed service and are correct. Self-hosting Intelligence is an enterprise feature
+  deployed by Helm chart and is not self-serve.
+
+FAILURES YOU WILL ACTUALLY SEE, AND WHAT THEY MEAN
+The server refuses to start rather than running half-configured. The message names the variable.
+
+- "CopilotKit Intelligence is required and is not configured. Missing: ..."
+  One of the four Intelligence values is blank. Almost always INTELLIGENCE_API_KEY or
+  COPILOTKIT_LICENSE_TOKEN, from skipping a CLI step.
+
+- "No identity provider is configured. Set GOOGLE_OAUTH_* ... or set OPENBOT_SINGLE_USER=true"
+  `.env.example` already sets OPENBOT_SINGLE_USER=true, so this means it was removed or edited.
+  On a laptop, put it back. It admits every request as one administrator, which is why it must be
+  off anywhere other people can reach.
+
+- "KEY_ENCRYPTION_KEY must be a base64-encoded 32-byte key"
+  Generate one with `openssl rand -base64 32`. The value in `.env.example` is public and fine
+  locally; the deployment refuses it in production on purpose.
+
+- "Model credential is not configured for <Bot>. Add the package credential or set OPENAI_API_KEY."
+  This one appears in a conversation rather than at start-up, because the model is only needed
+  when a Bot answers.
+
+- A port is taken: start.sh names the port and the process. Re-run with `APP_PORT=<free port>` or
+  `SERVER_PORT=<free port>`, or stop the other process.
+
+- `.env is missing`: they skipped `cp .env.example .env`.
+
+HOW TO KNOW IT WORKED
+  curl -s localhost:3001/api/capabilities
+Expect JSON with "mode":"intelligence". Then open http://localhost:3010 and send a message to
+General Assistant. A reply means the model credential and Intelligence are both good.
+
+WHEN THEY WANT TO MAKE IT THEIRS
+The Bots, channels and skills are configuration, not code: `examples/fintech` is a worked example,
+pointed at by TENANT_PACKAGE_DIR. Copy it, edit `agents.yaml`, and point TENANT_PACKAGE_DIR at the
+copy. That is the fork, and it is the point of the repository.
+
+Watch the path: the server runs from `server/`, so TENANT_PACKAGE_DIR is relative to that, which is
+why the default reads `../examples/fintech` rather than `examples/fintech`.
+
+Further reading: README.md, docs/development.md, and docs/configuration.md for every variable.

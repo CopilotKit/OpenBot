@@ -16,8 +16,52 @@
  * from under the first. Both then ran it. Every time this file names a moment it names it in SQL.
  */
 import { and, eq, gte, isNull, like, lt, or, sql } from "drizzle-orm";
+import postgres from "postgres";
 import type { Database } from "../db/client";
 import { workItems } from "../db/schema";
+
+/**
+ * Said aloud when work is queued, so a sweep can start now instead of at its next poll.
+ *
+ * The payload is the kind, and nothing more: a listener decides whether it sweeps that kind at
+ * all, and the queue stays the truth either way. A notification is a latency optimisation, never
+ * a delivery mechanism — one lost in transit costs up to one poll interval, not the work.
+ */
+export const WORK_OFFERED_TOPIC = "openbot_work_offered";
+
+/** Inside the offering transaction where there is one, so it fires on commit and never before. */
+const announceOffered = (db: Pick<Database, "execute">, kind: string) =>
+  db.execute(sql`select pg_notify(${WORK_OFFERED_TOPIC}, ${kind})`);
+
+export type WorkOfferedListener = { stop: () => Promise<void> };
+
+/**
+ * Hear work being offered, from any instance, including this one.
+ *
+ * On its own connection, because `LISTEN` holds one for the life of the subscription: taken from
+ * the pool, it would be a connection the rest of the server never gets back.
+ */
+export async function startWorkOfferedListener(
+  databaseUrl: string,
+  onOffered: (kind: string) => void,
+): Promise<WorkOfferedListener> {
+  const connection = postgres(databaseUrl, { max: 1 });
+
+  await connection.listen(WORK_OFFERED_TOPIC, (payload) => {
+    try {
+      onOffered(payload);
+    } catch {
+      // A listener's mistake is not a reason to tear down the subscription: the poll behind it is
+      // still correct, and the next sweep picks up whatever this wake-up would have.
+    }
+  });
+
+  return {
+    stop: async () => {
+      await connection.end();
+    },
+  };
+}
 
 export type WorkItem = {
   kind: string;
@@ -178,6 +222,7 @@ export function createWorkQueue(database: Database): WorkQueue {
 
       if (!atMost) {
         const [written] = await write(database);
+        if (written) await announceOffered(database, kind);
         return written ? "queued" : "already";
       }
 
@@ -215,6 +260,7 @@ export function createWorkQueue(database: Database): WorkQueue {
         if (already.length > 0) return "already";
         if ((row?.total ?? 0) >= atMost.max) return "refused";
         const [written] = await write(transaction as unknown as Database);
+        if (written) await announceOffered(transaction, kind);
         return written ? "queued" : "already";
       });
     },
