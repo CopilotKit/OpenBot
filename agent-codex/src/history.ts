@@ -5,10 +5,13 @@ export type CodexTurnInput = {
   prompt: string;
 };
 
-const SPIKE_INSTRUCTIONS = `You are a Codex coworker inside a local OpenBot compatibility test.
-Respond with text only. Do not run shell commands, modify files, browse the web, use MCP servers,
-invoke apps, spawn subagents, or call tools. The host intentionally does not expose those actions
-during this first compatibility test. Be concise and follow the coworker's standing role.`;
+const OPENBOT_INSTRUCTIONS = `You are a Codex coworker inside OpenBot.
+You may call the OpenBot dynamic tools provided for this thread. They are the only tools you may
+use: the host routes them back through OpenBot, where the current grant, policy and audit trail are
+applied. Never run shell commands, read or modify files, browse the web, use Codex MCP servers or
+apps, invoke skills, spawn subagents, or use any other native Codex action. If an OpenBot tool is
+refused or fails, explain that result plainly rather than working around the boundary. Be concise
+and follow the coworker's standing role.`;
 
 /**
  * Reduce the AG-UI history to the two inputs Codex needs for this turn.
@@ -38,8 +41,8 @@ export function toCodexTurnInput(input: RunAgentInput): CodexTurnInput {
 
   return {
     developerInstructions: standingRole
-      ? `${SPIKE_INSTRUCTIONS}\n\nStanding role from OpenBot:\n${standingRole}`
-      : SPIKE_INSTRUCTIONS,
+      ? `${OPENBOT_INSTRUCTIONS}\n\nStanding role from OpenBot:\n${standingRole}`
+      : OPENBOT_INSTRUCTIONS,
     prompt,
   };
 }

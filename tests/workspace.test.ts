@@ -13,16 +13,23 @@ function packageManifest(path: string) {
 }
 
 describe("OpenBot workspace", () => {
-  test("defines the app, server, and worker packages", () => {
+  test("defines every package installed by the root workspace", () => {
     const rootManifest = JSON.parse(
       readFileSync(join(repositoryRoot, "package.json"), "utf8"),
     ) as { workspaces: string[] };
 
-    expect(rootManifest.workspaces).toEqual(["app", "server", "worker"]);
+    expect(rootManifest.workspaces).toEqual([
+      "app",
+      "agent-codex",
+      "server",
+      "worker",
+    ]);
 
     for (const packageName of rootManifest.workspaces) {
       expect(existsSync(join(repositoryRoot, packageName))).toBe(true);
-      expect(packageManifest(packageName).name).toBe(packageName);
+      expect(packageManifest(packageName).name).toBe(
+        packageName === "agent-codex" ? "@openbot/agent-codex" : packageName,
+      );
     }
   });
 });

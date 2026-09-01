@@ -20,7 +20,8 @@ describe("toCodexTurnInput", () => {
     expect(result.developerInstructions).toContain(
       "You are the finance coworker.",
     );
-    expect(result.developerInstructions).toContain("Respond with text only");
+    expect(result.developerInstructions).toContain("OpenBot dynamic tools");
+    expect(result.developerInstructions).toContain("Never run shell commands");
   });
 
   test("refuses an empty turn", () => {

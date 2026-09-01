@@ -160,6 +160,10 @@ identifies_as_openbot() {
       curl -fsS --max-time 3 "http://localhost:$port/" 2>/dev/null \
         | grep -qi '<title>[^<]*OpenBot'
       ;;
+    agent-codex)
+      curl -fsS --max-time 3 "http://localhost:$port/health" 2>/dev/null \
+        | grep -q '"safety":"openbot-governed-tools"'
+      ;;
     # Compose services on dedicated loopback ports, answering a route named for this stack.
     *)
       curl -fsS --max-time 3 "http://localhost:$port/health" >/dev/null 2>&1
@@ -245,6 +249,8 @@ fi
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
 if [ "$CODEX_AGENT_ENABLED" = "true" ]; then
   CODEX_AGENT_WORKSPACE="$(setting CODEX_AGENT_WORKSPACE "$ROOT/.openbot-codex/workspace")"
+  CODEX_AGENT_STATE="$(setting CODEX_AGENT_STATE "$ROOT/.openbot-codex/threads.json")"
+  OPENBOT_TOOL_URL="$(setting OPENBOT_TOOL_URL "http://localhost:${SERVER_PORT}/api/agent-tools/call")"
   mkdir -p "$CODEX_AGENT_WORKSPACE"
   require_free_or_ours "$CODEX_AGENT_PORT" "agent-codex"
   if identifies_as_openbot "$CODEX_AGENT_PORT" "agent-codex"; then
@@ -255,7 +261,10 @@ if [ "$CODEX_AGENT_ENABLED" = "true" ]; then
     nohup env \
       PORT="$CODEX_AGENT_PORT" \
       MANAGED_AGENT_TOKEN="$MANAGED_AGENT_TOKEN" \
+      AGENT_TOOL_TOKEN="$AGENT_TOOL_TOKEN" \
+      OPENBOT_TOOL_URL="$OPENBOT_TOOL_URL" \
       CODEX_AGENT_WORKSPACE="$CODEX_AGENT_WORKSPACE" \
+      CODEX_AGENT_STATE="$CODEX_AGENT_STATE" \
       bun agent-codex/src/index.ts >"$LOGS/agent-codex.log" 2>&1 </dev/null &)
   wait_for "http://localhost:$CODEX_AGENT_PORT/health" "agent-codex" 60
 else
@@ -284,7 +293,7 @@ green "  coworker tables migrated"
 # and masks it. So: report what was resolved, and do not re-read the file.
 green "  managed coworker endpoint: $MANAGED_AGENT_AG_UI_URL"
 if [ "$CODEX_AGENT_ENABLED" = "true" ]; then
-  green "  Codex coworker: ChatGPT login · read-only text compatibility mode"
+  green "  Codex coworker: ChatGPT login · persistent threads · OpenBot-governed tools"
 fi
 
 info "2/4  Server"

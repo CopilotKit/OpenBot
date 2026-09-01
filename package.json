@@ -6,6 +6,7 @@
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "app",
+    "agent-codex",
     "server",
     "worker"
   ],

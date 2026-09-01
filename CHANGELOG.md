@@ -8,6 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A local Codex coworker keeps its conversation and uses OpenBot's governed tools
+
+OpenBot can now run a coworker through the Codex app already signed in on the host, without an API
+key. Its conversation survives adapter and app-server restarts: OpenBot records the Codex thread it
+owns, resumes that exact thread, and refuses to silently replace unreadable recovery state.
+
+Connector calls do not go around the deployment. Codex sees only the tools OpenBot assigned to that
+coworker, and every call returns with the deployment's signed run assertion through the existing
+grant, policy and audit gateway. Native Codex shell, file, web, app, plugin and MCP paths are disabled
+or interrupted for this mode, and the remaining turn is sandboxed read-only without network access.
+Rejected, stale and duplicate callbacks are reported as failed tool results rather than being
+carried out.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
