@@ -3,7 +3,11 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
-import { CodexAppServerClient } from "../src/codex-client";
+import {
+  codexLaunchSpec,
+  CodexAppServerClient,
+  safeCodexEnvironment,
+} from "../src/codex-client";
 import type { CodexDynamicTool } from "../src/tools";
 
 type Message = {
@@ -232,7 +236,18 @@ describe("CodexAppServerClient", () => {
     expect(start?.params?.dynamicTools).toEqual([dynamicTool]);
     expect(start?.params?.config).toMatchObject({
       mcp_servers: { existing_server: { enabled: false } },
-      features: { apps: false, plugins: false, multi_agent: false },
+      features: {
+        apps: false,
+        browser_use: false,
+        computer_use: false,
+        in_app_browser: false,
+        plugins: false,
+        shell_tool: false,
+        unified_exec: false,
+        workspace_dependencies: false,
+        multi_agent: false,
+      },
+      shell_environment_policy: { inherit: "none" },
       web_search: "disabled",
       apps: { _default: { enabled: false } },
       tools: { web_search: false, view_image: false },
@@ -249,6 +264,61 @@ describe("CodexAppServerClient", () => {
       networkAccess: false,
     });
     client.stop();
+  });
+
+  test("disables native action surfaces before app-server starts", () => {
+    const spec = codexLaunchSpec({
+      CODEX_BINARY: "/opt/codex",
+      CODEX_AGENT_WORKSPACE: "/srv/codex-workspace",
+      CODEX_HOME: "/srv/codex-home",
+      PATH: "/usr/bin",
+      AGENT_TOOL_TOKEN: "openbot-tool-secret",
+      MANAGED_AGENT_TOKEN: "openbot-agent-secret",
+      OPENAI_API_KEY: "provider-secret",
+    });
+
+    expect(spec.binary).toBe("/opt/codex");
+    expect(spec.cwd).toBe("/srv/codex-workspace");
+    expect(spec.args).toContain('shell_environment_policy.inherit="none"');
+    for (const feature of [
+      "shell_tool",
+      "unified_exec",
+      "browser_use",
+      "computer_use",
+      "in_app_browser",
+      "workspace_dependencies",
+    ]) {
+      const position = spec.args.indexOf(feature);
+      expect(position).toBeGreaterThan(0);
+      expect(spec.args[position - 1]).toBe("--disable");
+    }
+    expect(spec.env).toEqual({
+      PATH: "/usr/bin",
+      CODEX_HOME: "/srv/codex-home",
+    });
+  });
+
+  test("never inherits OpenBot or provider credentials into Codex", () => {
+    const environment = safeCodexEnvironment({
+      PATH: "/usr/bin",
+      HOME: "/home/codex",
+      LANG: "en_US.UTF-8",
+      SSL_CERT_FILE: "/etc/certs.pem",
+      AGENT_TOOL_TOKEN: "tool-secret",
+      MANAGED_AGENT_TOKEN: "managed-secret",
+      COMPUTER_TOKEN: "computer-secret",
+      OPENAI_API_KEY: "provider-secret",
+      DATABASE_URL: "postgres://secret",
+      AWS_SECRET_ACCESS_KEY: "cloud-secret",
+    });
+
+    expect(environment).toEqual({
+      PATH: "/usr/bin",
+      HOME: "/home/codex",
+      LANG: "en_US.UTF-8",
+      SSL_CERT_FILE: "/etc/certs.pem",
+    });
+    expect(JSON.stringify(environment)).not.toContain("secret");
   });
 
   test("ignores replayed prior-turn events before a resumed turn starts", async () => {

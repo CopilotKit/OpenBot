@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { CodexDynamicTool, ToolResult } from "./tools";
 
@@ -52,6 +53,28 @@ type SpawnAppServer = () => ChildProcessWithoutNullStreams;
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_TURN_TIMEOUT_MS = 180_000;
+const DISABLED_NATIVE_FEATURES = [
+  "apps",
+  "browser_use",
+  "browser_use_external",
+  "browser_use_full_cdp_access",
+  "code_mode",
+  "code_mode_host",
+  "computer_use",
+  "goals",
+  "hooks",
+  "image_generation",
+  "in_app_browser",
+  "memories",
+  "multi_agent",
+  "plugins",
+  "remote_plugin",
+  "shell_snapshot",
+  "shell_tool",
+  "skill_mcp_dependency_install",
+  "unified_exec",
+  "workspace_dependencies",
+] as const;
 const BLOCKED_ITEM_TYPES = new Set([
   "commandExecution",
   "fileChange",
@@ -574,10 +597,61 @@ export class CodexAppServerClient {
   }
 }
 
+export function safeCodexEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const safeNames = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "CODEX_HOME",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+  ] as const;
+  return Object.fromEntries(
+    safeNames.flatMap((name) =>
+      source[name] === undefined ? [] : [[name, source[name]]],
+    ),
+  );
+}
+
+/**
+ * The process boundary for Codex, separated so tests can prove it before anything is spawned.
+ *
+ * A post-start interrupt is still kept as an alarm, but it is not the security boundary: shell,
+ * browser, computer and integration features are disabled on the command line before the app-server
+ * can create a turn, and OpenBot credentials are absent from the child's environment entirely.
+ */
+export function codexLaunchSpec(source: NodeJS.ProcessEnv = process.env) {
+  const binary = source.CODEX_BINARY?.trim() || "codex";
+  return {
+    binary,
+    args: [
+      "app-server",
+      "--stdio",
+      "--config",
+      'shell_environment_policy.inherit="none"',
+      ...DISABLED_NATIVE_FEATURES.flatMap((feature) => ["--disable", feature]),
+    ],
+    cwd: resolve(
+      source.CODEX_AGENT_WORKSPACE?.trim() || ".openbot-codex/workspace",
+    ),
+    env: safeCodexEnvironment(source),
+  };
+}
+
 function launchCodex(): ChildProcessWithoutNullStreams {
-  const binary = process.env.CODEX_BINARY?.trim() || "codex";
-  return spawn(binary, ["app-server", "--stdio"], {
-    env: process.env,
+  const spec = codexLaunchSpec();
+  return spawn(spec.binary, spec.args, {
+    cwd: spec.cwd,
+    env: spec.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -589,13 +663,27 @@ function safetyConfigFor(mcpServerNames: string[]): JsonObject {
     ),
     features: {
       apps: false,
+      browser_use: false,
+      browser_use_external: false,
+      browser_use_full_cdp_access: false,
       plugins: false,
       multi_agent: false,
       hooks: false,
       memories: false,
       goals: false,
+      computer_use: false,
+      image_generation: false,
+      in_app_browser: false,
+      remote_plugin: false,
+      shell_snapshot: false,
+      shell_tool: false,
+      skill_mcp_dependency_install: false,
+      unified_exec: false,
+      workspace_dependencies: false,
       code_mode: { enabled: false },
+      code_mode_host: false,
     },
+    shell_environment_policy: { inherit: "none" },
     web_search: "disabled",
     apps: {
       _default: {
