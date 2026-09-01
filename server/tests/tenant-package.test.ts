@@ -306,6 +306,7 @@ describe("tenant YAML validation", () => {
       configuration: {
         systemPrompt:
           "You are a helpful general assistant. Give clear, concise, and accurate answers.",
+        computerAccess: "enabled",
       },
       skills: [],
     });
@@ -340,6 +341,38 @@ describe("tenant YAML validation", () => {
 
     expect(tenantPackage.agents[0]?.type).toBe("built_in");
     expect(tenantPackage.agents[1]?.type).toBe("remote_ag_ui");
+  });
+
+  test("projects an explicit computer entitlement for omitted and locked package agents", () => {
+    const tenantPackage = validateTenantPackage({
+      brand: "tenant: { id: fintech, product_name: Ledgerline }",
+      agents: `agents:
+  - id: legacy-package-agent
+    name: Legacy Package Agent
+    title: Legacy
+    role_description: Keeps the pre-field package behavior explicit.
+    type: built-in
+    system_prompt: Answer from the package.
+  - id: locked-package-agent
+    name: Locked Package Agent
+    title: Locked
+    role_description: Remains unavailable at G0.
+    type: built-in
+    computer_access: disabled
+    system_prompt: Refuse computer work.`,
+      channels: "channels: []",
+      model:
+        "model: { provider: openai, credential_secret_ref: openai-key, default_model: gpt-5.6-terra }",
+      knowledge: "sources: []",
+      themeCss: "",
+    });
+
+    expect(tenantPackage.agents[0]?.configuration).toMatchObject({
+      computerAccess: "enabled",
+    });
+    expect(tenantPackage.agents[1]?.configuration).toMatchObject({
+      computerAccess: "disabled",
+    });
   });
 
   test("rejects a channel that refers to an unknown agent", () => {
@@ -418,6 +451,10 @@ describe("tenant package agent profile synchronization", () => {
       id: agent.id,
       name: agent.name,
       packageId: deploymentPackage.id,
+      configuration: {
+        systemPrompt: "Be helpful.",
+        computerAccess: "enabled",
+      },
     });
     expect(profile).toMatchObject({
       agentId: agent.id,
