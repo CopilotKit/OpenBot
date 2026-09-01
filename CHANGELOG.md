@@ -34,6 +34,18 @@ to authenticate. In the same spirit, the handoff panel explains once when a cowo
 work on (it runs as its own agent, outside this deployment's loop) instead of offering switches the
 server can only refuse; its existing grants stay visible so they can still be revoked.
 
+### A channel stops showing a working indicator once its turn has ended
+
+Sending a message and then opening another channel before the reply arrived left the first channel
+showing three bouncing dots on the roster, and they stayed there after the answer had landed and
+been drawn into its preview, until the roster was refetched for some unrelated reason. A person's
+own turn is reported by the browser, because the server is not told when one begins, and that
+reporting was keyed on state belonging to the channel screen: opening another channel replaced the
+screen, and the replacement reported the channel it had just opened rather than the one still
+working. The report now belongs to the turn instead of to the screen, so the channel that was
+running is the channel told when it stops. Opening a channel also no longer announces that it is
+idle twice before anything has run in it.
+
 ### A hop the boundary refused now names the Bot that was refused
 
 The audit page renders its Bot column from `payload.bot` and nothing else. `agent.handoff_offered`
