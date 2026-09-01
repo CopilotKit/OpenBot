@@ -12,6 +12,8 @@ import { client } from "@/lib/client";
  */
 export type RoutineRecord = {
   id: string;
+  /** Which Bot carries it out, so a Bot's own dialog can show only its routines. */
+  agentId: string;
   schedule: string;
   timezone: string;
   instruction: string;

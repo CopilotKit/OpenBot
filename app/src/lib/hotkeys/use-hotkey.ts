@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { getHotkey, matchesHotkey } from "./hotkeys";
 import type { HotkeyId } from "./hotkeys";
+import { getHotkey, matchesHotkey } from "./hotkeys";
 
 /**
  * Whether the keystroke belongs to whatever the person is typing into.

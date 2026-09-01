@@ -158,8 +158,39 @@ export function createAgentRoutes(
     enabled: boolean;
     /** The Bots this one may address today, read per call so a revoked grant stops showing. */
     reachableFrom: (agentId: string) => Promise<readonly string[]>;
+    /**
+     * Whether this Bot can be a grantee at all — the handing-on tool executes inside this
+     * deployment's own run loop, so only a Bot that runs in it can be offered one. Exposed so the
+     * screen can say that once, instead of letting every switch fail with the same refusal.
+     * Optional so a caller without a plugin store answers "no" rather than crashing the read.
+     */
+    runsHere?: (agentId: string) => Promise<boolean | undefined>;
   },
+  /**
+   * Whether a coworker can run on this deployment's own Bot, i.e. be created with no endpoint.
+   *
+   * The store already refuses such a create on a deployment with no managed Bot; this exists so a
+   * screen can say so before somebody fills in three steps of a form that was always going to fail.
+   */
+  builtInAvailable = false,
+  /**
+   * The managed Bot's own address, so a coworker created without an endpoint can be told apart.
+   *
+   * Creation bakes this address into the coworker's stored configuration, and afterwards nothing in
+   * the row says whether a person supplied it. The difference matters to exactly one screen: a
+   * coworker running here calls tools back with the deployment's own credential and needs no setup,
+   * while one a person hosts needs a callback token put into their process. Without this flag the
+   * dialog nagged built-in coworkers about a credential they never needed.
+   */
+  managedEndpoint?: string,
 ) {
+  /** The dto with the one fact only this closure knows: whether the coworker runs on our own Bot. */
+  const dto = (actor: AgentActor, agent: AgentProfile) => ({
+    ...agentDto(actor, agent),
+    // A string comparison on purpose: two absent values must not read as "runs on our Bot".
+    builtIn:
+      typeof agent.endpoint === "string" && agent.endpoint === managedEndpoint,
+  });
   const routes = new Hono<{ Variables: AppVariables }>();
 
   /**
@@ -215,12 +246,22 @@ export function createAgentRoutes(
       const hidden = context.req.query("hidden") === "true";
       const agents = await store.list(context.var.actor, hidden);
       return context.json({
-        agents: agents.map((agent) => agentDto(context.var.actor, agent)),
+        agents: agents.map((agent) => dto(context.var.actor, agent)),
       });
     } catch (error) {
       return mapStoreError(context, error);
     }
   });
+
+  /**
+   * What kinds of coworker this deployment can create, for the screen that asks.
+   *
+   * Static per process: whether a managed Bot exists is deployment configuration, not data. Above
+   * the parameterised route on purpose, so "capabilities" can never be read as an agent id.
+   */
+  routes.get("/capabilities", requireUser, (context) =>
+    context.json({ capabilities: { builtInAvailable } }),
+  );
 
   routes.get("/:agentId", requireUser, async (context) => {
     try {
@@ -231,7 +272,7 @@ export function createAgentRoutes(
       if (!agent) {
         return context.json({ error: "Agent not found." }, 404);
       }
-      return context.json({ agent: agentDto(context.var.actor, agent) });
+      return context.json({ agent: dto(context.var.actor, agent) });
     } catch (error) {
       return mapStoreError(context, error);
     }
@@ -323,7 +364,7 @@ export function createAgentRoutes(
         ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
         hasKey: Boolean(parsed.value.auth),
       });
-      return context.json({ agent: agentDto(context.var.actor, agent) }, 201);
+      return context.json({ agent: dto(context.var.actor, agent) }, 201);
     } catch (error) {
       return mapStoreError(context, error);
     }
@@ -351,7 +392,7 @@ export function createAgentRoutes(
         ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
         ...(parsed.value.auth ? { keyReplaced: true } : {}),
       });
-      return context.json({ agent: agentDto(context.var.actor, agent) });
+      return context.json({ agent: dto(context.var.actor, agent) });
     } catch (error) {
       return mapStoreError(context, error);
     }
@@ -368,7 +409,7 @@ export function createAgentRoutes(
       await record(context, "bot.duplicated", agent.id, {
         copiedFrom: context.req.param("agentId"),
       });
-      return context.json({ agent: agentDto(context.var.actor, agent) }, 201);
+      return context.json({ agent: dto(context.var.actor, agent) }, 201);
     } catch (error) {
       return mapStoreError(context, error);
     }
@@ -481,6 +522,11 @@ export function createAgentRoutes(
           // Granting is an administrator's, the same as it is on every other grant.
           canGrant: context.var.actor.role === "admin",
           reachable: handoff ? await handoff.reachableFrom(agentId) : [],
+          // Whether this Bot can hold such a grant at all; the write path refuses one that cannot,
+          // and the screen should say so before a person flips switches that can only bounce.
+          grantable: handoff?.runsHere
+            ? ((await handoff.runsHere(agentId)) ?? false)
+            : false,
         },
       });
     } catch (error) {
