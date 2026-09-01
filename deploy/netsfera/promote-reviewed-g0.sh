@@ -50,8 +50,14 @@ file_owner_mode() {
 }
 
 clean_up_private_files() {
-  rm -rf "$temporary_directory"
-  rm -f "$bundle_path"
+  local cleanup_failed=0
+  if ! rm -rf "$temporary_directory"; then
+    cleanup_failed=1
+  fi
+  if ! rm -f "$bundle_path"; then
+    cleanup_failed=1
+  fi
+  return "$cleanup_failed"
 }
 
 wait_for_healthy_container() {

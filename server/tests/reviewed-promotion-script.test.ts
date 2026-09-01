@@ -23,6 +23,7 @@ function promotionFixture() {
   const fakeBin = join(root, "bin");
   const log = join(root, "commands.log");
   const state = join(root, "state");
+  const cleanupCounter = join(root, "cleanup-counter");
   run(["mkdir", source, incoming, fakeBin], root);
   run(["git", "init", "-q"], source);
   run(["git", "config", "user.email", "promotion@test"], source);
@@ -50,6 +51,11 @@ function promotionFixture() {
   makeExecutable(join(fakeBin, "rm"), `#!/usr/bin/env bash
 if [[ "\${FAKE_FAIL_MODE:-}" == *cleanup-failure* ]] && [[ "$*" == *g0-promotion* ]]; then
   printf 'simulated cleanup failure\\n' >&2
+  exit 55
+fi
+if [[ "\${FAKE_FAIL_MODE:-}" == *cleanup-first-failure* ]] && [[ "$*" == *g0-promotion* ]] && [ ! -e "$FAKE_CLEANUP_COUNTER" ]; then
+  : > "$FAKE_CLEANUP_COUNTER"
+  printf 'simulated first cleanup failure\\n' >&2
   exit 55
 fi
 exec /bin/rm "$@"
@@ -100,7 +106,7 @@ exit 0
   const bundleHash = run(["sha256sum", bundle], root).split(" ")[0];
   const owner = `${run(["id", "-un"], root)}:${run(["id", "-gn"], root)}`;
   return {
-    root, source, incoming, bundle, target, original, advertisedRef, bundleHash, fakeBin, log, state, owner,
+    root, source, incoming, bundle, target, original, advertisedRef, bundleHash, fakeBin, log, state, cleanupCounter, owner,
   };
 }
 
@@ -113,6 +119,7 @@ function execute(fixture: ReturnType<typeof promotionFixture>, failMode?: string
         PATH: `${fixture.fakeBin}:/opt/homebrew/bin:/usr/bin:/bin:/sbin`,
         FAKE_LOG: fixture.log,
         FAKE_STATE: fixture.state,
+        FAKE_CLEANUP_COUNTER: fixture.cleanupCounter,
         FAKE_ORIGINAL: fixture.original,
         ...(failMode ? { FAKE_FAIL_MODE: failMode } : {}),
         OPENBOT_SOURCE_DIR: fixture.source,
@@ -189,6 +196,19 @@ test("attempts rollback even when private cleanup fails", () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr.toString()).toContain("restoring recorded OpenBot source and image");
     expect(readFileSync(fixture.state, "utf8")).toBe("restored");
+    expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("reports cleanup failure after a successful promotion when the first cleanup removal fails", () => {
+  const fixture = promotionFixture();
+  try {
+    const result = execute(fixture, "cleanup-first-failure");
+    expect(result.exitCode).toBe(71);
+    expect(result.stderr.toString()).toContain("promotion cleanup failed after rollback");
+    expect(readFileSync(fixture.state, "utf8")).toBe("applied");
     expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
