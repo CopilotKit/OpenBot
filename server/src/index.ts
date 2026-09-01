@@ -143,7 +143,17 @@ const identifyActor: IdentifyActor = async (request) => {
 };
 
 const config = loadConfig();
-const port = Number.parseInt(process.env.PORT ?? "3001", 10);
+const rawPort = process.env.PORT ?? process.env.SERVER_PORT ?? "3001";
+if (
+  process.env.PORT &&
+  process.env.SERVER_PORT &&
+  process.env.PORT !== process.env.SERVER_PORT
+) {
+  throw new Error(
+    `PORT (${process.env.PORT}) and SERVER_PORT (${process.env.SERVER_PORT}) disagree: set one or set both to the same value`,
+  );
+}
+const port = Number.parseInt(rawPort, 10);
 const database = createDatabase(config.databaseUrl);
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
