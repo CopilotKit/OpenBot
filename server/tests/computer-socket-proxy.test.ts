@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  computerSocketIsolationRefusal,
   computerSocketUrl,
   parseComputerSocketPath,
+  parseComputerSocketLease,
 } from "../src/computer/socket-proxy";
+
+const LEASE = "a".repeat(86);
 
 describe("the computer WebSocket proxy", () => {
   test("accepts only the page stream and full desktop routes", () => {
@@ -21,6 +25,19 @@ describe("the computer WebSocket proxy", () => {
     ]) {
       expect(parseComputerSocketPath(path)).toBeNull();
     }
+  });
+
+  test("offers a process-wide desktop only when the provider isolates the whole computer", () => {
+    expect(
+      computerSocketIsolationRefusal("desktop", "per-bot"),
+    ).toBeUndefined();
+    expect(computerSocketIsolationRefusal("desktop", "shared")).toBe(
+      "A full desktop requires one isolated computer per Bot.",
+    );
+    expect(computerSocketIsolationRefusal("desktop", undefined)).toBe(
+      "A full desktop requires one isolated computer per Bot.",
+    );
+    expect(computerSocketIsolationRefusal("stream", "shared")).toBeUndefined();
   });
 
   test("keeps the token on the internal URL and defaults desktop access to view-only", () => {
@@ -47,8 +64,10 @@ describe("the computer WebSocket proxy", () => {
       kind: "desktop",
       token: "secret",
       mode: "control",
+      lease: LEASE,
     });
     expect(new URL(desktop).searchParams.get("mode")).toBe("control");
+    expect(new URL(desktop).searchParams.get("lease")).toBe(LEASE);
 
     const stream = computerSocketUrl({
       baseUrl: "http://127.0.0.1:4100",
@@ -56,7 +75,19 @@ describe("the computer WebSocket proxy", () => {
       kind: "stream",
       token: "secret",
       mode: "control",
+      lease: LEASE,
     });
     expect(new URL(stream).searchParams.has("mode")).toBe(false);
+    expect(new URL(stream).searchParams.get("lease")).toBe(LEASE);
+  });
+
+  test("accepts only a well-formed control capability from WebSocket protocols", () => {
+    expect(parseComputerSocketLease(`binary, openbot-lease.${LEASE}`)).toBe(
+      LEASE,
+    );
+    expect(
+      parseComputerSocketLease("binary, openbot-lease.short"),
+    ).toBeUndefined();
+    expect(parseComputerSocketLease("binary")).toBeUndefined();
   });
 });

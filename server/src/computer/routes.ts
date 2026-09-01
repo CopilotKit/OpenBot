@@ -8,6 +8,7 @@ import { DEPLOYMENT_ROUTES } from "./deployment-routes";
 import {
   type ActionActor,
   ActionRefusedError,
+  controlLeaseBelongsTo,
   type ComputerGateway,
   ComputerUnavailableError,
   ElementNotFoundError,
@@ -417,8 +418,28 @@ export function createComputerRoutes(
     act(context, (botId, actor) => gateway.takeControl(botId, actor)),
   );
 
+  routes.post("/:botId/control/renew", (context) =>
+    act(context, (botId, actor, body) => {
+      if (typeof body?.lease !== "string") {
+        return { error: "A control lease is required." };
+      }
+      if (!controlLeaseBelongsTo(body.lease, actor.id)) {
+        return { error: "This control lease belongs to another session." };
+      }
+      return gateway.renewControl(botId, actor, body.lease);
+    }),
+  );
+
   routes.post("/:botId/control/release", (context) =>
-    act(context, (botId, actor) => gateway.releaseControl(botId, actor)),
+    act(context, (botId, actor, body) => {
+      if (typeof body?.lease !== "string") {
+        return { error: "A control lease is required." };
+      }
+      if (!controlLeaseBelongsTo(body.lease, actor.id)) {
+        return { error: "This control lease belongs to another session." };
+      }
+      return gateway.releaseControl(botId, actor, body.lease);
+    }),
   );
 
   /** The Bot asking for a value it must not be told. */
@@ -481,15 +502,30 @@ export function createComputerRoutes(
       string,
       unknown
     > | null;
+    if (typeof body?.lease !== "string") {
+      return context.json({ error: "A control lease is required." }, 400);
+    }
+    const actor = actionActorOf(context);
+    if (!controlLeaseBelongsTo(body.lease, actor.id)) {
+      return context.json(
+        { error: "This control lease belongs to another session." },
+        403,
+      );
+    }
     try {
       return context.json(
-        await gateway.humanInput(context.req.param("botId"), {
-          ...(body ?? {}),
-          // Last, so the checked value wins. Spread over it, a body carrying its own `kind` replaced
-          // the one this route had just checked, and the gateway puts that value into the path it
-          // calls on the computer.
-          kind,
-        } as Parameters<typeof gateway.humanInput>[1]),
+        await gateway.humanInput(
+          context.req.param("botId"),
+          actor,
+          {
+            ...body,
+            // Last, so the checked value wins. Spread over it, a body carrying its own `kind` replaced
+            // the one this route had just checked, and the gateway puts that value into the path it
+            // calls on the computer.
+            kind,
+          } as Parameters<typeof gateway.humanInput>[2],
+          body.lease,
+        ),
       );
     } catch (error) {
       return context.json(errorBody(error), statusFor(error));
@@ -679,6 +715,14 @@ export function createComputerRoutes(
 
 type ComputerContext = Context<{ Variables: AppVariables }>;
 
+function actionActorOf(context: ComputerContext): ActionActor {
+  const record = context.var.actor;
+  return {
+    id: record.id,
+    ...(record.email === DEV_ACTOR_EMAIL ? {} : { userId: record.id }),
+  };
+}
+
 /** A request that was rejected before any decision was needed, because it was not a valid action. */
 type BadRequest = { error: string };
 
@@ -715,7 +759,6 @@ async function act(
   // helper is typed against a generic context that cannot know that, and a thrown "undefined bot"
   // would be a worse outcome than naming the one shared computer.
   const botId = context.req.param("botId") ?? "default";
-  const record = context.var.actor;
   const body = (await context.req.json().catch(() => null)) as Record<
     string,
     unknown
@@ -724,13 +767,10 @@ async function act(
   try {
     const result = await handler(
       botId,
-      {
-        id: record.id,
-        // Only a real users row may go in the audit table's foreign key column. The local development
-        // actor is not one, so writing it there fails the constraint and loses the row entirely. Who
-        // it was is recorded in the payload regardless. See gateway.ts.
-        ...(record.email === DEV_ACTOR_EMAIL ? {} : { userId: record.id }),
-      },
+      // Only a real users row may go in the audit table's foreign key column. The local development
+      // actor is not one, so writing it there fails the constraint and loses the row entirely. Who
+      // it was is recorded in the payload regardless. See gateway.ts.
+      actionActorOf(context),
       body,
       context.req.raw.signal,
     );

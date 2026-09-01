@@ -31,6 +31,7 @@ import { join } from "node:path";
 const asked = process.env.OPENBOT_LIVE_SCREEN === "1";
 
 const TOKEN = "test-computer-token";
+const CONTROL_LEASE = "a".repeat(43);
 
 /**
  * A port the operating system says is free, rather than one picked in advance.
@@ -107,8 +108,10 @@ type Frames = {
   close: () => void;
 };
 
-function watch(botId: string): Frames {
-  const socket = new WebSocket(`${WS}/stream?bot=${botId}&token=${TOKEN}`);
+function watch(botId: string, lease?: string): Frames {
+  const query = new URLSearchParams({ bot: botId, token: TOKEN });
+  if (lease) query.set("lease", lease);
+  const socket = new WebSocket(`${WS}/stream?${query}`);
   const errors: string[] = [];
   let sawFrame = () => {};
   const casting = new Promise<void>((resolve) => {
@@ -136,6 +139,16 @@ function watch(botId: string): Frames {
   };
   closing.push(close);
   return { socket, errors, connected, casting, close };
+}
+
+function takeControl(botId: string, lease: string) {
+  return api("/control/take", botId, {
+    method: "POST",
+    body: JSON.stringify({
+      lease,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }),
+  });
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -203,6 +216,7 @@ afterAll(async () => {
     "wheel",
     "stop-viewer",
     "reset-viewer",
+    "screenshot-stopped",
     "wont-launch",
     "still-starting",
   ]) {
@@ -251,12 +265,12 @@ describe.skipIf(!asked)("a socket that another connection replaced", () => {
       body: JSON.stringify({ url: TYPING_PAGE }),
     });
 
-    const first = watch(botId);
+    const first = watch(botId, CONTROL_LEASE);
     await first.casting;
-    const second = watch(botId);
+    const second = watch(botId, CONTROL_LEASE);
     await second.casting;
 
-    await api("/control/take", botId, { method: "POST" });
+    await takeControl(botId, CONTROL_LEASE);
     first.socket.send(JSON.stringify({ type: "key", key: "z" }));
 
     // The exact refusal, not merely some error. Dispatching through a cast the sender does not own
@@ -287,9 +301,9 @@ describe.skipIf(!asked)("a superseded socket closing later", () => {
       body: JSON.stringify({ url: TYPING_PAGE }),
     });
 
-    const first = watch(botId);
+    const first = watch(botId, CONTROL_LEASE);
     await first.casting;
-    const second = watch(botId);
+    const second = watch(botId, CONTROL_LEASE);
     await second.casting;
 
     // The replaced socket goes away now, after its replacement is live.
@@ -298,7 +312,7 @@ describe.skipIf(!asked)("a superseded socket closing later", () => {
 
     // The survivor still owns the screen, and the proof is that its typing arrives: a cast that was
     // stopped underneath it, or an ownership it quietly lost, would refuse this instead.
-    await api("/control/take", botId, { method: "POST" });
+    await takeControl(botId, CONTROL_LEASE);
     second.socket.send(JSON.stringify({ type: "key", key: "k" }));
 
     let landed = "";
@@ -386,6 +400,28 @@ describe.skipIf(!asked)("stopping the computer out from under a viewer", () => {
       "the viewer to be told its computer went away",
     );
 
+    await staysStopped(botId);
+  }, 30_000);
+});
+
+describe.skipIf(!asked)("looking at a stopped computer", () => {
+  test("a screenshot says the browser is closed without starting it again", async () => {
+    const botId = "screenshot-stopped";
+    await api("/navigate", botId, {
+      method: "POST",
+      body: JSON.stringify({ url: TYPING_PAGE }),
+    });
+    expect(await stopped(botId)).toBe(true);
+
+    const response = await api("/screenshot", botId);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "The browser is closed. Open it from the Browser icon on the computer desktop.",
+    });
+
+    // More than one poll interval and a cold launch. If the read is still a hidden start path, the
+    // following stop catches the browser it made rather than passing on a lucky early observation.
     await staysStopped(botId);
   }, 30_000);
 });

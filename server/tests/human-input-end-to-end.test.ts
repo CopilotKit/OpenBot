@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
-import { createComputerGateway } from "../src/computer/gateway";
+import {
+  createComputerGateway,
+  mintControlLease,
+} from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import type { ComputerProvider } from "../src/computer/provider";
 import { createComputerRoutes } from "../src/computer/routes";
@@ -29,6 +32,7 @@ afterEach(() => {
 });
 
 const TOKEN = "computer-token-for-this-test";
+const CONTROL_LEASE = mintControlLease("user-1");
 
 /** What the far side actually received, in the order it arrived. */
 type Received = { path: string; token: string | null; body: unknown };
@@ -103,7 +107,10 @@ async function drive(kind: string, body: unknown) {
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...(body && typeof body === "object" ? body : {}),
+        lease: CONTROL_LEASE,
+      }),
     },
   );
   return { response, received, rows };
@@ -117,7 +124,47 @@ describe("a person's input, end to end", () => {
     expect(received).toHaveLength(1);
     expect(received[0]?.path).toBe("/human/click");
     expect(received[0]?.token).toBe(TOKEN);
-    expect(received[0]?.body).toEqual({ x: 10, y: 20 });
+    expect(received[0]?.body).toEqual({
+      x: 10,
+      y: 20,
+      lease: CONTROL_LEASE,
+    });
+  });
+
+  test("refuses input without the private lease before it reaches the computer", async () => {
+    const { received, baseUrl } = serveComputer();
+    const { app } = appFor(baseUrl);
+    const response = await app.request(
+      "http://openbot.test/bot-1/human/click",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ x: 10, y: 20 }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(received).toEqual([]);
+  });
+
+  test("refuses a lease minted for another signed-in actor", async () => {
+    const { received, baseUrl } = serveComputer();
+    const { app } = appFor(baseUrl);
+    const response = await app.request(
+      "http://openbot.test/bot-1/human/click",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          x: 10,
+          y: 20,
+          lease: mintControlLease("another-user"),
+        }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(received).toEqual([]);
   });
 
   test.each([

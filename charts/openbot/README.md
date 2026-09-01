@@ -15,7 +15,7 @@ node pool being the wrong shape is the last thing anybody checks. Either run amd
 architecture you have and push it somewhere the cluster can reach. Check before assuming:
 
 ```sh
-docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.4 | grep architecture
+docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.5 | grep architecture
 ```
 
 **Intelligence credentials.** OpenBot requires CopilotKit Intelligence and the chart refuses to

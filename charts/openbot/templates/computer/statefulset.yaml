@@ -8,9 +8,10 @@ directory holds real logins, and a Deployment's pods get no stable volume of the
 would fight over one `ReadWriteOnce` claim and a rollout would hand the new pod an empty profile,
 which reads as every Bot being signed out of everything at once.
 
-`replicas: 1` on purpose in this mode. One browser for every Bot is what `shared` means, and it is
-the mode that needs no CRD in the cluster. `computers.mode: sandbox` gives each Bot its own, and is
-where the idle suspend lives; see the provider RBAC beside this file.
+`replicas: 1` on purpose in this mode. One desktop for every Bot is what `shared` means, and it is
+the mode that needs no CRD in the cluster. `computers.mode: sandbox` gives each Bot its own container;
+`computers.mode: vm` adds a required Kata runtime class. Both use the same idle suspend lifecycle;
+see the provider RBAC beside this file.
 
 STORAGE HAS GRAVITY. The volume below is `ReadWriteOnce`, and on all three clouds the ordinary block
 volume is zonal, so this pod is pinned to whichever zone its volume was created in for as long as
@@ -110,7 +111,17 @@ spec:
             One image serves both roles and the command decides which: this skips s6 and runs the
             browser process directly, so a computer pod carries no API and no database.
           */}}
-          command: ["/app/agent-computer/entrypoint.sh"]
+          # A checkout can be newer than the last published image. The graphical entrypoint arrived
+          # after v0.0.5, so fall back to that image's headless computer instead of CrashLooping while
+          # the next release is being prepared. The release workflow moves appVersion to the image
+          # built from the same tree, which activates the full desktop by default after publication.
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              if [ -x /app/agent-computer/entrypoint.sh ]; then
+                exec /app/agent-computer/entrypoint.sh
+              fi
+              exec /usr/local/bin/bun /app/agent-computer/src/index.ts
           ports:
             - name: http
               containerPort: 4100

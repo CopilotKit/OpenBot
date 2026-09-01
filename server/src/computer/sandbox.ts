@@ -100,7 +100,7 @@ export async function readSandboxTemplate(
     raw = await readFile(path, "utf8");
   } catch {
     throw new SandboxError(
-      `COMPUTER_SANDBOX_TEMPLATE_FILE points at ${path}, which cannot be read. That file is what a Bot's computer is cut from; the chart mounts it when computers.mode is sandbox.`,
+      `COMPUTER_SANDBOX_TEMPLATE_FILE points at ${path}, which cannot be read. That file is what a Bot's computer is cut from; the chart mounts it when computers.mode is sandbox or vm.`,
     );
   }
   const parsed = JSON.parse(raw) as Record<string, unknown>;

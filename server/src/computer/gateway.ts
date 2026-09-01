@@ -17,6 +17,7 @@
  * by the model is theatre: "never click Submit" is evaded by sending `{ref: "e13", name: "Continue"}`.
  * The refs are opaque to the caller precisely so that the server holds the mapping.
  */
+import { createHash, randomBytes } from "node:crypto";
 import { type AuditStore, recordAuditEvent } from "../audit";
 import {
   ComputerUnavailableError,
@@ -47,6 +48,7 @@ import type {
   ActionResult,
   ClickInput,
   ComputerStatus,
+  ControlLeaseState,
   ControlState,
   HumanInput,
   HumanInputResult,
@@ -93,6 +95,27 @@ export type ActionActor = {
   /** Null unless this is a real row in `users`, because the audit table has a foreign key to it. */
   userId?: string;
 };
+
+const ACTOR_FINGERPRINT_LENGTH = 43;
+
+/**
+ * Bind an opaque lease to the signed-in actor without keeping replica-local server state.
+ *
+ * The random suffix is the capability checked by the computer. The actor digest is checked by every
+ * OpenBot HTTP and WebSocket entry point. It need not be a signature: changing the digest changes
+ * the exact lease and the computer rejects it, while replaying the original from another account is
+ * rejected here.
+ */
+export function mintControlLease(actorId: string): string {
+  const actor = createHash("sha256").update(actorId).digest("base64url");
+  return `${actor}${randomBytes(32).toString("base64url")}`;
+}
+
+export function controlLeaseBelongsTo(lease: string, actorId: string): boolean {
+  if (!/^[A-Za-z0-9_-]{86}$/.test(lease)) return false;
+  const expected = createHash("sha256").update(actorId).digest("base64url");
+  return lease.slice(0, ACTOR_FINGERPRINT_LENGTH) === expected;
+}
 
 export type ComputerGatewayOptions = {
   provider: ComputerProvider;
@@ -184,8 +207,17 @@ export interface ComputerGateway {
     actor: ActionActor,
     reason: string,
   ): Promise<ControlState>;
-  takeControl(botId: string, actor: ActionActor): Promise<ControlState>;
-  releaseControl(botId: string, actor: ActionActor): Promise<ControlState>;
+  takeControl(botId: string, actor: ActionActor): Promise<ControlLeaseState>;
+  renewControl(
+    botId: string,
+    actor: ActionActor,
+    lease: string,
+  ): Promise<ControlState>;
+  releaseControl(
+    botId: string,
+    actor: ActionActor,
+    lease: string,
+  ): Promise<ControlState>;
   requestSecret(
     botId: string,
     actor: ActionActor,
@@ -196,7 +228,12 @@ export interface ComputerGateway {
     actor: ActionActor,
     text: string,
   ): Promise<SecretResult>;
-  humanInput(botId: string, input: HumanInput): Promise<HumanInputResult>;
+  humanInput(
+    botId: string,
+    actor: ActionActor,
+    input: HumanInput,
+    lease: string,
+  ): Promise<HumanInputResult>;
   computers(): Promise<{
     isolation: "per-bot" | "shared";
     computers: {
@@ -240,6 +277,16 @@ export function createComputerGateway(
    */
   const snapshots = options.snapshots ?? createInMemorySnapshotStore();
   const pageFrames = options.pageFrames;
+
+  // A closed tab stops renewing after at most this long. Long enough for a transient network pause,
+  // short enough that an abandoned takeover does not strand the Bot behind an invisible driver.
+  const CONTROL_LEASE_TTL_MS = 2 * 60 * 1000;
+  const leaseExpiry = () =>
+    new Date(Date.now() + CONTROL_LEASE_TTL_MS).toISOString();
+  const newControlLease = (actorId: string) => ({
+    lease: mintControlLease(actorId),
+    expiresAt: leaseExpiry(),
+  });
 
   /**
    * Where this Bot's computer is, checked before anything is sent to it.
@@ -647,7 +694,12 @@ export function createComputerGateway(
     },
 
     async takeControl(botId: string, actor: ActionActor) {
-      const state = await post<ControlState>(botId, "/control/take", {});
+      const capability = newControlLease(actor.id);
+      const state = await post<ControlState>(
+        botId,
+        "/control/take",
+        capability,
+      );
       await writeControlEvent(auditStore, "computer.control_taken", {
         botId,
         actor,
@@ -655,11 +707,26 @@ export function createComputerGateway(
         // took over.
         reason: state.reason,
       });
-      return state;
+      return { ...state, lease: capability.lease };
     },
 
-    async releaseControl(botId: string, actor: ActionActor) {
-      const state = await post<ControlState>(botId, "/control/release", {});
+    renewControl(botId: string, actor: ActionActor, lease: string) {
+      if (!controlLeaseBelongsTo(lease, actor.id)) {
+        throw new Error("This control lease belongs to another session.");
+      }
+      return post<ControlState>(botId, "/control/renew", {
+        lease,
+        expiresAt: leaseExpiry(),
+      });
+    },
+
+    async releaseControl(botId: string, actor: ActionActor, lease: string) {
+      if (!controlLeaseBelongsTo(lease, actor.id)) {
+        throw new Error("This control lease belongs to another session.");
+      }
+      const state = await post<ControlState>(botId, "/control/release", {
+        lease,
+      });
       await writeControlEvent(auditStore, "computer.control_released", {
         botId,
         actor,
@@ -770,8 +837,13 @@ export function createComputerGateway(
 
     async humanInput(
       botId: string,
+      actor: ActionActor,
       input: HumanInput,
+      lease: string,
     ): Promise<HumanInputResult> {
+      if (!controlLeaseBelongsTo(lease, actor.id)) {
+        throw new Error("This control lease belongs to another session.");
+      }
       const { kind, ...payload } = input;
       /*
        * Checked here as well as at the route, because this is where it becomes a path.
@@ -788,7 +860,10 @@ export function createComputerGateway(
           `A person's input is one of ${[...HUMAN_GESTURES].join(", ")}, not ${JSON.stringify(kind)}.`,
         );
       }
-      return post<HumanInputResult>(botId, `/human/${kind}`, payload);
+      return post<HumanInputResult>(botId, `/human/${kind}`, {
+        ...payload,
+        lease,
+      });
     },
 
     /**

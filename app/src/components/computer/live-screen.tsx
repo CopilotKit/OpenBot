@@ -38,11 +38,13 @@ type Props = {
   computerId: string;
   /** Whether the user currently holds the wheel. Input is only sent when true. */
   driving: boolean;
+  /** Private capability for this browser tab. Frames are public to authorized viewers; input is not. */
+  lease?: string;
   /** Called with a human-readable reason when the stream cannot be established. */
   onProblem?: (problem: string | null) => void;
 };
 
-export function LiveScreen({ computerId, driving, onProblem }: Props) {
+export function LiveScreen({ computerId, driving, lease, onProblem }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   /** The size of the frames Chrome is sending, which is what input coordinates are relative to. */
@@ -54,6 +56,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(
       `${scheme}://${window.location.host}/api/computers/${encodeURIComponent(computerId)}/stream`,
+      driving && lease ? [`openbot-lease.${lease}`] : [],
     );
     socketRef.current = socket;
     let closed = false;
@@ -126,7 +129,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
       socketRef.current = null;
     };
     // The socket is per Bot; switching Bot must close this stream and open the next one.
-  }, [computerId, onProblem]);
+  }, [computerId, driving, lease, onProblem]);
 
   const send = useCallback(
     (message: Record<string, unknown>) => {

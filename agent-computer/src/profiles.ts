@@ -345,6 +345,26 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
 
   return {
     /**
+     * The Bot's page only if its browser is already running.
+     *
+     * Passive observers use this path. Looking at a computer must not start one: the transcript polls
+     * screenshots while it is open, and using `page()` there meant closing Chromium with its native
+     * X immediately launched it again. This also deliberately leaves `usedAt` alone, so a watcher
+     * does not make an otherwise idle browser immortal.
+     */
+    runningPage(botId: string): Page | null {
+      const existing = live.get(botId);
+      existing?.retarget();
+      if (
+        existing?.context.browser()?.isConnected() &&
+        !existing.page.isClosed()
+      ) {
+        return existing.page;
+      }
+      return null;
+    },
+
+    /**
      * The Bot's page, starting its browser if it is not running.
      *
      * Started on first use rather than at boot, and re-created if it died: a crashed Chromium would
@@ -438,6 +458,26 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         });
         page.on("close", () => record.retarget());
         live.set(botId, record);
+        // Closing Chromium with its native X button bypasses `stop` and `evict`. Without this event,
+        // the dead context remained in `live`, `/computers` reported it as running, and nothing on
+        // the desktop could open it again until a later Bot API call happened to discover the stale
+        // page. Explicit closes delete the record before closing the context, so this runs only for
+        // a native close or crash and cannot announce the same close twice.
+        context.on("close", () => {
+          if (live.get(botId)?.context !== context) return;
+          live.delete(botId);
+          console.info(
+            JSON.stringify({
+              type: "computer-browser-closed",
+              botId,
+              reason: "its browser window was closed",
+            }),
+          );
+          void settleWithin(
+            Promise.resolve(onClosed(botId)),
+            ANNOUNCE_BUDGET_MS,
+          );
+        });
         // After the new one is in the map, so the cap counts what is really running and the Bot that
         // just asked is the most recently used and therefore never the one closed.
         await enforceCap();

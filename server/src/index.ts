@@ -34,7 +34,10 @@ import { createStallGuard } from "./channels/stall-guard";
 import { createThreadIdentity } from "./channels/thread-identity";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
-import { createComputerGateway } from "./computer/gateway";
+import {
+  controlLeaseBelongsTo,
+  createComputerGateway,
+} from "./computer/gateway";
 import { createPageFrameStore } from "./computer/page-frames";
 import { startPolicyListener } from "./computer/policy-listener";
 import {
@@ -47,8 +50,10 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import {
+  computerSocketIsolationRefusal,
   computerSocketUrl,
   parseComputerSocketPath,
+  parseComputerSocketLease,
 } from "./computer/socket-proxy";
 import { loadConfig } from "./config";
 import {
@@ -1120,6 +1125,19 @@ serve<SocketData>({
       if (!config.computer) {
         return new Response("No computer is configured.", { status: 503 });
       }
+      /*
+       * A full desktop is the process-wide X display, not a Bot-scoped browser tab. On a shared
+       * provider it would let somebody authorized for one Bot see and drive every other Bot's
+       * windows and the shared terminal. Refuse before locating the computer; the React client then
+       * falls back to the Bot-scoped page stream that shared mode can safely provide.
+       */
+      const isolationRefusal = computerSocketIsolationRefusal(
+        computerSocket.kind,
+        computerProvider?.isolation,
+      );
+      if (isolationRefusal) {
+        return new Response(isolationRefusal, { status: 503 });
+      }
       // The session guard, applied by hand because middleware does not run on an upgrade. An
       // unauthenticated socket here would be the whole point of the proxy defeated.
       const actor = await resolveRequestActor(request).catch(() => null);
@@ -1134,6 +1152,24 @@ serve<SocketData>({
           .catch(() => null))
       ) {
         return new Response("There is no such Bot.", { status: 404 });
+      }
+      const requestedProtocols =
+        request.headers.get("sec-websocket-protocol") ?? "";
+      const controlLease = parseComputerSocketLease(requestedProtocols);
+      const mode =
+        computerSocket.kind === "desktop" &&
+        url.searchParams.get("mode") === "control"
+          ? "control"
+          : "view";
+      if (mode === "control" && !controlLease) {
+        return new Response("Take control before driving this desktop.", {
+          status: 409,
+        });
+      }
+      if (controlLease && !controlLeaseBelongsTo(controlLease, actor.id)) {
+        return new Response("This control lease belongs to another session.", {
+          status: 403,
+        });
       }
       /*
        * Through the gateway, not the provider.
@@ -1153,17 +1189,13 @@ serve<SocketData>({
             status: 503,
           });
         }
-        const mode =
-          computerSocket.kind === "desktop" &&
-          url.searchParams.get("mode") === "control"
-            ? "control"
-            : "view";
         upstream = computerSocketUrl({
           baseUrl: streamBase,
           botId: computerSocket.botId,
           kind: computerSocket.kind,
           token: config.computer?.token ?? "",
           mode,
+          lease: controlLease,
         });
       } catch (error) {
         // Said out loud rather than falling back to another Bot's computer, which is the failure this
@@ -1176,8 +1208,6 @@ serve<SocketData>({
         );
       }
       const binary = computerSocket.kind === "desktop";
-      const requestedProtocols =
-        request.headers.get("sec-websocket-protocol") ?? "";
       const acceptsBinary = requestedProtocols
         .split(",")
         .map((value) => value.trim())

@@ -90,6 +90,10 @@ jobs:
         run: |
           set -euo pipefail
           test "v$(bun -e 'console.log(require("./package.json").version)')" = "$VERSION"
+          grep -qx "appVersion: \"${VERSION#v}\"" charts/openbot/Chart.yaml || {
+            echo "::error::The Helm chart does not point at ${VERSION}."
+            exit 1
+          }
           grep -q "^## ${VERSION#v}$" CHANGELOG.md || {
             echo "::error::CHANGELOG.md has no section for ${VERSION#v}."
             exit 1

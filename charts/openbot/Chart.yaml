@@ -3,9 +3,9 @@ name: openbot
 description: Run OpenBot on any Kubernetes cluster, managed or your own
 type: application
 # The chart's own version, bumped when templates or defaults change.
-version: 0.1.0
+version: 0.2.0
 # The OpenBot release this chart's default image tag points at.
-appVersion: "0.0.4"
+appVersion: "0.0.5"
 home: https://github.com/CopilotKit/OpenBot
 sources:
   - https://github.com/CopilotKit/OpenBot

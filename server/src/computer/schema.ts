@@ -277,6 +277,14 @@ export type ControlState = {
 };
 
 /**
+ * Returned only to the browser session that successfully takes the wheel.
+ *
+ * The lease is deliberately absent from `ControlState`: observers may see that a person is driving,
+ * but they cannot turn that observation into permission to send mouse or keyboard input.
+ */
+export type ControlLeaseState = ControlState & { lease: string };
+
+/**
  * A value the Bot needs and must not be told: a password, a one-time code.
  *
  * `label` is what the person is asked for, and it is the only part of this that is ever stored or

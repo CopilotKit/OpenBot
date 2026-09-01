@@ -11,8 +11,9 @@
 #   is meant to run on.
 #
 #   The supervisor. It exists to give each Bot its own container, which needs a Docker socket, which
-#   no serverless container platform permits. Without it every Bot shares the browser below, exactly
-#   as they do on a laptop with no supervisor configured. Per-Bot isolation is A6.
+#   no serverless container platform permits. Without it every Bot shares the desktop below, exactly
+#   as they do on a laptop with no supervisor configured. Kubernetes deployments use
+#   `computers.mode: sandbox` or `vm` for one isolated computer per Bot.
 #
 # THE BASE IS PLAYWRIGHT'S, not Bun's, because Chromium and its system libraries have to stay
 # matched and that image is the only place that is guaranteed. The tag must move with the
@@ -161,10 +162,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # the tool description tells a model to run. `sudo cat /proc/1/environ` does not.
 #
 # WHAT THIS IS NOT. It is a floor, not a boundary. Root is one CVE away and a shared container is not
-# an isolation story for code a model wrote: that needs a computer per Bot and a sandbox under it,
-# which is why per-Bot computers and gVisor are not optional extras next to this feature. Run the
-# image with `--security-opt no-new-privileges` where the platform allows, which turns setuid off
-# entirely for anything not named here.
+# an isolation story for code a model wrote: that needs a computer per Bot and a sandboxed runtime
+# under it. Kubernetes deployments get that with `computers.mode: sandbox`, or `vm` plus a Kata
+# runtime class for a hardware-virtualized boundary. Run the image with
+# `--security-opt no-new-privileges` where the platform allows, which turns setuid off entirely for
+# anything not named here.
 RUN apt-get update && apt-get install -y --no-install-recommends sudo \
   && rm -rf /var/lib/apt/lists/* \
   && printf '%s\n' \

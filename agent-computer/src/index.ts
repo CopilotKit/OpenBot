@@ -239,6 +239,13 @@ const DEFAULT_BOT_ID = (() => {
   return configured;
 })();
 
+// A local dock click carries no Bot header. The most recent successful control connection selects
+// the profile it belongs to: only a control socket can deliver the click which starts the launcher.
+// In per-Bot VM mode there is only one possible value; this also makes shared local development
+// deterministic for the person currently holding the wheel.
+let activeDesktopBotId = DEFAULT_BOT_ID;
+let activeDesktopLease: string | undefined;
+
 async function currentPage(botId: string): Promise<Page> {
   const session = sessionFor(botId);
   const page = await profiles.page(botId);
@@ -382,13 +389,14 @@ const SCREEN_NO_LONGER_LIVE =
 const FOLLOW_INTERVAL_MS = 1_000;
 
 /** The old page cast remains as a compatibility fallback for computers built before full desktop. */
-type PageStreamData = { kind: "page"; botId: string };
+type PageStreamData = { kind: "page"; botId: string; lease?: string };
 
 /** A full desktop connection and the loopback websockify socket it is relaying. */
 type DesktopStreamData = {
   kind: "desktop";
   botId: string;
   mode: DesktopMode;
+  lease?: string;
   upstream?: WebSocket;
 };
 
@@ -408,15 +416,18 @@ serve<StreamData>({
     async open(ws) {
       if (ws.data.kind === "desktop") {
         const session = sessionFor(ws.data.botId);
-        if (ws.data.mode === "control" && !session.control.humanMayDrive()) {
+        if (
+          ws.data.mode === "control" &&
+          !session.control.humanMayDrive(ws.data.lease)
+        ) {
           ws.close(1008, TAKE_CONTROL_FIRST);
           return;
         }
 
         try {
-          // Opening the computer starts the visible browser if it was asleep. Playwright and the
-          // framebuffer now point at the same Chromium process.
-          await currentPage(ws.data.botId);
+          // This is a computer connection, not a browser launch. A real VM remains useful with every
+          // application closed, and reconnecting its display must not resurrect one a person closed.
+          // Bot browser work and the desktop's Browser icon are the two explicit launch paths.
           const upstream = new WebSocket(
             desktopUpstream(ws.data.mode),
             "binary",
@@ -525,7 +536,7 @@ serve<StreamData>({
         // at a server-side read-only VNC instance, so even a modified client cannot inject through it.
         if (
           ws.data.mode === "control" &&
-          !sessionFor(ws.data.botId).control.humanMayDrive()
+          !sessionFor(ws.data.botId).control.humanMayDrive(ws.data.lease)
         ) {
           upstream.close();
           ws.close(1008, TAKE_CONTROL_FIRST);
@@ -575,7 +586,7 @@ serve<StreamData>({
       // first only decides whether the input has anywhere to land.
       //
       // Refuse with an error so the surface can explain why input is ignored.
-      if (!session.control.humanMayDrive()) {
+      if (!session.control.humanMayDrive(ws.data.lease)) {
         ws.send(JSON.stringify({ type: "error", error: TAKE_CONTROL_FIRST }));
         return;
       }
@@ -683,7 +694,13 @@ serve<StreamData>({
       }
       if (
         server.upgrade(request, {
-          data: { kind: "page", botId: streamBotId },
+          data: {
+            kind: "page",
+            botId: streamBotId,
+            ...(url.searchParams.get("lease")
+              ? { lease: url.searchParams.get("lease") as string }
+              : {}),
+          },
         })
       )
         return undefined as unknown as Response;
@@ -703,9 +720,10 @@ serve<StreamData>({
         return json({ error: "That is not a usable bot id." }, 400);
       }
       const mode = desktopMode(url.searchParams.get("mode"));
+      const lease = url.searchParams.get("lease") ?? undefined;
       if (
         mode === "control" &&
-        !sessionFor(desktopBotId).control.humanMayDrive()
+        !sessionFor(desktopBotId).control.humanMayDrive(lease)
       ) {
         return json({ error: TAKE_CONTROL_FIRST }, 409);
       }
@@ -713,7 +731,7 @@ serve<StreamData>({
         request.headers.get("sec-websocket-protocol") ?? "";
       if (
         server.upgrade(request, {
-          data: { kind: "desktop", botId: desktopBotId, mode },
+          data: { kind: "desktop", botId: desktopBotId, mode, lease },
           ...(requestedProtocols
             .split(",")
             .map((value) => value.trim())
@@ -722,6 +740,12 @@ serve<StreamData>({
             : {}),
         })
       ) {
+        // A local dock click carries no HTTP Bot header. The control socket does, and it is the only
+        // socket capable of delivering that click, so it selects the profile the dock reopens.
+        if (mode === "control") {
+          activeDesktopBotId = desktopBotId;
+          activeDesktopLease = lease;
+        }
         return undefined as unknown as Response;
       }
       return json({ error: "Expected a WebSocket upgrade." }, 400);
@@ -740,6 +764,31 @@ serve<StreamData>({
 
     if (url.pathname === "/capabilities" && request.method === "GET") {
       return json({ desktop: desktopCapability() });
+    }
+
+    // The browser icon inside the Linux desktop. It is authenticated like every other computer
+    // route, and usable only while a person holds the wheel for the Bot selected by the control
+    // socket above. `profiles.page` starts a missing browser or replaces a natively closed context;
+    // `bringToFront` makes the same icon restore an existing browser instead of opening duplicates.
+    if (url.pathname === "/desktop/apps/browser" && request.method === "POST") {
+      const desktopBotId = activeDesktopBotId;
+      if (!sessionFor(desktopBotId).control.humanMayDrive(activeDesktopLease)) {
+        return json({ error: TAKE_CONTROL_FIRST }, 409);
+      }
+      try {
+        const target = await currentPage(desktopBotId);
+        await target.bringToFront();
+        return json({
+          opened: true,
+          botId: desktopBotId,
+          url: target.url(),
+        });
+      } catch (error) {
+        return json(
+          { error: describe(error, "The browser could not be opened.") },
+          502,
+        );
+      }
     }
 
     // The Bot asking for help. It does not take control: it says it is stuck and why, and a person
@@ -837,26 +886,69 @@ serve<StreamData>({
     }
 
     if (url.pathname === "/control/take" && request.method === "POST") {
-      return json(session.control.take());
+      const body = (await request.json().catch(() => null)) as {
+        lease?: unknown;
+        expiresAt?: unknown;
+      } | null;
+      try {
+        return json(session.control.take(body?.lease, body?.expiresAt));
+      } catch (error) {
+        if (error instanceof ControlError) {
+          return json({ error: error.message }, 409);
+        }
+        if (error instanceof ControlRequestError) {
+          return json({ error: error.message }, 400);
+        }
+        throw error;
+      }
+    }
+
+    if (url.pathname === "/control/renew" && request.method === "POST") {
+      const body = (await request.json().catch(() => null)) as {
+        lease?: unknown;
+        expiresAt?: unknown;
+      } | null;
+      try {
+        return json(session.control.renew(body?.lease, body?.expiresAt));
+      } catch (error) {
+        if (error instanceof ControlError) {
+          return json({ error: error.message }, 409);
+        }
+        if (error instanceof ControlRequestError) {
+          return json({ error: error.message }, 400);
+        }
+        throw error;
+      }
     }
 
     if (url.pathname === "/control/release" && request.method === "POST") {
       // `reason` is dropped on release: it described the thing the person was asked to do, and once
       // they have done it, leaving it set would have the surface still showing the old request.
-      return json(session.control.release());
+      const body = (await request.json().catch(() => null)) as {
+        lease?: unknown;
+      } | null;
+      try {
+        return json(session.control.release(body?.lease));
+      } catch (error) {
+        if (error instanceof ControlError) {
+          return json({ error: error.message }, 409);
+        }
+        throw error;
+      }
     }
 
     // A person's input, by pixel. The Bot addresses elements by reference because it reads a list; a
     // person addresses them by pointing, because they are looking at a picture. Different problem,
     // different endpoint, and only usable while they hold the wheel.
     if (HUMAN_INPUT.has(url.pathname) && request.method === "POST") {
-      if (!session.control.humanMayDrive()) {
-        return json({ error: TAKE_CONTROL_FIRST }, 409);
-      }
       const body = (await request.json().catch(() => null)) as Record<
         string,
         unknown
       > | null;
+      const lease = typeof body?.lease === "string" ? body.lease : undefined;
+      if (!session.control.humanMayDrive(lease)) {
+        return json({ error: TAKE_CONTROL_FIRST }, 409);
+      }
       try {
         const target = await currentPage(botId);
         return json(await performHumanInput(target, url.pathname, body ?? {}));
@@ -898,7 +990,7 @@ serve<StreamData>({
     if (url.pathname === "/computers/stop" && request.method === "POST") {
       const wasRunning = await profiles.stop(botId);
       // The wheel goes back to the Bot because the controlled browser no longer exists.
-      session.control.release();
+      session.control.revoke();
       return json({ stopped: true, wasRunning });
     }
 
@@ -912,7 +1004,7 @@ serve<StreamData>({
     if (url.pathname === "/computers/reset" && request.method === "POST") {
       await profiles.reset(botId);
       // Reset releases control because any previous browser session and pending secret request are gone.
-      session.control.release();
+      session.control.revoke();
       return json({ reset: true, botId });
     }
 
@@ -958,7 +1050,20 @@ serve<StreamData>({
 
     if (url.pathname === "/screenshot" && request.method === "GET") {
       try {
-        const target = await currentPage(botId);
+        // A screenshot is observation, not an instruction to start an application. The transcript
+        // polls this endpoint while somebody is watching; calling `currentPage` here relaunched
+        // Chromium a second after the person closed its native window and made the VM look haunted.
+        // The desktop and dock remain available, and the Browser launcher is the explicit start path.
+        const target = profiles.runningPage(botId);
+        if (!target) {
+          return json(
+            {
+              error:
+                "The browser is closed. Open it from the Browser icon on the computer desktop.",
+            },
+            409,
+          );
+        }
         const buffer = await target.screenshot({ type: "png" });
         const size = target.viewportSize() ?? { width: 1280, height: 800 };
         return json({

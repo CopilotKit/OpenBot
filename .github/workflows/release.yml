@@ -103,6 +103,12 @@ jobs:
           ' -- "$BUMP" > /tmp/version
           version=$(cat /tmp/version)
 
+          # The chart's default image must be the image this release builds. Leaving appVersion on
+          # the previous release makes new templates execute against an older filesystem, which can
+          # turn a valid chart upgrade into a command-not-found CrashLoop.
+          sed -i -E "s/^appVersion: .*/appVersion: \"$version\"/" charts/openbot/Chart.yaml
+          grep -qx "appVersion: \"$version\"" charts/openbot/Chart.yaml
+
           # Unreleased becomes the version, and a fresh empty Unreleased takes its place so the next
           # change has somewhere to go without anyone hand-editing a heading.
           bun -e '

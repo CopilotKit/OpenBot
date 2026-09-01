@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 type Props = {
   computerId: string;
   driving: boolean;
+  /** Private to the browser tab that took control. Observing `driving` alone is not authority. */
+  lease?: string;
   onProblem?: (problem: string | null) => void;
   /** Old computer images have no RFB endpoint. Let the caller fall back to the page cast. */
   onUnavailable?: () => void;
@@ -22,6 +24,7 @@ const MAX_RECONNECTS = 2;
 export function RemoteDesktop({
   computerId,
   driving,
+  lease,
   onProblem,
   onUnavailable,
 }: Props) {
@@ -33,9 +36,10 @@ export function RemoteDesktop({
     // Each computer and each lease gets a fresh retry budget.
     void computerId;
     void driving;
+    void lease;
     setAttempt(0);
     setConnected(false);
-  }, [computerId, driving]);
+  }, [computerId, driving, lease]);
 
   useEffect(() => {
     const target = targetRef.current;
@@ -51,7 +55,10 @@ export function RemoteDesktop({
     let retryTimer: number | undefined;
     const rfb = new RFB(target, url, {
       shared: true,
-      wsProtocols: ["binary"],
+      wsProtocols: [
+        "binary",
+        ...(driving && lease ? [`openbot-lease.${lease}`] : []),
+      ],
     });
     rfb.viewOnly = !driving;
     rfb.scaleViewport = true;
@@ -67,10 +74,9 @@ export function RemoteDesktop({
       onProblem?.(null);
       if (driving) rfb.focus();
     };
-    const onDisconnect = (event: Event & { detail?: { clean?: boolean } }) => {
+    const onDisconnect = (_event: Event & { detail?: { clean?: boolean } }) => {
       if (disposed) return;
       setConnected(false);
-      if (event.detail?.clean) return;
       if (!connectedOnce && attempt >= MAX_RECONNECTS) {
         onUnavailable?.();
         return;
@@ -100,13 +106,14 @@ export function RemoteDesktop({
       rfb.disconnect();
       target.replaceChildren();
     };
-  }, [attempt, computerId, driving, onProblem, onUnavailable]);
+  }, [attempt, computerId, driving, lease, onProblem, onUnavailable]);
 
   return (
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: the runtime role is always application or img, both named here.
     <div
       ref={targetRef}
-      className="h-full min-h-0 w-full overflow-hidden bg-black [&_canvas]:!h-full [&_canvas]:!w-full"
-      role="application"
+      className="flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-black [&_canvas]:!h-full [&_canvas]:!w-full [&_canvas]:object-contain"
+      role={driving ? "application" : "img"}
       aria-label={
         driving
           ? "The assistant's full computer. You have control."

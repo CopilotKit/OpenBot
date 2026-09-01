@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+  CONTROL_ALREADY_HELD,
+  CONTROL_LEASE_REQUIRED,
   ControlError,
   ControlRequestError,
   createControl,
 } from "../src/control";
+
+const LEASE_A = "a".repeat(43);
+const LEASE_B = "b".repeat(43);
+const LEASE_UNTIL = "2026-08-14T00:10:00.000Z";
 
 /**
  * The wheel, tested on both paths.
@@ -17,10 +23,10 @@ import {
  */
 function fixture() {
   let tick = 0;
-  const at = () => `2026-08-14T00:00:0${tick}.000Z`;
+  const start = Date.parse("2026-08-14T00:00:00.000Z");
   const control = createControl(() => {
     tick += 1;
-    return at();
+    return new Date(start + tick * 1_000).toISOString();
   });
   return { control };
 }
@@ -52,25 +58,25 @@ describe("the happy path: ask, hand over, hand back", () => {
   test("taking the wheel keeps the reason and lowers the flag", () => {
     const { control } = fixture();
     control.requestHelp("Sign in to continue.");
-    const state = control.take();
+    const state = control.take(LEASE_A, LEASE_UNTIL);
     expect(state.holder).toBe("human");
     // The reason survives, because it is the thing the person was just asked to do.
     expect(state.reason).toBe("Sign in to continue.");
     // The request is answered, so the surface stops asking.
     expect(state.requested).toBe(false);
-    expect(control.humanMayDrive()).toBe(true);
+    expect(control.humanMayDrive(LEASE_A)).toBe(true);
   });
 
   test("handing back returns the wheel and clears the old request", () => {
     const { control } = fixture();
     control.requestHelp("Sign in to continue.");
-    control.take();
-    const state = control.release();
+    control.take(LEASE_A, LEASE_UNTIL);
+    const state = control.release(LEASE_A);
     expect(state.holder).toBe("bot");
     // Dropped on purpose: leaving it set has the surface still showing a request that was dealt with.
     expect(state.reason).toBeUndefined();
     expect(state.requested).toBe(false);
-    expect(control.humanMayDrive()).toBe(false);
+    expect(control.humanMayDrive(LEASE_A)).toBe(false);
     expect(() => control.assertBotMayAct()).not.toThrow();
   });
 
@@ -80,14 +86,14 @@ describe("the happy path: ask, hand over, hand back", () => {
     control.requestHelp("Stuck.");
     // Asking for help is not a change of driver, so the clock does not restart.
     expect(control.get().since).toBe(created);
-    expect(control.take().since).not.toBe(created);
+    expect(control.take(LEASE_A, LEASE_UNTIL).since).not.toBe(created);
   });
 });
 
 describe("the crappy paths: two drivers, one page", () => {
   test("the Bot is refused while a person holds the wheel", () => {
     const { control } = fixture();
-    control.take();
+    control.take(LEASE_A, LEASE_UNTIL);
     expect(() => control.assertBotMayAct()).toThrow(ControlError);
     // Refused with a reason the Bot can act on, wait, rather than a bare failure.
     expect(() => control.assertBotMayAct()).toThrow(/hand it back/);
@@ -95,8 +101,8 @@ describe("the crappy paths: two drivers, one page", () => {
 
   test("the refusal lifts the moment the person hands back", () => {
     const { control } = fixture();
-    control.take();
-    control.release();
+    control.take(LEASE_A, LEASE_UNTIL);
+    control.release(LEASE_A);
     expect(() => control.assertBotMayAct()).not.toThrow();
   });
 
@@ -105,21 +111,21 @@ describe("the crappy paths: two drivers, one page", () => {
     control.requestHelp("Sign in.");
     // The Bot asked for help and no person has taken the wheel. An open socket is not permission: this is
     // what stops anything that can reach the port from driving the browser mid-task.
-    expect(control.humanMayDrive()).toBe(false);
+    expect(control.humanMayDrive(LEASE_A)).toBe(false);
   });
 
   test("taking the wheel twice is not a way to lose the reason", () => {
     const { control } = fixture();
     control.requestHelp("Sign in.");
-    control.take();
-    const state = control.take();
+    control.take(LEASE_A, LEASE_UNTIL);
+    const state = control.take(LEASE_A, LEASE_UNTIL);
     expect(state.holder).toBe("human");
     expect(state.reason).toBe("Sign in.");
   });
 
   test("handing back when the Bot already has it is harmless", () => {
     const { control } = fixture();
-    const state = control.release();
+    const state = control.release(LEASE_A);
     expect(state.holder).toBe("bot");
     expect(() => control.assertBotMayAct()).not.toThrow();
   });
@@ -214,7 +220,11 @@ describe("the crappy paths: secrets", () => {
     for (const handover of ["take", "release"] as const) {
       const { control } = fixture();
       control.requestSecret({ ref: "e12", label: "password" });
-      control[handover]();
+      if (handover === "take") {
+        control.take(LEASE_A, LEASE_UNTIL);
+      } else {
+        control.release(LEASE_A);
+      }
       // A person who drove the browser themselves has dealt with the login. A masked box still asking
       // for a password afterwards is asking for a secret nothing is waiting for.
       expect(control.pendingSecret()).toBeNull();
@@ -272,7 +282,7 @@ describe("an unanswered request to take the wheel", () => {
     expect(state.reason).toBeUndefined();
   });
 
-  test("never takes the wheel back off a person who holds it", () => {
+  test("keeps the wheel while the browser renews its lease", () => {
     /*
      * The one case that must not expire. Somebody may be halfway through typing a code, and pulling
      * the browser back mid-sign-in is worse than any stale prompt. Only the ASK times out.
@@ -280,9 +290,56 @@ describe("an unanswered request to take the wheel", () => {
     let clock = "2026-08-22T03:00:00.000Z";
     const control = createControl(() => clock);
     control.requestHelp("sign in to Drive");
-    control.take();
+    control.take(LEASE_A, "2026-08-22T03:02:00.000Z");
 
-    clock = "2026-08-22T04:00:00.000Z";
+    clock = "2026-08-22T03:01:00.000Z";
+    control.renew(LEASE_A, "2026-08-22T03:03:00.000Z");
+    clock = "2026-08-22T03:02:30.000Z";
     expect(control.get().holder).toBe("human");
+  });
+});
+
+describe("a control lease belongs to one browser session", () => {
+  test("a second lease cannot take, drive, renew, or release the first session", () => {
+    const { control } = fixture();
+    control.take(LEASE_A, LEASE_UNTIL);
+
+    expect(() => control.take(LEASE_B, LEASE_UNTIL)).toThrow(
+      CONTROL_ALREADY_HELD,
+    );
+    expect(control.humanMayDrive(LEASE_B)).toBe(false);
+    expect(() => control.renew(LEASE_B, LEASE_UNTIL)).toThrow(
+      CONTROL_LEASE_REQUIRED,
+    );
+    expect(() => control.release(LEASE_B)).toThrow(CONTROL_LEASE_REQUIRED);
+    expect(control.humanMayDrive(LEASE_A)).toBe(true);
+  });
+
+  test("an expired browser lease returns control to the Bot", () => {
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.take(LEASE_A, "2026-08-22T03:01:00.000Z");
+
+    clock = "2026-08-22T03:01:01.000Z";
+    expect(control.get().holder).toBe("bot");
+    expect(control.humanMayDrive(LEASE_A)).toBe(false);
+  });
+
+  test("an expired lease cannot block the Bot when no browser remains to poll state", () => {
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.take(LEASE_A, "2026-08-22T03:01:00.000Z");
+
+    clock = "2026-08-22T03:01:01.000Z";
+    expect(() => control.assertBotMayAct()).not.toThrow();
+    expect(control.get().holder).toBe("bot");
+  });
+
+  test("stopping the controlled browser revokes its lease", () => {
+    const { control } = fixture();
+    control.take(LEASE_A, LEASE_UNTIL);
+
+    expect(control.revoke().holder).toBe("bot");
+    expect(control.humanMayDrive(LEASE_A)).toBe(false);
   });
 });

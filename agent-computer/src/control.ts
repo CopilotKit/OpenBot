@@ -80,6 +80,21 @@ export const HUMAN_HAS_CONTROL =
   "A person has control of the computer right now. Wait for them to hand it back before acting.";
 export const TAKE_CONTROL_FIRST =
   "Take control before driving the computer yourself.";
+export const CONTROL_ALREADY_HELD =
+  "Another person already has control of this computer.";
+export const CONTROL_LEASE_REQUIRED =
+  "This control lease is missing, expired, or belongs to another session.";
+
+const LEASE_TOKEN = /^[A-Za-z0-9_-]{32,256}$/;
+
+function sameLease(left: string | undefined, right: string | undefined) {
+  if (!left || !right || left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
 
 /**
  * The wheel, as a state machine.
@@ -96,6 +111,33 @@ export function createControl(
     since: now(),
     requested: false,
   };
+  // A bearer capability held only by the browser session that took control. Never returned by get().
+  let humanLease: string | undefined;
+  let humanLeaseUntil = 0;
+
+  const expireHumanLease = () => {
+    if (state.holder !== "human") return;
+    const current = now();
+    if (Date.parse(current) < humanLeaseUntil) return;
+    humanLease = undefined;
+    humanLeaseUntil = 0;
+    state = { holder: "bot", since: current, requested: false };
+  };
+
+  const checkedLease = (lease: unknown, expiresAt: unknown) => {
+    const current = Date.parse(now());
+    const expiry =
+      typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
+    if (
+      typeof lease !== "string" ||
+      !LEASE_TOKEN.test(lease) ||
+      !Number.isFinite(expiry) ||
+      expiry <= current
+    ) {
+      throw new ControlRequestError(CONTROL_LEASE_REQUIRED);
+    }
+    return { lease, expiry };
+  };
 
   return {
     /**
@@ -105,11 +147,12 @@ export function createControl(
      * expired on read rather than on a timer because there is nothing to wake: the run that asked
      * has ended, and the only thing that cares is whoever looks next.
      *
-     * Only ever the ASK. A person actually holding the wheel is never timed out from under them:
-     * they may be halfway through typing a code, and taking the browser back mid-sign-in is worse
-     * than any stale prompt.
+     * The human lease is short-lived and renewed by the browser that took control. That keeps a
+     * closed or abandoned tab from locking the computer indefinitely without taking control away
+     * from an active person midway through a login.
      */
     get(): ControlState {
+      expireHumanLease();
       if (
         state.requested &&
         state.holder === "bot" &&
@@ -198,13 +241,31 @@ export function createControl(
      * cleared: a person with full browser control can type the password into the page, and a masked
      * box left open behind them no longer corresponds to an active request.
      */
-    take(): ControlState {
+    take(lease: unknown, expiresAt: unknown): ControlState {
+      expireHumanLease();
+      const checked = checkedLease(lease, expiresAt);
+      if (state.holder === "human" && !sameLease(humanLease, checked.lease)) {
+        throw new ControlError(CONTROL_ALREADY_HELD);
+      }
+      humanLease = checked.lease;
+      humanLeaseUntil = checked.expiry;
       state = {
         holder: "human",
         since: now(),
         reason: state.reason,
         requested: false,
       };
+      return this.get();
+    },
+
+    /** Keep an active browser session's capability alive without changing when it took the wheel. */
+    renew(lease: unknown, expiresAt: unknown): ControlState {
+      expireHumanLease();
+      const checked = checkedLease(lease, expiresAt);
+      if (state.holder !== "human" || !sameLease(humanLease, checked.lease)) {
+        throw new ControlError(CONTROL_LEASE_REQUIRED);
+      }
+      humanLeaseUntil = checked.expiry;
       return this.get();
     },
 
@@ -216,12 +277,32 @@ export function createControl(
      * with it, a person who took the whole wheel and handed it back has dealt with the login, and a
      * secret box left open afterwards is asking for a password nothing is waiting for.
      */
-    release(): ControlState {
+    release(lease: unknown): ControlState {
+      expireHumanLease();
+      if (state.holder === "human" && !sameLease(humanLease, String(lease))) {
+        throw new ControlError(CONTROL_LEASE_REQUIRED);
+      }
+      humanLease = undefined;
+      humanLeaseUntil = 0;
       state = {
         holder: "bot",
         since: now(),
         requested: false,
       };
+      return this.get();
+    },
+
+    /**
+     * The controlled browser ceased to exist, so invalidate every human capability for it.
+     *
+     * This is intentionally not exposed on the network. Stop/reset already require an authorized
+     * server call and destroy the resource the lease names; requiring a now-useless browser token
+     * would leave the replacement browser permanently owned by a dead session.
+     */
+    revoke(): ControlState {
+      humanLease = undefined;
+      humanLeaseUntil = 0;
+      state = { holder: "bot", since: now(), requested: false };
       return this.get();
     },
 
@@ -232,12 +313,16 @@ export function createControl(
      * a refusal, which the Bot can explain and wait out.
      */
     assertBotMayAct(): void {
+      // A vanished browser cannot keep the Bot blocked. No polling tab remains to call `get()`, so
+      // the first Bot action after expiry must perform the same lease check itself.
+      expireHumanLease();
       if (state.holder === "human") throw new ControlError(HUMAN_HAS_CONTROL);
     },
 
     /** Whether a person's input should be applied. The socket being open is not permission. */
-    humanMayDrive(): boolean {
-      return state.holder === "human";
+    humanMayDrive(lease: string | undefined): boolean {
+      expireHumanLease();
+      return state.holder === "human" && sameLease(humanLease, lease);
     },
   };
 }

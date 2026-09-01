@@ -3,7 +3,9 @@ import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
 import {
   ActionRefusedError,
+  controlLeaseBelongsTo,
   createComputerGateway,
+  mintControlLease,
   WorkspaceRefusedError,
 } from "../src/computer/gateway";
 import type { ActionPolicy } from "../src/computer/policy";
@@ -37,6 +39,7 @@ const SNAPSHOT: SnapshotResult = {
     { ref: "e9", role: "button", name: "Submit order" },
   ],
 };
+const CONTROL_LEASE = mintControlLease("dev-local-user");
 
 /** A computer that records which HTTP actions reached it. */
 function fakeComputer(options?: {
@@ -156,7 +159,18 @@ function fakeComputer(options?: {
         return Response.json({ mode: "human", reason: "Sign in" });
       case "/control/take":
         calls.push("takeControl");
-        return Response.json({ mode: "human" });
+        return Response.json({
+          holder: "human",
+          since: "now",
+          requested: false,
+        });
+      case "/control/renew":
+        calls.push("renewControl");
+        return Response.json({
+          holder: "human",
+          since: "now",
+          requested: false,
+        });
       case "/control/release":
         calls.push("releaseControl");
         return Response.json({ mode: "bot" });
@@ -765,15 +779,21 @@ describe("the computer gateway", () => {
     await gateway.listFiles("bot-1", ACTOR, { path: "notes" });
     await gateway.control("bot-1");
     await gateway.requestHelp("bot-1", ACTOR, "Sign in");
-    await gateway.takeControl("bot-1", ACTOR);
-    await gateway.releaseControl("bot-1", ACTOR);
+    const takeover = await gateway.takeControl("bot-1", ACTOR);
+    await gateway.renewControl("bot-1", ACTOR, takeover.lease);
+    await gateway.releaseControl("bot-1", ACTOR, takeover.lease);
     await gateway.requestSecret("bot-1", ACTOR, {
       label: "Password",
       ref: "e1",
       snapshotId: 7,
     });
     await gateway.supplySecret("bot-1", ACTOR, "secret");
-    await gateway.humanInput("bot-1", { kind: "click", x: 10, y: 20 });
+    await gateway.humanInput(
+      "bot-1",
+      ACTOR,
+      { kind: "click", x: 10, y: 20 },
+      takeover.lease,
+    );
 
     const paths = requests.map(({ url }) => new URL(url).pathname);
     expect(paths).toEqual([
@@ -784,11 +804,30 @@ describe("the computer gateway", () => {
       "/control",
       "/control/request",
       "/control/take",
+      "/control/renew",
       "/control/release",
       "/control/secret",
       "/human/secret",
       "/human/click",
     ]);
+
+    expect(takeover.lease).toMatch(/^[A-Za-z0-9_-]{86}$/);
+    expect(controlLeaseBelongsTo(takeover.lease, ACTOR.id)).toBe(true);
+    expect(controlLeaseBelongsTo(takeover.lease, "another-user")).toBe(false);
+    for (const path of [
+      "/control/take",
+      "/control/renew",
+      "/control/release",
+      "/human/click",
+    ]) {
+      const request = requests.find(
+        (item) => new URL(item.url).pathname === path,
+      );
+      const body = JSON.parse(String(request?.init?.body ?? "null")) as {
+        lease?: string;
+      } | null;
+      expect(body?.lease).toBe(takeover.lease);
+    }
   });
   /*
    * Through `gatewayWith`, deliberately, rather than by handing `evaluateActionPolicy` a context
@@ -997,7 +1036,12 @@ describe("human input names a gesture, not a path", () => {
     const before = requests.length;
 
     await expect(
-      gateway.humanInput("bot-1", { kind, x: 1, y: 1 } as never),
+      gateway.humanInput(
+        "bot-1",
+        ACTOR,
+        { kind, x: 1, y: 1 } as never,
+        CONTROL_LEASE,
+      ),
     ).rejects.toThrow();
     // Nothing left this process. Asserting only that it threw would pass just as well when the
     // request went out and the far side answered 404, which is the failure being fixed.
@@ -1009,7 +1053,12 @@ describe("human input names a gesture, not a path", () => {
     async (kind) => {
       const { gateway, requests } = await gatewayWith(PERMISSIVE);
 
-      await gateway.humanInput("bot-1", { kind, x: 1, y: 1 } as never);
+      await gateway.humanInput(
+        "bot-1",
+        ACTOR,
+        { kind, x: 1, y: 1 } as never,
+        CONTROL_LEASE,
+      );
 
       expect(
         requests.some(

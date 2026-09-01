@@ -296,14 +296,17 @@ function GeneralSection({
               </div>
             </div>
           </ItemContent>
-          <ItemActions>
-            <AvatarUploadActions
-              disabled={!profile.canCustomizeAvatar}
-              hasImage={profile.avatarUrl !== null}
-              label={`${profile.name} avatar`}
-              onChange={(image) => updateAvatar.mutateAsync({ agentId, image })}
-            />
-          </ItemActions>
+          {profile.canCustomizeAvatar ? (
+            <ItemActions>
+              <AvatarUploadActions
+                hasImage={profile.avatarUrl !== null}
+                label={`${profile.name} avatar`}
+                onChange={(image) =>
+                  updateAvatar.mutateAsync({ agentId, image })
+                }
+              />
+            </ItemActions>
+          ) : null}
         </Item>
         <EditableTextItem
           canManage={profile.canManage}

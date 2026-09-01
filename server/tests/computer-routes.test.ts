@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables, AuthenticatedActor } from "../src/auth/guards";
-import type { ComputerGateway } from "../src/computer/gateway";
+import {
+  type ComputerGateway,
+  mintControlLease,
+} from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
 
@@ -149,7 +152,11 @@ describe("human input", () => {
   function recordingGateway() {
     const calls: Array<{ botId: string; input: Record<string, unknown> }> = [];
     const gateway = {
-      humanInput: async (botId: string, input: Record<string, unknown>) => {
+      humanInput: async (
+        botId: string,
+        _actor: unknown,
+        input: Record<string, unknown>,
+      ) => {
         calls.push({ botId, input });
         return { ok: true };
       },
@@ -172,7 +179,10 @@ describe("human input", () => {
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          ...(body && typeof body === "object" ? body : {}),
+          lease: mintControlLease(member.id),
+        }),
       },
     );
     return { response, calls };

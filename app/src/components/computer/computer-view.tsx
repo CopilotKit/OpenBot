@@ -9,6 +9,7 @@ import {
 import { createPortal } from "react-dom";
 import {
   type ControlState,
+  controlLease,
   readControl,
   releaseControl,
   supplySecret,
@@ -43,6 +44,20 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+/**
+ * Only an RFB/page-stream connection error may cover the expanded computer.
+ *
+ * The browser screenshot poll is a sibling surface. It is expected to fail after somebody closes
+ * Chromium from the desktop, and showing that failure over the framebuffer would hide the dock used
+ * to reopen it. Keeping both inputs here makes that separation a regression-testable decision.
+ */
+export function desktopOverlayProblem(
+  _browserProblem: string | null,
+  desktopProblem: string | null,
+): string | null {
+  return desktopProblem;
 }
 
 /**
@@ -236,6 +251,8 @@ export function ComputerView({
 }: Props) {
   const [shot, setShot] = useState<Screenshot | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  /** A full-desktop connection problem, separate from the browser screenshot used by the inline tile. */
+  const [desktopProblem, setDesktopProblem] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [desktopUnavailable, setDesktopUnavailable] = useState(false);
   const [control, setControl] = useState<ControlState | null>(null);
@@ -243,7 +260,9 @@ export function ComputerView({
   const [secret, setSecret] = useState("");
   const [secretProblem, setSecretProblem] = useState<string | null>(null);
   const [sendingSecret, setSendingSecret] = useState(false);
-  const driving = control?.holder === "human";
+  const lease = controlLease(computerId);
+  const driving = control?.holder === "human" && Boolean(lease);
+  const visibleDesktopProblem = desktopOverlayProblem(problem, desktopProblem);
   /** Read by the polling loop without restarting it on control changes. */
   const drivingRef = useRef(false);
   drivingRef.current = driving;
@@ -252,10 +271,12 @@ export function ComputerView({
     // Referenced deliberately: a different Bot may run an older image even when this one does not.
     void computerId;
     setDesktopUnavailable(false);
+    setDesktopProblem(null);
   }, [computerId]);
 
   const markDesktopUnavailable = useCallback(() => {
     setDesktopUnavailable(true);
+    setDesktopProblem(null);
   }, []);
 
   /** Release control; the Bot's waiting tool call resumes from this state change. */
@@ -670,7 +691,8 @@ export function ComputerView({
                         <LiveScreen
                           computerId={computerId}
                           driving={driving}
-                          onProblem={setProblem}
+                          lease={lease}
+                          onProblem={setDesktopProblem}
                         />
                       ) : (
                         <Suspense
@@ -683,20 +705,21 @@ export function ComputerView({
                           <RemoteDesktop
                             computerId={computerId}
                             driving={driving}
-                            onProblem={setProblem}
+                            lease={lease}
+                            onProblem={setDesktopProblem}
                             onUnavailable={markDesktopUnavailable}
                           />
                         </Suspense>
                       )}
                       {/*
-                        A live screen that ends reports why through `onProblem`, and this is the
-                        branch that is mounted when it does. Without drawing it here the message
-                        landed in `problem`, which only the sibling `NothingToSee` reads, so the
-                        screen ended with the stale last frame frozen on the canvas and nothing said.
+                        A live desktop that ends reports why through its own problem state. This must
+                        stay separate from the inline browser screenshot: a deliberately closed
+                        browser makes that poll fail while the VM display and its launchers remain
+                        healthy, and drawing that failure here covered the very dock used to reopen it.
                       */}
-                      {problem ? (
+                      {visibleDesktopProblem ? (
                         <div className="absolute inset-0 flex items-center justify-center bg-background/85 p-4 text-center text-sm text-muted-foreground">
-                          <span>{problem}</span>
+                          <span>{visibleDesktopProblem}</span>
                         </div>
                       ) : null}
                     </div>

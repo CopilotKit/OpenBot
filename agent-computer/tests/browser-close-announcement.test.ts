@@ -57,6 +57,28 @@ afterAll(async () => {
 describe.skipIf(!asked)(
   "a browser closed by something nobody asked for",
   () => {
+    test("a native browser close is forgotten immediately and tells whoever was watching", async () => {
+      process.env.COMPUTER_BROWSER_IDLE_MS = String(30 * 60_000);
+      const { createProfiles } = (await import(
+        `../src/profiles?native-close=${Date.now()}`
+      )) as typeof import("../src/profiles");
+      const told: string[] = [];
+      const profiles = createProfiles(join(root, "native-close"), (botId) => {
+        told.push(botId);
+      });
+
+      const page = await profiles.page("closer");
+      expect(profiles.liveCount()).toBe(1);
+
+      // Chromium's X button closes the persistent context without passing through `profiles.stop`.
+      await page.context().close();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      expect(profiles.liveCount()).toBe(0);
+      expect(told).toEqual(["closer"]);
+      await profiles.closeAll();
+    }, 60_000);
+
     test("the idle sweep tells whoever was watching", async () => {
       // The shortest timeout the sweep will act on. Zero disables it, because a timeout of nothing
       // means the feature is off rather than that everything is idle.
