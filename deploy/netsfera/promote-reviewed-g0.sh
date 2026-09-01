@@ -225,7 +225,7 @@ test "$(sha256sum "$candidate_render" | awk '{ print $1 }')" = "$candidate_hash"
 docker compose -p "$project_name" -f "$candidate_render" build openbot
 candidate_image_reference="$(jq -er '.services.openbot.image' "$candidate_render")"
 candidate_image_id="$(docker image inspect --format '{{.Id}}' "$candidate_image_reference")"
-docker run --rm --entrypoint sh "$candidate_image_id" -ceu 'grep -R -F -q "NETSFERA ERP" /app/app/dist 2>/dev/null && grep -R -F -q "netsfera" /app/app/dist 2>/dev/null'
+docker run --rm --entrypoint sh "$candidate_image_id" -ceu 'grep -R -F -q "NETSFERA ERP" /app/app/dist 2>/dev/null'
 test "$(git -C "$source_directory" rev-parse HEAD)" = "$target_commit"
 if ! post_build_status_output="$(git -C "$source_directory" status --porcelain)"; then
   echo "could not verify reviewed OpenBot checkout cleanliness after build" >&2

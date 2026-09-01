@@ -46,7 +46,7 @@ function promotionFixture() {
   run(["git", "checkout", "--detach", original], source);
   chmodSync(bundle, 0o600);
 
-  makeExecutable(join(fakeBin, "jq"), "#!/usr/bin/env bash\nprintf '%s\\n' openbot:test\n");
+  makeExecutable(join(fakeBin, "jq"), "#!/usr/bin/env bash\ncat >/dev/null\nprintf '%s\\n' openbot:test\n");
   makeExecutable(join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
   makeExecutable(join(fakeBin, "rm"), `#!/usr/bin/env bash
 if [[ "\${FAKE_FAIL_MODE:-}" == *cleanup-failure* ]] && [[ "$*" == *g0-promotion* ]]; then
@@ -99,7 +99,17 @@ if [ "$1" = inspect ]; then
   fi
   exit 0
 fi
-[ "$1" = run ] && exit 0
+if [ "$1" = run ]; then
+  case "\${FAKE_IMAGE_BRAND:-product-and-tenant}" in
+    product-only)
+      [[ "$*" == *'grep -R -F -q "netsfera"'* ]] && exit 42
+      ;;
+    wrong-product)
+      [[ "$*" == *--entrypoint* ]] && exit 43
+      ;;
+  esac
+  exit 0
+fi
 exit 0
 `);
 
@@ -110,7 +120,11 @@ exit 0
   };
 }
 
-function execute(fixture: ReturnType<typeof promotionFixture>, failMode?: string) {
+function execute(
+  fixture: ReturnType<typeof promotionFixture>,
+  failMode?: string,
+  imageBrand?: "product-only" | "wrong-product",
+) {
   return Bun.spawnSync(
     ["bash", scriptPath, fixture.bundle, fixture.bundleHash, fixture.advertisedRef, fixture.target],
     {
@@ -122,6 +136,7 @@ function execute(fixture: ReturnType<typeof promotionFixture>, failMode?: string
         FAKE_CLEANUP_COUNTER: fixture.cleanupCounter,
         FAKE_ORIGINAL: fixture.original,
         ...(failMode ? { FAKE_FAIL_MODE: failMode } : {}),
+        ...(imageBrand ? { FAKE_IMAGE_BRAND: imageBrand } : {}),
         OPENBOT_SOURCE_DIR: fixture.source,
         OPENBOT_INCOMING_DIR: fixture.incoming,
         OPENBOT_EXPECTED_BUNDLE_OWNER: fixture.owner,
@@ -170,6 +185,29 @@ test("promotes only openbot from the exact candidate render and keeps unique evi
     const evidence = readdirSync(fixture.incoming).filter((name) => name.endsWith(".evidence"));
     expect(evidence).toHaveLength(1);
     expect(readFileSync(join(fixture.incoming, evidence[0]), "utf8")).toContain(`target_commit=${fixture.target}`);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("accepts the baked NETSFERA ERP product even when Vite removed unused tenantId", () => {
+  const fixture = promotionFixture();
+  try {
+    const result = execute(fixture, undefined, "product-only");
+    expect(result.exitCode).toBe(0);
+    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.target);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a baked image without the exact NETSFERA ERP product and rolls back", () => {
+  const fixture = promotionFixture();
+  try {
+    const result = execute(fixture, undefined, "wrong-product");
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("restoring recorded OpenBot source and image");
+    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.original);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
