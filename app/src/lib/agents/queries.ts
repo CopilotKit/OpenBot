@@ -18,6 +18,15 @@ export type AgentProfile = {
   visibility: AgentVisibility;
   /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;
+  /**
+   * Whether it runs on this deployment's own Bot.
+   *
+   * Creating a coworker with no endpoint stores the deployment's managed address, so `endpoint`
+   * alone cannot tell "built-in" from "hosted by a person" — and the difference decides whether the
+   * Connection screen asks for a callback token. A built-in coworker calls tools back with the
+   * deployment's own credential and needs no setup at all.
+   */
+  builtIn: boolean;
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
   /**
@@ -78,6 +87,14 @@ export type HandoffGrants = {
   canGrant: boolean;
   /** Bot ids this Bot may address today. */
   reachable: string[];
+  /**
+   * Whether this Bot can hold such a grant at all.
+   *
+   * The handing-on tool executes inside this deployment's own run loop, so only a Bot that runs in
+   * it can be offered one. False means every grant would be refused, and the screen should say that
+   * once instead of letting each switch bounce with the same message.
+   */
+  grantable: boolean;
 };
 
 export function agentListQueryOptions(hidden = false) {

@@ -344,6 +344,7 @@ describe("agent lifecycle routes", () => {
           systemOwned: false,
           canManage: true,
           mine: true,
+          builtIn: false,
         },
         {
           id: "agent-2",
@@ -356,6 +357,7 @@ describe("agent lifecycle routes", () => {
           systemOwned: false,
           canManage: false,
           mine: false,
+          builtIn: false,
         },
         {
           id: "system-agent",
@@ -368,6 +370,7 @@ describe("agent lifecycle routes", () => {
           systemOwned: true,
           canManage: false,
           mine: false,
+          builtIn: false,
         },
       ],
     });
@@ -662,6 +665,8 @@ describe("which Bots a Bot may hand work to", () => {
       enabled: true,
       canGrant: true,
       reachable: ["knowledge"],
+      // No runsHere reader was wired, and a Bot nothing can vouch for is not offered grants.
+      grantable: false,
     });
   });
 

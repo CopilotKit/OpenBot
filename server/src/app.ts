@@ -832,11 +832,16 @@ export function createApp(
                 config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0,
               reachableFrom: (agentId) =>
                 pluginStore.botsReachableFrom(agentId),
+              // The same answer the write path checks, read up front so the screen can say it once.
+              runsHere: (agentId) => pluginStore.agentRunsHere(agentId),
             }
           : undefined,
         // Whether "built-in" is a kind of coworker this deployment can actually make: the create
         // path falls back to the managed Bot's endpoint, so without one it can only refuse.
         config.managedAgent !== undefined,
+        // The managed Bot's address, so a coworker created without an endpoint — which creation
+        // stores as running at this address — can be told apart from one a person hosts.
+        config.managedAgent?.endpoint.toString(),
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the
