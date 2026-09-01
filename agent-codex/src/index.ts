@@ -4,9 +4,14 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { CodexAppServerClient } from "./codex-client";
-import { toCodexTurnInput } from "./history";
+import { recoveredThreadPrompt, toCodexTurnInput } from "./history";
 import { CodexThreadStore } from "./thread-store";
-import { dynamicToolsOf, OpenBotToolGateway, runAssertionOf } from "./tools";
+import {
+  dynamicToolsOf,
+  OpenBotToolGateway,
+  runAssertionOf,
+  toolCatalogueFingerprint,
+} from "./tools";
 
 const PORT = Number.parseInt(process.env.PORT ?? "4202", 10);
 const MANAGED_AGENT_TOKEN = process.env.MANAGED_AGENT_TOKEN?.trim();
@@ -74,18 +79,24 @@ async function runAgent(
         await serialiseThread(input.threadId, async () => {
           const turn = toCodexTurnInput(input);
           const dynamicTools = dynamicToolsOf(input);
+          const toolCatalogue = toolCatalogueFingerprint(dynamicTools);
           const allowedToolNames = new Set(
             dynamicTools.map((tool) => tool.name),
           );
           const runAssertion = runAssertionOf(input);
           let codexThreadId = threadStore.get(input.threadId);
-          if (codexThreadId) {
+          let prompt = turn.prompt;
+          if (
+            codexThreadId &&
+            threadStore.catalogue(input.threadId) === toolCatalogue
+          ) {
             await codex.resumeThread(
               codexThreadId,
               WORKSPACE,
               turn.developerInstructions,
             );
           } else {
+            const replacesStaleThread = Boolean(codexThreadId);
             codexThreadId = await codex.startThread(
               WORKSPACE,
               turn.developerInstructions,
@@ -93,13 +104,20 @@ async function runAgent(
             );
             // Persist before the first turn. A crash can orphan an empty Codex thread, but it can
             // never produce conversation state that OpenBot subsequently forgets how to resume.
-            await threadStore.remember(input.threadId, codexThreadId);
+            await threadStore.remember(
+              input.threadId,
+              codexThreadId,
+              toolCatalogue,
+            );
+            if (replacesStaleThread) {
+              prompt = recoveredThreadPrompt(input, turn.prompt);
+            }
           }
 
           await codex.runTurn(
             codexThreadId,
             WORKSPACE,
-            turn.prompt,
+            prompt,
             {
               onText(delta) {
                 if (!textOpen) {

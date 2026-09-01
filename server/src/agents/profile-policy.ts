@@ -22,6 +22,22 @@ export function canManageAgent(
   return agent.ownerUserId === actor.id || actor.role === "admin";
 }
 
+/**
+ * Whether this person may choose the picture other people see for a Bot.
+ *
+ * A package owns a system Bot's executable profile, so nobody may rename or reconfigure it. Its
+ * presentation is deployment-local, though, and an administrator may brand it without forking the
+ * package. User-owned Bots keep the same owner-or-admin rule as every other profile edit.
+ */
+export function canCustomizeAgentAvatar(
+  actor: AgentActor,
+  agent: AgentProfile,
+): boolean {
+  if (agent.deletedAt !== null) return false;
+  if (actor.role === "admin") return true;
+  return !agent.systemOwned && agent.ownerUserId === actor.id;
+}
+
 export const canRunAgent = canAccessAgent;
 
 /**

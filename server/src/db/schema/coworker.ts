@@ -37,6 +37,8 @@ export const agentProfiles = pgTable(
     title: text("title").notNull(),
     roleDescription: text("role_description").notNull(),
     avatarSeed: text("avatar_seed").notNull(),
+    /** A user-chosen image, falling back to the deterministic seed when absent. */
+    avatarImage: text("avatar_image"),
     visibility: agentVisibility("visibility").notNull(),
     /*
      * The credential this Bot's agent presents when it calls a tool back.

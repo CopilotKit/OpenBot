@@ -14,10 +14,13 @@ import { cn } from "@/lib/utils";
  */
 export const ChannelAvatar = memo(function ChannelAvatar({
   participantIds,
+  participantImages,
   size = 32,
   typing = false,
 }: {
   participantIds: string[];
+  /** Parallel to participantIds when a server-owned avatar is available. */
+  participantImages?: (string | null)[];
   size?: number;
   typing?: boolean;
 }) {
@@ -25,7 +28,11 @@ export const ChannelAvatar = memo(function ChannelAvatar({
 
   const avatar =
     channelSize === 1 ? (
-      <Avatar className="size-full" name={participantIds[0]} size={size} />
+      <AvatarFace
+        image={participantImages?.[0]}
+        seed={participantIds[0]}
+        size={size}
+      />
     ) : (
       <div className="flex flex-row items-center size-full">
         {participantIds.slice(0, 3).map((c, i, shown) => (
@@ -38,9 +45,9 @@ export const ChannelAvatar = memo(function ChannelAvatar({
               transform: `translateX(${i * -75}%)`,
             }}
           >
-            <Avatar
-              className="size-full"
-              name={c}
+            <AvatarFace
+              image={participantImages?.[i]}
+              seed={c}
               size={size / (shown.length / 2)}
             />
           </div>
@@ -55,6 +62,22 @@ export const ChannelAvatar = memo(function ChannelAvatar({
     </div>
   );
 });
+
+function AvatarFace({
+  image,
+  seed,
+  size,
+}: {
+  image?: string | null;
+  seed: string;
+  size: number;
+}) {
+  return image ? (
+    <img alt="" className="size-full rounded-full object-cover" src={image} />
+  ) : (
+    <Avatar className="size-full" name={seed} size={size} />
+  );
+}
 
 /**
  * Three bouncing dots in a small badge, ringed in the sidebar's own colour so it sits on the

@@ -97,7 +97,7 @@ This template renders nothing.
 {{- /*
   Asking for per-Bot computers on a cluster that cannot make them.
 
-  `computers.mode: sandbox` creates `Sandbox` objects, which only exist once the agent-sandbox
+  `computers.mode: sandbox` and `vm` create `Sandbox` objects, which only exist once the agent-sandbox
   controller is installed. Without it the install succeeds, every pod is healthy, and the deployment
   looks finished right up until the first Bot asks for a browser and gets a 404 from the API server.
   That is the worst time to learn it, so it is a refusal here instead, with the command to run.
@@ -106,10 +106,22 @@ This template renders nothing.
   `helm template` with no cluster has no way to know, which is what `--api-versions` is for and what
   the chart's own render tests pass.
 */}}
-{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.requireController }}
+{{- if and (has .Values.computers.mode (list "sandbox" "vm")) .Values.computers.sandbox.requireController }}
 {{- if not (.Capabilities.APIVersions.Has "agents.x-k8s.io/v1beta1/Sandbox") }}
-{{- fail "computers.mode is sandbox, which gives every Bot its own computer, but this cluster has no Sandbox CRD. Install the controller first:\n\n  kubectl apply --server-side -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v0.5.6/sandbox-with-extensions.yaml\n\nOr use computers.mode: shared, which needs nothing installed. Rendering without a cluster? Pass --api-versions agents.x-k8s.io/v1beta1/Sandbox, or set computers.sandbox.requireController=false." }}
+{{- fail "This computer mode gives every Bot its own computer, but this cluster has no Sandbox CRD. Install the controller first:\n\n  kubectl apply --server-side -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v0.5.6/sandbox-with-extensions.yaml\n\nOr use computers.mode: shared, which needs nothing installed. Rendering without a cluster? Pass --api-versions agents.x-k8s.io/v1beta1/Sandbox, or set computers.sandbox.requireController=false." }}
 {{- end }}
+{{- end }}
+
+{{- /*
+  Calling an ordinary pod a VM would be security theatre.
+
+  `vm` uses the same stateful Sandbox lifecycle, but requires a RuntimeClass supplied by a VM-backed
+  runtime such as Kata Containers. The chart cannot prove what a cluster's arbitrary RuntimeClass
+  name points at; requiring one prevents the known-bad case where `vm` quietly means the default
+  shared-kernel runtime.
+*/}}
+{{- if and (eq .Values.computers.mode "vm") (not .Values.computers.runtimeClassName) }}
+{{- fail "computers.mode is vm but computers.runtimeClassName is empty. Set it to a VM-backed RuntimeClass such as kata-qemu; an ordinary pod is not a virtual machine." }}
 {{- end }}
 
 {{- /*
@@ -129,12 +141,12 @@ This template renders nothing.
   Remove this block when the provider claims from the pool. It is a note that the wiring is
   unfinished, not a judgement that the feature is unwanted.
 */}}
-{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.warmPool.enabled }}
+{{- if and (has .Values.computers.mode (list "sandbox" "vm")) .Values.computers.sandbox.warmPool.enabled }}
 {{- fail "computers.sandbox.warmPool.enabled is on, but nothing claims from the pool yet: the server creates a Sandbox per Bot and never a SandboxClaim, so the pool would run and bill without ever shortening a first action. Set computers.sandbox.warmPool.enabled=false until claiming ships." }}
 {{- end }}
 
-{{- if not (has .Values.computers.mode (list "shared" "sandbox" "external")) }}
-{{- fail "computers.mode must be one of: shared, sandbox, external." }}
+{{- if not (has .Values.computers.mode (list "shared" "sandbox" "vm" "external")) }}
+{{- fail "computers.mode must be one of: shared, sandbox, vm, external." }}
 {{- end }}
 
 {{- /*

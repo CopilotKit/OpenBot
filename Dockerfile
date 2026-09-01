@@ -28,7 +28,17 @@ ARG BUN_VERSION=1.3.14
 # root's home. Set before the install, or the installer has already chosen the wrong directory.
 ENV BUN_INSTALL=/usr/local
 ENV PATH="/usr/local/bin:${PATH}"
-RUN apt-get update && apt-get install -y --no-install-recommends unzip xz-utils \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dbus-x11 \
+    openbox \
+    tint2 \
+    unzip \
+    websockify \
+    x11vnc \
+    x11-xserver-utils \
+    xterm \
+    xz-utils \
+    xvfb \
   && rm -rf /var/lib/apt/lists/* \
   && curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
 
@@ -41,6 +51,7 @@ WORKDIR /src
 COPY package.json bun.lock ./
 COPY tsconfig.base.json bunfig.toml ./
 COPY app/package.json app/package.json
+COPY agent-codex/package.json agent-codex/package.json
 COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 RUN bun install --frozen-lockfile
@@ -57,8 +68,9 @@ RUN cd agent-computer && bun install --frozen-lockfile
 # biome and the test tooling are a gigabyte that nothing in a running container imports.
 RUN mkdir -p /prod && cp package.json bun.lock /prod/ \
   && cp -r app/package.json /prod/app-package.json \
-  && cd /prod && mkdir -p app server worker \
+  && cd /prod && mkdir -p app agent-codex server worker \
   && cp /src/app/package.json app/package.json \
+  && cp /src/agent-codex/package.json agent-codex/package.json \
   && cp /src/server/package.json server/package.json \
   && cp /src/worker/package.json worker/package.json \
   && bun install --frozen-lockfile --production
@@ -111,6 +123,8 @@ COPY shared shared
 COPY examples examples
 COPY agent-computer/src agent-computer/src
 COPY agent-computer/package.json agent-computer/package.json
+COPY agent-computer/entrypoint.sh agent-computer/entrypoint.sh
+RUN chmod +x agent-computer/entrypoint.sh
 
 # The built app, served by the API on the same origin. There is no CORS in this server, so this is
 # not a convenience: two origins would simply fail.

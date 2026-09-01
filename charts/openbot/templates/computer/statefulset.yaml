@@ -110,7 +110,7 @@ spec:
             One image serves both roles and the command decides which: this skips s6 and runs the
             browser process directly, so a computer pod carries no API and no database.
           */}}
-          command: ["/usr/local/bin/bun", "/app/agent-computer/src/index.ts"]
+          command: ["/app/agent-computer/entrypoint.sh"]
           ports:
             - name: http
               containerPort: 4100

@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import {
@@ -17,7 +17,7 @@ import {
   mintCallbackToken,
   sameToken,
 } from "./callback-token";
-import { canManageAgent } from "./profile-policy";
+import { canCustomizeAgentAvatar, canManageAgent } from "./profile-policy";
 import type {
   AgentActor,
   AgentProfile,
@@ -33,6 +33,8 @@ export type ProfileReadExecutor = DatabaseExecutor;
 export type AgentProfileStore = {
   list(actor: AgentActor, hidden?: boolean): Promise<AgentProfile[]>;
   get(actor: AgentActor, id: string): Promise<AgentProfile | null>;
+  /** Read image bytes only for an actor who may access this profile. */
+  avatar(actor: AgentActor, id: string): Promise<string | null>;
   /**
    * `get`, but on the caller's own transaction and holding the profile against deletion until that
    * transaction ends.
@@ -52,6 +54,11 @@ export type AgentProfileStore = {
     actor: AgentActor,
     id: string,
     input: CreateAgentInput,
+  ): Promise<AgentProfile>;
+  setAvatar(
+    actor: AgentActor,
+    id: string,
+    image: string | null,
   ): Promise<AgentProfile>;
   duplicate(actor: AgentActor, id: string): Promise<AgentProfile>;
   setHidden(actor: AgentActor, id: string, hidden: boolean): Promise<void>;
@@ -111,6 +118,8 @@ const joinedProjection = {
   title: agentProfiles.title,
   roleDescription: agentProfiles.roleDescription,
   avatarSeed: agentProfiles.avatarSeed,
+  hasCustomAvatar: sql<boolean>`${agentProfiles.avatarImage} is not null`,
+  avatarUpdatedAt: agentProfiles.updatedAt,
   visibility: agentProfiles.visibility,
   ownerUserId: agentProfiles.ownerUserId,
   packageId: deploymentPackages.id,
@@ -156,6 +165,8 @@ function mapProfile(
     title: row.title,
     roleDescription: row.roleDescription,
     avatarSeed: row.avatarSeed,
+    hasCustomAvatar: row.hasCustomAvatar,
+    avatarUpdatedAt: row.avatarUpdatedAt,
     visibility: row.visibility,
     ownerUserId: row.ownerUserId,
     systemOwned: row.packageId !== null,
@@ -231,6 +242,12 @@ function requireManageable(actor: AgentActor, profile: AgentProfile) {
   }
 }
 
+function requireAvatarManageable(actor: AgentActor, profile: AgentProfile) {
+  if (!canCustomizeAgentAvatar(actor, profile)) {
+    throw new AgentNotManageableError(profile.id);
+  }
+}
+
 function newAgentId() {
   return `agent_${crypto.randomUUID()}`;
 }
@@ -294,6 +311,17 @@ export function createAgentProfileStore(
 
     get(actor, id) {
       return findAccessibleProfile(database, actor, id);
+    },
+
+    async avatar(actor, id) {
+      const profile = await findAccessibleProfile(database, actor, id);
+      if (!profile) return null;
+      const [row] = await database
+        .select({ image: agentProfiles.avatarImage })
+        .from(agentProfiles)
+        .where(eq(agentProfiles.agentId, id))
+        .limit(1);
+      return row?.image ?? null;
     },
 
     async getWithin(executor, actor, id) {
@@ -432,10 +460,33 @@ export function createAgentProfileStore(
       );
     },
 
+    setAvatar(actor, id, image) {
+      return database.transaction(async (transaction) => {
+        await lockProfileMutationRows(transaction, id);
+        const profile = await findAccessibleProfile(transaction, actor, id);
+        if (!profile) throw new AgentNotFoundError(id);
+        requireAvatarManageable(actor, profile);
+
+        await transaction
+          .update(agentProfiles)
+          .set({ avatarImage: image, updatedAt: new Date() })
+          .where(eq(agentProfiles.agentId, id));
+
+        const updated = await findAccessibleProfile(transaction, actor, id);
+        if (!updated) throw new AgentNotFoundError(id);
+        return updated;
+      });
+    },
+
     duplicate(actor, id) {
       return database.transaction(async (transaction) => {
         const source = await findAccessibleProfile(transaction, actor, id);
         if (!source) throw new AgentNotFoundError(id);
+        const [sourceAvatar] = await transaction
+          .select({ image: agentProfiles.avatarImage })
+          .from(agentProfiles)
+          .where(eq(agentProfiles.agentId, id))
+          .limit(1);
 
         if (!managedConfiguration) {
           throw new ManagedAgentUnavailableError();
@@ -453,6 +504,7 @@ export function createAgentProfileStore(
           title: source.title,
           roleDescription: source.roleDescription,
           avatarSeed: source.avatarSeed,
+          avatarImage: sourceAvatar?.image,
           visibility: "private",
         });
 

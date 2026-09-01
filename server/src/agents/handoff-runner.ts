@@ -99,6 +99,8 @@ const REAP_OLDER_THAN_MS = 24 * 60 * 60 * 1_000;
 
 export function createHandoffRunner(options: {
   queue: WorkQueue;
+  /** Queue namespace. Injectable so database-backed tests cannot claim another suite's hops. */
+  kind?: string;
   delivery: HandoffDelivery;
   /** Who this replica is, for the lease. */
   owner: string;
@@ -122,6 +124,7 @@ export function createHandoffRunner(options: {
 }) {
   const {
     queue,
+    kind = HANDOFF_KIND,
     delivery,
     owner,
     sign,
@@ -157,7 +160,7 @@ export function createHandoffRunner(options: {
    */
   const relay = (work: HandoffWork, key: string, answer: string) =>
     queue.offer({
-      kind: HANDOFF_KIND,
+      kind,
       // Outside the run's fan-out prefix and keyed on the hop, for the same two reasons as the
       // notice below: a relay is not a Bot this run asked for, and one run may legally ask the
       // same Bot two different things.
@@ -176,7 +179,7 @@ export function createHandoffRunner(options: {
 
   const tell = (work: HandoffWork, key: string, reason: string) =>
     queue.offer({
-      kind: HANDOFF_KIND,
+      kind,
       /*
        * OUTSIDE THE RUN'S OWN PREFIX, and carrying the failed hop's key.
        *
@@ -220,7 +223,7 @@ export function createHandoffRunner(options: {
      */
     async reap(): Promise<number> {
       return queue.purge({
-        kind: HANDOFF_KIND,
+        kind,
         olderThanMs: REAP_OLDER_THAN_MS,
         maxAttempts,
       });
@@ -229,7 +232,7 @@ export function createHandoffRunner(options: {
     /** Deliver whatever this replica can claim. */
     async sweep(): Promise<HandoffRunReport> {
       const claimed = await queue.claim({
-        kind: HANDOFF_KIND,
+        kind,
         owner,
         leaseMs,
         limit,
@@ -263,7 +266,7 @@ export function createHandoffRunner(options: {
       const heartbeat = setInterval(() => {
         for (const key of ours) {
           void queue
-            .renew({ kind: HANDOFF_KIND, key, owner, leaseMs })
+            .renew({ kind, key, owner, leaseMs })
             .then((kept) => {
               // False means it went to somebody else. Dropped rather than renewed again, so the
               // loop below knows not to spend a model call on work it no longer holds.
@@ -281,7 +284,7 @@ export function createHandoffRunner(options: {
              * A hop nothing can be done with. Finished rather than released, because releasing it puts
              * the same unusable row back on the queue for ever.
              */
-            await queue.finish({ kind: HANDOFF_KIND, key: item.key, owner });
+            await queue.finish({ kind, key: item.key, owner });
             report.skipped.push({ key: item.key, reason: "not a hop" });
             continue;
           }
@@ -331,7 +334,7 @@ export function createHandoffRunner(options: {
            * turn, billed, ending in a second answer in somebody's conversation.
            */
           const stillOurs = await queue.renew({
-            kind: HANDOFF_KIND,
+            kind,
             key: item.key,
             owner,
             leaseMs,
@@ -354,7 +357,7 @@ export function createHandoffRunner(options: {
               assertion: sign(work),
             });
             const kept = await queue.finish({
-              kind: HANDOFF_KIND,
+              kind,
               key: item.key,
               owner,
             });
@@ -447,7 +450,7 @@ export function createHandoffRunner(options: {
              * refused it once will probably refuse it again in the next second.
              */
             await queue.release({
-              kind: HANDOFF_KIND,
+              kind,
               key: item.key,
               owner,
               delayMs: 60_000,

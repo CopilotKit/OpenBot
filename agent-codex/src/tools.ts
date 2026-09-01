@@ -1,4 +1,5 @@
 import type { RunAgentInput } from "@ag-ui/core";
+import { createHash } from "node:crypto";
 
 export type CodexDynamicTool = {
   type: "function";
@@ -52,6 +53,16 @@ export function dynamicToolsOf(input: RunAgentInput): CodexDynamicTool[] {
   }
 
   return tools;
+}
+
+/** Identifies the exact dynamic-tool catalogue persisted in a Codex rollout. */
+export function toolCatalogueFingerprint(tools: CodexDynamicTool[]): string {
+  const canonical = [...tools]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((tool) => canonicalJsonValue(tool));
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify(canonical))
+    .digest("hex")}`;
 }
 
 export function runAssertionOf(input: RunAgentInput): string {
@@ -142,4 +153,16 @@ export class OpenBotToolGateway {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (!isObject(value)) return value;
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, child]) => child !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, canonicalJsonValue(child)]),
+  );
 }

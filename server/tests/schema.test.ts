@@ -201,6 +201,12 @@ describe("OpenBot database schema", () => {
         primary: false,
       },
       {
+        name: "avatar_image",
+        notNull: false,
+        hasDefault: false,
+        primary: false,
+      },
+      {
         name: "visibility",
         notNull: true,
         hasDefault: false,

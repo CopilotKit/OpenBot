@@ -715,6 +715,7 @@ async function createPersistentAgent(options: {
   id?: string;
   name: string;
   owner: AgentActor;
+  avatarImage?: string;
   visibility?: "public" | "private";
 }) {
   const agentId = options.id ?? persistentId("agent");
@@ -731,6 +732,7 @@ async function createPersistentAgent(options: {
     title: `${options.name} title`,
     roleDescription: `${options.name} role description`,
     avatarSeed: agentId,
+    avatarImage: options.avatarImage,
     visibility: options.visibility ?? "private",
   });
   return agentId;
@@ -799,6 +801,49 @@ async function channelTableSnapshot() {
 }
 
 describe("channel store integration", () => {
+  test("carries uploaded coworker avatars into the roster summary", async () => {
+    const actor = await createPersistentUser();
+    const avatarImage = "data:image/png;base64,roster";
+    const agentId = await createPersistentAgent({
+      avatarImage,
+      name: "Branded agent",
+      owner: actor,
+    });
+    const created = await persistentStore.create(actor, [agentId]);
+    createdChannelIds.push(created.id);
+
+    const page = await persistentStore.list(actor);
+    expect(page.channels.find((channel) => channel.id === created.id)).toEqual(
+      expect.objectContaining({
+        agentIds: [agentId],
+        hasCustomAvatars: [true],
+      }),
+    );
+
+    const persistentRequireUser: MiddlewareHandler<{
+      Variables: AppVariables;
+    }> = async (context, next) => {
+      context.set("actor", actor);
+      await next();
+    };
+    const response = await appFor(
+      persistentStore,
+      persistentRequireUser,
+    ).request("http://openbot.test/");
+    const body = (await response.json()) as {
+      channels: { id: string; avatarUrls: (string | null)[] }[];
+    };
+    expect(
+      body.channels.find((channel) => channel.id === created.id)?.avatarUrls,
+    ).toEqual([
+      expect.stringMatching(
+        new RegExp(
+          `^/api/agents/${agentId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/avatar/image\\?v=[a-z0-9]+$`,
+        ),
+      ),
+    ]);
+  });
+
   test("reads the creator's persisted channel exactly", async () => {
     const actor = await createPersistentUser();
     const agentId = await createPersistentAgent({

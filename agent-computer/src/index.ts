@@ -16,6 +16,12 @@ import {
   NO_SECRET_PENDING,
   TAKE_CONTROL_FIRST,
 } from "./control";
+import {
+  type DesktopMode,
+  desktopCapability,
+  desktopMode,
+  desktopUpstream,
+} from "./desktop";
 import { identity } from "./identity";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
 import { type InputMessage, startScreencast } from "./screencast";
@@ -375,8 +381,18 @@ const SCREEN_NO_LONGER_LIVE =
 /** How often the cast checks that it is still showing the page the Bot is on. */
 const FOLLOW_INTERVAL_MS = 1_000;
 
-/** What a live-screen socket carries: the Bot whose screen it is showing. */
-type StreamData = { botId: string };
+/** The old page cast remains as a compatibility fallback for computers built before full desktop. */
+type PageStreamData = { kind: "page"; botId: string };
+
+/** A full desktop connection and the loopback websockify socket it is relaying. */
+type DesktopStreamData = {
+  kind: "desktop";
+  botId: string;
+  mode: DesktopMode;
+  upstream?: WebSocket;
+};
+
+type StreamData = PageStreamData | DesktopStreamData;
 
 serve<StreamData>({
   port: PORT,
@@ -390,6 +406,51 @@ serve<StreamData>({
    */
   websocket: {
     async open(ws) {
+      if (ws.data.kind === "desktop") {
+        const session = sessionFor(ws.data.botId);
+        if (ws.data.mode === "control" && !session.control.humanMayDrive()) {
+          ws.close(1008, TAKE_CONTROL_FIRST);
+          return;
+        }
+
+        try {
+          // Opening the computer starts the visible browser if it was asleep. Playwright and the
+          // framebuffer now point at the same Chromium process.
+          await currentPage(ws.data.botId);
+          const upstream = new WebSocket(
+            desktopUpstream(ws.data.mode),
+            "binary",
+          );
+          upstream.binaryType = "arraybuffer";
+          ws.data.upstream = upstream;
+          upstream.onmessage = async (event) => {
+            try {
+              if (typeof event.data === "string") {
+                ws.send(event.data);
+              } else if (event.data instanceof ArrayBuffer) {
+                ws.send(event.data);
+              } else if (event.data instanceof Blob) {
+                ws.send(await event.data.arrayBuffer());
+              }
+            } catch {
+              upstream.close();
+            }
+          };
+          upstream.onclose = () => ws.close();
+          upstream.onerror = () => ws.close(1011, "The desktop stopped.");
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              type: "desktop-start-error",
+              botId: ws.data.botId,
+              error: String(error),
+            }),
+          );
+          ws.close(1011, "The desktop could not be started.");
+        }
+        return;
+      }
+
       const session = sessionFor(ws.data.botId);
       /*
        * Claimed before anything is awaited, and that order is the fix.
@@ -457,6 +518,23 @@ serve<StreamData>({
     },
 
     async message(ws, raw) {
+      if (ws.data.kind === "desktop") {
+        const upstream = ws.data.upstream;
+        if (!upstream || upstream.readyState !== WebSocket.OPEN) return;
+        // A control socket is permission only while the lease is live. The view socket terminates
+        // at a server-side read-only VNC instance, so even a modified client cannot inject through it.
+        if (
+          ws.data.mode === "control" &&
+          !sessionFor(ws.data.botId).control.humanMayDrive()
+        ) {
+          upstream.close();
+          ws.close(1008, TAKE_CONTROL_FIRST);
+          return;
+        }
+        upstream.send(raw);
+        return;
+      }
+
       const session = sessionFor(ws.data.botId);
       /*
        * Whose screen this is, asked before anything is done with the input.
@@ -523,6 +601,10 @@ serve<StreamData>({
     },
 
     async close(ws) {
+      if (ws.data.kind === "desktop") {
+        ws.data.upstream?.close();
+        return;
+      }
       // Names the socket, so it can only ever give up its own screen. A superseded socket closing
       // after its replacement has started releases nothing; see viewer.ts.
       //
@@ -599,8 +681,49 @@ serve<StreamData>({
       if (!isPlainBotId(streamBotId)) {
         return json({ error: "That is not a usable bot id." }, 400);
       }
-      if (server.upgrade(request, { data: { botId: streamBotId } }))
+      if (
+        server.upgrade(request, {
+          data: { kind: "page", botId: streamBotId },
+        })
+      )
         return undefined as unknown as Response;
+      return json({ error: "Expected a WebSocket upgrade." }, 400);
+    }
+
+    if (url.pathname === "/desktop") {
+      const capability = desktopCapability();
+      if (!capability.available) {
+        return json(
+          { error: "This computer does not provide a full desktop." },
+          503,
+        );
+      }
+      const desktopBotId = botIdOf(request, url.searchParams.get("bot"));
+      if (!isPlainBotId(desktopBotId)) {
+        return json({ error: "That is not a usable bot id." }, 400);
+      }
+      const mode = desktopMode(url.searchParams.get("mode"));
+      if (
+        mode === "control" &&
+        !sessionFor(desktopBotId).control.humanMayDrive()
+      ) {
+        return json({ error: TAKE_CONTROL_FIRST }, 409);
+      }
+      const requestedProtocols =
+        request.headers.get("sec-websocket-protocol") ?? "";
+      if (
+        server.upgrade(request, {
+          data: { kind: "desktop", botId: desktopBotId, mode },
+          ...(requestedProtocols
+            .split(",")
+            .map((value) => value.trim())
+            .includes("binary")
+            ? { headers: { "sec-websocket-protocol": "binary" } }
+            : {}),
+        })
+      ) {
+        return undefined as unknown as Response;
+      }
       return json({ error: "Expected a WebSocket upgrade." }, 400);
     }
 
@@ -613,6 +736,10 @@ serve<StreamData>({
     // for help without having to reload anything.
     if (url.pathname === "/control" && request.method === "GET") {
       return json(session.control.get());
+    }
+
+    if (url.pathname === "/capabilities" && request.method === "GET") {
+      return json({ desktop: desktopCapability() });
     }
 
     // The Bot asking for help. It does not take control: it says it is stuck and why, and a person

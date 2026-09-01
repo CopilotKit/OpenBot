@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   canAccessAgent,
+  canCustomizeAgentAvatar,
   canManageAgent,
   canRunAgent,
 } from "../src/agents/profile-policy";
@@ -17,6 +18,8 @@ function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     title: "Research Assistant",
     roleDescription: "Finds and summarizes information.",
     avatarSeed: "researcher",
+    hasCustomAvatar: false,
+    avatarUpdatedAt: new Date(0),
     visibility: "private",
     ownerUserId: creator.id,
     systemOwned: false,
@@ -69,6 +72,16 @@ describe("agent profile permissions", () => {
       expect(canRunAgent(actor, agent)).toBe(true);
       expect(canManageAgent(actor, agent)).toBe(false);
     }
+    expect(canCustomizeAgentAvatar(admin, agent)).toBe(true);
+    expect(canCustomizeAgentAvatar(creator, agent)).toBe(false);
+  });
+
+  test("lets an owner or administrator customize a user-owned avatar", () => {
+    const agent = profile();
+
+    expect(canCustomizeAgentAvatar(creator, agent)).toBe(true);
+    expect(canCustomizeAgentAvatar(otherUser, agent)).toBe(false);
+    expect(canCustomizeAgentAvatar(admin, agent)).toBe(true);
   });
 
   test("denies every permission for deleted profiles", () => {

@@ -39,7 +39,8 @@ class FakeAppServer {
       | "native"
       | "duplicate"
       | "malformed"
-      | "waiting" = "tool",
+      | "waiting"
+      | "replay" = "tool",
   ) {
     const child = new EventEmitter() as EventEmitter & {
       stdin: PassThrough;
@@ -116,9 +117,31 @@ class FakeAppServer {
         });
         break;
       case "turn/start":
+        if (this.turn === "replay") {
+          this.send({
+            method: "item/agentMessage/delta",
+            params: {
+              threadId: "codex-thread",
+              turnId: "old-turn",
+              itemId: "old-message",
+              delta: "stale answer",
+            },
+          });
+          this.send({
+            method: "turn/completed",
+            params: {
+              threadId: "codex-thread",
+              turn: { id: "old-turn", status: "completed" },
+            },
+          });
+        }
         this.result(message.id, { turn: { id: "turn-1" } });
         queueMicrotask(() => {
-          if (this.turn === "tool" || this.turn === "duplicate") {
+          if (
+            this.turn === "tool" ||
+            this.turn === "duplicate" ||
+            this.turn === "replay"
+          ) {
             this.sendToolCall("dynamic-tool-call");
           } else if (this.turn === "malformed") {
             this.sendToolCall("dynamic-tool-call", []);
@@ -214,6 +237,10 @@ describe("CodexAppServerClient", () => {
       apps: { _default: { enabled: false } },
       tools: { web_search: false, view_image: false },
     });
+    const resume = server.messages.find(
+      (message) => message.method === "thread/resume",
+    );
+    expect(resume?.params?.dynamicTools).toBeUndefined();
     const turn = server.messages.find(
       (message) => message.method === "turn/start",
     );
@@ -221,6 +248,26 @@ describe("CodexAppServerClient", () => {
       type: "readOnly",
       networkAccess: false,
     });
+    client.stop();
+  });
+
+  test("ignores replayed prior-turn events before a resumed turn starts", async () => {
+    const server = new FakeAppServer("replay");
+    const client = new CodexAppServerClient(() => server.process);
+    await client.start();
+    await client.resumeThread("codex-thread", "/workspace", "governed only");
+    const text: string[] = [];
+
+    await client.runTurn("codex-thread", "/workspace", "Read the page", {
+      onText(delta) {
+        text.push(delta);
+      },
+      async onToolCall() {
+        return { text: "Example Domain", success: true };
+      },
+    });
+
+    expect(text).toEqual(["I found three files."]);
     client.stop();
   });
 

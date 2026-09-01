@@ -1,4 +1,4 @@
-{{- if eq .Values.computers.mode "sandbox" }}
+{{- if has .Values.computers.mode (list "sandbox" "vm") }}
 {{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
 {{/*
 What the API may do to computers, and nothing else.

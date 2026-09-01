@@ -43,6 +43,7 @@ const ASKER = `e2e-asker-${suite}`;
 const TARGET = `e2e-target-${suite}`;
 const ACTOR = `e2e-actor-${suite}`;
 const RUN = `e2e-run-${suite}`;
+const KIND = `bot.message.test.${suite}`;
 
 const queue = createWorkQueue(database);
 const auditStore = createAuditStore(database);
@@ -50,6 +51,7 @@ const profiles = createAgentProfileStore(database);
 
 const desk = createHandoffDesk({
   queue,
+  kind: KIND,
   profiles,
   // The person's own role, as the request path resolves it: an administrator sees Bots a user does
   // not, and a hop to one of those is theirs to make.
@@ -140,6 +142,7 @@ describe("a hop, from the tool call to the delivery", () => {
     const delivered: Array<{ work: HandoffWork; message: string }> = [];
     const runner = createHandoffRunner({
       queue: createWorkQueue(database),
+      kind: KIND,
       owner: `replica-${suite}`,
       sign: () => "signed",
       auditStore,
@@ -190,6 +193,7 @@ describe("a hop, from the tool call to the delivery", () => {
         seen,
         runner: createHandoffRunner({
           queue: createWorkQueue(database),
+          kind: KIND,
           owner,
           sign: () => "signed",
           auditStore,
@@ -230,6 +234,7 @@ describe("a hop, from the tool call to the delivery", () => {
 
     const runner = createHandoffRunner({
       queue: createWorkQueue(database),
+      kind: KIND,
       owner: `replica-${suite}`,
       sign: () => "signed",
       auditStore,

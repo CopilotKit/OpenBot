@@ -17,6 +17,9 @@ const ADMIN = {
   image: null,
 };
 
+const ONE_PIXEL_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
 function person(overrides: Partial<Person> = {}): Person {
   return {
     id: "u1",
@@ -40,6 +43,7 @@ function appWith(
   calls: string[];
 } {
   const calls: string[] = [];
+  let avatar: string | null = null;
   const store: PeopleStore = {
     // One page, and no next one: what a small deployment answers. The paging itself is covered
     // against a real database in people-paging.integration.test.ts.
@@ -55,6 +59,11 @@ function appWith(
       calls.push(`restore:${userId}`);
     },
     isRevoked: async () => false,
+    avatar: async () => avatar,
+    setAvatar: async (userId, image) => {
+      avatar = image;
+      calls.push(`setAvatar:${userId}:${image === null ? "null" : "image"}`);
+    },
   };
 
   const app = createApp(
@@ -90,6 +99,52 @@ const json = (body: unknown): RequestInit => ({
 });
 
 describe("people routes", () => {
+  test("stores a person's custom avatar and reports it from /api/me", async () => {
+    const { request, calls } = appWith([]);
+
+    const saved = await request("/api/me/avatar", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ image: ONE_PIXEL_PNG }),
+    });
+    expect(saved.status).toBe(200);
+    expect(calls).toEqual([`setAvatar:${ADMIN.id}:image`]);
+    expect(await saved.json()).toEqual({
+      avatar: {
+        image: expect.stringContaining("/api/me/avatar/image?v="),
+        hasCustomAvatar: true,
+      },
+    });
+
+    const current = await request("/api/me");
+    expect(await current.json()).toEqual({
+      user: expect.objectContaining({
+        image: expect.stringContaining("/api/me/avatar/image?v="),
+        hasCustomAvatar: true,
+      }),
+    });
+
+    const image = await request("/api/me/avatar/image");
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await image.arrayBuffer())).toEqual(
+      Buffer.from(ONE_PIXEL_PNG.split(",")[1], "base64"),
+    );
+  });
+
+  test("refuses an unsafe avatar before writing the person's row", async () => {
+    const { request, calls } = appWith([]);
+
+    const response = await request("/api/me/avatar", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ image: "https://attacker.example/avatar.svg" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
   test("lists everybody for an administrator", async () => {
     const { request } = appWith([person()]);
 

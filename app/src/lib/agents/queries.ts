@@ -15,6 +15,7 @@ export type AgentProfile = {
   title: string;
   roleDescription: string;
   avatarSeed: string;
+  avatarUrl: string | null;
   visibility: AgentVisibility;
   /** Where this coworker runs. Null for the Bot in the box. */
   endpoint: string | null;
@@ -39,6 +40,8 @@ export type AgentProfile = {
   hidden: boolean;
   systemOwned: boolean;
   canManage: boolean;
+  /** Owners may customize their Bot; administrators may also brand package-owned Bots. */
+  canCustomizeAvatar: boolean;
   /**
    * Whether the signed-in person created this coworker.
    *

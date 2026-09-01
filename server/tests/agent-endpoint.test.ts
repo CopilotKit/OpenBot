@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { dynamicToolsOf } from "../../agent-codex/src/tools";
+import { mintRunAssertion } from "../src/agents/callback-token";
 import { agentAuthHeaders, storeAgentAuth } from "../src/agents/auth-header";
 import { testAgentConnection } from "../src/agents/connection-test";
 import {
@@ -7,6 +9,11 @@ import {
   EndpointNotAllowedError,
 } from "../src/agents/endpoint";
 import { parseAgentInput } from "../src/agents/routes";
+import { createApp } from "../src/app";
+import type { ComputerGateway } from "../src/computer/gateway";
+import { loadConfig } from "../src/config";
+import { remoteComputerToolAliases } from "../src/copilot";
+import { testEnvironment } from "./support/environment";
 
 /** A 32-byte key, as the vault expects. */
 const TEST_KEY = Buffer.alloc(32, 7).toString("base64");
@@ -198,6 +205,118 @@ describe("the connection test", () => {
       },
     });
     expect(seen).toBe("Bearer abc123");
+  });
+});
+
+describe("Codex computer callbacks", () => {
+  test("offers only the server-owned browser alias to Codex", () => {
+    const frontendTools = [
+      {
+        name: "computer_navigate",
+        description: "Browser-owned navigation",
+        parameters: { type: "object" },
+      },
+      {
+        name: "computer_request_help",
+        description: "Wait for a person in the browser",
+        parameters: { type: "object" },
+      },
+    ];
+    const aliases = remoteComputerToolAliases(frontendTools);
+    const tools = dynamicToolsOf({
+      threadId: "thread-1",
+      runId: "run-1",
+      state: {},
+      messages: [],
+      context: [],
+      tools: [...frontendTools, ...aliases],
+      forwardedProps: {
+        openbotDeploymentTools: aliases.map((tool) => tool.name),
+      },
+    });
+
+    expect(aliases.map((tool) => tool.name)).toEqual([
+      "openbot_computer_navigate",
+    ]);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "openbot_computer_navigate",
+    ]);
+  });
+
+  test("routes aliased navigation through the governed computer gateway", async () => {
+    const calls: Array<{
+      botId: string;
+      actorId: string;
+      url: string;
+    }> = [];
+    const computerGateway = {
+      navigate: async (botId: string, actor: { id: string }, url: string) => {
+        calls.push({ botId, actorId: actor.id, url });
+        return {
+          url,
+          title: "Example Domain",
+          text: "Example Domain",
+          truncated: false,
+          elapsedMs: 12,
+        };
+      },
+    } as unknown as ComputerGateway;
+    const config = loadConfig(
+      testEnvironment({ AGENT_TOOL_TOKEN: "agent-secret" }),
+    );
+    const app = createApp(
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      computerGateway,
+    );
+    const run = mintRunAssertion(
+      {
+        botId: "codex-assistant",
+        actorId: "local-development",
+        runId: "run-1",
+      },
+      config.keyEncryptionKey,
+    );
+
+    const response = await app.request(
+      "http://openbot.test/api/agent-tools/call",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-openbot-agent-token": "agent-secret",
+        },
+        body: JSON.stringify({
+          name: "openbot_computer_navigate",
+          args: { url: "https://example.com/" },
+          run,
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      text: string;
+      isError: boolean;
+    };
+    expect(body.isError).toBe(false);
+    expect(JSON.parse(body.text)).toMatchObject({
+      ok: true,
+      url: "https://example.com/",
+      title: "Example Domain",
+    });
+    expect(calls).toEqual([
+      {
+        botId: "codex-assistant",
+        actorId: "local-development",
+        url: "https://example.com/",
+      },
+    ]);
   });
 });
 

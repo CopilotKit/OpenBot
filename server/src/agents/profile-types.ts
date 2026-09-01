@@ -11,6 +11,10 @@ export type AgentProfile = {
   title: string;
   roleDescription: string;
   avatarSeed: string;
+  /** Whether an authenticated image endpoint has bytes to serve. */
+  hasCustomAvatar: boolean;
+  /** Content version for immutable avatar URLs, without selecting the image payload. */
+  avatarUpdatedAt: Date;
   visibility: AgentVisibility;
   ownerUserId: string | null;
   systemOwned: boolean;

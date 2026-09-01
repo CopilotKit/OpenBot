@@ -227,6 +227,8 @@ describe("channel activity", () => {
         lastMessageAgentId: agentId,
         lastMessageAt: at,
         createdAt: expect.any(Date),
+        hasCustomAvatars: [false],
+        avatarUpdatedAts: [expect.any(Date)],
         pinned: false,
         lastReadAt: null,
       },

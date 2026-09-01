@@ -19,6 +19,7 @@ import { useNeedsYou } from "@/components/computer/needs-you";
 import { DetailPanel } from "@/components/layout/detail-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import { markChannelReadMutationOptions } from "@/lib/channels/mutations";
 import {
   type AgentChannel,
@@ -86,6 +87,10 @@ function RouteComponent() {
   const isWatching = watch === true;
   /** Channel routing currently supports one coworker. */
   const agentId = channel.data?.agentIds[0];
+  const agent = useQuery({
+    ...agentQueryOptions(agentId ?? ""),
+    enabled: agentId !== undefined,
+  });
   /** Only polled while the screen is closed; the screen panel polls control itself. */
   const needsYou = useNeedsYou(agentId, !isWatching);
 
@@ -191,6 +196,9 @@ function RouteComponent() {
             >
               <ChannelAvatar
                 participantIds={channel.data?.agentIds ?? []}
+                participantImages={
+                  agentId ? [agent.data?.avatarUrl ?? null] : undefined
+                }
                 size={22}
               />
             </motion.div>

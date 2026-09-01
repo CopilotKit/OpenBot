@@ -101,6 +101,7 @@ async function createProfileFixture(options: {
   title?: string;
   roleDescription?: string;
   avatarSeed?: string;
+  avatarImage?: string;
   configuration?: Record<string, unknown>;
 }) {
   const agentId = id("seed-agent");
@@ -124,9 +125,17 @@ async function createProfileFixture(options: {
     title,
     roleDescription,
     avatarSeed,
+    avatarImage: options.avatarImage,
     visibility: options.visibility ?? "private",
   });
-  return { agentId, name, title, roleDescription, avatarSeed };
+  return {
+    agentId,
+    name,
+    title,
+    roleDescription,
+    avatarSeed,
+    avatarImage: options.avatarImage ?? null,
+  };
 }
 
 async function profileById(actor: AgentActor, agentId: string) {
@@ -506,6 +515,45 @@ describe("agent profile store integration", () => {
     expect(await store.get(admin, source.agentId)).toBeNull();
   });
 
+  test("stores avatar overrides for owners and lets an admin brand a package Bot", async () => {
+    const owner = await createUser();
+    const other = await createUser();
+    const admin = await createUser("admin");
+    const userAgent = await createProfileFixture({ owner });
+    const deploymentPackage = await createPackage();
+    const packageAgent = await createProfileFixture({
+      owner: null,
+      packageId: deploymentPackage.id,
+      visibility: "public",
+    });
+
+    const updated = await store.setAvatar(
+      owner,
+      userAgent.agentId,
+      "data:image/png;base64,owner",
+    );
+    expect(updated.hasCustomAvatar).toBe(true);
+    expect(await store.avatar(owner, userAgent.agentId)).toBe(
+      "data:image/png;base64,owner",
+    );
+    await expect(
+      store.setAvatar(other, userAgent.agentId, "data:image/png;base64,other"),
+    ).rejects.toThrow("was not found");
+
+    const branded = await store.setAvatar(
+      admin,
+      packageAgent.agentId,
+      "data:image/png;base64,admin",
+    );
+    expect(branded.hasCustomAvatar).toBe(true);
+    expect(await store.avatar(admin, packageAgent.agentId)).toBe(
+      "data:image/png;base64,admin",
+    );
+    await expect(
+      store.setAvatar(owner, packageAgent.agentId, null),
+    ).rejects.toThrow("cannot be managed");
+  });
+
   test("duplicates a profile as a caller-owned private agent with copied presentation fields", async () => {
     const owner = await createUser();
     const source = await createProfileFixture({
@@ -515,6 +563,7 @@ describe("agent profile store integration", () => {
       title: "Source Title",
       roleDescription: "Source role.",
       avatarSeed: "source-avatar",
+      avatarImage: "data:image/png;base64,source",
     });
     await store.setHidden(owner, source.agentId, true);
 
@@ -528,12 +577,14 @@ describe("agent profile store integration", () => {
       title: source.title,
       roleDescription: source.roleDescription,
       avatarSeed: source.avatarSeed,
+      hasCustomAvatar: true,
       visibility: "private",
       ownerUserId: owner.id,
       systemOwned: false,
       hidden: false,
       deletedAt: null,
     });
+    expect(await store.avatar(owner, duplicate.id)).toBe(source.avatarImage);
     expect(duplicate.id).not.toBe(source.agentId);
     createdAgentIds.push(duplicate.id);
     const duplicatePreferences = await database

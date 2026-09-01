@@ -1,4 +1,4 @@
-{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.warmPool.enabled }}
+{{- if and (has .Values.computers.mode (list "sandbox" "vm")) .Values.computers.sandbox.warmPool.enabled }}
 {{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
 {{/*
 Computers waiting, so a Bot's first action after lunch does not wait for Chromium to boot.

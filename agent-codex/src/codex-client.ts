@@ -20,6 +20,8 @@ type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
+  /** Runs in the protocol reader before later messages can overtake the promise continuation. */
+  beforeResolve?: (value: unknown) => void;
 };
 
 type ThreadResult = {
@@ -237,15 +239,15 @@ export class CodexAppServerClient {
     const unsubscribe = this.onMessage((message) => {
       const params = message.params ?? {};
       if (params.threadId !== threadId) return;
-      if (
-        active.turnId &&
-        typeof params.turnId === "string" &&
-        params.turnId !== active.turnId
-      )
+      /*
+       * `thread/resume` can replay notifications from the last persisted turn before `turn/start`
+       * answers with the new turn id. Those are history, not this request. Let only the response to
+       * `turn/start` establish ownership; otherwise a replayed item makes the real turn look like an
+       * unrelated concurrent turn and the whole run is rejected before it begins.
+       */
+      if (!active.turnId) return;
+      if (typeof params.turnId === "string" && params.turnId !== active.turnId)
         return;
-      if (!active.turnId && typeof params.turnId === "string") {
-        active.turnId = params.turnId;
-      }
 
       if (message.method === "item/started") {
         const item = isObject(params.item) ? params.item : {};
@@ -319,22 +321,24 @@ export class CodexAppServerClient {
     });
 
     try {
-      const result = (await this.request("turn/start", {
-        threadId,
-        input: [{ type: "text", text: prompt, text_elements: [] }],
-        cwd,
-        approvalPolicy: "never",
-        sandboxPolicy: { type: "readOnly", networkAccess: false },
-        effort: "low",
-      })) as TurnStartResult;
+      const result = (await this.request(
+        "turn/start",
+        {
+          threadId,
+          input: [{ type: "text", text: prompt, text_elements: [] }],
+          cwd,
+          approvalPolicy: "never",
+          sandboxPolicy: { type: "readOnly", networkAccess: false },
+          effort: "low",
+        },
+        (value) => {
+          const turnId = (value as TurnStartResult).turn?.id;
+          if (turnId) active.turnId = turnId;
+        },
+      )) as TurnStartResult;
       const startedTurnId = result.turn?.id;
       if (!startedTurnId) {
         throw new Error("Codex app-server did not return a turn id.");
-      }
-      if (active.turnId && active.turnId !== startedTurnId) {
-        throw new Error(
-          `Codex sent events for turn ${active.turnId} before starting ${startedTurnId}.`,
-        );
       }
       active.turnId = startedTurnId;
       if (signal?.aborted) interrupt();
@@ -357,14 +361,23 @@ export class CodexAppServerClient {
     return () => this.listeners.delete(listener);
   }
 
-  private request(method: string, params: JsonObject): Promise<unknown> {
+  private request(
+    method: string,
+    params: JsonObject,
+    beforeResolve?: (value: unknown) => void,
+  ): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Codex app-server request ${method} timed out.`));
       }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve, reject, timeout });
+      this.pending.set(id, {
+        resolve,
+        reject,
+        timeout,
+        ...(beforeResolve ? { beforeResolve } : {}),
+      });
       this.write({ method, id, params });
     });
   }
@@ -407,7 +420,16 @@ export class CodexAppServerClient {
           ),
         );
       } else {
-        pending.resolve(message.result);
+        try {
+          pending.beforeResolve?.(message.result);
+          pending.resolve(message.result);
+        } catch (error) {
+          pending.reject(
+            error instanceof Error
+              ? error
+              : new Error("Codex app-server returned an invalid response."),
+          );
+        }
       }
       return;
     }
@@ -447,7 +469,7 @@ export class CodexAppServerClient {
       if (
         !active ||
         !turnId ||
-        (active.turnId !== undefined && turnId !== active.turnId) ||
+        turnId !== active.turnId ||
         !callId ||
         !name ||
         params.namespace !== null

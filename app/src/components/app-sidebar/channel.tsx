@@ -38,6 +38,7 @@ import { ChannelAvatar } from "../channels/avatar";
 export const Channel = memo(function Channel({
   channelId,
   participantIds,
+  participantImages,
   name,
   lastMessage,
   lastMessageAt,
@@ -47,6 +48,7 @@ export const Channel = memo(function Channel({
 }: {
   channelId: string;
   participantIds: string[];
+  participantImages?: (string | null)[];
   name: string;
   lastMessage?: string;
   lastMessageAt?: string;
@@ -114,6 +116,7 @@ export const Channel = memo(function Channel({
             <div className="">
               <ChannelAvatar
                 participantIds={participantIds}
+                participantImages={participantImages}
                 size={32}
                 typing={busy}
               />

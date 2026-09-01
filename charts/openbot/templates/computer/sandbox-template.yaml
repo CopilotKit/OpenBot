@@ -1,4 +1,4 @@
-{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.warmPool.enabled }}
+{{- if and (has .Values.computers.mode (list "sandbox" "vm")) .Values.computers.sandbox.warmPool.enabled }}
 {{- $ns := default .Release.Namespace .Values.computers.sandbox.namespace -}}
 {{/*
 The template a warm pool cuts pre-warmed computers from.

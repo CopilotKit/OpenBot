@@ -1,4 +1,4 @@
-{{- if and (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.culler.enabled }}
+{{- if and (has .Values.computers.mode (list "sandbox" "vm")) .Values.computers.sandbox.culler.enabled }}
 {{- $component := "culler" -}}
 {{/*
 Suspending computers nobody is using.

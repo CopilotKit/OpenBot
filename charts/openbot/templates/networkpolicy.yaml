@@ -92,7 +92,7 @@ spec:
           protocol: TCP
         - port: 443
           protocol: TCP
-    {{- if eq .Values.computers.mode "sandbox" }}
+    {{- if has .Values.computers.mode (list "sandbox" "vm") }}
     {{- /*
       The Kubernetes API server, which is where a per-Bot computer is asked for.
 
@@ -181,7 +181,7 @@ spec:
     {{- end }}
 {{- end }}
 
-{{- if and .Values.networkPolicy.enabled (eq .Values.computers.mode "sandbox") .Values.computers.sandbox.culler.enabled }}
+{{- if and .Values.networkPolicy.enabled (has .Values.computers.mode (list "sandbox" "vm")) .Values.computers.sandbox.culler.enabled }}
 ---
 {{- $culler := "culler" -}}
 {{/* A pod no policy selects keeps the cluster default, so this one was the release's only unfenced one. */}}

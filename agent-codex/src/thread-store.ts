@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 type ThreadState = {
   version: 1;
   threads: Record<string, string>;
+  catalogues?: Record<string, string>;
 };
 
 const EMPTY_STATE: ThreadState = { version: 1, threads: {} };
@@ -18,6 +19,7 @@ const EMPTY_STATE: ThreadState = { version: 1, threads: {} };
  */
 export class CodexThreadStore {
   private readonly threads: Map<string, string>;
+  private readonly catalogues: Map<string, string>;
   private writes = Promise.resolve();
 
   private constructor(
@@ -25,6 +27,7 @@ export class CodexThreadStore {
     state: ThreadState,
   ) {
     this.threads = new Map(Object.entries(state.threads));
+    this.catalogues = new Map(Object.entries(state.catalogues ?? {}));
   }
 
   static async open(path: string): Promise<CodexThreadStore> {
@@ -45,6 +48,10 @@ export class CodexThreadStore {
     return this.threads.get(openbotThreadId);
   }
 
+  catalogue(openbotThreadId: string): string | undefined {
+    return this.catalogues.get(openbotThreadId);
+  }
+
   size(): number {
     return this.threads.size;
   }
@@ -52,9 +59,13 @@ export class CodexThreadStore {
   async remember(
     openbotThreadId: string,
     codexThreadId: string,
+    catalogue?: string,
   ): Promise<void> {
     if (!openbotThreadId || !codexThreadId) {
       throw new Error("Thread ids must not be empty.");
+    }
+    if (catalogue !== undefined && !catalogue) {
+      throw new Error("A tool catalogue fingerprint must not be empty.");
     }
     const write = this.writes
       .catch(() => {})
@@ -62,10 +73,16 @@ export class CodexThreadStore {
         await mkdir(dirname(this.path), { recursive: true });
         const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
         const nextThreads = new Map(this.threads);
+        const nextCatalogues = new Map(this.catalogues);
         nextThreads.set(openbotThreadId, codexThreadId);
+        if (catalogue === undefined) nextCatalogues.delete(openbotThreadId);
+        else nextCatalogues.set(openbotThreadId, catalogue);
         const state: ThreadState = {
           version: 1,
           threads: Object.fromEntries(nextThreads),
+          ...(nextCatalogues.size > 0
+            ? { catalogues: Object.fromEntries(nextCatalogues) }
+            : {}),
         };
         try {
           await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, {
@@ -74,6 +91,8 @@ export class CodexThreadStore {
           });
           await rename(temporary, this.path);
           this.threads.set(openbotThreadId, codexThreadId);
+          if (catalogue === undefined) this.catalogues.delete(openbotThreadId);
+          else this.catalogues.set(openbotThreadId, catalogue);
         } catch (error) {
           await unlink(temporary).catch(() => {});
           throw error;
@@ -94,21 +113,37 @@ function parseState(raw: string, path: string): ThreadState {
     );
   }
 
+  if (!isObject(value) || value.version !== 1 || !isObject(value.threads)) {
+    throwUnsupportedState(path);
+  }
+
+  const threads = value.threads;
+  const catalogues = value.catalogues;
   if (
-    !isObject(value) ||
-    value.version !== 1 ||
-    !isObject(value.threads) ||
-    Object.entries(value.threads).some(
+    Object.entries(threads).some(
       ([openbotThreadId, codexThreadId]) =>
         !openbotThreadId || typeof codexThreadId !== "string" || !codexThreadId,
-    )
+    ) ||
+    (catalogues !== undefined &&
+      (!isObject(catalogues) ||
+        Object.entries(catalogues).some(
+          ([openbotThreadId, catalogue]) =>
+            !openbotThreadId ||
+            typeof catalogue !== "string" ||
+            !catalogue ||
+            !(openbotThreadId in threads),
+        )))
   ) {
-    throw new Error(
-      `Codex thread state at ${path} has an unsupported shape. Refusing to forget existing conversations.`,
-    );
+    throwUnsupportedState(path);
   }
 
   return value as ThreadState;
+}
+
+function throwUnsupportedState(path: string): never {
+  throw new Error(
+    `Codex thread state at ${path} has an unsupported shape. Refusing to forget existing conversations.`,
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

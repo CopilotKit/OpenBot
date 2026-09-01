@@ -22,6 +22,7 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type * as React from "react";
 import { useState } from "react";
+import { UserAvatar } from "@/components/people/user-avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,23 +64,6 @@ const adminLinkOptions = { to: "/admin" } satisfies LinkOptions;
 const settingsLinkOptions = { to: "/settings" } satisfies LinkOptions;
 
 const userMenuItemClassName = "gap-2 px-2 py-1.5";
-
-function UserAvatar() {
-  const { data: currentUser } = useQuery(currentUserQueryOptions());
-  const initials =
-    currentUser?.name
-      ?.trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") ?? currentUser?.email.slice(0, 2).toUpperCase();
-
-  return (
-    <div className="size-[28px] bg-muted-foreground/10 text-foreground/70 rounded-full flex items-center justify-center text-xs overflow-hidden">
-      {initials}
-    </div>
-  );
-}
 
 /**
  * Cap layout animation because `layout` measures every animated row on each reorder.
@@ -189,6 +173,7 @@ function ChannelRow({
       <Channel
         channelId={channel.id}
         participantIds={channel.agentIds}
+        participantImages={channel.avatarUrls}
         name={channel.name}
         lastMessage={channel.lastMessage ?? undefined}
         lastMessageAt={
@@ -372,7 +357,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   <SidebarMenuButton className="hover:bg-foreground/5 h-10" />
                 }
               >
-                <UserAvatar />
+                <UserAvatar
+                  email={currentUser?.email}
+                  image={currentUser?.image}
+                  name={currentUser?.name}
+                />
                 <span className="text-sm trackint-tight">
                   {currentUser?.name || currentUser?.email}
                 </span>

@@ -43,7 +43,7 @@ spec:
           the old values, and the deployment looks upgraded while behaving exactly as it did.
         */}}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- if eq .Values.computers.mode "sandbox" }}
+        {{- if has .Values.computers.mode (list "sandbox" "vm") }}
         {{- /*
           The shape of a computer, which the server reads once and keeps.
 
@@ -136,7 +136,7 @@ spec:
             periodSeconds: {{ .Values.server.livenessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.server.livenessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.server.livenessProbe.failureThreshold }}
-          {{- if eq .Values.computers.mode "sandbox" }}
+          {{- if has .Values.computers.mode (list "sandbox" "vm") }}
           {{- /* The shape of a Bot's computer, as a file rather than as a permission to read one. */}}
           volumeMounts:
             - name: sandbox-template
@@ -147,7 +147,7 @@ spec:
           resources:
 {{ toYaml . | indent 12 }}
           {{- end }}
-      {{- if eq .Values.computers.mode "sandbox" }}
+      {{- if has .Values.computers.mode (list "sandbox" "vm") }}
       volumes:
         - name: sandbox-template
           configMap:

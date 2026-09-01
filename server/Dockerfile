@@ -17,6 +17,7 @@ COPY package.json bun.lock ./
 COPY tsconfig.base.json tsconfig.base.json
 COPY bunfig.toml bunfig.toml
 COPY app/package.json app/package.json
+COPY agent-codex/package.json agent-codex/package.json
 COPY server/package.json server/package.json
 COPY worker/package.json worker/package.json
 RUN bun install --frozen-lockfile

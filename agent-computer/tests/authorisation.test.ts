@@ -63,6 +63,15 @@ describe("finding the secret a caller offered", () => {
     );
   });
 
+  test("the full desktop takes it from the query for the same upgrade boundary", () => {
+    expect(
+      offeredToken(
+        new Headers(),
+        url(`/desktop?bot=b&token=${SECRET}&mode=view`),
+      ),
+    ).toBe(SECRET);
+  });
+
   test("the stream does NOT accept a header instead", () => {
     // Not a restriction that matters for security, both are checked against the same secret, but
     // the socket has one way in, and a surface that sent the header would fail loudly rather than
@@ -86,6 +95,7 @@ describe("what an unauthenticated caller may reach", () => {
       "/files/list",
       "/files/read",
       "/stream",
+      "/desktop",
       "/live",
       "/",
     ]) {
@@ -135,6 +145,7 @@ describe("what the wheel stops while a person is driving", () => {
       "/control/take",
       "/control/release",
       "/stream",
+      "/desktop",
     ]) {
       expect(actsOnTheComputer(path)).toBeFalse();
     }

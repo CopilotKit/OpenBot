@@ -45,6 +45,10 @@ export type AgentChannel = {
 
 /** A channel plus the last thing said in it, which is what a roster renders. */
 export type ChannelSummary = AgentChannel & {
+  /** Parallel to agentIds, without copying image payloads into every roster row. */
+  hasCustomAvatars: boolean[];
+  /** Content version source for immutable avatar URLs, parallel to agentIds. */
+  avatarUpdatedAts: Date[];
   lastMessage: string | null;
   lastMessageAt: Date | null;
   lastMessageAgentId: string | null;
@@ -477,6 +481,8 @@ export function createChannelStore(
           id: channels.id,
           name: channels.name,
           agentId: channelAgents.agentId,
+          hasAvatarImage: sql<boolean>`${agentProfiles.avatarImage} is not null`,
+          avatarUpdatedAt: agentProfiles.updatedAt,
           threadId: intelligenceChannelMappings.threadId,
           deletedAt: agentProfiles.deletedAt,
           lastMessage: channels.lastMessage,
@@ -528,6 +534,8 @@ export function createChannelStore(
         const summary = summaries.get(row.id);
         if (summary) {
           summary.agentIds.push(row.agentId);
+          summary.hasCustomAvatars.push(row.hasAvatarImage);
+          summary.avatarUpdatedAts.push(row.avatarUpdatedAt);
           summary.active &&= row.deletedAt === null;
           continue;
         }
@@ -535,6 +543,8 @@ export function createChannelStore(
           id: row.id,
           name: row.name,
           agentIds: [row.agentId],
+          hasCustomAvatars: [row.hasAvatarImage],
+          avatarUpdatedAts: [row.avatarUpdatedAt],
           threadId: row.threadId,
           active: row.deletedAt === null,
           lastMessage: row.lastMessage,
@@ -1169,6 +1179,11 @@ function channelDto(channel: AgentChannel): AgentChannel {
 function channelSummaryDto(channel: ChannelSummary) {
   return {
     ...channelDto(channel),
+    avatarUrls: channel.agentIds.map((agentId, index) =>
+      channel.hasCustomAvatars[index]
+        ? `/api/agents/${encodeURIComponent(agentId)}/avatar/image?v=${channel.avatarUpdatedAts[index]?.getTime().toString(36)}`
+        : null,
+    ),
     lastMessage: channel.lastMessage,
     // Serialised as ISO-8601 so the browser gets a string it can sort and format.
     lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,

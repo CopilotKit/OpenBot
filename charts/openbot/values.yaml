@@ -186,6 +186,8 @@ config:
 #             and is what a first install should use.
 #   sandbox   A computer each, as a `Sandbox` from kubernetes-sigs/agent-sandbox, suspended when
 #             idle and resumed with its logins intact. Needs that controller in the cluster.
+#   vm        The same persistent computer lifecycle inside a VM-backed RuntimeClass such as Kata.
+#             Requires `runtimeClassName`; the chart refuses to call an ordinary pod a VM.
 #   external  Neither. `url` points at a computer somebody else runs.
 computers:
   mode: shared
@@ -194,7 +196,8 @@ computers:
   # Never a literal. See `secrets` below.
   existingTokenSecret: ""
 
-  # gVisor or Kata, where the cluster has one. Unset means an ordinary pod, because the three clouds
+  # gVisor or Kata, where the cluster has one. Required for `mode: vm` and optional for `sandbox`.
+  # Unset means an ordinary pod, because the three clouds
   # do not agree: GKE has managed gVisor, AKS offers Kata and gVisor, and on EKS it is bring your own
   # node configuration. A chart that assumed a RuntimeClass would fail to install without one.
   runtimeClassName: ""
@@ -232,7 +235,7 @@ computers:
   # `networkPolicy.computerExtraEgress`, or the computer cannot reach it.
   extraEnv: []
 
-  # `mode: sandbox` only. Where the per-Bot computers are created and what may create them.
+  # `mode: sandbox` and `mode: vm` only. Where per-Bot computers are created and what may create them.
   sandbox:
     # Refuse to install when the cluster has no Sandbox CRD, rather than succeeding and failing at
     # the first browser action. Turn it off only where the CRD arrives after this chart does, such as

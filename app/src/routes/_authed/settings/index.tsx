@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import React from "react";
 import {
@@ -5,7 +6,9 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { UserAvatar } from "@/components/people/user-avatar";
 import { useTheme } from "@/components/theme-provider";
+import { AvatarUploadActions } from "@/components/ui/avatar-upload-actions";
 import {
   Item,
   ItemActions,
@@ -15,6 +18,8 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { updateCurrentUserAvatarMutationOptions } from "@/lib/auth/mutations";
+import { currentUserQueryOptions } from "@/lib/auth/queries";
 import { formatHotkey, HOTKEYS } from "@/lib/hotkeys/hotkeys";
 
 export const Route = createFileRoute("/_authed/settings/")({
@@ -23,6 +28,11 @@ export const Route = createFileRoute("/_authed/settings/")({
 
 function RouteComponent() {
   const { dark, setDark } = useTheme();
+  const queryClient = useQueryClient();
+  const { data: currentUser } = useQuery(currentUserQueryOptions());
+  const updateAvatar = useMutation(
+    updateCurrentUserAvatarMutationOptions(queryClient),
+  );
 
   /*
    * The measurements that used to be written out here now live in `PageShell`, which Skills, Admin
@@ -37,6 +47,33 @@ function RouteComponent() {
       description="How OpenBot looks and behaves for you. These apply to your account alone, on every deployment you sign in to."
       title="Preferences"
     >
+      <PageSection title="Profile">
+        <PageRows>
+          <Item size="sm">
+            <div className="mr-3">
+              <UserAvatar
+                email={currentUser?.email}
+                image={currentUser?.image}
+                name={currentUser?.name}
+                size={40}
+              />
+            </div>
+            <ItemContent>
+              <ItemTitle>Avatar</ItemTitle>
+              <ItemDescription>PNG, JPEG, or WebP, up to 2 MB.</ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <AvatarUploadActions
+                disabled={!currentUser}
+                hasCustomImage={currentUser?.hasCustomAvatar === true}
+                hasImage={Boolean(currentUser?.image)}
+                label="your avatar"
+                onChange={(image) => updateAvatar.mutateAsync(image)}
+              />
+            </ItemActions>
+          </Item>
+        </PageRows>
+      </PageSection>
       <PageSection title="General">
         <PageRows>
           <Item size="sm">

@@ -15,3 +15,22 @@ export function signOutMutationOptions(queryClient: QueryClient) {
     onSuccess: () => queryClient.removeQueries({ queryKey: authKeys.all }),
   });
 }
+
+export function updateCurrentUserAvatarMutationOptions(
+  queryClient: QueryClient,
+) {
+  return mutationOptions({
+    mutationFn: (image: string | null) =>
+      client<{ image: string | null; hasCustomAvatar: boolean }>(
+        "/api/me/avatar",
+        "avatar",
+        {
+          method: "PUT",
+          body: { image },
+          fallback: "Could not save your avatar",
+        },
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: authKeys.currentUser() }),
+  });
+}

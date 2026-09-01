@@ -4,6 +4,7 @@ import {
   dynamicToolsOf,
   OpenBotToolGateway,
   runAssertionOf,
+  toolCatalogueFingerprint,
 } from "../src/tools";
 
 function input(overrides: Partial<RunAgentInput> = {}): RunAgentInput {
@@ -78,6 +79,48 @@ describe("Codex dynamic tools", () => {
       ),
     ).toBe("opaque.signature");
     expect(runAssertionOf(input())).toBe("");
+  });
+
+  test("fingerprints the complete catalogue without depending on key or tool order", () => {
+    const first = [
+      {
+        type: "function" as const,
+        name: "read_page",
+        description: "Read the page",
+        inputSchema: {
+          required: ["url"],
+          properties: { url: { type: "string" } },
+          type: "object",
+        },
+      },
+      {
+        type: "function" as const,
+        name: "click",
+        description: "Click",
+        inputSchema: { type: "object" },
+      },
+    ];
+    const reordered = [
+      first[1],
+      {
+        ...first[0],
+        inputSchema: {
+          type: "object",
+          properties: { url: { type: "string" } },
+          required: ["url"],
+        },
+      },
+    ];
+
+    expect(toolCatalogueFingerprint(reordered)).toBe(
+      toolCatalogueFingerprint(first),
+    );
+    expect(
+      toolCatalogueFingerprint([
+        { ...first[0], description: "Read the current page" },
+        first[1],
+      ]),
+    ).not.toBe(toolCatalogueFingerprint(first));
   });
 });
 

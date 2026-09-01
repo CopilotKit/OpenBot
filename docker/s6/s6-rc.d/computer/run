@@ -19,4 +19,13 @@ fi
 cd /app/agent-computer
 export PORT=4100
 export WORKSPACE_DIR=/workspace
-exec s6-setuidgid pwuser /usr/local/bin/bun src/index.ts
+mkdir -p /tmp/.X11-unix /tmp/runtime-pwuser
+chmod 1777 /tmp/.X11-unix
+chown pwuser:pwuser /tmp/runtime-pwuser
+chmod 700 /tmp/runtime-pwuser
+exec s6-setuidgid pwuser env \
+  HOME=/home/pwuser \
+  USER=pwuser \
+  LOGNAME=pwuser \
+  XDG_RUNTIME_DIR=/tmp/runtime-pwuser \
+  ./entrypoint.sh

@@ -4,11 +4,27 @@
 # neither.
 FROM mcr.microsoft.com/playwright:v1.62.1-noble
 
+ARG BUN_VERSION=1.3.14
+ENV BUN_INSTALL=/usr/local
+ENV PATH="/usr/local/bin:${PATH}"
+
+# A real desktop, not a page-only screencast. Xvfb owns the display, Openbox supplies window chrome,
+# x11vnc publishes its framebuffer, and websockify carries RFB through the authenticated OpenBot
+# WebSocket proxy. None of these ports are exposed from the container.
+#
 # unzip is not in the Playwright image and bun's installer needs it.
-RUN apt-get update && apt-get install -y --no-install-recommends unzip \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dbus-x11 \
+    openbox \
+    tint2 \
+    unzip \
+    websockify \
+    x11vnc \
+    x11-xserver-utils \
+    xterm \
+    xvfb \
   && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:${PATH}"
+  && curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
 
 WORKDIR /app
 # The lockfile as well as the manifest: `--frozen-lockfile` with no lockfile present resolves afresh
@@ -17,6 +33,8 @@ COPY agent-computer/package.json agent-computer/bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY agent-computer/src ./src
+COPY agent-computer/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 # Durable working directory. Bot-produced files that must survive replacement live here.
 RUN mkdir -p /workspace
@@ -28,4 +46,4 @@ EXPOSE 4100
 HEALTHCHECK --interval=2s --timeout=3s --start-period=2s --retries=30 \
   CMD bun -e "const r = await fetch('http://localhost:4100/health'); process.exit(r.ok ? 0 : 1)"
 
-CMD ["bun", "src/index.ts"]
+CMD ["./entrypoint.sh"]

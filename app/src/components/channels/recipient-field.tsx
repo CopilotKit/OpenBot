@@ -38,6 +38,9 @@ export function RecipientField({
       profile.name.toLowerCase().includes(search.trim().toLowerCase()),
     );
   const isFull = recipients.length >= MAX_RECIPIENTS;
+  const profileById = new Map(
+    (profiles ?? []).map((profile) => [profile.id, profile]),
+  );
 
   return (
     <div className="border-b border-border px-4 py-2">
@@ -51,7 +54,13 @@ export function RecipientField({
             size="xs"
             variant="secondary"
           >
-            <ChannelAvatar participantIds={[recipient.id]} size={16} />
+            <ChannelAvatar
+              participantIds={[recipient.id]}
+              participantImages={[
+                profileById.get(recipient.id)?.avatarUrl ?? null,
+              ]}
+              size={16}
+            />
             {recipient.name}
             <span aria-hidden>×</span>
             <span className="sr-only">Remove {recipient.name}</span>
@@ -88,7 +97,11 @@ export function RecipientField({
                 }}
                 type="button"
               >
-                <ChannelAvatar participantIds={[profile.id]} size={18} />
+                <ChannelAvatar
+                  participantIds={[profile.id]}
+                  participantImages={[profile.avatarUrl]}
+                  size={18}
+                />
                 <span>{profile.name}</span>
                 <span className="text-muted-foreground">{profile.title}</span>
               </button>

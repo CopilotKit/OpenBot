@@ -24,7 +24,7 @@ const database = createDatabase(
   TEST_POOL,
 );
 const queue = createWorkQueue(database);
-const kind = "bot.message";
+const kind = `bot.message.test.${randomUUID()}`;
 
 const silent: AuditStore = { insert: async () => {} };
 
@@ -70,6 +70,7 @@ describe("a batch of hops and a lease that can run out", () => {
     const held = Promise.withResolvers<void>();
     const shared = {
       queue,
+      kind,
       sign: () => "signed",
       auditStore: silent,
       // Small enough to drive in milliseconds; the property is one duration outrunning another.
@@ -131,6 +132,7 @@ describe("a batch of hops and a lease that can run out", () => {
     const held = Promise.withResolvers<void>();
     const slow = createHandoffRunner({
       queue,
+      kind,
       owner: "replica-a",
       sign: () => "signed",
       auditStore: silent,

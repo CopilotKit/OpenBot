@@ -16,6 +16,7 @@ import {
 } from "../../shared/bot-prompt";
 import type { AgentActor } from "./agents/profile-types";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
+import { COMPUTER_TOOLS } from "./computer/schema";
 import type { DeploymentConfig } from "./config";
 import type { SelectableSkill, Selection } from "./plugins/selection";
 import {
@@ -25,6 +26,26 @@ import {
 } from "./plugins/selection";
 import type { GrantedTool } from "./plugins/tools";
 import { grantedToolGuidance } from "./plugins/tools";
+
+/**
+ * Browser tools that a remote Bot may call back through this deployment.
+ *
+ * Human handoff and secret-entry tools deliberately stay in the browser: their handlers wait for a
+ * person for up to ten minutes, while a remote agent callback is one synchronous HTTP request. The
+ * tools here all have a complete server-side implementation in `ComputerGateway`, so the remote Bot
+ * gets the same policy decision and audit row as a built-in Bot.
+ */
+const REMOTE_COMPUTER_TOOLS = new Set<string>([
+  ...COMPUTER_TOOLS,
+  // The command tool predates COMPUTER_TOOLS but is governed by the same gateway.
+  "computer_run_command",
+]);
+
+export function remoteComputerToolAliases(tools: RunAgentInput["tools"] = []) {
+  return tools
+    .filter((tool) => REMOTE_COMPUTER_TOOLS.has(tool.name))
+    .map((tool) => ({ ...tool, name: `openbot_${tool.name}` }));
+}
 
 /**
  * The CopilotKit runtime, always in Intelligence mode.
@@ -586,6 +607,13 @@ function remoteAgentWithStandingRole(
     next: AbstractAgent,
   ) => {
     const holdingsMessage = holdingsMessageFor(tools);
+    /*
+     * The browser already registered the `computer_*` names as frontend handlers. If the remote Bot
+     * called one of those names after the server executed it, AG-UI would make the browser execute
+     * the same action again. The remote endpoint gets an aliased copy; only the signed callback maps
+     * it back to the governed gateway.
+     */
+    const computerTools = remoteComputerToolAliases(input.tools);
     return next.run({
       ...input,
       messages: [
@@ -606,6 +634,7 @@ function remoteAgentWithStandingRole(
        */
       tools: [
         ...(input.tools ?? []),
+        ...computerTools,
         ...tools.map((tool) => ({
           name: tool.name,
           description: tool.description,
@@ -628,7 +657,12 @@ function remoteAgentWithStandingRole(
          * could not, and then apologised to the person for not showing the chart that was on screen
          * in front of them. Only this side knows which is which, so only this side can say.
          */
-        openbotDeploymentTools: tools.map((tool) => tool.name),
+        openbotDeploymentTools: [
+          ...new Set([
+            ...tools.map((tool) => tool.name),
+            ...computerTools.map((tool) => tool.name),
+          ]),
+        ],
         /*
          * This deployment's own statement of what this run is.
          *

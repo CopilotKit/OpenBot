@@ -1,4 +1,4 @@
-{{- if eq .Values.computers.mode "sandbox" }}
+{{- if has .Values.computers.mode (list "sandbox" "vm") }}
 {{/*
 What a Bot's computer looks like, handed to the server as a file.
 

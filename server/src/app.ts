@@ -1,5 +1,6 @@
 import type { Hono as HonoApp, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
 import { authoriseAgentCall, sameToken } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
@@ -20,6 +21,7 @@ import {
   requireAdmin,
 } from "./auth/guards";
 import type { IdentityProviderStore } from "./auth/identity-provider-store";
+import { avatarResponse, avatarUrl, parseAvatarImage } from "./avatar";
 import type { ChannelEventHub } from "./channels/events";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
@@ -29,7 +31,7 @@ import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
-import type { ComputerGateway } from "./computer/gateway";
+import type { ActionActor, ComputerGateway } from "./computer/gateway";
 import type { PageFrameStore } from "./computer/page-frames";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
@@ -71,6 +73,157 @@ async function recordPersonEvent(
     actorUserId: context.var.actor.id,
     payload: { email: person.email, ...payload },
   });
+}
+
+const CODEX_COMPUTER_TOOL_PREFIX = "openbot_computer_";
+
+/**
+ * Execute a Codex computer alias through the same gateway used by the browser tools.
+ *
+ * The alias matters: AG-UI also carries these tool events back to the browser, where the unprefixed
+ * `computer_*` names have frontend handlers. Returning an unprefixed name after executing here would
+ * click, type, or navigate twice.
+ */
+async function callCodexComputerTool(
+  gateway: ComputerGateway,
+  name: string,
+  args: Record<string, unknown>,
+  botId: string,
+  actorId: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  if (!name.startsWith(CODEX_COMPUTER_TOOL_PREFIX)) return undefined;
+
+  const tool = name.slice("openbot_".length);
+  const actor: ActionActor = { id: actorId };
+  switch (tool) {
+    case "computer_navigate":
+      return gateway.navigate(botId, actor, stringArgument(args, "url"));
+    case "computer_read":
+      return gateway.read(botId);
+    case "computer_snapshot":
+      return gateway.snapshot(botId);
+    case "computer_click":
+      return gateway.click(
+        botId,
+        actor,
+        {
+          ref: stringArgument(args, "ref"),
+          snapshotId: numberArgument(args, "snapshotId"),
+        },
+        signal,
+      );
+    case "computer_type": {
+      const submit = booleanArgument(args, "submit");
+      return gateway.type(
+        botId,
+        actor,
+        {
+          ref: stringArgument(args, "ref"),
+          snapshotId: numberArgument(args, "snapshotId"),
+          text: stringArgument(args, "text"),
+          ...(submit === undefined ? {} : { submit }),
+        },
+        signal,
+      );
+    }
+    case "computer_key": {
+      const ref = optionalStringArgument(args, "ref");
+      const snapshotId = optionalNumberArgument(args, "snapshotId");
+      return gateway.key(
+        botId,
+        actor,
+        {
+          key: stringArgument(args, "key"),
+          ...(ref === undefined ? {} : { ref }),
+          ...(snapshotId === undefined ? {} : { snapshotId }),
+        },
+        signal,
+      );
+    }
+    case "computer_scroll": {
+      const deltaY = optionalNumberArgument(args, "deltaY");
+      return gateway.scroll(
+        botId,
+        actor,
+        deltaY === undefined ? {} : { deltaY },
+      );
+    }
+    case "computer_list_files": {
+      const path = optionalStringArgument(args, "path");
+      return gateway.listFiles(
+        botId,
+        actor,
+        path === undefined ? {} : { path },
+      );
+    }
+    case "computer_read_file":
+      return gateway.readFile(botId, actor, {
+        path: stringArgument(args, "path"),
+      });
+    case "computer_run_command":
+      return gateway.runCommand(
+        botId,
+        actor,
+        { command: stringArgument(args, "command") },
+        signal,
+      );
+    case "computer_write_file": {
+      const append = booleanArgument(args, "append");
+      return gateway.writeFile(botId, actor, {
+        path: stringArgument(args, "path"),
+        contents: stringArgument(args, "contents"),
+        ...(append === undefined ? {} : { append }),
+      });
+    }
+    default:
+      throw new Error("That computer tool is not available to remote agents.");
+  }
+}
+
+function stringArgument(args: Record<string, unknown>, name: string): string {
+  const value = args[name];
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be a string.`);
+  }
+  return value;
+}
+
+function optionalStringArgument(
+  args: Record<string, unknown>,
+  name: string,
+): string | undefined {
+  const value = args[name];
+  if (value === undefined) return undefined;
+  return stringArgument(args, name);
+}
+
+function numberArgument(args: Record<string, unknown>, name: string): number {
+  const value = args[name];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${name} must be a number.`);
+  }
+  return value;
+}
+
+function optionalNumberArgument(
+  args: Record<string, unknown>,
+  name: string,
+): number | undefined {
+  if (args[name] === undefined) return undefined;
+  return numberArgument(args, name);
+}
+
+function booleanArgument(
+  args: Record<string, unknown>,
+  name: string,
+): boolean | undefined {
+  const value = args[name];
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") {
+    throw new Error(`${name} must be a boolean.`);
+  }
+  return value;
 }
 
 export function createApp(
@@ -298,10 +451,17 @@ export function createApp(
       ? createRequireUser(auth, roleRepository)
       : authenticationUnavailable;
 
-  app.get("/api/me", requireUser, async (context) =>
-    context.json({
+  app.get("/api/me", requireUser, async (context) => {
+    const avatarImage =
+      (await peopleStore?.avatar(context.var.actor.id)) ?? null;
+    return context.json({
       user: {
         ...context.var.actor,
+        image:
+          avatarUrl("/api/me/avatar/image", avatarImage) ??
+          context.var.actor.image ??
+          null,
+        hasCustomAvatar: avatarImage !== null,
         /*
          * Read here rather than in the guard, so only this route pays the extra query. Null means
          * this deployment does not track onboarding, which the app reads as nothing to finish;
@@ -311,8 +471,46 @@ export function createApp(
           ? await onboardingStore.status(context.var.actor.id)
           : null,
       },
+    });
+  });
+  app.put(
+    "/api/me/avatar",
+    requireUser,
+    bodyLimit({
+      maxSize: 3 * 1024 * 1024,
+      onError: (context) =>
+        context.json({ error: "Avatar image must be 2 MB or smaller." }, 413),
     }),
+    async (context) => {
+      if (!peopleStore) {
+        return context.json(
+          { error: "Profile storage is not available." },
+          503,
+        );
+      }
+      const body = (await context.req.json().catch(() => null)) as {
+        image?: unknown;
+      } | null;
+      const parsed = parseAvatarImage(body?.image);
+      if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+
+      await peopleStore.setAvatar(context.var.actor.id, parsed.value);
+      return context.json({
+        avatar: {
+          image:
+            avatarUrl("/api/me/avatar/image", parsed.value) ??
+            context.var.actor.image ??
+            null,
+          hasCustomAvatar: parsed.value !== null,
+        },
+      });
+    },
   );
+  app.get("/api/me/avatar/image", requireUser, async (context) => {
+    const image = (await peopleStore?.avatar(context.var.actor.id)) ?? null;
+    if (!image) return context.json({ error: "Avatar not found." }, 404);
+    return avatarResponse(image);
+  });
   app.post("/api/me/onboarding", requireUser, async (context) => {
     if (!onboardingStore) {
       return context.json({ error: "Onboarding is not available." }, 503);
@@ -952,7 +1150,7 @@ export function createApp(
    * no person behind it. Absent secret means the route does not exist: a deployment that has not
    * configured this refuses rather than accepting anybody who can reach the port.
    */
-  if (pluginStore) {
+  if (pluginStore || computerGateway) {
     const legacyToken = config.agentToolToken ?? "";
     app.post("/api/agent-tools/call", async (context) => {
       /*
@@ -1019,6 +1217,38 @@ export function createApp(
       }
 
       try {
+        if (body.name.startsWith(CODEX_COMPUTER_TOOL_PREFIX)) {
+          if (!computerGateway) {
+            throw new Error(
+              "This deployment has no governed computer gateway.",
+            );
+          }
+          const args =
+            body.args &&
+            typeof body.args === "object" &&
+            !Array.isArray(body.args)
+              ? body.args
+              : {};
+          const result = await callCodexComputerTool(
+            computerGateway,
+            body.name,
+            args,
+            verdict.botId,
+            verdict.actorId,
+            context.req.raw.signal,
+          );
+          const outcome =
+            result && typeof result === "object" && !Array.isArray(result)
+              ? { ok: true, ...result }
+              : { ok: true, result };
+          return context.json({
+            text: JSON.stringify(outcome),
+            isError: false,
+          });
+        }
+        if (!pluginStore) {
+          throw new Error("This deployment has no plugin tool gateway.");
+        }
         const result = await pluginStore.callTool({
           // The model is offered `mcp__server__tool`; the store speaks `server/tool`.
           ref: body.name.replace(/^mcp__/, "").replace("__", "/"),

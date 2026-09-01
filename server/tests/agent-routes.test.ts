@@ -31,6 +31,9 @@ const validInput: CreateAgentInput = {
   visibility: "private",
 };
 
+const ONE_PIXEL_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
 function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
   return {
     id: "agent-1",
@@ -38,6 +41,8 @@ function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
     title: validInput.title,
     roleDescription: validInput.roleDescription,
     avatarSeed: "expense-manager",
+    hasCustomAvatar: false,
+    avatarUpdatedAt: new Date(0),
     visibility: validInput.visibility,
     ownerUserId: actor.id,
     systemOwned: false,
@@ -62,6 +67,10 @@ function fakeStore(
       calls.push(["get", receivedActor, id]);
       return profile({ id });
     },
+    async avatar(receivedActor, id) {
+      calls.push(["avatar", receivedActor, id]);
+      return null;
+    },
     async getWithin(_executor, receivedActor, id) {
       calls.push(["getWithin", receivedActor, id]);
       return profile({ id });
@@ -73,6 +82,14 @@ function fakeStore(
     async update(receivedActor, id, input) {
       calls.push(["update", receivedActor, id, input]);
       return profile({ id, ...input });
+    },
+    async setAvatar(receivedActor, id, image) {
+      calls.push(["setAvatar", receivedActor, id, image]);
+      return profile({
+        id,
+        hasCustomAvatar: image !== null,
+        avatarUpdatedAt: new Date(1),
+      });
     },
     async duplicate(receivedActor, id) {
       calls.push(["duplicate", receivedActor, id]);
@@ -313,6 +330,60 @@ describe("agent lifecycle routes", () => {
     ]);
   });
 
+  test("validates and stores a coworker avatar independently of profile edits", async () => {
+    const store = fakeStore();
+    const app = appFor(store);
+
+    const saved = await app.request("http://openbot.test/agent-1/avatar", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ image: ONE_PIXEL_PNG }),
+    });
+    expect(saved.status).toBe(200);
+    expect(store.calls).toEqual([
+      ["setAvatar", actor, "agent-1", ONE_PIXEL_PNG],
+    ]);
+    expect(await json(saved)).toEqual({
+      agent: expect.objectContaining({
+        id: "agent-1",
+        avatarUrl: expect.stringContaining(
+          "/api/agents/agent-1/avatar/image?v=",
+        ),
+      }),
+    });
+
+    store.calls.length = 0;
+    const refused = await app.request("http://openbot.test/agent-1/avatar", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        image: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+      }),
+    });
+    expect(refused.status).toBe(400);
+    expect(store.calls).toEqual([]);
+  });
+
+  test("serves avatar bytes only through an accessible coworker", async () => {
+    const store = fakeStore({
+      async avatar(receivedActor, id) {
+        store.calls.push(["avatar", receivedActor, id]);
+        return ONE_PIXEL_PNG;
+      },
+    });
+
+    const response = await appFor(store).request(
+      "http://openbot.test/agent-1/avatar/image?v=current",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(
+      Buffer.from(ONE_PIXEL_PNG.split(",")[1], "base64"),
+    );
+    expect(store.calls).toEqual([["avatar", actor, "agent-1"]]);
+  });
+
   test("projects exact DTO fields and computes permissions for the authenticated actor", async () => {
     const store = fakeStore({
       async list() {
@@ -339,10 +410,12 @@ describe("agent lifecycle routes", () => {
           title: validInput.title,
           roleDescription: validInput.roleDescription,
           avatarSeed: "expense-manager",
+          avatarUrl: null,
           visibility: "private",
           hidden: false,
           systemOwned: false,
           canManage: true,
+          canCustomizeAvatar: true,
           mine: true,
           builtIn: false,
         },
@@ -352,10 +425,12 @@ describe("agent lifecycle routes", () => {
           title: validInput.title,
           roleDescription: validInput.roleDescription,
           avatarSeed: "expense-manager",
+          avatarUrl: null,
           visibility: "private",
           hidden: false,
           systemOwned: false,
           canManage: false,
+          canCustomizeAvatar: false,
           mine: false,
           builtIn: false,
         },
@@ -365,10 +440,12 @@ describe("agent lifecycle routes", () => {
           title: validInput.title,
           roleDescription: validInput.roleDescription,
           avatarSeed: "expense-manager",
+          avatarUrl: null,
           visibility: "public",
           hidden: false,
           systemOwned: true,
           canManage: false,
+          canCustomizeAvatar: false,
           mine: false,
           builtIn: false,
         },

@@ -117,6 +117,19 @@ jobs:
       # question: every secret key a container demands has to be one the chart actually writes.
       # Getting that wrong is invisible until a pod starts, and every shipped target had it wrong.
       - run: bun scripts/check-rendered-chart.ts rendered.yaml
+      - name: Render VM computer mode
+        if: matrix.target == 'eks-sandbox'
+        run: |
+          helm template ci charts/openbot \
+            --values charts/openbot/ci/eks-sandbox-values.yaml \
+            --set computers.mode=vm \
+            --set computers.runtimeClassName=kata-qemu \
+            --set-string secrets.keyEncryptionKey="$(openssl rand -base64 32)" \
+            --api-versions agents.x-k8s.io/v1beta1/Sandbox \
+            --api-versions extensions.agents.x-k8s.io/v1beta1/SandboxTemplate \
+            > rendered-vm.yaml
+          grep -q 'runtimeClassName: kata-qemu' rendered-vm.yaml
+          bun scripts/check-rendered-chart.ts rendered-vm.yaml
       # And that the refusals are load-bearing rather than decorative. A chart full of `fail`
       # messages nothing ever triggers is a chart that has never been shown to refuse anything, and
       # every one of these describes a state that shipped in a values file at some point.
@@ -152,6 +165,10 @@ jobs:
           # A browser inside every replica of a replicated API.
           refuses "an embedded browser across several replicas" \
             --set server.embeddedComputer=true --set server.replicaCount=2
+          # A VM label that quietly launches an ordinary shared-kernel pod would be worse than not
+          # offering the mode. The runtime is the boundary and must be explicit.
+          refuses "VM computer mode without a VM-backed RuntimeClass" \
+            --set computers.mode=vm --set-string computers.runtimeClassName=
           # A Bot's egress proxy on a port the computer's own network policy does not allow. The
           # variables reach the computer through extraEnv, so nothing else notices that the policy
           # then refuses to let it be reached.
@@ -161,11 +178,11 @@ jobs:
             --set-string computers.extraEnv[0].value=http://proxy.internal:3128
           # A warm pool nothing claims from. Only meaningful where the target asks for per-Bot
           # computers; on the others the mode is not sandbox and the refusal is not armed.
-          if grep -qE '^ *mode: sandbox' charts/openbot/ci/${{ matrix.target }}-values.yaml; then
+          if grep -qE '^ *mode: (sandbox|vm)' charts/openbot/ci/${{ matrix.target }}-values.yaml; then
             refuses "a warm pool no Bot can be handed a computer from" \
               --set computers.sandbox.warmPool.enabled=true
           else
-            echo "skipped: the warm-pool refusal is only armed for computers.mode: sandbox"
+            echo "skipped: the warm-pool refusal is only armed for per-Bot computer modes"
           fi
       # And that a values key this chart did not used to have still renders when it is absent.
       #

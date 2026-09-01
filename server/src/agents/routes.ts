@@ -1,11 +1,13 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { AuditEventType, AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
+import { avatarResponse, avatarUrl, parseAvatarImage } from "../avatar";
 import { testAgentConnection } from "./connection-test";
 import { checkAgentEndpoint } from "./endpoint";
-import { canManageAgent } from "./profile-policy";
+import { canCustomizeAgentAvatar, canManageAgent } from "./profile-policy";
 import {
   AgentNotFoundError,
   AgentNotManageableError,
@@ -248,6 +250,49 @@ export function createAgentRoutes(
       return context.json({
         agents: agents.map((agent) => dto(context.var.actor, agent)),
       });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.put(
+    "/:agentId/avatar",
+    requireUser,
+    bodyLimit({
+      maxSize: 3 * 1024 * 1024,
+      onError: (context) =>
+        context.json({ error: "Avatar image must be 2 MB or smaller." }, 413),
+    }),
+    async (context) => {
+      const body = (await context.req.json().catch(() => null)) as {
+        image?: unknown;
+      } | null;
+      const parsed = parseAvatarImage(body?.image);
+      if (!parsed.ok) return context.json({ error: parsed.error }, 400);
+
+      try {
+        const agent = await store.setAvatar(
+          context.var.actor,
+          context.req.param("agentId"),
+          parsed.value,
+        );
+        return context.json({ agent: dto(context.var.actor, agent) });
+      } catch (error) {
+        return mapStoreError(context, error);
+      }
+    },
+  );
+
+  routes.get("/:agentId/avatar/image", requireUser, async (context) => {
+    try {
+      const image = await store.avatar(
+        context.var.actor,
+        context.req.param("agentId"),
+      );
+      if (!image) {
+        return context.json({ error: "Avatar not found." }, 404);
+      }
+      return avatarResponse(image);
     } catch (error) {
       return mapStoreError(context, error);
     }
@@ -556,6 +601,10 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     title: agent.title,
     roleDescription: agent.roleDescription,
     avatarSeed: agent.avatarSeed,
+    avatarUrl: avatarUrl(
+      `/api/agents/${encodeURIComponent(agent.id)}/avatar/image`,
+      agent.hasCustomAvatar ? agent.avatarUpdatedAt : null,
+    ),
     visibility: agent.visibility,
     hidden: agent.hidden,
     systemOwned: agent.systemOwned,
@@ -566,6 +615,7 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     // Whether one exists, never what it is.
     hasCallbackToken: agent.hasCallbackToken,
     canManage: canManageAgent(actor, agent),
+    canCustomizeAvatar: canCustomizeAgentAvatar(actor, agent),
     // Ownership, kept separate from permission. `canManage` is also true for an administrator on
     // another user's coworker, so a roster that split "mine" on it would file other people's work
     // under yours, and only for administrators, who are the least likely to notice.

@@ -166,7 +166,7 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
 {{- else if and (eq .Values.computers.mode "external") .Values.computers.url }}
 - name: AGENT_COMPUTER_URL
   value: {{ .Values.computers.url | quote }}
-{{- else if eq .Values.computers.mode "sandbox" }}
+{{- else if has .Values.computers.mode (list "sandbox" "vm") }}
 - name: COMPUTER_SANDBOX_NAMESPACE
   value: {{ default .Release.Namespace .Values.computers.sandbox.namespace | quote }}
 - name: COMPUTER_SANDBOX_IDLE_AFTER
@@ -371,7 +371,7 @@ be able to address the API server at all, and the default is the wrong way round
         "name" "computer"
         "image" (include "openbot.image" .)
         "imagePullPolicy" .Values.image.pullPolicy
-        "command" (list "/usr/local/bin/bun" "/app/agent-computer/src/index.ts")
+        "command" (list "/app/agent-computer/entrypoint.sh")
         "ports" (list (dict "name" "http" "containerPort" 4100))
         "env" (concat
           (list
@@ -430,6 +430,5 @@ Sandbox per Bot, and without a token it fails on the first browser action with a
 than anything that names the cause.
 */}}
 {{- define "openbot.automountToken" -}}
-{{- or .Values.serviceAccount.automountServiceAccountToken (eq .Values.computers.mode "sandbox") -}}
+{{- or .Values.serviceAccount.automountServiceAccountToken (has .Values.computers.mode (list "sandbox" "vm")) -}}
 {{- end -}}
-

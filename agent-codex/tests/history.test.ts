@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { RunAgentInput } from "@ag-ui/core";
-import { toCodexTurnInput } from "../src/history";
+import { recoveredThreadPrompt, toCodexTurnInput } from "../src/history";
 
 const input = (messages: unknown[]): RunAgentInput =>
   ({ messages }) as RunAgentInput;
@@ -28,5 +28,20 @@ describe("toCodexTurnInput", () => {
     expect(() =>
       toCodexTurnInput(input([{ role: "system", content: "A role" }])),
     ).toThrow("needs a user message");
+  });
+
+  test("replays prior conversation without duplicating the current request", () => {
+    const run = input([
+      { role: "system", content: "A standing role" },
+      { role: "user", content: "Remember codeword cobalt" },
+      { role: "assistant", content: "I will remember cobalt" },
+      { role: "user", content: "What is the codeword?" },
+    ]);
+
+    const prompt = recoveredThreadPrompt(run, "What is the codeword?");
+    expect(prompt).toContain("Remember codeword cobalt");
+    expect(prompt).toContain("I will remember cobalt");
+    expect(prompt.match(/What is the codeword\?/g)).toHaveLength(1);
+    expect(prompt).not.toContain("A standing role");
   });
 });

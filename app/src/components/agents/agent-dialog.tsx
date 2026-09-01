@@ -15,6 +15,7 @@ import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
 import { HandoffPanel } from "@/components/agents/handoff-panel";
 import { RoutinesList } from "@/components/routines/routines-list";
+import { AvatarUploadActions } from "@/components/ui/avatar-upload-actions";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -67,6 +68,7 @@ import {
   deleteAgentMutationOptions,
   duplicateAgentMutationOptions,
   setAgentHiddenMutationOptions,
+  updateAgentAvatarMutationOptions,
   updateAgentMutationOptions,
 } from "@/lib/agents/mutations";
 import { type AgentProfile, agentQueryOptions } from "@/lib/agents/queries";
@@ -148,6 +150,7 @@ function AgentDialogBody({ agentId }: { agentId: string }) {
           {/* Who this dialog is about, said once here rather than repeated per section. */}
           <SidebarHeader className="flex-row items-center gap-3 p-4">
             <AbstractAvatar
+              image={profile.avatarUrl}
               name={profile.name}
               seed={profile.avatarSeed}
               size={36}
@@ -191,6 +194,7 @@ function AgentDialogBody({ agentId }: { agentId: string }) {
           <div className="flex shrink-0 flex-col gap-2 border-b border-border p-3 pr-12 md:hidden">
             <div className="flex items-center gap-2">
               <AbstractAvatar
+                image={profile.avatarUrl}
                 name={profile.name}
                 seed={profile.avatarSeed}
                 size={28}
@@ -248,6 +252,9 @@ function GeneralSection({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const updateAgent = useMutation(updateAgentMutationOptions(queryClient));
+  const updateAvatar = useMutation(
+    updateAgentAvatarMutationOptions(queryClient),
+  );
 
   /*
    * One field at a time, over the whole update endpoint: the API takes the full profile, so the
@@ -272,6 +279,32 @@ function GeneralSection({
       {/* Each stands on its own — muted, not bg-card, which is invisible against a popup — and
           each edits in place: the field somebody wants to change is the only one that opens. */}
       <div className="flex flex-col gap-2">
+        <Item variant="muted">
+          <ItemContent>
+            <div className="flex items-center gap-3">
+              <AbstractAvatar
+                image={profile.avatarUrl}
+                name={profile.name}
+                seed={profile.avatarSeed}
+                size={40}
+              />
+              <div>
+                <ItemTitle>Avatar</ItemTitle>
+                <ItemDescription>
+                  PNG, JPEG, or WebP, up to 2 MB.
+                </ItemDescription>
+              </div>
+            </div>
+          </ItemContent>
+          <ItemActions>
+            <AvatarUploadActions
+              disabled={!profile.canCustomizeAvatar}
+              hasImage={profile.avatarUrl !== null}
+              label={`${profile.name} avatar`}
+              onChange={(image) => updateAvatar.mutateAsync({ agentId, image })}
+            />
+          </ItemActions>
+        </Item>
         <EditableTextItem
           canManage={profile.canManage}
           label="Name"

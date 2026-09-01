@@ -76,6 +76,8 @@ export type HandoffDesk = {
 
 export function createHandoffDesk(options: {
   queue: WorkQueue;
+  /** Queue namespace. Injectable so database-backed tests cannot claim another suite's hops. */
+  kind?: string;
   profiles: AgentProfileStore;
   /** Whether the asking Bot has been granted the Bot it is addressing. Read per hop, never cached. */
   mayAddress: (fromBotId: string, toBotId: string) => Promise<boolean>;
@@ -95,7 +97,15 @@ export function createHandoffDesk(options: {
   auditStore: AuditStore;
   caps: HandoffCaps;
 }): HandoffDesk {
-  const { queue, profiles, mayAddress, actorFor, auditStore, caps } = options;
+  const {
+    queue,
+    kind = HANDOFF_KIND,
+    profiles,
+    mayAddress,
+    actorFor,
+    auditStore,
+    caps,
+  } = options;
 
   /** Said once, so the trail carries the same words the Bot was given. */
   async function refuse(
@@ -306,7 +316,7 @@ export function createHandoffDesk(options: {
         .slice(0, 32)}`;
 
       const offered = await queue.offer({
-        kind: HANDOFF_KIND,
+        kind,
         key,
         /*
          * Counted from the rows rather than from a variable, because a run whose hops land on

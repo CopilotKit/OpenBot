@@ -69,6 +69,7 @@ describe("server authorization", () => {
         email: "member@openbot.test",
         name: "OpenBot Member",
         image: "https://example.test/member.png",
+        hasCustomAvatar: false,
         role: "user",
         // No store was passed, so this deployment tracks no onboarding and the app gates nobody.
         onboarding: null,

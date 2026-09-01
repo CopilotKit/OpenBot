@@ -1,4 +1,5 @@
 import { mutationOptions, type QueryClient } from "@tanstack/react-query";
+import { channelKeys } from "@/lib/channels/queries";
 import { client } from "@/lib/client";
 import { type AgentProfile, type AgentVisibility, agentKeys } from "./queries";
 
@@ -45,6 +46,25 @@ export function updateAgentMutationOptions(queryClient: QueryClient) {
         fallback: FALLBACK,
       }),
     onSuccess: () => invalidateAgents(queryClient),
+  });
+}
+
+export function updateAgentAvatarMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (variables: {
+      agentId: string;
+      image: string | null;
+    }): Promise<AgentProfile> =>
+      client(`/api/agents/${variables.agentId}/avatar`, "agent", {
+        method: "PUT",
+        body: { image: variables.image },
+        fallback: "Could not save the coworker avatar",
+      }),
+    onSuccess: () =>
+      Promise.all([
+        invalidateAgents(queryClient),
+        queryClient.invalidateQueries({ queryKey: channelKeys.all }),
+      ]),
   });
 }
 

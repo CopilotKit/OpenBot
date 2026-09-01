@@ -75,6 +75,9 @@ export type PeopleStore = {
   restore: (userId: string) => Promise<void>;
   find: (userId: string) => Promise<Person | undefined>;
   isRevoked: (email: string) => Promise<boolean>;
+  /** The OpenBot-owned override, separate from the identity provider's image. */
+  avatar: (userId: string) => Promise<string | null>;
+  setAvatar: (userId: string, image: string | null) => Promise<void>;
 };
 
 /** How many people a page holds when the caller does not say. */
@@ -173,6 +176,8 @@ export function createPeopleStore(
         id: users.id,
         email: users.email,
         name: users.name,
+        // Provider image only. The OpenBot-owned avatar has its own authenticated endpoint; putting
+        // its data URL in this page would copy up to 2 MB into every administrator list row.
         image: users.image,
         /*
          * Aggregated rather than joined into duplicate rows. `user_roles` is a set and `accounts`
@@ -274,6 +279,22 @@ export function createPeopleStore(
   return {
     list,
     find,
+
+    async avatar(userId) {
+      const [row] = await database
+        .select({ image: users.avatarImage })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      return row?.image ?? null;
+    },
+
+    async setAvatar(userId, image) {
+      await database
+        .update(users)
+        .set({ avatarImage: image, updatedAt: new Date() })
+        .where(eq(users.id, userId));
+    },
 
     async setRole(userId, role) {
       await setRole(database, userId, role);

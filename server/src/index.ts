@@ -46,6 +46,10 @@ import {
   describeComputerIsolation,
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
+import {
+  computerSocketUrl,
+  parseComputerSocketPath,
+} from "./computer/socket-proxy";
 import { loadConfig } from "./config";
 import {
   type IdentifyActor,
@@ -1081,24 +1085,12 @@ const app = createApp(
  * Not a Hono route because an upgrade is not a request/response: Bun hands it over before Hono sees a
  * body, so it is handled in `fetch` ahead of the app.
  */
-const toStreamUrl = (baseUrl: string, botId: string) =>
-  // The Bot travels in the query, because a websocket upgrade carries no custom header for the
-  // computer to read and every call it serves is per Bot. The secret travels the same way and for the
-  // same reason, this socket is the one a person can type into, so it is the last thing that should
-  // be reachable without it.
-  `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(botId)}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
-
-/**
- * Which Bot's screen. The Bot is named in the path and its computer is located the same way every
- * other call locates it, so the live stream cannot point at a different Bot's browser.
- */
-const streamPathBotId = (pathname: string): string | null => {
-  const match = pathname.match(/^\/api\/computers\/([^/]+)\/stream$/);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
-};
-
 /** What each proxied socket carries: where to connect inward, and the socket once opened. */
-type StreamData = { upstream: string; inward?: WebSocket };
+type StreamData = {
+  upstream: string;
+  binary: boolean;
+  inward?: WebSocket;
+};
 
 /**
  * Bun takes exactly one WebSocket handler for the server, and two features need one: the app proxies
@@ -1120,9 +1112,9 @@ serve<SocketData>({
   port,
   async fetch(request, server) {
     const url = new URL(request.url);
-    const streamBotId = streamPathBotId(url.pathname);
+    const computerSocket = parseComputerSocketPath(url.pathname);
     if (
-      streamBotId !== null &&
+      computerSocket !== null &&
       request.headers.get("upgrade")?.toLowerCase() === "websocket"
     ) {
       if (!config.computer) {
@@ -1138,7 +1130,7 @@ serve<SocketData>({
       // so signing in is not enough: without this, anybody signed in watches anybody's Bot work.
       if (
         !(await agentProfileStore
-          .get({ id: actor.id, role: actor.role }, streamBotId)
+          .get({ id: actor.id, role: actor.role }, computerSocket.botId)
           .catch(() => null))
       ) {
         return new Response("There is no such Bot.", { status: 404 });
@@ -1154,14 +1146,25 @@ serve<SocketData>({
       let upstream: string;
       try {
         const streamBase = computerGateway
-          ? await computerGateway.locate(streamBotId)
+          ? await computerGateway.locate(computerSocket.botId)
           : undefined;
         if (!streamBase) {
           return new Response("No computer address is configured.", {
             status: 503,
           });
         }
-        upstream = toStreamUrl(streamBase, streamBotId);
+        const mode =
+          computerSocket.kind === "desktop" &&
+          url.searchParams.get("mode") === "control"
+            ? "control"
+            : "view";
+        upstream = computerSocketUrl({
+          baseUrl: streamBase,
+          botId: computerSocket.botId,
+          kind: computerSocket.kind,
+          token: config.computer?.token ?? "",
+          mode,
+        });
       } catch (error) {
         // Said out loud rather than falling back to another Bot's computer, which is the failure this
         // whole path exists to prevent.
@@ -1172,7 +1175,21 @@ serve<SocketData>({
           { status: 502 },
         );
       }
-      if (server.upgrade(request, { data: { upstream } })) {
+      const binary = computerSocket.kind === "desktop";
+      const requestedProtocols =
+        request.headers.get("sec-websocket-protocol") ?? "";
+      const acceptsBinary = requestedProtocols
+        .split(",")
+        .map((value) => value.trim())
+        .includes("binary");
+      if (
+        server.upgrade(request, {
+          data: { upstream, binary },
+          ...(binary && acceptsBinary
+            ? { headers: { "sec-websocket-protocol": "binary" } }
+            : {}),
+        })
+      ) {
         return undefined as unknown as Response;
       }
       return new Response("Expected a WebSocket upgrade.", { status: 400 });
@@ -1185,13 +1202,23 @@ serve<SocketData>({
         channelSocket.open(asChannelSocket(ws));
         return;
       }
-      const inward = new WebSocket(ws.data.upstream);
+      const binary = ws.data.binary;
+      const inward = binary
+        ? new WebSocket(ws.data.upstream, "binary")
+        : new WebSocket(ws.data.upstream);
+      if (binary) inward.binaryType = "arraybuffer";
       ws.data.inward = inward;
       // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
       // should be dropped, not queued, because a stale frame is worse than a missing one.
-      inward.onmessage = (event) => {
+      inward.onmessage = async (event) => {
         try {
-          ws.send(String(event.data));
+          if (!binary || typeof event.data === "string") {
+            ws.send(String(event.data));
+          } else if (event.data instanceof ArrayBuffer) {
+            ws.send(event.data);
+          } else if (event.data instanceof Blob) {
+            ws.send(await event.data.arrayBuffer());
+          }
         } catch {
           inward.close();
         }
@@ -1204,7 +1231,9 @@ serve<SocketData>({
         channelSocket.message(asChannelSocket(ws), raw);
         return;
       }
-      if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
+      if (ws.data.inward?.readyState === 1) {
+        ws.data.inward.send(ws.data.binary ? raw : String(raw));
+      }
     },
     close(ws, code, reason) {
       if (!isProxiedStream(ws.data)) {

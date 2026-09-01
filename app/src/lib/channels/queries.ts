@@ -18,6 +18,8 @@ export type AgentChannel = {
 
 /** A channel plus the last thing said in it, which is what the roster renders. */
 export type ChannelSummary = AgentChannel & {
+  /** Parallel to agentIds; null means use the generated fallback. */
+  avatarUrls: (string | null)[];
   lastMessage: string | null;
   /** ISO-8601, or null for a channel nobody has used yet. */
   lastMessageAt: string | null;

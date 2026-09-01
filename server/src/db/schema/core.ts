@@ -54,6 +54,13 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   name: text("name"),
   image: text("image"),
+  /**
+   * The image this person chose in OpenBot.
+   *
+   * Separate from Better Auth's `image`: an identity provider owns that field and may refresh it on
+   * sign-in. A person choosing a picture here must not have it quietly replaced the next morning.
+   */
+  avatarImage: text("avatar_image"),
   emailVerified: boolean("email_verified").notNull().default(false),
   /**
    * The person's groups, for a group-based rule to be evaluated against.
