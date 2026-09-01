@@ -114,10 +114,16 @@ Activity is held in the browser for the open conversation and is gone on reload.
 A coworker is a durable Bot profile:
 
 - `agents` stores runtime identity and endpoint/key reference.
-- `agent_profiles` stores name, title, role, owner, visibility, and deletion state.
+- `agent_profiles` stores name, title, role, avatar seed or custom image, owner, visibility, and
+  deletion state.
 - `agent_preferences` stores per-user roster state.
 
 A channel is a conversation with one coworker and a CopilotKit Intelligence thread mapping. Starting a new channel creates a new thread.
+
+A person's optional custom avatar lives on their `users` row. Both person and Bot images are served
+from authenticated, private, versioned routes; list responses carry those short URLs and never the
+base64 image payloads. That keeps replica behavior shared through PostgreSQL without turning every
+roster read into a multi-megabyte response.
 
 Who may reach one is decided by membership: every channel route resolves the caller in
 `channel_memberships` and refuses without a row. `channels.allowed_groups` is declared in the

@@ -7,7 +7,7 @@ A coworker is a Bot with a durable profile and standing role. The role is sent w
 | Piece                | Table                           | Purpose                                                               |
 | -------------------- | ------------------------------- | --------------------------------------------------------------------- |
 | Runtime agent        | `agents`                        | AG-UI endpoint and optional key reference.                            |
-| Profile              | `agent_profiles`                | Name, title, role, avatar seed, owner, visibility, and soft deletion. |
+| Profile              | `agent_profiles`                | Name, title, role, avatar seed or custom image, owner, visibility, and soft deletion. |
 | Personal roster      | `agent_preferences`             | Per-user hidden state.                                                |
 | Channel              | `channels`                      | Conversation membership and coworker binding.                         |
 | Intelligence mapping | `intelligence_channel_mappings` | Channel-to-thread mapping.                                            |
@@ -35,7 +35,21 @@ The message is ordinary AG-UI system content, so it works with any AG-UI-compati
 | `private`  | Owner and administrators.   |
 | `public`   | Everyone in the deployment. |
 
-Filtering happens in server/database queries. Package-provided agents cannot be edited or deleted through the product.
+Filtering happens in server/database queries. Package-provided agents cannot be renamed,
+reconfigured, or deleted through the product. An administrator can still set their deployment-local
+avatar without changing the profile the package owns.
+
+## Avatars
+
+A person changes their own avatar in **Settings**. A Bot owner changes its avatar in the coworker
+dialog, and an administrator can do the same for any Bot, including one supplied by the tenant
+package. Removing a custom image returns to the identity-provider image or initials for a person,
+and to the generated avatar for a Bot.
+
+Uploads accept PNG, JPEG, and WebP images up to 2 MB. The server checks the decoded size, file
+signature, and dimensions before storing the image in PostgreSQL. Roster and channel responses carry
+a short versioned image URL rather than the image bytes, so one list never copies every avatar into
+its JSON response.
 
 ## Channels
 

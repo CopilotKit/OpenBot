@@ -134,11 +134,11 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 | Route                | Purpose                                                            |
 | -------------------- | ------------------------------------------------------------------ |
 | `/`                  | Start and browse channels.                                         |
-| `/agents`            | Create, edit, duplicate, hide, delete, and launch coworkers.       |
+| `/agents`            | Create, edit, brand, duplicate, hide, delete, and launch coworkers. |
 | `/channel/:id`       | Converse with one coworker, watch its screen, and see what it ran. |
 | `/bot`               | Direct chat with a Bot; `?agent=<id>` selects one.                 |
 | `/skills`            | Create and enable personal skills.                                 |
-| `/settings`          | User preferences.                                                  |
+| `/settings`          | Personal profile, avatar, and user preferences.                    |
 | `/admin/credentials` | Store write-only encrypted credentials.                            |
 | `/admin/computers`   | View, stop, and reset Bot computers.                               |
 | `/admin/boundaries`  | Configure browser/file/MCP action policy.                          |
@@ -158,6 +158,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 - **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand-written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
 - **Use the Codex account already on your machine**: local Codex mode resumes persistent Codex threads and exposes only the tools OpenBot assigned. Calls return through the same grant, policy and audit gateway; Codex-native action surfaces are disabled before app-server turns begin.
+- **Give people and Bots their own faces**: upload, replace, or remove PNG, JPEG, and WebP avatars from Settings or the coworker dialog. The same image follows that identity through the sidebar, channels, recipients, handoffs, and profile surfaces.
 - **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
 - **Governed MCP**: Google Drive and Notion ship in the catalogue, reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks; unknown tools and custom-server tools are treated as writes, and a catalogue tool the server advertises but does not name as a write classifies as a read. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
 - **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer.
