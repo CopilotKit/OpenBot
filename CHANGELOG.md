@@ -8,6 +8,32 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Coworkers are made in a wizard and managed in a dialog
+
+Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
+with **Built in** offered only when the deployment actually has a managed Bot to run it on.
+Managing one is a dialog opened from wherever the coworker appears, with sections for its profile
+(each field edited in place), what it may reach, its connection, handoff grants, routines, and the
+hide/duplicate/delete verbs — usable on a phone, where the old side panel hid most of this. The
+panel beside a conversation slims down to who-you-are-talking-to plus two buttons: start a new
+channel, or open that dialog.
+
+### Routines live on each coworker
+
+The sidebar's global Routines entry is gone; a coworker's routines are a section of its own dialog,
+since a routine is something *it* carries out. The `/routines` page still answers direct links.
+Each routine row now wears its state as chips — the channel it posts to, how the last run went, and
+either the next run, **Paused**, or **Due** when a firing is waiting on the sweep (which used to
+render as "Next 5 hours ago").
+
+### A built-in coworker is no longer asked for credentials it will never need
+
+A coworker running on the deployment's own Bot was nagged for a callback token and shown an
+endpoint form. Its connection tab now says what is true — it runs here, nothing to connect, nothing
+to authenticate. In the same spirit, the handoff panel explains once when a coworker cannot hand
+work on (it runs as its own agent, outside this deployment's loop) instead of offering switches the
+server can only refuse; its existing grants stay visible so they can still be revoked.
+
 ### A Bot's answer comes back to the conversation that asked
 
 **This reverses what 0.0.5 shipped.** The 0.0.5 notes below say the asking Bot does not relay text
