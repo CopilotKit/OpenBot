@@ -34,6 +34,15 @@ to authenticate. In the same spirit, the handoff panel explains once when a cowo
 work on (it runs as its own agent, outside this deployment's loop) instead of offering switches the
 server can only refuse; its existing grants stay visible so they can still be revoked.
 
+### A conversation is given a name of its own
+
+A channel was labelled with the names of the Bots in it, so every conversation with the same
+coworker read the same on the roster, and the only thing telling two of them apart was a preview of
+whatever was said last. That preview is usually the tail of an answer, which says nothing about the
+question that prompted it. Once a conversation has an opening exchange, the deployment's own model
+is asked for a few words naming what it is about, and the roster draws those words in place of the
+preview. A deployment with no model key configured names nothing and looks exactly as it did before.
+
 ### A channel stops showing a working indicator once its turn has ended
 
 Sending a message and then opening another channel before the reply arrived left the first channel
