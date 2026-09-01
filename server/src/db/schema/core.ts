@@ -259,6 +259,10 @@ export const channels = pgTable(
       onDelete: "set null",
     }),
     override: jsonb("override"),
+    /** A few words about the conversation. Channel grain like `last_message`; null is ordinary. */
+    summary: text("summary"),
+    /** When the summary above was written, so a later change can decide whether to redo it. */
+    summaryAt: timestamp("summary_at", { withTimezone: true }),
     /**
      * The last thing said in this channel, denormalised so a roster is one indexed read.
      *
@@ -302,6 +306,18 @@ export const channels = pgTable(
     index("channels_recent_activity_idx").on(
       sql`COALESCE(${table.lastMessageAt}, ${table.createdAt}) DESC`,
     ),
+    /**
+     * The channels still waiting for a summary.
+     *
+     * Partial, on the condition rather than the column, because the sweep that offers this work asks
+     * for exactly the rows this index holds and nothing else. Every channel that has been summarised
+     * leaves the index, so it shrinks as the deployment settles rather than growing with it: a
+     * question asked every couple of seconds on every replica should not be a scan of every
+     * conversation anybody has ever had.
+     */
+    index("channels_awaiting_summary_idx")
+      .on(table.id)
+      .where(sql`${table.summary} is null and ${table.deletedAt} is null`),
   ],
 );
 
