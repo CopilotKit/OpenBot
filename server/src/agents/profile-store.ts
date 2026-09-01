@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { computerAccessOf } from "../computer/access";
 import type { CredentialStore } from "../credentials";
 import type { Database } from "../db/client";
 import {
@@ -166,6 +167,7 @@ function mapProfile(
     // Whether a key is set, never which. The form needs to show "a key is set" so a person does not
     // wipe one by saving an unrelated edit; showing the value would put a secret in a screenshot.
     hasAuth: authFromConfiguration(row.configuration) !== null,
+    computerAccess: computerAccessOf(row.configuration),
   };
 }
 

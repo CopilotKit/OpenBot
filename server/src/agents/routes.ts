@@ -517,6 +517,7 @@ function agentDto(actor: AgentActor, agent: AgentProfile) {
     // and any credential for it lives in the vault, never in this row.
     endpoint: agent.endpoint,
     hasAuth: agent.hasAuth,
+    computerAccess: agent.computerAccess,
     // Whether one exists, never what it is.
     hasCallbackToken: agent.hasCallbackToken,
     canManage: canManageAgent(actor, agent),

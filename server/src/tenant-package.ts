@@ -157,6 +157,17 @@ type TenantAgent = {
   skills: string[];
 };
 
+function computerAccessConfiguration(agent: Record<string, unknown>) {
+  if (agent.computer_access === undefined) return {};
+  if (
+    agent.computer_access !== "enabled" &&
+    agent.computer_access !== "disabled"
+  ) {
+    throw new Error("agent.computer_access must be enabled or disabled");
+  }
+  return { computerAccess: agent.computer_access };
+}
+
 type TenantChannel = {
   id: string;
   name: string;
@@ -379,9 +390,11 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
                     agent.system_prompt,
                     "agent.system_prompt",
                   ),
+                  ...computerAccessConfiguration(agent),
                 }
               : {
                   endpoint: requiredString(agent.endpoint, "agent.endpoint"),
+                  ...computerAccessConfiguration(agent),
                 },
           skills:
             agent.skills === undefined || agent.skills === null

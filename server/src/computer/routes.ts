@@ -49,6 +49,14 @@ export function createComputerRoutes(
    * endpoint says it cannot answer rather than answering from nothing.
    */
   auditReader?: AuditReader,
+  /**
+   * Whether the named Bot is entitled to any computer capability at all.
+   *
+   * This is separate from `canUseBot`: a signed-in operator may use a Bot while that Bot is still
+   * intentionally computerless. It is appended to retain the route constructor's existing callers;
+   * `createApp` always supplies the profile-backed answer.
+   */
+  canUseComputer: BotAccessCheck = async () => true,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -85,6 +93,12 @@ export function createComputerRoutes(
 
     if (botId && !(await canUseBot(context.var.actor, botId))) {
       return context.json({ error: "There is no such Bot." }, 404);
+    }
+    if (botId && !(await canUseComputer(context.var.actor, botId))) {
+      return context.json(
+        { error: "This Bot does not have computer access." },
+        403,
+      );
     }
     await next();
   });

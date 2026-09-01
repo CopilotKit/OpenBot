@@ -1,12 +1,15 @@
 import { useFrontendTool } from "@copilotkit/react-core/v2";
+import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import { tryClient } from "@/lib/client";
+import { canOfferComputerTools } from "@/lib/computers/access";
 import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
 import { type ControlState, readControl } from "@/lib/computers/control";
-import { useActiveBotHolder } from "./active-bot";
+import { useActiveBotHolder, useDeclaredBotId } from "./active-bot";
 import { reportComputerActivity } from "./computer-activity";
 
 /**
@@ -238,6 +241,19 @@ function didNotWork(outcome: ComputerOutcome): boolean {
 }
 
 export function ComputerTools() {
+  const botId = useDeclaredBotId();
+  const profile = useQuery({
+    ...agentQueryOptions(botId ?? ""),
+    enabled: Boolean(botId),
+    retry: false,
+  });
+
+  if (!canOfferComputerTools(profile.data)) return null;
+
+  return <ComputerToolRegistrations />;
+}
+
+function ComputerToolRegistrations() {
   const bot = useActiveBotHolder();
 
   useFrontendTool({

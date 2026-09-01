@@ -7,6 +7,7 @@ agents:
     role_description: Coordina consultas del ERP cuando las capacidades correspondientes estén concedidas.
     avatar_seed: jefe-erp
     type: built-in
+    computer_access: disabled
     system_prompt: >-
       You are the NETSFERA ERP chief. At G0 you have no ERP, browser, shell, file, or connector
       tools. Explain that the requested operation is not available; do not invent results or claim
@@ -17,6 +18,7 @@ agents:
     role_description: Recopila documentos externos solo después de recibir los grants revisados para ello.
     avatar_seed: recolector-documentos
     type: built-in
+    computer_access: disabled
     system_prompt: >-
       You are the NETSFERA document collector. At G0 you have no browser, shell, file, ERP, or
       connector tools. Explain that the requested operation is not available; do not invent results

@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { intentOf } from "../src/computer/gateway";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
 } from "../src/computer/policy";
-import { intentOf } from "../src/computer/gateway";
 import { parseActionPolicy } from "../src/computer/policy-store";
 
 /**
@@ -93,7 +93,7 @@ describe("the Netsfera G0 computer policy", () => {
     }
   });
 
-  test("evaluates every G0 rule without a broken-rule fallback", () => {
+  test("keeps the later collector boundary expressions parseable for its future promotion", () => {
     const allowed = [
       context({
         bot: { id: "recolector-documentos" },
@@ -125,9 +125,56 @@ describe("the Netsfera G0 computer policy", () => {
     ];
 
     for (const input of allowed) {
-      const decision = evaluateActionPolicy(policy, input);
+      // The entitlement and the G0-wide collector denial both win today. Isolate the later CEL
+      // allow expression so a future Task 9 promotion cannot discover a broken rule by relying on
+      // fail-closed behaviour at runtime.
+      const rule = policy.allow.find((candidate) =>
+        candidate.includes(input.tool.name),
+      );
+      expect(rule).toBeDefined();
+      const decision = evaluateActionPolicy(
+        { mode: "enforce", deny: [], allow: [rule as string] },
+        input,
+      );
       expect(decision.allowed).toBe(true);
       expect(decision.source).toBe("allow");
+    }
+
+    const denied = [
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_run_command" },
+        intent: "run_command",
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_navigate" },
+        intent: "navigate",
+        page: { host: "evil.example", url: "https://evil.example" },
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_navigate" },
+        intent: "navigate",
+        page: { host: "chatgpt.com", url: "https://chatgpt.com/payment" },
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_click" },
+        intent: "activate",
+        element: { ref: "e1", role: "button", name: "Buy" },
+      }),
+    ];
+
+    for (const [rule, input] of policy.deny
+      .slice(2)
+      .map((rule, index) => [rule, denied[index]] as const)) {
+      expect(input).toBeDefined();
+      const decision = evaluateActionPolicy(
+        { mode: "enforce", deny: [rule], allow: ["true"] },
+        input as PolicyContext,
+      );
+      expect(decision.source).toBe("deny");
     }
   });
 });

@@ -732,6 +732,17 @@ export function createApp(
         (await agentProfileStore.get(actor, botId)) !== null
     : async () => true;
 
+  /*
+   * The profile is the one durable source for the per-agent computer entitlement. A deployment that
+   * predates the field maps an omitted setting to enabled in the store; a deployment with no profile
+   * store has only its legacy public Bots and retains the same behaviour.
+   */
+  const canUseComputer: BotAccessCheck = agentProfileStore
+    ? async (actor, botId) =>
+        (await agentProfileStore.get(actor, botId))?.computerAccess ===
+        "enabled"
+    : async () => true;
+
   // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
   // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is
   // the one shape of this feature that must not exist.
@@ -745,6 +756,7 @@ export function createApp(
         canUseBot,
         pageFrames,
         auditReader,
+        canUseComputer,
       ),
     );
   }
