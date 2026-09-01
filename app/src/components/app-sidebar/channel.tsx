@@ -26,6 +26,7 @@ import {
   deleteChannelMutationOptions,
   setChannelPinnedMutationOptions,
 } from "@/lib/channels/mutations";
+import { useTypedReveal } from "@/lib/typed-reveal";
 import { ChannelAvatar } from "../channels/avatar";
 
 /**
@@ -39,6 +40,7 @@ export const Channel = memo(function Channel({
   channelId,
   participantIds,
   name,
+  summary,
   lastMessage,
   lastMessageAt,
   pinned,
@@ -48,6 +50,9 @@ export const Channel = memo(function Channel({
   channelId: string;
   participantIds: string[];
   name: string;
+  /** What the conversation is about, once named. The channel name only says which Bot it is. */
+  summary?: string;
+  /** Shown on that same line until the conversation has been named. */
   lastMessage?: string;
   lastMessageAt?: string;
   pinned: boolean;
@@ -63,6 +68,8 @@ export const Channel = memo(function Channel({
     select: (params) =>
       (params as { channelId?: string }).channelId === channelId,
   });
+  /* Types in only on arrival; an already-named row draws it outright. */
+  const revealed = useTypedReveal(summary);
   const setPinned = useMutation(setChannelPinnedMutationOptions(queryClient));
   const deleteChannel = useMutation(deleteChannelMutationOptions(queryClient));
   const [confirming, setConfirming] = useState(false);
@@ -133,7 +140,12 @@ export const Channel = memo(function Channel({
               </div>
               <div className="mt-px flex h-4 items-center gap-1.5">
                 <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-muted-foreground">
-                  {lastMessage}
+                  {/* Falls back to the last message, so the line never blanks while naming runs. */}
+                  {revealed.text ?? lastMessage}
+                  {revealed.typing ? (
+                    /* Solid, not blinking: this is over in under half a second. */
+                    <span className="ml-0.5 inline-block h-3 w-px translate-y-px bg-muted-foreground/70 align-middle" />
+                  ) : null}
                 </span>
                 {unread ? (
                   /* State about the message beats state about the row, so it sits first. */
