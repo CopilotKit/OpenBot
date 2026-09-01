@@ -238,6 +238,16 @@ function newAgentId() {
 }
 
 /**
+ * The omission-as-enabled interpretation exists only for profiles written before computer access
+ * was introduced. Every profile born now records the safer default, including a duplicate.
+ */
+export function newProfileConfiguration(
+  configuration: Record<string, unknown>,
+) {
+  return { ...configuration, computerAccess: "disabled" as const };
+}
+
+/**
  * Which agent a token belongs to.
  *
  * Selected by hash and then compared in constant time. The lookup alone would be enough to identify
@@ -321,7 +331,7 @@ export function createAgentProfileStore(
           //
           // The key, if there is one, goes to the vault and only its reference is stored here. See
           // auth-header.ts for why a bearer token must not sit next to the endpoint.
-          configuration: {
+          configuration: newProfileConfiguration({
             ...endpoint,
             ...(input.auth && vault
               ? {
@@ -335,7 +345,7 @@ export function createAgentProfileStore(
                   }),
                 }
               : {}),
-          },
+          }),
         });
         await transaction.insert(agentProfiles).values({
           agentId: id,
@@ -447,7 +457,7 @@ export function createAgentProfileStore(
           id: duplicateId,
           name: source.name,
           type: "remote_ag_ui",
-          configuration: managedConfiguration,
+          configuration: newProfileConfiguration(managedConfiguration),
         });
         await transaction.insert(agentProfiles).values({
           agentId: duplicateId,
