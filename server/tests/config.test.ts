@@ -196,7 +196,7 @@ describe("deployment configuration", () => {
         clientId: "google-client-id",
         clientSecret: "google-client-secret",
       },
-      trustedOrigins: ["http://localhost:3000"],
+      trustedOrigins: ["http://localhost:3010"],
       initialAdminEmails: ["admin@openbot.test", "owner@openbot.test"],
     });
   });

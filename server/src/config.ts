@@ -502,7 +502,7 @@ function authConfig(
     secret,
     trustedOrigins: commaSeparated(environment, "TRUSTED_ORIGINS").length
       ? commaSeparated(environment, "TRUSTED_ORIGINS")
-      : ["http://localhost:3000"],
+      : ["http://localhost:3010"],
     initialAdminEmails,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
