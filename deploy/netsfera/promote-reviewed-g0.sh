@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Promote one verified review artifact.  This is deliberately fail-fast: it is
-# intended to be the only state-changing command executed on the bot host.
+# The single state-changing G0 promotion entrypoint for the bot host.
 set -Eeuo pipefail
 
 if [ "$#" -ne 4 ]; then
@@ -12,7 +11,6 @@ bundle_path="$1"
 expected_bundle_sha256="$2"
 advertised_ref="$3"
 target_commit="$4"
-
 source_directory="${OPENBOT_SOURCE_DIR:-/opt/openbot/source}"
 incoming_directory="${OPENBOT_INCOMING_DIR:-/root/openbot-incoming}"
 project_name="${OPENBOT_COMPOSE_PROJECT:-openbot}"
@@ -20,16 +18,17 @@ base_env_file="${OPENBOT_BASE_ENV_FILE:-/opt/openbot/.env}"
 phase2_env_file="${OPENBOT_PHASE2_ENV_FILE:-/etc/netsfera/bot-zero-trust/erp-phase2.env}"
 base_compose_file="${OPENBOT_BASE_COMPOSE_FILE:-/opt/openbot/docker-compose.yml}"
 supervisor_compose_file="${OPENBOT_SUPERVISOR_COMPOSE_FILE:-/opt/openbot/docker-compose.browser-supervisor.yml}"
-phase2_compose_file="${OPENBOT_PHASE2_COMPOSE_FILE:-/etc/netsfera/bot-zero-trust/erp-phase2.yml}"
+phase2_compose_file="${OPENBOT_PHASE2_COMPOSE_FILE:-/opt/openbot/docker-compose.erp-phase2.yml}"
 g0_overlay_file="${OPENBOT_G0_OVERLAY_FILE:-${source_directory}/deploy/netsfera/docker-compose.erp-agent.yml}"
 expected_owner="${OPENBOT_EXPECTED_BUNDLE_OWNER:-root:root}"
 
 umask 077
-temporary_directory="$(mktemp -d "${incoming_directory}/g0-promotion.XXXXXX")"
+run_id="$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}-${RANDOM}-$$"
+temporary_directory="$(mktemp -d "${incoming_directory}/g0-promotion.${run_id}.XXXXXX")"
 base_render="${temporary_directory}/base.json"
 candidate_render="${temporary_directory}/candidate.json"
 test_source_directory="${temporary_directory}/test-source"
-evidence_file="${incoming_directory}/g0-promotion-${target_commit}.evidence"
+evidence_file="${incoming_directory}/g0-promotion-${target_commit}-${run_id}.evidence"
 rollback_ready=0
 success=0
 
@@ -55,43 +54,83 @@ clean_up_private_files() {
   rm -f "$bundle_path"
 }
 
+wait_for_healthy_container() {
+  local container_id="$1"
+  local health=""
+  for _ in $(seq 1 30); do
+    health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id")"
+    [ "$health" = "healthy" ] && return 0
+    sleep 2
+  done
+  return 1
+}
+
 restore_previous_state() {
-  local status="$1"
-  trap - ERR HUP INT TERM
-  if [ "$rollback_ready" -eq 1 ]; then
-    echo "promotion failed; restoring recorded OpenBot source and image" >&2
-    docker image tag "$rollback_image_tag" "$rollback_image_reference" >/dev/null 2>&1 || true
-    git -C "$source_directory" checkout --detach "$rollback_source_revision" >/dev/null 2>&1 || true
-    "${compose_base[@]}" up -d --no-build >/dev/null 2>&1 || true
+  local restore_failed=0
+  local rollback_container_id=""
+  trap - ERR EXIT HUP INT TERM
+  set +e
+  echo "promotion failed; restoring recorded OpenBot source and image" >&2
+
+  if ! docker image tag "$rollback_image_tag" "$rollback_image_reference" >/dev/null; then
+    echo "rollback failure: could not restore the recorded image tag" >&2
+    restore_failed=1
   fi
-  exit "$status"
+  if [ "$(docker image inspect --format '{{.Id}}' "$rollback_image_reference" 2>/dev/null)" != "$rollback_running_image_id" ]; then
+    echo "rollback failure: restored image reference does not match its recorded image ID" >&2
+    restore_failed=1
+  fi
+
+  if ! git -C "$source_directory" checkout --detach "$rollback_source_revision" >/dev/null || [ "$(git -C "$source_directory" rev-parse HEAD 2>/dev/null)" != "$rollback_source_revision" ] || [ -n "$(git -C "$source_directory" status --porcelain 2>/dev/null)" ]; then
+    echo "rollback failure: source checkout was not restored cleanly" >&2
+    restore_failed=1
+  fi
+
+  if ! "${compose_base[@]}" up -d --no-deps --no-build openbot >/dev/null; then
+    echo "rollback failure: could not recreate only OpenBot from the prior stack" >&2
+    restore_failed=1
+  fi
+  rollback_container_id="$("${compose_base[@]}" ps -q openbot)"
+  if [ -z "$rollback_container_id" ] || [ "$(docker inspect --format '{{.Image}}' "$rollback_container_id" 2>/dev/null)" != "$rollback_running_image_id" ]; then
+    echo "rollback failure: prior OpenBot container image is not restored" >&2
+    restore_failed=1
+  elif ! wait_for_healthy_container "$rollback_container_id"; then
+    echo "rollback failure: prior OpenBot container is not healthy" >&2
+    restore_failed=1
+  fi
+  set -e
+  if [ "$restore_failed" -ne 0 ]; then
+    echo "CRITICAL: automatic rollback is incomplete; do not continue promotion" >&2
+    return 70
+  fi
+  return 0
 }
 
 on_exit() {
   local status=$?
+  local rollback_status=0
+  trap - EXIT HUP INT TERM
   clean_up_private_files
-  if [ "$success" -ne 1 ]; then
-    restore_previous_state "$status"
+  if [ "$success" -ne 1 ] && [ "$rollback_ready" -eq 1 ]; then
+    restore_previous_state || rollback_status=$?
+    if [ "$rollback_status" -ne 0 ]; then
+      exit "$rollback_status"
+    fi
   fi
   exit "$status"
 }
 trap on_exit EXIT
 trap 'exit 130' HUP INT TERM
 
-if [ ! -f "$bundle_path" ]; then
-  echo "reviewed bundle is missing" >&2
-  exit 65
-fi
-if [ ! -d "$source_directory/.git" ]; then
-  echo "OpenBot source checkout is missing" >&2
+if [ ! -f "$bundle_path" ] || [ ! -d "$source_directory/.git" ]; then
+  echo "reviewed bundle or OpenBot source checkout is missing" >&2
   exit 65
 fi
 if ! [[ "$expected_bundle_sha256" =~ ^[a-f0-9]{64}$ ]]; then
   echo "reviewed bundle SHA-256 has invalid format" >&2
   exit 65
 fi
-actual_bundle_sha256="$(sha256sum "$bundle_path" | awk '{ print $1 }')"
-if [ "$actual_bundle_sha256" != "$expected_bundle_sha256" ]; then
+if [ "$(sha256sum "$bundle_path" | awk '{ print $1 }')" != "$expected_bundle_sha256" ]; then
   echo "reviewed bundle SHA-256 mismatch" >&2
   exit 65
 fi
@@ -106,8 +145,7 @@ if [ "$advertised_commit" != "$target_commit" ]; then
   exit 65
 fi
 
-if ! g0_grants="$("${compose_base[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U openbot -d openbot -At -F $'\t' \
-  -c "SELECT agent_id, kind, ref FROM plugin_grants WHERE agent_id IN ('jefe-erp', 'recolector-documentos') ORDER BY agent_id, kind, ref")"; then
+if ! g0_grants="$("${compose_base[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U openbot -d openbot -At -F $'\t' -c "SELECT agent_id, kind, ref FROM plugin_grants WHERE agent_id IN ('jefe-erp', 'recolector-documentos') ORDER BY agent_id, kind, ref")"; then
   echo "could not enumerate persisted G0 grants" >&2
   exit 65
 fi
@@ -116,7 +154,7 @@ if [ -n "$g0_grants" ]; then
   exit 65
 fi
 
-# Capture rollback state before any checkout, build, or Compose mutation.
+# Capture rollback state before checkout, image build, or Compose mutation.
 rollback_source_revision="$(git -C "$source_directory" rev-parse HEAD)"
 rollback_image_reference="$("${compose_base[@]}" config --format json | jq -er '.services.openbot.image')"
 rollback_container_id="$("${compose_base[@]}" ps -q openbot)"
@@ -125,80 +163,51 @@ if [ -z "$rollback_container_id" ]; then
   exit 65
 fi
 rollback_running_image_id="$(docker inspect --format '{{.Image}}' "$rollback_container_id")"
-rollback_image_tag="${rollback_image_reference}-g0-rollback-${target_commit:0:12}"
+rollback_image_tag="${rollback_image_reference}-g0-rollback-${run_id}"
+if docker image inspect "$rollback_image_tag" >/dev/null 2>&1 || [ -e "$evidence_file" ]; then
+  echo "promotion run identifier collides with existing rollback evidence or image" >&2
+  exit 65
+fi
 docker image tag "$rollback_running_image_id" "$rollback_image_tag"
 rollback_ready=1
 
 git -C "$source_directory" fetch --no-tags "$bundle_path" "${advertised_ref}:refs/heads/g0-reviewed-artifact"
-if [ "$(git -C "$source_directory" rev-parse refs/heads/g0-reviewed-artifact)" != "$target_commit" ]; then
-  echo "fetched review artifact did not resolve to the target commit" >&2
-  exit 65
-fi
+test "$(git -C "$source_directory" rev-parse refs/heads/g0-reviewed-artifact)" = "$target_commit"
 git -C "$source_directory" cat-file -e "${target_commit}^{commit}"
 git -C "$source_directory" checkout --detach "$target_commit"
-if [ -n "$(git -C "$source_directory" status --porcelain)" ]; then
-  echo "reviewed OpenBot checkout is not clean" >&2
-  exit 65
-fi
+test -z "$(git -C "$source_directory" status --porcelain)"
 
-# Bun is never installed on the host.  The throw-away copy isolates test output
-# from the checkout that is later built and promoted.
+# The Bun image intentionally lacks host Git/JQ/Docker. Only Bun-compatible source tests run here.
 git clone --quiet --no-hardlinks "$source_directory" "$test_source_directory"
 git -C "$test_source_directory" checkout --detach "$target_commit"
-docker run --rm \
-  -v "${test_source_directory}:/source:rw" \
-  -w /source \
-  oven/bun:1.3.14 \
-  sh -ceu 'bun install --frozen-lockfile && bun test server/tests/computer-policy.test.ts server/tests/computer-access.test.ts server/tests/computer-stream-access.test.ts server/tests/app-build-tenant-config.test.ts server/tests/netsfera-overlay.test.ts server/tests/verify-rendered-overlay-script.test.ts server/tests/reviewed-bundle-script.test.ts server/tests/reviewed-promotion-script.test.ts app/tests/computer-access.test.ts && bun run --cwd app typecheck'
+docker run --rm -v "${test_source_directory}:/source:rw" -w /source oven/bun:1.3.14 sh -ceu 'bun install --frozen-lockfile && bun test server/tests/computer-policy.test.ts server/tests/computer-access.test.ts server/tests/computer-stream-access.test.ts server/tests/app-build-tenant-config.test.ts app/tests/computer-access.test.ts && bun run --cwd app typecheck'
 
 "${compose_base[@]}" config --format json >"$base_render"
 "${compose_base[@]}" -f "$g0_overlay_file" config --format json >"$candidate_render"
 chmod 600 "$base_render" "$candidate_render"
 "${source_directory}/deploy/netsfera/verify-rendered-overlay.sh" "$base_render" "$candidate_render" >/dev/null
 candidate_hash="$(sha256sum "$candidate_render" | awk '{ print $1 }')"
+test "$(sha256sum "$candidate_render" | awk '{ print $1 }')" = "$candidate_hash"
 
-if [ "$(sha256sum "$candidate_render" | awk '{ print $1 }')" != "$candidate_hash" ]; then
-  echo "private candidate render changed before build" >&2
-  exit 65
-fi
 docker compose -p "$project_name" -f "$candidate_render" build openbot
 candidate_image_reference="$(jq -er '.services.openbot.image' "$candidate_render")"
 candidate_image_id="$(docker image inspect --format '{{.Id}}' "$candidate_image_reference")"
-docker run --rm --entrypoint sh "$candidate_image_id" -ceu '
-  grep -R -F -q "NETSFERA ERP" /app/app/dist 2>/dev/null &&
-  grep -R -F -q "netsfera" /app/app/dist 2>/dev/null
-'
-if [ "$(git -C "$source_directory" rev-parse HEAD)" != "$target_commit" ] || [ -n "$(git -C "$source_directory" status --porcelain)" ]; then
-  echo "reviewed OpenBot checkout changed after build" >&2
-  exit 65
-fi
-if [ "$(sha256sum "$candidate_render" | awk '{ print $1 }')" != "$candidate_hash" ]; then
-  echo "private candidate render changed before apply" >&2
-  exit 65
-fi
+docker run --rm --entrypoint sh "$candidate_image_id" -ceu 'grep -R -F -q "NETSFERA ERP" /app/app/dist 2>/dev/null && grep -R -F -q "netsfera" /app/app/dist 2>/dev/null'
+test "$(git -C "$source_directory" rev-parse HEAD)" = "$target_commit"
+test -z "$(git -C "$source_directory" status --porcelain)"
+test "$(sha256sum "$candidate_render" | awk '{ print $1 }')" = "$candidate_hash"
 
-docker compose -p "$project_name" -f "$candidate_render" up -d --no-build
+docker compose -p "$project_name" -f "$candidate_render" up -d --no-deps --no-build openbot
 running_container_id="$(docker compose -p "$project_name" -f "$candidate_render" ps -q openbot)"
-if [ -z "$running_container_id" ]; then
-  echo "the promoted OpenBot container cannot be resolved" >&2
-  exit 65
-fi
-running_image_id="$(docker inspect --format '{{.Image}}' "$running_container_id")"
-if [ "$running_image_id" != "$candidate_image_id" ]; then
-  echo "the promoted OpenBot container image does not match the reviewed build" >&2
-  exit 65
-fi
-for _ in $(seq 1 30); do
-  if [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$running_container_id")" = "healthy" ]; then
-    break
-  fi
-  sleep 2
-done
-if [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$running_container_id")" != "healthy" ]; then
-  echo "the promoted OpenBot container did not become healthy" >&2
+if [ -z "$running_container_id" ] || [ "$(docker inspect --format '{{.Image}}' "$running_container_id")" != "$candidate_image_id" ] || ! wait_for_healthy_container "$running_container_id"; then
+  echo "the promoted OpenBot container did not reach the reviewed healthy image" >&2
   exit 65
 fi
 
+if ! (set -o noclobber; : >"$evidence_file"); then
+  echo "refusing to overwrite existing promotion evidence" >&2
+  exit 65
+fi
 {
   printf 'target_commit=%s\n' "$target_commit"
   printf 'candidate_render_sha256=%s\n' "$candidate_hash"
@@ -209,5 +218,4 @@ fi
 } >"$evidence_file"
 chmod 600 "$evidence_file"
 success=1
-printf 'promotion complete; private evidence: %s; rollback source: %s; rollback image tag: %s\n' \
-  "$evidence_file" "$rollback_source_revision" "$rollback_image_tag"
+printf 'promotion complete; private evidence: %s; rollback source: %s; rollback image tag: %s\n' "$evidence_file" "$rollback_source_revision" "$rollback_image_tag"
