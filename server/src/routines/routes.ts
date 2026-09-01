@@ -83,6 +83,8 @@ export function createRoutineRoutes(
  */
 type RoutineDto = {
   id: string;
+  /** Which Bot carries it out, so a Bot's own screen can show only its routines. */
+  agentId: string;
   schedule: string;
   timezone: string;
   instruction: string;
@@ -95,6 +97,7 @@ type RoutineDto = {
 function routineDto(routine: RoutineSummary): RoutineDto {
   return {
     id: routine.id,
+    agentId: routine.agentId,
     schedule: routine.schedule,
     timezone: routine.timezone,
     instruction: routine.instruction,

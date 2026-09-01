@@ -117,6 +117,7 @@ describe("GET /", () => {
       routines: [
         {
           id: "routine-1",
+          agentId: "agent-1",
           schedule: "Weekdays at 09:00",
           timezone: "UTC",
           instruction: "Post the weather every weekday morning.",
