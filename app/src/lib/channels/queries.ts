@@ -16,8 +16,10 @@ export type AgentChannel = {
   active: boolean;
 };
 
-/** A channel plus the last thing said in it, which is what the roster renders. */
+/** A channel plus what the roster renders about it. */
 export type ChannelSummary = AgentChannel & {
+  /** A few words about the conversation, or null. The roster falls back to `name`. */
+  summary: string | null;
   lastMessage: string | null;
   /** ISO-8601, or null for a channel nobody has used yet. */
   lastMessageAt: string | null;

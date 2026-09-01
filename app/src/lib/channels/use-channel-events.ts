@@ -31,6 +31,8 @@ export type ChannelActivityEvent = {
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
+  /** The channel's newly written summary. Absent on an ordinary activity event. */
+  summary?: string;
   /** The channel is gone from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
   /**
@@ -94,6 +96,16 @@ export function applyChannelEvent(
   );
   const previous = page.channels[index];
   if (!previous) return data;
+
+  /* One field, and no re-sort: naming a conversation is not something anybody said in it. */
+  if (activity.summary !== undefined) {
+    if (previous.summary === activity.summary) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, summary: activity.summary };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
 
   /*
    * A pin patches the one field it is about.
