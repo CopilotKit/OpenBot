@@ -15,19 +15,6 @@ done
 
 script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 policy_path="$script_directory/agent-computer-policy.json"
-compose=(
-  docker compose -p openbot
-  --env-file /opt/openbot/.env
-  --env-file /etc/netsfera/bot-zero-trust/erp-phase2.env
-  -f /opt/openbot/docker-compose.yml
-  -f /opt/openbot/docker-compose.browser-supervisor.yml
-  -f /opt/openbot/docker-compose.erp-phase2.yml
-)
-
-"${compose[@]}" config --format json >"$base_render"
-"${compose[@]}" -f /opt/openbot/source/deploy/netsfera/docker-compose.erp-agent.yml \
-  config --format json >"$candidate_render"
-
 expected_policy="$(jq -cS . "$policy_path")"
 if ! jq -e --arg expected_policy "$expected_policy" '
   .services.openbot as $openbot

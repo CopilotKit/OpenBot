@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,6 +22,8 @@ function renderedStack(options: {
   volumes?: Record<string, unknown>;
   secrets?: Record<string, unknown>;
   configs?: Record<string, unknown>;
+  additionalServices?: Record<string, unknown>;
+  extraOpenbotEnvironment?: Record<string, string>;
 } = {}) {
   const baseOpenbot = {
     image: "openbot:test",
@@ -47,6 +48,7 @@ function renderedStack(options: {
                 ...baseOpenbot.environment,
                 TENANT_PACKAGE_DIR: "../examples/netsfera",
                 AGENT_COMPUTER_POLICY: reviewedPolicy,
+                ...options.extraOpenbotEnvironment,
               },
             }
           : {}),
@@ -58,6 +60,7 @@ function renderedStack(options: {
         networks: { hardened: null },
         ...options.supervisor,
       },
+      ...options.additionalServices,
     },
     networks: { hardened: { external: true }, ...options.networks },
     volumes: { "openbot-data": {}, ...options.volumes },
@@ -71,29 +74,13 @@ function runsRenderedOverlayVerification(
 ) {
   const directory = mkdtempSync(join(tmpdir(), "openbot-render-check-"));
   try {
-    const docker = join(directory, "docker");
     const stat = join(directory, "stat");
-    const bun = join(directory, "bun");
     const baseRender = join(directory, "base.json");
     const candidateRender = join(directory, "candidate.json");
-    writeFileSync(baseRender, "", { mode: 0o600 });
-    writeFileSync(candidateRender, "", { mode: 0o600 });
-    writeFileSync(
-      docker,
-      `#!/usr/bin/env bash
-for argument in "$@"; do
-  if [[ "$argument" == *docker-compose.erp-agent.yml ]]; then
-    printf '%s\\n' '${renderedStack({ g0: true, ...candidateOptions })}'
-    exit 0
-  fi
-done
-printf '%s\\n' '${renderedStack()}'
-`,
-    );
+    writeFileSync(baseRender, renderedStack(), { mode: 0o600 });
+    writeFileSync(candidateRender, renderedStack({ g0: true, ...candidateOptions }), { mode: 0o600 });
     writeFileSync(stat, '#!/usr/bin/env bash\nprintf "%s\\n" 600\n');
-    chmodSync(docker, 0o755);
     chmodSync(stat, 0o755);
-    symlinkSync(process.execPath, bun);
 
     return Bun.spawnSync(["bash", scriptPath, baseRender, candidateRender], {
       env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
@@ -122,6 +109,24 @@ test("the private renderer rejects an OpenBot topology change", () => {
 test("the private renderer rejects another service changing", () => {
   const result = runsRenderedOverlayVerification({
     supervisor: { privileged: true },
+  });
+
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
+});
+
+test("the private renderer rejects an added service", () => {
+  const result = runsRenderedOverlayVerification({
+    additionalServices: { exfiltrator: { image: "unexpected:test" } },
+  });
+
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
+});
+
+test("the private renderer rejects an extra OpenBot environment variable", () => {
+  const result = runsRenderedOverlayVerification({
+    extraOpenbotEnvironment: { UNREVIEWED_SETTING: "1" },
   });
 
   expect(result.exitCode).not.toBe(0);
