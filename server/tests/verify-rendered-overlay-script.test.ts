@@ -20,6 +20,9 @@ function renderedStack(options: {
   openbot?: Record<string, unknown>;
   supervisor?: Record<string, unknown>;
   networks?: Record<string, unknown>;
+  volumes?: Record<string, unknown>;
+  secrets?: Record<string, unknown>;
+  configs?: Record<string, unknown>;
 } = {}) {
   const baseOpenbot = {
     image: "openbot:test",
@@ -57,9 +60,9 @@ function renderedStack(options: {
       },
     },
     networks: { hardened: { external: true }, ...options.networks },
-    volumes: { "openbot-data": {} },
-    secrets: { database_url: { name: "database_url" } },
-    configs: { base_config: { name: "base_config" } },
+    volumes: { "openbot-data": {}, ...options.volumes },
+    secrets: { database_url: { name: "database_url" }, ...options.secrets },
+    configs: { base_config: { name: "base_config" }, ...options.configs },
   });
 }
 
@@ -129,6 +132,17 @@ test("the private renderer rejects a top-level network change", () => {
   const result = runsRenderedOverlayVerification({
     networks: { hardened: { external: false } },
   });
+
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
+});
+
+test.each([
+  ["volume", { volumes: { "openbot-data": { external: true } } }],
+  ["secret", { secrets: { database_url: { name: "other_database_url" } } }],
+  ["config", { configs: { base_config: { name: "other_config" } } }],
+])("the private renderer rejects a top-level %s change", (_, candidateOptions) => {
+  const result = runsRenderedOverlayVerification(candidateOptions);
 
   expect(result.exitCode).not.toBe(0);
   expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");

@@ -16,7 +16,7 @@ done
 script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 policy_path="$script_directory/agent-computer-policy.json"
 compose=(
-  docker compose
+  docker compose -p openbot
   --env-file /opt/openbot/.env
   --env-file /etc/netsfera/bot-zero-trust/erp-phase2.env
   -f /opt/openbot/docker-compose.yml
