@@ -24,6 +24,7 @@ function renderedStack(options: {
   configs?: Record<string, unknown>;
   additionalServices?: Record<string, unknown>;
   extraOpenbotEnvironment?: Record<string, string>;
+  candidatePolicy?: string;
 } = {}) {
   const baseOpenbot = {
     image: "openbot:test",
@@ -47,7 +48,7 @@ function renderedStack(options: {
               environment: {
                 ...baseOpenbot.environment,
                 TENANT_PACKAGE_DIR: "../examples/netsfera",
-                AGENT_COMPUTER_POLICY: reviewedPolicy,
+                AGENT_COMPUTER_POLICY: options.candidatePolicy ?? reviewedPolicy,
                 ...options.extraOpenbotEnvironment,
               },
             }
@@ -95,6 +96,24 @@ test("the private renderer permits only the reviewed full-stack changes", () => 
 
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).toContain("verified private candidate");
+});
+
+test("the private renderer accepts Compose's escaped literal policy dollar", () => {
+  const result = runsRenderedOverlayVerification({
+    candidatePolicy: reviewedPolicy.replace("^downloads(/|$)", () => "^downloads(/|$$)"),
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString()).toContain("verified private candidate");
+});
+
+test("the private renderer still rejects a genuine candidate policy change", () => {
+  const result = runsRenderedOverlayVerification({
+    candidatePolicy: reviewedPolicy.replace("computer_list_files", "computer_write_file"),
+  });
+
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr.toString()).toContain("G0 rendered-stack verification failed.");
 });
 
 test("the private renderer rejects an OpenBot topology change", () => {
