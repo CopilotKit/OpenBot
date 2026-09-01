@@ -31,7 +31,13 @@ import {
 import { createChannelStore } from "./channels/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import { createStallGuard } from "./channels/stall-guard";
+import {
+  forgetSettledSummaries,
+  offerChannelsAwaitingSummary,
+  summariseClaimedChannels,
+} from "./channels/summary";
 import { createThreadIdentity } from "./channels/thread-identity";
+import { createChannelTitler } from "./channels/titler";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
@@ -1030,6 +1036,41 @@ repeatAfterEach(
   },
   60 * 60 * 1_000,
 );
+
+/*
+ * Naming conversations, in the API process rather than `worker/`, which the single-image container
+ * does not run. Its own loop, so a slow model never delays a hop.
+ */
+const channelSummaries = {
+  database,
+  queue: createWorkQueue(database),
+  transcript: routineIntelligence,
+  title: createChannelTitler({
+    model: tenantPackage.model.defaultModel,
+    resolveApiKey: resolveRuntimeModelApiKey,
+  }),
+  owner: `summariser/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
+};
+repeatAfterEach(async () => {
+  try {
+    await offerChannelsAwaitingSummary(channelSummaries);
+    const report = await summariseClaimedChannels(channelSummaries);
+    if (report.written.length > 0) {
+      console.info(
+        JSON.stringify({ type: "channel-summaries", written: report.written }),
+      );
+    }
+    // Same pass: one statement, deletes by age, and two replicas running it changes nothing.
+    await forgetSettledSummaries(channelSummaries);
+  } catch (error) {
+    // Never fatal, and never loud enough to drown the log: a deployment with no model configured
+    // reaches this on every pass, and it has not gone wrong, it simply has no titles.
+    console.warn(
+      "[channels] conversations could not be named:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}, 10_000);
 
 const app = createApp(
   config,
