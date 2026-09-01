@@ -14,10 +14,9 @@ const tenantPackageDirectory = configuredTenantPackageDirectory
   : resolve(projectRoot, "examples/fintech");
 const tenantPackage = await loadTenantPackage(tenantPackageDirectory);
 const applicationConfiguration = createApplicationConfiguration(tenantPackage);
-const outputPath = resolve(
-  projectRoot,
-  "app/src/lib/generated/application-config.ts",
-);
+const outputPath = process.env.APP_CONFIG_OUTPUT_PATH
+  ? resolve(process.env.APP_CONFIG_OUTPUT_PATH)
+  : resolve(projectRoot, "app/src/lib/generated/application-config.ts");
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(

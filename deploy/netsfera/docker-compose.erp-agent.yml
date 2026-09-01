@@ -3,6 +3,9 @@
 # their network, port, volume, security, or browser topology.
 services:
   openbot:
+    build:
+      args:
+        TENANT_PACKAGE_DIR: ../examples/netsfera
     environment:
       TENANT_PACKAGE_DIR: ../examples/netsfera
       # The current loader accepts AGENT_COMPUTER_POLICY as JSON, not a file path. The rendered

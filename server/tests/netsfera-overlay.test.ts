@@ -21,11 +21,39 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
   };
 }
 
-function renderedOverlayPolicy(): ActionPolicy {
+function renderedOverlay() {
   const directory = mkdtempSync(join(tmpdir(), "openbot-netsfera-overlay-"));
   const basePath = join(directory, "base.yml");
-  writeFileSync(basePath, "services:\n  openbot:\n    image: busybox:latest\n");
+  writeFileSync(
+    basePath,
+    [
+      "services:",
+      "  openbot:",
+      "    image: busybox:latest",
+      "    build:",
+      "      context: .",
+      "    ports: [\"127.0.0.1:3001:3001\"]",
+      "    security_opt: [no-new-privileges:true]",
+      "    volumes: [openbot-data:/data]",
+      "    networks: [openbot-hardened]",
+      "volumes:",
+      "  openbot-data: {}",
+      "networks:",
+      "  openbot-hardened: {}",
+      "",
+    ].join("\n"),
+  );
   try {
+    const base = Bun.spawnSync([
+      "docker",
+      "compose",
+      "-f",
+      basePath,
+      "config",
+      "--format",
+      "json",
+    ]);
+    expect(base.exitCode).toBe(0);
     const rendered = Bun.spawnSync([
       "docker",
       "compose",
@@ -38,21 +66,35 @@ function renderedOverlayPolicy(): ActionPolicy {
       "json",
     ]);
     expect(rendered.exitCode).toBe(0);
-    const compose = JSON.parse(rendered.stdout.toString()) as {
+    const baseCompose = JSON.parse(base.stdout.toString()) as {
       services?: {
-        openbot?: { environment?: { AGENT_COMPUTER_POLICY?: string } };
+        openbot?: Record<string, unknown>;
       };
     };
-    const policy =
-      compose.services?.openbot?.environment?.AGENT_COMPUTER_POLICY;
-    expect(typeof policy).toBe("string");
-    // `docker compose config` escapes a literal dollar as `$$` in its rendered YAML/JSON. The
-    // container receives the single literal dollar used by the CEL regex, so compare that effective
-    // value with the reviewed artifact rather than the renderer's transport spelling.
-    return JSON.parse((policy as string).replaceAll("$$", "$")) as ActionPolicy;
+    const compose = JSON.parse(rendered.stdout.toString()) as {
+      services?: {
+        openbot?: Record<string, unknown>;
+      };
+    };
+    return {
+      base: baseCompose.services?.openbot,
+      overlay: compose.services?.openbot,
+    };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+function renderedOverlayPolicy(): ActionPolicy {
+  const environment = renderedOverlay().overlay?.environment as
+    | { AGENT_COMPUTER_POLICY?: string }
+    | undefined;
+  const policy = environment?.AGENT_COMPUTER_POLICY;
+  expect(typeof policy).toBe("string");
+  // `docker compose config` escapes a literal dollar as `$$` in its rendered YAML/JSON. The
+  // container receives the single literal dollar used by the CEL regex, so compare that effective
+  // value with the reviewed artifact rather than the renderer's transport spelling.
+  return JSON.parse((policy as string).replaceAll("$$", "$")) as ActionPolicy;
 }
 
 describe("the rendered Netsfera production overlay", () => {
@@ -61,6 +103,21 @@ describe("the rendered Netsfera production overlay", () => {
       readFileSync(policyPath, "utf8"),
     ) as ActionPolicy;
     expect(renderedOverlayPolicy()).toEqual(artifact);
+  });
+
+  test("selects the Netsfera app build without changing the hardened topology", () => {
+    const { base, overlay } = renderedOverlay();
+
+    expect(overlay?.build).toMatchObject({
+      args: { TENANT_PACKAGE_DIR: "../examples/netsfera" },
+    });
+    expect(overlay).toMatchObject({
+      image: base?.image,
+      ports: base?.ports,
+      security_opt: base?.security_opt,
+      volumes: base?.volumes,
+      networks: base?.networks,
+    });
   });
 
   test.each(["jefe-erp", "recolector-documentos"])(
