@@ -110,6 +110,12 @@ export function createHandoffDesk(options: {
       targetId: from.botId,
       ...(from.actorId ? { actorUserId: from.actorId } : {}),
       payload: {
+        // The same key `agent.handoff_offered` sets below, and for the same reason: the Audit
+        // screen renders `payload.bot` and nothing else in its Bot column, so a row without it
+        // shows a dash. The accepted row was given this and its refusal was not, which left the
+        // refusal — the one the trail says matters more, because a hop that happened is visible in
+        // the transcript and a refused one is invisible everywhere else — naming no Bot at all.
+        bot: from.botId,
         from: from.botId,
         // As the model named it, capped: untrusted input, kept because "who did it reach for" is the
         // useful half of the question.

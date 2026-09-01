@@ -44,12 +44,32 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  render,
+  /*
+   * DIVERGES FROM UPSTREAM SHADCN. Base UI defaults `nativeButton` to `true`, which is right only
+   * while the element really is a `<button>`. Six call sites here draw a router `Link` through
+   * `render` instead — "New skill", "New agent", the sidebar's new-channel control, the two
+   * empty-state returns, and `PageShell`'s back button, which is five routes in every state each of
+   * them has — and every one of them warned at render that it had been told to expect a native
+   * button and found an anchor. It was not only noise: Base UI was putting `type="button"` on an
+   * anchor, which means nothing there, and withholding the `role="button"` and Space-to-activate
+   * handling a non-button needs in order to behave like one.
+   *
+   * Replacing the element is exactly the case where the default is wrong, so the default follows
+   * `render`, once here rather than at every call site. Passing `render` is not proof the result is
+   * a non-button, only that we can no longer assume it is one, so a call site drawing a real
+   * `<button>` through `render` passes `nativeButton` back explicitly — `combobox.tsx` is the one
+   * that does.
+   */
+  nativeButton = render === undefined,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      nativeButton={nativeButton}
+      render={render}
       {...props}
     />
   )

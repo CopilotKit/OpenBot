@@ -31,6 +31,8 @@ function runner(options?: {
     message: string;
     shown?: string;
   }) => Promise<void>;
+  /** What the delivery says the Bot answered. Null — nothing worth relaying — unless a test cares. */
+  answer?: string | null;
 }) {
   const calls: Array<{ verb: string; key: string; owner?: string }> = [];
   const events: string[] = [];
@@ -92,6 +94,7 @@ function runner(options?: {
         deliver: async ({ work, message, shown, assertion }) => {
           delivered.push({ message, assertion });
           await options?.deliver?.({ work, message, shown });
+          return { answer: options?.answer ?? null };
         },
       },
     }),
@@ -194,6 +197,40 @@ describe("delivering a hop", () => {
       from: WORK.fromBotId,
       to: WORK.toBotId,
     });
+  });
+
+  /*
+   * And so do the rows either side of it, which is the half the assertion above did not reach.
+   *
+   * A delivery is the outcome that is also visible in the transcript. A hop that was retried or
+   * that failed is visible nowhere else at all, so those are the rows somebody actually comes to
+   * this screen for — and they were the ones rendering a dash where the Bot's name belongs.
+   */
+  test("a hop that was retried or that failed names the Bot too", async () => {
+    const retried = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 2 },
+      ],
+    });
+    await retried.runner.sweep();
+
+    expect(
+      retried.written.find(
+        (event) => event.eventType === "agent.handoff_retried",
+      )?.payload,
+    ).toMatchObject({ bot: WORK.fromBotId, from: WORK.fromBotId });
+
+    const failed = runner({
+      deliver: async () => {
+        throw new Error("the gateway was unreachable");
+      },
+    });
+    await failed.runner.sweep();
+
+    expect(
+      failed.written.find((event) => event.eventType === "agent.handoff_failed")
+        ?.payload,
+    ).toMatchObject({ bot: WORK.fromBotId, from: WORK.fromBotId });
   });
 
   /* Releasing an unusable row would put it back on the queue for ever. */
@@ -339,6 +376,89 @@ describe("a hop that failed for good", () => {
 
     expect(offered).toEqual([]);
     expect(calls.map((call) => call.verb)).toContain("release");
+  });
+});
+
+/**
+ * The answer coming home.
+ *
+ * The addressed Bot's turn runs in a scratch thread nobody is shown, so its words reach the person
+ * one way: a backwards hop that runs the asking Bot, in the conversation being watched, with the
+ * answer in its prompt. Attributed by the deployment, in the asking Bot's voice — the only voice
+ * that thread admits.
+ */
+describe("relaying the answer home", () => {
+  test("a delivered hop sends the answer back through the Bot that asked", async () => {
+    const { runner: sweeper, offered } = runner({
+      answer: "The outage was Tuesday, 02:10 to 02:45.",
+    });
+
+    await sweeper.sweep();
+
+    expect(offered).toHaveLength(1);
+    expect(offered[0]).toMatchObject({
+      fromBotId: "researcher",
+      toBotId: "assistant",
+      answerIn: "thread-1",
+      threadId: "thread-1",
+      depth: 1,
+    });
+    expect(offered[0]?.task).toContain("find the outage window");
+    expect(offered[0]?.task).toContain(
+      "The outage was Tuesday, 02:10 to 02:45.",
+    );
+  });
+
+  test("its key is outside the run's own prefix, like the notice", async () => {
+    const { runner: sweeper, calls } = runner({ answer: "Tuesday." });
+
+    await sweeper.sweep();
+
+    const key = calls.find((call) => call.verb === "offer")?.key ?? "";
+    expect(key.startsWith("run-1:")).toBe(false);
+    expect(key).toContain("run-1:abc");
+  });
+
+  /* A relay of a relay is a loop. The `answerIn` marker that stops a notice stops this too. */
+  test("a relay is not itself relayed", async () => {
+    const { runner: sweeper, offered } = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "relay:run-1:abc",
+          payload: { ...WORK, answerIn: "thread-1" },
+          attempts: 1,
+        },
+      ] as unknown as WorkItem[],
+      answer: "Understood, telling them now.",
+    });
+
+    await sweeper.sweep();
+
+    expect(offered).toEqual([]);
+  });
+
+  test("a turn that said nothing sends nothing home", async () => {
+    const { runner: sweeper, offered } = runner({ answer: null });
+
+    await sweeper.sweep();
+
+    expect(offered).toEqual([]);
+  });
+
+  /*
+   * The answer rides inside the relaying run's prompt, and a Bot that came back with a book would
+   * spend that run's whole context window repeating it.
+   */
+  test("an answer the length of a book is clipped, and says so", async () => {
+    const { runner: sweeper, offered } = runner({
+      answer: "x".repeat(20_000),
+    });
+
+    await sweeper.sweep();
+
+    expect(offered[0]?.task).toContain("[…the answer was cut here for length]");
+    expect((offered[0]?.task ?? "").length).toBeLessThan(14_000);
   });
 });
 

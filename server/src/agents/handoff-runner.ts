@@ -46,6 +46,10 @@ export type HandoffDelivery = {
    * Rejecting means the hop did not happen and is worth another go. Resolving means it did, whatever
    * the Bot said: a Bot that answers "I could not find that" has answered, and retrying would ask it
    * the same question again and bill for the same non-answer.
+   *
+   * Resolves with what the Bot said, because its turn runs in a scratch thread nobody is shown:
+   * the words it comes back with exist for the relay or not at all. Null means a turn of nothing
+   * but tool calls, which is a turn that happened and nothing worth carrying back.
    */
   deliver: (input: {
     work: HandoffWork;
@@ -67,7 +71,7 @@ export type HandoffDelivery = {
     shown?: string;
     /** The signed statement of the run it is starting, carrying its depth. */
     assertion: string;
-  }) => Promise<void>;
+  }) => Promise<{ answer: string | null }>;
 };
 
 export type HandoffRunReport = {
@@ -139,6 +143,37 @@ export function createHandoffRunner(options: {
    * Marked with `answerIn`, which is also what stops this recursing: a notice that fails is not
    * itself worth a notice, and the check above skips any hop that carries one.
    */
+  /**
+   * Put the answer in front of the person, the same way a failure is: by running the Bot that
+   * asked, in the conversation they are watching.
+   *
+   * THE ADDRESSED BOT NEVER SPEAKS THERE — the platform gives a thread exactly one agent — so its
+   * words come home in the asking Bot's voice, attributed. The same `answerIn` marker that stops a
+   * notice recursing stops a relay relaying: a hop that carries one enqueues nothing when it lands.
+   *
+   * The answer is clipped rather than trusted to be a paragraph. It rides inside the prompt of the
+   * relaying run, and a Bot that came back with a report the length of a book would otherwise spend
+   * the relay's whole context window repeating it.
+   */
+  const relay = (work: HandoffWork, key: string, answer: string) =>
+    queue.offer({
+      kind: HANDOFF_KIND,
+      // Outside the run's fan-out prefix and keyed on the hop, for the same two reasons as the
+      // notice below: a relay is not a Bot this run asked for, and one run may legally ask the
+      // same Bot two different things.
+      key: `relay:${key}`,
+      payload: {
+        fromBotId: work.toBotId,
+        toBotId: work.fromBotId,
+        actorId: work.actorId,
+        threadId: work.threadId,
+        runId: work.runId,
+        depth: work.depth,
+        answerIn: work.threadId,
+        task: `You asked ${work.toName ?? work.toBotId} to help with this: ${work.task}\n\nIt answered:\n\n${clip(answer)}\n\nGive the person the outcome. Keep what matters, drop the pleasantries, and say it came from ${work.toName ?? work.toBotId}.`,
+      } as unknown as Record<string, unknown>,
+    });
+
   const tell = (work: HandoffWork, key: string, reason: string) =>
     queue.offer({
       kind: HANDOFF_KIND,
@@ -265,6 +300,9 @@ export function createHandoffRunner(options: {
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
               payload: {
+                // See the same key on `agent.handoff_delivered` below: the Audit screen's Bot
+                // column reads `payload.bot`, so a row without it names no Bot.
+                bot: work.fromBotId,
                 from: work.fromBotId,
                 to: work.toBotId,
                 run: work.runId,
@@ -309,7 +347,7 @@ export function createHandoffRunner(options: {
 
           try {
             const shown = summarise(work);
-            await delivery.deliver({
+            const { answer } = await delivery.deliver({
               work,
               message: attribute(work),
               ...(shown ? { shown } : {}),
@@ -339,6 +377,8 @@ export function createHandoffRunner(options: {
                 targetId: work.toBotId,
                 ...(work.actorId ? { actorUserId: work.actorId } : {}),
                 payload: {
+                  // See the same key on `agent.handoff_delivered` below.
+                  bot: work.fromBotId,
                   from: work.fromBotId,
                   to: work.toBotId,
                   run: work.runId,
@@ -349,6 +389,22 @@ export function createHandoffRunner(options: {
               continue;
             }
             report.delivered.push(work.toBotId);
+            /*
+             * The answer goes home through the queue, like the turn that produced it: durable, so a
+             * pod dying between the turn and the relay loses the relay to a retry rather than for
+             * ever. Only for a forward hop with words to carry — a relay of a relay is the loop the
+             * `answerIn` check exists to stop, and a wordless turn has nothing to say.
+             */
+            if (!work.answerIn && answer) {
+              await relay(work, item.key, answer).catch((failure) => {
+                // The turn happened and is on record; a relay that cannot be queued must not undo
+                // that by failing the hop into a retry and a second turn.
+                console.warn(
+                  "Could not queue the relay for a delivered hop.",
+                  failure,
+                );
+              });
+            }
             await recordAuditEvent(auditStore, {
               eventType: "agent.handoff_delivered",
               targetType: "agent",
@@ -405,6 +461,10 @@ export function createHandoffRunner(options: {
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
               payload: {
+                // See the same key on `agent.handoff_delivered` above. This row is the one a
+                // person's unanswered question ends on, so a Bot column showing a dash on it is
+                // the worst place in the set to have one.
+                bot: work.fromBotId,
                 from: work.fromBotId,
                 to: work.toBotId,
                 run: work.runId,
@@ -422,6 +482,21 @@ export function createHandoffRunner(options: {
       return report;
     },
   };
+}
+
+/**
+ * How much of an answer one relay will carry.
+ *
+ * Generous, because with the answer living nowhere a person is shown, what the relay drops is gone:
+ * the scratch thread that holds the rest is never mapped to a channel. The cap exists for the Bot
+ * that comes back with a book — an answer that size swamps the relaying run's prompt, and the
+ * asking Bot was told what a good answer looks like precisely so this stays a paragraph.
+ */
+const RELAY_ANSWER_LIMIT = 12_000;
+
+function clip(answer: string): string {
+  if (answer.length <= RELAY_ANSWER_LIMIT) return answer;
+  return `${answer.slice(0, RELAY_ANSWER_LIMIT)}\n\n[…the answer was cut here for length]`;
 }
 
 /**

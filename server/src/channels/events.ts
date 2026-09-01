@@ -11,6 +11,10 @@ import postgres from "postgres";
  * Delivery goes through Postgres rather than an in-process list, because an in-process list is
  * silently wrong the moment a second server instance exists: the writer is on one and the listener
  * on the other, and the message is never delivered.
+ *
+ * A NOTIFY is never replayed, so an announcement made while this subscription is down is gone. The
+ * client's own "refetch on reconnect" does not cover it: the socket that dropped is this server's,
+ * not the browser's. `resyncAll` is the signal that closes that gap.
  */
 
 export const CHANNEL_ACTIVITY_TOPIC = "channel_activity";
@@ -31,7 +35,22 @@ export type ChannelActivityEvent = {
    * hub's delivery rule does the rest: nobody else in the channel hears a pin they did not make.
    */
   pinned?: boolean;
+  /**
+   * A turn started or ended in this channel. Absent on an ordinary activity event.
+   *
+   * Transient and message-less: it is never written to a table, only announced, so the roster can
+   * show a working indicator for a headless turn — a handoff hop, a relay — that no browser
+   * streams. A missed one costs at most a stuck-looking dot until the next real event, never data.
+   */
+  busy?: boolean;
 };
+
+/** "The roster you hold may be wrong." Carries no delta, because what was lost is not recoverable. */
+export type ChannelResyncEvent = { resync: true };
+
+const RESYNC_PAYLOAD = JSON.stringify({
+  resync: true,
+} satisfies ChannelResyncEvent);
 
 type Send = (payload: string) => void;
 
@@ -40,6 +59,8 @@ export type ChannelEventHub = {
   register(userId: string, send: Send): () => void;
   /** Fan one event out to this instance's own connections. */
   deliver(event: ChannelActivityEvent): void;
+  /** Tell every connection to refetch. Everybody, because the lost events named their own members. */
+  resyncAll(): void;
   connectionCount(userId: string): number;
 };
 
@@ -75,6 +96,18 @@ export function createChannelEventHub(): ChannelEventHub {
       }
     },
 
+    resyncAll() {
+      for (const sends of connections.values()) {
+        for (const send of sends) {
+          try {
+            send(RESYNC_PAYLOAD);
+          } catch {
+            // Closing, and detached by its own close handler. See `deliver`.
+          }
+        }
+      }
+    },
+
     connectionCount(userId) {
       return connections.get(userId)?.size ?? 0;
     },
@@ -95,14 +128,36 @@ export async function startChannelActivityListener(
 ): Promise<ChannelActivityListener> {
   const connection = postgres(databaseUrl, { max: 1 });
 
-  await connection.listen(CHANNEL_ACTIVITY_TOPIC, (payload) => {
-    try {
-      hub.deliver(JSON.parse(payload) as ChannelActivityEvent);
-    } catch {
-      // A payload we cannot read is not a reason to tear down the subscription: the roster query is
-      // still correct, and the next refetch shows whatever this event would have.
+  /*
+   * `onlisten` fires on every establish, reconnects included — the same hook `policy-listener.ts`
+   * uses to re-read its row. There is no row to re-read here, so the browsers are told to refetch
+   * instead.
+   *
+   * The first establish is skipped so the message means one thing. It has no earlier subscription
+   * behind it, so nothing can have been missed, and a resync there would say "possibly a gap" — not
+   * something a client can act on differently.
+   */
+  let subscribed = false;
+  const resync = () => {
+    if (!subscribed) {
+      subscribed = true;
+      return;
     }
-  });
+    hub.resyncAll();
+  };
+
+  await connection.listen(
+    CHANNEL_ACTIVITY_TOPIC,
+    (payload) => {
+      try {
+        hub.deliver(JSON.parse(payload) as ChannelActivityEvent);
+      } catch {
+        // A payload we cannot read is not a reason to tear down the subscription: the roster query
+        // is still correct, and the next refetch shows whatever this event would have.
+      }
+    },
+    resync,
+  );
 
   return {
     stop: async () => {

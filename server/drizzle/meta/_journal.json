@@ -173,14 +173,28 @@
     {
       "idx": 24,
       "version": "7",
-      "when": 1788112755991,
-      "tag": "0024_bot_templates",
+      "when": 1787926466892,
+      "tag": "0024_onboarding",
       "breakpoints": true
     },
     {
       "idx": 25,
       "version": "7",
-      "when": 1788166562929,
+      "when": 1787926472382,
+      "tag": "0025_backfill_existing_users_have_onboarded",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787926472383,
+      "tag": "0024_bot_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1787926472384,
       "tag": "0025_template_sources",
       "breakpoints": true
     }

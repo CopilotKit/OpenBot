@@ -9,6 +9,12 @@ import {
 } from "@/components/layout/page-shell";
 import { Button } from "@/components/ui/button";
 import { useBotNames } from "@/lib/agents/bot-names";
+import {
+  DID_NOT_HAPPEN_EVENT_TYPES,
+  eventTypeFilter,
+  outcomeOf,
+  REFUSED_EVENT_TYPES,
+} from "@/lib/audit/outcome";
 import { auditEventsQueryOptions } from "@/lib/audit/queries";
 import { silenceOf } from "@/lib/audit/silence";
 
@@ -30,44 +36,21 @@ type AuditEvent = {
   createdAt: string;
 };
 
+/*
+ * The saved views, built from the same lists the row label and colour are decided by.
+ *
+ * Written out by hand here and again below, they had already drifted: a refusal on one list and not
+ * the other is a row drawn as "Allowed" or a row missing from the view somebody clicks to ask what
+ * this deployment refused. See `@/lib/audit/outcome`, which is now the only place either question is
+ * answered.
+ */
 const FILTERS = [
   { label: "Everything", search: "" },
   { label: "Computer actions", search: "?eventType=computer.action_allowed" },
-  {
-    label: "Blocked",
-    /*
-     * Include every refusal family, not only browser policy refusals.
-     *
-     * `mcp.callback_refused` is here because it is a refusal, even though nothing about a Bot was
-     * judged: a caller could not prove which Bot it was. Somebody filtering for what this deployment
-     * turned away wants that in the list, and it is the one refusal with no policy behind it, so
-     * leaving it out would hide the only evidence that anything was attempted.
-     *
-     * `routines.dispatch_refused` is the same shape one boundary over: the worker, not a Bot, and a
-     * stale or missing secret rather than a policy decision. The same reasoning that put
-     * `mcp.callback_refused` here applies unchanged — nobody was judged, something was still turned
-     * away, and the saved view a person clicks for "what did this deployment block" should show it.
-     *
-     * `template.import_refused` is the same question asked of a document. It belongs here more than
-     * any of the others do: a refused import leaves nothing behind anywhere else in the product —
-     * no Bot, no skill, no ledger row — so this is the only view in which the attempt can be
-     * counted at all, and counting is the point. One refused paste is somebody's typo. Forty in an
-     * afternoon, each turned away for a different reason, is somebody mapping the edges of the
-     * parser, and that is only ever visible to a reader who can list them together.
-     *
-     * `template.capability_declined` is an administrator turning an ask down, which is a refusal by
-     * a person rather than by a rule. `template.capability_requested` is deliberately NOT here:
-     * nothing was forbidden, the ask simply landed unmet, and padding this filter with the designed
-     * outcome would teach a reader to discount the refusals that are real.
-     */
-    search:
-      "?eventType=computer.action_refused,mcp.call_rejected,mcp.callback_refused,component.refused,component.function_refused,routines.dispatch_refused,template.import_refused,template.capability_declined",
-  },
+  { label: "Blocked", search: eventTypeFilter(REFUSED_EVENT_TYPES) },
   {
     label: "Did not happen",
-    // A stalled stream belongs here. It is the same complaint as an action that was allowed and then
-    // did not take: nothing was refused, and nothing came of it either.
-    search: "?eventType=computer.action_failed,agent.stream_stalled",
+    search: eventTypeFilter(DID_NOT_HAPPEN_EVENT_TYPES),
   },
 ] as const;
 
@@ -160,33 +143,8 @@ function Row({
     | { role?: string; name?: string }
     | string
     | undefined;
-  const refused =
-    event.eventType === "computer.action_refused" ||
-    event.eventType === "component.refused" ||
-    event.eventType === "component.function_refused" ||
-    event.eventType === "mcp.call_rejected" ||
-    /*
-     * A caller that could not prove which Bot it was. Refused like the others, and it has to read
-     * that way here: the fallback below calls anything it does not recognise "Allowed", which for a
-     * refusal is the one wrong answer. A trail that is confidently wrong is worse than a silent one.
-     */
-    event.eventType === "mcp.callback_refused" ||
-    // The worker turned away at the door, same reasoning as the caller above.
-    event.eventType === "routines.dispatch_refused" ||
-    /*
-     * A document this deployment would not take, and an ask an administrator turned down.
-     *
-     * These two arrived with the template family and this predicate was not told about them, so
-     * they took the fallback: `template.import_refused` painted the word "Allowed" in the muted
-     * foreground on the one row an investigator opens this page to find. A person turning away
-     * forty pasted files in an afternoon read forty rows saying the deployment had allowed them.
-     *
-     * `template.capability_requested` is not here on purpose. Nothing was forbidden — configuration
-     * travels and capability does not, so an ask that lands unmet is the designed behaviour — and
-     * colouring it as a refusal would devalue the refusals that are real.
-     */
-    event.eventType === "template.import_refused" ||
-    event.eventType === "template.capability_declined";
+  const outcome = outcomeOf(event.eventType);
+  const refused = outcome === "refused";
   const stalled = event.eventType === "agent.stream_stalled";
   const templateSubject = templateSubjectOf(event, payload);
   /*
@@ -208,7 +166,7 @@ function Row({
   // Allowed by policy but not carried out. A stalled turn belongs in the same family: the Bot was
   // asked and the answer never arrived. Colour is how this table is read, and a row left in the
   // muted foreground reads as "Allowed", which a turn nobody ever got an answer to was not.
-  const failed = event.eventType === "computer.action_failed" || stalled;
+  const failed = outcome === "did-not-happen";
   const silence = stalled ? silenceOf(payload) : null;
 
   return (

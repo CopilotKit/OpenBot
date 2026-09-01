@@ -8,7 +8,23 @@ import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
  *
  * The query remains the source of truth; socket events only patch its cache. Reconnects refetch the
  * list to recover events missed while disconnected.
+ *
+ * Two connections can drop and only one is this one. `onopen` covers this socket. The other is the
+ * server's subscription to Postgres, which stays invisible here — so the server sends a resync when
+ * it comes back, answered with the same refetch.
  */
+
+/** The server saying it may have missed announcements, so the roster we hold may be wrong. */
+export type ChannelResyncEvent = { resync: true };
+
+/** What arrives on the socket. `resync` is the discriminant; an activity event never carries it. */
+export type ChannelSocketMessage = ChannelActivityEvent | ChannelResyncEvent;
+
+export function isResync(
+  message: ChannelSocketMessage,
+): message is ChannelResyncEvent {
+  return (message as ChannelResyncEvent).resync === true;
+}
 
 export type ChannelActivityEvent = {
   channelId: string;
@@ -24,6 +40,13 @@ export type ChannelActivityEvent = {
    * made in another tab or on another replica.
    */
   pinned?: boolean;
+  /**
+   * A turn started or ended in this channel. Absent on an ordinary activity event.
+   *
+   * Carries no message: it patches only the row's `busy` flag, so the roster can show a working
+   * indicator without disturbing the preview or the order.
+   */
+  busy?: boolean;
 };
 
 /** The infinite query's cache, which holds pages rather than one array. */
@@ -88,6 +111,22 @@ export function applyChannelEvent(
     return { ...data, pages };
   }
 
+  /*
+   * A busy signal patches the one field it is about, and never re-sorts.
+   *
+   * The spread below would carry this event's null message onto the row and wipe the preview. Busy
+   * is also not activity — a channel does not jump to the top of the roster because a turn started
+   * in it — so the order is left exactly as it was.
+   */
+  if (activity.busy !== undefined) {
+    if ((previous.busy ?? false) === activity.busy) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, busy: activity.busy };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
+
   // Preserve object identity for unchanged rows so memoized rows do not re-render.
   const next = page.channels.slice();
   next[index] = { ...previous, ...activity };
@@ -132,12 +171,21 @@ export function useChannelEvents() {
       };
 
       socket.onmessage = (message) => {
-        let activity: ChannelActivityEvent;
+        let parsed: ChannelSocketMessage;
         try {
-          activity = JSON.parse(message.data as string);
+          parsed = JSON.parse(message.data as string);
         } catch {
           return;
         }
+
+        // Refetch rather than patch: there is no delta to apply. Checked before anything reads
+        // `channelId`, because this message has none.
+        if (isResync(parsed)) {
+          void queryClient.invalidateQueries({ queryKey: channelKeys.list() });
+          return;
+        }
+
+        const activity = parsed;
 
         /*
          * The list is paged, so the cache holds pages rather than one array.

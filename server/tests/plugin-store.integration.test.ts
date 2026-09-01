@@ -383,6 +383,54 @@ describe("the policy is asked as well as the grant", () => {
     expect((thrown as PluginRefusedError).rule).toBeNull();
     expect((thrown as PluginRefusedError).message).toContain("connected");
   });
+
+  test("a dry-run refusal is recorded, even though the call is let through", async () => {
+    await store.grant("mcp", ref, holderId, "admin@openbot.local");
+    /*
+     * The mode an operator switches on to size a rule before enforcing it, and the only mode in
+     * which the policy refuses and the call still goes out. Its whole value is the row: without one
+     * the report reads "this rule would refuse nothing" about traffic it would refuse.
+     */
+    const rule = `mcp.tool == "${toolName}"`;
+    policy = { mode: "dry-run", deny: [rule], allow: ["true"] };
+
+    try {
+      await store
+        .callTool({
+          ref,
+          args: {},
+          botId: holderId,
+          actorId: "someone@openbot.local",
+        })
+        // Forwarded past the policy, so what happens next is the vendor's business and not this
+        // test's: nobody has connected an account, so it fails there. Swallowed deliberately.
+        .catch(() => undefined);
+    } finally {
+      policy = { mode: "enforce", deny: [], allow: ["true"] };
+    }
+
+    const rows = await auditRowsFor(ref);
+    const recorded = rows.filter(
+      (row) =>
+        row.eventType === "mcp.call_rejected" &&
+        (row.payload as { decision?: { rule?: string } }).decision?.rule ===
+          rule,
+    );
+    expect(recorded.length).toBeGreaterThan(0);
+    /*
+     * What tells this row apart from a call this deployment actually stopped. `allowed` is the
+     * policy's answer and `carriedOut` is what the mode did with it, so a reader counting what a
+     * rule would have refused finds this one, and a reader counting what was refused does not.
+     */
+    const decision = (
+      recorded[0].payload as {
+        decision?: { allowed?: boolean; mode?: string; carriedOut?: boolean };
+      }
+    ).decision;
+    expect(decision?.allowed).toBe(false);
+    expect(decision?.mode).toBe("dry-run");
+    expect(decision?.carriedOut).toBe(true);
+  });
 });
 
 describe("the trail says what happened, not what was permitted", () => {
