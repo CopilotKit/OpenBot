@@ -1,3 +1,4 @@
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -8,7 +9,6 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { afterAll, afterEach, expect, test } from "bun:test";
 import type { ReactNode } from "react";
 
 /**
@@ -693,4 +693,63 @@ test("the ceiling is rendered in the compiler's own sentences", async () => {
   });
   expect(sentences.length).toBeGreaterThan(0);
   for (const sentence of sentences) expect(body).toContain(sentence);
+});
+
+/**
+ * The regression, in the reporter's words: the action button is at the bottom and not visible when
+ * somebody presses "Use this template".
+ *
+ * It was. `Import <name>` was the last element in the document, under six sections and every word
+ * of a stranger's instruction set — in the 560px panel this screen actually ships in that is
+ * several thousand pixels below the fold, with nothing on the first screen to say a control existed
+ * at all. Somebody who pressed "Use this template" arrived at a wall of prose with no visible way
+ * to say yes.
+ *
+ * Three properties, because the fix is worth nothing unless all three hold. The control is above
+ * the reading rather than after it. It is pinned, so it survives the scroll rather than leaving
+ * with the first screen. And there is exactly one of it: two controls sharing one label is how
+ * somebody presses the stale one, which is the failure that made the gallery card and the panel
+ * button indistinguishable to a recording script.
+ */
+test("the button that installs is above the file and stays on screen", async () => {
+  await readTemplate();
+
+  const button = screen.getByText("Import Renewal Desk");
+  const body = document.body.textContent ?? "";
+  expect(body.indexOf("Import Renewal Desk")).toBeLessThan(
+    body.indexOf("1. What this Bot is"),
+  );
+
+  const bar = button.closest("header");
+  expect(bar).not.toBeNull();
+  expect(bar?.className).toContain("sticky");
+  expect(bar?.className).toContain("top-0");
+
+  expect(screen.getAllByText("Import Renewal Desk").length).toBe(1);
+});
+
+/**
+ * Whatever the button is currently saying about itself has to be where the button is.
+ *
+ * Both halves of that used to sit at the foot of the document beside it, which was fine while the
+ * button was there too. With the control pinned, a reason left behind would be a shut button on
+ * screen and its explanation thousands of pixels below — and an install error would land on a
+ * screen the person had already scrolled away from.
+ */
+test("the reason the button is shut travels with the button", async () => {
+  await readTemplate();
+
+  const bar = screen.getByText("Import Renewal Desk").closest("header");
+  expect(bar?.textContent).toContain(
+    "An address is needed before this coworker can be imported.",
+  );
+
+  await userEvent.type(
+    field("Address this coworker runs at"),
+    "https://renewals.example.com/ag-ui",
+  );
+
+  // Answered, so the bar says what pressing it costs instead.
+  expect(bar?.textContent).not.toContain("An address is needed");
+  expect(bar?.textContent).toContain("Importing grants nothing.");
 });
