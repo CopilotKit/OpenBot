@@ -45,6 +45,7 @@ import {
   describeComputerIsolation,
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
+import { locateComputerStream } from "./computer/stream-access";
 import { loadConfig } from "./config";
 import {
   type IdentifyActor,
@@ -1092,15 +1093,6 @@ serve<SocketData>({
       if (!actor) {
         return new Response("Sign in first.", { status: 401 });
       }
-      // And which Bot, which the guard above does not answer. This socket carries that Bot's screen,
-      // so signing in is not enough: without this, anybody signed in watches anybody's Bot work.
-      if (
-        !(await agentProfileStore
-          .get({ id: actor.id, role: actor.role }, streamBotId)
-          .catch(() => null))
-      ) {
-        return new Response("There is no such Bot.", { status: 404 });
-      }
       /*
        * Through the gateway, not the provider.
        *
@@ -1111,9 +1103,18 @@ serve<SocketData>({
        */
       let upstream: string;
       try {
-        const streamBase = computerGateway
-          ? await computerGateway.locate(streamBotId)
-          : undefined;
+        const stream = await locateComputerStream({
+          profileStore: agentProfileStore,
+          actor: { id: actor.id, role: actor.role },
+          botId: streamBotId,
+          gateway: computerGateway,
+        });
+        if (stream.kind === "denied") {
+          // Deliberately identical for absent, inaccessible, disabled, malformed, and unreadable
+          // profiles. A stream must not become a profile-existence oracle.
+          return new Response("There is no such Bot.", { status: 404 });
+        }
+        const streamBase = stream.baseUrl;
         if (!streamBase) {
           return new Response("No computer address is configured.", {
             status: 503,
