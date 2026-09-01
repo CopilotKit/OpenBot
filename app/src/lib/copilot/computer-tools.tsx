@@ -246,9 +246,14 @@ export function ComputerTools() {
     ...agentQueryOptions(botId ?? ""),
     enabled: Boolean(botId),
     retry: false,
+    // This is deliberately local to the globally-mounted computer offer, rather than a global
+    // query-client poll. A revoked entitlement must eventually remove model-visible tools even when
+    // a tab never changes focus; while a refresh is pending or errors, the helper below fails closed.
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
   });
 
-  if (!canOfferComputerTools(profile.data)) return null;
+  if (!canOfferComputerTools(botId, profile)) return null;
 
   return <ComputerToolRegistrations />;
 }

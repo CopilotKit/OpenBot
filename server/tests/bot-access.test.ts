@@ -66,6 +66,9 @@ describe("the computer surface", () => {
       { get: () => ({ mode: "enforce", deny: [], allow: [] }) } as never,
       signedIn(actorId, role),
       ownedBy("owner"),
+      undefined,
+      undefined,
+      async () => true,
     );
     return {
       reached,
@@ -171,6 +174,9 @@ describe("a path that starts with a deployment route", () => {
         asked.push(botId);
         return false;
       },
+      undefined,
+      undefined,
+      async () => true,
     );
     return { reached, asked, hono: new Hono().route("/api/computers", routes) };
   }
@@ -241,6 +247,9 @@ describe("the computer surface, unauthenticated", () => {
         asked.push(botId);
         return true;
       },
+      undefined,
+      undefined,
+      async () => true,
     );
     const hono = new Hono().route("/api/computers", routes);
 

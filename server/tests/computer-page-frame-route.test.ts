@@ -91,6 +91,8 @@ function harness(options?: {
     asActor,
     async () => true,
     pageFrames,
+    undefined,
+    async () => true,
   );
   return { routes, saved };
 }
@@ -293,6 +295,9 @@ describe("the frame a page was opened on", () => {
       gateway,
       {} as PolicyStore,
       asActor,
+      async () => true,
+      undefined,
+      undefined,
       async () => true,
     );
 

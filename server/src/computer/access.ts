@@ -9,9 +9,10 @@
 export type ComputerAccess = "enabled" | "disabled";
 
 export function computerAccessOf(configuration: unknown): ComputerAccess {
-  if (!configuration || typeof configuration !== "object") return "enabled";
+  if (!configuration || typeof configuration !== "object") return "disabled";
+  if (!("computerAccess" in configuration)) return "enabled";
   return (configuration as { computerAccess?: unknown }).computerAccess ===
-    "disabled"
-    ? "disabled"
-    : "enabled";
+    "enabled"
+    ? "enabled"
+    : "disabled";
 }

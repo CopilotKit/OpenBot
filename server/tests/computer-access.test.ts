@@ -53,6 +53,7 @@ describe("per-agent computer access", () => {
   test("recognises a disabled and an enabled stored agent configuration", () => {
     expect(computerAccessOf({ computerAccess: "disabled" })).toBe("disabled");
     expect(computerAccessOf({ computerAccess: "enabled" })).toBe("enabled");
+    expect(computerAccessOf({ computerAccess: "unexpected" })).toBe("disabled");
   });
 });
 
@@ -128,5 +129,25 @@ describe("computer routes enforce per-agent access before every gateway call", (
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ text: "visible page" });
     expect(reached).toEqual(["legacy-bot"]);
+  });
+
+  test("refuses a route that was wired without the entitlement callback", async () => {
+    const reached: string[] = [];
+    const routes = createComputerRoutes(
+      {
+        read: async () => {
+          reached.push("read");
+          return { text: "private page" };
+        },
+      } as unknown as ComputerGateway,
+      {} as PolicyStore,
+      asSignedIn,
+      async () => true,
+    );
+
+    const response = await routes.request("http://openbot.test/any-bot/read");
+
+    expect(response.status).toBe(403);
+    expect(reached).toEqual([]);
   });
 });

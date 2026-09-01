@@ -78,6 +78,9 @@ function routesFor(baseUrl: string) {
       {} as PolicyStore,
       asActor,
       async () => true,
+      undefined,
+      undefined,
+      async () => true,
     ),
   };
 }

@@ -7,7 +7,21 @@
  * leak a call into the run.
  */
 export function canOfferComputerTools(
-  agent: { computerAccess: "enabled" | "disabled" } | undefined,
+  botId: string | undefined,
+  profile: {
+    data: { id: string; computerAccess: "enabled" | "disabled" } | undefined;
+    isError: boolean;
+    isFetching: boolean;
+    isSuccess: boolean;
+  },
 ): boolean {
-  return agent?.computerAccess === "enabled";
+  const data = profile.data;
+  return (
+    Boolean(botId) &&
+    profile.isSuccess &&
+    !profile.isFetching &&
+    !profile.isError &&
+    data?.id === botId &&
+    data?.computerAccess === "enabled"
+  );
 }

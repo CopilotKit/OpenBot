@@ -56,7 +56,7 @@ export function createComputerRoutes(
    * intentionally computerless. It is appended to retain the route constructor's existing callers;
    * `createApp` always supplies the profile-backed answer.
    */
-  canUseComputer: BotAccessCheck = async () => true,
+  canUseComputer: BotAccessCheck = async () => false,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
