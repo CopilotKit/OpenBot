@@ -76,12 +76,6 @@ export async function setChannelBusy(variables: {
   });
 }
 
-export function setChannelBusyMutationOptions() {
-  return mutationOptions({
-    mutationFn: setChannelBusy,
-  });
-}
-
 /** Pin or unpin a channel for this member. A marker, not a reorder, so no optimistic sort. */
 export function setChannelPinnedMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
