@@ -88,7 +88,12 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
         <Item variant="muted">
           <ItemContent>
             <ItemTitle>Switched off for this deployment</ItemTitle>
-            <ItemDescription>
+            {/*
+             * Unclamped: `ItemDescription` clips to two lines, which is right for a roster row
+             * whose description is a subtitle and wrong for an item that exists to explain. The
+             * sentence that gets cut is the one saying what to do about it.
+             */}
+            <ItemDescription className="line-clamp-none">
               These grants are kept but none takes effect until handing work
               between Bots is switched back on.
             </ItemDescription>
@@ -100,7 +105,8 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
         <Item variant="muted">
           <ItemContent>
             <ItemTitle>This coworker cannot hand work on</ItemTitle>
-            <ItemDescription>
+            {/* Unclamped for the same reason as above: three lines, and the third is the useful one. */}
+            <ItemDescription className="line-clamp-none">
               Handing work on is a tool that runs inside this deployment's own
               loop, and this coworker runs as its own agent — so there is
               nothing to grant it. It can still be asked by Bots that can.
