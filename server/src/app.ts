@@ -723,25 +723,25 @@ export function createApp(
    * The store's own read path already applies `canAccessAgent`, so asking it for the Bot is the same
    * question the roster and the runtime ask, rather than a second copy of the rule.
    *
-   * A deployment with no profile store has no agents table and therefore no private Bot to protect:
-   * its Bots come from the tenant package and are public to everybody who can sign in. Answering yes
-   * there keeps that deployment working without weakening one that has owners.
+   * A deployment with no profile store cannot prove a Bot exists or carries its reviewed
+   * entitlement. Refuse it: the only compatibility path is a real profile whose omitted stored
+   * setting the profile store normalizes as enabled.
    */
   const canUseBot: BotAccessCheck = agentProfileStore
     ? async (actor, botId) =>
         (await agentProfileStore.get(actor, botId)) !== null
-    : async () => true;
+    : async () => false;
 
   /*
    * The profile is the one durable source for the per-agent computer entitlement. A deployment that
-   * predates the field maps an omitted setting to enabled in the store; a deployment with no profile
-   * store has only its legacy public Bots and retains the same behaviour.
+   * predates the field maps an omitted setting to enabled in the store. Without the store there is
+   * no durable entitlement to trust, so the capability is absent.
    */
   const canUseComputer: BotAccessCheck = agentProfileStore
     ? async (actor, botId) =>
         (await agentProfileStore.get(actor, botId))?.computerAccess ===
         "enabled"
-    : async () => true;
+    : async () => false;
 
   // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
   // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is

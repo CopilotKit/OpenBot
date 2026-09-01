@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import type { MiddlewareHandler } from "hono";
+import { createApp } from "../src/app";
 import type { AppVariables } from "../src/auth/guards";
 import { computerAccessOf } from "../src/computer/access";
 import type { ComputerGateway } from "../src/computer/gateway";
 import type { PolicyStore } from "../src/computer/policy-store";
 import { createComputerRoutes } from "../src/computer/routes";
+import { loadConfig } from "../src/config";
 import {
   loadTenantPackage,
   validateTenantPackage,
 } from "../src/tenant-package";
+import { testEnvironment } from "./support/environment";
 
 const asSignedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
   context,
@@ -58,6 +61,44 @@ describe("per-agent computer access", () => {
 });
 
 describe("computer routes enforce per-agent access before every gateway call", () => {
+  test("createApp without a profile store refuses a Bot and never reaches its computer", async () => {
+    const reached: string[] = [];
+    const app = createApp(
+      loadConfig(
+        testEnvironment({
+          OPENBOT_SINGLE_USER: "true",
+          GOOGLE_OAUTH_CLIENT_ID: undefined,
+          GOOGLE_OAUTH_CLIENT_SECRET: undefined,
+          BETTER_AUTH_SECRET: undefined,
+          BETTER_AUTH_URL: undefined,
+        }),
+      ),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        read: async (botId: string) => {
+          reached.push(botId);
+          return { text: "private page" };
+        },
+      } as unknown as ComputerGateway,
+      {} as PolicyStore,
+    );
+
+    const response = await app.request(
+      "http://openbot.test/api/computers/no-store/read",
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "There is no such Bot.",
+    });
+    expect(reached).toEqual([]);
+  });
+
   test.each([
     ["jefe-erp", "/read", "GET"],
     ["recolector-documentos", "/snapshot", "POST"],
