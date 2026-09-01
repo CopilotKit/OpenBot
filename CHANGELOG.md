@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### People and Bots can use their own avatars
+
+The signed-in person can upload, replace, or remove a PNG, JPEG, or WebP avatar from Settings. Bot
+owners can do the same from the coworker dialog, and deployment administrators can brand packaged
+Bots without gaining permission to rewrite their executable profiles. Custom images now follow the
+person or Bot through the sidebar, channel roster, recipients, handoffs, and profile surfaces, while
+removal returns to the identity-provider image, initials, or generated Bot avatar.
+
+Uploads are authenticated, limited to 2 MB and safe image dimensions, checked against their actual
+file signature, and served from short private versioned URLs rather than copied into roster JSON.
+
 ### Computer use is a whole graphical computer, with a dock that survives closing the browser
 
 A Bot with an isolated computer now exposes its full Linux desktop through the guarded OpenBot
