@@ -16,7 +16,7 @@ import {
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import {
   recordChannelActivityMutationOptions,
-  setChannelBusyMutationOptions,
+  setChannelBusy,
 } from "@/lib/channels/mutations";
 import {
   type AgentChannel,
@@ -291,6 +291,8 @@ export function ChannelChat({
    * first one to finish declare the conversation idle.
    */
   const [turnsInFlight, setTurnsInFlight] = useState(0);
+  /* Authoritative once this screen unmounts, where `setTurnsInFlight` becomes a no-op. */
+  const turnsRef = useRef(0);
   const [runsInFlight, setRunsInFlight] = useState(0);
 
   /**
@@ -298,23 +300,6 @@ export function ChannelChat({
    */
   const recordActivity = useMutation(recordChannelActivityMutationOptions());
 
-  /*
-   * Show this channel as working on the roster while its own turn runs.
-   *
-   * The server cannot see a person's turn begin — the runtime does not tell it — so the browser
-   * reports it, keyed on whether a turn is in flight. The server broadcasts it to every member, so
-   * the row shows the dots even on a tab that has since navigated elsewhere; a run that outlives
-   * this tab clears itself when the roster next refetches, which is the acceptable failure for a
-   * transient hint. Not cleared on unmount on purpose: a turn keeps running server-side after the
-   * person leaves the channel, and clearing here would drop the indicator while the work goes on.
-   */
-  const setBusy = useMutation(setChannelBusyMutationOptions());
-  const busy = turnsInFlight > 0;
-  // Keyed on the busy transition alone; `setBusy.mutate` is a stable handle, not a dependency.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: firing on the busy transition only.
-  useEffect(() => {
-    setBusy.mutate({ channelId: channel.id, busy });
-  }, [busy, channel.id]);
   const report = (text: string, agentId: string | null) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -411,11 +396,21 @@ export function ChannelChat({
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    setTurnsInFlight((count) => count + 1);
+    turnsRef.current += 1;
+    setTurnsInFlight(turnsRef.current);
+    if (turnsRef.current === 1) {
+      void setChannelBusy({ channelId: channel.id, busy: true });
+    }
     try {
       await deliver(trimmed, skillInstructions);
     } finally {
-      setTurnsInFlight((count) => count - 1);
+      turnsRef.current -= 1;
+      setTurnsInFlight(turnsRef.current);
+      // Sent from here rather than from an effect on `turnsInFlight`: this runs after unmount, that
+      // does not, and the last turn out is what takes the roster's working indicator down.
+      if (turnsRef.current === 0) {
+        void setChannelBusy({ channelId: channel.id, busy: false });
+      }
     }
   };
 
