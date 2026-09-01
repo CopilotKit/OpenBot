@@ -47,6 +47,20 @@ function promotionFixture() {
 
   makeExecutable(join(fakeBin, "jq"), "#!/usr/bin/env bash\nprintf '%s\\n' openbot:test\n");
   makeExecutable(join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
+  makeExecutable(join(fakeBin, "rm"), `#!/usr/bin/env bash
+if [[ "\${FAKE_FAIL_MODE:-}" == *cleanup-failure* ]] && [[ "$*" == *g0-promotion* ]]; then
+  printf 'simulated cleanup failure\\n' >&2
+  exit 55
+fi
+exec /bin/rm "$@"
+`);
+  makeExecutable(join(fakeBin, "git"), `#!/usr/bin/env bash
+if [[ "\${FAKE_FAIL_MODE:-}" == *rollback-status* ]] && [ "$1" = -C ] && [ "$3" = status ] && [ "$(/opt/homebrew/bin/git -C "$2" rev-parse HEAD)" = "$FAKE_ORIGINAL" ]; then
+  printf 'simulated rollback status failure\\n' >&2
+  exit 41
+fi
+exec /opt/homebrew/bin/git "$@"
+`);
   makeExecutable(join(fakeBin, "docker"), `#!/usr/bin/env bash
 set -eu
 printf 'docker %s\\n' "$*" >> "$FAKE_LOG"
@@ -55,7 +69,7 @@ if [ "$1" = compose ]; then
   case "$joined" in
     *" exec "*) exit 0 ;;
     *" config "*) printf '%s\\n' '{"services":{"openbot":{"image":"openbot:test"}}}'; exit 0 ;;
-    *" build openbot "*) [ "\${FAKE_FAIL_MODE:-}" = after-build ] && exit 44; exit 0 ;;
+    *" build openbot "*) [[ "\${FAKE_FAIL_MODE:-}" == *after-build* ]] && exit 44; exit 0 ;;
     *" up -d "*) case "$joined" in *candidate.json*) printf applied > "$FAKE_STATE" ;; esac; exit 0 ;;
     *" ps -q openbot "*) case "$joined" in *candidate.json*) printf new ;; *) printf old ;; esac; exit 0 ;;
   esac
@@ -73,7 +87,7 @@ if [ "$1" = inspect ]; then
   last="\${!#}"
   format="\${3:-}"
   if [[ "$format" == *Health* ]]; then
-    if [ "$last" = new ] && [ "\${FAKE_FAIL_MODE:-}" = after-apply ]; then printf unhealthy; else printf healthy; fi
+    if [ "$last" = new ] && [[ "\${FAKE_FAIL_MODE:-}" == *after-apply* ]]; then printf unhealthy; else printf healthy; fi
   elif [[ "$format" == *Image* ]]; then
     [ "$last" = old ] && printf sha256:old || printf sha256:new
   fi
@@ -99,6 +113,7 @@ function execute(fixture: ReturnType<typeof promotionFixture>, failMode?: string
         PATH: `${fixture.fakeBin}:/opt/homebrew/bin:/usr/bin:/bin:/sbin`,
         FAKE_LOG: fixture.log,
         FAKE_STATE: fixture.state,
+        FAKE_ORIGINAL: fixture.original,
         ...(failMode ? { FAKE_FAIL_MODE: failMode } : {}),
         OPENBOT_SOURCE_DIR: fixture.source,
         OPENBOT_INCOMING_DIR: fixture.incoming,
@@ -162,6 +177,31 @@ test.each(["after-build", "after-apply"])("rolls back and verifies the prior ser
     expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.original);
     expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
     expect(readFileSync(fixture.state, "utf8")).toBe("restored");
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("attempts rollback even when private cleanup fails", () => {
+  const fixture = promotionFixture();
+  try {
+    const result = execute(fixture, "after-build,cleanup-failure");
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("restoring recorded OpenBot source and image");
+    expect(readFileSync(fixture.state, "utf8")).toBe("restored");
+    expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("reports CRITICAL and exits 70 when rollback status verification fails", () => {
+  const fixture = promotionFixture();
+  try {
+    const result = execute(fixture, "after-build,rollback-status");
+    expect(result.exitCode).toBe(70);
+    expect(result.stderr.toString()).toContain("CRITICAL: automatic rollback is incomplete");
+    expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

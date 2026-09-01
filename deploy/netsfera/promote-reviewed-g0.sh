@@ -68,7 +68,8 @@ wait_for_healthy_container() {
 restore_previous_state() {
   local restore_failed=0
   local rollback_container_id=""
-  trap - ERR EXIT HUP INT TERM
+  local rollback_head=""
+  local rollback_status_output=""
   set +e
   echo "promotion failed; restoring recorded OpenBot source and image" >&2
 
@@ -81,8 +82,22 @@ restore_previous_state() {
     restore_failed=1
   fi
 
-  if ! git -C "$source_directory" checkout --detach "$rollback_source_revision" >/dev/null || [ "$(git -C "$source_directory" rev-parse HEAD 2>/dev/null)" != "$rollback_source_revision" ] || [ -n "$(git -C "$source_directory" status --porcelain 2>/dev/null)" ]; then
-    echo "rollback failure: source checkout was not restored cleanly" >&2
+  if ! git -C "$source_directory" checkout --detach "$rollback_source_revision" >/dev/null; then
+    echo "rollback failure: could not restore source checkout" >&2
+    restore_failed=1
+  fi
+  if ! rollback_head="$(git -C "$source_directory" rev-parse HEAD 2>/dev/null)"; then
+    echo "rollback failure: could not read restored source revision" >&2
+    restore_failed=1
+  elif [ "$rollback_head" != "$rollback_source_revision" ]; then
+    echo "rollback failure: source revision does not match the recorded revision" >&2
+    restore_failed=1
+  fi
+  if ! rollback_status_output="$(git -C "$source_directory" status --porcelain 2>/dev/null)"; then
+    echo "rollback failure: could not verify restored source cleanliness" >&2
+    restore_failed=1
+  elif [ -n "$rollback_status_output" ]; then
+    echo "rollback failure: restored source checkout is not clean" >&2
     restore_failed=1
   fi
 
@@ -98,7 +113,6 @@ restore_previous_state() {
     echo "rollback failure: prior OpenBot container is not healthy" >&2
     restore_failed=1
   fi
-  set -e
   if [ "$restore_failed" -ne 0 ]; then
     echo "CRITICAL: automatic rollback is incomplete; do not continue promotion" >&2
     return 70
@@ -109,13 +123,20 @@ restore_previous_state() {
 on_exit() {
   local status=$?
   local rollback_status=0
-  trap - EXIT HUP INT TERM
-  clean_up_private_files
+  local cleanup_status=0
+  trap - ERR EXIT HUP INT TERM
+  set +e
   if [ "$success" -ne 1 ] && [ "$rollback_ready" -eq 1 ]; then
     restore_previous_state || rollback_status=$?
-    if [ "$rollback_status" -ne 0 ]; then
-      exit "$rollback_status"
-    fi
+  fi
+  clean_up_private_files || cleanup_status=$?
+  if [ "$rollback_status" -ne 0 ]; then
+    echo "CRITICAL: automatic rollback is incomplete; cleanup result does not change that outcome" >&2
+    exit 70
+  fi
+  if [ "$cleanup_status" -ne 0 ]; then
+    echo "promotion cleanup failed after rollback; private files require manual removal" >&2
+    exit 71
   fi
   exit "$status"
 }
@@ -175,7 +196,13 @@ git -C "$source_directory" fetch --no-tags "$bundle_path" "${advertised_ref}:ref
 test "$(git -C "$source_directory" rev-parse refs/heads/g0-reviewed-artifact)" = "$target_commit"
 git -C "$source_directory" cat-file -e "${target_commit}^{commit}"
 git -C "$source_directory" checkout --detach "$target_commit"
-test -z "$(git -C "$source_directory" status --porcelain)"
+if ! reviewed_status_output="$(git -C "$source_directory" status --porcelain)"; then
+  echo "could not verify reviewed OpenBot checkout cleanliness" >&2
+  exit 65
+elif [ -n "$reviewed_status_output" ]; then
+  echo "reviewed OpenBot checkout is not clean" >&2
+  exit 65
+fi
 
 # The Bun image intentionally lacks host Git/JQ/Docker. Only Bun-compatible source tests run here.
 git clone --quiet --no-hardlinks "$source_directory" "$test_source_directory"
@@ -194,7 +221,13 @@ candidate_image_reference="$(jq -er '.services.openbot.image' "$candidate_render
 candidate_image_id="$(docker image inspect --format '{{.Id}}' "$candidate_image_reference")"
 docker run --rm --entrypoint sh "$candidate_image_id" -ceu 'grep -R -F -q "NETSFERA ERP" /app/app/dist 2>/dev/null && grep -R -F -q "netsfera" /app/app/dist 2>/dev/null'
 test "$(git -C "$source_directory" rev-parse HEAD)" = "$target_commit"
-test -z "$(git -C "$source_directory" status --porcelain)"
+if ! post_build_status_output="$(git -C "$source_directory" status --porcelain)"; then
+  echo "could not verify reviewed OpenBot checkout cleanliness after build" >&2
+  exit 65
+elif [ -n "$post_build_status_output" ]; then
+  echo "reviewed OpenBot checkout is not clean after build" >&2
+  exit 65
+fi
 test "$(sha256sum "$candidate_render" | awk '{ print $1 }')" = "$candidate_hash"
 
 docker compose -p "$project_name" -f "$candidate_render" up -d --no-deps --no-build openbot
