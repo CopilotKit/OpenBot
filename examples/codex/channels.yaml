@@ -1,0 +1,6 @@
+channels:
+  - id: codex
+    name: Codex
+    description: Test a Codex coworker backed by the local ChatGPT subscription.
+    permitted_agents: [codex-assistant]
+    allowed_groups: [all]

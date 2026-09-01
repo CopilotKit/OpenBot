@@ -30,8 +30,17 @@ SERVER_PORT="$(setting SERVER_PORT 3001)"
 COMPUTER_PORT="$(setting COMPUTER_PORT 4100)"
 BOT_PORT="$(setting BOT_PORT 4200)"
 LANGGRAPH_PORT="$(setting LANGGRAPH_PORT 4201)"
+CODEX_AGENT_PORT="$(setting CODEX_AGENT_PORT 4202)"
 SUPERVISOR_PORT="$(setting SUPERVISOR_PORT 4500)"
 ONE_COMPUTER_EACH="${OPENBOT_ONE_COMPUTER_EACH:-true}"
+CODEX_AGENT_ENABLED="$(setting CODEX_AGENT_ENABLED false)"
+case "$CODEX_AGENT_ENABLED" in
+  true|false) ;;
+  *)
+    printf '\033[31m%s\033[0m\n' "CODEX_AGENT_ENABLED must be true or false."
+    exit 1
+    ;;
+esac
 export APP_PORT SERVER_PORT
 SUPERVISOR_TOKEN="$(setting SUPERVISOR_TOKEN openbot-dev-supervisor-token)"
 COMPUTER_TOKEN="$(setting COMPUTER_TOKEN openbot-dev-computer-token)"
@@ -54,10 +63,15 @@ WORKER_SHARED_SECRET="$(setting WORKER_SHARED_SECRET openbot-dev-worker-secret)"
 #
 # Written into .env rather than exported for this run alone, so `docker compose up` by hand later
 # sees the same value the script used.
-# The laptop stack runs agent-langgraph on LANGGRAPH_PORT. The one-container image does not, so
-# this default stays in the script rather than in .env: a `docker run --env-file .env` must not
-# inherit a URL that points at a process the image does not contain.
-MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "http://localhost:${LANGGRAPH_PORT}/ag-ui")"
+# The laptop stack normally runs agent-langgraph on LANGGRAPH_PORT. The local Codex compatibility
+# mode instead runs a host process so it can reuse the person's existing `codex login` session
+# without copying ChatGPT credentials into Docker.
+if [ "$CODEX_AGENT_ENABLED" = "true" ]; then
+  DEFAULT_MANAGED_AGENT_URL="http://localhost:${CODEX_AGENT_PORT}/ag-ui"
+else
+  DEFAULT_MANAGED_AGENT_URL="http://localhost:${LANGGRAPH_PORT}/ag-ui"
+fi
+MANAGED_AGENT_AG_UI_URL="$(setting MANAGED_AGENT_AG_UI_URL "$DEFAULT_MANAGED_AGENT_URL")"
 export MANAGED_AGENT_AG_UI_URL
 
 # Whether this run minted a secret that something already running may not have.
@@ -215,12 +229,13 @@ fi
 # `docker compose up -d` is declarative and does nothing for a service whose configuration has not
 # changed, so naming them all costs a comparison and buys the guarantee that what is running is what
 # this run configured.
-for svc in agent-computer agent-bot agent-langgraph; do
-  SERVICES+=("$svc")
-done
+SERVICES+=(agent-computer)
+if [ "$CODEX_AGENT_ENABLED" != "true" ]; then
+  SERVICES+=(agent-bot agent-langgraph)
+fi
 
 export SUPERVISOR_TOKEN COMPUTER_TOKEN WORKER_SHARED_SECRET
-export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT SUPERVISOR_PORT
+export COMPUTER_PORT BOT_PORT LANGGRAPH_PORT CODEX_AGENT_PORT SUPERVISOR_PORT
 docker compose up -d --build "${SERVICES[@]}" >/dev/null
 if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
   red "  Migrations did not apply. The database is not the schema this server expects."
@@ -228,8 +243,25 @@ if ! docker compose run --rm --build migrate >"$LOGS/migrate.log" 2>&1; then
   exit 1
 fi
 wait_for "http://localhost:$COMPUTER_PORT/health" "agent-computer"
-wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
-wait_for "http://localhost:$LANGGRAPH_PORT/health" "agent-langgraph"
+if [ "$CODEX_AGENT_ENABLED" = "true" ]; then
+  CODEX_AGENT_WORKSPACE="$(setting CODEX_AGENT_WORKSPACE "$ROOT/.openbot-codex/workspace")"
+  mkdir -p "$CODEX_AGENT_WORKSPACE"
+  require_free_or_ours "$CODEX_AGENT_PORT" "agent-codex"
+  if identifies_as_openbot "$CODEX_AGENT_PORT" "agent-codex"; then
+    pkill -f "bun agent-codex/src/index.ts" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+  (cd "$ROOT" && \
+    nohup env \
+      PORT="$CODEX_AGENT_PORT" \
+      MANAGED_AGENT_TOKEN="$MANAGED_AGENT_TOKEN" \
+      CODEX_AGENT_WORKSPACE="$CODEX_AGENT_WORKSPACE" \
+      bun agent-codex/src/index.ts >"$LOGS/agent-codex.log" 2>&1 </dev/null &)
+  wait_for "http://localhost:$CODEX_AGENT_PORT/health" "agent-codex" 60
+else
+  wait_for "http://localhost:$BOT_PORT/health" "agent-bot"
+  wait_for "http://localhost:$LANGGRAPH_PORT/health" "agent-langgraph"
+fi
 
 for table in agent_profiles agent_preferences; do
   if ! docker compose exec -T postgres \
@@ -251,6 +283,9 @@ green "  coworker tables migrated"
 # grep survives inside `setting()` only because `local v="$(...)"` takes `local`'s own exit status
 # and masks it. So: report what was resolved, and do not re-read the file.
 green "  managed coworker endpoint: $MANAGED_AGENT_AG_UI_URL"
+if [ "$CODEX_AGENT_ENABLED" = "true" ]; then
+  green "  Codex coworker: ChatGPT login · read-only text compatibility mode"
+fi
 
 info "2/4  Server"
 require_free_or_ours "$SERVER_PORT" server
@@ -302,16 +337,18 @@ if identifies_as_openbot "$SERVER_PORT" server; then
 fi
 if ! identifies_as_openbot "$SERVER_PORT" server; then
   if [ "$ONE_COMPUTER_EACH" = "true" ]; then
-    (cd server && PORT="$SERVER_PORT" \
+    (cd server && nohup env \
+      PORT="$SERVER_PORT" \
       COMPUTER_SUPERVISOR_URL="http://localhost:$SUPERVISOR_PORT" \
       SUPERVISOR_TOKEN="$SUPERVISOR_TOKEN" \
       COMPUTER_TOKEN="$COMPUTER_TOKEN" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 </dev/null &)
   else
-    (cd server && PORT="$SERVER_PORT" \
+    (cd server && nohup env \
+      PORT="$SERVER_PORT" \
       WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 &)
+      bun --env-file=../.env src/index.ts >"$LOGS/server.log" 2>&1 </dev/null &)
   fi
 fi
 wait_for_openbot "$SERVER_PORT" server
@@ -335,10 +372,11 @@ wait_for_openbot "$SERVER_PORT" server
 if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
   WORKER_DATABASE_URL="$(setting DATABASE_URL postgres://openbot:openbot@localhost:5432/openbot)"
   (cd "$ROOT" && \
-    DATABASE_URL="$WORKER_DATABASE_URL" \
-    SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
-    WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
-    bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 &)
+    nohup env \
+      DATABASE_URL="$WORKER_DATABASE_URL" \
+      SERVER_INTERNAL_URL="http://localhost:$SERVER_PORT" \
+      WORKER_SHARED_SECRET="$WORKER_SHARED_SECRET" \
+      bun worker/src/index.ts >"$LOGS/worker.log" 2>&1 </dev/null &)
   info "  worker: started (routine sweep loop)"
   sleep 1
   if ! pgrep -f "bun worker/src/index.ts" >/dev/null 2>&1; then
@@ -368,7 +406,7 @@ PY
 info "4/4  App"
 require_free_or_ours "$APP_PORT" app
 if ! identifies_as_openbot "$APP_PORT" app; then
-  (cd app && bun run dev --port "$APP_PORT" --strictPort >"$LOGS/app.log" 2>&1 &)
+  (cd app && nohup bun run dev --port "$APP_PORT" --strictPort >"$LOGS/app.log" 2>&1 </dev/null &)
 fi
 wait_for_openbot "$APP_PORT" app
 
@@ -395,6 +433,7 @@ Try:
 Logs: $LOGS
   Routine sweep worker: $LOGS/worker.log
 Stop the routine worker: pkill -f 'bun worker/src/index.ts'
+Stop the Codex coworker: pkill -f 'bun agent-codex/src/index.ts'
 Stop Docker services: docker compose down
   A Bot's computer is made by the supervisor rather than by compose, so it keeps running:
   docker rm -f \$(docker ps -q --filter label=openbot.supervisor=true)

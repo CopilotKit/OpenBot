@@ -1,0 +1,4 @@
+model:
+  provider: openai
+  credential_secret_ref: unused-in-codex-spike
+  default_model: gpt-5.6-terra

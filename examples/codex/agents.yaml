@@ -1,0 +1,8 @@
+agents:
+  - id: codex-assistant
+    name: Codex
+    title: Subscription-powered coworker
+    role_description: Help with general questions using the locally signed-in Codex account.
+    avatar_seed: codex-assistant
+    type: remote-ag-ui
+    endpoint: ${MANAGED_AGENT_AG_UI_URL:-}
