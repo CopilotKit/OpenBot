@@ -20,11 +20,17 @@ import {
   type PolicyContext,
 } from "./policy";
 
-/** The event types the gateway writes for a judged computer action. In one place, for the query. */
+/**
+ * The event types that record a policy DECISION about a computer action. In one place, for the query.
+ *
+ * Not `computer.action_failed`: the gateway writes that beside the decision row when a permitted
+ * action is attempted and does not succeed, so it is a second row for an action already recorded
+ * here, not a decision of its own. Replaying it too would score the action twice — see
+ * {@link dryRunAgainstHistory}.
+ */
 export const REPLAYABLE_EVENT_TYPES = [
   "computer.action_allowed",
   "computer.action_refused",
-  "computer.action_failed",
 ] as const;
 
 /** One action the candidate policy would have decided differently. */
@@ -38,7 +44,7 @@ export type DryRunChange = {
   element: { role: string; name: string } | null;
   command: string | null;
   file: string | null;
-  /** What actually happened, from the trail. A failed action was permitted first, so it was allowed. */
+  /** What the policy in force decided, from the action's decision row. */
   was: "allowed" | "refused";
   would: "allowed" | "refused";
   /** The candidate rule that decided it, or null for the default refusal. */
@@ -120,6 +126,14 @@ export function contextFromAuditPayload(
  * a dry-run policy's refusals, which were recorded and then carried out. That is the honest
  * baseline: the question this answers is "what would decide differently than was decided", not
  * "what would run differently than ran".
+ *
+ * A `computer.action_failed` row is skipped rather than scored. It is the outcome of an action whose
+ * decision row is already in this history, so counting it would score that action twice — and worse,
+ * a dry-run policy carries a refused action out, so a refused-then-failed action would arrive as a
+ * decision row that says "refused" and a failure row that reads as "allowed", inventing a change no
+ * policy made. The decision is on the decision row; the failure row only says it did not finish.
+ * Callers should exclude it from the query too ({@link REPLAYABLE_EVENT_TYPES}); this guards the
+ * function against being handed one regardless.
  */
 export function dryRunAgainstHistory(
   policy: ActionPolicy,
@@ -134,6 +148,7 @@ export function dryRunAgainstHistory(
   };
 
   for (const event of events) {
+    if (event.eventType === "computer.action_failed") continue;
     const context = contextFromAuditPayload(event.payload);
     if (!context) continue;
     report.scanned += 1;

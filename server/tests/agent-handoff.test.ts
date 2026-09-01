@@ -338,7 +338,56 @@ describe("handing work to another Bot", () => {
     expect(refused.events[0]?.payload).toMatchObject({
       reason: "not_granted",
       run: "run-1",
+      /*
+       * And the refusal names the Bot too, which is the half this was missing.
+       *
+       * The accepted row above was given `bot` and its refusal was not, so the pair the trail calls
+       * "both outcomes" rendered one Bot and one dash. On the row the notes call the more important
+       * of the two: a hop that happened is visible in the transcript, and a refused one is
+       * invisible everywhere except here.
+       */
+      bot: "assistant",
     });
+  });
+
+  /*
+   * Every way a hop can be refused, not only the one the pair above happens to use.
+   *
+   * `refuse` is one function and all five reasons go through it, so this could not drift per reason
+   * — but that is the argument for asserting it once across all of them rather than trusting it.
+   */
+  test("every refusal names the Bot that was refused", async () => {
+    const cases: Array<[string, ReturnType<typeof desk>]> = [
+      ["no_task", desk()],
+      ["not_granted", desk({ granted: false })],
+      ["unknown_bot", desk()],
+      ["depth", desk({ caps: { maxDepth: 0, maxPerRun: 3 } })],
+      ["fan_out", desk({ caps: { maxDepth: 2, maxPerRun: 0 } })],
+    ];
+    const envelopes: Record<string, { target: string; task: string }> = {
+      no_task: { target: "researcher", task: "" },
+      not_granted: { target: "researcher", task: "t" },
+      unknown_bot: { target: "nobody-by-that-name", task: "t" },
+      depth: { target: "researcher", task: "t" },
+      fan_out: { target: "researcher", task: "t" },
+    };
+
+    for (const [name, harness] of cases) {
+      const envelope = envelopes[name] as { target: string; task: string };
+      const outcome = await harness.desk.send({
+        from: FROM,
+        target: envelope.target,
+        envelope: { task: envelope.task },
+      });
+
+      expect(outcome.ok).toBe(false);
+      expect(harness.events.map((event) => event.eventType)).toEqual([
+        "agent.handoff_refused",
+      ]);
+      // The asking Bot, the same one `agent.handoff_offered` records, so the two rows of a pair
+      // read as one Bot's two possible outcomes rather than as one Bot and a dash.
+      expect(harness.events[0]?.payload).toMatchObject({ bot: "assistant" });
+    }
   });
 });
 

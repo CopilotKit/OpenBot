@@ -78,7 +78,11 @@ import {
   synchronizeTenantPackage,
 } from "./tenant-package";
 import { repeatAfterEach } from "./work/loop";
-import { createWorkQueue, startWorkOfferedListener } from "./work/queue";
+import {
+  createWorkQueue,
+  startWorkOfferedListener,
+  type WorkOfferedListener,
+} from "./work/queue";
 
 /**
  * Who is asking, for a CopilotKit request.
@@ -832,6 +836,14 @@ const copilotRuntime = mountCopilotRuntime(
  * seconds for hops that can never be offered: roughly forty thousand claim transactions per replica
  * per day, for a feature it had turned off.
  */
+/**
+ * The queue's own wake-up, when handing work between Bots is switched on at all.
+ *
+ * Held at module scope so the shutdown below can give its connection back. Undefined on a
+ * deployment with the capability off, which is a deployment that never started one.
+ */
+let workOfferedListener: WorkOfferedListener | undefined;
+
 if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
@@ -959,9 +971,12 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
    * claiming a different batch, and this replica's concurrent agent runs would grow with the
    * backlog rather than stopping at the limit it was asked for.
    */
-  await startWorkOfferedListener(config.databaseUrl, (kind) => {
-    if (kind === HANDOFF_KIND) void kick();
-  });
+  workOfferedListener = await startWorkOfferedListener(
+    config.databaseUrl,
+    (kind) => {
+      if (kind === HANDOFF_KIND) void kick();
+    },
+  );
   repeatAfterEach(kick, 2_000);
 }
 
@@ -1217,6 +1232,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     void Promise.allSettled([
       channelActivityListener.stop(),
       policyListener.stop(),
+      // Started only where handing work between Bots is switched on, so it is often not there.
+      workOfferedListener?.stop() ?? Promise.resolve(),
       Promise.resolve(retentionSweeps.stop()),
     ]).finally(() => process.exit(0));
   });

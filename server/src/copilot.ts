@@ -1095,6 +1095,23 @@ export function mountCopilotRuntime(
     ...(config.accessibility
       ? { telemetryProperties: { accessibility_title: "OpenBot" } }
       : {}),
+    /*
+     * What lets a Bot answer with an interface it wrote itself.
+     *
+     * This one flag is the whole difference between a Bot that draws and a Bot that describes
+     * markup it cannot show. The middleware it turns on does not give the model the tool — the
+     * browser does that — it reads the arguments of the `generateSandboxedUi` call as they stream
+     * and re-emits them as `open-generative-ui` activity events. Those events are the only thing
+     * that paints: the tool's own renderer shows the waiting message and then returns nothing. So a
+     * deployment with the browser half and not this one has Bots generating whole interfaces that
+     * never appear, which is the shape this capability arrived in.
+     *
+     * `true` rather than a list of Bots. The list narrows only the event transform, and the tool
+     * stays offered to every Bot regardless, so naming some Bots here would leave the others able to
+     * call it and draw nothing. Whether the capability exists at all is the switch this deployment
+     * has; see DeploymentConfig.generativeUi.
+     */
+    ...(config.generativeUi ? { openGenerativeUI: true } : {}),
     // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
     // one resolver decides both whose threads these are and whose coworkers exist.
     agents: createRequestAgents(

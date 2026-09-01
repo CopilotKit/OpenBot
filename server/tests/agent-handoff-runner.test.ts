@@ -199,6 +199,40 @@ describe("delivering a hop", () => {
     });
   });
 
+  /*
+   * And so do the rows either side of it, which is the half the assertion above did not reach.
+   *
+   * A delivery is the outcome that is also visible in the transcript. A hop that was retried or
+   * that failed is visible nowhere else at all, so those are the rows somebody actually comes to
+   * this screen for — and they were the ones rendering a dash where the Bot's name belongs.
+   */
+  test("a hop that was retried or that failed names the Bot too", async () => {
+    const retried = runner({
+      claimed: [
+        { kind: "bot.message", key: "run-1:abc", payload: WORK, attempts: 2 },
+      ],
+    });
+    await retried.runner.sweep();
+
+    expect(
+      retried.written.find(
+        (event) => event.eventType === "agent.handoff_retried",
+      )?.payload,
+    ).toMatchObject({ bot: WORK.fromBotId, from: WORK.fromBotId });
+
+    const failed = runner({
+      deliver: async () => {
+        throw new Error("the gateway was unreachable");
+      },
+    });
+    await failed.runner.sweep();
+
+    expect(
+      failed.written.find((event) => event.eventType === "agent.handoff_failed")
+        ?.payload,
+    ).toMatchObject({ bot: WORK.fromBotId, from: WORK.fromBotId });
+  });
+
   /* Releasing an unusable row would put it back on the queue for ever. */
   test("a row that is not a hop is finished rather than released", async () => {
     const { runner: sweep, calls } = runner({

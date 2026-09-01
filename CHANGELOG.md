@@ -34,6 +34,80 @@ to authenticate. In the same spirit, the handoff panel explains once when a cowo
 work on (it runs as its own agent, outside this deployment's loop) instead of offering switches the
 server can only refuse; its existing grants stay visible so they can still be revoked.
 
+### A hop the boundary refused now names the Bot that was refused
+
+The audit page renders its Bot column from `payload.bot` and nothing else. `agent.handoff_offered`
+and `agent.handoff_delivered` were given that key; the four rows either side of them — a hop
+refused, a hop retried, and a hop that failed for good — were not, so they showed a dash where the
+Bot belongs. Those are the rows somebody actually opens the trail for: a hop that happened is visible
+in the transcript anyway, and a refused or lost one is visible nowhere else. All four now name the
+asking Bot, exactly as the accepted pair and `agent.escalated` already did.
+
+### A failed tool refresh no longer leaves a connector offering nothing
+
+Refreshing a connector's tools replaced the list with a delete and then an insert, as two separate
+statements. Whenever the second did not land — a pod killed mid-refresh, a dropped connection, or a
+server answering `tools/list` with the same tool name twice, which the table refuses — the delete had
+already committed on its own. The table is shared, so every replica lost that connector's tools at
+once, every grant an administrator had made was silently un-offered, and the Bot was told it holds
+none of that vendor's tools. Nothing brought them back until somebody read the error on the Plugins
+page and pressed Refresh. The two statements are now one, so a bad refresh is recorded and the tools
+already held are left alone, which is what the code always claimed to do.
+
+### A rule tried in dry-run now says what it would have refused a Bot's tools
+
+`dry-run` exists so a boundary can be measured against live traffic before it starts refusing
+anybody. It worked that way for the browser, and not for connectors: a tool call the rule matched was
+recorded only as the call that then went out, so `Blocked` on the audit page — and any query behind
+it — answered "this rule would have refused none of them" about calls it would have refused. A rule
+about `mcp.server`, `mcp.tool` or `mcp.effect` therefore looked inert, and enforcing it started
+refusing Bots with nothing in the trail to have warned anybody. A refused tool call is now recorded
+whatever the mode does with it, carrying `carriedOut` so a reader can tell a call this deployment
+stopped from one dry-run recorded and let past. Enforcing deployments behave exactly as before.
+
+### A policy dry-run no longer counts a failed action twice, or invents a change it did not make
+
+Testing a boundary against recent history replayed three kinds of audit row, and one of them is a
+duplicate: a permitted action that fails is recorded both as the decision that allowed it and as a
+separate failure row, so every failed action was scanned and scored twice. Worse, a dry-run policy
+carries a refused action out, so a refused action can fail too — and its two rows disagree, the
+decision row saying "refused" and the failure row reading as "allowed", so a candidate policy that
+refused it identically was reported as a new refusal it never introduced. The replay now scores each
+action once, from the row that recorded its decision.
+
+### A message no longer routes to a specialist because a longer word contained a connector's name
+
+When the intent router falls back — it is unreachable, or it declines — and exactly one coworker can
+reach a system the message names, the message goes to that coworker. The name was matched as a bare
+substring, so "how do I deal with a slacker" matched the **slack** connector and "una jirafa" (a
+giraffe) matched **jira**: a message naming neither system was pinned, for the life of the thread,
+to a specialist that could not answer it. A connector's name now has to appear on a word boundary,
+so a system named on its own still routes and one buried inside another word does not.
+
+### The audit page no longer says "Allowed" about six kinds of refusal
+
+A hop one Bot was not allowed to make, an endpoint this deployment would not dial, a rotation the
+vault refused and a sign-in it turned away were all drawn as **Allowed**, in the muted colour every
+ordinary row uses, and none of them appeared under **Blocked**. The same for a hop that ran out of
+attempts and a question that reached nobody, which are "Did not happen" rather than allowed. The
+page recognised six refusal types and the six added since were never added to it. Refusals now read
+as refusals, the two saved views are built from the same lists the rows are labelled from, and a
+refusal added later is added in one place or in none.
+
+### A conversation deleted while a server was reconnecting no longer lingers on the screen
+
+Announcements between servers travel as Postgres notifications, which reach whoever is subscribed at
+the moment they are sent and are never replayed. While a server's subscription was down — a database
+restart, a failover, a rolling upgrade — every channel deletion, pin and message announced in that
+window was lost, and nothing afterwards asked for it again.
+
+The browser could not notice. Its own connection to the server stayed open throughout, so the
+refetch it already does when that connection comes back was never triggered, and the roster went on
+showing a conversation that had been deleted until the page was reloaded.
+
+A server now tells the browsers it is holding to refetch when its subscription is re-established.
+Nothing to configure, and no change for a deployment whose database connection never drops.
+
 ### A Bot's answer comes back to the conversation that asked
 
 **This reverses what 0.0.5 shipped.** The 0.0.5 notes below say the asking Bot does not relay text
@@ -121,6 +195,7 @@ cluster and is not empty is now refused with a sentence naming the mount to use 
 
 Reported by [@jerelvelarde](https://github.com/CopilotKit/OpenBot/issues/269) with the container logs
 for both mount paths, which is what made the two failure modes separable.
+
 ### A sign-in a site opens in a new window is shown, and can be clicked
 
 A Bot's browser was bound to the page it launched with, and to nothing the site opened afterwards.
@@ -136,6 +211,7 @@ afterwards with the same "take a new snapshot" it already gives after a navigati
 cannot act on the wrong document.
 
 Nothing to configure.
+
 ### Stopping a Bot's computer stops it, and the person watching is told
 
 A computer somebody stopped came back up on its own about a second later, and reset did the same. The
@@ -295,6 +371,7 @@ uses. It still cannot address another pod, a node, or a cloud metadata endpoint.
 destination and so permitted everything. That rule now covers the API server alone, and
 `networkPolicy.kubernetesApiCidr` narrows it to your cluster's service range; left empty it stays as
 it was, because a chart cannot know that range.
+
 ### Taking the wheel stops the Bot's shell, not just its clicks
 
 While a person held the wheel the Bot was refused on the page, and not in the shell. `/exec` and a
@@ -309,6 +386,7 @@ to be able to say what it was doing.
 
 Nothing to configure. A Bot that acts during a takeover gets the refusal it already got for a click,
 and the trail records the attempt and the failure the same way.
+
 ### A computer that was suspended once suspends again
 
 Scale-to-zero worked once per Bot. A computer suspended, resumed, used and then left alone again was
@@ -325,6 +403,7 @@ the same clock the offer runs on, so a Bot cannot come back round as idle until 
 
 Nothing to configure, and the sweep already runs on a schedule. A deployment where each Bot has its
 own computer stops paying for browsers that were used once.
+
 ### A Bot's egress proxy is reachable on Kubernetes, or the install is refused
 
 The chart named no egress variable anywhere, so a Helm deployment read the per-Bot proxy settings
@@ -467,6 +546,7 @@ unknown session means "no opinion" and skips the generation check, so on exactly
 shape it was written for, the check that stops a ref from a replaced computer resolving against a
 live one was silently absent. It now asks the supervisor when it does not know, by listing rather
 than by ensuring, so asking never starts a computer that had stopped.
+
 ### A routing trail says why a message was not routed, not only that it was not
 
 Every untagged message writes a `channel.routed` row, and that row carried `fallback: true` for two
@@ -558,6 +638,7 @@ credential is refused rather than quietly attached to fail on its next call.
 Curated servers keep working as they did. Their URL comes from the catalogue rather than the
 request, and a per-instance hostname is matched against the vendor's own anchored pattern before
 anything is stored, so re-adding one cannot point it at an address of the caller's choosing.
+
 ### A configured egress proxy reaches the browser that uses it
 
 `EGRESS_PROXY_DEFAULT` and `EGRESS_PROXY_<BOT>` were documented as the way to give a Bot a stable
@@ -579,6 +660,7 @@ given them. It is optional, so a deployment with no proxy is unchanged, and giti
 proxy URL can carry a password.
 
 **Move these two out of `.env` and into `egress.env`.** In `.env` they reach no process.
+
 ### Screens without a conversation stop polling for a Bot that does not exist
 
 Every surface asks which components its Bot holds, and asks again every few seconds so a revoked
@@ -593,6 +675,7 @@ that matters is invisible.
 
 The grant queries now wait for a surface to declare a real Bot, and simply do not run while the
 placeholder holds. Conversation surfaces — the Bot page, channels — declare one and are unchanged.
+
 ### A rule can be tested against history before it is saved
 
 A boundary was written blind: an administrator typed a CEL rule, saved it, and learned what it
@@ -672,6 +755,7 @@ this port has to reach it another way**, which is what publishing it on every in
 This does not reach back in time. A deployment that has been running with the two on one network
 should assume a Bot could have read or written the database, and look at the trail with that in
 mind.
+
 ### A credential in an MCP server address is refused in the query and the fragment too
 
 Refusing `https://user:token@vendor.example/mcp` closed the userinfo spelling of a credential in the
@@ -698,6 +782,7 @@ beside `metadata.google.internal`, and it carries a dot and none of the suffixes
 it read as an ordinary vendor name. The long spelling was only ever refused incidentally, by the
 `.internal` rule. Both are now named, so the address this check was written for is refused on purpose
 rather than by luck.
+
 ### A curated MCP server is pointed at its own kind of credential too
 
 Adding a server by URL was made to check which credential it is being pointed at. Adding one from the
@@ -971,6 +1056,7 @@ one they are, so those match too.
 
 No configuration changes and nothing is stored differently; a deployment that was already on the
 light theme sees no difference at all.
+
 ### `start.sh` refuses a port that answers but is not OpenBot
 
 The startup checks asked whether a port answered, and treated that as proof the port belonged to this
@@ -1035,6 +1121,7 @@ the decision row is written, so an action somebody tried to take still appears o
 **A deployment may see refusals it did not see before.** That is the point: those are the actions that
 were being carried out without the boundary seeing what they touched. A Bot that meets one takes a
 fresh snapshot and continues.
+
 ### A package ships its skills, so tool selection works on a clone
 
 Tool selection narrows a Bot's tools to the ones its matching skills declare, and a deployment starts

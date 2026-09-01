@@ -300,6 +300,9 @@ export function createHandoffRunner(options: {
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
               payload: {
+                // See the same key on `agent.handoff_delivered` below: the Audit screen's Bot
+                // column reads `payload.bot`, so a row without it names no Bot.
+                bot: work.fromBotId,
                 from: work.fromBotId,
                 to: work.toBotId,
                 run: work.runId,
@@ -374,6 +377,8 @@ export function createHandoffRunner(options: {
                 targetId: work.toBotId,
                 ...(work.actorId ? { actorUserId: work.actorId } : {}),
                 payload: {
+                  // See the same key on `agent.handoff_delivered` below.
+                  bot: work.fromBotId,
                   from: work.fromBotId,
                   to: work.toBotId,
                   run: work.runId,
@@ -456,6 +461,10 @@ export function createHandoffRunner(options: {
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
               payload: {
+                // See the same key on `agent.handoff_delivered` above. This row is the one a
+                // person's unanswered question ends on, so a Bot column showing a dash on it is
+                // the worst place in the set to have one.
+                bot: work.fromBotId,
                 from: work.fromBotId,
                 to: work.toBotId,
                 run: work.runId,
