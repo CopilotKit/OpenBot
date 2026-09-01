@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
   type PolicyContext,
 } from "../src/computer/policy";
+import { intentOf } from "../src/computer/gateway";
 import { parseActionPolicy } from "../src/computer/policy-store";
 
 /**
@@ -25,6 +28,109 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
     ...overrides,
   };
 }
+
+const netsferaPolicyPath = join(
+  import.meta.dir,
+  "../../deploy/netsfera/agent-computer-policy.json",
+);
+
+function netsferaPolicy(): ActionPolicy {
+  // The permissive fallback makes a missing checked-in policy fail each behavioral assertion below,
+  // instead of passing only because OpenBot's absent-policy default is also deny.
+  if (!existsSync(netsferaPolicyPath)) {
+    return { mode: "enforce", deny: [], allow: ["true"] };
+  }
+  return JSON.parse(readFileSync(netsferaPolicyPath, "utf8")) as ActionPolicy;
+}
+
+describe("the Netsfera G0 computer policy", () => {
+  const policy = netsferaPolicy();
+
+  test("is an explicit checked-in deployment policy", () => {
+    expect(existsSync(netsferaPolicyPath)).toBe(true);
+  });
+
+  test("refuses the G0 actions", () => {
+    const denied = [
+      {
+        bot: "jefe-erp",
+        tool: "computer_navigate",
+        host: "erp.netsfera.es",
+        url: "https://erp.netsfera.es",
+      },
+      { bot: "jefe-erp", tool: "computer_run_command", host: "", url: "" },
+      {
+        bot: "recolector-documentos",
+        tool: "computer_navigate",
+        host: "evil.example",
+        url: "https://evil.example",
+      },
+      {
+        bot: "recolector-documentos",
+        tool: "computer_run_command",
+        host: "",
+        url: "",
+      },
+      {
+        bot: "recolector-documentos",
+        tool: "computer_navigate",
+        host: "chatgpt.com",
+        url: "https://chatgpt.com/admin/billing/payment-methods",
+      },
+    ];
+    for (const input of denied) {
+      const decision = evaluateActionPolicy(
+        policy,
+        context({
+          bot: { id: input.bot },
+          tool: { name: input.tool },
+          page: { host: input.host, url: input.url },
+          intent: intentOf(input.tool, undefined),
+        }),
+      );
+      expect(decision.allowed).toBe(false);
+      expect(decision.source).toBe("deny");
+    }
+  });
+
+  test("evaluates every G0 rule without a broken-rule fallback", () => {
+    const allowed = [
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_navigate" },
+        page: { host: "chatgpt.com", url: "https://chatgpt.com/invoices" },
+        intent: "navigate",
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_click" },
+        page: {
+          host: "console.hetzner.cloud",
+          url: "https://console.hetzner.cloud/projects",
+        },
+        intent: "activate",
+        element: { ref: "e1", role: "button", name: "Open invoice" },
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_read_file" },
+        page: { host: "", url: "" },
+        intent: "read_file",
+        file: {
+          path: "downloads/invoice.pdf",
+          name: "invoice.pdf",
+          extension: "pdf",
+        },
+      }),
+    ];
+
+    for (const input of allowed) {
+      const decision = evaluateActionPolicy(policy, input);
+      expect(decision.allowed).toBe(true);
+      expect(decision.source).toBe("allow");
+    }
+  });
+});
 
 const permissive: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 

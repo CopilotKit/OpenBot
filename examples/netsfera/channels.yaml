@@ -1,0 +1,11 @@
+channels:
+  - id: control-erp
+    name: Control ERP
+    description: Conversaciones con el Jefe ERP.
+    permitted_agents: [jefe-erp]
+    allowed_groups: [all]
+  - id: documentos-externos
+    name: Documentos externos
+    description: Conversaciones con el Recolector de documentos.
+    permitted_agents: [recolector-documentos]
+    allowed_groups: [all]

@@ -1,0 +1,11 @@
+# This overlay intentionally changes only the OpenBot application configuration. It must always be
+# layered after the existing hardened base and browser-supervisor Compose files; it never replaces
+# their network, port, volume, security, or browser topology.
+services:
+  openbot:
+    environment:
+      TENANT_PACKAGE_DIR: ../examples/netsfera
+      # The current loader accepts AGENT_COMPUTER_POLICY as JSON, not a file path. This value is kept
+      # byte-for-byte equivalent to agent-computer-policy.json; the policy test evaluates the file.
+      AGENT_COMPUTER_POLICY: >-
+        {"mode":"enforce","deny":["bot.id == \"jefe-erp\" && matches(tool.name, \"^computer_\")","bot.id == \"recolector-documentos\" && tool.name in [\"computer_run_command\",\"computer_write_file\"]","bot.id == \"recolector-documentos\" && intent in [\"navigate\",\"activate\",\"type\"] && page.host != \"\" && !(page.host in [\"chatgpt.com\",\"auth.openai.com\",\"platform.openai.com\",\"accounts.hetzner.com\",\"console.hetzner.cloud\"])","bot.id == \"recolector-documentos\" && intent in [\"navigate\",\"activate\",\"type\"] && (contains(page.url, \"payment\") || contains(page.url, \"billing/plan\") || contains(page.url, \"member\") || contains(page.url, \"credential\") || contains(page.url, \"api-key\") || contains(page.url, \"password\"))","bot.id == \"recolector-documentos\" && intent in [\"activate\",\"type\"] && (contains(element.name, \"buy\") || contains(element.name, \"purchase\") || contains(element.name, \"upgrade\") || contains(element.name, \"payment method\") || contains(element.name, \"api key\") || contains(element.name, \"password\"))"],"allow":["bot.id == \"recolector-documentos\" && tool.name in [\"computer_navigate\",\"computer_click\",\"computer_type\",\"computer_key\",\"computer_scroll\"] && page.host in [\"chatgpt.com\",\"auth.openai.com\",\"platform.openai.com\",\"accounts.hetzner.com\",\"console.hetzner.cloud\"]","bot.id == \"recolector-documentos\" && tool.name in [\"computer_read_file\",\"computer_list_files\"] && matches(file.path, \"^downloads(/|$)\")"]}
