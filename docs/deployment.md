@@ -1,7 +1,8 @@
 # Deployment
 
-OpenBot ships as one container. It carries the app, the API that serves it, and the browser the Bots
-drive, and it can carry its own PostgreSQL as well. It does what it does on a laptop.
+OpenBot ships as one container. It carries the app, the API that serves it, and the graphical
+computer the Bots drive, and it can carry its own PostgreSQL as well. It does what it does on a
+laptop.
 
 ```sh
 docker build -t openbot .
@@ -16,9 +17,9 @@ docker run -p 3001:3001 --env-file .env \
 
 ## What is in the image, and what is not
 
-**In it:** the built app, the API, and Chromium. One port, 3001. The browser listens on 4100 inside
-the container and is deliberately not published: it holds real logins and its only caller is the
-process beside it.
+**In it:** the built app, the API, and a Linux desktop with Chromium and a terminal. One port, 3001.
+The computer listens on 4100 inside the container and is deliberately not published: it holds real
+logins and its only caller is the process beside it.
 
 **PostgreSQL, if you ask for it.** `EMBEDDED_POSTGRES=on` starts one inside the container, creates
 the database and the `vector` extension the first time, and runs the migrations on every start. It
@@ -41,10 +42,10 @@ enable it for you.
 **Not in it:**
 
 **The supervisor.** It gives each Bot its own container, which needs a Docker socket, which no
-serverless container platform permits. Without it, every Bot shares the one browser, exactly as they
-do on a laptop with no supervisor configured. A shared browser means shared logins, shared files and
-shared session between Bots, which is fine for a deployment where one team trusts its own Bots and
-is not fine as a boundary between tenants.
+serverless container platform permits. Without it, every Bot shares one computer, exactly as they do
+on a laptop with no supervisor configured. Shared mode exposes only each Bot's browser page, not the
+process-wide desktop, but the underlying logins, files and session are still shared. That is fine for
+a deployment where one team trusts its own Bots and is not a boundary between tenants.
 
 **The routines schedule.** Nothing in this image is scheduled to fire a routine — there is no
 worker service beside the API, and `worker/` (the looping local variant) is not in the image. The
@@ -124,7 +125,7 @@ docker run --rm --env-file .env openbot \
 
 The page snapshot a Bot resolves element references against lives in Postgres, so a second replica
 can answer a click the first one snapshotted. Run more than one if the platform wants it. The
-supervisor is still not in this image, so every replica shares the one browser inside it.
+supervisor is still not in this image, so every replica uses its own shared computer.
 
 ## Platform notes
 

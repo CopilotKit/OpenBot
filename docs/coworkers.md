@@ -61,6 +61,12 @@ That is `agent-langgraph`, which runs a real framework and its own tool loop. Th
 `4200` hand-writes the protocol and leaves the loop to whatever is watching, so it is a reference
 rather than something to build a deployment on.
 
+With `CODEX_AGENT_ENABLED=true`, `scripts/start.sh` instead defaults this endpoint to
+`http://localhost:4202/ag-ui`, starts the Codex adapter on the host, and skips both provider-key Bot
+containers. The adapter reuses the existing ChatGPT login, resumes its Codex threads, and sends only
+assigned tool calls back through OpenBot's governed callback. See
+[the local Codex coworker guide](../agent-codex/README.md).
+
 The URL is optional. Set it with `MANAGED_AGENT_TOKEN`, or leave it unset: product-created coworkers
 then need their own endpoint, and a package agent whose endpoint expands to nothing is omitted
 rather than registered against a missing host. A leftover token with no URL is ignored.

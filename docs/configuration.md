@@ -31,8 +31,8 @@ All four Intelligence values are required together. Missing any of them stops se
 the product. It needs `MANAGED_AGENT_TOKEN` beside it, or the server refuses to start. Unset, the
 server starts without a managed Bot, the shipped Risk Analyst coworker is omitted, and creating a
 coworker without its own endpoint is refused. A leftover token with no URL is ignored. The
-one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` points it
-at `agent-langgraph` on a laptop.
+one-container image has no Bot process, so leave the URL unset there. `scripts/start.sh` normally
+points it at `agent-langgraph` on a laptop, or at `agent-codex` when local Codex mode is enabled.
 
 ## General variables
 
@@ -42,7 +42,7 @@ at `agent-langgraph` on a laptop.
 | `NODE_ENV`           | unset                              | `production` refuses the example `KEY_ENCRYPTION_KEY`. It does not decide whether sign-in is required; see `OPENBOT_SINGLE_USER`. |
 | `TENANT_PACKAGE_DIR` | `../examples/fintech`              | Tenant package directory, resolved from `server/`.                  |
 | `DEPLOYMENT_ID`      | the tenant package's id            | Names this deployment inside a shared Intelligence project.          |
-| `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both shipped Bots.        |
+| `OPENAI_API_KEY`     | unset                              | Default model key for built-in agents and both provider-key Bots. Not needed for local Codex mode. |
 | `OPENAI_BASE_URL`    | unset                              | OpenAI-compatible endpoint that key is spent against. See below.    |
 | `BOT_PROVIDER`       | `openai`                           | Provider for `agent-langgraph`: `openai`, `anthropic`, or `google`. |
 | `ANTHROPIC_API_KEY`  | unset                              | Anthropic key when `BOT_PROVIDER=anthropic`.                        |
@@ -132,6 +132,34 @@ above: it says where the worker's own process can reach this deployment's API, w
 where the worker runs rather than a fact about the deployment `loadConfig` describes. `start.sh` points
 it at the server's own port on a laptop; the Helm chart's routines CronJob points it at the server's
 in-cluster Service address.
+
+## Local Codex coworker
+
+Local Codex mode runs a host-side AG-UI adapter against the Codex app-server already authenticated by
+`codex login`. It is an alternative to starting the two provider-key Bot containers:
+
+```dotenv
+CODEX_AGENT_ENABLED=true
+AGENT_ENDPOINT_ALLOWED_HOSTS=localhost:4202
+```
+
+`scripts/start.sh` then makes `http://localhost:4202/ag-ui` the default managed coworker endpoint,
+starts the adapter on the host, and keeps its Codex thread mapping under `.openbot-codex/`. An explicit
+`MANAGED_AGENT_AG_UI_URL` still wins, so remove an old `localhost:4201` value when switching modes.
+
+| Variable                      | Default                              | Meaning |
+| ----------------------------- | ------------------------------------ | ------- |
+| `CODEX_AGENT_ENABLED`         | `false`                              | Starts the local Codex adapter and skips `agent-bot` and `agent-langgraph`. |
+| `CODEX_AGENT_PORT`            | `4202`                               | Host port for the adapter. |
+| `CODEX_AGENT_WORKSPACE`       | `.openbot-codex/workspace`           | Working directory passed to Codex turns. |
+| `CODEX_AGENT_STATE`           | `.openbot-codex/threads.json`        | Durable OpenBot-thread to Codex-thread mapping. |
+| `CODEX_AGENT_TURN_TIMEOUT_MS` | `180000`                             | Maximum time allowed for one Codex app-server turn. |
+| `CODEX_BINARY`                | `codex`                              | Codex CLI binary to launch. |
+| `OPENBOT_TOOL_URL`            | local server `/api/agent-tools/call` | Callback where assigned tools re-enter OpenBot's grant, policy and audit gateway. |
+
+The start script supplies `MANAGED_AGENT_TOKEN` and `AGENT_TOOL_TOKEN`. When running the adapter by
+hand, supply both plus `OPENBOT_TOOL_URL` and the state paths yourself. See
+[the adapter guide](../agent-codex/README.md).
 
 ## OpenAI-compatible endpoints
 
@@ -333,6 +361,7 @@ When optional SPIRE services are used:
 | `agent-computer`  | 4100                       | `COMPUTER_PORT`   |
 | `agent-bot`       | 4200                       | `BOT_PORT`        |
 | `agent-langgraph` | 4201                       | `LANGGRAPH_PORT`  |
+| `agent-codex`     | 4202                       | `CODEX_AGENT_PORT` |
 | `supervisor`      | 4500 host / 4300 container | `SUPERVISOR_PORT` |
 | PostgreSQL        | 5432                       | `POSTGRES_PORT`   |
 
@@ -340,6 +369,7 @@ Set these in `.env` or in the environment. `docker-compose.yml` publishes on the
 `scripts/start.sh` reads the same names to decide where to look, so one setting moves a service and
 everything that talks to it. The addresses built from them are separate settings, so a moved service
 also needs its URL changed: `DATABASE_URL`, `AGENT_COMPUTER_URL` and `MANAGED_AGENT_AG_UI_URL`.
+Codex mode derives its managed URL from `CODEX_AGENT_PORT` unless that URL is set explicitly.
 
 To run two deployments on one Docker host, give the second one its own `COMPOSE_PROJECT_NAME`,
 `COMPUTER_NAMESPACE` and `COMPUTER_IMAGE`. Container and volume names are global to a host, and the

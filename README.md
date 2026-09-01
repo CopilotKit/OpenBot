@@ -55,7 +55,7 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 - Docker, for PostgreSQL and the shipped Bots.
 - [Bun](https://bun.sh) 1.3+, for the app and API server.
 - A CopilotKit Intelligence project and license. A free plan is available, and Intelligence can be self-hosted.
-- A model key. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google.
+- Either a model key, or the installed Codex CLI already authenticated with `codex login`. The proof-of-concept Bot uses OpenAI; the LangGraph Bot can use OpenAI, Anthropic, or Google; local Codex mode uses the ChatGPT account on this machine.
 
 ## Quick start
 
@@ -85,6 +85,11 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 3. Fill the remaining required values:
 
    - `OPENAI_API_KEY`
+
+   Or, to use the ChatGPT account already signed in through Codex instead of a provider API key,
+   set `CODEX_AGENT_ENABLED=true` and
+   `AGENT_ENDPOINT_ALLOWED_HOSTS=localhost:4202`. See
+   [agent-codex/README.md](agent-codex/README.md).
 
    Keep the managed Intelligence URLs from `.env.example` unless you run Intelligence yourself. The example `KEY_ENCRYPTION_KEY` is public and fine locally; generate your own with:
 
@@ -144,7 +149,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 
 ## Features
 
-- **A computer per Bot**: the supervisor gives each Bot its own container, its own `/workspace` volume and its own browser profile. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
+- **A computer per Bot**: the supervisor gives each Bot its own container, its own `/workspace` volume and its own browser profile. The guarded screen shows the full Linux desktop, including browser chrome, dialogs and a terminal; its Browser and Terminal dock stays available when Chromium is closed. Set `COMPUTER_RUNTIME=runsc` to run them under gVisor where the host supports it.
 - **A shell, not just a browser**: a Bot can run a command in its workspace, install what it needs, and process a file it saved. Through the same gate as everything else, so a rule can refuse a shell outright or refuse particular commands, and the command is on the record either way. The command inherits PATH, locale, terminal and proxy variables, not the rest of the deployment's environment.
 - **The gateway is the only way in**: it resolves the target from a server-held snapshot, evaluates the policy, writes the audit row, and only then calls the computer. There is no path that acts without the record existing first.
 - **CEL policy, fail closed**: rules can inspect `tool.name`, `intent`, `bot.id`, `actor.id`, `page.url`, `page.host`, `element.*`, `key`, `file.*` and `mcp.*`. Deny is evaluated before allow, a missing policy permits nothing, and a broken rule refuses rather than opens.
@@ -152,6 +157,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 - **Take the wheel**: a Bot that hits a login wall or a 2FA prompt asks for help. Control is handed over in the same panel and recorded as `computer.help_requested`, `computer.control_taken` and `computer.control_released`. While a person is driving, Bot actions are refused rather than queued.
 - **Secrets never enter the transcript**: the trail records that a secret was requested and how long it was, not what it said.
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand-written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
+- **Use the Codex account already on your machine**: local Codex mode resumes persistent Codex threads and exposes only the tools OpenBot assigned. Calls return through the same grant, policy and audit gateway; Codex-native action surfaces are disabled before app-server turns begin.
 - **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
 - **Governed MCP**: Google Drive and Notion ship in the catalogue, reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks; unknown tools and custom-server tools are treated as writes, and a catalogue tool the server advertises but does not name as a write classifies as a read. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
 - **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer.
@@ -214,6 +220,7 @@ Settings worth knowing:
 | `COMPUTER_TOKEN`                     | Secret every Bot computer request must present. `start.sh` sets one.      |
 | `SUPERVISOR_TOKEN`                   | Secret the supervisor requires. `start.sh` sets one.                      |
 | `AGENT_TOOL_TOKEN`                   | Secret a Bot presents to call a granted tool back. `start.sh` sets one. Without it no Bot may call tools. |
+| `CODEX_AGENT_ENABLED`                | Runs the host-side Codex adapter on port 4202 and skips the two provider-key Bot containers. |
 | `COMPUTER_SUPERVISOR_URL`            | Gives each Bot a computer of its own instead of one shared computer.      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run computers under gVisor, where the host has it.      |
 | `COMPUTER_SANDBOX`                   | Set to `on` for Chromium's own sandbox, where the host permits it.        |
@@ -232,9 +239,10 @@ Full reference: [docs/configuration.md](docs/configuration.md).
 | ------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------ |
 | `app`                    | 3010                       | React/Vite UI.                                                                                   |
 | `server`                 | 3001                       | Hono API, CopilotKit runtime, auth, policy, audit, plugins, components, coworkers, and channels. |
-| `agent-computer`         | 4100                       | Chromium plus `/workspace` and browser profile.                                                  |
+| `agent-computer`         | 4100                       | Linux desktop, Chromium, terminal, `/workspace`, and browser profile.                            |
 | `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                          |
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                             |
+| `agent-codex`            | 4202                       | Optional host-side Codex AG-UI adapter using the local ChatGPT login.                            |
 | `supervisor`             | 4500 host / 4300 container | Creates and manages one computer per Bot.                                                        |
 | PostgreSQL with pgvector | 5432                       | Product data, policy, audit, credentials, grants, channels, and component metadata.              |
 | CopilotKit Intelligence  | external                   | Durable threads and memory.                                                                      |

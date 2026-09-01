@@ -2,7 +2,8 @@
 
 ## Setup
 
-Install Docker, [Bun](https://bun.sh) 1.3+, `lsof`, `python3`, and `curl`.
+Install Docker, [Bun](https://bun.sh) 1.3+, `lsof`, `python3`, and `curl`. Local Codex mode also needs
+the Codex CLI authenticated with `codex login`.
 
 ```sh
 cp .env.example .env
@@ -19,7 +20,9 @@ npx --yes copilotkit@latest license --write
 
 Put the `cpk-...` runtime key from `project select` in `.env` as
 `INTELLIGENCE_API_KEY`. `license --write` writes `COPILOTKIT_LICENSE_TOKEN`.
-Then add `OPENAI_API_KEY`.
+Then add `OPENAI_API_KEY`. To use the local ChatGPT account instead, set
+`CODEX_AGENT_ENABLED=true` and `AGENT_ENDPOINT_ALLOWED_HOSTS=localhost:4202`; see
+[the Codex coworker guide](../agent-codex/README.md).
 
 Start the stack:
 
@@ -40,10 +43,13 @@ Use `bun run dev` only when you want the app and API server without starting the
 | `agent-computer`  | 4100                       |
 | `agent-bot`       | 4200                       |
 | `agent-langgraph` | 4201                       |
+| `agent-codex`     | 4202 (only in local Codex mode) |
 | `supervisor`      | 4500 host / 4300 container |
 | PostgreSQL        | 5432                       |
 
 `start.sh` leaves existing matching services alone and reports when a port is held by another process.
+With `CODEX_AGENT_ENABLED=true`, it runs `agent-codex` on the host and skips the `agent-bot` and
+`agent-langgraph` containers.
 
 ## Migrations
 
@@ -127,9 +133,10 @@ cd agent-computer && bun install
 cd .. && bun run test:live-screen
 ```
 
-It drives the live screen against the real computer process with a real Chromium: a socket closing
-while the browser is still starting, a second connection taking the screen from the first, the wheel
-refusing input from the socket that owns it, and a browser closing by request or by the idle sweep.
+It drives the live screen against the real computer process with Chromium and Xvfb: a socket closing
+while the browser is still starting, a second connection taking the screen from the first, control
+lease checks, the full RFB desktop, and closing Chromium with its native X before reopening it from
+the desktop dock.
 Those need `agent-computer/src/index.ts`, which imports Playwright at module scope, and `playwright`
 is declared only in `agent-computer/package.json`, which `bun install` at the root does not reach. So
 without `OPENBOT_LIVE_SCREEN=1` the files skip before importing anything, which is what keeps

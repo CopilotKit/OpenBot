@@ -1,6 +1,6 @@
 # Architecture
 
-OpenBot combines a React app, a Hono API server, PostgreSQL, CopilotKit Intelligence, AG-UI Bot endpoints, and governed browser computers.
+OpenBot combines a React app, a Hono API server, PostgreSQL, CopilotKit Intelligence, AG-UI Bot endpoints, and governed graphical computers.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/architecture-dark.svg">
@@ -15,14 +15,18 @@ Regenerate it with `bun run diagram` after changing anything it shows.
 | ------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `app`                    | 3010                       | React/Vite interface for channels, Bot chat, live screen, settings, and admin pages.                                                        |
 | `server`                 | 3001                       | API, CopilotKit runtime, auth, roles, tenant package, coworkers, channels, policy, audit, credentials, plugins, components, and connectors. |
-| `agent-computer`         | 4100                       | Chromium, `/workspace`, browser profile, screenshots, snapshots, and file tools.                                                            |
+| `agent-computer`         | 4100                       | A Linux desktop, Chromium, terminal, `/workspace`, browser profile, screenshots, snapshots, and file tools.                                 |
 | `agent-bot`              | 4200                       | Proof-of-concept AG-UI Bot.                                                                                                                     |
 | `agent-langgraph`        | 4201                       | LangGraph AG-UI Bot.                                                                                                                        |
+| `agent-codex`            | 4202                       | Optional host-side AG-UI adapter for the locally authenticated Codex app-server.                                                            |
 | `supervisor`             | 4500 host / 4300 container | Creates, stops, resets, and lists per-Bot computer containers.                                                                              |
 | PostgreSQL with pgvector | 5432                       | Product data, audit rows, credentials, policy, grants, channels, and components.                                           |
 | CopilotKit Intelligence  | external                   | Durable threads, memory, and realtime gateway.                                                                                              |
 
-`scripts/start.sh` starts PostgreSQL, `agent-computer`, `agent-bot`, `agent-langgraph`, and the supervisor through Docker Compose, then starts `server` and `app` on the host.
+`scripts/start.sh` starts PostgreSQL, `agent-computer`, and the supervisor through Docker Compose,
+then starts `server` and `app` on the host. It normally starts `agent-bot` and `agent-langgraph` in
+Compose too. With `CODEX_AGENT_ENABLED=true`, it skips those two and starts `agent-codex` on the host
+so the adapter can reuse the existing `codex login` session.
 
 The compose file also defines optional SPIRE services. `start.sh` does not start them.
 
@@ -73,6 +77,12 @@ Compose puts it on a different network from PostgreSQL. A Bot has a shell, and a
 
 With `COMPUTER_SUPERVISOR_URL`, each Bot gets its own computer container, workspace volume, and browser profile. Without it, all Bots share `AGENT_COMPUTER_URL`.
 
+An isolated computer publishes its whole framebuffer as read-only and control RFB sockets behind the
+server's same-origin WebSocket proxy. That is what shows browser chrome, native dialogs, the desktop
+panel and terminal rather than one CDP page canvas. A shared provider stays on the page stream because
+its process-wide desktop could contain another Bot's window. Older computer images without the RFB
+capability fall back to that page stream during an upgrade.
+
 A command on the computer inherits PATH, locale and terminal names, and the proxy variables, not the rest of the process environment. Userinfo is stripped from a proxy URL. `COMPUTER_SHELL_ENV` names anything else a deployment wants passed.
 
 The supervisor exposes only ensure, stop, reset, and list operations. It holds the Docker socket, so do not expose it outside the deployment network: Docker Compose binds it to `127.0.0.1:4500`, and a deployment running the server inside the compose network reaches it as `supervisor:4300` and needs no published port at all. Set `COMPUTER_RUNTIME=runsc` to run computers under gVisor on hosts that support it.
@@ -91,7 +101,11 @@ Secret entry is separate from chat content. The audit trail records that a secre
 
 ## Watching a Bot work
 
-Two surfaces beside the conversation. The screen is the live browser, proxied over a websocket and gated on the same question as every other route about that Bot. The Activity tab is what the Bot did away from the browser: every command with its output and exit code, every file read, write and listing, newest first.
+Two surfaces sit beside the conversation. For an isolated Bot, the screen is its full live desktop;
+for a shared provider, it is the Bot-scoped browser page. Both are proxied over a WebSocket and gated
+on the same question as every other route about that Bot. The Activity tab is what the Bot did away
+from the browser: every command with its output and exit code, every file read, write and listing,
+newest first.
 
 Activity is held in the browser for the open conversation and is gone on reload. It is a window rather than a record; the record is the audit trail, which is server-side, survives restarts, and is what an investigation reads. A saved file contributes its path and size and never its contents, matching the write route, which declines to echo them because a Bot may be saving something it was told in confidence.
 

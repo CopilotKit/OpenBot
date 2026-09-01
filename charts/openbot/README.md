@@ -214,9 +214,9 @@ That only happens in multi-zone clusters, so it passes every single-zone test.
 
 ### Storage has gravity
 
-The API tier holds nothing on disk. When per-Bot computers arrive they will, and the ordinary block
-volume on all three clouds is **zonal**: once provisioned, every pod referencing it is scheduled into
-that zone, so a Bot's computer is pinned to a zone for as long as its profile exists. That is
+The API tier holds nothing on disk. Per-Bot computers do, and the ordinary block volume on all three
+clouds is **zonal**: once provisioned, every pod referencing it is scheduled into that zone, so a
+Bot's computer is pinned to a zone for as long as its profile exists. That is
 acceptable and worth stating rather than discovering. `storageClass` stays empty by default, meaning
 the cluster's default class, because naming `gp3` or `pd-balanced` here is how a chart stops
 installing on somebody's bare-metal cluster.
