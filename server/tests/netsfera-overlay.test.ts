@@ -97,6 +97,37 @@ function renderedOverlayPolicy(): ActionPolicy {
   return JSON.parse((policy as string).replaceAll("$$", "$")) as ActionPolicy;
 }
 
+function changedPaths(
+  before: unknown,
+  after: unknown,
+  prefix = "",
+): string[] {
+  if (JSON.stringify(before) === JSON.stringify(after)) return [];
+  const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+
+  if (isObjectRecord(before) || isObjectRecord(after)) {
+    const beforeObject = isObjectRecord(before) ? before : {};
+    const afterObject = isObjectRecord(after) ? after : {};
+    return [...new Set([...Object.keys(beforeObject), ...Object.keys(afterObject)])]
+      .flatMap((key) =>
+        changedPaths(
+          beforeObject[key],
+          afterObject[key],
+          prefix ? `${prefix}.${key}` : key,
+        ),
+      )
+      .sort();
+  }
+
+  if (
+    before === null || after === null || typeof before !== typeof after
+  ) {
+    return [prefix];
+  }
+  return [prefix];
+}
+
 describe("the rendered Netsfera production overlay", () => {
   test("has the same executable policy as the reviewed artifact", () => {
     const artifact = JSON.parse(
@@ -118,6 +149,16 @@ describe("the rendered Netsfera production overlay", () => {
       volumes: base?.volumes,
       networks: base?.networks,
     });
+  });
+
+  test("changes only the reviewed build and runtime configuration", () => {
+    const { base, overlay } = renderedOverlay();
+
+    expect(changedPaths(base, overlay)).toEqual([
+      "build.args.TENANT_PACKAGE_DIR",
+      "environment.AGENT_COMPUTER_POLICY",
+      "environment.TENANT_PACKAGE_DIR",
+    ]);
   });
 
   test.each(["jefe-erp", "recolector-documentos"])(

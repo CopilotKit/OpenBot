@@ -1,54 +1,32 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadApplicationConfiguration } from "../../scripts/application-config";
 
-type GeneratedConfig = {
-  brand: { tenantId: string; productName: string };
-};
-
-function generatedConfigFromAppBuild(
-  tenantPackageDirectory?: string,
-): GeneratedConfig {
-  const outputDirectory = mkdtempSync(join(tmpdir(), "openbot-app-build-"));
-  const outputPath = join(outputDirectory, "application-config.ts");
-  writeFileSync(
-    outputPath,
-    [
-      "export type AppConfig = { brand: { tenantId: string; productName: string } };",
-      'export const appConfig: AppConfig = {"brand":{"tenantId":"sentinel","productName":"Sentinel"}};',
-      "",
-    ].join("\n"),
-  );
-  try {
-    const build = Bun.spawnSync([process.execPath, "scripts/generate-app-config.ts"], {
-      env: {
-        ...process.env,
-        APP_CONFIG_OUTPUT_PATH: outputPath,
-        TENANT_PACKAGE_DIR: tenantPackageDirectory,
-      },
-    });
-    expect(build.exitCode).toBe(0);
-
-    const generated = readFileSync(outputPath, "utf8");
-    const serializedConfig = generated.match(
-      /export const appConfig: AppConfig = (\{[\s\S]*\});\n$/,
-    )?.[1];
-    expect(serializedConfig).toBeDefined();
-    return JSON.parse(serializedConfig as string) as GeneratedConfig;
-  } finally {
-    rmSync(outputDirectory, { recursive: true, force: true });
-  }
-}
-
-test("the default app-build configuration generates the OpenBot brand", () => {
-  expect(generatedConfigFromAppBuild()).toEqual({
+test("the default app-build configuration loads the OpenBot brand", async () => {
+  await expect(loadApplicationConfiguration()).resolves.toEqual({
     brand: { tenantId: "openbot", productName: "OpenBot" },
   });
 });
 
-test("a Netsfera app-build configuration generates the NETSFERA ERP brand", () => {
-  expect(generatedConfigFromAppBuild("../examples/netsfera")).toEqual({
+test("a Netsfera app-build configuration loads the NETSFERA ERP brand", async () => {
+  await expect(
+    loadApplicationConfiguration("../examples/netsfera"),
+  ).resolves.toEqual({
     brand: { tenantId: "netsfera", productName: "NETSFERA ERP" },
   });
+});
+
+test("the root app-build stage exports its tenant argument to prebuild", () => {
+  const dockerfile = readFileSync(
+    join(import.meta.dir, "../../Dockerfile"),
+    "utf8",
+  );
+  const appBuildStage = dockerfile.match(
+    /FROM deps AS app-build\n([\s\S]*?)\n\nFROM /,
+  )?.[1];
+
+  expect(appBuildStage).toContain("ARG TENANT_PACKAGE_DIR=../examples/fintech");
+  expect(appBuildStage).toContain("ENV TENANT_PACKAGE_DIR=${TENANT_PACKAGE_DIR}");
+  expect(appBuildStage).toContain("RUN bun run --cwd app build");
 });
