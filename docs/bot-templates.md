@@ -459,7 +459,7 @@ Three ways, and none of them is a service OpenBot runs.
 1. **A file somebody sends you.** Slack, a gist, a pull request comment. Import is a paste box, and
    this needs no infrastructure at all.
 2. **The seed in the image.** [`examples/templates/`](../examples/templates/README.md) ships
-   twenty-seven worked templates, copied into the container, so a deployment with no network has
+   twenty-eight worked templates, copied into the container, so a deployment with no network has
    something to start from. Its README carries the rules a new one is reviewed against.
 3. **A curated repository**, `jerelvelarde/awesome-openbot-templates`: `*.openbot.yaml` files an
    administrator registers as a source, pinned to a commit sha and fetched server-side, so the

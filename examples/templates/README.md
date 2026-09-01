@@ -5,21 +5,21 @@ depends on, the capabilities it *asks* for, and a ceiling on what it may do. It 
 endpoint, no credential and no grant. See [docs/bot-templates.md](../../docs/bot-templates.md) for
 the format.
 
-There are 27 of them, across the 9 kinds of work a category may name. The `Dockerfile`
+There are 28 of them, across the 9 kinds of work a category may name. The `Dockerfile`
 copies `examples/` into the image, so they travel with a deployment that has no network at all and
 can be imported by opening one and pasting it in. They are also the worked examples: a template
 somebody writes by hand is read against these.
 
 The set is deliberately varied rather than uniform — some ask for no connectors at all, four run
 remote, one buys exactly a single write — so that it demonstrates the boundary vocabulary instead of
-repeating one shape 27 times. What each one is really carrying is a rule about judgement: what it
+repeating one shape 28 times. What each one is really carrying is a rule about judgement: what it
 must not conclude, and what it says when the evidence is thin.
 
 They are deliberately **written rather than exported**. Neither `type: built_in` nor `system_prompt`
 is a field, so exporting one of the shipped fintech Bots drops the prompt that is the whole of its
 behaviour, which is not a faithful round trip. A written template puts that behaviour in
 `role_description`, which does travel — and which a deployment with no Bot in the box hands the
-coworker as its standing instruction, so the twenty-three here that say `runtime: managed` ask the
+coworker as its standing instruction, so the twenty-four here that say `runtime: managed` ask the
 importer for no address at all. The first catalogue entries have to be written, and that is what
 these are.
 
@@ -52,6 +52,7 @@ these are.
 | `talent-scout.openbot.yaml` | recruiting | Reads a role's written requirements, then finds published evidence against each one and gives the address it was read on. Does not rank people and contacts nobody. |
 | `ticket-triage.openbot.yaml` | customer-success | Reads an incoming ticket, works out what it actually is, and hands a person a draft reply and a reason. Never answers the customer itself. |
 | `vendor-review.openbot.yaml` | operations-finance | Assembles what is actually known before a renewal — the terms we signed, what we spent, and what the vendor publishes today — and recommends nothing. |
+| `x-writer.openbot.yaml` | marketing | Drafts one post at a time for X from the thing that actually shipped, counts the characters, and hands it to a person to publish. Publishes nothing itself. |
 
 ## Review rules
 
