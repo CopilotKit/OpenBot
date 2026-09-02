@@ -8,6 +8,13 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A conversation started from the sidebar is recorded like one started from the home screen
+
+The trail had a `channel.routed` row for every conversation begun in the home composer — the
+coworker it went to and why, whether inferred or named with `@` — and nothing at all for one begun
+from the sidebar's +, a coworker's card or its profile, which read exactly like a row that failed
+to write. Picking a coworker in that To: field is now recorded the same way an `@` is.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
