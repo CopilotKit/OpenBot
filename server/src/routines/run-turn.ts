@@ -53,9 +53,9 @@ import type {
   BaseEvent,
   Message,
   RunAgentInput,
-  ToolCall,
 } from "@ag-ui/client";
 import { EventType } from "@ag-ui/client";
+import { sanitizeSeededHistory } from "../agents/history-sanitize";
 import { historyOrEmpty } from "../copilot";
 import type { TurnRunner } from "./runner";
 
@@ -196,104 +196,13 @@ function toAgentMessage(message: ThreadHistoryMessage): Message {
   } as Message;
 }
 
-/** Whether a message said nothing at all — no text, no parts, nothing to show a person. */
-function isSilent(message: Message): boolean {
-  const content = (message as { content?: unknown }).content;
-  if (content === undefined || content === null) return true;
-  if (typeof content === "string") return content.length === 0;
-  if (Array.isArray(content)) return content.length === 0;
-  return false;
-}
-
 /**
- * Refuse to re-present a conversation the model API will reject.
- *
- * FOUND IN PRODUCTION. Two firings of one routine, fifteen minutes apart, both failed with
- * `Tool result is missing for tool call call_TTbiXzJVNifQt8ioU1JJmj4S.` — the SAME call id both
- * times, so it did not come from the live turn: the channel's Intelligence thread held an assistant
- * message carrying a tool call whose result message never landed, because an earlier CHAT turn was
- * interrupted mid-call. The seeding below hands the whole converted history to the runner, the model
- * provider validates call/result pairing, and it rejects the conversation. One historical dangle
- * therefore poisons EVERY future firing in that channel until the fatigue rule disables the routine:
- * a permanent failure grown out of transient damage, and nothing the person did wrong.
- *
- * WHY DROPPING IS THE RIGHT ANSWER, and not repair. History here is CONTEXT for a turn, not a
- * transaction to resume. A dangling call is already permanently unanswerable — the tool run that
- * would have answered it ended when that chat turn did, and there is no result to invent. The only
- * two options are to seed a conversation the API refuses, or to seed the same conversation minus a
- * call that never completed. The second one loses a fragment of an interrupted exchange; the first
- * one disables a routine forever.
- *
- * WHAT THIS DOES NOT DO. It does not DELETE anything from the platform. The thread still holds every
- * row, the person still sees the interrupted exchange in their channel, and a browser turn is
- * unaffected. This is a read-side filter on one turn's input and nothing more.
- *
- * IDS ARE NEVER CHANGED, which is what keeps `persistedInputMessages`' id-subtraction below correct:
- * a message this pass stripped a tool call from keeps its id and is still subtracted out as historic,
- * and a message it dropped was never a candidate to persist. So sanitizing cannot turn a firing into
- * one that re-persists the transcript.
- *
- * The rules, in order:
- *  1. A tool call is ANSWERED if some later message carries it as `toolCallId`. Later, not merely
- *     present: a result ahead of its call is not a pairing any provider accepts either.
- *  2. An assistant message keeps only its answered calls. If that leaves it with no calls and
- *     nothing said, the message is dropped — an empty assistant husk is itself invalid for some
- *     providers, so stripping the call is not enough.
- *  3. A tool result whose `toolCallId` matches no surviving call is dropped: the mirror-image dangle,
- *     which is what an interruption between the two rows leaves behind in the other order.
- *
- * Order is preserved, the input array is not mutated, and a message the pass does not change is
- * returned as the same object — a healthy thread, which is nearly all of them, goes through
- * untouched rather than through a re-normalization that could quietly differ.
+ * Re-exported from `agents/history-sanitize.ts`, where it now lives, because a chat turn needs
+ * it too and this module cannot be imported from `copilot.ts`, since the import already runs the
+ * other way. Kept as a name on this module because this is where the reasoning was found and where the
+ * tests that cover the seeding path still reach for it.
  */
-export function sanitizeSeededHistory(history: Message[]): Message[] {
-  /** For each answered call id, the earliest position that answers it. */
-  const answeredAt = new Map<string, number>();
-  for (const [index, message] of history.entries()) {
-    const { toolCallId } = message as { toolCallId?: string };
-    if (toolCallId === undefined) continue;
-    if (!answeredAt.has(toolCallId)) answeredAt.set(toolCallId, index);
-  }
-
-  const surviving = new Set<string>();
-  const kept: (Message | undefined)[] = history.map((message, index) => {
-    const { toolCalls } = message as { toolCalls?: ToolCall[] };
-    if (toolCalls === undefined) return message;
-
-    const answered = toolCalls.filter((call) => {
-      const at = answeredAt.get(call.id);
-      return at !== undefined && at > index;
-    });
-    for (const call of answered) surviving.add(call.id);
-
-    // The husk check goes FIRST so it also catches a row that arrived with no calls and nothing
-    // said — the same invalid shape, reached without a dangle.
-    if (answered.length === 0 && isSilent(message)) return undefined;
-    // The healthy path, and the only one that returns the very same object.
-    if (answered.length === toolCalls.length) return message;
-
-    /*
-     * Cast for the same reason `toAgentMessage` casts: `Message` is a union discriminated on `role`,
-     * and a spread over the union widens past every branch of it. Neither rewrite here can change
-     * the role or the shape — one narrows the `toolCalls` array, the other removes the key — so
-     * there is nothing to narrow against and nothing that could stop being a `Message`.
-     */
-    if (answered.length > 0) {
-      return { ...message, toolCalls: answered } as Message;
-    }
-    // Text it did say, minus a call it cannot complete.
-    const { toolCalls: _dropped, ...rest } = message as Message & {
-      toolCalls?: ToolCall[];
-    };
-    return rest as Message;
-  });
-
-  return kept.filter((message): message is Message => {
-    if (message === undefined) return false;
-    const { toolCallId } = message as { toolCallId?: string };
-    return toolCallId === undefined || surviving.has(toolCallId);
-  });
-}
+export { sanitizeSeededHistory };
 
 /** What a message said out loud, or nothing if it did not say anything. */
 function assistantText(message: Message): string | undefined {

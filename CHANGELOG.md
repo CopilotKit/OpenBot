@@ -8,6 +8,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A conversation is no longer stuck after a tool call went unanswered
+
+A tool that runs in the browser can be torn down while its call is still open, most often because
+the tab was closed or reloaded mid-run. The call stayed in the thread with no result, every retry
+sent it back up, and the model API refused the whole conversation with `Tool result is missing for
+tool call ...`. The next three things the person typed failed identically, and the only way out was
+to notice that and start another channel.
+
+A chat turn now drops a tool call nothing is going to answer before the conversation reaches the
+model, on a built-in Bot and on a remote one alike. Routines already did this for the history they
+seed, and now share the one filter, with a stricter rule than theirs was: a result counts as an
+answer only if it arrives before the next thing the person said, matching what the model API
+enforces, so a handler that resolves after the person has typed again no longer looks like an
+answer. A routine's seeded history that held such a late result used to keep both halves and fail
+at the model; it now drops both and runs. A result that sits ahead of its own call, or a second
+answer to a call already answered, is dropped as well rather than sent where no provider accepts
+it. Ids are never rewritten and the stored thread is untouched, so the transcript still shows what
+happened and a call waiting on a resume still gets its result. The same filter also covers a Bot
+answering a relayed question, whose seeded conversation kept every tool call and no tool result.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
