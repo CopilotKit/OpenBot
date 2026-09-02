@@ -437,7 +437,12 @@ export function createAgentProfileStore(
         const source = await findAccessibleProfile(transaction, actor, id);
         if (!source) throw new AgentNotFoundError(id);
 
-        if (!managedConfiguration) {
+        // The endpoint alone: `auth` is a vault reference, and copying it shares one credential.
+        const configuration = source.endpoint
+          ? { endpoint: source.endpoint }
+          : managedConfiguration;
+        // After the source read, so a source with its own endpoint needs no managed Bot to fall back to.
+        if (!configuration) {
           throw new ManagedAgentUnavailableError();
         }
         const duplicateId = newAgentId();
@@ -445,7 +450,7 @@ export function createAgentProfileStore(
           id: duplicateId,
           name: source.name,
           type: "remote_ag_ui",
-          configuration: managedConfiguration,
+          configuration,
         });
         await transaction.insert(agentProfiles).values({
           agentId: duplicateId,

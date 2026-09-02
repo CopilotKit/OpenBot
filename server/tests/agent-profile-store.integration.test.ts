@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
+import { authFromConfiguration } from "../src/agents/auth-header";
 import {
   AgentNotFoundError,
   AgentNotManageableError,
@@ -589,6 +590,85 @@ describe("agent profile store integration", () => {
     expect(sourceMappings).not.toHaveLength(0);
     expect(duplicateChannelAgents).toHaveLength(0);
     expect(duplicateMappings).toHaveLength(0);
+  });
+
+  test("copies the source's own endpoint rather than repointing the copy at the managed Bot", async () => {
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      configuration: { endpoint: "https://hosted.example.test/ag-ui" },
+    });
+
+    const duplicate = await store.duplicate(owner, source.agentId);
+    createdAgentIds.push(duplicate.id);
+
+    expect(duplicate.endpoint).toBe("https://hosted.example.test/ag-ui");
+    expect(duplicate.endpoint).not.toBe(managedAgentAgUiUrl.toString());
+  });
+
+  test("gives a copy of an endpoint-less source the managed Bot, as its source had", async () => {
+    const owner = await createUser();
+    const created = await store.create(owner, {
+      name: `Created ${randomUUID()}`,
+      title: "Created Title",
+      roleDescription: "Created role description.",
+      visibility: "private",
+    } as CreateAgentInput);
+    createdAgentIds.push(created.id);
+
+    const duplicate = await store.duplicate(owner, created.id);
+    createdAgentIds.push(duplicate.id);
+
+    expect(duplicate.endpoint).toBe(managedAgentAgUiUrl.toString());
+  });
+
+  test("does not carry the source's stored key onto the copy", async () => {
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      configuration: {
+        endpoint: "https://hosted.example.test/ag-ui",
+        auth: { header: "Authorization", credentialId: "credential-1" },
+      },
+    });
+    expect((await profileById(owner, source.agentId)).hasAuth).toBe(true);
+
+    const duplicate = await store.duplicate(owner, source.agentId);
+    createdAgentIds.push(duplicate.id);
+
+    expect(duplicate.hasAuth).toBe(false);
+    const [row] = await database
+      .select({ configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, duplicate.id));
+    expect(authFromConfiguration(row?.configuration)).toBeNull();
+  });
+
+  test("duplicates a coworker with its own endpoint on a deployment with no managed Bot", async () => {
+    const unmanagedStore = createAgentProfileStore(database, undefined);
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      configuration: { endpoint: "https://hosted.example.test/ag-ui" },
+    });
+
+    const duplicate = await unmanagedStore.duplicate(owner, source.agentId);
+    createdAgentIds.push(duplicate.id);
+
+    expect(duplicate.endpoint).toBe("https://hosted.example.test/ag-ui");
+  });
+
+  test("refuses to duplicate an endpoint-less coworker with no managed Bot to fall back to", async () => {
+    const unmanagedStore = createAgentProfileStore(database, undefined);
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      configuration: {},
+    });
+
+    await expect(
+      unmanagedStore.duplicate(owner, source.agentId),
+    ).rejects.toBeInstanceOf(ManagedAgentUnavailableError);
   });
 
   test("soft deletes a profile from reads and lists while retaining its raw rows", async () => {

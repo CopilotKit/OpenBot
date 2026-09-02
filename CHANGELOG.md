@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Duplicating a coworker keeps the endpoint it was copied from
+
+Duplicate used to point every copy at this deployment's own managed Bot, whatever the coworker being
+copied ran on. Duplicating one you host yourself gave back something that looked identical on every
+screen, carried the same name, title and role, and answered from a different process. The copy's
+connection tab then said it ran here and stopped showing an endpoint at all, so the swap was
+invisible in the one place you would have checked. A copy now runs where its original ran, and the
+managed Bot is used only when the coworker being copied had no endpoint of its own, which is the
+same fallback that applies when you create one without an endpoint. It does not inherit the
+original's key: that is a reference into the vault, and two coworkers sharing one credential would
+mean rotating either one's key silently changed the other's, so a copy starts without one. On a
+deployment with no managed Bot configured, duplicating a coworker that brought its own endpoint now
+works instead of being refused with advice to give it an endpoint it already had.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
