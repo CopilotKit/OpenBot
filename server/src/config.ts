@@ -634,9 +634,23 @@ function agentEndpointAllowedHosts(
         `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must name one host. Patterns are not accepted: list each address instead.`,
       );
     }
-    hosts.add(host.replace(/^\[/, "").replace(/\]$/, ""));
+    hosts.add(normalizeAllowedHost(host));
   }
   return hosts;
+}
+
+function normalizeAllowedHost(host: string): string {
+  // IPv6 is bracketed as [host] or [host]:port. Strip the brackets and keep the port.
+  if (host.startsWith("[")) {
+    const close = host.indexOf("]");
+    if (close === -1) return host.replace(/^\[/, "").replace(/\]$/, "");
+    const ipv6 = host.slice(1, close).toLowerCase();
+    const rest = host.slice(close + 1);
+    if (!rest) return ipv6;
+    if (rest.startsWith(":")) return `${ipv6}${rest.toLowerCase()}`;
+    return `${ipv6}${rest.toLowerCase()}`;
+  }
+  return host;
 }
 
 function privateHostsAllowed(environment: Environment): boolean {
