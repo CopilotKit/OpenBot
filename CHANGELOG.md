@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A custom MCP server token is sent with the scheme it names
+
+Every token stored against a custom MCP server went out as `Bearer`, whatever the vendor asked for.
+A server that forwards the header to an API speaking Basic auth still answers the handshake and the
+tool listing, so the Plugins page showed the connector connected and its tools offered, and every
+real call came back 401. DataForSEO's hosted server behaves exactly this way.
+
+A token that begins with `Basic ` or `Bearer ` is now sent as written, so paste the credential the
+vendor gives you, scheme and all. A bare token is still sent as `Bearer`, so nothing already
+working needs to change.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
