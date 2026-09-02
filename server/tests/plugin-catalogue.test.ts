@@ -93,10 +93,15 @@ describe("which servers this deployment will talk to", () => {
         expect(entry.hostPattern?.startsWith("^")).toBe(true);
         expect(entry.hostPattern?.endsWith("$")).toBe(true);
       } else if (entry.auth.kind === "builtin") {
-        // First-party and in-process: there is no host outside this process to reach, so the
-        // https requirement below does not apply. Asserted positively instead, so this branch
-        // cannot quietly become a loophole for a future entry that DOES dial a real host.
-        expect(entry.host).toBe("builtin://routines");
+        /*
+         * First-party and in-process: there is no host outside this process to reach, so the
+         * https requirement below does not apply. Asserted against a list rather than against the
+         * `builtin://` scheme, so this branch cannot quietly become a loophole for a future entry
+         * that DOES dial a real host: adding one means adding it here, deliberately.
+         */
+        expect(["builtin://routines", "builtin://mailbox"]).toContain(
+          entry.host,
+        );
       } else {
         expect(entry.host.startsWith("https://")).toBe(true);
       }
@@ -105,6 +110,19 @@ describe("which servers this deployment will talk to", () => {
 });
 
 describe("whose credential a server uses", () => {
+  test("a builtin entry says whether it is reached as the asker or as the deployment", () => {
+    /*
+     * The one question the audit trail asks about a call with no vendor. Routines touches the
+     * asker's own rows; Mailbox opens one mailbox the deployment owns, on a password the deployment
+     * holds. Recording the second as the asker would put a person's id on a row describing access
+     * that was never theirs, so every builtin has to state it rather than inherit a guess.
+     */
+    for (const entry of CATALOGUE) {
+      if (entry.auth.kind !== "builtin") continue;
+      expect(["actor", "deployment"]).toContain(entry.auth.reachedAs);
+    }
+  });
+
   test("every entry says which, rather than leaving it to be inferred", () => {
     // The whole point of replacing a `needsCredential` boolean. "Needs a credential" did not say
     // whose, and a reader who guessed would guess the deployment's, which for a user-oauth vendor
@@ -252,7 +270,9 @@ describe("Routines", () => {
   });
 
   test("has no credential, because there is nothing to authenticate to", () => {
-    expect(entry?.auth.kind).toBe("builtin");
+    // Reached as the person asking, unlike the other builtin: a routine is theirs, and the audit
+    // trail should say whose rows a call touched.
+    expect(entry?.auth).toEqual({ kind: "builtin", reachedAs: "actor" });
   });
 
   test("is reached through the builtin transport, not a vendor", () => {
@@ -279,6 +299,50 @@ describe("Routines", () => {
       ...(entry?.writeTools ?? []),
       "list_routines",
       "brand-new-tool",
+    ]) {
+      expect(classifyTool(entry, name, false)).toBe("write");
+    }
+  });
+});
+
+describe("Mailbox", () => {
+  const entry = catalogueEntry("mailbox");
+
+  test("is in the catalogue and resolves to its own builtin address", () => {
+    expect(entry).not.toBeNull();
+    expect(resolveServerUrl("mailbox")?.url).toBe("builtin://mailbox");
+  });
+
+  test("has no per-person credential, because there is one mailbox and it is the deployment's", () => {
+    expect(entry?.auth).toEqual({ kind: "builtin", reachedAs: "deployment" });
+    // `builtin` takes no credential from the server row, so nothing an administrator points at this
+    // entry is ever spent. The mailbox password is resolved from the vault by its own key instead.
+    expect(serverCredentialKind(entry as CatalogueEntry)).toBeNull();
+  });
+
+  test("is reached through its own builtin transport, not a vendor and not Routines", () => {
+    expect(entry?.transport).toBe("builtin-mailbox");
+  });
+
+  test("pins the exact write list, so a dropped or renamed entry fails here", () => {
+    // One write, and the reason this entry is grantable per tool: reading mail is recoverable and
+    // sending it is not.
+    expect(entry?.writeTools).toEqual(["send_message"]);
+  });
+
+  test("classifies its tools the same way every other vendor's are classified", () => {
+    expect(classifyTool(entry, "send_message", true)).toBe("write");
+    expect(classifyTool(entry, "list_messages", true)).toBe("read");
+    expect(classifyTool(entry, "read_message", true)).toBe("read");
+    expect(classifyTool(entry, "search_messages", true)).toBe("read");
+    // A name nothing here has vouched for is a write, the same as for any other vendor.
+    expect(classifyTool(entry, "delete_message", false)).toBe("write");
+    // Every tool, advertised or not, is a write when the server never said it was advertised.
+    for (const name of [
+      "send_message",
+      "list_messages",
+      "read_message",
+      "search_messages",
     ]) {
       expect(classifyTool(entry, name, false)).toBe("write");
     }

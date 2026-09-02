@@ -8,6 +8,61 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot can read and answer the deployment's own mailbox
+
+A new catalogue entry, Mailbox, appears at `/admin/plugins/mailbox`. It gives a Bot four tools
+against the deployment's own mail: `list_messages`, `read_message`, `search_messages` and
+`send_message`, the last of which threads a reply when it is given the uid of the message being
+answered, and files a copy of what it sent in the account's Sent folder so webmail and the Bot both
+find the outgoing mail. The mailbox belongs to the deployment rather than to whoever is asking, so
+everybody granted the tools reads the same mail. Decide that before granting it, because it is the
+whole of the access model.
+
+Configure it with `MAILBOX_IMAP_HOST`, `MAILBOX_SMTP_HOST` and `MAILBOX_USERS`, which are needed
+together: set one of the three and the server refuses to start naming the others, rather than
+booting with half a mailbox that fails at the first login in front of somebody. `MAILBOX_USERS` is
+a comma-separated list, so several accounts on one shared host are one deployment, and the first
+listed is the default that a call naming no `account` works in. `MAILBOX_USER` is still read as a
+list of one for a deployment that already had it, and setting both refuses to start.
+`MAILBOX_IMAP_PORT` and `MAILBOX_SMTP_PORT` default to the implicit-TLS ports, 993 and 465. Leave
+the three required variables unset and the connector is still listed and still grantable, and every
+call answers with the sentence naming what to set.
+
+The passwords are not environment variables. Each account's password is a row in the encrypted
+credential vault at `/admin/credentials`, kind `mcp`, provider `mailbox`, key id the address itself,
+so a deployment with three mailboxes holds three rows and rotates or revokes each on its own. A
+password is read at the moment a call needs it, so a rotation takes effect on the next tool call
+rather than on the next restart, and a revocation stops that account within a call. Nothing prints
+one: IMAP command logging is off, and a mail server's failure sentence is scrubbed of the plaintext
+and of the base64 forms before it reaches an audit row, a transcript or a model.
+
+`MAILBOX_ALLOWED_RECIPIENT_DOMAINS` bounds where mail may go, refusing a recipient outside the list
+before any connection is opened. Unset means anywhere, which is the behaviour every deployment had
+before this existed. It is there because a policy rule cannot do this job: a rule sees a tool call's
+name and its effect, never its arguments, so the only thing it can express about `send_message` is
+whether it happens at all. An approval rule decides that mail goes; the allowlist decides where it
+may go. A deployment that cares should set both.
+
+Grants are per tool and not per account, so "may read the mail" and "may answer it" are two separate
+decisions, while "may read support@ but not billing@" is not one this deployment can express: if an
+account must stay out of a Bot's reach, do not configure it here. Every call takes the same route as
+any other connector's. The Bot's grant is checked and the policy is evaluated with the tool's effect
+(`send_message` as a write, the other three as reads) before any mail server is dialled, and the
+audit row is written afterwards, on the outcome, in the same attempt-first order every other
+connector uses; a refusal is the only row written before the call goes out. A recipient the
+allowlist refuses, and any other argument a tool refuses on its own, is answered before the
+account's password is read out of the vault, so a call that was never going to reach a server never
+decrypts the secret either.
+
+`send_message` tells a Bot three different things, because a Bot acts on them differently. A
+delivered message is confirmed with the folder its copy is in and its message id. A refusal the
+server wrote is a failure that was not sent and may be corrected. A server that stopped answering
+after the message was handed over, whether by a timeout, a dropped socket or the sixty-second
+deadline, is reported as unconfirmed rather than failed: delivery is unknown and may have happened,
+do not send it again, tell the person who asked, and here is the message id so a duplicate can be
+found. A plain failure there was the one way this connector could deliver a message twice, since a
+Bot told "it failed" sends it again and mail cannot be recalled.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,

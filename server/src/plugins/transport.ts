@@ -1,3 +1,4 @@
+import * as builtinMailbox from "./builtin-mailbox";
 import * as builtinRoutines from "./builtin-routines";
 import type { CatalogueEntry } from "./catalogue";
 import * as driveRest from "./google-drive-rest";
@@ -44,9 +45,10 @@ export type VendorTransport = {
      * Who this call is for, and which Bot is making it.
      *
      * Ignored by every transport that dials a vendor: MCP and Drive answer to a credential, and who
-     * holds it is already decided by the time the connection is built. The builtin transport has no
-     * credential and no vendor — it acts on this deployment's own tables — so the actor is not
-     * context, it is the authorization, and it refuses without one. A routine is somebody's.
+     * holds it is already decided by the time the connection is built. A builtin transport has no
+     * vendor, so it answers for itself: Routines refuses a call that names no actor, because a
+     * routine is somebody's and the actor is the authorization, while Mailbox does not, because
+     * there is one mailbox belonging to the deployment and the Bot's grant is the authorization.
      */
     actorId?: string;
     /** The Bot the run belongs to. A routine runs as its Bot, which is never a name a model supplies. */
@@ -60,9 +62,10 @@ export type VendorTransport = {
        * Who this call is for, and which Bot is making it.
        *
        * Ignored by every transport that dials a vendor: MCP and Drive answer to a credential, and who
-       * holds it is already decided by the time the connection is built. The builtin transport has no
-       * credential and no vendor — it acts on this deployment's own tables — so the actor is not
-       * context, it is the authorization, and it refuses without one. A routine is somebody's.
+       * holds it is already decided by the time the connection is built. A builtin transport has no
+       * vendor, so it answers for itself: Routines refuses a call that names no actor, because a
+       * routine is somebody's and the actor is the authorization, while Mailbox does not, because
+       * there is one mailbox belonging to the deployment and the Bot's grant is the authorization.
        */
       actorId?: string;
       /** The Bot the run belongs to. A routine runs as its Bot, which is never a name a model supplies. */
@@ -79,12 +82,17 @@ export type VendorTransport = {
  * A closed union rather than a string, so adding one is a change to this file and to the registry
  * below together. An entry naming a transport that does not exist should not typecheck.
  */
-export type TransportKind = "mcp" | "google-drive-rest" | "builtin-routines";
+export type TransportKind =
+  | "mcp"
+  | "google-drive-rest"
+  | "builtin-routines"
+  | "builtin-mailbox";
 
 const TRANSPORTS: Record<TransportKind, VendorTransport> = {
   mcp,
   "google-drive-rest": driveRest,
   "builtin-routines": builtinRoutines,
+  "builtin-mailbox": builtinMailbox,
 };
 
 /**
