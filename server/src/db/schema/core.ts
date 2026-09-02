@@ -160,6 +160,33 @@ export const userRoles = pgTable(
 );
 
 /**
+ * One person's standing instructions, applied to every built-in coworker they run.
+ *
+ * The person-shaped half of a durable instruction. The other two carriers are both about the work
+ * rather than about the person: a coworker's role belongs to the coworker and is the same for
+ * everybody who talks to it, and a skill is invoked for one task. Neither can say "always write to
+ * me in British English" or "we are a two-person company, never call us a team", which is a fact
+ * about the person and true in every channel.
+ *
+ * The user id IS the primary key rather than a column beside a surrogate one. There is exactly one
+ * of these per person, and a table that allowed two would make "what are this person's standing
+ * instructions" depend on which row a query happened to order first.
+ *
+ * Empty is absence, not a row: the store deletes on an empty save rather than storing "". A row
+ * holding an empty string would be a person with standing instructions that say nothing, which the
+ * prompt seam then has to recognise and skip anyway — so there is one representation of "none", and
+ * it is having no row.
+ */
+export const userInstructions = pgTable("user_instructions", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  instructions: text("instructions").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
  * An enterprise identity provider this deployment has been told about.
  *
  * The other three providers are configuration: one Google, one Entra, one Okta, named in the

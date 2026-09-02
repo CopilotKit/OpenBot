@@ -77,6 +77,7 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
+import { createUserInstructionsStore } from "./user-instructions";
 import { repeatAfterEach } from "./work/loop";
 import {
   createWorkQueue,
@@ -515,6 +516,20 @@ const resolveRuntimeModelApiKey = () =>
 const loadToolsForActor = (actorId: string) => (botId: string) =>
   grantedTools({ store: pluginStore, botId, actorId });
 
+/** One person's standing instructions, for both the /api/settings routes and every run they start. */
+const userInstructionsStore = createUserInstructionsStore(database);
+
+/*
+ * What this person has told every built-in coworker they run.
+ *
+ * Per actor and read per build, for the reason every other per-person fact here is: somebody who
+ * edits their instructions and sends a message expects the message to land on the new ones, and a
+ * value captured at boot would serve the whole deployment whatever the first person to sign in had
+ * written.
+ */
+const loadInstructionsForActor = (actorId: string) => () =>
+  userInstructionsStore.read(actorId);
+
 /*
  * What the deployment tells a remote Bot about the run it is starting.
  *
@@ -669,6 +684,9 @@ const buildAgentFor = async ({
     // full so a Bot this owner cannot see is still absent, but the other Bots are neither built nor
     // asked what they hold.
     agentId,
+    // The owner's own standing instructions. A routine is their work done while they are asleep, so
+    // it is written the way they asked for it to be written, exactly as their chat turn would be.
+    loadInstructionsForActor(actor.id),
   );
   const agent = agents[agentId];
   if (!agent) {
@@ -826,6 +844,8 @@ const copilotRuntime = mountCopilotRuntime(
   (input) => {
     void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
   },
+  // What this person has told every coworker of theirs, in every channel. See user-instructions.ts.
+  loadInstructionsForActor,
 );
 
 /**
@@ -1078,6 +1098,9 @@ const app = createApp(
   routineStore,
   // Where each person is in first-run onboarding, read by /api/me and written by the wizard.
   createOnboardingStore(database),
+  // The same store every run reads through `loadInstructionsForActor`, so the screen a person edits
+  // and the prompt their coworker is built from can never be two different pieces of text.
+  userInstructionsStore,
 );
 
 /**
