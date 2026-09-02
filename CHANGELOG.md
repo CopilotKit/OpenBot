@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The transcript stays with the question when an answer starts arriving
+
+Sending a message carried it up to the top of the view, correctly, and then the Bot's first token
+threw the conversation back to its very first message, with the answer being written several
+screens below the fold. It happened on every turn, from wherever the reader happened to be
+scrolled, so every answer began with a scroll back down to find it. The transcript now holds the
+question in place for the whole turn, and the scroll that puts it there is animated rather than a
+jump — unless the reader has asked their system for reduced motion.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
