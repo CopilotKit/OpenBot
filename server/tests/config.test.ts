@@ -394,6 +394,59 @@ describe("deployment configuration", () => {
     },
   );
 
+  test("listens on 3001 when neither PORT nor SERVER_PORT is set", () => {
+    expect(loadConfig(baseEnvironment).port).toBe(3001);
+  });
+
+  test("moves the server by either name", () => {
+    expect(loadConfig({ ...baseEnvironment, PORT: "3005" }).port).toBe(3005);
+    expect(loadConfig({ ...baseEnvironment, SERVER_PORT: "3005" }).port).toBe(
+      3005,
+    );
+    expect(
+      loadConfig({ ...baseEnvironment, PORT: " 3005 ", SERVER_PORT: "3005" })
+        .port,
+    ).toBe(3005);
+  });
+
+  /*
+   * An unset variable declared in a compose file, or left as `PORT=` in a `.env`, arrives as an
+   * empty string rather than as absent. `process.env.PORT ?? process.env.SERVER_PORT` saw the empty
+   * string and never reached the second name, and `Number.parseInt("")` handed `Bun.serve` a NaN,
+   * which it answers by binding an ephemeral port nobody asked for.
+   */
+  test("reads SERVER_PORT when PORT is declared but empty, and the other way round", () => {
+    expect(
+      loadConfig({ ...baseEnvironment, PORT: "", SERVER_PORT: "3005" }).port,
+    ).toBe(3005);
+    expect(
+      loadConfig({ ...baseEnvironment, PORT: "3005", SERVER_PORT: "" }).port,
+    ).toBe(3005);
+    expect(
+      loadConfig({ ...baseEnvironment, PORT: "", SERVER_PORT: "" }).port,
+    ).toBe(3001);
+  });
+
+  test("refuses to start when PORT and SERVER_PORT disagree", () => {
+    expect(() =>
+      loadConfig({ ...baseEnvironment, PORT: "3001", SERVER_PORT: "3005" }),
+    ).toThrow("PORT (3001) and SERVER_PORT (3005) disagree");
+  });
+
+  // `Number.parseInt("30o1")` is 30, and the server used to come up there. Refused instead, the way
+  // a mistyped cap is: a port has to fail at start-up, where somebody is looking.
+  test.each(["30o1", "three", "0", "65536", "1.5", "-1"])(
+    "refuses to start on PORT=%p",
+    (value) => {
+      expect(() => loadConfig({ ...baseEnvironment, PORT: value })).toThrow(
+        "PORT must be a whole number between 1 and 65535",
+      );
+      expect(() =>
+        loadConfig({ ...baseEnvironment, SERVER_PORT: value }),
+      ).toThrow("SERVER_PORT must be a whole number between 1 and 65535");
+    },
+  );
+
   test("configures Docker as the per-Bot computer provider", () => {
     const config = loadConfig({
       ...baseEnvironment,
