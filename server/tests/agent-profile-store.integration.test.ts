@@ -221,6 +221,31 @@ async function racePackageAttachment(
   }
 }
 
+/**
+ * The stored row behind a coworker, proven to exist before anything reads it.
+ *
+ * Asserted here rather than at each call site because a missing row and a missing field are
+ * different failures that an optional chain would collapse into the same one — "systemPrompt is
+ * undefined" reads as a prompt that was not written when it may be a coworker that is not there.
+ */
+async function agentRow(agentId: string): Promise<{
+  type: string;
+  configuration: { systemPrompt?: string; endpoint?: string };
+}> {
+  const [row] = await database
+    .select({ type: agents.type, configuration: agents.configuration })
+    .from(agents)
+    .where(eq(agents.id, agentId));
+  if (!row) throw new Error(`no agents row for ${agentId}`);
+  return {
+    type: row.type,
+    configuration: (row.configuration ?? {}) as {
+      systemPrompt?: string;
+      endpoint?: string;
+    },
+  };
+}
+
 describe("agent profile store integration", () => {
   test("refuses to create a coworker with no endpoint when this deployment has no managed Bot", async () => {
     const owner = await createUser();
@@ -234,6 +259,97 @@ describe("agent profile store integration", () => {
         visibility: "private",
       }),
     ).rejects.toBeInstanceOf(ManagedAgentUnavailableError);
+  });
+
+  /**
+   * The coworker with nowhere to send it, and the instruction it actually runs on.
+   *
+   * `registeredAgentFromRow` gives a `built_in` agent its `configuration.systemPrompt` and NO
+   * standing role message, so that column is the whole of what such a coworker is ever told —
+   * `agentProfiles.roleDescription` never reaches it. These two tests exist because the pair can
+   * drift silently: creating writes both, and an edit that wrote only the profile left every screen
+   * showing new instructions while the Bot went on following the old ones, for good, with nothing
+   * anywhere to say so.
+   */
+  test("creates a coworker that runs here when there is nowhere to send it", async () => {
+    const owner = await createUser();
+    const withoutManaged = createAgentProfileStore(database, undefined);
+
+    const created = await withoutManaged.create(owner, {
+      name: "Runs Here",
+      title: "Everyday Work",
+      roleDescription: "Answer from the ledger and quote the line you used.",
+      visibility: "private",
+      systemPrompt: "Answer from the ledger and quote the line you used.",
+    });
+    createdAgentIds.push(created.id);
+
+    const row = await agentRow(created.id);
+    expect(row.type).toBe("built_in");
+    expect(row.configuration.systemPrompt).toBe(
+      "Answer from the ledger and quote the line you used.",
+    );
+    // No address was given and none was invented; that is what makes it built_in rather than remote.
+    expect(row.configuration.endpoint).toBeUndefined();
+  });
+
+  test("an edit moves the instruction such a coworker actually runs on", async () => {
+    const owner = await createUser();
+    const withoutManaged = createAgentProfileStore(database, undefined);
+    const created = await withoutManaged.create(owner, {
+      name: "Runs Here",
+      title: "Everyday Work",
+      roleDescription: "The first instruction.",
+      visibility: "private",
+      systemPrompt: "The first instruction.",
+    });
+    createdAgentIds.push(created.id);
+
+    await withoutManaged.update(owner, created.id, {
+      name: "Runs Here",
+      title: "Everyday Work",
+      roleDescription: "The second instruction, which must be the live one.",
+      visibility: "private",
+    });
+
+    const row = await agentRow(created.id);
+    expect(row.type).toBe("built_in");
+    expect(row.configuration.systemPrompt).toBe(
+      "The second instruction, which must be the live one.",
+    );
+    // And the profile every screen reads agrees with it, rather than only the profile moving.
+    expect((await profileById(owner, created.id)).roleDescription).toBe(
+      "The second instruction, which must be the live one.",
+    );
+  });
+
+  /**
+   * The other half of the same rule: a remote coworker must not acquire a prompt it never had.
+   *
+   * Its instruction travels as the standing role message built from the profile, so a `systemPrompt`
+   * appearing in its configuration would be a second source for the same thing — and the one the
+   * runtime prefers for a `built_in` row, which is what this coworker would look like if its type
+   * ever changed.
+   */
+  test("an edit never gives a coworker at its own address a system prompt", async () => {
+    const owner = await createUser();
+    const source = await createProfileFixture({
+      owner,
+      visibility: "private",
+      configuration: { endpoint: "https://remote.example.test/ag-ui" },
+    });
+
+    await store.update(owner, source.agentId, {
+      name: "Still Remote",
+      title: "Elsewhere",
+      roleDescription: "Edited, and it still runs at its own address.",
+      visibility: "private",
+      endpoint: "https://remote.example.test/ag-ui",
+    });
+
+    const row = await agentRow(source.agentId);
+    expect(row.type).toBe("remote_ag_ui");
+    expect(row.configuration.systemPrompt).toBeUndefined();
   });
 
   test("lets an owner and admin get and list a private profile but hides it from another user", async () => {

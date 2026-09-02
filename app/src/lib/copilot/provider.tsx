@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { deploymentCapabilitiesQueryOptions } from "@/lib/deployment/queries";
 import { ActiveBotProvider } from "./active-bot";
+import { BotTools } from "./bot-tools";
 import { ComputerTools } from "./computer-tools";
 import { EscalationTool } from "./escalation-tool";
 import { GalleryTools } from "./gallery-tools";
@@ -62,6 +63,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
         <GalleryTools />
         {/* Browser-authored components use the same component grants as the compiled gallery. */}
         <SandboxedTools />
+        {/*
+          Making a coworker from a conversation. Registers nothing unless the declared Bot holds the
+          `bot-creator` skill, so most runs are not offered these four tools at all.
+        */}
+        <BotTools />
         {children}
       </ActiveBotProvider>
     </CopilotKitProvider>
