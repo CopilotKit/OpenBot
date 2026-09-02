@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A browser clock that runs ahead no longer hides what a routine said
+
+The roster line and unread dot for a channel are moved by the last report that arrived, and only
+ever forwards. A browser whose clock was ahead stamped its report into the future, and then every
+report from a correct clock — a routine's reply, a relayed handoff answer, another member's browser
+— was dropped without a word until the real time caught up: the reply was in the thread, and the
+roster never said so. A reported time is now capped at the server's own clock.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
