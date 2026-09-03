@@ -143,17 +143,9 @@ const identifyActor: IdentifyActor = async (request) => {
 };
 
 const config = loadConfig();
-const rawPort = process.env.PORT ?? process.env.SERVER_PORT ?? "3001";
-if (
-  process.env.PORT &&
-  process.env.SERVER_PORT &&
-  process.env.PORT !== process.env.SERVER_PORT
-) {
-  throw new Error(
-    `PORT (${process.env.PORT}) and SERVER_PORT (${process.env.SERVER_PORT}) disagree: set one or set both to the same value`,
-  );
-}
-const port = Number.parseInt(rawPort, 10);
+// Read with the rest of the configuration, where an empty variable is an absent one. See
+// `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
+const port = config.port;
 const database = createDatabase(config.databaseUrl);
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
