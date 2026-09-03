@@ -229,3 +229,117 @@ describe("a consent this deployment did not start", () => {
     expect(recorded).toEqual([]);
   });
 });
+
+/**
+ * The vendor answered the consent screen and then could not be reached for the redemption.
+ *
+ * Every other refusal here is one of our own checks saying no before the network is touched, which
+ * is why nothing caught this: the vendor in these tests is either willing or never asked. A vendor
+ * that is reachable enough to send somebody back and unreachable a moment later is the ordinary
+ * shape of an outage, and it lands on somebody who has just consented.
+ */
+describe("a vendor that could not be reached for the redemption", () => {
+  async function sealed(): Promise<string> {
+    return await sealConnectState(
+      { userId: "user-1", serverId: "notion", verifier: "v-1" },
+      KEY,
+    );
+  }
+
+  async function withUnreachableVendor(
+    reject: () => never,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => reject()) as unknown as typeof fetch;
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  test("a connection failure ends at Settings, not on a 500", async () => {
+    const recorded: Recorded[] = [];
+    const hono = app({ recorded });
+    const state = await sealed();
+
+    await withUnreachableVendor(
+      () => {
+        throw new TypeError(
+          "Unable to connect. Is the computer able to access the url?",
+        );
+      },
+      async () => {
+        const response = await hono.request(callbackUrl(state));
+        // Both halves of the promise the handler makes, and the status is the half that was broken:
+        // a throw out of the redemption left Hono answering 500 with no Location at all.
+        expect(response.status).toBe(302);
+        expect(response.headers.get("location")).toBe(FAILED);
+      },
+    );
+    expect(recorded).toEqual([]);
+  });
+
+  test("a token endpoint that never answers ends the same way", async () => {
+    const recorded: Recorded[] = [];
+    const hono = app({ recorded });
+    const state = await sealed();
+
+    await withUnreachableVendor(
+      () => {
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      },
+      async () => {
+        const response = await hono.request(callbackUrl(state));
+        expect(response.status).toBe(302);
+        expect(response.headers.get("location")).toBe(FAILED);
+      },
+    );
+    expect(recorded).toEqual([]);
+  });
+
+  /**
+   * Quiet to the person, not quiet to the deployment.
+   *
+   * The redirect above is deliberately the same one every other refusal produces, which is what
+   * makes this test necessary: from the outside a vendor that is down and a vendor that said no are
+   * now indistinguishable, so the only place the difference survives is the log. Before the refusal
+   * was caught at all, the framework's own handler printed it on the way to a 500; catching it
+   * without putting a line back would have paid for the redirect with the outage nobody can see.
+   */
+  test("the deployment is told, even though the person is only sent back", async () => {
+    const recorded: Recorded[] = [];
+    const hono = app({ recorded });
+    const state = await sealed();
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+
+    try {
+      await withUnreachableVendor(
+        () => {
+          throw new TypeError("Unable to connect.");
+        },
+        async () => {
+          const response = await hono.request(callbackUrl(state));
+          expect(response.status).toBe(302);
+          expect(response.headers.get("location")).toBe(FAILED);
+        },
+      );
+    } finally {
+      console.error = realError;
+    }
+
+    const line = said.find((said) =>
+      said.includes("oauth-token-endpoint-unreachable"),
+    );
+    expect(line).toBeDefined();
+    // Which vendor, so an operator reading this knows where to look, and the cause.
+    expect(line).toContain("mcp.notion.com");
+    expect(line).toContain("Unable to connect.");
+    expect(recorded).toEqual([]);
+  });
+});
