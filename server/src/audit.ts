@@ -29,7 +29,9 @@ const sensitiveKeys = new Set([
   "token",
   "tokens",
   "tool_arguments",
+  "toolarguments",
   "tool_result",
+  "toolresult",
 ]);
 
 export const auditEventTypes = [

@@ -14,6 +14,7 @@ import {
   COMPUTER_GUIDANCE,
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
+import { sanitizeSeededHistory } from "./agents/history-sanitize";
 import type { AgentActor } from "./agents/profile-types";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
@@ -419,7 +420,7 @@ async function buildAgent(
    * what keeps a narrowed run from being told it holds something it was not offered.
    */
   const withTools = (tools: GrantedTool[]) =>
-    new BuiltInAgent(
+    new BuiltInAgentWithSaneHistory(
       builtInAgentConfiguration(
         agent,
         model,
@@ -586,15 +587,29 @@ function remoteAgentWithStandingRole(
     next: AbstractAgent,
   ) => {
     const holdingsMessage = holdingsMessageFor(tools);
+    /*
+     * The same guard a built-in Bot gets in `BuiltInAgentWithSaneHistory`, applied here because a
+     * remote Bot never passes through it: this middleware is the last thing between the browser's
+     * `input.messages` and the endpoint. A framework at the other end that converts with the same
+     * SDK refuses a dangling call for the same reason, and one that does not would still be
+     * shown a call nothing is going to answer. Done inside the middleware rather than by wrapping
+     * the agent, for the reason given above `remoteAgentWithStandingRole`: `run` skips `.use()`.
+     */
+    const answeredByResume = new Set(
+      (input.resume ?? []).map((entry) => entry.interruptId),
+    );
     return next.run({
       ...input,
       messages: [
         agent.standingMessage,
         ...(holdingsMessage ? [holdingsMessage] : []),
-        ...input.messages.filter(
-          (message) =>
-            message.id !== agent.standingMessage.id &&
-            message.id !== holdingsMessage?.id,
+        ...sanitizeSeededHistory(
+          input.messages.filter(
+            (message) =>
+              message.id !== agent.standingMessage.id &&
+              message.id !== holdingsMessage?.id,
+          ),
+          answeredByResume,
         ),
       ],
       /*
@@ -664,6 +679,68 @@ function remoteAgentWithStandingRole(
   );
 
   return remote;
+}
+
+/**
+ * A built-in Bot that will not hand the model provider a conversation it is going to refuse.
+ *
+ * FOUND LIVE, ON CHAT. One person's next three messages each failed with
+ * `AI_MissingToolResultsError: Tool result is missing for tool call chatcmpl-tool-8dd56dc7497c5ea9`,
+ * thrown out of the AI SDK's `convertToLanguageModelPrompt`. A frontend tool handler had been torn
+ * down while its call was open, so the agent's live messages in the browser carried an assistant
+ * message whose tool call never got a result. The durable store did not have it, nothing was going
+ * to answer it, and every retry sent it straight back up as `input.messages`. The conversation was
+ * finished until the person worked out for themselves to start another one.
+ *
+ * The guard has to be on this side of `run`. `BuiltInAgent.run` converts `input.messages` itself,
+ * with no seam in between, so wrapping the agent is the only place left to stand. The reasoning for
+ * why a dangling call is DROPPED rather than repaired, and why ids are never changed, is in
+ * `agents/history-sanitize.ts`, where the routines path found the same failure first.
+ *
+ * A RESUMED CALL IS NOT A DANGLE. `run` appends a tool result for each `input.resume` entry by
+ * `interruptId` AFTER converting the messages, so a call that a resume is about to answer must
+ * survive this pass or the appended result lands on nothing.
+ */
+class BuiltInAgentWithSaneHistory extends BuiltInAgent {
+  /**
+   * The configuration, held a second time because the base class keeps its own copy private and
+   * {@link clone} has to build another one of THIS class rather than of the base.
+   */
+  private readonly configuration: BuiltInAgentConfiguration;
+
+  constructor(configuration: BuiltInAgentConfiguration) {
+    super(configuration);
+    this.configuration = configuration;
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    const answeredByResume = new Set(
+      (input.resume ?? []).map((entry) => entry.interruptId),
+    );
+    return super.run({
+      ...input,
+      messages: sanitizeSeededHistory(input.messages, answeredByResume),
+    });
+  }
+
+  /**
+   * Carried by hand, for the same reason {@link RunBuiltAgent.clone} is.
+   *
+   * The runtime clones an agent before every run, and the base class's clone hard-codes
+   * `new BuiltInAgent(this.config)`: inherited unchanged, the very first message anybody sends
+   * would go through an agent that does none of the above. The middleware list is copied because
+   * the base clone copies it, and it is reached through a cast because `AbstractAgent` declares it
+   * private. Nothing registers middleware on a built-in Bot today, and this is here so that the day
+   * something does, it is not lost in a clone.
+   */
+  clone(): BuiltInAgentWithSaneHistory {
+    const cloned = new BuiltInAgentWithSaneHistory(this.configuration);
+    type WithMiddlewares = { middlewares: unknown[] };
+    (cloned as unknown as WithMiddlewares).middlewares = [
+      ...(this as unknown as WithMiddlewares).middlewares,
+    ];
+    return cloned;
+  }
 }
 
 /**

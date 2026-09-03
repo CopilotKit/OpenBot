@@ -1,6 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import type { RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
+import { EMPTY } from "rxjs";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import {
   buildAgents,
@@ -801,5 +803,223 @@ describe("where a Bot says its answer came from", () => {
     ]) {
       expect(guidance).toContain(kind);
     }
+  });
+});
+
+/**
+ * The dangling tool call, refused before it reaches the model provider.
+ *
+ * FOUND LIVE. Three consecutive attempts to say anything in one conversation failed with
+ * `AI_MissingToolResultsError: Tool result is missing for tool call chatcmpl-tool-8dd56dc7497c5ea9`.
+ * A frontend tool handler had been torn down while its call was open, so the browser's live agent
+ * messages carried an assistant message whose tool call would never be answered, and each retry sent
+ * it back up as `input.messages`. `BuiltInAgent.run` converts those messages itself, so the only
+ * place a guard can stand is in front of it, and these are the properties that say it is standing
+ * there: on the agent a request is handed, on the clone the runtime makes before every run, and on
+ * the narrowed path, which builds its agent again per run.
+ */
+describe("a chat turn is not sent a conversation the model API refuses", () => {
+  const assistant = {
+    id: "general-assistant",
+    name: "General Assistant",
+    type: "built_in" as const,
+    systemPrompt: "Be helpful.",
+  };
+  const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
+
+  /** The messages a run reaches `BuiltInAgent.run` with, without a model call behind them. */
+  function captureRuns() {
+    const seen: RunAgentInput[] = [];
+    const spy = spyOn(BuiltInAgent.prototype, "run").mockImplementation(
+      (input: RunAgentInput) => {
+        seen.push(input);
+        return EMPTY;
+      },
+    );
+    return { seen, restore: () => spy.mockRestore() };
+  }
+
+  function input(
+    messages: unknown[],
+    resume?: { interruptId: string; status: "resolved" }[],
+  ): RunAgentInput {
+    return {
+      threadId: "thread_1",
+      runId: "run_1",
+      messages: messages as RunAgentInput["messages"],
+      tools: [],
+      context: [],
+      forwardedProps: {},
+      state: {},
+      ...(resume === undefined ? {} : { resume }),
+    };
+  }
+
+  const danglingCall = [
+    { id: "m1", role: "user", content: "Save that." },
+    {
+      id: "m2",
+      role: "assistant",
+      content: "Saving it.",
+      toolCalls: [
+        {
+          id: "chatcmpl-tool-8dd56dc7497c5ea9",
+          type: "function",
+          function: { name: "saveDocument", arguments: "{}" },
+        },
+      ],
+    },
+    { id: "m3", role: "user", content: "Did that work?" },
+  ];
+
+  async function builtIn() {
+    const agents = await buildAgents([assistant], model, "openai-secret");
+    return agents["general-assistant"];
+  }
+
+  test("the unanswerable call is gone from what the run converts", async () => {
+    const agent = await builtIn();
+    const { seen, restore } = captureRuns();
+
+    try {
+      agent?.run(input(danglingCall));
+    } finally {
+      restore();
+    }
+
+    const messages = seen[0]?.messages ?? [];
+    // Everything the person and the Bot said survives. Only the call nothing will ever answer is
+    // gone, and with it the message that carried nothing else.
+    expect(messages.map((message) => message.id)).toEqual(["m1", "m2", "m3"]);
+    expect(messages[1]).not.toHaveProperty("toolCalls");
+    // And the caller's own array is untouched, because the browser goes on using it.
+    expect(danglingCall[1]).toHaveProperty("toolCalls");
+  });
+
+  test("the clone the runtime runs guards it too", async () => {
+    // `agents[agentId].clone()` happens before every single run, and the base class's clone builds a
+    // plain `BuiltInAgent`. Inherited unchanged, the guard would never once be reached in production.
+    const agent = (await builtIn())?.clone();
+    const { seen, restore } = captureRuns();
+
+    try {
+      agent?.run(input(danglingCall));
+    } finally {
+      restore();
+    }
+
+    expect(seen[0]?.messages).toHaveLength(3);
+    expect(seen[0]?.messages?.[1]).not.toHaveProperty("toolCalls");
+  });
+
+  test("a call the run is about to resume is kept", async () => {
+    /*
+     * `run` appends a tool result per `input.resume` entry, keyed by `interruptId`, AFTER converting
+     * the messages. So an interrupted call is the one dangle that is not a dangle: dropping it would
+     * leave that appended result pointing at a call no longer in the conversation, which is the same
+     * error arriving from the other side.
+     */
+    const agent = await builtIn();
+    const { seen, restore } = captureRuns();
+
+    try {
+      agent?.run(
+        input(danglingCall, [
+          { interruptId: "chatcmpl-tool-8dd56dc7497c5ea9", status: "resolved" },
+        ]),
+      );
+    } finally {
+      restore();
+    }
+
+    expect(seen[0]?.messages?.[1]).toMatchObject({
+      toolCalls: [{ id: "chatcmpl-tool-8dd56dc7497c5ea9" }],
+    });
+  });
+
+  test("a remote Bot is not sent the unanswerable call either", async () => {
+    /*
+     * A remote Bot never passes through `BuiltInAgentWithSaneHistory`: its middleware forwards the
+     * browser's messages to the endpoint as they are. A framework there that converts with the
+     * same SDK refuses the same conversation, so the guard is applied in that middleware, and
+     * asserted on the wire.
+     */
+    await using endpoint = fakeAgUiEndpoint();
+    const agents = await buildAgents(
+      [
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui" as const,
+          endpoint: endpoint.url,
+          standingMessage: standingRoleMessage(riskRow),
+        },
+      ],
+      model,
+      null,
+    );
+
+    const agent = agents.risk;
+    agent?.setMessages(danglingCall as never[]);
+    await agent?.runAgent();
+
+    const sent = endpoint.requests.at(-1)?.messages as {
+      id: string;
+      toolCalls?: unknown[];
+    }[];
+    expect(sent.map((message) => message.id)).toEqual([
+      "standing-role:risk",
+      "m1",
+      "m2",
+      "m3",
+    ]);
+    expect(sent[2]).not.toHaveProperty("toolCalls");
+  });
+
+  test("the narrowed path is guarded, because it builds its agent the same way", async () => {
+    // Tool selection defers the build to the run, so this is a different agent object than the one
+    // the request was handed. It is built through the same `withTools`, and that is the property.
+    const granted = Array.from({ length: 3 }, (_, index) => ({
+      ref: `drive/tool_${index}`,
+      name: `mcp__drive__tool_${index}`,
+      description: `drive tool ${index}`,
+    })) as never[];
+    const agents = await buildAgents(
+      [assistant],
+      model,
+      "openai-secret",
+      undefined,
+      async () => granted,
+      undefined,
+      undefined,
+      undefined,
+      {
+        loadSkills: async () => [
+          {
+            slug: "drive-audit",
+            title: "Drive audit",
+            summary: "Read documents out of Google Drive.",
+            tools: ["drive/tool_0"],
+          },
+        ],
+        choose: async () => JSON.stringify({ skills: ["drive-audit"] }),
+        floor: 0,
+      },
+    );
+    const { seen, restore } = captureRuns();
+
+    try {
+      // Subscribed, because the narrowing wrapper builds the inner agent lazily on subscription.
+      await new Promise<void>((resolve) => {
+        agents["general-assistant"]
+          ?.run(input(danglingCall))
+          .subscribe({ complete: resolve, error: () => resolve() });
+      });
+    } finally {
+      restore();
+    }
+
+    expect(seen[0]?.messages).toHaveLength(3);
+    expect(seen[0]?.messages?.[1]).not.toHaveProperty("toolCalls");
   });
 });
