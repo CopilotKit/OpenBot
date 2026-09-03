@@ -324,6 +324,30 @@ export async function redeemAuthorizationCode(input: {
   if (input.clientSecret) params.set("client_secret", input.clientSecret);
 
   /*
+   * Our own catalogue, told apart from their outage before a request is attempted.
+   *
+   * `fetch` refuses a malformed URL by throwing the same kind of error a refused connection does,
+   * so without this the two would reach the same catch and read as the same sentence. They are not
+   * the same thing: one is a vendor having a bad day and the other is an endpoint in this
+   * deployment's own catalogue that nobody can ever connect through. The person gets the ordinary
+   * refusal either way, because there is nothing else to give them, and the log is where the
+   * difference has to survive.
+   *
+   * Checking it here is also what leaves the catch below covering only the transport, rather than
+   * quietly standing in for a mistake in a frozen literal.
+   */
+  if (!URL.canParse(input.tokenUrl)) {
+    console.error(
+      JSON.stringify({
+        type: "oauth-token-endpoint-unusable",
+        tokenUrl: input.tokenUrl,
+        note: "This vendor's token endpoint is not a usable address, so nobody can connect it until the catalogue is fixed.",
+      }),
+    );
+    return null;
+  }
+
+  /*
    * A vendor that could not be reached at all, which the refusal below cannot see.
    *
    * `!response.ok` needs a response, and there is none when the connection is refused, the name does
@@ -425,6 +449,20 @@ export async function registerDynamicClient(input: {
   registrationUrl: string;
   redirectUri: string;
 }): Promise<{ clientId: string; clientSecret: string } | null> {
+  // The same catalogue check the redemption makes, and for the same reason: a registration endpoint
+  // that is not an address is this deployment's mistake, not the vendor's outage, and only the log
+  // can tell them apart.
+  if (!URL.canParse(input.registrationUrl)) {
+    console.error(
+      JSON.stringify({
+        type: "oauth-registration-endpoint-unusable",
+        registrationUrl: input.registrationUrl,
+        note: "This vendor's registration endpoint is not a usable address, so this deployment can never introduce itself.",
+      }),
+    );
+    return null;
+  }
+
   // A vendor that could not be reached at all — see `redeemAuthorizationCode`, which states the same
   // gap in full. This one lands on an administrator pressing Connect rather than on somebody
   // mid-consent, and null is what turns it into the 502 that route already writes for a vendor that

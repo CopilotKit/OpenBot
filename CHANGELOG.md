@@ -8,6 +8,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Connecting an account survives a vendor that is down
+
+Finishing a connection used to end on a blank server error if the vendor could not be reached at the
+moment you were sent back, whether that was a refused connection, a name that would not resolve, or
+fifteen seconds of silence. It now ends where every other failed connect already ended: back on
+Connected accounts with a note, and nothing stored. Pressing Connect for a vendor this deployment
+has not introduced itself to yet behaves the same way, answering 502 rather than a server error, and
+that message now covers a vendor that could not be reached as well as one that turned the
+registration down.
+
+A connection whose grant cannot be written to the vault ends the same way, rather than on the blank
+error it used to give somebody who had just finished consenting.
+
+Because the person is told the same thing whatever went wrong, the server log is now where the
+difference lives. Three lines to look for: `oauth-token-endpoint-unreachable` and
+`oauth-registration-endpoint-unreachable` name the vendor and the cause, and
+`oauth-connection-not-recorded` says a consent completed and could not be kept. A fourth,
+`oauth-token-endpoint-unusable`, means the fault is this deployment's catalogue rather than the
+vendor.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,

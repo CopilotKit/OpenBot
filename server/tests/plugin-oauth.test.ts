@@ -586,9 +586,17 @@ describe("registering this deployment as an OAuth client", () => {
     }
   });
 
+  /**
+   * The signal is checked, not just the catch. A stub that ignores `init.signal` would pass against
+   * code that had dropped the deadline entirely, which is the one thing a timeout test exists to
+   * notice. The fifteen seconds themselves stay unexercised; the literal is in the source and
+   * waiting it out is not a test.
+   */
   test("a registration endpoint that never answers is the same refusal", async () => {
+    const seen: (AbortSignal | undefined)[] = [];
     const realFetch = globalThis.fetch;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen.push(init?.signal ?? undefined);
       throw new DOMException("The operation timed out.", "TimeoutError");
     }) as unknown as typeof fetch;
     try {
@@ -601,6 +609,8 @@ describe("registering this deployment as an OAuth client", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+    expect(seen[0]).toBeInstanceOf(AbortSignal);
+    expect(seen[0]?.aborted).toBe(false);
   });
 });
 
@@ -776,9 +786,12 @@ describe("redeeming an authorization code", () => {
     }
   });
 
+  /** Same reasoning as the registration side: the deadline is what is being tested, so it is read. */
   test("a token endpoint that never answers is the same refusal", async () => {
+    const seen: (AbortSignal | undefined)[] = [];
     const realFetch = globalThis.fetch;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      seen.push(init?.signal ?? undefined);
       throw new DOMException("The operation timed out.", "TimeoutError");
     }) as unknown as typeof fetch;
     try {
@@ -795,5 +808,7 @@ describe("redeeming an authorization code", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+    expect(seen[0]).toBeInstanceOf(AbortSignal);
+    expect(seen[0]?.aborted).toBe(false);
   });
 });
