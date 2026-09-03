@@ -89,6 +89,48 @@ describe("what a Bot is, on the trail", () => {
     expect(rows[0]?.payload.endpoint).toBe("https://elsewhere.example/ag-ui");
   });
 
+  /*
+   * The other dangerous edit, and the one the trail was silent about.
+   *
+   * `visibility` is not a display preference. `accessFilter` admits a public coworker to every
+   * signed-in person, and `canRunAgent` is `canAccessAgent`, so public hands everybody in the
+   * deployment the right to act as this Bot and spend the connector grants it holds. It is one click
+   * in the coworker dialog.
+   */
+  test("creating one records who may reach it", async () => {
+    const { rows, hono } = app();
+
+    await hono.request("http://t/api/agents", json({ visibility: "private" }));
+
+    expect(rows[0]?.eventType).toBe("bot.created");
+    expect(rows[0]?.payload.visibility).toBe("private");
+  });
+
+  test("opening one to the whole deployment says so", async () => {
+    const { rows, hono } = app();
+
+    await hono.request("http://t/api/agents/bot-1", {
+      ...json({ visibility: "public" }),
+      method: "PATCH",
+    });
+
+    expect(rows[0]?.eventType).toBe("bot.updated");
+    expect(rows[0]?.payload.visibility).toBe("public");
+  });
+
+  test("an edit that leaves it private says that too", async () => {
+    // Carried on every row rather than only on the row that moved it: reading the trail forward has
+    // to tell you what was reachable at each point, and the route has no before to compare against.
+    const { rows, hono } = app();
+
+    await hono.request("http://t/api/agents/bot-1", {
+      ...json({ visibility: "private", title: "Sales assistant, revised" }),
+      method: "PATCH",
+    });
+
+    expect(rows[0]?.payload.visibility).toBe("private");
+  });
+
   test("a replaced key is noted and never recorded", async () => {
     const { rows, hono } = app();
 
