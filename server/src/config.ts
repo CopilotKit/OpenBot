@@ -132,6 +132,8 @@ export type HandoffCaps = {
 };
 
 export type DeploymentConfig = {
+  /** The port the API listens on. Named `PORT` or `SERVER_PORT`; see `serverPort`. */
+  port: number;
   databaseUrl: string;
   keyEncryptionKey: string;
   /**
@@ -634,9 +636,23 @@ function agentEndpointAllowedHosts(
         `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must name one host. Patterns are not accepted: list each address instead.`,
       );
     }
-    hosts.add(host.replace(/^\[/, "").replace(/\]$/, ""));
+    hosts.add(normalizeAllowedHost(host));
   }
   return hosts;
+}
+
+function normalizeAllowedHost(host: string): string {
+  // IPv6 is bracketed as [host] or [host]:port. Strip the brackets and keep the port.
+  if (host.startsWith("[")) {
+    const close = host.indexOf("]");
+    if (close === -1) return host.replace(/^\[/, "").replace(/\]$/, "");
+    const ipv6 = host.slice(1, close).toLowerCase();
+    const rest = host.slice(close + 1);
+    if (!rest) return ipv6;
+    if (rest.startsWith(":")) return `${ipv6}${rest.toLowerCase()}`;
+    return `${ipv6}${rest.toLowerCase()}`;
+  }
+  return host;
 }
 
 function privateHostsAllowed(environment: Environment): boolean {
@@ -854,6 +870,44 @@ function agentStallTimeoutMs(environment: Environment): number {
   return milliseconds;
 }
 
+/** Where the API listens when nothing says otherwise: what `.env.example` and the image ship. */
+const DEFAULT_PORT = 3001;
+
+/**
+ * The port the API listens on, from either of its two names.
+ *
+ * `PORT` and `SERVER_PORT` name one number: either moves the server, and two that disagree are
+ * refused at boot rather than half-applied. Read through `optional` like every other setting here,
+ * and that is the point. An unset variable declared in a compose file, or left as `PORT=` in a
+ * `.env`, arrives as an empty string rather than as absent, so `process.env.PORT ??
+ * process.env.SERVER_PORT` never fell through to the second name, and `Number.parseInt("")` is
+ * `NaN`. Given `NaN`, `Bun.serve` binds an ephemeral port: the server came up somewhere nobody had
+ * asked for, `SERVER_PORT` ignored, and the script polling it reported a server that never
+ * started — the failure #312 set out to remove, back through the other name.
+ *
+ * A value that is not a whole port number is refused for the reason the caps above are: `30o1`
+ * used to start the server on port 30, and a typo has to fail where somebody is looking.
+ */
+function serverPort(environment: Environment): number {
+  const read = (name: string): number | undefined => {
+    const raw = optional(environment, name);
+    if (raw === undefined) return undefined;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1 || value > 65535) {
+      throw new Error(`${name} must be a whole number between 1 and 65535`);
+    }
+    return value;
+  };
+  const port = read("PORT");
+  const serverPort = read("SERVER_PORT");
+  if (port !== undefined && serverPort !== undefined && port !== serverPort) {
+    throw new Error(
+      `PORT (${port}) and SERVER_PORT (${serverPort}) disagree: set one or set both to the same value`,
+    );
+  }
+  return port ?? serverPort ?? DEFAULT_PORT;
+}
+
 export function loadConfig(
   environment: Environment = process.env,
 ): DeploymentConfig {
@@ -863,6 +917,7 @@ export function loadConfig(
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
+    port: serverPort(environment),
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),

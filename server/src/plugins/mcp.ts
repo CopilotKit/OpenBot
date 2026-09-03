@@ -199,6 +199,22 @@ function vendorFailure(error: unknown): string {
 }
 
 /**
+ * The Authorization header a stored token becomes.
+ *
+ * Bearer by default, which is what an MCP server's own token usually is. A token that already
+ * names its scheme is sent as written, because some vendors forward the header straight to an API
+ * that only speaks Basic: DataForSEO's hosted server answers the handshake and the tool listing to
+ * anything, then returns 401 on every real call made with Bearer, so a deployment that could only
+ * say Bearer looked connected and never worked. The scheme travels with the credential rather than
+ * as a setting on the server row, so rotating a token can change how it is presented and nothing
+ * else has to know.
+ */
+export function authorizationHeader(token: string): string {
+  const trimmed = token.trim();
+  return /^(basic|bearer)\s+\S/i.test(trimmed) ? trimmed : `Bearer ${trimmed}`;
+}
+
+/**
  * Build, use and close a client.
  *
  * The `finally` closes the transport whatever happened, because a thrown error is the case where a
@@ -210,7 +226,7 @@ async function withClient<T>(
 ): Promise<T> {
   const transport = new StreamableHTTPClientTransport(new URL(connection.url), {
     requestInit: connection.token
-      ? { headers: { Authorization: `Bearer ${connection.token}` } }
+      ? { headers: { Authorization: authorizationHeader(connection.token) } }
       : undefined,
   });
   const client = new Client({ name: "openbot", version: "1.0.0" });
