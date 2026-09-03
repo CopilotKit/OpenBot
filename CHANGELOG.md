@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A tool call that failed no longer reads as one that worked
+
+The audit page draws a row it does not recognise as `Allowed`, which is right for the many rows that
+are neither a refusal nor a failure. Two rows that are failures were falling through to it: a
+connector tool call this deployment permitted and the vendor did not complete, and a component's
+data read that was granted and then broke. Both were drawn in the same muted colour as a call that
+went through, and neither appeared under `Did not happen`, so the view an administrator opens to ask
+what did not work here was short by exactly the rows they came for. A per-person connector fails on
+this path every time somebody's token expires, so this was the most common failure the product has
+and the one the trail was quietest about. Both now read as `Did not happen`, and both are in that
+saved view. Neither is filed as a refusal: nothing was forbidden on either row.
+
 ### Duplicating a coworker keeps the endpoint it was copied from
 
 Duplicate used to point every copy at this deployment's own managed Bot, whatever the coworker being
