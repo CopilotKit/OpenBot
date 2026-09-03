@@ -117,6 +117,10 @@ docker run -p 3001:3001 --env-file .env \
 Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you already run.
 [docs/deployment.md](docs/deployment.md) has the minimum sizes, the platform notes, and how it behaves behind more than one replica.
 
+Or deploy it on Railway in one click, with Postgres, the managed Bot that makes *New coworker* work, a scheduler so routines fire, and a password in front of the URL; your OpenAI key and the two CopilotKit credentials are the only inputs:
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/openbot?referralCode=MYUCwz&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
 ## Try it
 
 - Open `/bot` and ask: `Open news.ycombinator.com and tell me the top story.`
