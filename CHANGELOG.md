@@ -18,6 +18,42 @@ chance to replace it because history was only restored into an empty channel.
 The stored thread now wins whenever it holds more than the channel does and holds everything the
 channel already shows. A message typed while history is still loading is not in the store yet, and
 a run still streaming has messages the store has not seen, so neither is rolled back.
+### The transcript stays with the question when an answer starts arriving
+
+Sending a message carried it up to the top of the view, correctly, and then the Bot's first token
+threw the conversation back to its very first message, with the answer being written several
+screens below the fold. It happened on every turn, from wherever the reader happened to be
+scrolled, so every answer began with a scroll back down to find it. The transcript now holds the
+question in place for the whole turn, and the scroll that puts it there is animated rather than a
+jump — unless the reader has asked their system for reduced motion.
+### A conversation started from the sidebar is recorded like one started from the home screen
+
+The trail had a `channel.routed` row for every conversation begun in the home composer — the
+coworker it went to and why, whether inferred or named with `@` — and nothing at all for one begun
+from the sidebar's +, a coworker's card or its profile, which read exactly like a row that failed
+to write. Picking a coworker in that To: field is now recorded the same way an `@` is.
+### A browser clock that runs ahead no longer hides what a routine said
+
+The roster line and unread dot for a channel are moved by the last report that arrived, and only
+ever forwards. A browser whose clock was ahead stamped its report into the future, and then every
+report from a correct clock — a routine's reply, a relayed handoff answer, another member's browser
+— was dropped without a word until the real time caught up: the reply was in the thread, and the
+roster never said so. A reported time is now capped at the server's own clock.
+### An empty supervisor PORT is unset, not an ephemeral bind
+
+`PORT=` left blank in compose or a `.env` used to reach `Bun.serve` as `NaN`, so the supervisor
+bound a random port while the published mapping still pointed at 4300. Empty now means the default
+4300; a non-numeric or out-of-range value refuses to start instead of binding port 30 from a typo
+like `30o0`.
+### An empty `PORT` no longer starts the server on a port nobody asked for
+
+`PORT` and `SERVER_PORT` name one number, and either is meant to move the server. A `PORT` that was
+declared but empty — a compose file passing a variable the host never set, or `PORT=` left in a
+`.env` next to a `SERVER_PORT` that was set — was read as "set to nothing": `SERVER_PORT` was
+ignored, the number parsed to `NaN`, and the server came up on an ephemeral port while everything
+that polls `SERVER_PORT` reported it had never started. An empty value now counts as unset, the way
+every other setting already treats it, and a value that is not a whole port number (`30o1` used to
+start the server on port 30) refuses to start instead.
 
 ### Coworkers are made in a wizard and managed in a dialog
 
