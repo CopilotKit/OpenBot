@@ -16,7 +16,7 @@ export const Route = createFileRoute("/_authed/_app/")({
 function RouteComponent() {
   const { data: agents } = useQuery(agentListQueryOptions());
   const explore = agents?.filter((a) => !a.mine && a.visibility === "public");
-  const { start, pending } = useStartChannel();
+  const { start, startChosen, pending } = useStartChannel();
   const [error, setError] = useState<string | null>(null);
 
   /** Default recipient when the composer draft has no mention. */
@@ -46,22 +46,17 @@ function RouteComponent() {
               // run, it falls back to the same default the composer used to always use.
               setError(null);
               try {
-                let agentId: string | undefined = draft.agentId ?? undefined;
-                if (agentId) {
-                  /*
-                   * Told to the server so the choice is recorded, and its answer thrown away: the
-                   * person already decided and nothing here may change that. Failing to write the
-                   * audit row must not stop the conversation, so a rejection is swallowed whole.
-                   */
-                  await routeMessage(draft.text, agentId).catch(
-                    () => undefined,
-                  );
-                } else {
-                  try {
-                    agentId = (await routeMessage(draft.text)).agentId;
-                  } catch {
-                    agentId = fallback?.id;
-                  }
+                if (draft.agentId) {
+                  // Recorded and started as one sequence, shared with `/channel/new`: the person
+                  // already decided, and the trail has to say so wherever they decided it.
+                  await startChosen(draft.agentId, draft.text);
+                  return;
+                }
+                let agentId: string | undefined;
+                try {
+                  agentId = (await routeMessage(draft.text)).agentId;
+                } catch {
+                  agentId = fallback?.id;
                 }
                 if (!agentId) return;
                 await start(agentId, draft.text);
