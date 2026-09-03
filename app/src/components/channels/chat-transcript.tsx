@@ -732,7 +732,7 @@ export function ChatTranscript({
               ) : waitingOnFirstToken ? (
                 <Thinking />
               ) : null}
-            {queued.map((message) => (
+              {queued.map((message) => (
                 <Queued
                   key={message.id}
                   onRemove={
