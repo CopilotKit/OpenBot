@@ -8,6 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Duplicating a Bot in the box keeps its instructions
+
+A coworker that runs on this deployment's own Bot has no endpoint — it has a prompt, which is the
+whole of what makes it that coworker. Duplicate rebuilt every copy from the endpoint alone, found
+none, and fell back to the managed Bot with the prompt dropped, so the copy carried the name, the
+title, the role and the avatar and none of the instructions. Its entire instruction became the one
+sentence of role description, which is the shape behind the compliance answer this repository
+already has a note about. The two coworkers the default package ships are both of this kind, and one
+of them is a careful do-not-fabricate instruction. A copy now keeps the prompt and stays a Bot in the
+box, which also means it can still be granted the right to hand work on — written as a hosted
+coworker it could never hold that grant, however the original was set up — and copying one no longer
+needs a managed Bot to fall back to.
+
 ### Duplicating a coworker keeps the endpoint it was copied from
 
 Duplicate used to point every copy at this deployment's own managed Bot, whatever the coworker being
