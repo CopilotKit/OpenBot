@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A stray space in NODE_ENV no longer lets the public example key through
+
+A deployment that never changed `KEY_ENCRYPTION_KEY` encrypts its credential vault with the key
+printed in `.env.example`, so the server refuses to start with it under `NODE_ENV=production`. That
+refusal compared the variable exactly as written, while the other production refusal beside it —
+private-host browsing — trimmed first. Both read the same env file, and a trailing space there is
+invisible: Docker's `env_file` preserves it and so does every hosting dashboard with a text box. So
+`NODE_ENV=production ` tripped one refusal, slipped past the other, and started the deployment on the
+public key with only a warning at boot. Both gates now ask the same question the same way.
+
 ### Duplicating a coworker keeps the endpoint it was copied from
 
 Duplicate used to point every copy at this deployment's own managed Bot, whatever the coworker being

@@ -323,6 +323,27 @@ function optional(environment: Environment, name: string): string | undefined {
 }
 
 /**
+ * Whether this deployment says it is in production, which is what the two hard refusals turn on.
+ *
+ * ONE PLACE, BECAUSE THE TWO GATES DID NOT AGREE. Both refuse a local-only setting on a deployed
+ * server — the example encryption key, and private-host browsing — and both compare `NODE_ENV`
+ * against `"production"`. The private-hosts gate read it through `optional`, so the comparison
+ * trimmed; the key gate compared `environment.NODE_ENV` raw.
+ *
+ * Both sides of that comparison come out of the same file. `NODE_ENV=production ` with a trailing
+ * space — invisible in an env file, and preserved verbatim by Docker's `env_file` and by every
+ * hosting dashboard with a text box — therefore tripped one refusal and slipped past the other. The
+ * one it slipped past is the one that decides whether the credential vault may be encrypted with a
+ * key printed in this repository.
+ *
+ * A helper rather than a second `optional` call, so the next gate that needs this question cannot
+ * pick the wrong way to ask it.
+ */
+function isProduction(environment: Environment): boolean {
+  return optional(environment, "NODE_ENV") === "production";
+}
+
+/**
  * The key in `.env.example`, which every clone of this repository starts with.
  *
  * It is a valid key, which is the whole problem: it is the right length and the right encoding, so
@@ -344,7 +365,7 @@ function keyEncryptionKey(environment: Environment): string {
    * in any deployment.
    */
   if (value === PLACEHOLDER_KEY) {
-    if (environment.NODE_ENV === "production") {
+    if (isProduction(environment)) {
       throw new Error(
         "KEY_ENCRYPTION_KEY is still the example key from .env.example, which is public. Generate one with: openssl rand -base64 32",
       );
@@ -660,9 +681,9 @@ function privateHostsAllowed(environment: Environment): boolean {
     return false;
   }
 
-  // Through `optional`, so the comparison trims. Read raw, `NODE_ENV="production "` out of an env
-  // file would slip past a gate that the switch beside it, which does trim, would still trip.
-  if (optional(environment, "NODE_ENV") === "production") {
+  // Through `isProduction`, so the comparison trims. Read raw, `NODE_ENV="production "` out of an
+  // env file would slip past a gate that the switch beside it, which does trim, would still trip.
+  if (isProduction(environment)) {
     throw new Error(
       "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true is for local development only: it lets a Bot reach this deployment's own network. Remove it from this deployment's environment.",
     );
