@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Hiding a coworker no longer hides the grants pointing at it
+
+Hiding a coworker is a preference about your own roster — one row per person — and the grants saying
+which Bots may hand work to it are a deployment-wide fact an administrator set. The Handoff section
+joined the two, so hiding a coworker from your roster took every grant aimed at it off the screen:
+the switch was gone, no note said why, and the count above the list quietly dropped by one. Those
+grants were still in force, because a hop is decided by the grant and not by anybody's roster, so
+the coworker went on being asked while the only screen that could stop it had stopped listing it.
+A coworker you have hidden now appears in that list when a grant already points at it, marked as
+hidden from your roster, so it can be switched off. One you have hidden with nothing granted to it
+stays hidden.
+
 ### Duplicating a coworker keeps the endpoint it was copied from
 
 Duplicate used to point every copy at this deployment's own managed Bot, whatever the coworker being
