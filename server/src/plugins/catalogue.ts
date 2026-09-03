@@ -38,10 +38,16 @@ export type CatalogueAuth =
   /** One token, held by the deployment, used for everybody. */
   | { kind: "deployment-bearer" }
   /**
-   * First-party and in-process. There is no credential, because there is nothing to authenticate
-   * to: the call runs against this deployment's own tables, as the person whose turn it is.
+   * First-party and in-process. There is no vendor to authenticate to, because the call runs inside
+   * this deployment rather than against somebody else's server.
+   *
+   * `reachedAs` is not a formality. The two builtins differ on the one question the audit trail
+   * asks: Routines touches the asking person's own rows and is therefore reached AS them, while
+   * Mailbox opens one mailbox that belongs to the deployment, on a password the deployment holds,
+   * and is reached as the deployment however many people ask. Recording the second as the asker
+   * would put a person's id on a row describing access that was never theirs.
    */
-  | { kind: "builtin" }
+  | { kind: "builtin"; reachedAs: "actor" | "deployment" }
   /**
    * The asker's own grant. The deployment registers an OAuth client; each person consents once and
    * the call runs on their token, so the vendor decides what comes back.
@@ -280,13 +286,47 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     host: "builtin://routines",
     path: "/",
     transport: "builtin-routines",
-    auth: Object.freeze({ kind: "builtin" }),
+    // Reached as the person asking: a routine is theirs, it runs with their grants, and the rows it
+    // touches are their own.
+    auth: Object.freeze({ kind: "builtin", reachedAs: "actor" }),
     writeTools: Object.freeze([
       "create_routine",
       "update_routine",
       "delete_routine",
     ]),
     docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/routines.md",
+  },
+  {
+    key: "mailbox",
+    title: "Mailbox",
+    vendor: "OpenBot",
+    summary:
+      "Read and send email from the deployment's mailbox, as the Bot granted it.",
+    /*
+     * In-process, like Routines, and in the catalogue for a sharper version of the same reason.
+     * There is no vendor to review here, but there is a capability to grant: mail is the one thing
+     * a Bot can do that reaches people who never agreed to talk to it, and `send_message` is
+     * irrevocable the instant it runs. Which Bots may read the mail, and which of those may answer
+     * it, is a decision an administrator makes per tool on the Plugins page.
+     *
+     * `builtin` names the auth kind because nothing here is authenticated per person: there is one
+     * mailbox, it belongs to the deployment, and its password is the deployment's own. That
+     * password is NOT reached through `credential_id` on the server row: see
+     * `plugins/builtin-mailbox.ts`, which resolves it from the vault as the `mailbox` credential.
+     */
+    host: "builtin://mailbox",
+    path: "/",
+    transport: "builtin-mailbox",
+    // Reached as the deployment: one mailbox, one password this deployment holds, the same mail for
+    // everybody who asks. Whoever asked is still on the audit row as the actor; what this settles is
+    // that the access was not theirs.
+    auth: Object.freeze({ kind: "builtin", reachedAs: "deployment" }),
+    /*
+     * One write, and it is the whole reason this entry is grantable per tool: reading mail is
+     * recoverable and sending it is not.
+     */
+    writeTools: Object.freeze(["send_message"]),
+    docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/mailbox.md",
   },
 ]);
 

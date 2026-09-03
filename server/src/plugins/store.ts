@@ -315,13 +315,22 @@ const iso = (value: Date | string | null): string | null =>
  * the row a per-person connector exists to be able to trust.
  *
  * `deployment` for a shared token; the asker's own id for a server reached as the person asking.
- * `builtin` is the third case and the only one with no credential at all — the actor is not whose
- * token was used, it is whose rows were touched.
+ * `builtin` is the third case and the only one with no credential at all, so it answers for itself:
+ * Routines touches the asker's own rows and says so, while Mailbox opens one mailbox belonging to
+ * the deployment and says that instead. The entry decides, rather than this expression guessing from
+ * the kind, because a builtin reached as the deployment but recorded as the asker would put
+ * somebody's id on a row describing access that was never theirs.
  */
-const reachedAsFor = (entry: CatalogueEntry | null, actorId: string): string =>
-  entry?.auth.kind === "user-oauth" || entry?.auth.kind === "builtin"
-    ? actorId
-    : "deployment";
+const reachedAsFor = (
+  entry: CatalogueEntry | null,
+  actorId: string,
+): string => {
+  if (entry?.auth.kind === "user-oauth") return actorId;
+  if (entry?.auth.kind === "builtin") {
+    return entry.auth.reachedAs === "actor" ? actorId : "deployment";
+  }
+  return "deployment";
+};
 
 /**
  * Where this server actually is, when the stored row and the catalogue disagree.

@@ -726,3 +726,178 @@ describe("how far a Bot may hand work on", () => {
     ).toThrow("BOT_HANDOFF_MAX_PER_RUN");
   });
 });
+
+/**
+ * The mailbox, which is three variables that mean nothing apart and secrets that are not here.
+ *
+ * The absent case is the one worth pinning: it is the ordinary state of every deployment that does
+ * not want this, and it must not be a start-up failure: the catalogue entry stays admissible and
+ * grantable either way, and a tool call is where a deployment finds out.
+ */
+describe("the deployment's mailbox", () => {
+  const MAILBOX = {
+    MAILBOX_IMAP_HOST: "imap.example.test",
+    MAILBOX_SMTP_HOST: "smtp.example.test",
+    MAILBOX_USERS: "bot@example.test",
+  };
+
+  test("is absent when none of it is set, without refusing to start", () => {
+    expect(loadConfig(baseEnvironment).mailbox).toBeUndefined();
+  });
+
+  test("defaults both ports to the implicit-TLS ones", () => {
+    // 993 and 465 rather than the STARTTLS ports, so the connection is encrypted before the
+    // password is sent rather than negotiating for it in the clear.
+    expect(loadConfig({ ...baseEnvironment, ...MAILBOX }).mailbox).toEqual({
+      imapHost: "imap.example.test",
+      imapPort: 993,
+      smtpHost: "smtp.example.test",
+      smtpPort: 465,
+      users: ["bot@example.test"],
+      // Unset means anywhere, which is the behaviour every deployment had before the list existed.
+      allowedRecipientDomains: new Set(),
+    });
+  });
+
+  test("reads several accounts, in order, with the first as the default", () => {
+    // One pair of hosts, an account each: the shared-hosting shape. The order is a decision, since
+    // the first is what a tool call that named no account works in.
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        ...MAILBOX,
+        MAILBOX_USERS:
+          "Support@Example.test, sales@example.test ,billing@example.test",
+      }).mailbox?.users,
+    ).toEqual([
+      "support@example.test",
+      "sales@example.test",
+      "billing@example.test",
+    ]);
+  });
+
+  test("deduplicates accounts that differ only in case", () => {
+    // The address is also the key of the vault credential holding that account's password, so two
+    // spellings of one mailbox would be a second account nothing can ever unlock.
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        ...MAILBOX,
+        MAILBOX_USERS: "bot@example.test,BOT@example.test",
+      }).mailbox?.users,
+    ).toEqual(["bot@example.test"]);
+  });
+
+  test("still reads the singular MAILBOX_USER, as a list of one", () => {
+    // The variable this feature shipped with. A deployment that already has one should not have to
+    // be edited to keep working.
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        MAILBOX_IMAP_HOST: "imap.example.test",
+        MAILBOX_SMTP_HOST: "smtp.example.test",
+        MAILBOX_USER: "Bot@Example.test",
+      }).mailbox?.users,
+    ).toEqual(["bot@example.test"]);
+  });
+
+  test("refuses both spellings at once, naming the conflict", () => {
+    // Two answers to the same question. Merging them or preferring one silently would be guessing
+    // at an intention nothing here can read.
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        ...MAILBOX,
+        MAILBOX_USER: "other@example.test",
+      }),
+    ).toThrow("MAILBOX_USERS and MAILBOX_USER are both set");
+  });
+
+  test("refuses an account that is not an address, naming it", () => {
+    // It would otherwise become an account a model can select, a credential key an administrator
+    // cannot guess, and a login failure at run time in front of somebody.
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        ...MAILBOX,
+        MAILBOX_USERS: "bot@example.test,not-an-address",
+      }),
+    ).toThrow('MAILBOX_USERS entry "not-an-address"');
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        MAILBOX_IMAP_HOST: "imap.example.test",
+        MAILBOX_SMTP_HOST: "smtp.example.test",
+        MAILBOX_USER: "bot at example.test",
+      }),
+    ).toThrow('MAILBOX_USER entry "bot at example.test"');
+  });
+
+  test("reads the recipient allowlist, lower-cased and without the @ people write", () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        ...MAILBOX,
+        MAILBOX_ALLOWED_RECIPIENT_DOMAINS: "Example.com, @partner.example",
+      }).mailbox?.allowedRecipientDomains,
+    ).toEqual(new Set(["example.com", "partner.example"]));
+  });
+
+  test("an emptied allowlist means anywhere, not nowhere", () => {
+    // A blanked line in a .env has switched the restriction off. The opposite reading would be a
+    // mailbox that silently refuses everybody.
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        ...MAILBOX,
+        MAILBOX_ALLOWED_RECIPIENT_DOMAINS: "  ",
+      }).mailbox?.allowedRecipientDomains.size,
+    ).toBe(0);
+  });
+
+  test("refuses an allowlist entry that is not a domain", () => {
+    // A safety list written as an address would match nothing while looking like a restriction.
+    for (const entry of ["sales@example.com", "https://example.com", "a b"]) {
+      expect(() =>
+        loadConfig({
+          ...baseEnvironment,
+          ...MAILBOX,
+          MAILBOX_ALLOWED_RECIPIENT_DOMAINS: entry,
+        }),
+      ).toThrow("MAILBOX_ALLOWED_RECIPIENT_DOMAINS");
+    }
+  });
+
+  test("takes ports a deployment names", () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        ...MAILBOX,
+        MAILBOX_IMAP_PORT: "1993",
+        MAILBOX_SMTP_PORT: "2465",
+      }).mailbox,
+    ).toMatchObject({ imapPort: 1993, smtpPort: 2465 });
+  });
+
+  test("refuses half a mailbox, naming what is missing", () => {
+    // Booting with a host and no user is a deployment where every mail tool fails at the first
+    // login, at run time, in front of somebody, with nothing but an auth error to go on.
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        MAILBOX_IMAP_HOST: "imap.example.test",
+      }),
+    ).toThrow("MAILBOX_SMTP_HOST, MAILBOX_USERS");
+    expect(() =>
+      loadConfig({ ...baseEnvironment, MAILBOX_USERS: "bot@example.test" }),
+    ).toThrow("MAILBOX_IMAP_HOST, MAILBOX_SMTP_HOST");
+  });
+
+  test("refuses a port that is not a port, rather than falling back to the default", () => {
+    for (const port of ["nine-nine-three", "0", "70000", "993.5"]) {
+      expect(() =>
+        loadConfig({ ...baseEnvironment, ...MAILBOX, MAILBOX_IMAP_PORT: port }),
+      ).toThrow("MAILBOX_IMAP_PORT must be a port number between 1 and 65535");
+    }
+  });
+});

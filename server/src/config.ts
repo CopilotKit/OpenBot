@@ -62,6 +62,53 @@ export type ComputerConfig =
   | SandboxComputerConfig;
 
 /**
+ * The deployment's own mailbox: where it is and which accounts it signs in as.
+ *
+ * NO PASSWORD HERE, and that is the point of the shape. Everything in this file comes from the
+ * environment, which means a `.env` file on a laptop, a compose file in a repository and whatever a
+ * cluster hands a container as plain text. The mailbox passwords are the only secrets in this
+ * feature, so they live where the other secrets this deployment holds live: the encrypted
+ * credential vault, one credential per account, keyed by the address. See
+ * `plugins/builtin-mailbox.ts` for how one is resolved.
+ *
+ * Both ports default to the implicit-TLS ones (993 and 465) rather than to the STARTTLS ones, so a
+ * deployment that sets only the two hosts gets an encrypted connection rather than one that
+ * negotiates for it in the clear.
+ */
+export type MailboxConfig = {
+  imapHost: string;
+  imapPort: number;
+  smtpHost: string;
+  smtpPort: number;
+  /**
+   * The accounts on these hosts, lower-cased and in the order they were configured.
+   *
+   * Never empty: a mailbox with no account is refused at start-up rather than carried around as a
+   * shape every caller has to check. The FIRST is the default, which is the one a tool call that
+   * named no account works in, so the order in `MAILBOX_USERS` is a decision rather than a detail.
+   *
+   * Several accounts, one set of hosts: this is the shared-hosting shape, where `support@`,
+   * `sales@` and `billing@` are all mailboxes on the same IMAP and SMTP servers with a password
+   * each. Each password is its own vault credential, keyed by the address.
+   */
+  users: readonly string[];
+  /**
+   * The domains a Bot may send to. Empty means anywhere, which is the default.
+   *
+   * WHY A DEPLOYMENT MIGHT WANT THIS. The policy engine sees a tool call's NAME and its effect, not
+   * its arguments, so no rule can say "may email the company and nobody else": the only thing a
+   * rule can do about `send_message` is require approval for all of it or none of it. That leaves a
+   * gap this closes: the read tools bring text somebody else wrote into a model's context, and a
+   * Bot holding read plus unconstrained send is one persuasive message away from mailing the inbox
+   * to whoever asked. An allowlist bounds where anything can go, without a person in the loop.
+   *
+   * It is a floor and not a substitute for the approval rule. Inside the allowed domains the Bot
+   * can still send whatever it was talked into, so a deployment that cares should have both.
+   */
+  allowedRecipientDomains: ReadonlySet<string>;
+};
+
+/**
  * Who a deployment lets in, and through which front door.
  *
  * One identity provider is a product decision somebody else already made. A company running this
@@ -258,6 +305,16 @@ export type DeploymentConfig = {
    * mounted and failing: a capability that is not configured should be missing, not broken.
    */
   computer?: ComputerConfig;
+  /**
+   * The deployment's mailbox. Absent means the Mailbox tools refuse rather than fail.
+   *
+   * Unlike {@link DeploymentConfig.computer}, absence does not unmount anything: the catalogue entry
+   * stays admissible and its tools stay grantable, because a Bot's grants are an administrator's
+   * decision and should not evaporate because a variable was unset during a deploy. What absence
+   * changes is what a call answers: a sentence naming the four things to set, rather than a
+   * connection attempt to nowhere.
+   */
+  mailbox?: MailboxConfig;
   /** How far one Bot handing work to another may go. */
   handoff: HandoffCaps;
   /**
@@ -820,6 +877,152 @@ function generativeUiEnabled(environment: Environment): boolean {
 }
 
 /**
+ * A port from the environment, or the protocol's default.
+ *
+ * Refused rather than coerced, the same as every other number in this file. A deployment that typed
+ * `993 ` with a stray character and silently got 993 anyway is fine; one that typed `9993` and got
+ * the default would be talking to the right host on the wrong port with nothing saying so.
+ */
+function mailboxPort(
+  environment: Environment,
+  name: string,
+  fallback: number,
+): number {
+  const raw = optional(environment, name);
+  if (!raw) return fallback;
+
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${name} must be a port number between 1 and 65535`);
+  }
+  return port;
+}
+
+/**
+ * The deployment's mailbox, if it has one.
+ *
+ * Absent when none of the three are set, which is the ordinary state of a deployment that does not
+ * want this. Set one or two of them and it refuses to start naming what is missing, rather than
+ * booting with half a mailbox: a deployment with a host and no user is one where every mail tool
+ * fails at the first login, at run time, in front of somebody, and the only evidence is an auth
+ * failure from a server that will not say which half was wrong.
+ *
+ * The passwords are deliberately not read here. See {@link MailboxConfig}.
+ */
+function mailboxConfig(environment: Environment): MailboxConfig | undefined {
+  const imapHost = optional(environment, "MAILBOX_IMAP_HOST");
+  const smtpHost = optional(environment, "MAILBOX_SMTP_HOST");
+  const users = mailboxUsers(environment);
+  if (!imapHost && !smtpHost && users.length === 0) return undefined;
+
+  const missing = [
+    imapHost ? null : "MAILBOX_IMAP_HOST",
+    smtpHost ? null : "MAILBOX_SMTP_HOST",
+    users.length > 0 ? null : "MAILBOX_USERS",
+  ].filter((name): name is string => name !== null);
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.join(", ")} must be set as well: a mailbox needs an IMAP host, an SMTP host and at least one user. Unset all three to switch the mailbox off.`,
+    );
+  }
+
+  return {
+    imapHost: imapHost as string,
+    // Implicit TLS on both, rather than the STARTTLS ports. See MailboxConfig.
+    imapPort: mailboxPort(environment, "MAILBOX_IMAP_PORT", 993),
+    smtpHost: smtpHost as string,
+    smtpPort: mailboxPort(environment, "MAILBOX_SMTP_PORT", 465),
+    users,
+    allowedRecipientDomains: allowedRecipientDomains(environment),
+  };
+}
+
+/**
+ * The accounts on this deployment's mail hosts, in the order they were written.
+ *
+ * `MAILBOX_USERS` is the list and its first entry is the default account. `MAILBOX_USER`, the
+ * singular this feature shipped with, is still read as a list of one, so a deployment that already
+ * has one does not have to be edited to keep working. Both set is refused rather than merged or
+ * silently preferred: they are two answers to the same question, and a deployment holding both has
+ * an intention nobody here can read.
+ *
+ * Lower-cased and deduplicated, because an address is case-insensitive and the address is also the
+ * key of the vault credential holding that account's password. `Support@` and `support@` written as
+ * two entries are one mailbox, and treating them as two would be a second account nothing can ever
+ * unlock.
+ *
+ * An entry that is not an address refuses to start, naming it. It would otherwise become an account
+ * a model can select, a credential key an administrator cannot guess, and a login failure at run
+ * time in front of somebody.
+ */
+function mailboxUsers(environment: Environment): string[] {
+  const list = optional(environment, "MAILBOX_USERS");
+  const legacy = optional(environment, "MAILBOX_USER");
+  if (list && legacy) {
+    throw new Error(
+      "MAILBOX_USERS and MAILBOX_USER are both set and they are the same setting. Keep MAILBOX_USERS, which holds the whole list, and unset MAILBOX_USER.",
+    );
+  }
+
+  const name = list ? "MAILBOX_USERS" : "MAILBOX_USER";
+  const entries = list
+    ? commaSeparated(environment, "MAILBOX_USERS")
+    : legacy
+      ? [legacy]
+      : [];
+
+  const users: string[] = [];
+  for (const entry of entries) {
+    if (!/^[^\s@,]+@[^\s@,]+$/.test(entry)) {
+      throw new Error(
+        `${name} entry "${entry}" must be an email address such as bot@example.com`,
+      );
+    }
+    const address = entry.toLowerCase();
+    if (!users.includes(address)) users.push(address);
+  }
+  return users;
+}
+
+/**
+ * Where mail from this deployment may go, read from the environment.
+ *
+ * Unset and empty are the same answer, and it is "anywhere": a deployment that has not said
+ * otherwise keeps the behaviour it had, and one that empties the variable has switched the
+ * restriction off rather than switched every send off. The opposite reading would turn a blanked
+ * line in a `.env` into a mailbox that silently refuses everybody.
+ *
+ * Lower-cased, because a domain is case-insensitive and an allowlist that misses `Example.test` is
+ * an allowlist somebody will debug at the wrong end. A leading `@` is accepted and dropped, since
+ * that is how a person writes a domain when they are thinking of addresses.
+ *
+ * Refused rather than ignored when an entry is not a domain. `MAILBOX_ALLOWED_RECIPIENT_DOMAINS` is
+ * a safety list, and one written as `sales@example.test` that silently matched nothing would be a
+ * deployment that believes it is restricted and is not.
+ */
+function allowedRecipientDomains(
+  environment: Environment,
+): ReadonlySet<string> {
+  const domains = commaSeparated(
+    environment,
+    "MAILBOX_ALLOWED_RECIPIENT_DOMAINS",
+  ).map((entry) => entry.replace(/^@/, "").toLowerCase());
+
+  for (const domain of domains) {
+    if (
+      !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(
+        domain,
+      )
+    ) {
+      throw new Error(
+        `MAILBOX_ALLOWED_RECIPIENT_DOMAINS entry "${domain}" must be a domain such as example.com, not an address or a URL`,
+      );
+    }
+  }
+  return new Set(domains);
+}
+
+/**
  * How long the audit trail is kept.
  *
  * Refused rather than coerced, like everything else here. "We accepted your retention policy but not
@@ -861,6 +1064,7 @@ export function loadConfig(
   const auth = authConfig(environment, google);
   const managedAgent = managedAgentConfig(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
+  const mailbox = mailboxConfig(environment);
 
   return {
     databaseUrl: required(environment, "DATABASE_URL"),
@@ -894,6 +1098,7 @@ export function loadConfig(
       ? { appDistDir: optional(environment, "APP_DIST_DIR") as string }
       : {}),
     computer: computerConfig(environment),
+    ...(mailbox ? { mailbox } : {}),
     handoff: handoffCaps(environment),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }

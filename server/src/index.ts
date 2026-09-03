@@ -57,12 +57,14 @@ import {
 import {
   createCredentialAdminService,
   createCredentialStore,
+  decryptCredentialForUse,
   resolveModelApiKey,
 } from "./credentials";
 import { createDatabase } from "./db/client";
 import { intelligenceChannelMappings } from "./db/schema";
 import { createOnboardingStore } from "./people/onboarding";
 import { createPeopleStore } from "./people/store";
+import { mailboxCredentialFor, useMailbox } from "./plugins/builtin-mailbox";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { redirectUriFor } from "./plugins/oauth";
 import { createPluginStore } from "./plugins/store";
@@ -337,6 +339,50 @@ const pluginStore = createPluginStore({
  */
 const routineStore = createRoutineStore(database);
 useRoutineTools(routineStore);
+
+/**
+ * The mailbox, and where its password comes from.
+ *
+ * Installed the same way and for the same reason as the routine store above: the transport is a
+ * module, so this is the one seam it has.
+ *
+ * WHAT IS INSTALLED IS A WAY TO READ A PASSWORD, NOT A PASSWORD. Nothing here decrypts anything at
+ * boot. The closure runs when a tool call needs the secret, so an administrator who rotates an
+ * account's credential is obeyed by the next call rather than by the next restart, and one who
+ * revokes it stops the tools within a call, because `decryptCredentialForUse` refuses a revoked
+ * row, which `builtin-mailbox` reports as a failure rather than treating as an absent password.
+ *
+ * ONE CREDENTIAL PER ACCOUNT, keyed by the address, so a deployment with several mailboxes on a
+ * shared host holds several rows and each is rotated and revoked on its own.
+ *
+ * `mcp` is the kind, which is the vault's name for "the one token this deployment holds for this
+ * server", and it is exactly what a mailbox password is here: one secret, held by the deployment,
+ * used for everybody, never anybody's own grant. The provider and key id are the connector's key, so
+ * an administrator stores it at `/admin/credentials` the same way they store a custom server's
+ * token.
+ *
+ * Nothing is installed when no mailbox is configured. The catalogue entry stays admissible and its
+ * tools stay grantable either way (see `DeploymentConfig.mailbox`), and a call then answers with
+ * the sentence naming what to set.
+ */
+useMailbox(
+  config.mailbox
+    ? {
+        config: config.mailbox,
+        password: async (account) => {
+          const held = await credentialStore.findLiveByKey(
+            mailboxCredentialFor(account),
+          );
+          if (!held) return null;
+          return decryptCredentialForUse(
+            config.keyEncryptionKey,
+            credentialStore,
+            held.id,
+          );
+        },
+      }
+    : null,
+);
 
 /**
  * Where a Bot handing work to another gets decided.
