@@ -21,6 +21,10 @@ supervisor_compose_file="${OPENBOT_SUPERVISOR_COMPOSE_FILE:-/opt/openbot/docker-
 phase2_compose_file="${OPENBOT_PHASE2_COMPOSE_FILE:-/opt/openbot/docker-compose.erp-phase2.yml}"
 g0_overlay_file="${OPENBOT_G0_OVERLAY_FILE:-${source_directory}/deploy/netsfera/docker-compose.erp-agent.yml}"
 expected_owner="${OPENBOT_EXPECTED_BUNDLE_OWNER:-root:root}"
+compose_helper="${OPENBOT_COMPOSE_HELPER:-/usr/local/lib/netsfera/openbot-compose-v1.sh}"
+deployment_lock_file="${OPENBOT_DEPLOYMENT_LOCK_FILE:-/var/lock/openbot-deployment.lock}"
+activation_manifest="${OPENBOT_G1_ACTIVATION_MANIFEST:-/etc/netsfera/bot-zero-trust/openbot-g1-activation.manifest}"
+activation_marker="${OPENBOT_G1_ACTIVATION_MARKER:-/etc/netsfera/bot-zero-trust/enable-openbot-g1}"
 
 umask 077
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}-${RANDOM}-$$"
@@ -33,7 +37,7 @@ rollback_ready=0
 success=0
 
 compose_base=(
-  docker compose -p "$project_name"
+  "$compose_helper" --lock-held-fd 9 --reviewed-controller -p "$project_name"
   --env-file "$base_env_file"
   --env-file "$phase2_env_file"
   -f "$base_compose_file"
@@ -172,7 +176,23 @@ if [ "$advertised_commit" != "$target_commit" ]; then
   exit 65
 fi
 
-if ! g0_grants="$("${compose_base[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U openbot -d openbot -At -F $'\t' -c "SELECT agent_id, kind, ref FROM plugin_grants WHERE agent_id IN ('jefe-erp', 'recolector-documentos') ORDER BY agent_id, kind, ref")"; then
+if [ ! -e "$deployment_lock_file" ] && [ ! -L "$deployment_lock_file" ]; then
+  (set -o noclobber; : >"$deployment_lock_file") 2>/dev/null || true
+fi
+if [ ! -f "$deployment_lock_file" ] || [ -L "$deployment_lock_file" ] || \
+  [ "$(stat -c '%u:%g %a' "$deployment_lock_file")" != "${OPENBOT_EXPECTED_LOCK_OWNER:-0:0} 600" ]; then
+  echo "OpenBot deployment lock file is unsafe" >&2
+  exit 65
+fi
+exec 9>"$deployment_lock_file"
+flock -n 9 || { echo "OpenBot deployment lock is held by another operation" >&2; exit 75; }
+[ "$(stat -Lc '%d:%i' "$deployment_lock_file")" = "$(stat -Lc '%d:%i' "/proc/$$/fd/9")" ] || exit 65
+if [ -e "$activation_manifest" ] || [ -L "$activation_manifest" ] || [ -e "$activation_marker" ] || [ -L "$activation_marker" ]; then
+  echo "baseline promotion requires inactive G1 state" >&2
+  exit 65
+fi
+
+if ! g0_grants="$("${compose_base[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U openbot -d openbot -At -F $'\t' -c "SELECT agent_id, kind, ref FROM plugin_grants WHERE agent_id IN ('jefe-erp', 'recolector-documentos') AND kind <> 'skill' ORDER BY agent_id, kind, ref")"; then
   echo "could not enumerate persisted G0 grants" >&2
   exit 65
 fi
@@ -222,7 +242,7 @@ chmod 600 "$base_render" "$candidate_render"
 candidate_hash="$(sha256sum "$candidate_render" | awk '{ print $1 }')"
 test "$(sha256sum "$candidate_render" | awk '{ print $1 }')" = "$candidate_hash"
 
-docker compose -p "$project_name" -f "$candidate_render" build openbot
+"$compose_helper" --lock-held-fd 9 --reviewed-controller -p "$project_name" -f "$candidate_render" build openbot
 candidate_image_reference="$(jq -er '.services.openbot.image' "$candidate_render")"
 candidate_image_id="$(docker image inspect --format '{{.Id}}' "$candidate_image_reference")"
 docker run --rm --entrypoint sh "$candidate_image_id" -ceu 'grep -R -F -q "NETSFERA ERP" /app/app/dist 2>/dev/null'
@@ -236,8 +256,8 @@ elif [ -n "$post_build_status_output" ]; then
 fi
 test "$(sha256sum "$candidate_render" | awk '{ print $1 }')" = "$candidate_hash"
 
-docker compose -p "$project_name" -f "$candidate_render" up -d --no-deps --no-build openbot
-running_container_id="$(docker compose -p "$project_name" -f "$candidate_render" ps -q openbot)"
+"$compose_helper" --lock-held-fd 9 --reviewed-controller -p "$project_name" -f "$candidate_render" up -d --no-deps --no-build openbot
+running_container_id="$("$compose_helper" --lock-held-fd 9 --reviewed-controller -p "$project_name" -f "$candidate_render" ps -q openbot)"
 if [ -z "$running_container_id" ] || [ "$(docker inspect --format '{{.Image}}' "$running_container_id")" != "$candidate_image_id" ] || ! wait_for_healthy_container "$running_container_id"; then
   echo "the promoted OpenBot container did not reach the reviewed healthy image" >&2
   exit 65

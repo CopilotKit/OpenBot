@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const scriptPath = resolve(import.meta.dir, "../../deploy/netsfera/promote-reviewed-g0.sh");
+const lockedHelperPath = resolve(import.meta.dir, "../../deploy/netsfera/openbot-compose-lock-v1.sh");
+const realGit = Bun.which("git")!;
 
 function run(command: string[], cwd: string) {
   const result = Bun.spawnSync(command, { cwd });
@@ -25,6 +27,10 @@ function promotionFixture() {
   const state = join(root, "state");
   const cleanupCounter = join(root, "cleanup-counter");
   run(["mkdir", source, incoming, fakeBin], root);
+  makeExecutable(join(fakeBin, "openbot-compose-v1.sh"), `#!/bin/sh
+printf 'helper %s\\n' "$*" >>"$FAKE_LOG"
+exec "$LOCKED_HELPER" "$@"
+`);
   run(["git", "init", "-q"], source);
   run(["git", "config", "user.email", "promotion@test"], source);
   run(["git", "config", "user.name", "Promotion Test"], source);
@@ -61,11 +67,11 @@ fi
 exec /bin/rm "$@"
 `);
   makeExecutable(join(fakeBin, "git"), `#!/usr/bin/env bash
-if [[ "\${FAKE_FAIL_MODE:-}" == *rollback-status* ]] && [ "$1" = -C ] && [ "$3" = status ] && [ "$(/opt/homebrew/bin/git -C "$2" rev-parse HEAD)" = "$FAKE_ORIGINAL" ]; then
+if [[ "\${FAKE_FAIL_MODE:-}" == *rollback-status* ]] && [ "$1" = -C ] && [ "$3" = status ] && [ "$("$REAL_GIT" -C "$2" rev-parse HEAD)" = "$FAKE_ORIGINAL" ]; then
   printf 'simulated rollback status failure\\n' >&2
   exit 41
 fi
-exec /opt/homebrew/bin/git "$@"
+exec "$REAL_GIT" "$@"
 `);
   makeExecutable(join(fakeBin, "docker"), `#!/usr/bin/env bash
 set -eu
@@ -73,7 +79,12 @@ printf 'docker %s\\n' "$*" >> "$FAKE_LOG"
 if [ "$1" = compose ]; then
   joined=" $* "
   case "$joined" in
-    *" exec "*) exit 0 ;;
+    *" exec "*)
+      case "\${FAKE_FAIL_MODE:-}" in
+        skill-grant) [[ "$*" == *"kind <> 'skill'"* ]] || printf 'recolector-documentos\\tskill\\tpersonal-provider\\n';;
+        mcp-grant|bot-grant) printf 'recolector-documentos\\t%s\\tforbidden\\n' "\${FAKE_FAIL_MODE%-grant}";;
+      esac
+      exit 0 ;;
     *" config "*) printf '%s\\n' '{"services":{"openbot":{"image":"openbot:test"}}}'; exit 0 ;;
     *" build openbot "*) [[ "\${FAKE_FAIL_MODE:-}" == *after-build* ]] && exit 44; exit 0 ;;
     *" up -d "*) case "$joined" in *candidate.json*) printf applied > "$FAKE_STATE" ;; esac; exit 0 ;;
@@ -135,6 +146,12 @@ function execute(
         FAKE_STATE: fixture.state,
         FAKE_CLEANUP_COUNTER: fixture.cleanupCounter,
         FAKE_ORIGINAL: fixture.original,
+        REAL_GIT: realGit,
+        LOCKED_HELPER: lockedHelperPath,
+        OPENBOT_COMPOSE_HELPER: join(fixture.fakeBin, "openbot-compose-v1.sh"),
+        OPENBOT_DEPLOYMENT_LOCK_FILE: join(fixture.root, "deployment.lock"),
+        OPENBOT_G1_ACTIVATION_MANIFEST: join(fixture.root, "activation.manifest"),
+        OPENBOT_G1_ACTIVATION_MARKER: join(fixture.root, "activation.marker"),
         ...(failMode ? { FAKE_FAIL_MODE: failMode } : {}),
         ...(imageBrand ? { FAKE_IMAGE_BRAND: imageBrand } : {}),
         OPENBOT_SOURCE_DIR: fixture.source,
@@ -160,6 +177,19 @@ function expectScopedUpCommands(log: string) {
   }
 }
 
+test.each(["skill-grant", "mcp-grant", "bot-grant"])("promotion permits only instruction grants: %s", (grant) => {
+  const fixture = promotionFixture();
+  try {
+    const result = execute(fixture, grant);
+    if (grant === "skill-grant") expect(result.exitCode, result.stderr.toString()).toBe(0);
+    else {
+      expect(result.exitCode).toBe(65);
+      expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.original);
+      expect(readFileSync(fixture.log, "utf8")).not.toContain(" build openbot");
+    }
+  } finally { rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
 test("rejects a mismatched reviewed-bundle digest before changing the source checkout", () => {
   const fixture = promotionFixture();
   try {
@@ -182,6 +212,10 @@ test("promotes only openbot from the exact candidate render and keeps unique evi
     expect(result.exitCode).toBe(0);
     expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.target);
     expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
+    expect(readFileSync(fixture.log, "utf8")).toContain("helper --lock-held-fd 9 --reviewed-controller");
+    const commands = readFileSync(fixture.log, "utf8").split("\n");
+    expect(commands.filter((line) => line.startsWith("helper ")).length)
+      .toBe(commands.filter((line) => line.startsWith("docker compose ")).length);
     const evidence = readdirSync(fixture.incoming).filter((name) => name.endsWith(".evidence"));
     expect(evidence).toHaveLength(1);
     expect(readFileSync(join(fixture.incoming, evidence[0]), "utf8")).toContain(`target_commit=${fixture.target}`);
