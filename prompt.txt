@@ -21,8 +21,7 @@ fills most of them itself: it defaults COMPUTER_TOKEN and WORKER_SHARED_SECRET, 
 AGENT_TOOL_TOKEN and writes it back into `.env`. What it cannot invent is:
 
   1. INTELLIGENCE_API_KEY        the `cpk-...` runtime key
-  2. COPILOTKIT_LICENSE_TOKEN    the licence
-  3. OPENAI_API_KEY              the model credential
+  2. OPENAI_API_KEY              the model credential
 
 Everything else in `.env.example` is either already correct or generated. Do not talk the person
 through the other seven.
@@ -33,7 +32,9 @@ THE STEPS
 
   npx --yes copilotkit@latest login           # opens a browser
   npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
-  npx --yes copilotkit@latest license --write # writes COPILOTKIT_LICENSE_TOKEN into ./.env
+
+There is no licence step. `copilotkit license` still exists for a self-hosted Intelligence, and
+COPILOTKIT_LICENSE_TOKEN is honoured when set, but managed Intelligence needs only the cpk- key.
 
 Put the `cpk-...` key in `.env` as INTELLIGENCE_API_KEY. Put their model key in OPENAI_API_KEY.
 Then:
@@ -56,8 +57,8 @@ FAILURES YOU WILL ACTUALLY SEE, AND WHAT THEY MEAN
 The server refuses to start rather than running half-configured. The message names the variable.
 
 - "CopilotKit Intelligence is required and is not configured. Missing: ..."
-  One of the four Intelligence values is blank. Almost always INTELLIGENCE_API_KEY or
-  COPILOTKIT_LICENSE_TOKEN, from skipping a CLI step.
+  One of the three Intelligence values is blank. Almost always INTELLIGENCE_API_KEY, from
+  skipping `project select`.
 
 - "No identity provider is configured. Set GOOGLE_OAUTH_* ... or set OPENBOT_SINGLE_USER=true"
   `.env.example` already sets OPENBOT_SINGLE_USER=true, so this means it was removed or edited.
