@@ -78,7 +78,6 @@ describe("deployment configuration", () => {
       INTELLIGENCE_API_URL: baseEnvironment.INTELLIGENCE_API_URL,
       INTELLIGENCE_GATEWAY_WS_URL: baseEnvironment.INTELLIGENCE_GATEWAY_WS_URL,
       INTELLIGENCE_API_KEY: baseEnvironment.INTELLIGENCE_API_KEY,
-      COPILOTKIT_LICENSE_TOKEN: baseEnvironment.COPILOTKIT_LICENSE_TOKEN,
       MANAGED_AGENT_AG_UI_URL: baseEnvironment.MANAGED_AGENT_AG_UI_URL,
       MANAGED_AGENT_TOKEN: baseEnvironment.MANAGED_AGENT_TOKEN,
       // Explicit, because no provider means every visitor is the administrator and a deployment has
@@ -96,7 +95,6 @@ describe("deployment configuration", () => {
     "INTELLIGENCE_API_URL",
     "INTELLIGENCE_GATEWAY_WS_URL",
     "INTELLIGENCE_API_KEY",
-    "COPILOTKIT_LICENSE_TOKEN",
   ])("refuses to start when %s is missing", (name) => {
     const environment: Record<string, string | undefined> = {
       ...baseEnvironment,
@@ -105,6 +103,37 @@ describe("deployment configuration", () => {
 
     expect(() => loadConfig(environment)).toThrow(
       `CopilotKit Intelligence is required and is not configured. Missing: ${name}`,
+    );
+  });
+
+  test("starts without COPILOTKIT_LICENSE_TOKEN, because managed Intelligence no longer issues one", () => {
+    const environment: Record<string, string | undefined> = {
+      ...baseEnvironment,
+    };
+    delete environment.COPILOTKIT_LICENSE_TOKEN;
+
+    const config = loadConfig(environment);
+
+    if (config.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(config.runtime.intelligence.licenseToken).toBeUndefined();
+    expect(config.runtime.intelligence.apiKey).toBe(
+      baseEnvironment.INTELLIGENCE_API_KEY,
+    );
+  });
+
+  test("still forwards a licence token when a deployment sets one", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      COPILOTKIT_LICENSE_TOKEN: "self-hosted-licence",
+    });
+
+    if (config.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(config.runtime.intelligence.licenseToken).toBe(
+      "self-hosted-licence",
     );
   });
 
@@ -178,6 +207,67 @@ describe("deployment configuration", () => {
       }),
     ).toThrow("KEY_ENCRYPTION_KEY must be a base64-encoded 32-byte key");
   });
+
+  /*
+   * The key in `.env.example`, refused on a deployed server.
+   *
+   * It is a valid key — right length, right encoding — so nothing else about it fails a check. A
+   * deployment that never changed it encrypts its credential vault with a value printed in a public
+   * repository and looks exactly like one that did, which is why this refusal is the only thing
+   * standing between "copied the example file" and that outcome.
+   */
+  test("refuses the example encryption key on a production deployment", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        NODE_ENV: "production",
+      }),
+    ).toThrow("KEY_ENCRYPTION_KEY is still the example key");
+  });
+
+  /*
+   * The same trim the private-hosts gate below already gets, on the gate that matters more.
+   *
+   * Both sides of the comparison come out of one env file, and a trailing space there is invisible:
+   * Docker's `env_file` preserves it verbatim and so does every hosting dashboard with a text box.
+   * Compared raw, `NODE_ENV="production "` downgraded this refusal to a warning nobody reads at boot
+   * and started the deployment on the public key.
+   */
+  test("refuses the example key when NODE_ENV carries whitespace", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        NODE_ENV: "production ",
+      }),
+    ).toThrow("KEY_ENCRYPTION_KEY is still the example key");
+  });
+
+  // The local workflow is the reason the example key is usable at all, so off production it still
+  // does exactly what it did: warns, and starts.
+  test.each(["development", undefined])(
+    "warns about the example key and still starts under NODE_ENV=%p",
+    (nodeEnv) => {
+      const consoleWarn = spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        expect(() =>
+          loadConfig({
+            ...baseEnvironment,
+            ...(nodeEnv ? { NODE_ENV: nodeEnv } : {}),
+          }),
+        ).not.toThrow();
+
+        const warning = consoleWarn.mock.calls
+          .map(([first]) => String(first))
+          .find((line) => line.includes("KEY_ENCRYPTION_KEY"));
+
+        expect(warning).toBeDefined();
+        expect(warning).toContain("which is public");
+      } finally {
+        consoleWarn.mockRestore();
+      }
+    },
+  );
 
   test("enables Google authentication when its complete deployment contract is present", () => {
     const config = loadConfig({

@@ -211,11 +211,13 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
     secretKeyRef:
       name: {{ include "openbot.secretName" . }}
       key: intelligence-api-key
+{{- if .Values.secrets.licenseToken }}
 - name: COPILOTKIT_LICENSE_TOKEN
   valueFrom:
     secretKeyRef:
       name: {{ include "openbot.secretName" . }}
       key: license-token
+{{- end }}
 {{- with .Values.config.managedAgent.url }}
 - name: MANAGED_AGENT_AG_UI_URL
   value: {{ . | quote }}
