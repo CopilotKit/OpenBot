@@ -17,7 +17,14 @@ import { createAgentProfileStore } from "./agents/profile-store";
 import type { AgentActor } from "./agents/profile-types";
 import { createRuntimeAgentLoader } from "./agents/runtime-agents";
 import { createApp } from "./app";
-import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
+import {
+  type AuditInitiator,
+  createAuditReader,
+  createAuditStore,
+  DEPLOYMENT_INITIATOR,
+  PERSON_INITIATOR,
+  recordAuditEvent,
+} from "./audit";
 import { startRetentionSweeps } from "./audit-retention";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
@@ -374,6 +381,7 @@ const handoffDesk = createHandoffDesk({
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.policy_loaded",
   targetType: "policy",
+  initiator: DEPLOYMENT_INITIATOR,
   payload: {
     ...policyStore.get(),
     source:
@@ -400,6 +408,7 @@ const isolation = describeComputerIsolation(computerProvider);
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.isolation_loaded",
   targetType: "computer",
+  initiator: DEPLOYMENT_INITIATOR,
   payload: {
     isolation: isolation.isolation,
     note: isolation.note,
@@ -511,8 +520,10 @@ const resolveRuntimeModelApiKey = () =>
 
 // Tools run here, not in the browser. Each one still executes through the plugin store, so the
 // grant, the policy and the audit row are exactly where they were.
-const loadToolsForActor = (actorId: string) => (botId: string) =>
-  grantedTools({ store: pluginStore, botId, actorId });
+const loadToolsForActor =
+  (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
+  (botId: string) =>
+    grantedTools({ store: pluginStore, botId, actorId, initiator });
 
 /** One person's standing instructions, for both the /api/settings routes and every run they start. */
 const userInstructionsStore = createUserInstructionsStore(database);
@@ -661,9 +672,11 @@ const actorFor = async (ownerUserId: string): Promise<AgentActor> => {
 const buildAgentFor = async ({
   ownerUserId,
   agentId,
+  initiator,
 }: {
   ownerUserId: string;
   agentId: string;
+  initiator: AuditInitiator;
 }) => {
   const actor = await actorFor(ownerUserId);
   const agents = await resolveRuntimeAgents(
@@ -671,7 +684,7 @@ const buildAgentFor = async ({
     tenantPackage.model,
     resolveRuntimeModelApiKey,
     stallGuard,
-    loadToolsForActor(actor.id),
+    loadToolsForActor(actor.id, initiator),
     signRunForActor(actor.id),
     config.computer ? COMPUTER_GUIDANCE : undefined,
     loadVendors,
@@ -898,14 +911,18 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
        * delivery that then rebuilt them as an ordinary user could not find the Bot the desk had just
        * agreed to, and the person was told it never answered.
        */
-      agentFor: async ({ actorId, botId }) => {
+      agentFor: async ({ actorId, botId, fromBotId }) => {
         const actor = await actorFor(actorId).catch(() => null);
         if (!actor) {
           throw new Error(
             "who this is for could not be confirmed, so the Bot was not run",
           );
         }
-        return copilotRuntime.agentFor({ actor, botId });
+        return copilotRuntime.agentFor({
+          actor,
+          botId,
+          initiator: { kind: "handoff", id: fromBotId },
+        });
       },
       history: copilotRuntime.history,
       lock: copilotRuntime.threadLock,

@@ -53,15 +53,20 @@ function delivery(
   }> = [];
   const lockCalls: string[] = [];
   const released: string[] = [];
+  const builtFor: { actorId: string; botId: string; fromBotId: string }[] = [];
   return {
     requests,
     lockCalls,
     released,
+    builtFor,
     delivery: createHandoffDelivery({
       ...(options.deadlineMs === undefined
         ? {}
         : { deadlineMs: options.deadlineMs }),
-      agentFor: async () => agent,
+      agentFor: async (input) => {
+        builtFor.push(input);
+        return agent;
+      },
       history: async () => options.history ?? PRIOR,
       newRunId: () => "run-2",
       mintThreadId: () => "scratch-thread",
@@ -781,5 +786,22 @@ describe("a history read that fails", () => {
       }),
     ).rejects.toThrow("the platform answered 500");
     expect(lockCalls).toEqual([]);
+  });
+});
+
+describe("what the trail is told started the hop", () => {
+  test("the addressed Bot is built for the Bot that handed the work on", async () => {
+    const { delivery: deliver, builtFor } = delivery(FINISHED);
+
+    await deliver.deliver({
+      work: WORK,
+      message: "assistant has asked you to help",
+      shown: "Assistant asked Researcher for this on your behalf: find it",
+      assertion: "signed",
+    });
+
+    expect(builtFor).toEqual([
+      { actorId: "user-1", botId: "researcher", fromBotId: "assistant" },
+    ]);
   });
 });

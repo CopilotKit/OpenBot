@@ -24,6 +24,7 @@ import {
  */
 
 const OWNER = "user_owner";
+const ROUTINE_ID = "routine_standup";
 const AGENT_ID = "bot_helper";
 const THREAD_ID = "thread_owner_channel_1";
 const INSTRUCTION = "Post the standup summary.";
@@ -195,12 +196,16 @@ function harness(options: {
     },
   };
 
+  const builtFor: { initiator: { kind: string; id?: string } }[] = [];
   const runTurn = createTurnRunner({
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     intelligence: intelligence as any,
     // biome-ignore lint/suspicious/noExplicitAny: narrow structural fakes, on purpose.
     runner: runner as any,
-    buildAgentFor: async () => agent,
+    buildAgentFor: async (input) => {
+      builtFor.push(input);
+      return agent;
+    },
     ...(options.turnTimeoutMs === undefined
       ? {}
       : { turnTimeoutMs: options.turnTimeoutMs }),
@@ -218,12 +223,13 @@ function harness(options: {
   const run = () =>
     runTurn({
       ownerUserId: OWNER,
+      routineId: ROUTINE_ID,
       agentId: AGENT_ID,
       threadId: THREAD_ID,
       instruction: INSTRUCTION,
     });
 
-  return { run, agent, calls, order };
+  return { run, agent, calls, order, builtFor };
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -878,5 +884,19 @@ describe("a RUN_ERROR through next", () => {
 
     await expect(run()).rejects.toThrow("the model refused");
     expect(calls.cleaned).toHaveLength(1);
+  });
+});
+
+describe("what the trail is told started the turn", () => {
+  test("the Bot is built for the routine, not for the owner acting by hand", async () => {
+    const { run, builtFor } = harness({});
+
+    await run();
+
+    expect(builtFor).toHaveLength(1);
+    expect(builtFor[0]?.initiator).toEqual({
+      kind: "routine",
+      id: ROUTINE_ID,
+    });
   });
 });

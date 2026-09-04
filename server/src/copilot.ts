@@ -15,6 +15,7 @@ import {
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
+import type { AuditInitiator } from "./audit";
 import type { AgentActor } from "./agents/profile-types";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
@@ -1036,7 +1037,10 @@ export function createRequestAgents(
    */
   stallGuard?: StallGuard,
   /** What each Bot may call, resolved for whoever is asking. Absent means no tools. */
-  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
+  loadToolsForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => LoadToolsForBot,
   /** Resolved per request, because what it signs is who this request turned out to be. */
   signRunForActor?: (actorId: string) => SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
@@ -1186,7 +1190,10 @@ export function mountCopilotRuntime(
    * there is no reason for a caller to have to say `undefined` here to reach `basePath`.
    */
   stallGuard: StallGuard,
-  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
+  loadToolsForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => LoadToolsForBot,
   signRunForActor?: (actorId: string) => SignRun,
   basePath = "/api/copilotkit",
   loadVendors?: () => Promise<readonly string[]>,
@@ -1236,6 +1243,7 @@ export function mountCopilotRuntime(
      */
     actor: AgentActor;
     botId: string;
+    initiator?: AuditInitiator;
   }): Promise<AbstractAgent | null> => {
     const { actor } = input;
     const agents = await resolveRuntimeAgents(
@@ -1243,7 +1251,7 @@ export function mountCopilotRuntime(
       model,
       resolveModelApiKey,
       stallGuard,
-      loadToolsForActor?.(actor.id),
+      loadToolsForActor?.(actor.id, input.initiator),
       signRunForActor?.(actor.id),
       config.computer ? COMPUTER_GUIDANCE : undefined,
       loadVendors,

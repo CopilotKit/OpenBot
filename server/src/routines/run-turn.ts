@@ -56,6 +56,7 @@ import type {
 } from "@ag-ui/client";
 import { EventType } from "@ag-ui/client";
 import { sanitizeSeededHistory } from "../agents/history-sanitize";
+import type { AuditInitiator } from "../audit";
 import { historyOrEmpty } from "../copilot";
 import type { TurnRunner } from "./runner";
 
@@ -260,6 +261,7 @@ export function createTurnRunner(options: {
   buildAgentFor: (input: {
     ownerUserId: string;
     agentId: string;
+    initiator: AuditInitiator;
   }) => Promise<AbstractAgent>;
   /** How long one headless turn may take before it is stopped. */
   turnTimeoutMs?: number;
@@ -278,7 +280,7 @@ export function createTurnRunner(options: {
     abortGraceMs = DEFAULT_ABORT_GRACE_MS,
   } = options;
 
-  return async ({ ownerUserId, agentId, threadId, instruction }) => {
+  return async ({ ownerUserId, routineId, agentId, threadId, instruction }) => {
     /*
      * One id for this turn, minted once.
      *
@@ -362,7 +364,11 @@ export function createTurnRunner(options: {
      * ownership on every event and pushes them to the gateway, which is the whole reason this file
      * exists rather than a bare `runAgent`.
      */
-    const agent = await buildAgentFor({ ownerUserId, agentId });
+    const agent = await buildAgentFor({
+      ownerUserId,
+      agentId,
+      initiator: { kind: "routine", id: routineId },
+    });
     agent.threadId = threadId;
     agent.setMessages(messages);
 

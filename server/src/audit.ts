@@ -396,11 +396,40 @@ export const auditEventTypes = [
 
 export type AuditEventType = (typeof auditEventTypes)[number];
 
+/** What caused a row, where `actorUserId` is only whose authority it borrowed. */
+export type AuditInitiator =
+  | { kind: "person" }
+  | { kind: "deployment" }
+  | { kind: "routine"; id: string }
+  | { kind: "handoff"; id: string };
+
+export const PERSON_INITIATOR: AuditInitiator = { kind: "person" };
+
+/** The deployment acting as itself: at start-up, or refusing a caller it could not identify. */
+export const DEPLOYMENT_INITIATOR: AuditInitiator = { kind: "deployment" };
+
+export const auditInitiatorKinds = [
+  "person",
+  "deployment",
+  "routine",
+  "handoff",
+] as const;
+
+export type AuditInitiatorKind = (typeof auditInitiatorKinds)[number];
+
+export function isAuditInitiatorKind(
+  value: string,
+): value is AuditInitiatorKind {
+  return (auditInitiatorKinds as readonly string[]).includes(value);
+}
+
 export type AuditEventInput = {
   eventType: AuditEventType;
   targetType: string;
   targetId?: string;
   actorUserId?: string;
+  /** Omitted means a person did it. */
+  initiator?: AuditInitiator;
   payload: Record<string, unknown>;
 };
 
@@ -411,6 +440,9 @@ export type AuditStore = {
 export type AuditEvent = {
   id: string;
   actorUserId: string | null;
+  /** Read back as written, not narrowed to the union. */
+  initiatorKind: string;
+  initiatorId: string | null;
   eventType: string;
   targetType: string;
   targetId: string | null;
@@ -430,6 +462,8 @@ export type AuditEventQuery = {
    */
   eventType?: string;
   actorUserId?: string;
+  /** One kind, or several separated by commas, the way `eventType` takes several. */
+  initiatorKind?: string;
   targetType?: string;
   targetId?: string;
   from?: string;
@@ -486,11 +520,21 @@ export async function recordAuditEvent(
   });
 }
 
+function initiatorColumns(initiator: AuditInitiator | undefined) {
+  if (!initiator)
+    return { initiatorKind: "person" as const, initiatorId: null };
+  if (initiator.kind === "person" || initiator.kind === "deployment") {
+    return { initiatorKind: initiator.kind, initiatorId: null };
+  }
+  return { initiatorKind: initiator.kind, initiatorId: initiator.id };
+}
+
 export function createAuditStore(database: Database): AuditStore {
   return {
-    insert: async (event) => {
+    insert: async ({ initiator, ...event }) => {
       await database.insert(auditEvents).values({
         ...event,
+        ...initiatorColumns(initiator),
         payload: redactAuditPayload(event.payload) as Record<string, unknown>,
       });
     },
@@ -531,6 +575,10 @@ export function createAuditReader(database: Database): AuditReader {
         .split(",")
         .map((type) => type.trim())
         .filter(Boolean);
+      const requestedInitiators = (query.initiatorKind ?? "")
+        .split(",")
+        .map((kind) => kind.trim())
+        .filter((kind) => isAuditInitiatorKind(kind));
       const conditions = [
         requestedTypes.length === 1
           ? eq(auditEvents.eventType, requestedTypes[0] as string)
@@ -540,6 +588,11 @@ export function createAuditReader(database: Database): AuditReader {
         query.actorUserId
           ? eq(auditEvents.actorUserId, query.actorUserId)
           : undefined,
+        requestedInitiators.length === 1
+          ? eq(auditEvents.initiatorKind, requestedInitiators[0] as string)
+          : requestedInitiators.length > 1
+            ? inArray(auditEvents.initiatorKind, requestedInitiators)
+            : undefined,
         query.targetType
           ? eq(auditEvents.targetType, query.targetType)
           : undefined,
@@ -627,6 +680,7 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
     limit,
     eventType: optional("eventType"),
     actorUserId: optional("actorUserId"),
+    initiatorKind: optional("initiatorKind"),
     targetType: optional("targetType"),
     targetId: optional("targetId"),
     from,
