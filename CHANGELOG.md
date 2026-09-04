@@ -8,6 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Setting up needs one Intelligence credential, not two
+
+`COPILOTKIT_LICENSE_TOKEN` is no longer required. Managed Intelligence derives entitlement from the
+project key, so the second credential people were sent to fetch had stopped existing, and startup
+was still refusing to boot without it. A deployment now needs `INTELLIGENCE_API_URL`,
+`INTELLIGENCE_GATEWAY_WS_URL` and `INTELLIGENCE_API_KEY`. A licence token is still read and still
+forwarded to the runtime when set, which is what a self-hosted Intelligence with its own licence
+needs.
+
+The Helm chart failed harder than the docs did: it *required* `secrets.licenseToken`, so a
+managed-Intelligence install was refused at `helm install` rather than merely misdocumented. That
+value is now optional.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
