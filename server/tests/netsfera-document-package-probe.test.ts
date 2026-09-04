@@ -23,6 +23,8 @@ test.each([
   "extra-skill",
   "mcp",
   "bot",
+  "duplicate-chief",
+  "duplicate-collector",
 ])(
   "stopped-image package probe checks %s without credentials or a database",
   (variant) => {
@@ -46,6 +48,20 @@ test.each([
       if (variant === "extra-skill") contents += "      - unexpected\n";
       if (variant === "mcp") contents += "    mcp_servers: [forbidden]\n";
       if (variant === "bot") contents += "    bots: [jefe-erp]\n";
+      if (variant === "duplicate-chief" || variant === "duplicate-collector") {
+        const definitions = contents.split("  - id: ");
+        const duplicate =
+          variant === "duplicate-chief"
+            ? definitions[1].replace(
+                "computer_access: disabled",
+                "computer_access: enabled",
+              )
+            : definitions[2].replace(
+                "computer_access: enabled",
+                "computer_access: disabled",
+              );
+        contents += `  - id: ${duplicate}`;
+      }
       writeFileSync(path, contents);
       const result = Bun.spawnSync([process.execPath, script, directory], {
         env: { PATH: process.env.PATH! },

@@ -175,6 +175,7 @@ printf 'mock 10000000 1 %s 1%% /\n' "$available"
   executable(
     join(bin, "rm"),
     `#!/bin/sh
+if [ "\${FAIL_CONSUMER_CLEANUP:-0}" = 1 ] && [ -f "$RENDER_RECORD" ] && [ "$*" = "-f $(cat "$RENDER_RECORD")" ]; then exit 55; fi
 if [ "\${FAIL_ACTIVATION_ROLLBACK:-0}" = 1 ] && [ "$*" = "-f $OPENBOT_G1_ACTIVATION_MANIFEST" ]; then
   exit 56
 fi
@@ -185,6 +186,13 @@ fi
 exec /bin/rm "$@"
 `,
   );
+  executable(join(bin, "mktemp"), `#!/bin/sh
+created=$(/usr/bin/mktemp "$@") || exit $?
+if [ -n "\${RENDER_RECORD:-}" ]; then
+  case "$*" in ''|*g1-verify*) printf '%s\\n' "$created" >"$RENDER_RECORD";; esac
+fi
+printf '%s\\n' "$created"
+`);
   executable(
     join(bin, "mv"),
     `#!/bin/sh
@@ -215,6 +223,12 @@ if [ "$1" = compose ]; then
       exit 0;;
     *" create "*|*" run "*) printf 'forbidden live apply\n' >&2; exit 99;;
     *" config "*)
+      if printf '%s' "$*" | grep -q 'g1-stage-.*.image.yml'; then
+        case "\${CONSUMER_RENDER_MODE:-}" in
+          failure) exit 42;;
+          signal) kill -"\${CONSUMER_SIGNAL:-TERM}" "$CONSUMER_PID"; sleep 0.1;;
+        esac
+      fi
       image=openbot:test
       previous=""
       for value do
@@ -739,6 +753,64 @@ test.each([
   } finally {
     rmSync(input.root, { recursive: true, force: true });
   }
+});
+
+test.each(["unknown-with-newline", "unknown-without-newline", "duplicate", "missing", "reordered", "blank-record", "no-final-newline"])(
+  "locked helper rejects noncanonical manifest: %s", (fault) => {
+    const input = fixture();
+    try {
+      expect(execute(input).exitCode).toBe(0);
+      const evidence = stagedEvidence(input);
+      expect(Bun.spawnSync(["bash", activationPath, "activate", evidence.path], { env: environment(input) }).exitCode).toBe(0);
+      let contents = readFileSync(input.activationManifest, "utf8");
+      if (fault === "unknown-with-newline") contents += "unknown=value\n";
+      if (fault === "unknown-without-newline") contents += "unknown=value";
+      if (fault === "duplicate") contents += `candidate_commit=${target}`;
+      if (fault === "missing") contents = contents.split("\n").slice(1).join("\n");
+      if (fault === "reordered") { const lines = contents.trimEnd().split("\n"); [lines[0], lines[1]] = [lines[1], lines[0]]; contents = lines.join("\n") + "\n"; }
+      if (fault === "blank-record") contents += "\n";
+      if (fault === "no-final-newline") contents = contents.trimEnd();
+      writeFileSync(input.activationManifest, contents);
+      writeFileSync(input.log, "");
+      const checked = Bun.spawnSync(["bash", lockedHelperPath, "restart", "openbot"], { env: environment(input) });
+      expect(checked.exitCode).not.toBe(0);
+      expect(readFileSync(input.log, "utf8")).not.toMatch(/restart openbot/);
+    } finally { rmSync(input.root, { recursive: true, force: true }); }
+  },
+);
+
+test.each(["helper", "verifier"].flatMap((consumer) =>
+  ["failure", "signal", "signal-hup", "signal-int", "cleanup", "failure-cleanup"].map((mode) => [consumer, mode] as const),
+))("%s consumer preserves errors, cancellation and render cleanup: %s", (consumer, mode) => {
+    const input = fixture();
+    try {
+      expect(execute(input).exitCode).toBe(0);
+      const evidence = stagedEvidence(input);
+      if (consumer === "helper") {
+        expect(Bun.spawnSync(["bash", activationPath, "activate", evidence.path], { env: environment(input) }).exitCode).toBe(0);
+      }
+      const renderRecord = join(input.root, "render-record");
+      const temporaryDirectory = join(input.root, "consumer-temporary");
+      mkdirSync(temporaryDirectory);
+      const command = consumer === "helper"
+        ? ["bash", lockedHelperPath, "restart", "openbot"]
+        : ["sh", verifierPath, "pre-apply", evidence.path];
+      writeFileSync(input.log, "");
+      const result = Bun.spawnSync(["bash", "-c", 'export CONSUMER_PID=$$; exec "$@"', "consumer", ...command], { env: {
+        ...environment(input),
+        TMPDIR: temporaryDirectory,
+        RENDER_RECORD: renderRecord,
+        CONSUMER_RENDER_MODE: mode.startsWith("failure") ? "failure" : mode.startsWith("signal") ? "signal" : "",
+        CONSUMER_SIGNAL: mode === "signal-hup" ? "HUP" : mode === "signal-int" ? "INT" : "TERM",
+        FAIL_CONSUMER_CLEANUP: mode.includes("cleanup") ? "1" : "0",
+      } });
+      expect(result.exitCode, `${consumer}/${mode}: ${result.stderr}`).toBe(mode.includes("cleanup") ? 71 : mode === "signal" ? 143 : mode === "signal-hup" ? 129 : mode === "signal-int" ? 130 : 42);
+      const privateRender = readFileSync(renderRecord, "utf8").trim();
+      expect(existsSync(privateRender)).toBe(mode.includes("cleanup"));
+      if (mode.includes("cleanup")) expect(result.stderr.toString()).toContain("render cleanup failed");
+      expect(result.stdout.toString()).not.toContain("verification passed");
+      expect(readFileSync(input.log, "utf8")).not.toMatch(/docker compose .*restart openbot/);
+    } finally { rmSync(input.root, { recursive: true, force: true }); }
 });
 
 test("deactivation cuts a tampered G1 binding and restores the evidenced G0 tag", () => {

@@ -254,9 +254,39 @@ if test "$(cat "$candidate_overlay_path")" != "$expected_overlay"; then
 fi
 
 umask 077
+render_file=''
+render_child=''
+cleanup_render() {
+  private_render="$render_file"
+  render_file=''
+  test -z "$private_render" || rm -f "$private_render"
+}
+on_render_exit() {
+  status=$?
+  trap - EXIT HUP INT TERM
+  if test -n "$render_child"; then
+    kill -TERM "$render_child" 2>/dev/null || true
+    wait "$render_child" 2>/dev/null || true
+  fi
+  if ! cleanup_render; then
+    printf '%s\n' 'staged verifier render cleanup failed' >&2
+    exit 71
+  fi
+  exit "$status"
+}
+trap on_render_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 render_file="$(mktemp "${incoming_directory}/g1-verify.XXXXXX.json")"
-trap 'rm -f "$render_file"' EXIT HUP INT TERM
-compose_base -f "$g1_overlay_file" -f "$candidate_overlay_path" config --format json >"$render_file"
+# Start the helper directly so cancellation owns the exact render process PID.
+"$compose_helper" --lock-held-fd "${inherited_fd:-9}" --reviewed-controller -p "$project_name" \
+  --env-file "$base_env_file" --env-file "$phase2_env_file" \
+  -f "$base_compose_file" -f "$supervisor_compose_file" -f "$phase2_compose_file" \
+  -f "$g1_overlay_file" -f "$candidate_overlay_path" config --format json >"$render_file" &
+render_child=$!
+wait "$render_child"
+render_child=''
 chmod 0600 "$render_file"
 if ! jq -e --arg expected_image "$candidate_exact_reference" '.services.openbot.image == $expected_image' "$render_file" >/dev/null || \
   test "$(sha256sum "$render_file" | awk '{ print $1 }')" != "$candidate_apply_render_sha256"; then
@@ -316,4 +346,8 @@ else
   fi
 fi
 
+if ! cleanup_render; then
+  printf '%s\n' 'staged verifier render cleanup failed' >&2
+  exit 71
+fi
 printf 'staged G1 verification passed: %s\n' "$phase"

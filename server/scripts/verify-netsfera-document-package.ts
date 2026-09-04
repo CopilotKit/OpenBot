@@ -20,10 +20,15 @@ for (const [id, access, skills] of [
     ["crear-proveedor-documental", "skill-creator"],
   ],
 ] as const) {
-  const agent = loaded.agents.find((entry) => entry.id === id);
-  const definition = raw.agents.find(
+  const agents = loaded.agents.filter((entry) => entry.id === id);
+  const definitions = raw.agents.filter(
     (entry: { id: string }) => entry.id === id,
   );
+  if (agents.length !== 1 || definitions.length !== 1) {
+    throw new Error(`Expected exactly one document agent definition: ${id}`);
+  }
+  const [agent] = agents;
+  const [definition] = definitions;
   // Package loader ignores unknown keys. Fail closed on undeclared capability
   // fields rather than letting a future loader silently turn them into grants.
   const allowed = new Set([

@@ -194,7 +194,19 @@ if [[ -e "$activation_manifest" || -L "$activation_manifest" ]]; then
   exact_overlay_path="$(manifest_field exact_overlay_path)"
   exact_overlay_sha256="$(manifest_field exact_overlay_sha256)"
   apply_render_sha256="$(manifest_field apply_render_sha256)"
-  [[ "$(wc -l <"$activation_manifest" | tr -d ' ')" == 11 ]] || {
+  cmp -s "$activation_manifest" <(
+    printf 'candidate_commit=%s\n' "$candidate_commit"
+    printf 'candidate_image_reference=%s\n' "$candidate_image_reference"
+    printf 'candidate_index_id=%s\n' "$candidate_index_id"
+    printf 'candidate_descriptor_digest=%s\n' "$candidate_descriptor_digest"
+    printf 'candidate_exact_reference=%s\n' "$candidate_exact_reference"
+    printf 'candidate_image_id=%s\n' "$candidate_image_id"
+    printf 'functional_overlay_path=%s\n' "$functional_overlay_path"
+    printf 'functional_overlay_sha256=%s\n' "$functional_overlay_sha256"
+    printf 'exact_overlay_path=%s\n' "$exact_overlay_path"
+    printf 'exact_overlay_sha256=%s\n' "$exact_overlay_sha256"
+    printf 'apply_render_sha256=%s\n' "$apply_render_sha256"
+  ) || {
     printf '%s\n' 'OpenBot G1 activation manifest is not canonical' >&2
     exit 65
   }
@@ -213,14 +225,44 @@ if [[ -e "$activation_manifest" || -L "$activation_manifest" ]]; then
   [[ "$(docker image inspect --format '{{.Id}}' "$candidate_image_reference")" == "$candidate_index_id" ]] || exit 65
   [[ "$(docker image inspect --format '{{index .Descriptor "digest"}}' "$candidate_image_reference")" == "$candidate_descriptor_digest" ]] || exit 65
   [[ "$(docker image inspect --format '{{.Id}}' "$candidate_exact_reference")" == "$candidate_index_id" ]] || exit 65
+  activation_render=''
+  render_child=''
+  cleanup_render() {
+    local private_render="$activation_render"
+    activation_render=''
+    [[ -z "$private_render" ]] || rm -f "$private_render"
+  }
+  on_render_exit() {
+    local status=$?
+    trap - EXIT HUP INT TERM
+    if [[ -n "$render_child" ]]; then
+      kill -TERM "$render_child" 2>/dev/null || true
+      wait "$render_child" 2>/dev/null || true
+    fi
+    if ! cleanup_render; then
+      printf '%s\n' 'active helper render cleanup failed' >&2
+      exit 71
+    fi
+    exit "$status"
+  }
+  trap on_render_exit EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   activation_render="$(mktemp)"
-  "${base[@]}" -f "$functional_overlay_path" -f "$exact_overlay_path" config --format json >"$activation_render"
-  [[ "$(sha256sum "$activation_render" | awk '{print $1}')" == "$apply_render_sha256" ]] || { rm -f "$activation_render"; exit 65; }
+  "${base[@]}" -f "$functional_overlay_path" -f "$exact_overlay_path" config --format json >"$activation_render" &
+  render_child=$!
+  wait "$render_child"
+  render_child=''
+  [[ "$(sha256sum "$activation_render" | awk '{print $1}')" == "$apply_render_sha256" ]] || exit 65
   jq -e --arg expected "$candidate_exact_reference" '.services.openbot.image == $expected' "$activation_render" >/dev/null || {
-    rm -f "$activation_render"
     exit 65
   }
-  rm -f "$activation_render"
+  if ! cleanup_render; then
+    printf '%s\n' 'active helper render cleanup failed' >&2
+    exit 71
+  fi
+  trap - EXIT HUP INT TERM
   base+=( -f "$functional_overlay_path" -f "$exact_overlay_path" )
 fi
 exec "${base[@]}" "$@"
