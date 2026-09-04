@@ -8,6 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The published service images are zstd rather than gzip
+
+An image pull was already a compressed transfer, so this is not compression where there was none; it
+is a better algorithm for the same job. `agent-computer` goes from 962 MB to 886 MB on the wire, and
+zstd inflates several times faster, which on 2 GB of Chromium is worth more than the 8%. The saving
+comes from recompressing the layers that arrived from somebody else's registry, where nearly all of
+the bytes are, so the images no longer share layers with a gzip pull of the same base.
+
+This applies to the five `ghcr.io/copilotkit/openbot-<service>` images and not to
+`ghcr.io/copilotkit/openbot`. Reading a zstd layer needs a client that supports it, which Podman and
+current containerd do; the single image is pulled by deployments running whatever they have, so it
+stays gzip.
+
 ### A release publishes every service's image, not just the one
 
 `ghcr.io/copilotkit/openbot` was the only image a release produced, so anything running the Compose

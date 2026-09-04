@@ -206,13 +206,27 @@ jobs:
       # Pushed by digest and deliberately untagged. A tag written here would name one architecture,
       # and the two jobs for one image would race to own it, so the last to finish would decide what
       # the tag meant.
+      #
+      # zstd, not gzip. A pull is already a compressed transfer, so this is not about compressing
+      # something that was not; it is a better algorithm for the same job. Measured on
+      # `agent-computer`, the image that matters: 962 MB becomes 886 MB, and it inflates several
+      # times faster, which is worth more than the 8% on 2 GB of Chromium. `force-compression`
+      # is what reaches the layers that came from somebody else's registry, which is where almost
+      # all of the bytes are; without it only our own thin layers change and the saving rounds to
+      # nothing. The cost is that these images no longer share layers with a gzip pull of the same
+      # base, and that a client which cannot read zstd cannot read them, which is why this is here
+      # and not on the `openbot` image above: that one is pulled by servers with whatever they have,
+      # and these are pulled by an installer that ships Podman.
       - id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ${{ matrix.image }}/Dockerfile
           platforms: linux/${{ matrix.platform.arch }}
-          outputs: type=image,name=ghcr.io/copilotkit/openbot-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          # `oci-mediatypes=true` because zstd layers have no Docker-schema2 media type to be
+          # described by. It is buildx's default for this exporter and is stated rather than
+          # assumed, since the push fails without it and the reason would not be obvious.
+          outputs: type=image,name=ghcr.io/copilotkit/openbot-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
           # Scoped per image and per architecture. One shared scope would have ten builds
           # overwriting each other's cache and none of them reading their own.
           cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
