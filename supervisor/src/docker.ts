@@ -61,7 +61,7 @@ const COMPUTER_HEALTHCHECK = {
   Timeout: 3_000_000_000,
   StartPeriod: 2_000_000_000,
   Retries: 30,
-} as const;
+};
 
 /**
  * How many times `ensure` will build a computer before giving up.
