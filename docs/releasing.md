@@ -83,12 +83,13 @@ the server reaches the supervisor, the supervisor builds a computer, the gateway
 browser acts, and the trail records it. It cannot run in CI, and this is not a gap to be closed
 later.
 
-OpenBot only runs in Intelligence mode. `loadConfig` refuses to start without a licence, and a
-licence is cryptographically signed for the machine it was issued for, so a hosted runner cannot hold
-one. The `image` check gets around this with placeholder values, because nothing is contacted at
-start-up, but the journey asserts `licenseStatus` is `valid` and no placeholder can make that true.
+OpenBot only runs in Intelligence mode, and `loadConfig` refuses to start without the project's
+Intelligence values, which a hosted runner has no business holding. The `image` check gets around
+this with placeholder values, because nothing is contacted at start-up, but the journey asserts
+`licenseStatus` is `valid`, and no placeholder can make that true.
 
-So it is a step a person takes, on a machine with a licence, before merging the release PR:
+So it is a step a person takes, on a machine with real Intelligence credentials, before merging
+the release PR:
 
 ```sh
 bash scripts/start.sh
