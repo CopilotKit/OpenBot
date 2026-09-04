@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.7
+
 ### The published service images are zstd rather than gzip
 
 An image pull was already a compressed transfer, so this is not compression where there was none; it
