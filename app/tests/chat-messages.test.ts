@@ -154,4 +154,16 @@ describe("toVisibleChatItems", () => {
 
     expect(toVisibleChatItems([thinking])).toEqual([]);
   });
+
+  test("drops a malformed live user turn instead of throwing", () => {
+    // Live turns bypass schema validation; one bad turn must not unmount the transcript.
+    for (const content of [undefined, null, 42] as unknown[]) {
+      const bad = {
+        id: "user-bad",
+        role: "user",
+        content,
+      } as unknown as Message;
+      expect(toVisibleChatItems([bad])).toEqual([]);
+    }
+  });
 });

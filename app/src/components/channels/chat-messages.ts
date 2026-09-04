@@ -98,6 +98,12 @@ export function toVisibleChatItems(
 
     if (message.role !== "user") return [];
 
+    if (
+      typeof message.content !== "string" &&
+      !Array.isArray(message.content)
+    ) {
+      return [];
+    }
     const text =
       typeof message.content === "string"
         ? message.content
