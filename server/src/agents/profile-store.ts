@@ -183,6 +183,74 @@ function endpointOf(configuration: unknown): string | null {
   return typeof endpoint === "string" ? endpoint : null;
 }
 
+/**
+ * The instruction a Bot in the box runs on, read back out of its stored configuration.
+ *
+ * The mirror of {@link endpointOf}, and needed for the same reason: a copy has to be made of what
+ * the original actually was, and for a `built_in` coworker the prompt IS the coworker. Trimmed and
+ * required to be non-empty, matching `registeredAgentFromRow`, which will not build a Bot from a
+ * blank one either.
+ */
+function systemPromptOf(configuration: unknown): string | null {
+  if (!configuration || typeof configuration !== "object") return null;
+  const prompt = (configuration as { systemPrompt?: unknown }).systemPrompt;
+  if (typeof prompt !== "string") return null;
+  const trimmed = prompt.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/** What a coworker is, and what it runs on: the two `agents` columns a copy has to reproduce. */
+export type AgentRun = {
+  type: "built_in" | "remote_ag_ui";
+  configuration: Record<string, unknown>;
+};
+
+/**
+ * What a duplicate runs on, decided from what the original ran on.
+ *
+ * WHY THIS IS NOT JUST THE ENDPOINT. Duplicate used to rebuild the copy from `source.endpoint` alone
+ * and write `type: "remote_ag_ui"` flat. #328 fixed the half of that a coworker with its own endpoint
+ * saw. The other half is a coworker that has no endpoint because it is not supposed to have one: a
+ * `built_in` Bot's configuration is `{ systemPrompt }`, so the endpoint read came back null, the copy
+ * fell through to the managed Bot, and the prompt was dropped on the floor.
+ *
+ * That copy is the failure this repository already has a paragraph about. It looks identical on every
+ * screen and its whole instruction becomes `standingRoleMessage` — see the note above that function
+ * in `copilot.ts`, which names the compliance Bot that answered a filing question with invented
+ * thresholds because one sentence of role description was all that reached it. The default tenant
+ * package ships two `built_in` coworkers, and one of them, `Knowledge`, is a careful
+ * do-not-fabricate instruction. Copy it and you get a coworker with the name, the title, the avatar,
+ * and none of that.
+ *
+ * The type is carried too, not only the configuration. A copy written as `remote_ag_ui` also cannot
+ * be granted handoff for the rest of its life: `agentRunsHere` and `botsReachableFrom` both key on
+ * `agents.type == "built_in"`, so the original may hand work on and its copy silently may not.
+ *
+ * `null` means there is nothing to run this copy on, which the caller turns into
+ * {@link ManagedAgentUnavailableError}. That can now only happen for a source that had neither an
+ * endpoint nor a prompt on a deployment with no managed Bot — never for a `built_in` source, which
+ * brings its own instruction and needs no managed Bot to fall back to.
+ *
+ * `auth` is deliberately not carried: it is a reference into the vault, and two coworkers sharing one
+ * credential would mean rotating either one's key silently changed the other's.
+ */
+export function runForDuplicate(
+  source: { type: "built_in" | "remote_ag_ui"; configuration: unknown },
+  managed: Record<string, unknown> | undefined,
+): AgentRun | null {
+  const systemPrompt = systemPromptOf(source.configuration);
+  if (source.type === "built_in" && systemPrompt) {
+    return { type: "built_in", configuration: { systemPrompt } };
+  }
+
+  const endpoint = endpointOf(source.configuration);
+  if (endpoint) {
+    return { type: "remote_ag_ui", configuration: { endpoint } };
+  }
+
+  return managed ? { type: "remote_ag_ui", configuration: managed } : null;
+}
+
 async function findAccessibleProfile(
   executor: DatabaseExecutor,
   actor: AgentActor,
@@ -437,15 +505,35 @@ export function createAgentProfileStore(
         const source = await findAccessibleProfile(transaction, actor, id);
         if (!source) throw new AgentNotFoundError(id);
 
-        if (!managedConfiguration) {
+        /*
+         * The stored row, because a profile does not carry what a copy has to reproduce.
+         *
+         * `AgentProfile` projects `endpoint` out of the configuration and nothing else, which is all
+         * an edit form needs and half of what this needs: a `built_in` coworker has no endpoint and
+         * a prompt instead. Read here rather than widened into the profile, so the DTO every surface
+         * gets does not start carrying a Bot's instructions. Inside the transaction, and after the
+         * access check, so this cannot read a row the caller may not see.
+         */
+        const [stored] = await transaction
+          .select({ type: agents.type, configuration: agents.configuration })
+          .from(agents)
+          .where(eq(agents.id, id))
+          .limit(1);
+        if (!stored) throw new AgentNotFoundError(id);
+
+        // `auth` is a vault reference and is deliberately not carried: see `runForDuplicate`.
+        const run = runForDuplicate(stored, managedConfiguration);
+        // After the source read, so a source that brings its own endpoint or its own prompt needs no
+        // managed Bot to fall back to.
+        if (!run) {
           throw new ManagedAgentUnavailableError();
         }
         const duplicateId = newAgentId();
         await transaction.insert(agents).values({
           id: duplicateId,
           name: source.name,
-          type: "remote_ag_ui",
-          configuration: managedConfiguration,
+          type: run.type,
+          configuration: run.configuration,
         });
         await transaction.insert(agentProfiles).values({
           agentId: duplicateId,

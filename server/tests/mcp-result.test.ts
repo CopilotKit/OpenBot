@@ -63,6 +63,13 @@ describe("a result with something in it", () => {
     expect(resultText([{}]).text).toBe("[unknown]");
   });
 
+  test("names a null or non-object part rather than throwing", () => {
+    // Content arrives from a vendor's server; a null entry must not throw.
+    expect(resultText([null]).text).toBe("[unknown]");
+    expect(resultText([undefined]).text).toBe("[unknown]");
+    expect(resultText([42]).text).toBe("[unknown]");
+  });
+
   test("a part that is only whitespace still counts as something being there", () => {
     // One blank part beside a real one must not make the whole result look empty.
     expect(

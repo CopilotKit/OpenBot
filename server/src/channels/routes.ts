@@ -902,10 +902,22 @@ type ActivityInputParseResult =
 /**
  * Parse a reported message.
  *
- * `at` comes from the client that saw the message, because only it knows when the message arrived, * but it is never trusted as a clock: the store compares it against what is stored and only ever
- * moves forwards, so a wrong one can lose a report, not corrupt the row.
+ * `at` comes from the client that saw the message, because only it knows when the message arrived,
+ * and it may say when, but not later than now. The store compares it against what is stored and
+ * only ever moves forwards, and that guard is shared with every other clock in the deployment:
+ * the routine runner's, a relayed handoff answer's, every other member's browser. A browser whose
+ * clock ran seven minutes ahead used to stamp the row seven minutes into the future, and it was
+ * not that report that got lost — every correct one for the next seven minutes was, silently: a
+ * routine's reply landed in the thread and never on the roster. Clamped rather than refused,
+ * because clocks are a little ahead all the time and a report a second early is still the report.
+ * A stamp in the past is kept as it is, so a person's message and the reply, reported separately
+ * by the same clock, still land in the order that clock saw them.
  */
-export function parseActivityInput(input: unknown): ActivityInputParseResult {
+export function parseActivityInput(
+  input: unknown,
+  /** The server's own clock, injectable so a test can be about a specific gap. */
+  now: Date = new Date(),
+): ActivityInputParseResult {
   if (!isChannelInputObject(input)) {
     return { ok: false, error: "Activity must be a JSON object." };
   }
@@ -917,13 +929,20 @@ export function parseActivityInput(input: unknown): ActivityInputParseResult {
   if (object.agentId !== null && typeof object.agentId !== "string") {
     return { ok: false, error: "Agent ID must be a string or null." };
   }
+  if (
+    typeof object.agentId === "string" &&
+    object.agentId.trim().length === 0
+  ) {
+    return { ok: false, error: "Agent ID must be a string or null." };
+  }
   if (typeof object.at !== "string") {
     return { ok: false, error: "Timestamp is required." };
   }
-  const at = new Date(object.at);
-  if (Number.isNaN(at.getTime())) {
+  const reported = new Date(object.at);
+  if (Number.isNaN(reported.getTime())) {
     return { ok: false, error: "Timestamp must be an ISO-8601 date." };
   }
+  const at = reported.getTime() > now.getTime() ? now : reported;
 
   return {
     ok: true,
