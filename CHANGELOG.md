@@ -8,6 +8,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A release publishes every service's image, not just the one
+
+`ghcr.io/copilotkit/openbot` was the only image a release produced, so anything running the Compose
+stack built `agent-computer`, the supervisor, both Bots and the migration image from source on
+every machine. That needs a toolchain and it needs several minutes, most of them Chromium, and it
+is the difference between a deployment and a laptop being able to start at all.
+
+Each of those is now published beside it, at `ghcr.io/copilotkit/openbot-<service>`, carrying both
+`linux/amd64` and `linux/arm64` so one reference works on a server and on an arm64 laptop. Every
+image gets its own build provenance attestation, and `container-images.json` on the release pins a
+digest for all of them rather than for one.
+
+Nothing changes for a checkout: unset, `COMPUTER_IMAGE`, `SUPERVISOR_IMAGE`, `BOT_IMAGE`,
+`LANGGRAPH_IMAGE` and `SERVER_IMAGE` name local tags and Compose builds them as before. Point them
+at published digests and set `IMAGE_PULL_POLICY=missing` to pull instead. `docs/releasing.md` shows
+reading the references out of `container-images.json`; `docs/configuration.md` lists the settings.
+
+CI now builds those five Dockerfiles too. Nothing did before, because they are built by
+`docker compose up --build`, which only the smoke journey runs and which cannot run in CI, so a
+broken one surfaced during a release after the first image had already been pushed.
 ### A skill can be written in the conversation instead of retyped into a form
 
 A skill is four fields and an instruction a Bot follows, and the instruction is the one that decides

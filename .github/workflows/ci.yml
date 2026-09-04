@@ -358,13 +358,63 @@ jobs:
       - if: always()
         run: docker rm -f openbot-ci >/dev/null 2>&1 || true
 
+  # The five images the release publishes alongside the one above. Nothing else here builds them:
+  # they are built by `docker compose up --build`, which only the smoke journey runs and which
+  # cannot run in CI. So a broken `supervisor/Dockerfile` used to surface during a release, after
+  # the `openbot` image had already been pushed, which is the one failure this repository calls out
+  # as leaving a published image with nothing pointing at it.
+  #
+  # Built, not pushed, and one architecture: this answers whether the Dockerfile resolves. Whether
+  # it resolves on arm64 too is answered at release time, on an arm64 runner.
+  #
+  # No registry cache, so a release builds these a second time. `type=gha` needs ACTIONS_* in the
+  # environment, which `build-push-action` injects and a plain `run:` step does not have, and
+  # reaching for another action to export them would buy minutes in a job that runs rarely at the
+  # price of a dependency in the one workflow whose inputs are a security boundary.
+  component-dockerfiles:
+    name: component dockerfiles
+    runs-on: ubuntu-latest
+    # The same cost gate as `image` above, and for the same reason: `agent-computer` pulls
+    # Playwright's base and `server` builds the app, so this is minutes rather than seconds. On main
+    # and through the release's workflow_call it always runs.
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'full-ci')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # A Dockerfile the release does not publish is one a machine would build from source, so the
+      # list and the tree have to agree. Checked here rather than trusted, because the failure is
+      # silent: the release succeeds and a laptop somewhere compiles the app.
+      - name: Every buildable service is published
+        run: |
+          set -euo pipefail
+          found="$(find . -mindepth 2 -maxdepth 2 -name Dockerfile -not -path './node_modules/*' \
+            | sed -e 's|^\./||' -e 's|/Dockerfile$||' | sort)"
+          published="$(jq -r '.[]' .github/published-images.json | sort)"
+          if [ "$found" != "$published" ]; then
+            echo "::error::.github/published-images.json does not match the Dockerfiles in the tree."
+            diff <(echo "$published") <(echo "$found") || true
+            exit 1
+          fi
+      - name: They build
+        run: |
+          set -euo pipefail
+          while read -r image; do
+            echo "::group::$image"
+            docker buildx build --file "$image/Dockerfile" --platform linux/amd64 .
+            echo "::endgroup::"
+          done < <(jq -r '.[]' .github/published-images.json)
+
   # One check for branch protection to require. A new job above is covered by this without anybody
   # remembering to add it to a list, and a job that was skipped for the wrong reason is not a pass.
   verify:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, chart, test, build, migrations, image]
+    needs: [static, deployables, chart, test, build, migrations, image, component-dockerfiles]
     steps:
       - name: Require every check
         env:

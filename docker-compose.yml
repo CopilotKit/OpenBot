@@ -39,6 +39,18 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+    # Named, and pullable, for the same reason as agent-computer below: a release publishes this
+    # image, and a machine that can name it does not need a toolchain to build it. `pull_policy`
+    # is what decides between the two, because a service carrying a `build` section builds by
+    # default however its image is named. IMAGE_PULL_POLICY=missing makes it pull instead.
+    #
+    # Not a guarantee that nothing is built: a pull that fails falls back to building, silently,
+    # which is right for a developer and wrong for an installed OpenBot, where there is no
+    # toolchain and the honest answer is that the image could not be fetched. Anything shipping
+    # these images to a machine that cannot build them overrides the `build` section away rather
+    # than relying on this variable.
+    image: ${SERVER_IMAGE:-openbot-server:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     command: ["bun", "x", "drizzle-kit", "migrate", "--config=drizzle.config.ts"]
     environment:
       DATABASE_URL: postgres://openbot:openbot@postgres:5432/openbot
@@ -57,6 +69,7 @@ services:
     # Tagged explicitly because the supervisor starts one computer per Bot from this image by name,
     # and a Compose-derived name would change with the project.
     image: ${COMPUTER_IMAGE:-openbot-agent-computer:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
       # Loopback only. This process drives a browser holding real logins; COMPUTER_TOKEN is the
       # request control, and loopback keeps the surface off routed networks.
@@ -158,6 +171,9 @@ services:
     build:
       context: .
       dockerfile: supervisor/Dockerfile
+    # Published by a release; see migrate above for what pull_policy decides.
+    image: ${SUPERVISOR_IMAGE:-openbot-supervisor:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     # The same file, because this process does not read these itself: it forwards every EGRESS_PROXY
     # key out of its own environment into each computer it creates, so it has to be given them first.
     env_file:
@@ -218,6 +234,9 @@ services:
     build:
       context: .
       dockerfile: agent-bot/Dockerfile
+    # Published by a release; see migrate above for what pull_policy decides.
+    image: ${BOT_IMAGE:-openbot-agent-bot:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
       # Loopback, not every interface. The token is the boundary; this means an attacker needs to be
       # on the machine before they can even try it. Nothing legitimate reaches a Bot from another
@@ -245,6 +264,9 @@ services:
     build:
       context: .
       dockerfile: agent-langgraph/Dockerfile
+    # Published by a release; see migrate above for what pull_policy decides.
+    image: ${LANGGRAPH_IMAGE:-openbot-agent-langgraph:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-build}
     ports:
       # Loopback, for the same reason as agent-bot above.
       - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4201"

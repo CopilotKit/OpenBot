@@ -326,6 +326,32 @@ When optional SPIRE services are used:
 - computers read `SPIFFE_ENDPOINT_SOCKET`;
 - Compose also uses `SPIRE_JOIN_TOKEN` and `COMPOSE_PROJECT_NAME`.
 
+## Images
+
+Every service `docker-compose.yml` can build is published by a release, so a machine can run the
+stack without a toolchain and without waiting for Chromium to build.
+
+| Service           | Setting             | Published image                            |
+| ----------------- | ------------------- | ------------------------------------------ |
+| `agent-computer`  | `COMPUTER_IMAGE`    | `ghcr.io/copilotkit/openbot-agent-computer` |
+| `supervisor`      | `SUPERVISOR_IMAGE`  | `ghcr.io/copilotkit/openbot-supervisor`     |
+| `agent-bot`       | `BOT_IMAGE`         | `ghcr.io/copilotkit/openbot-agent-bot`      |
+| `agent-langgraph` | `LANGGRAPH_IMAGE`   | `ghcr.io/copilotkit/openbot-agent-langgraph`|
+| `migrate`         | `SERVER_IMAGE`      | `ghcr.io/copilotkit/openbot-server`         |
+
+Unset, each names a local tag and Compose builds it, which is what a checkout of this repository
+does. Set to a published reference, pinned by digest, together with `IMAGE_PULL_POLICY=missing`,
+Compose pulls instead. Both architectures are in every image, so the same reference works on an
+arm64 laptop and an amd64 server.
+
+`IMAGE_PULL_POLICY` is needed because a service carrying a `build` section builds by default
+however its image is named. It is also not a promise that nothing is built: a pull that fails falls
+back to building, which suits a developer and does not suit a machine with no toolchain, where the
+useful answer is that the image could not be fetched. Somewhere that must never build, override the
+`build` sections away instead.
+
+`docs/releasing.md` shows reading the digests straight out of a release's `container-images.json`.
+
 ## Ports
 
 | Service           | Default port               | Setting           |
