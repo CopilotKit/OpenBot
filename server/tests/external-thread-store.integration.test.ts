@@ -48,6 +48,15 @@ function binding(
   };
 }
 
+function feishuBinding(label: string): ExternalThreadBindingInput {
+  return binding(label, {
+    provider: "feishu",
+    providerTenantId: `tenant_${suite}`,
+    providerConversationId: `chat_${label}_${suite}`,
+    providerThreadId: `message_${label}_${suite}`,
+  });
+}
+
 function expectAssignedToRisk(error: unknown): void {
   expect(error).toBeInstanceOf(ExternalThreadConflictError);
   if (error instanceof ExternalThreadConflictError) {
@@ -208,6 +217,25 @@ describe("external thread bindings", () => {
     await expect(
       store.getByChannelsThreadId(input.channelsThreadId),
     ).resolves.toEqual(bound);
+  });
+
+  test("binds and reloads a Feishu thread without colliding with Slack", async () => {
+    const feishu = feishuBinding("provider_pair");
+    const slack = binding("provider_pair", {
+      providerTenantId: feishu.providerTenantId,
+      providerConversationId: feishu.providerConversationId,
+      providerThreadId: feishu.providerThreadId,
+    });
+
+    const [boundFeishu, boundSlack] = await Promise.all([
+      store.bind(feishu),
+      store.bind(slack),
+    ]);
+
+    await expect(store.getByProviderThread(feishu)).resolves.toEqual(
+      boundFeishu,
+    );
+    await expect(store.getByProviderThread(slack)).resolves.toEqual(boundSlack);
   });
 
   test("appends provider-visible turns idempotently and reads them in order", async () => {

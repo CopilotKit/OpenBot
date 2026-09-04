@@ -25,6 +25,24 @@ describe("external Slack transcript target", () => {
     });
   });
 
+  test("accepts a Feishu transcript target", () => {
+    expect(
+      externalThreadTarget({
+        threadId: "channels-thread-feishu",
+        agentId: "risk",
+        agentName: "Risk Analyst",
+        provider: "feishu",
+        readOnly: true,
+      }),
+    ).toEqual({
+      threadId: "channels-thread-feishu",
+      agentId: "risk",
+      agentName: "Risk Analyst",
+      provider: "feishu",
+      readOnly: true,
+    });
+  });
+
   test("rejects writable or malformed targets", () => {
     for (const value of [
       null,
