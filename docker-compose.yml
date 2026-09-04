@@ -160,7 +160,7 @@ services:
       - spire-agent-socket:/tmp/spire-agent/public
       - spire-agent-data:/opt/spire/data
       # Read-only, and only so the docker workload attestor can see which container is asking.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${ENGINE_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
 
   # One computer per Bot.
   #
@@ -220,7 +220,15 @@ services:
     volumes:
       # Read-only because this service only ever needs to ask; it is still root-equivalent, which is
       # the whole reason nothing else here gets it.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      #
+      # The source is a setting because the default is wrong on one of the engines this runs on.
+      # Docker puts its socket at this path, and so does Podman on macOS, where `podman machine`
+      # symlinks it to the rootless socket inside the virtual machine. Rootless Podman on Linux does
+      # not: the path is either absent or, with podman-docker installed, a symlink to
+      # /run/podman/podman.sock, which is the *rootful* socket and is not the one running. The
+      # supervisor then holds a dead socket and reports that it cannot reach Docker. Point
+      # ENGINE_SOCKET at $XDG_RUNTIME_DIR/podman/podman.sock there.
+      - ${ENGINE_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
       # To register an entry per Bot as each computer is created.
       - spire-server-socket:/tmp/spire-server/private
     security_opt:

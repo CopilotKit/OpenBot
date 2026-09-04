@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The engine socket the supervisor is given can be pointed somewhere else
+
+Compose mounted `/var/run/docker.sock` into the supervisor as a fixed path. That is correct for
+Docker, and for Podman on macOS, where `podman machine` symlinks it to the rootless socket inside the
+virtual machine. It is wrong for rootless Podman on Linux, where the path is either absent or, with
+`podman-docker` installed, a symlink to `/run/podman/podman.sock`, the rootful socket, which is not
+the one running. The supervisor held a dead socket and every attempt to give a Bot a computer failed
+with a message about not reaching Docker.
+
+The mount source is now `ENGINE_SOCKET`, defaulting to `/var/run/docker.sock`, so nothing changes
+unless it is set. On rootless Podman on Linux, set it to `$XDG_RUNTIME_DIR/podman/podman.sock`.
+
 ### A Bot's computer is waited for properly on Podman, and the supervisor can reach the engine there
 
 Two things stopped OpenBot running on Podman, which nothing had tried before.
