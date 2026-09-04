@@ -444,6 +444,20 @@ Each agent requires `id`, `name`, `title`, `role_description`, and `type`.
 | `built-in`     | `system_prompt` |
 | `remote-ag-ui` | `endpoint`      |
 
+`computer_access` is an optional per-agent entitlement with the values `enabled` and `disabled`:
+
+```yaml
+agents:
+  - id: document-collector
+    # …the required fields above…
+    computer_access: enabled
+```
+
+- Omitted in an older package is materialized as `enabled` for compatibility.
+- A new user-created or duplicated agent starts as `disabled`.
+- Explicit `disabled` makes computer tools and routes unavailable.
+- Explicit `enabled` makes the tools and routes exist, but every acting call still requires CEL policy approval.
+
 The two types are told different amounts, which is easy to miss. A `built-in` agent gets its
 `system_prompt`; a `remote-ag-ui` agent has none, and its `role_description` is the only instruction
 it ever receives from the package. Write that sentence as the whole brief for the Bot, not as a
