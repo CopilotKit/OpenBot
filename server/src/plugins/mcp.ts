@@ -49,6 +49,7 @@ export function resultText(content: unknown): {
   const parts = Array.isArray(content) ? content : [];
   const joined = parts
     .map((part) => {
+      if (!part || typeof part !== "object") return "[unknown]";
       const item = part as { type?: string; text?: string };
       if (item.type === "text" && typeof item.text === "string") {
         return item.text;
