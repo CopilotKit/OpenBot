@@ -13,12 +13,18 @@ export type RuntimeCapabilities = {
   intelligence: IntelligenceSettings;
 };
 
-/** The Intelligence contract. Every field is required; see runtimeCapabilities. */
+/**
+ * The Intelligence contract. Three values are required; see runtimeCapabilities.
+ *
+ * `licenseToken` is optional. Managed Intelligence derives entitlement from the project key, and
+ * `@copilotkit/runtime` declares `licenseToken` optional with a `COPILOTKIT_LICENSE_TOKEN` fallback
+ * of its own. A deployment that still holds one keeps passing it; nothing here requires it.
+ */
 export type IntelligenceSettings = {
   apiUrl: string;
   gatewayWsUrl: string;
   apiKey: string;
-  licenseToken: string;
+  licenseToken?: string;
 };
 
 export type DockerComputerConfig = {
@@ -581,9 +587,15 @@ function oktaAuth(
 /**
  * Resolve the Intelligence contract, or refuse to start.
  *
- * All four values are required together. A partial set is the more dangerous shape than none at all:
- * it means somebody intended to configure Intelligence and got it wrong, so failing on the partial
- * set alone (as this did) let a completely unconfigured deployment through as if that were a choice.
+ * The three addressing values are required together. A partial set is the more dangerous shape than
+ * none at all: it means somebody intended to configure Intelligence and got it wrong, so failing on
+ * the partial set alone (as this did) let a completely unconfigured deployment through as if that
+ * were a choice.
+ *
+ * COPILOTKIT_LICENSE_TOKEN IS NO LONGER ONE OF THEM. Managed Intelligence issues a single project
+ * key and derives entitlement from it, and requiring a second credential here sent people hunting
+ * for a token the platform had stopped handing out. It is still read and still forwarded when a
+ * deployment sets one, which is what a self-hosted Intelligence with its own licence needs.
  */
 function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const settings = {
@@ -597,7 +609,6 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     INTELLIGENCE_API_URL: settings.apiUrl,
     INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
     INTELLIGENCE_API_KEY: settings.apiKey,
-    COPILOTKIT_LICENSE_TOKEN: settings.licenseToken,
   })
     .filter(([, value]) => !value)
     .map(([name]) => name);

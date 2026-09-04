@@ -356,7 +356,7 @@ info = json.loads(sys.argv[1])
 status, agents = info.get("licenseStatus"), list(info.get("agents", {}))
 if status != "valid":
     print(f"\033[31m  licence is '{status}', not 'valid'.\033[0m")
-    print("\033[31m  Run: npx copilotkit@latest login && npx copilotkit@latest license --write\033[0m")
+    print("\033[31m  Check INTELLIGENCE_API_KEY: npx copilotkit@latest login && npx copilotkit@latest project select\033[0m")
     print("\033[31m  See README.md for Intelligence setup.\033[0m")
     raise SystemExit(1)
 if not agents:

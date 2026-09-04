@@ -78,7 +78,6 @@ describe("deployment configuration", () => {
       INTELLIGENCE_API_URL: baseEnvironment.INTELLIGENCE_API_URL,
       INTELLIGENCE_GATEWAY_WS_URL: baseEnvironment.INTELLIGENCE_GATEWAY_WS_URL,
       INTELLIGENCE_API_KEY: baseEnvironment.INTELLIGENCE_API_KEY,
-      COPILOTKIT_LICENSE_TOKEN: baseEnvironment.COPILOTKIT_LICENSE_TOKEN,
       MANAGED_AGENT_AG_UI_URL: baseEnvironment.MANAGED_AGENT_AG_UI_URL,
       MANAGED_AGENT_TOKEN: baseEnvironment.MANAGED_AGENT_TOKEN,
       // Explicit, because no provider means every visitor is the administrator and a deployment has
@@ -96,7 +95,6 @@ describe("deployment configuration", () => {
     "INTELLIGENCE_API_URL",
     "INTELLIGENCE_GATEWAY_WS_URL",
     "INTELLIGENCE_API_KEY",
-    "COPILOTKIT_LICENSE_TOKEN",
   ])("refuses to start when %s is missing", (name) => {
     const environment: Record<string, string | undefined> = {
       ...baseEnvironment,
@@ -105,6 +103,37 @@ describe("deployment configuration", () => {
 
     expect(() => loadConfig(environment)).toThrow(
       `CopilotKit Intelligence is required and is not configured. Missing: ${name}`,
+    );
+  });
+
+  test("starts without COPILOTKIT_LICENSE_TOKEN, because managed Intelligence no longer issues one", () => {
+    const environment: Record<string, string | undefined> = {
+      ...baseEnvironment,
+    };
+    delete environment.COPILOTKIT_LICENSE_TOKEN;
+
+    const config = loadConfig(environment);
+
+    if (config.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(config.runtime.intelligence.licenseToken).toBeUndefined();
+    expect(config.runtime.intelligence.apiKey).toBe(
+      baseEnvironment.INTELLIGENCE_API_KEY,
+    );
+  });
+
+  test("still forwards a licence token when a deployment sets one", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      COPILOTKIT_LICENSE_TOKEN: "self-hosted-licence",
+    });
+
+    if (config.runtime.mode !== "intelligence") {
+      throw new Error("expected the Intelligence runtime");
+    }
+    expect(config.runtime.intelligence.licenseToken).toBe(
+      "self-hosted-licence",
     );
   });
 
