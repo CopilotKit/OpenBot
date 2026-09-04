@@ -13,6 +13,7 @@ function channel(overrides: Partial<ChannelSummary>): ChannelSummary {
     agentIds: ["agent-1"],
     threadId: "thread-1",
     active: true,
+    summary: null,
     lastMessage: "hello",
     lastMessageAt: "2026-08-25T12:00:00.000Z",
     lastMessageAgentId: "agent-1",
@@ -59,4 +60,28 @@ test("the open channel is never unread, however unseen its activity", () => {
   expect(isUnread(channel({}), "channel-1")).toBe(false);
   expect(isUnread(channel({}), "channel-2")).toBe(true);
   expect(isUnread(channel({}), undefined)).toBe(true);
+});
+
+/*
+ * The roster row draws the summary and no longer draws the last message, so the fields the unread
+ * rule reads are now invisible on screen. That makes them easy for a later change to believe unused.
+ * These two pin the dependency: the dot is a fact about the message, never about the title.
+ */
+test("a titled channel is still unseen on its Bot's message", () => {
+  expect(
+    hasUnseenActivity(
+      channel({ summary: "Expense categories", lastMessage: null }),
+    ),
+  ).toBe(true);
+});
+
+test("a title does not make a read channel unseen again", () => {
+  expect(
+    hasUnseenActivity(
+      channel({
+        summary: "Expense categories",
+        lastReadAt: "2026-08-25T12:30:00.000Z",
+      }),
+    ),
+  ).toBe(false);
 });

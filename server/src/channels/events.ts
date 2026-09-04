@@ -26,6 +26,8 @@ export type ChannelActivityEvent = {
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
+  /** Newly written summary, on its own event: the sweep runs seconds after the activity it follows. */
+  summary?: string;
   /** The channel is hidden from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
   /**

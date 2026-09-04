@@ -373,9 +373,15 @@ export function createAgentRoutes(
       /*
        * The endpoint, because that is where conversation content will be sent, and whether a key was
        * attached, because "this Bot authenticates" is a fact and the key itself never is.
+       *
+       * And who may reach it. `visibility` is not a display preference: `accessFilter` admits a
+       * `public` coworker to every signed-in person, and `canRunAgent` is `canAccessAgent`, so public
+       * means everybody in the deployment may act as this Bot and spend the grants it holds. A row
+       * that cannot say which it was cannot reconstruct who could use this coworker at the time.
        */
       await record(context, "bot.created", agent.id, {
         name: parsed.value.name,
+        visibility: parsed.value.visibility,
         ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
         hasKey: Boolean(parsed.value.auth),
       });
@@ -400,10 +406,22 @@ export function createAgentRoutes(
         context.req.param("agentId"),
         parsed.value,
       );
-      // What changed, not the new values. Repointing the endpoint is the dangerous edit and is worth
-      // naming; a replaced key is worth knowing about and is never worth recording.
+      /*
+       * What changed, not the new values. Repointing the endpoint is the dangerous edit and is worth
+       * naming; a replaced key is worth knowing about and is never worth recording.
+       *
+       * `visibility` is carried the way `name` is — on every row, whether or not this edit moved it —
+       * because it is the second dangerous edit and the route has no before to compare against.
+       * Public admits every signed-in person to this coworker, and `canRunAgent` is `canAccessAgent`,
+       * so it hands them the right to act as it and spend what it was granted. Without the value on
+       * each row, an edit that opened a coworker to the whole deployment is byte-identical to one
+       * that corrected its title, and the trail cannot say when it was opened or by whom. Recorded on
+       * every row rather than only on the row that changed it, so reading the trail forward tells you
+       * what was reachable at any point, which is what an incident asks.
+       */
       await record(context, "bot.updated", agent.id, {
         name: parsed.value.name,
+        visibility: parsed.value.visibility,
         ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
         ...(parsed.value.auth ? { keyReplaced: true } : {}),
       });
