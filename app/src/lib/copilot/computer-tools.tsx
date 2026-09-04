@@ -1,12 +1,15 @@
 import { useFrontendTool } from "@copilotkit/react-core/v2";
+import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { ToolLine } from "@/components/channels/tool-line";
 import { CommandOutput } from "@/components/computer/command-output";
 import { ComputerView } from "@/components/computer/computer-view";
+import { agentQueryOptions } from "@/lib/agents/queries";
 import { tryClient } from "@/lib/client";
+import { canOfferComputerTools } from "@/lib/computers/access";
 import { noteBrowsed, recordActivity } from "@/lib/computers/activity";
 import { type ControlState, readControl } from "@/lib/computers/control";
-import { useActiveBotHolder } from "./active-bot";
+import { useActiveBotHolder, useDeclaredBotId } from "./active-bot";
 import { reportComputerActivity } from "./computer-activity";
 
 /**
@@ -238,6 +241,24 @@ function didNotWork(outcome: ComputerOutcome): boolean {
 }
 
 export function ComputerTools() {
+  const botId = useDeclaredBotId();
+  const profile = useQuery({
+    ...agentQueryOptions(botId ?? ""),
+    enabled: Boolean(botId),
+    retry: false,
+    // This is deliberately local to the globally-mounted computer offer, rather than a global
+    // query-client poll. A revoked entitlement must eventually remove model-visible tools even when
+    // a tab never changes focus; while a refresh is pending or errors, the helper below fails closed.
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
+  });
+
+  if (!canOfferComputerTools(botId, profile)) return null;
+
+  return <ComputerToolRegistrations />;
+}
+
+function ComputerToolRegistrations() {
   const bot = useActiveBotHolder();
 
   useFrontendTool({

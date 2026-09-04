@@ -1,23 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
-import {
-  createApplicationConfiguration,
-  loadTenantPackage,
-} from "../server/src/tenant-package";
+import { dirname, resolve } from "node:path";
+import { loadApplicationConfiguration } from "./application-config";
 
 const projectRoot = resolve(import.meta.dir, "..");
-const configuredTenantPackageDirectory = process.env.TENANT_PACKAGE_DIR;
-const tenantPackageDirectory = configuredTenantPackageDirectory
-  ? isAbsolute(configuredTenantPackageDirectory)
-    ? configuredTenantPackageDirectory
-    : resolve(projectRoot, "server", configuredTenantPackageDirectory)
-  : resolve(projectRoot, "examples/fintech");
-const tenantPackage = await loadTenantPackage(tenantPackageDirectory);
-const applicationConfiguration = createApplicationConfiguration(tenantPackage);
-const outputPath = resolve(
-  projectRoot,
-  "app/src/lib/generated/application-config.ts",
-);
+const applicationConfiguration = await loadApplicationConfiguration();
+const outputPath = resolve(projectRoot, "app/src/lib/generated/application-config.ts");
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(

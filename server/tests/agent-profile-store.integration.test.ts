@@ -658,6 +658,13 @@ describe("agent profile store integration", () => {
       .from(agentPreferences)
       .where(eq(agentPreferences.agentId, duplicate.id));
     expect(duplicatePreferences).toHaveLength(0);
+    const [duplicateAgent] = await database
+      .select({ configuration: agents.configuration })
+      .from(agents)
+      .where(eq(agents.id, duplicate.id));
+    expect(duplicateAgent?.configuration).toMatchObject({
+      computerAccess: "disabled",
+    });
   });
 
   test("duplicates no channel membership or Intelligence mapping from the source", async () => {
@@ -890,7 +897,10 @@ describe("agent profile store integration", () => {
       id: created.id,
       name: input.name,
       type: "remote_ag_ui",
-      configuration: { endpoint: managedAgentAgUiUrl.toString() },
+      configuration: {
+        endpoint: managedAgentAgUiUrl.toString(),
+        computerAccess: "disabled",
+      },
       packageId: null,
     });
   });

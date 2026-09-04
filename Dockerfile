@@ -66,6 +66,8 @@ RUN mkdir -p /prod && cp package.json bun.lock /prod/ \
 
 FROM deps AS app-build
 
+ARG TENANT_PACKAGE_DIR=../examples/fintech
+ENV TENANT_PACKAGE_DIR=${TENANT_PACKAGE_DIR}
 COPY app app
 COPY scripts scripts
 COPY shared shared

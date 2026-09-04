@@ -26,6 +26,9 @@ describe("computer routes", () => {
       policyStore,
       requireUser,
       async () => true,
+      undefined,
+      undefined,
+      async () => true,
     );
 
     const response = await routes.request(
@@ -85,6 +88,9 @@ function appFor(actor: AuthenticatedActor, computers: () => Promise<unknown>) {
       asActor(actor),
       // Permissive. Whether this person may act as the Bot in the path is a different question with
       // its own suite, and `:botId` is not what this route answers about anyway.
+      async () => true,
+      undefined,
+      undefined,
       async () => true,
     ),
     listed: () => listed,
@@ -160,6 +166,9 @@ describe("human input", () => {
         gateway,
         {} as PolicyStore,
         asActor(member),
+        async () => true,
+        undefined,
+        undefined,
         async () => true,
       ),
     };

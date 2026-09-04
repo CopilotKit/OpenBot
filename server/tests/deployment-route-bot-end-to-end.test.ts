@@ -88,6 +88,9 @@ function appFor(baseUrl: string, permitted: string) {
         asked.push(botId);
         return botId === permitted;
       },
+      undefined,
+      undefined,
+      async () => true,
     ),
   };
 }

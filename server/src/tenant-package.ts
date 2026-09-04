@@ -157,6 +157,33 @@ type TenantAgent = {
   skills: string[];
 };
 
+function computerAccessConfiguration(agent: Record<string, unknown>) {
+  if (agent.computer_access === undefined) {
+    // Older packages predate this key, but a sync writes a current row. Materialize their established
+    // access now so only genuinely old persisted rows can retain an omission.
+    return { computerAccess: "enabled" as const };
+  }
+  if (
+    agent.computer_access !== "enabled" &&
+    agent.computer_access !== "disabled"
+  ) {
+    throw new Error("agent.computer_access must be enabled or disabled");
+  }
+  return { computerAccess: agent.computer_access };
+}
+
+/** Every package sync writes an explicit entitlement, including programmatic callers of this API. */
+function persistedPackageAgentConfiguration(
+  configuration: Record<string, unknown>,
+) {
+  return {
+    ...configuration,
+    ...computerAccessConfiguration({
+      computer_access: configuration.computerAccess,
+    }),
+  };
+}
+
 type TenantChannel = {
   id: string;
   name: string;
@@ -379,9 +406,11 @@ export function validateTenantPackage(files: PackageFiles): TenantPackage {
                     agent.system_prompt,
                     "agent.system_prompt",
                   ),
+                  ...computerAccessConfiguration(agent),
                 }
               : {
                   endpoint: requiredString(agent.endpoint, "agent.endpoint"),
+                  ...computerAccessConfiguration(agent),
                 },
           skills:
             agent.skills === undefined || agent.skills === null
@@ -632,7 +661,9 @@ export async function synchronizeTenantPackage(
           id: agent.id,
           name: agent.name,
           type: agent.type,
-          configuration: agent.configuration,
+          configuration: persistedPackageAgentConfiguration(
+            agent.configuration,
+          ),
           packageId: deploymentPackage.id,
         })
         .onConflictDoUpdate({
@@ -641,7 +672,9 @@ export async function synchronizeTenantPackage(
           set: {
             name: agent.name,
             type: agent.type,
-            configuration: agent.configuration,
+            configuration: persistedPackageAgentConfiguration(
+              agent.configuration,
+            ),
             packageId: deploymentPackage.id,
             updatedAt,
           },

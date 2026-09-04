@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { intentOf } from "../src/computer/gateway";
 import {
   type ActionPolicy,
   evaluateActionPolicy,
@@ -25,6 +28,156 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
     ...overrides,
   };
 }
+
+const netsferaPolicyPath = join(
+  import.meta.dir,
+  "../../deploy/netsfera/agent-computer-policy.json",
+);
+
+function netsferaPolicy(): ActionPolicy {
+  // The permissive fallback makes a missing checked-in policy fail each behavioral assertion below,
+  // instead of passing only because OpenBot's absent-policy default is also deny.
+  if (!existsSync(netsferaPolicyPath)) {
+    return { mode: "enforce", deny: [], allow: ["true"] };
+  }
+  return JSON.parse(readFileSync(netsferaPolicyPath, "utf8")) as ActionPolicy;
+}
+
+describe("the Netsfera G0 computer policy", () => {
+  const policy = netsferaPolicy();
+
+  test("is an explicit checked-in deployment policy", () => {
+    expect(existsSync(netsferaPolicyPath)).toBe(true);
+  });
+
+  test("refuses the G0 actions", () => {
+    const denied = [
+      {
+        bot: "jefe-erp",
+        tool: "computer_navigate",
+        host: "erp.netsfera.es",
+        url: "https://erp.netsfera.es",
+      },
+      { bot: "jefe-erp", tool: "computer_run_command", host: "", url: "" },
+      {
+        bot: "recolector-documentos",
+        tool: "computer_navigate",
+        host: "evil.example",
+        url: "https://evil.example",
+      },
+      {
+        bot: "recolector-documentos",
+        tool: "computer_run_command",
+        host: "",
+        url: "",
+      },
+      {
+        bot: "recolector-documentos",
+        tool: "computer_navigate",
+        host: "chatgpt.com",
+        url: "https://chatgpt.com/admin/billing/payment-methods",
+      },
+    ];
+    for (const input of denied) {
+      const decision = evaluateActionPolicy(
+        policy,
+        context({
+          bot: { id: input.bot },
+          tool: { name: input.tool },
+          page: { host: input.host, url: input.url },
+          intent: intentOf(input.tool, undefined),
+        }),
+      );
+      expect(decision.allowed).toBe(false);
+      expect(decision.source).toBe("deny");
+    }
+  });
+
+  test("keeps the later collector boundary expressions parseable for its future promotion", () => {
+    const allowed = [
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_navigate" },
+        page: { host: "chatgpt.com", url: "https://chatgpt.com/invoices" },
+        intent: "navigate",
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_click" },
+        page: {
+          host: "console.hetzner.cloud",
+          url: "https://console.hetzner.cloud/projects",
+        },
+        intent: "activate",
+        element: { ref: "e1", role: "button", name: "Open invoice" },
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_read_file" },
+        page: { host: "", url: "" },
+        intent: "read_file",
+        file: {
+          path: "downloads/invoice.pdf",
+          name: "invoice.pdf",
+          extension: "pdf",
+        },
+      }),
+    ];
+
+    for (const input of allowed) {
+      // The entitlement and the G0-wide collector denial both win today. Isolate the later CEL
+      // allow expression so a future Task 9 promotion cannot discover a broken rule by relying on
+      // fail-closed behaviour at runtime.
+      const rule = policy.allow.find((candidate) =>
+        candidate.includes(input.tool.name),
+      );
+      expect(rule).toBeDefined();
+      const decision = evaluateActionPolicy(
+        { mode: "enforce", deny: [], allow: [rule as string] },
+        input,
+      );
+      expect(decision.allowed).toBe(true);
+      expect(decision.source).toBe("allow");
+    }
+
+    const denied = [
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_run_command" },
+        intent: "run_command",
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_navigate" },
+        intent: "navigate",
+        page: { host: "evil.example", url: "https://evil.example" },
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_navigate" },
+        intent: "navigate",
+        page: { host: "chatgpt.com", url: "https://chatgpt.com/payment" },
+      }),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_click" },
+        intent: "activate",
+        element: { ref: "e1", role: "button", name: "Buy" },
+      }),
+    ];
+
+    for (const [rule, input] of policy.deny
+      .slice(2)
+      .map((rule, index) => [rule, denied[index]] as const)) {
+      expect(input).toBeDefined();
+      const decision = evaluateActionPolicy(
+        { mode: "enforce", deny: [rule], allow: ["true"] },
+        input as PolicyContext,
+      );
+      expect(decision.source).toBe("deny");
+    }
+  });
+});
 
 const permissive: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 

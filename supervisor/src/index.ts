@@ -10,6 +10,8 @@ import {
   reset,
   stop,
 } from "./docker";
+import { parseComputerDnsServers } from "./dns";
+import { parseComputerExtraHosts } from "./extra-hosts";
 import { registerEntry } from "./identity";
 import { namesFor } from "./names";
 import { listenPort } from "./listen-port";
@@ -60,6 +62,8 @@ if (!token) {
 const image = process.env.COMPUTER_IMAGE ?? "openbot-agent-computer:latest";
 const network = process.env.COMPUTER_NETWORK;
 const runtime = process.env.COMPUTER_RUNTIME;
+const dnsServers = parseComputerDnsServers(process.env.COMPUTER_DNS_SERVERS);
+const extraHosts = parseComputerExtraHosts(process.env.COMPUTER_EXTRA_HOSTS);
 const memoryBytes = process.env.COMPUTER_MEMORY_BYTES
   ? Number.parseInt(process.env.COMPUTER_MEMORY_BYTES, 10)
   : undefined;
@@ -130,6 +134,8 @@ app.post("/computers/:botId/ensure", async (context) => {
     const state = await ensure(parsed.names, {
       image,
       environment: environmentFor(parsed.names.botId),
+      ...(dnsServers.length ? { dnsServers } : {}),
+      ...(extraHosts.length ? { extraHosts } : {}),
       ...(network ? { network } : {}),
       ...(runtime ? { runtime } : {}),
       ...(memoryBytes ? { memoryBytes } : {}),

@@ -29,6 +29,8 @@ export type AgentProfile = {
   builtIn: boolean;
   /** Whether a key is set for it. Never the key itself. */
   hasAuth: boolean;
+  /** The server-derived entitlement for the built-in computer surface. */
+  computerAccess: "enabled" | "disabled";
   /**
    * Whether this coworker holds a credential for calling tools back.
    *

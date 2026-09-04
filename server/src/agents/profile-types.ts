@@ -1,4 +1,5 @@
 export type AgentVisibility = "public" | "private";
+export type ComputerAccess = "enabled" | "disabled";
 
 export type AgentActor = {
   id: string;
@@ -20,6 +21,8 @@ export type AgentProfile = {
   endpoint: string | null;
   /** Whether a key is set for it. Never the key. */
   hasAuth: boolean;
+  /** Whether this Bot may be offered and reach the computer surface. */
+  computerAccess: ComputerAccess;
   /**
    * Whether this agent holds a credential for calling tools back.
    *
