@@ -14,12 +14,10 @@ Provision CopilotKit Intelligence after `.env` exists:
 ```sh
 npx --yes copilotkit@latest login
 npx --yes copilotkit@latest project select
-npx --yes copilotkit@latest license --write
 ```
 
 Put the `cpk-...` runtime key from `project select` in `.env` as
-`INTELLIGENCE_API_KEY`. `license --write` writes `COPILOTKIT_LICENSE_TOKEN`.
-Then add `OPENAI_API_KEY`.
+`INTELLIGENCE_API_KEY`. There is no licence step. Then add `OPENAI_API_KEY`.
 
 Start the stack:
 
