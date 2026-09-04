@@ -75,12 +75,12 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    ```sh
    npx --yes copilotkit@latest login
    npx --yes copilotkit@latest project select
-   npx --yes copilotkit@latest license --write
    ```
 
    Put the `cpk-...` runtime key from `project select` in `.env` as
-   `INTELLIGENCE_API_KEY`. `license --write` writes
-   `COPILOTKIT_LICENSE_TOKEN` into the existing `.env`.
+   `INTELLIGENCE_API_KEY`. That is the only Intelligence credential you need:
+   managed Intelligence derives entitlement from the project key, so there is
+   no separate licence token to fetch.
 
 3. Fill the remaining required values:
 
@@ -202,7 +202,10 @@ See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/
 - `INTELLIGENCE_API_URL`
 - `INTELLIGENCE_GATEWAY_WS_URL`
 - `INTELLIGENCE_API_KEY`
-- `COPILOTKIT_LICENSE_TOKEN`
+
+`COPILOTKIT_LICENSE_TOKEN` is optional. A self-hosted Intelligence with its own
+licence can still set it and it is forwarded to the runtime; managed Intelligence
+does not issue one and startup no longer asks for it.
 
 Settings worth knowing:
 
