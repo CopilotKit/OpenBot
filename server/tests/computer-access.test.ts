@@ -26,7 +26,7 @@ const asSignedIn: MiddlewareHandler<{ Variables: AppVariables }> = async (
 };
 
 describe("per-agent computer access", () => {
-  test("loads both Netsfera G0 Bots as explicitly disabled", async () => {
+  test("keeps Jefe ERP disabled and enables the document collector", async () => {
     const tenant = await loadTenantPackage("examples/netsfera");
 
     expect(
@@ -35,7 +35,7 @@ describe("per-agent computer access", () => {
     expect(
       tenant.agents.find((agent) => agent.id === "recolector-documentos")
         ?.configuration,
-    ).toMatchObject({ computerAccess: "disabled" });
+    ).toMatchObject({ computerAccess: "enabled" });
   });
 
   test("preserves computer access for a legacy package that omitted the setting", () => {
