@@ -31,7 +31,13 @@ import {
 import { createChannelStore } from "./channels/routes";
 import { websocket as channelSocket } from "./channels/socket";
 import { createStallGuard } from "./channels/stall-guard";
+import {
+  forgetSettledSummaries,
+  offerChannelsAwaitingSummary,
+  summariseClaimedChannels,
+} from "./channels/summary";
 import { createThreadIdentity } from "./channels/thread-identity";
+import { createChannelTitler } from "./channels/titler";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
@@ -77,6 +83,7 @@ import {
   loadTenantPackage,
   synchronizeTenantPackage,
 } from "./tenant-package";
+import { createUserInstructionsStore } from "./user-instructions";
 import { repeatAfterEach } from "./work/loop";
 import {
   createWorkQueue,
@@ -143,17 +150,9 @@ const identifyActor: IdentifyActor = async (request) => {
 };
 
 const config = loadConfig();
-const rawPort = process.env.PORT ?? process.env.SERVER_PORT ?? "3001";
-if (
-  process.env.PORT &&
-  process.env.SERVER_PORT &&
-  process.env.PORT !== process.env.SERVER_PORT
-) {
-  throw new Error(
-    `PORT (${process.env.PORT}) and SERVER_PORT (${process.env.SERVER_PORT}) disagree: set one or set both to the same value`,
-  );
-}
-const port = Number.parseInt(rawPort, 10);
+// Read with the rest of the configuration, where an empty variable is an absent one. See
+// `serverPort` in config.ts for what `process.env.PORT ?? …` did with `PORT=` instead.
+const port = config.port;
 const database = createDatabase(config.databaseUrl);
 await initializeDevActorUser(database, config.singleUser);
 // The vault, built before the agent store because a customer's agent may sit behind a key and that
@@ -515,6 +514,20 @@ const resolveRuntimeModelApiKey = () =>
 const loadToolsForActor = (actorId: string) => (botId: string) =>
   grantedTools({ store: pluginStore, botId, actorId });
 
+/** One person's standing instructions, for both the /api/settings routes and every run they start. */
+const userInstructionsStore = createUserInstructionsStore(database);
+
+/*
+ * What this person has told every built-in coworker they run.
+ *
+ * Per actor and read per build, for the reason every other per-person fact here is: somebody who
+ * edits their instructions and sends a message expects the message to land on the new ones, and a
+ * value captured at boot would serve the whole deployment whatever the first person to sign in had
+ * written.
+ */
+const loadInstructionsForActor = (actorId: string) => () =>
+  userInstructionsStore.read(actorId);
+
 /*
  * What the deployment tells a remote Bot about the run it is starting.
  *
@@ -669,6 +682,9 @@ const buildAgentFor = async ({
     // full so a Bot this owner cannot see is still absent, but the other Bots are neither built nor
     // asked what they hold.
     agentId,
+    // The owner's own standing instructions. A routine is their work done while they are asleep, so
+    // it is written the way they asked for it to be written, exactly as their chat turn would be.
+    loadInstructionsForActor(actor.id),
   );
   const agent = agents[agentId];
   if (!agent) {
@@ -826,6 +842,8 @@ const copilotRuntime = mountCopilotRuntime(
   (input) => {
     void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
   },
+  // What this person has told every coworker of theirs, in every channel. See user-instructions.ts.
+  loadInstructionsForActor,
 );
 
 /**
@@ -1031,6 +1049,41 @@ repeatAfterEach(
   60 * 60 * 1_000,
 );
 
+/*
+ * Naming conversations, in the API process rather than `worker/`, which the single-image container
+ * does not run. Its own loop, so a slow model never delays a hop.
+ */
+const channelSummaries = {
+  database,
+  queue: createWorkQueue(database),
+  transcript: routineIntelligence,
+  title: createChannelTitler({
+    model: tenantPackage.model.defaultModel,
+    resolveApiKey: resolveRuntimeModelApiKey,
+  }),
+  owner: `summariser/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
+};
+repeatAfterEach(async () => {
+  try {
+    await offerChannelsAwaitingSummary(channelSummaries);
+    const report = await summariseClaimedChannels(channelSummaries);
+    if (report.written.length > 0) {
+      console.info(
+        JSON.stringify({ type: "channel-summaries", written: report.written }),
+      );
+    }
+    // Same pass: one statement, deletes by age, and two replicas running it changes nothing.
+    await forgetSettledSummaries(channelSummaries);
+  } catch (error) {
+    // Never fatal, and never loud enough to drown the log: a deployment with no model configured
+    // reaches this on every pass, and it has not gone wrong, it simply has no titles.
+    console.warn(
+      "[channels] conversations could not be named:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}, 10_000);
+
 const app = createApp(
   config,
   auth,
@@ -1078,6 +1131,9 @@ const app = createApp(
   routineStore,
   // Where each person is in first-run onboarding, read by /api/me and written by the wizard.
   createOnboardingStore(database),
+  // The same store every run reads through `loadInstructionsForActor`, so the screen a person edits
+  // and the prompt their coworker is built from can never be two different pieces of text.
+  userInstructionsStore,
 );
 
 /**

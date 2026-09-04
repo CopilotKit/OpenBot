@@ -8,14 +8,17 @@ agents:
     avatar_seed: general-assistant
     type: built-in
     system_prompt: You are a helpful general assistant. Give clear, concise, and accurate answers.
-    # Authoring lives on the everyday Bot, and on this one only.
+    # Turns this Bot into the one you make coworkers with, and this line is the whole gate: the app
+    # offers `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` only to a Bot holding
+    # `bot-creator`. Remove it and making a coworker in a conversation stops working, with nothing on
+    # any screen to say why.
     #
-    # Holding `skill-creator` is what makes the app offer this Bot the four authoring tools, so this
-    # line is the difference between a deployment where people can write skills in a conversation and
-    # one where they fill in the form on /skills. It is on the general assistant because that is the
-    # Bot somebody already has open when they notice they keep asking for the same thing; putting it
-    # on Knowledge as well would spend four of its tool slots on a job nobody would ask it to do.
+    # Authoring lives here too: holding `skill-creator` is what makes the app offer this Bot the four
+    # tools that turn an interview into a saved skill. Both are on the general assistant because it is
+    # the Bot somebody already has open, and the one with no specialism to dilute. Knowledge narrows
+    # to document tools per run, so putting either on it is how that narrowing stops working.
     skills:
+      - bot-creator
       - skill-creator
   - id: knowledge
     name: Knowledge

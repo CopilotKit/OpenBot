@@ -8,6 +8,219 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A person can set standing instructions that every coworker follows
+
+Settings now has a box for standing instructions: one piece of text per person, saved once and
+spliced into every built-in coworker's prompt, in every channel, on every run, including the runs a
+routine starts overnight. It is the place for what is true of every task rather than of any one of
+them, such as how somebody wants to be written to or what their company is and is not to be called.
+A coworker's role still decides what it does; these decide how it does it, and the prompt says so,
+so an instruction cannot quietly redefine what a coworker is for.
+
+Instructions belong to the person who wrote them. Nobody, administrators included, can read or set
+somebody else's, and they are deleted with the account. A coworker running at a remote AG-UI
+endpoint is not sent them, since this deployment does not compose that prompt. Nothing is added to
+any prompt until somebody writes something, so a deployment where nobody uses this behaves exactly
+as before.
+
+This adds migration `0026_user_instructions`, which creates one table.
+### The trail says who a coworker was opened to
+
+Making a coworker public admits every signed-in person to it, and being admitted to a coworker is
+being allowed to act as it — with the connectors, the tools and the browser it was granted. It is one
+click in the coworker dialog. The `bot.created` and `bot.updated` rows recorded the name, the
+endpoint and whether a key was set, and said nothing about this, so an edit that opened a coworker to
+the whole deployment was byte-identical on the audit page to one that corrected its title. Both rows
+now carry the visibility, on every edit rather than only the edit that moved it, so reading the trail
+forward says who could reach each coworker at any point.
+### Duplicating a Bot in the box keeps its instructions
+
+A coworker that runs on this deployment's own Bot has no endpoint — it has a prompt, which is the
+whole of what makes it that coworker. Duplicate rebuilt every copy from the endpoint alone, found
+none, and fell back to the managed Bot with the prompt dropped, so the copy carried the name, the
+title, the role and the avatar and none of the instructions. Its entire instruction became the one
+sentence of role description, which is the shape behind the compliance answer this repository
+already has a note about. The two coworkers the default package ships are both of this kind, and one
+of them is a careful do-not-fabricate instruction. A copy now keeps the prompt and stays a Bot in the
+box, which also means it can still be granted the right to hand work on — written as a hosted
+coworker it could never hold that grant, however the original was set up — and copying one no longer
+needs a managed Bot to fall back to.
+### Hiding a coworker no longer hides the grants pointing at it
+
+Hiding a coworker is a preference about your own roster — one row per person — and the grants saying
+which Bots may hand work to it are a deployment-wide fact an administrator set. The Handoff section
+joined the two, so hiding a coworker from your roster took every grant aimed at it off the screen:
+the switch was gone, no note said why, and the count above the list quietly dropped by one. Those
+grants were still in force, because a hop is decided by the grant and not by anybody's roster, so
+the coworker went on being asked while the only screen that could stop it had stopped listing it.
+A coworker you have hidden now appears in that list when a grant already points at it, marked as
+hidden from your roster, so it can be switched off. One you have hidden with nothing granted to it
+stays hidden.
+### A tool call that failed no longer reads as one that worked
+
+The audit page draws a row it does not recognise as `Allowed`, which is right for the many rows that
+are neither a refusal nor a failure. Two rows that are failures were falling through to it: a
+connector tool call this deployment permitted and the vendor did not complete, and a component's
+data read that was granted and then broke. Both were drawn in the same muted colour as a call that
+went through, and neither appeared under `Did not happen`, so the view an administrator opens to ask
+what did not work here was short by exactly the rows they came for. A per-person connector fails on
+this path every time somebody's token expires, so this was the most common failure the product has
+and the one the trail was quietest about. Both now read as `Did not happen`, and both are in that
+saved view. Neither is filed as a refusal: nothing was forbidden on either row.
+### A stray space in NODE_ENV no longer lets the public example key through
+
+A deployment that never changed `KEY_ENCRYPTION_KEY` encrypts its credential vault with the key
+printed in `.env.example`, so the server refuses to start with it under `NODE_ENV=production`. That
+refusal compared the variable exactly as written, while the other production refusal beside it —
+private-host browsing — trimmed first. Both read the same env file, and a trailing space there is
+invisible: Docker's `env_file` preserves it and so does every hosting dashboard with a text box. So
+`NODE_ENV=production ` tripped one refusal, slipped past the other, and started the deployment on the
+public key with only a warning at boot. Both gates now ask the same question the same way.
+## 0.0.6
+
+### Setting up needs one Intelligence credential, not two
+
+`COPILOTKIT_LICENSE_TOKEN` is no longer required. Managed Intelligence derives entitlement from the
+project key, so the second credential people were sent to fetch had stopped existing, and startup
+was still refusing to boot without it. A deployment now needs `INTELLIGENCE_API_URL`,
+`INTELLIGENCE_GATEWAY_WS_URL` and `INTELLIGENCE_API_KEY`. A licence token is still read and still
+forwarded to the runtime when set, which is what a self-hosted Intelligence with its own licence
+needs.
+
+The Helm chart failed harder than the docs did: it *required* `secrets.licenseToken`, so a
+managed-Intelligence install was refused at `helm install` rather than merely misdocumented. That
+value is now optional.
+
+### Duplicating a coworker keeps the endpoint it was copied from
+
+Duplicate used to point every copy at this deployment's own managed Bot, whatever the coworker being
+copied ran on. Duplicating one you host yourself gave back something that looked identical on every
+screen, carried the same name, title and role, and answered from a different process. The copy's
+connection tab then said it ran here and stopped showing an endpoint at all, so the swap was
+invisible in the one place you would have checked. A copy now runs where its original ran, and the
+managed Bot is used only when the coworker being copied had no endpoint of its own, which is the
+same fallback that applies when you create one without an endpoint. It does not inherit the
+original's key: that is a reference into the vault, and two coworkers sharing one credential would
+mean rotating either one's key silently changed the other's, so a copy starts without one. On a
+deployment with no managed Bot configured, duplicating a coworker that brought its own endpoint now
+works instead of being refused with advice to give it an endpoint it already had.
+### Connecting an account survives a vendor that is down
+
+Finishing a connection used to end on a blank server error if the vendor could not be reached at the
+moment you were sent back, whether that was a refused connection, a name that would not resolve, or
+fifteen seconds of silence. It now ends where every other failed connect already ended: back on
+Connected accounts with a note, and nothing stored. Pressing Connect for a vendor this deployment
+has not introduced itself to yet behaves the same way, answering 502 rather than a server error, and
+that message now covers a vendor that could not be reached as well as one that turned the
+registration down.
+
+A connection whose grant cannot be written to the vault ends the same way, rather than on the blank
+error it used to give somebody who had just finished consenting.
+
+Because the person is told the same thing whatever went wrong, the server log is now where the
+difference lives. Three lines to look for: `oauth-token-endpoint-unreachable` and
+`oauth-registration-endpoint-unreachable` name the vendor and the cause, and
+`oauth-connection-not-recorded` says a consent completed and could not be kept. A fourth,
+`oauth-token-endpoint-unusable`, means the fault is this deployment's catalogue rather than the
+vendor.
+### A custom MCP server token is sent with the scheme it names
+
+Every token stored against a custom MCP server went out as `Bearer`, whatever the vendor asked for.
+A server that forwards the header to an API speaking Basic auth still answers the handshake and the
+tool listing, so the Plugins page showed the connector connected and its tools offered, and every
+real call came back 401. DataForSEO's hosted server behaves exactly this way.
+
+A token that begins with `Basic ` or `Bearer ` is now sent as written, so paste the credential the
+vendor gives you, scheme and all. A bare token is still sent as `Bearer`, so nothing already
+working needs to change.
+### A conversation is no longer stuck after a tool call went unanswered
+
+A tool that runs in the browser can be torn down while its call is still open, most often because
+the tab was closed or reloaded mid-run. The call stayed in the thread with no result, every retry
+sent it back up, and the model API refused the whole conversation with `Tool result is missing for
+tool call ...`. The next three things the person typed failed identically, and the only way out was
+to notice that and start another channel.
+
+A chat turn now drops a tool call nothing is going to answer before the conversation reaches the
+model, on a built-in Bot and on a remote one alike. Routines already did this for the history they
+seed, and now share the one filter, with a stricter rule than theirs was: a result counts as an
+answer only if it arrives before the next thing the person said, matching what the model API
+enforces, so a handler that resolves after the person has typed again no longer looks like an
+answer. A routine's seeded history that held such a late result used to keep both halves and fail
+at the model; it now drops both and runs. A result that sits ahead of its own call, or a second
+answer to a call already answered, is dropped as well rather than sent where no provider accepts
+it. Ids are never rewritten and the stored thread is untouched, so the transcript still shows what
+happened and a call waiting on a resume still gets its result. The same filter also covers a Bot
+answering a relayed question, whose seeded conversation kept every tool call and no tool result.
+### Reopening a channel no longer hides the end of the last conversation
+
+Opening a channel joins the realtime gateway, and the snapshot the join returns can lag the durable
+store. When it did, the last exchange of a finished turn was missing from the transcript on every
+reload, with no unread marker or anything else to explain the gap, and the stored copy never got a
+chance to replace it because history was only restored into an empty channel.
+
+The stored thread now wins whenever it holds more than the channel does and holds everything the
+channel already shows. A message typed while history is still loading is not in the store yet, and
+a run still streaming has messages the store has not seen, so neither is rolled back.
+### The transcript stays with the question when an answer starts arriving
+
+Sending a message carried it up to the top of the view, correctly, and then the Bot's first token
+threw the conversation back to its very first message, with the answer being written several
+screens below the fold. It happened on every turn, from wherever the reader happened to be
+scrolled, so every answer began with a scroll back down to find it. The transcript now holds the
+question in place for the whole turn, and the scroll that puts it there is animated rather than a
+jump — unless the reader has asked their system for reduced motion.
+### A conversation started from the sidebar is recorded like one started from the home screen
+
+The trail had a `channel.routed` row for every conversation begun in the home composer — the
+coworker it went to and why, whether inferred or named with `@` — and nothing at all for one begun
+from the sidebar's +, a coworker's card or its profile, which read exactly like a row that failed
+to write. Picking a coworker in that To: field is now recorded the same way an `@` is.
+### A browser clock that runs ahead no longer hides what a routine said
+
+The roster line and unread dot for a channel are moved by the last report that arrived, and only
+ever forwards. A browser whose clock was ahead stamped its report into the future, and then every
+report from a correct clock — a routine's reply, a relayed handoff answer, another member's browser
+— was dropped without a word until the real time caught up: the reply was in the thread, and the
+roster never said so. A reported time is now capped at the server's own clock.
+### An empty supervisor PORT is unset, not an ephemeral bind
+
+`PORT=` left blank in compose or a `.env` used to reach `Bun.serve` as `NaN`, so the supervisor
+bound a random port while the published mapping still pointed at 4300. Empty now means the default
+4300; a non-numeric or out-of-range value refuses to start instead of binding port 30 from a typo
+like `30o0`.
+### Tool arguments and results are redacted in the audit trail whatever their spelling
+
+The sensitive-key list redacted `tool_result` and `tool_arguments` but not `toolResult` and
+`toolArguments`, which is the spelling MCP and computer tool calls use. Those payloads were stored
+verbatim in `audit_events.payload`, nested ones included, while every other sensitive key already
+carried both spellings. New rows are redacted; rows already written are not rewritten, so a
+deployment that has been running MCP or computer tools still holds unredacted arguments and results
+in its existing trail.
+
+### An IPv6 address listed in `AGENT_ENDPOINT_ALLOWED_HOSTS` is now actually allowed
+
+A bracketed IPv6 host was normalised one way when the list was read and another way when an endpoint
+was checked, so the two could never match: `[::1]:8080` became `::1]:8080` on one side and
+`::1:8080` on the other. Registering a Bot at a listed IPv6 address was refused as a private
+address anyway. IPv4 was unaffected.
+
+### An empty `PORT` no longer starts the server on a port nobody asked for
+
+`PORT` and `SERVER_PORT` name one number, and either is meant to move the server. A `PORT` that was
+declared but empty — a compose file passing a variable the host never set, or `PORT=` left in a
+`.env` next to a `SERVER_PORT` that was set — was read as "set to nothing": `SERVER_PORT` was
+ignored, the number parsed to `NaN`, and the server came up on an ephemeral port while everything
+that polls `SERVER_PORT` reported it had never started. An empty value now counts as unset, the way
+every other setting already treats it, and a value that is not a whole port number (`30o1` used to
+start the server on port 30) refuses to start instead.
+
+### `TRUSTED_ORIGINS` falls back to the port the app is actually served on
+
+Unset, it fell back to `http://localhost:3000`, while the app is served on 3010 everywhere else in
+this repository. `appUrl` reads the first trusted origin, so a deployment that left the variable
+blank built OAuth redirects against a port nothing was listening on.
+
 ### Coworkers are made in a wizard and managed in a dialog
 
 Creating a coworker is now a three-step wizard — who it is, who may see it, then where it runs,
@@ -33,6 +246,15 @@ endpoint form. Its connection tab now says what is true — it runs here, nothin
 to authenticate. In the same spirit, the handoff panel explains once when a coworker cannot hand
 work on (it runs as its own agent, outside this deployment's loop) instead of offering switches the
 server can only refuse; its existing grants stay visible so they can still be revoked.
+
+### A conversation is given a name of its own
+
+A channel was labelled with the names of the Bots in it, so every conversation with the same
+coworker read the same on the roster, and the only thing telling two of them apart was a preview of
+whatever was said last. That preview is usually the tail of an answer, which says nothing about the
+question that prompted it. Once a conversation has an opening exchange, the deployment's own model
+is asked for a few words naming what it is about, and the roster draws those words in place of the
+preview. A deployment with no model key configured names nothing and looks exactly as it did before.
 
 ### A channel stops showing a working indicator once its turn has ended
 
@@ -119,6 +341,33 @@ showing a conversation that had been deleted until the page was reloaded.
 
 A server now tells the browsers it is holding to refetch when its subscription is re-established.
 Nothing to configure, and no change for a deployment whose database connection never drops.
+
+### A Bot can answer with a picture instead of describing one
+
+Ask for a chart and a Bot replied in prose, or handed back a fenced block of HTML for somebody to
+read instead of look at. Set `OPENBOT_GENERATIVE_UI=true` and it may answer with an interface it
+writes itself, drawn in the transcript. Off unless asked for, and deliberately so: it runs code a
+model wrote, so a deployment acquires the capability by choosing it rather than by upgrading.
+
+### The sidebar collapses, and the roster is reachable on a phone
+
+The sidebar could always collapse, but nothing in the app ever drew the trigger. The only
+affordance was a 16px transparent rail carrying `tabIndex={-1}`, which the eye could not find and
+the keyboard could not reach. Below 768px that same sidebar becomes a sheet whose open state starts
+false, so with no trigger the roster was unreachable on a phone, and the roster is how you reach a
+channel, Skills, Agents and your own account. There is now a toggle in the header each screen
+already draws, with Cmd/Ctrl+B on it, and the collapsed choice survives a reload: the state was
+written to a cookie that nothing ever read back. Fifteen screens that previously drew no header bar
+gain 40px above their heading, because the toggle has to sit at the pane's edge.
+
+### A button drawn as a link answers the keyboard and announces itself
+
+Six controls navigate rather than submit, so they render a router link through the shared button:
+New skill, New agent, the sidebar's new-channel control, two empty-state returns, and the back
+button that draws on five routes. Base UI was told each was a native `<button>`, so it wrote
+`type="button"` onto an anchor, where it means nothing, and skipped the two things a non-button
+needs: the `role="button"` that tells a screen reader what the control is, and Space-key
+activation, which a `<button>` gets from the browser and an anchor does not.
 
 ### A Bot's answer comes back to the conversation that asked
 
@@ -207,6 +456,17 @@ cluster and is not empty is now refused with a sentence naming the mount to use 
 
 Reported by [@jerelvelarde](https://github.com/CopilotKit/OpenBot/issues/269) with the container logs
 for both mount paths, which is what made the two failure modes separable.
+
+### Turning on network policies no longer leaves the culler pod open
+
+`networkPolicy.enabled` rendered policies selecting the server and the computers. The culler
+CronJob's pod carries `component: culler` and was selected by neither, and a pod no policy selects
+keeps the cluster default rather than being denied. So the switch fenced the API and the computers
+and left open the one pod that wakes every five minutes carrying the API's whole environment,
+`KEY_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET` included, with a token allowed to create, patch and
+delete Sandboxes. It has a third policy now, narrower than the other two, and
+`networkPolicy.cullerExtraEgress` narrows its database egress separately from `extraEgress`. A
+render that leaves any pod unfenced is refused by the chart checks.
 
 ### A sign-in a site opens in a new window is shown, and can be clicked
 

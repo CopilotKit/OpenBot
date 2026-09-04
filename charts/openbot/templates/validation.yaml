@@ -70,12 +70,15 @@ This template renders nothing.
 {{- /*
   Intelligence, which is not optional.
 
-  All four values are required together and the server refuses to start on a partial set, so the
-  same rule is applied here: caught at install with the values named, rather than in a crash loop
-  whose message is in a log nobody has opened.
+  The three addressing values are required together and the server refuses to start on a partial
+  set, so the same rule is applied here: caught at install with the values named, rather than in a
+  crash loop whose message is in a log nobody has opened.
+
+  `secrets.licenseToken` is NOT among them. Managed Intelligence issues no licence token, so
+  requiring one here would block an install the server would have accepted.
 */}}
 {{- if or (not .Values.config.intelligence.apiUrl) (not .Values.config.intelligence.gatewayWsUrl) }}
-{{- fail "OpenBot requires CopilotKit Intelligence. Set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey and secrets.licenseToken." }}
+{{- fail "OpenBot requires CopilotKit Intelligence. Set config.intelligence.apiUrl and config.intelligence.gatewayWsUrl, and the matching secrets.intelligenceApiKey." }}
 {{- end }}
 
 {{- /*

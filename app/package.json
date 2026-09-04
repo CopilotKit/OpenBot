@@ -13,10 +13,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ag-ui/core": "0.0.57",
+    "@ag-ui/core": "0.0.59",
     "@base-ui/react": "^1.6.0",
     "@better-auth/sso": "^1.7.1",
-    "@copilotkit/react-core": "1.69.0",
+    "@copilotkit/react-core": "1.70.1",
     "@fontsource-variable/inter": "^5.3.0",
     "@shadcn/react": "^0.3.0",
     "@tabler/icons-react": "^3.36.1",

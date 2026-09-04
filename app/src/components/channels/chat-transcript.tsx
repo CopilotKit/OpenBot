@@ -5,7 +5,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import { IconBox } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Streamdown } from "streamdown";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import {
@@ -618,6 +618,42 @@ function ServerToolLine({ name, result }: { name: string; result?: string }) {
   );
 }
 
+const SEND_SCROLL_MS = 700;
+
+function useSmoothSendScroll(
+  viewport: React.RefObject<HTMLDivElement | null>,
+  newestUserMessageId: string | null,
+) {
+  const reducedMotion = useReducedMotion();
+  const seenRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    const element = viewport.current;
+    const previous = seenRef.current;
+    seenRef.current = newestUserMessageId;
+
+    if (
+      element === null ||
+      newestUserMessageId === null ||
+      previous === null ||
+      previous === newestUserMessageId ||
+      reducedMotion
+    ) {
+      return;
+    }
+
+    element.style.scrollBehavior = "smooth";
+    const timer = window.setTimeout(() => {
+      element.style.scrollBehavior = "";
+    }, SEND_SCROLL_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+      element.style.scrollBehavior = "";
+    };
+  }, [newestUserMessageId, reducedMotion, viewport]);
+}
+
 export function ChatTranscript({
   busy = false,
   commandNames = "",
@@ -651,6 +687,12 @@ export function ChatTranscript({
   const waitingOnFirstToken =
     busy && lastItem?.kind === "text" && lastItem.role === "user";
 
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const newestUserMessageId =
+    items.findLast((item) => item.kind === "text" && item.role === "user")
+      ?.id ?? null;
+  useSmoothSendScroll(viewportRef, newestUserMessageId);
+
   /*
    * One decider per mounted transcript, so opening a different channel starts the cascade over and
    * a message never inherits a delay from a conversation it was not in.
@@ -678,18 +720,30 @@ export function ChatTranscript({
   return (
     <MessageScrollerProvider autoScroll scrollPreviousItemPeek={48}>
       <MessageScroller>
-        <MessageScrollerViewport>
+        <MessageScrollerViewport ref={viewportRef}>
           <MessageScrollerContent
             aria-busy={busy}
             className="mx-auto w-full max-w-2xl px-4 py-6"
+            spacerClassName="order-2"
           >
-            {/*
-             * The memo boundary is INSIDE the scroller item, not around it. `MessageScrollerItem`
-             * reads the scroller's context, so it re-renders whenever the scroll state moves and
-             * memoising it would achieve nothing. Its child is what costs — markdown parsing and
-             * chart SVGs — and that is what is skipped.
-             */}
-            {/* Instead of the rows, never alongside them: one real message and this is a lie. */}
+            <div className="contents [&>*]:order-1">
+              {stopped ? (
+                <Stopped reason={stopped} />
+              ) : waitingOnFirstToken ? (
+                <Thinking />
+              ) : null}
+              {queued.map((message) => (
+                <Queued
+                  key={message.id}
+                  onRemove={
+                    onRemoveQueued
+                      ? () => onRemoveQueued(message.id)
+                      : undefined
+                  }
+                  text={message.text}
+                />
+              ))}
+            </div>
             {items.length === 0 && restoring ? <RestoringTranscript /> : null}
             {items.map((item, index) =>
               item.kind === "tool" ? (
@@ -724,35 +778,6 @@ export function ChatTranscript({
                 </MessageScrollerItem>
               ),
             )}
-            {/*
-             * Outside the item list, so neither of these is a message. Each has no id, is never
-             * anchored, and is gone by the next turn — giving one a `MessageScrollerItem` would ask
-             * the scroller to measure and anchor something that exists for a second and a half.
-             *
-             * One or the other, never both: a turn that ended has stopped being in flight, and a
-             * shimmering "Thinking" under a line saying the Bot stopped would contradict it.
-             */}
-            {stopped ? (
-              <Stopped reason={stopped} />
-            ) : waitingOnFirstToken ? (
-              <Thinking />
-            ) : null}
-            {/*
-             * Below the thinking line, and outside the item list for the same reason it is: these
-             * are not yet turns. They have ids of their own, but they are this tab's ids and not the
-             * thread's, so handing them to the scroller would ask it to anchor on something that is
-             * about to be replaced by a message with a different id — and the replacement is the
-             * one worth scrolling to.
-             */}
-            {queued.map((message) => (
-              <Queued
-                key={message.id}
-                onRemove={
-                  onRemoveQueued ? () => onRemoveQueued(message.id) : undefined
-                }
-                text={message.text}
-              />
-            ))}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />

@@ -2018,6 +2018,67 @@ describe("a dynamic client the vendor has evicted", () => {
     );
   });
 
+  /**
+   * The registration nothing stands in for.
+   *
+   * Every other test here injects `registerClient`, which is right for asserting what the store does
+   * with an answer but means the real function is never the one answering. What it returns when the
+   * vendor cannot be reached at all is exactly what the store's `null` branches were written for, so
+   * once that path exists it is worth one test that lets the real code produce the value rather than
+   * a stub asserting the value the real code is assumed to produce.
+   */
+  const storeWithRealRegistration = createPluginStore({
+    database,
+    auditStore: createAuditStore(database),
+    credentials: vault,
+    encryptionKey: DYNAMIC_KEY,
+    policy: () => policy,
+    callVendor: async () => ({
+      text: "[vendor not reached in tests]",
+      isError: false,
+    }),
+    exchangeRefreshToken: seams.exchangeRefreshToken,
+    redirectUri: REDIRECT_URI,
+  });
+
+  test("an unreachable registration endpoint leaves no client and no trail", async () => {
+    await clearClient();
+    const registeredBefore = await registeredRows();
+    const said: string[] = [];
+    const realError = console.error;
+    const realFetch = globalThis.fetch;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+    globalThis.fetch = (async () => {
+      throw new TypeError("Unable to connect.");
+    }) as unknown as typeof fetch;
+
+    try {
+      expect(
+        await storeWithRealRegistration.ensureOAuthClient(
+          dynamicServerId,
+          "someone@openbot.test",
+        ),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+      console.error = realError;
+    }
+
+    // Nothing kept, and nothing claimed. A trail row here would say this deployment registered
+    // itself with a vendor that never answered.
+    expect(
+      await storeWithRealRegistration.oauthClientFor(dynamicServerId),
+    ).toBe(null);
+    expect((await registeredRows()).length).toBe(registeredBefore.length);
+    expect(
+      said.find((line) =>
+        line.includes("oauth-registration-endpoint-unreachable"),
+      ),
+    ).toBeDefined();
+  });
+
   test("an entry an administrator registers by hand is left alone", async () => {
     /*
      * Drive, whose client is pasted in from Google's console. Registering one for it would be

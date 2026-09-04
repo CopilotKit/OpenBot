@@ -14,6 +14,7 @@ import {
   COMPUTER_GUIDANCE,
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
+import { sanitizeSeededHistory } from "./agents/history-sanitize";
 import type { AgentActor } from "./agents/profile-types";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
@@ -184,6 +185,42 @@ function isHttpUrl(value: string) {
   }
 }
 
+/**
+ * What the person asking has said they want, in every channel, from every coworker.
+ *
+ * The OpenBot equivalent of a CLAUDE.md, and the third instruction carrier beside the two that
+ * already existed. A role is the coworker's and reads the same to everybody who talks to it; a skill
+ * is pulled in for one task. This is the person's, and it is true of every task they ever ask for —
+ * how they want to be written to, what their company is called, what it is not to be called.
+ *
+ * THE PRECEDENCE SENTENCE IS PART OF THE BLOCK, not decoration. Two standing instructions in one
+ * prompt is a conflict waiting to be resolved by whichever the model read last, and the answer is
+ * not symmetric: a person may say how they want things done, and must not be able to say what a
+ * coworker is for. Without the sentence, "always answer in one line" quietly overrides a role that
+ * exists to produce a filing with its sources in it.
+ *
+ * BUILT-IN COWORKERS ONLY. A remote AG-UI bot runs its own loop at somebody else's endpoint, and
+ * everything this deployment sends it is a standing system message rather than a prompt it composes
+ * — see `remoteAgentWithStandingRole`. Adding a third message there is a real change with its own
+ * questions (whether an endpoint that ignores the role would honour this, and whether one
+ * deployment's person may address another's server with their own prose), and it is deliberately not
+ * made here.
+ *
+ * Null for anything blank, so the caller has one thing to test rather than an empty paragraph to
+ * detect.
+ */
+export function standingInstructionsGuidance(
+  instructions: string | null | undefined,
+): string | null {
+  const trimmed = instructions?.trim() ?? "";
+  if (trimmed.length === 0) return null;
+
+  return [
+    `The person you are working with has standing instructions that apply in every channel and every task, alongside your role: ${trimmed}`,
+    "Where the two conflict, the role decides what you do and these decide how you do it.",
+  ].join("\n\n");
+}
+
 export function builtInAgentConfiguration(
   agent: RegisteredBuiltInAgent,
   model: RuntimeModel,
@@ -213,6 +250,11 @@ export function builtInAgentConfiguration(
    * and browsed to it. See `grantedToolGuidance`.
    */
   connectedVendors: readonly string[] = [],
+  /**
+   * The standing instructions of the person this run belongs to. Absent means they have written
+   * none, which is most people on most days and costs the prompt nothing.
+   */
+  standingInstructions?: string | null,
 ): BuiltInAgentConfiguration {
   if (!apiKey) {
     return {
@@ -226,17 +268,25 @@ export function builtInAgentConfiguration(
     };
   }
 
+  const standing = standingInstructionsGuidance(standingInstructions);
+
   return {
     model: `${model.provider}/${model.defaultModel}`,
     /*
-     * The package's role, then what this Bot actually holds, then the computer.
+     * The package's role, then the person's own standing instructions, then what this Bot actually
+     * holds, then the computer.
      *
      * The grants go BEFORE the computer prose on purpose. That prose is long and emphatic about the
      * browser and mentions connectors nowhere, so a Bot that read it last reached for the browser
      * even when it held a tool for the exact system being asked about.
+     *
+     * The person's instructions go straight after the role and before all of it, because they are
+     * the other half of the same question — who you are and who you are working for — and because
+     * their precedence sentence only means anything next to the role it defers to.
      */
     prompt: [
       agent.systemPrompt,
+      ...(standing ? [standing] : []),
       /*
        * Unconditional, unlike the two below it.
        *
@@ -306,8 +356,25 @@ export async function buildAgents(
   agentFetch?: AgentFetch,
   /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
   handoff?: HandoffForRun,
+  /**
+   * What the person asking has told every coworker they run. Absent means this deployment does not
+   * carry standing instructions, which is what every deployment did before they existed.
+   */
+  loadInstructions?: LoadInstructions,
 ): Promise<Record<string, AbstractAgent>> {
   const vendors = await loadVendors().catch(() => [] as readonly string[]);
+  /*
+   * Read once per build and only when somebody will be told it, like the vendors above and the model
+   * key below: it is a fact about the person, not about a coworker, and asking per Bot would be the
+   * same row fetched once for each of them. Skipped entirely when nothing built-in is being built,
+   * because the remote path does not carry this at all.
+   *
+   * Failure is silence. A coworker that could not be told loses a paragraph; one that refused to
+   * start would lose the conversation, and a preferences row is not worth a run.
+   */
+  const instructions = agents.some((agent) => agent.type === "built_in")
+    ? await loadInstructions?.().catch(() => null)
+    : null;
   return Object.fromEntries(
     await Promise.all(
       agents.map(async (agent) => [
@@ -324,11 +391,21 @@ export async function buildAgents(
           selection,
           agentFetch,
           handoff,
+          instructions ?? null,
         ),
       ]),
     ),
   );
 }
+
+/**
+ * The standing instructions of whoever this run belongs to, resolved when a run needs them.
+ *
+ * A closure rather than a string passed down, for the same reason `LoadToolsForBot` is one: it is a
+ * per-person fact that a person can change between two runs, and a value captured at boot would
+ * serve everybody the first person's preferences. Null means they have written none.
+ */
+export type LoadInstructions = () => Promise<string | null>;
 
 async function buildAgent(
   agent: RegisteredAgent,
@@ -342,6 +419,8 @@ async function buildAgent(
   selection?: ToolSelection,
   agentFetch?: AgentFetch,
   handoff?: HandoffForRun,
+  /** Already resolved by {@link buildAgents}, so one roster costs one read. */
+  standingInstructions: string | null = null,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -401,6 +480,12 @@ async function buildAgent(
      * Making this work is a feature rather than a fix: the callback would have to carry a run
      * assertion the endpoint cannot forge, and execute a hop on its behalf. Worth doing; not done
      * here, and worth knowing it is missing rather than assuming it is not.
+     *
+     * AND THE PERSON'S STANDING INSTRUCTIONS ARE NOT SENT HERE EITHER. `standingInstructions` is
+     * built-in only, deliberately: a remote Bot composes its own prompt at somebody else's endpoint,
+     * so this deployment would be sending one person's prose to a server it does not run, with no
+     * way to know whether it is read or how it ranks against the role. See
+     * `standingInstructionsGuidance`.
      */
     return remoteAgentWithStandingRole(
       agent,
@@ -419,7 +504,7 @@ async function buildAgent(
    * what keeps a narrowed run from being told it holds something it was not offered.
    */
   const withTools = (tools: GrantedTool[]) =>
-    new BuiltInAgent(
+    new BuiltInAgentWithSaneHistory(
       builtInAgentConfiguration(
         agent,
         model,
@@ -427,6 +512,7 @@ async function buildAgent(
         tools,
         computerGuidance,
         connectedVendors,
+        standingInstructions,
       ),
     );
 
@@ -586,15 +672,29 @@ function remoteAgentWithStandingRole(
     next: AbstractAgent,
   ) => {
     const holdingsMessage = holdingsMessageFor(tools);
+    /*
+     * The same guard a built-in Bot gets in `BuiltInAgentWithSaneHistory`, applied here because a
+     * remote Bot never passes through it: this middleware is the last thing between the browser's
+     * `input.messages` and the endpoint. A framework at the other end that converts with the same
+     * SDK refuses a dangling call for the same reason, and one that does not would still be
+     * shown a call nothing is going to answer. Done inside the middleware rather than by wrapping
+     * the agent, for the reason given above `remoteAgentWithStandingRole`: `run` skips `.use()`.
+     */
+    const answeredByResume = new Set(
+      (input.resume ?? []).map((entry) => entry.interruptId),
+    );
     return next.run({
       ...input,
       messages: [
         agent.standingMessage,
         ...(holdingsMessage ? [holdingsMessage] : []),
-        ...input.messages.filter(
-          (message) =>
-            message.id !== agent.standingMessage.id &&
-            message.id !== holdingsMessage?.id,
+        ...sanitizeSeededHistory(
+          input.messages.filter(
+            (message) =>
+              message.id !== agent.standingMessage.id &&
+              message.id !== holdingsMessage?.id,
+          ),
+          answeredByResume,
         ),
       ],
       /*
@@ -664,6 +764,68 @@ function remoteAgentWithStandingRole(
   );
 
   return remote;
+}
+
+/**
+ * A built-in Bot that will not hand the model provider a conversation it is going to refuse.
+ *
+ * FOUND LIVE, ON CHAT. One person's next three messages each failed with
+ * `AI_MissingToolResultsError: Tool result is missing for tool call chatcmpl-tool-8dd56dc7497c5ea9`,
+ * thrown out of the AI SDK's `convertToLanguageModelPrompt`. A frontend tool handler had been torn
+ * down while its call was open, so the agent's live messages in the browser carried an assistant
+ * message whose tool call never got a result. The durable store did not have it, nothing was going
+ * to answer it, and every retry sent it straight back up as `input.messages`. The conversation was
+ * finished until the person worked out for themselves to start another one.
+ *
+ * The guard has to be on this side of `run`. `BuiltInAgent.run` converts `input.messages` itself,
+ * with no seam in between, so wrapping the agent is the only place left to stand. The reasoning for
+ * why a dangling call is DROPPED rather than repaired, and why ids are never changed, is in
+ * `agents/history-sanitize.ts`, where the routines path found the same failure first.
+ *
+ * A RESUMED CALL IS NOT A DANGLE. `run` appends a tool result for each `input.resume` entry by
+ * `interruptId` AFTER converting the messages, so a call that a resume is about to answer must
+ * survive this pass or the appended result lands on nothing.
+ */
+class BuiltInAgentWithSaneHistory extends BuiltInAgent {
+  /**
+   * The configuration, held a second time because the base class keeps its own copy private and
+   * {@link clone} has to build another one of THIS class rather than of the base.
+   */
+  private readonly configuration: BuiltInAgentConfiguration;
+
+  constructor(configuration: BuiltInAgentConfiguration) {
+    super(configuration);
+    this.configuration = configuration;
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    const answeredByResume = new Set(
+      (input.resume ?? []).map((entry) => entry.interruptId),
+    );
+    return super.run({
+      ...input,
+      messages: sanitizeSeededHistory(input.messages, answeredByResume),
+    });
+  }
+
+  /**
+   * Carried by hand, for the same reason {@link RunBuiltAgent.clone} is.
+   *
+   * The runtime clones an agent before every run, and the base class's clone hard-codes
+   * `new BuiltInAgent(this.config)`: inherited unchanged, the very first message anybody sends
+   * would go through an agent that does none of the above. The middleware list is copied because
+   * the base clone copies it, and it is reached through a cast because `AbstractAgent` declares it
+   * private. Nothing registers middleware on a built-in Bot today, and this is here so that the day
+   * something does, it is not lost in a clone.
+   */
+  clone(): BuiltInAgentWithSaneHistory {
+    const cloned = new BuiltInAgentWithSaneHistory(this.configuration);
+    type WithMiddlewares = { middlewares: unknown[] };
+    (cloned as unknown as WithMiddlewares).middlewares = [
+      ...(this as unknown as WithMiddlewares).middlewares,
+    ];
+    return cloned;
+  }
 }
 
 /**
@@ -789,6 +951,13 @@ export async function resolveRuntimeAgents(
    * theirs to see at all; what narrows is what gets built.
    */
   onlyBotId?: string,
+  /**
+   * The standing instructions of the person this build is for.
+   *
+   * Appended after `onlyBotId` rather than beside the other per-person collaborators, because these
+   * are positional and moving one shifts every existing call site by one.
+   */
+  loadInstructions?: LoadInstructions,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -819,6 +988,7 @@ export async function resolveRuntimeAgents(
     selection,
     agentFetch,
     handoff,
+    loadInstructions,
   );
 }
 
@@ -889,6 +1059,14 @@ export function createRequestAgents(
    * roster that person can see, so a Bot must never be able to address one they cannot.
    */
   handoffForActor?: (actorId: string) => HandoffForRun,
+  /**
+   * What this person has told every coworker they run, resolved for whoever is asking.
+   *
+   * Per actor, and through `identifyActor` rather than anything in the request body, for the same
+   * reason the grants are: this text goes into a prompt that then speaks as that person's coworker,
+   * so which person it belongs to has to be decided by the session and never by the caller.
+   */
+  loadInstructionsForActor?: (actorId: string) => LoadInstructions,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
@@ -904,6 +1082,9 @@ export function createRequestAgents(
       selectionForActor?.(actor.id),
       agentFetch,
       handoffForActor?.(actor.id),
+      // Every Bot this person can see, so no `onlyBotId` here; the instructions follow it.
+      undefined,
+      loadInstructionsForActor?.(actor.id),
     );
   };
 }
@@ -1023,6 +1204,14 @@ export function mountCopilotRuntime(
    * awaited in the lock path and a failure in it never touches whether the lock was taken.
    */
   onRunBusy?: (input: { threadId: string; busy: boolean }) => void,
+  /**
+   * What the person asking has told every built-in coworker they run, resolved per person.
+   *
+   * Given to both the request path and `agentFor` below, so a hop delivered to a Bot at three in the
+   * morning carries the same standing instructions the Bot in front of the person does. A seam wired
+   * into only one of them would be the drift `agentFor` exists to prevent.
+   */
+  loadInstructionsForActor?: (actorId: string) => LoadInstructions,
 ) {
   const { intelligence } = config.runtime;
 
@@ -1065,6 +1254,7 @@ export function mountCopilotRuntime(
       // see is still absent; what this skips is constructing the other Bots and asking the database
       // what each of them was granted, on every delivery and again on every retry.
       input.botId,
+      loadInstructionsForActor?.(actor.id),
     );
     return agents[input.botId] ?? null;
   };
@@ -1133,6 +1323,7 @@ export function mountCopilotRuntime(
       selectionForActor,
       agentFetch,
       handoffForActor,
+      loadInstructionsForActor,
     ) as never,
   });
 

@@ -18,6 +18,7 @@ import {
   intelligenceChannelMappings,
   mcpUserCredentials,
   sessions,
+  userInstructions,
   userRoles,
   users,
   verifications,
@@ -39,6 +40,7 @@ describe("OpenBot database schema", () => {
         credentials,
         auditEvents,
         intelligenceChannelMappings,
+        userInstructions,
       ].map(getTableName),
     ).toEqual([
       "users",
@@ -53,6 +55,7 @@ describe("OpenBot database schema", () => {
       "credentials",
       "audit_events",
       "intelligence_channel_mappings",
+      "user_instructions",
     ]);
   });
 
@@ -105,6 +108,62 @@ describe("OpenBot database schema", () => {
       { name: "scope", notNull: true },
       { name: "connected_at", notNull: true },
       { name: "updated_at", notNull: true },
+    ]);
+  });
+
+  test("gives one person one set of standing instructions, and makes that the key", () => {
+    const config = getTableConfig(userInstructions);
+
+    /*
+     * The user id IS the primary key, not a column beside a surrogate one.
+     *
+     * "What has this person asked every coworker to do" must have exactly one answer, because the
+     * answer goes into a prompt. With an id and no unique constraint two rows are legal, and then
+     * which of them speaks for the person depends on whichever the query happened to order first.
+     */
+    expect(
+      config.columns.map((column) => ({
+        name: column.name,
+        sqlType: column.getSQLType(),
+        notNull: column.notNull,
+        primary: column.primary,
+      })),
+    ).toEqual([
+      { name: "user_id", sqlType: "text", notNull: true, primary: true },
+      { name: "instructions", sqlType: "text", notNull: true, primary: false },
+      {
+        name: "created_at",
+        sqlType: "timestamp with time zone",
+        notNull: true,
+        primary: false,
+      },
+      {
+        name: "updated_at",
+        sqlType: "timestamp with time zone",
+        notNull: true,
+        primary: false,
+      },
+    ]);
+
+    /*
+     * Cascade, because this is one person's own prose about themselves. A deleted account must not
+     * leave behind a paragraph that would be read into somebody's prompt if the id were ever reused.
+     */
+    expect(
+      config.foreignKeys.map((foreignKey) => {
+        const reference = foreignKey.reference();
+        return {
+          sourceColumns: reference.columns.map((column) => column.name),
+          targetTable: getTableName(reference.foreignTable),
+          onDelete: foreignKey.onDelete,
+        };
+      }),
+    ).toEqual([
+      {
+        sourceColumns: ["user_id"],
+        targetTable: "users",
+        onDelete: "cascade",
+      },
     ]);
   });
 

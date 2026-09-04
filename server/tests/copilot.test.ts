@@ -1,6 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import type { RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
+import { EMPTY } from "rxjs";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import {
   buildAgents,
@@ -801,5 +803,429 @@ describe("where a Bot says its answer came from", () => {
     ]) {
       expect(guidance).toContain(kind);
     }
+  });
+});
+
+/**
+ * The person's own standing instructions, and where they land in a prompt.
+ *
+ * The third instruction carrier. A role is the coworker's and reads the same to everybody; a skill
+ * is pulled in for one task. This is the person's, and it is true of every task they ask for, which
+ * is why the only interesting properties are about placement and precedence rather than about
+ * content: WHERE it sits relative to the role, that it is absent when nobody has written any, that
+ * it never reaches a Bot at somebody else's endpoint, and that failing to read it costs a paragraph
+ * rather than a run.
+ */
+describe("a person's standing instructions", () => {
+  const assistant = {
+    id: "general-assistant",
+    name: "General Assistant",
+    type: "built_in" as const,
+    systemPrompt: "Be helpful.",
+  };
+  const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
+
+  const promptWith = (instructions: string | null) =>
+    builtInAgentConfiguration(
+      assistant,
+      model,
+      "openai-secret",
+      [],
+      undefined,
+      [],
+      instructions,
+    ).prompt as string;
+
+  test("carries the block, its precedence sentence, and the person's own words", () => {
+    const prompt = promptWith("Write in British English.");
+
+    expect(prompt).toContain(
+      "The person you are working with has standing instructions that apply in every channel and every task, alongside your role: Write in British English.",
+    );
+    /*
+     * The precedence sentence is part of the block rather than decoration. Two standing instructions
+     * in one prompt is a conflict resolved by whichever the model read last, and the resolution is
+     * not symmetric: "always answer in one line" must not quietly override a role that exists to
+     * produce a filing with its sources in it.
+     */
+    expect(prompt).toContain(
+      "Where the two conflict, the role decides what you do and these decide how you do it.",
+    );
+  });
+
+  test("sits after the role and before everything the deployment adds", () => {
+    const prompt = builtInAgentConfiguration(
+      assistant,
+      model,
+      "openai-secret",
+      [{ name: "mcp__google-drive__search_files" }] as never[],
+      "Computer guidance.",
+      [],
+      "Write in British English.",
+    ).prompt as string;
+
+    // The role, then who it is working for, then what it holds, then its hands. Asserted as
+    // positions rather than as presence, because the order is the part that was decided.
+    expect(prompt.indexOf("Be helpful.")).toBeLessThan(
+      prompt.indexOf("standing instructions that apply in every channel"),
+    );
+    expect(
+      prompt.indexOf("standing instructions that apply in every channel"),
+    ).toBeLessThan(prompt.indexOf("google-drive"));
+    expect(prompt.indexOf("google-drive")).toBeLessThan(
+      prompt.indexOf("Computer guidance."),
+    );
+  });
+
+  test.each([[null], [undefined], [""], ["   \n  "]])(
+    "adds nothing at all when there are none: %j",
+    (instructions) => {
+      const prompt = promptWith(instructions as string | null);
+
+      expect(prompt).not.toContain("standing instructions");
+      // Byte for byte what a deployment had before any of this existed, which is what most people
+      // on most days get.
+      expect(prompt).toBe(`Be helpful.\n\n${PROVENANCE_GUIDANCE}`);
+    },
+  );
+
+  test("is read once for a whole roster, and only when somebody built-in will be told it", async () => {
+    let reads = 0;
+    const loadInstructions = async () => {
+      reads += 1;
+      return "Write in British English.";
+    };
+
+    await buildAgents(
+      [
+        assistant,
+        { ...assistant, id: "second-assistant", name: "Second Assistant" },
+      ],
+      model,
+      "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      loadInstructions,
+    );
+    // One person, one row: asking per Bot would be the same read once for each of them.
+    expect(reads).toBe(1);
+
+    await buildAgents(
+      [
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui",
+          endpoint: "http://risk.internal/ag-ui",
+        },
+      ],
+      model,
+      "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      loadInstructions,
+    );
+    /*
+     * Not read at all for a roster with nothing built-in. A remote Bot composes its own prompt at
+     * somebody else's endpoint, so this deployment has nowhere to put the text and no reason to pay
+     * for reading it.
+     */
+    expect(reads).toBe(1);
+  });
+
+  test("never reaches a Bot at somebody else's endpoint", () => {
+    const content = standingRoleMessage({
+      id: "risk",
+      name: "Risk",
+      title: "Risk & Compliance",
+      roleDescription: "Investigate policies and controls.",
+    }).content;
+
+    expect(content).not.toContain("standing instructions that apply");
+  });
+
+  test("costs a paragraph rather than a run when it cannot be read", async () => {
+    const agents = await buildAgents(
+      [assistant],
+      model,
+      "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        throw new Error("The database is unreachable.");
+      },
+    );
+
+    // The Bot is still built and still answers. A preferences row is not worth a conversation.
+    expect(agents["general-assistant"]).toBeInstanceOf(BuiltInAgent);
+  });
+
+  test("is resolved for whoever the request turned out to be", async () => {
+    const asked: string[] = [];
+    const factory = createRequestAgents(
+      async () => ({ id: "user-7", role: "user" as const }),
+      async () => [assistant],
+      model,
+      async () => "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (actorId) => async () => {
+        asked.push(actorId);
+        return "Write in British English.";
+      },
+    );
+
+    await factory({
+      request: new Request("http://openbot.test/api/copilotkit"),
+    });
+
+    /*
+     * The actor from `identifyActor`, never anything in the request body. This text goes into a
+     * prompt that then speaks as that person's coworker in every channel they work in, so which
+     * person it belongs to is the session's answer and nobody else's.
+     */
+    expect(asked).toEqual(["user-7"]);
+  });
+});
+
+/**
+ * The dangling tool call, refused before it reaches the model provider.
+ *
+ * FOUND LIVE. Three consecutive attempts to say anything in one conversation failed with
+ * `AI_MissingToolResultsError: Tool result is missing for tool call chatcmpl-tool-8dd56dc7497c5ea9`.
+ * A frontend tool handler had been torn down while its call was open, so the browser's live agent
+ * messages carried an assistant message whose tool call would never be answered, and each retry sent
+ * it back up as `input.messages`. `BuiltInAgent.run` converts those messages itself, so the only
+ * place a guard can stand is in front of it, and these are the properties that say it is standing
+ * there: on the agent a request is handed, on the clone the runtime makes before every run, and on
+ * the narrowed path, which builds its agent again per run.
+ */
+describe("a chat turn is not sent a conversation the model API refuses", () => {
+  const assistant = {
+    id: "general-assistant",
+    name: "General Assistant",
+    type: "built_in" as const,
+    systemPrompt: "Be helpful.",
+  };
+  const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
+
+  /** The messages a run reaches `BuiltInAgent.run` with, without a model call behind them. */
+  function captureRuns() {
+    const seen: RunAgentInput[] = [];
+    const spy = spyOn(BuiltInAgent.prototype, "run").mockImplementation(
+      (input: RunAgentInput) => {
+        seen.push(input);
+        return EMPTY;
+      },
+    );
+    return { seen, restore: () => spy.mockRestore() };
+  }
+
+  function input(
+    messages: unknown[],
+    resume?: { interruptId: string; status: "resolved" }[],
+  ): RunAgentInput {
+    return {
+      threadId: "thread_1",
+      runId: "run_1",
+      messages: messages as RunAgentInput["messages"],
+      tools: [],
+      context: [],
+      forwardedProps: {},
+      state: {},
+      ...(resume === undefined ? {} : { resume }),
+    };
+  }
+
+  const danglingCall = [
+    { id: "m1", role: "user", content: "Save that." },
+    {
+      id: "m2",
+      role: "assistant",
+      content: "Saving it.",
+      toolCalls: [
+        {
+          id: "chatcmpl-tool-8dd56dc7497c5ea9",
+          type: "function",
+          function: { name: "saveDocument", arguments: "{}" },
+        },
+      ],
+    },
+    { id: "m3", role: "user", content: "Did that work?" },
+  ];
+
+  async function builtIn() {
+    const agents = await buildAgents([assistant], model, "openai-secret");
+    return agents["general-assistant"];
+  }
+
+  test("the unanswerable call is gone from what the run converts", async () => {
+    const agent = await builtIn();
+    const { seen, restore } = captureRuns();
+
+    try {
+      agent?.run(input(danglingCall));
+    } finally {
+      restore();
+    }
+
+    const messages = seen[0]?.messages ?? [];
+    // Everything the person and the Bot said survives. Only the call nothing will ever answer is
+    // gone, and with it the message that carried nothing else.
+    expect(messages.map((message) => message.id)).toEqual(["m1", "m2", "m3"]);
+    expect(messages[1]).not.toHaveProperty("toolCalls");
+    // And the caller's own array is untouched, because the browser goes on using it.
+    expect(danglingCall[1]).toHaveProperty("toolCalls");
+  });
+
+  test("the clone the runtime runs guards it too", async () => {
+    // `agents[agentId].clone()` happens before every single run, and the base class's clone builds a
+    // plain `BuiltInAgent`. Inherited unchanged, the guard would never once be reached in production.
+    const agent = (await builtIn())?.clone();
+    const { seen, restore } = captureRuns();
+
+    try {
+      agent?.run(input(danglingCall));
+    } finally {
+      restore();
+    }
+
+    expect(seen[0]?.messages).toHaveLength(3);
+    expect(seen[0]?.messages?.[1]).not.toHaveProperty("toolCalls");
+  });
+
+  test("a call the run is about to resume is kept", async () => {
+    /*
+     * `run` appends a tool result per `input.resume` entry, keyed by `interruptId`, AFTER converting
+     * the messages. So an interrupted call is the one dangle that is not a dangle: dropping it would
+     * leave that appended result pointing at a call no longer in the conversation, which is the same
+     * error arriving from the other side.
+     */
+    const agent = await builtIn();
+    const { seen, restore } = captureRuns();
+
+    try {
+      agent?.run(
+        input(danglingCall, [
+          { interruptId: "chatcmpl-tool-8dd56dc7497c5ea9", status: "resolved" },
+        ]),
+      );
+    } finally {
+      restore();
+    }
+
+    expect(seen[0]?.messages?.[1]).toMatchObject({
+      toolCalls: [{ id: "chatcmpl-tool-8dd56dc7497c5ea9" }],
+    });
+  });
+
+  test("a remote Bot is not sent the unanswerable call either", async () => {
+    /*
+     * A remote Bot never passes through `BuiltInAgentWithSaneHistory`: its middleware forwards the
+     * browser's messages to the endpoint as they are. A framework there that converts with the
+     * same SDK refuses the same conversation, so the guard is applied in that middleware, and
+     * asserted on the wire.
+     */
+    await using endpoint = fakeAgUiEndpoint();
+    const agents = await buildAgents(
+      [
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui" as const,
+          endpoint: endpoint.url,
+          standingMessage: standingRoleMessage(riskRow),
+        },
+      ],
+      model,
+      null,
+    );
+
+    const agent = agents.risk;
+    agent?.setMessages(danglingCall as never[]);
+    await agent?.runAgent();
+
+    const sent = endpoint.requests.at(-1)?.messages as {
+      id: string;
+      toolCalls?: unknown[];
+    }[];
+    expect(sent.map((message) => message.id)).toEqual([
+      "standing-role:risk",
+      "m1",
+      "m2",
+      "m3",
+    ]);
+    expect(sent[2]).not.toHaveProperty("toolCalls");
+  });
+
+  test("the narrowed path is guarded, because it builds its agent the same way", async () => {
+    // Tool selection defers the build to the run, so this is a different agent object than the one
+    // the request was handed. It is built through the same `withTools`, and that is the property.
+    const granted = Array.from({ length: 3 }, (_, index) => ({
+      ref: `drive/tool_${index}`,
+      name: `mcp__drive__tool_${index}`,
+      description: `drive tool ${index}`,
+    })) as never[];
+    const agents = await buildAgents(
+      [assistant],
+      model,
+      "openai-secret",
+      undefined,
+      async () => granted,
+      undefined,
+      undefined,
+      undefined,
+      {
+        loadSkills: async () => [
+          {
+            slug: "drive-audit",
+            title: "Drive audit",
+            summary: "Read documents out of Google Drive.",
+            tools: ["drive/tool_0"],
+          },
+        ],
+        choose: async () => JSON.stringify({ skills: ["drive-audit"] }),
+        floor: 0,
+      },
+    );
+    const { seen, restore } = captureRuns();
+
+    try {
+      // Subscribed, because the narrowing wrapper builds the inner agent lazily on subscription.
+      await new Promise<void>((resolve) => {
+        agents["general-assistant"]
+          ?.run(input(danglingCall))
+          .subscribe({ complete: resolve, error: () => resolve() });
+      });
+    } finally {
+      restore();
+    }
+
+    expect(seen[0]?.messages).toHaveLength(3);
+    expect(seen[0]?.messages?.[1]).not.toHaveProperty("toolCalls");
   });
 });

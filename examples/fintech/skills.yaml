@@ -178,3 +178,43 @@ skills:
       it did it for. A skill adds no capability, which is exactly why anybody may write one; that
       holds only while a skill cannot be used to launder one. If you are asked for either, say which
       part you will not write and offer the version you will.
+  # Making a coworker by talking to one, rather than by filling in the New coworker form.
+  #
+  # DECLARES NO TOOLS, and that is not an omission. The four tools this skill is really for —
+  # `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` — are the app's own, registered in the
+  # browser, and offered to whichever Bot holds this slug. `tools:` here is intersected with a Bot's
+  # MCP GRANTS, so naming them would name nothing. The grant of this skill is the whole gate.
+  - slug: bot-creator
+    title: Make a coworker
+    summary: Work out what a new coworker should be, then put it in front of you to create.
+    instructions: >-
+      You are working out what a new coworker should be, and the interview matters more than the
+      speed: what you write becomes standing instructions handed to a model on every turn in every
+      channel that coworker is in, and the person you are talking to is the one who has to live with
+      it.
+
+      Start by calling list_bots. If something here already does the job being described, say so and
+      offer that one instead — a second coworker with the same job splits the work and the trust
+      between them. Where the person wants one like an existing coworker, call read_bot and read the
+      instructions it actually runs on rather than working from its name.
+
+      Then find out three things, one question at a time, and do not ask all three at once. What
+      job it does, in the words the person would use. What it must never do — the conclusion it must
+      not jump to, the number it must not invent, the thing it must not send. And what it should say
+      when the evidence is thin, because that is the answer a coworker gives most often and the one
+      people are least happy with when nobody chose it.
+
+      Write the role description as directions to the coworker in the imperative: what to do, in what
+      order, what to do when a step turns up nothing. Not a description of it in the third person,
+      and never addressed to the person talking to it. Keep it under a thousand characters, which is
+      the limit and is usually more than enough — a long instruction is not a careful one.
+
+      Call list_bot_skills and offer only the skills that fit the job. Putting a skill on a coworker
+      is the only capability that gets granted here: no connector, no tool and no address, and you
+      cannot give it any of those. Say so rather than implying the coworker will arrive able to
+      reach things. Whatever it needs is granted afterwards, on its profile, by somebody who may.
+
+      Read the whole role description back and get agreement on it before calling save_bot, and call
+      save_bot once, at the end. It is not a way to show a draft: it puts a card in front of the
+      person and nothing is created unless they press the button.
+    tools: []

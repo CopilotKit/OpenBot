@@ -308,12 +308,13 @@ describe("tenant YAML validation", () => {
           "You are a helpful general assistant. Give clear, concise, and accurate answers.",
       },
       /*
-       * Authoring, and only on this Bot. Holding `skill-creator` is what makes the app offer the four
-       * tools that turn an interview into a saved skill, so this pairing is the feature rather than a
-       * detail of the example: a package that shipped the skill and granted it to nobody would boot a
-       * deployment where writing a skill in a conversation quietly does not work.
+       * One skill each, and both are gates rather than preferences. `bot-creator` is what makes the
+       * app offer `list_bots`, `read_bot`, `list_bot_skills` and `save_bot`; `skill-creator` is what
+       * makes it offer the four tools that turn an interview into a saved skill. Dropped from the
+       * package, either feature stops working with nothing on any screen to say why, which is why the
+       * pairing is asserted here rather than left to whoever edits the YAML next.
        */
-      skills: ["skill-creator"],
+      skills: ["bot-creator", "skill-creator"],
     });
     // The pairing the shipped package makes, which is the whole reason Knowledge narrows to document
     // tools rather than being offered everything its grants hold.

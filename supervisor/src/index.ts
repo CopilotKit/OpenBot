@@ -12,6 +12,7 @@ import {
 } from "./docker";
 import { registerEntry } from "./identity";
 import { namesFor } from "./names";
+import { listenPort } from "./listen-port";
 
 /**
  * The container supervisor: the only thing here that holds the Docker socket.
@@ -43,7 +44,12 @@ import { namesFor } from "./names";
  * root on the host, so missing authentication is a deployment failure.
  */
 
-const port = Number.parseInt(process.env.PORT ?? "4300", 10);
+const resolvedPort = listenPort(process.env.PORT, 4300);
+if (!resolvedPort.ok) {
+  console.error(resolvedPort.reason);
+  process.exit(1);
+}
+const port = resolvedPort.port;
 const token = process.env.SUPERVISOR_TOKEN?.trim();
 if (!token) {
   console.error(

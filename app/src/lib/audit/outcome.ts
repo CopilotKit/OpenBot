@@ -61,6 +61,27 @@ export const DID_NOT_HAPPEN_EVENT_TYPES = [
   "agent.handoff_failed",
   /** A question that reached nobody: the Bot stopped, and the person was never asked. */
   "agent.escalation_failed",
+  /*
+   * A tool call this deployment permitted and the vendor did not complete.
+   *
+   * The direct sibling of `computer.action_failed`, written by the same decide-record-then-act
+   * order on the other acting surface: `callTool` writes the decision row first, attempts the
+   * call, and then writes this instead of `mcp.call_succeeded` when the vendor answers `isError`
+   * or the attempt throws. Every failure of a per-person connector lands here — no connection for
+   * the asker, a refresh token the vendor stopped accepting, an API not enabled for the project —
+   * which makes it the row somebody most often comes to this page to find, and it was the one row
+   * of the family drawn in the same muted colour as a call that worked.
+   */
+  "mcp.call_failed",
+  /*
+   * A component's read that was granted and then broke.
+   *
+   * `server/src/audit.ts` says this one is "deliberately not a refusal", and that is right: nothing
+   * was forbidden. But it is not an allowance either. The row exists precisely because the read did
+   * not happen, and the page already labels it "Could not be read" while colouring it as though it
+   * had been.
+   */
+  "component.function_failed",
 ] as const;
 
 export type AuditOutcome = "refused" | "did-not-happen" | "allowed";
