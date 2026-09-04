@@ -128,6 +128,12 @@ export type HandoffCaps = {
   /** How many other Bots one run may address. */
   maxPerRun: number;
 };
+export type FeishuConfig = {
+  appId: string;
+  appSecret: string;
+  tenantKey: string;
+};
+
 
 export type DeploymentConfig = {
   /** The port the API listens on. Named `PORT` or `SERVER_PORT`; see `serverPort`. */
@@ -168,6 +174,9 @@ export type DeploymentConfig = {
    * A known managed tenant must still match this value; see slack/tenant-context.ts.
    */
   slackTenantId: string | undefined;
+  /** Feishu long-connection credentials. Absent leaves Feishu disabled. */
+  feishu?: FeishuConfig;
+
   /**
    * Where this deployment is reached from outside, with no trailing slash.
    *
@@ -823,6 +832,20 @@ function slackTenantId(environment: Environment): string | undefined {
   return tenantId;
 }
 
+function feishuConfig(environment: Environment): FeishuConfig | undefined {
+  const appId = optional(environment, "FEISHU_APP_ID");
+  const appSecret = optional(environment, "FEISHU_APP_SECRET");
+  const tenantKey = optional(environment, "FEISHU_TENANT_KEY");
+  const configured = [appId, appSecret, tenantKey].filter(Boolean).length;
+  if (configured === 0) return undefined;
+  if (configured !== 3) {
+    throw new Error(
+      "FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_TENANT_KEY must be configured together",
+    );
+  }
+  return { appId: appId!, appSecret: appSecret!, tenantKey: tenantKey! };
+}
+
 /**
  * Whether a Bot may draw an interface it wrote itself.
  *
@@ -926,6 +949,7 @@ export function loadConfig(
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
   const managedAgent = managedAgentConfig(environment);
+  const feishu = feishuConfig(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
@@ -936,6 +960,7 @@ export function loadConfig(
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     slackTenantId: slackTenantId(environment),
+    ...(feishu ? { feishu } : {}),
     publicUrl: (
       optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
     )?.replace(/\/+$/, ""),

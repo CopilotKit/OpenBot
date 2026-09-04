@@ -70,6 +70,9 @@ import { createOnboardingStore } from "./people/onboarding";
 import { createExternalLinkStore } from "./external/link-store";
 import { createExternalLinkRoutes } from "./external/routes";
 import { createExternalThreadStore } from "./external/thread-store";
+import { createOpenBotFeishuChannel } from "./feishu/channel";
+import { createFeishuIdentityResolver } from "./feishu/identity";
+import { createFeishuTransport } from "./feishu/transport";
 import { createPeopleStore } from "./people/store";
 import { useRoutineTools } from "./plugins/builtin-routines";
 import { redirectUriFor } from "./plugins/oauth";
@@ -896,6 +899,22 @@ const openbotSlackChannel = createOpenBotSlackChannel({
  * invisible: it runs, and quietly holds different tools or a different role from the one the person
  * is talking to.
  */
+const feishuChannel = config.feishu
+  ? createOpenBotFeishuChannel({
+      transport: createFeishuTransport(config.feishu),
+      agentDeps: {
+        routing: slackRouting,
+        store: externalThreadStore,
+        resolver: actorAgentResolver,
+      },
+      resolveUser: createFeishuIdentityResolver({
+        store: externalLinkStore,
+        encryptionKey: config.keyEncryptionKey,
+        appUrl: config.appUrl,
+      }),
+    })
+  : undefined;
+
 const copilotRuntime = mountCopilotRuntime(
   config,
   actorAgentResolver,
@@ -911,6 +930,8 @@ const copilotRuntime = mountCopilotRuntime(
   },
   [openbotSlackChannel],
 );
+
+await feishuChannel?.start();
 
 /*
  * The guard the account-link confirmation runs behind: a person's own session, never Slack's word.
@@ -1363,6 +1384,7 @@ const managedHost = startManagedChannelHost({
   // Each listener holds a connection of its own for the life of the process. Released on the way
   // out, so a watch-mode restart does not leave two behind on every reload.
   stopOthers: [
+    () => feishuChannel?.stop() ?? Promise.resolve(),
     () => channelActivityListener.stop(),
     () => policyListener.stop(),
     () => retentionSweeps.stop(),

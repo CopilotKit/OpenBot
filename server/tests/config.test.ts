@@ -95,6 +95,27 @@ describe("deployment configuration", () => {
     ).toBe("T05QFA4BW9X");
   });
 
+  test("loads Feishu long-connection credentials only as a complete set", () => {
+    expect(
+      loadConfig({
+        ...baseEnvironment,
+        FEISHU_APP_ID: " cli_a1 ",
+        FEISHU_APP_SECRET: " secret ",
+        FEISHU_TENANT_KEY: " tenant-key ",
+      }).feishu,
+    ).toEqual({
+      appId: "cli_a1",
+      appSecret: "secret",
+      tenantKey: "tenant-key",
+    });
+
+    expect(() =>
+      loadConfig({ ...baseEnvironment, FEISHU_APP_ID: "cli_a1" }),
+    ).toThrow(
+      "FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_TENANT_KEY must be configured together",
+    );
+  });
+
   test.each(["unknown", " UNKNOWN "])(
     "rejects the non-canonical managed Slack tenant %j",
     (tenantId) => {

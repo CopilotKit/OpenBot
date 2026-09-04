@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AbstractAgent, type BaseEvent, type RunAgentInput } from "@ag-ui/client";
+import { of } from "rxjs";
 import type { ActorAgentResolver } from "../src/agents/agent-resolver";
 import type { ExternalThreadStore } from "../src/external/thread-store";
 import type { CoworkerRoutingService } from "../src/routing/service";
@@ -33,6 +34,9 @@ function harness() {
     },
   };
   const store = {
+    async getByChannelsThreadId() {
+      return null;
+    },
     async getByProviderThread() {
       return null;
     },
@@ -57,10 +61,10 @@ function harness() {
   const channel = createOpenBotFeishuChannel({
     transport,
     agentDeps: { store, routing, resolver },
-    resolveUser: async ({ provider, providerTenantId, providerUserId }) => ({
+    resolveUser: async () => ({
+      kind: "linked",
       actor: { id: "alice", role: "user" },
       user: { id: "alice", name: "Alice" },
-      identity: { provider, providerTenantId, providerUserId, providerEmail: null },
     }),
   });
   return { channel, sent, emit: async (message: Parameters<NonNullable<typeof onMessage>>[0]) => onMessage?.(message) };

@@ -29,6 +29,7 @@ import { Route as AuthedAdminIdentityProvidersRouteImport } from './routes/_auth
 import { Route as AuthedAdminPeopleRouteImport } from './routes/_authed/admin/people'
 import { Route as AuthedAdminPlaygroundRouteImport } from './routes/_authed/admin/playground'
 import { Route as AuthedAdminSkillsRouteImport } from './routes/_authed/admin/skills'
+import { Route as AuthedLinkFeishuRouteImport } from './routes/_authed/link/feishu'
 import { Route as AuthedLinkSlackRouteImport } from './routes/_authed/link/slack'
 import { Route as AuthedSettingsIndexRouteImport } from './routes/_authed/settings/index'
 import { Route as AuthedAppAgentsIndexRouteImport } from './routes/_authed/_app/agents/index'
@@ -144,6 +145,11 @@ const AuthedAdminSkillsRoute = AuthedAdminSkillsRouteImport.update({
   path: '/skills',
   getParentRoute: () => AuthedAdminRouteRoute,
 } as any)
+const AuthedLinkFeishuRoute = AuthedLinkFeishuRouteImport.update({
+  id: '/link/feishu',
+  path: '/link/feishu',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedLinkSlackRoute = AuthedLinkSlackRouteImport.update({
   id: '/link/slack',
   path: '/link/slack',
@@ -247,6 +253,7 @@ export interface FileRoutesByFullPath {
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/link/feishu': typeof AuthedLinkFeishuRoute
   '/link/slack': typeof AuthedLinkSlackRoute
   '/admin/': typeof AuthedAdminIndexRoute
   '/settings/': typeof AuthedSettingsIndexRoute
@@ -280,6 +287,7 @@ export interface FileRoutesByTo {
   '/admin/people': typeof AuthedAdminPeopleRoute
   '/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/admin/skills': typeof AuthedAdminSkillsRoute
+  '/link/feishu': typeof AuthedLinkFeishuRoute
   '/link/slack': typeof AuthedLinkSlackRoute
   '/admin': typeof AuthedAdminIndexRoute
   '/settings': typeof AuthedSettingsIndexRoute
@@ -317,6 +325,7 @@ export interface FileRoutesById {
   '/_authed/admin/people': typeof AuthedAdminPeopleRoute
   '/_authed/admin/playground': typeof AuthedAdminPlaygroundRoute
   '/_authed/admin/skills': typeof AuthedAdminSkillsRoute
+  '/_authed/link/feishu': typeof AuthedLinkFeishuRoute
   '/_authed/link/slack': typeof AuthedLinkSlackRoute
   '/_authed/_app/': typeof AuthedAppIndexRoute
   '/_authed/admin/': typeof AuthedAdminIndexRoute
@@ -355,6 +364,7 @@ export interface FileRouteTypes {
     | '/admin/people'
     | '/admin/playground'
     | '/admin/skills'
+    | '/link/feishu'
     | '/link/slack'
     | '/admin/'
     | '/settings/'
@@ -388,6 +398,7 @@ export interface FileRouteTypes {
     | '/admin/people'
     | '/admin/playground'
     | '/admin/skills'
+    | '/link/feishu'
     | '/link/slack'
     | '/admin'
     | '/settings'
@@ -424,6 +435,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/people'
     | '/_authed/admin/playground'
     | '/_authed/admin/skills'
+    | '/_authed/link/feishu'
     | '/_authed/link/slack'
     | '/_authed/_app/'
     | '/_authed/admin/'
@@ -589,6 +601,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/skills'
       preLoaderRoute: typeof AuthedAdminSkillsRouteImport
       parentRoute: typeof AuthedAdminRouteRoute
+    }
+    '/_authed/link/feishu': {
+      id: '/_authed/link/feishu'
+      path: '/link/feishu'
+      fullPath: '/link/feishu'
+      preLoaderRoute: typeof AuthedLinkFeishuRouteImport
+      parentRoute: typeof AuthedRoute
     }
     '/_authed/link/slack': {
       id: '/_authed/link/slack'
@@ -791,6 +810,7 @@ interface AuthedRouteChildren {
   AuthedAppRoute: typeof AuthedAppRouteWithChildren
   AuthedAssistRoute: typeof AuthedAssistRoute
   AuthedOnboardingRoute: typeof AuthedOnboardingRoute
+  AuthedLinkFeishuRoute: typeof AuthedLinkFeishuRoute
   AuthedLinkSlackRoute: typeof AuthedLinkSlackRoute
 }
 
@@ -800,6 +820,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedAppRoute: AuthedAppRouteWithChildren,
   AuthedAssistRoute: AuthedAssistRoute,
   AuthedOnboardingRoute: AuthedOnboardingRoute,
+  AuthedLinkFeishuRoute: AuthedLinkFeishuRoute,
   AuthedLinkSlackRoute: AuthedLinkSlackRoute,
 }
 

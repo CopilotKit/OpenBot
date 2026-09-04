@@ -80,12 +80,14 @@ export function createExternalLinkRoutes({
 }: ExternalLinkRoutesOptions) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
-  routes.get("/slack", requireUser, async (context) => {
+  routes.get("/:provider", requireUser, async (context) => {
     try {
+      const provider = context.req.param("provider");
       const claim = await readExternalLinkToken(
         context.req.query("token"),
         encryptionKey,
       );
+      if (claim.provider !== provider) return invalidLinkResponse(context);
       return context.json({
         providerTenantId: claim.providerTenantId,
         providerUserId: claim.providerUserId,
@@ -96,11 +98,13 @@ export function createExternalLinkRoutes({
     }
   });
 
-  routes.post("/slack", requireUser, async (context) => {
+  routes.post("/:provider", requireUser, async (context) => {
     const body = await context.req.json().catch(() => null);
     let claim: ExternalProviderIdentity;
     try {
+      const provider = context.req.param("provider");
       claim = await readExternalLinkToken(tokenFrom(body), encryptionKey);
+      if (claim.provider !== provider) return invalidLinkResponse(context);
     } catch {
       return invalidLinkResponse(context);
     }
