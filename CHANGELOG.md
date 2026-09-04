@@ -8,6 +8,27 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A skill can be written in the conversation instead of retyped into a form
+
+A skill is four fields and an instruction a Bot follows, and the instruction is the one that decides
+whether the skill works. The only place to write it was a textarea on `/skills`, which meant having
+the conversation, getting a good draft in the transcript, and then copying it out and retyping it.
+Mostly nobody bothered, which is how a deployment runs for months with no skills in it.
+
+The example package now ships a `skill-creator` skill, granted to `general-assistant`. A Bot holding
+it is offered four tools for listing, reading and saving skills; every other Bot is offered none of
+them. It interviews you about the skill you want, looks at what already exists before naming it,
+rehearses it against one realistic request, and then saves it.
+
+The save is a card, not something that happens quietly. It draws the command, the title, the declared
+tools and the whole instruction, and writes nothing until a button is pressed. A skill appears in
+everybody's `/` menu with somebody's name on it, and saving is also how an edit is spelled, so an
+unattended save could replace a skill somebody is already using.
+
+The tools run in the browser as the signed-in person, over the same `POST /api/plugins/skills` a
+person uses, so who may take a slug is answered the same way and the `configuration.changed` audit
+row is written the same way.
+
 ### A person can set standing instructions that every coworker follows
 
 Settings now has a box for standing instructions: one piece of text per person, saved once and
@@ -24,6 +45,43 @@ any prompt until somebody writes something, so a deployment where nobody uses th
 as before.
 
 This adds migration `0026_user_instructions`, which creates one table.
+### A coworker can be made in the conversation, and it starts able to reach nothing
+
+A coworker without an endpoint runs on its role description, which becomes the standing instruction
+handed to a model on every turn in every channel it is in. It is the hardest thing anybody is asked
+to write cold, so people write a sentence, get a coworker that answers vaguely, and never go back to
+the field that decided everything.
+
+The example package now ships a `bot-creator` skill, granted to `general-assistant`, with tools for
+listing, reading and saving coworkers. It asks the follow-up your last answer calls for, reads the
+roster to say when something already does the job, and can be told to make one like an existing
+coworker but for a different job, then go and read what that coworker actually runs on.
+
+The card shows the name, the job, the skills and the entire role description, scrolled rather than
+clamped, because that text runs on somebody's behalf. What is made is granted nothing: it can reach
+no connector, no tool and no browser until somebody grants it, and a conversation with it says so.
+
+Like the skill tools above, these run in the browser as the signed-in person over the endpoints a
+person uses, so who may create a coworker is answered the same way and `bot.created` carries the
+actor.
+
+### A conversation has a name of its own
+
+A channel's name was only the names of the Bots in it, so asking one Bot about six unrelated things
+gave six rows reading the same thing, told apart by a preview of whatever was said last, which is
+usually the tail of an answer and says nothing about the question. A conversation is now named from
+its opening exchange, and the roster's second line holds that name instead of the preview, falling
+back to the preview until a name exists. A row is never blank and never worse off than before.
+
+Two things a deployment should know. The opening exchange, up to 600 code points, is sent to whatever
+`tenantPackage.model` names, which is the same provider the Bots already use, so it is not new egress
+but it is sent as housekeeping rather than because somebody asked for it. And the second line now
+says what the conversation is about instead of what was last said.
+
+It runs on the work queue rather than as a headless turn, so naming a conversation never takes the
+Intelligence thread lock and cannot refuse somebody's own next message with a 409. A deployment with
+no model key names nothing and carries on.
+
 ### The trail says who a coworker was opened to
 
 Making a coworker public admits every signed-in person to it, and being admitted to a coworker is
@@ -67,6 +125,21 @@ what did not work here was short by exactly the rows they came for. A per-person
 this path every time somebody's token expires, so this was the most common failure the product has
 and the one the trail was quietest about. Both now read as `Did not happen`, and both are in that
 saved view. Neither is filed as a refusal: nothing was forbidden on either row.
+### A blank agentId on a channel activity says which field was wrong
+
+`POST /api/channels/:id/activity` accepted an `agentId` of only spaces, trimmed it to nothing, then
+looked that up and answered `404 Agent not found`. The field was malformed rather than the agent
+missing, so the answer sent whoever was integrating to look for a coworker that was never named. It
+is now a `400` naming the field, which is what the same endpoint already did for malformed text.
+
+### Audit payloads are redacted by the store as well as by its caller
+
+Redaction of secrets out of audit payloads happened in `recordAuditEvent`, and every caller in the
+tree goes through it. The store underneath it is exported, though, and its `insert` wrote whatever it
+was handed, so a future direct caller would have written secrets to the audit table in cleartext.
+`insert` now redacts too. Redaction is idempotent, so nothing about the existing path changes; this
+is the floor under it rather than a fix to it.
+
 ### A stray space in NODE_ENV no longer lets the public example key through
 
 A deployment that never changed `KEY_ENCRYPTION_KEY` encrypts its credential vault with the key
@@ -76,6 +149,14 @@ private-host browsing — trimmed first. Both read the same env file, and a trai
 invisible: Docker's `env_file` preserves it and so does every hosting dashboard with a text box. So
 `NODE_ENV=production ` tripped one refusal, slipped past the other, and started the deployment on the
 public key with only a warning at boot. Both gates now ask the same question the same way.
+### A tool result from an MCP server with an empty part no longer crashes the turn
+
+Reading a tool result cast every part to an object and asked for its type. A `null` or missing entry,
+which a vendor's MCP server is free to send, threw instead, and the turn that had just called the
+tool failed. Such a part is now named `[unknown]`, which is the same naming-rather-than-dropping the
+surrounding code already does for parts it does not recognise, so the rest of the result still
+reaches the Bot.
+
 ## 0.0.6
 
 ### Setting up needs one Intelligence credential, not two
