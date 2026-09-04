@@ -14,6 +14,7 @@ import { Route as SignRouteImport } from './routes/sign'
 import { Route as AuthedAppRouteImport } from './routes/_authed/_app'
 import { Route as AuthedAdminRouteRouteImport } from './routes/_authed/admin/route'
 import { Route as AuthedAssistRouteImport } from './routes/_authed/assist'
+import { Route as AuthedOnboardingRouteImport } from './routes/_authed/onboarding'
 import { Route as AuthedSettingsRouteRouteImport } from './routes/_authed/settings/route'
 import { Route as AuthedAppIndexRouteImport } from './routes/_authed/_app/index'
 import { Route as AuthedAppBotRouteImport } from './routes/_authed/_app/bot'
@@ -65,6 +66,11 @@ const AuthedAdminRouteRoute = AuthedAdminRouteRouteImport.update({
 const AuthedAssistRoute = AuthedAssistRouteImport.update({
   id: '/assist',
   path: '/assist',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedOnboardingRoute = AuthedOnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedSettingsRouteRoute = AuthedSettingsRouteRouteImport.update({
@@ -229,6 +235,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AuthedAdminRouteRouteWithChildren
   '/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/assist': typeof AuthedAssistRoute
+  '/onboarding': typeof AuthedOnboardingRoute
   '/bot': typeof AuthedAppBotRoute
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
@@ -261,6 +268,7 @@ export interface FileRoutesByTo {
   '/': typeof AuthedAppIndexRoute
   '/sign': typeof SignRoute
   '/assist': typeof AuthedAssistRoute
+  '/onboarding': typeof AuthedOnboardingRoute
   '/bot': typeof AuthedAppBotRoute
   '/routines': typeof AuthedAppRoutinesRoute
   '/skills': typeof AuthedAppSkillsRoute
@@ -297,6 +305,7 @@ export interface FileRoutesById {
   '/_authed/settings': typeof AuthedSettingsRouteRouteWithChildren
   '/_authed/_app': typeof AuthedAppRouteWithChildren
   '/_authed/assist': typeof AuthedAssistRoute
+  '/_authed/onboarding': typeof AuthedOnboardingRoute
   '/_authed/_app/bot': typeof AuthedAppBotRoute
   '/_authed/_app/routines': typeof AuthedAppRoutinesRoute
   '/_authed/_app/skills': typeof AuthedAppSkillsRoute
@@ -334,6 +343,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/settings'
     | '/assist'
+    | '/onboarding'
     | '/bot'
     | '/routines'
     | '/skills'
@@ -366,6 +376,7 @@ export interface FileRouteTypes {
     | '/'
     | '/sign'
     | '/assist'
+    | '/onboarding'
     | '/bot'
     | '/routines'
     | '/skills'
@@ -401,6 +412,7 @@ export interface FileRouteTypes {
     | '/_authed/settings'
     | '/_authed/_app'
     | '/_authed/assist'
+    | '/_authed/onboarding'
     | '/_authed/_app/bot'
     | '/_authed/_app/routines'
     | '/_authed/_app/skills'
@@ -471,6 +483,13 @@ declare module '@tanstack/react-router' {
       path: '/assist'
       fullPath: '/assist'
       preLoaderRoute: typeof AuthedAssistRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/onboarding': {
+      id: '/_authed/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof AuthedOnboardingRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/settings': {
@@ -770,6 +789,7 @@ interface AuthedRouteChildren {
   AuthedSettingsRouteRoute: typeof AuthedSettingsRouteRouteWithChildren
   AuthedAppRoute: typeof AuthedAppRouteWithChildren
   AuthedAssistRoute: typeof AuthedAssistRoute
+  AuthedOnboardingRoute: typeof AuthedOnboardingRoute
   AuthedLinkSlackRoute: typeof AuthedLinkSlackRoute
 }
 
@@ -778,6 +798,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedSettingsRouteRoute: AuthedSettingsRouteRouteWithChildren,
   AuthedAppRoute: AuthedAppRouteWithChildren,
   AuthedAssistRoute: AuthedAssistRoute,
+  AuthedOnboardingRoute: AuthedOnboardingRoute,
   AuthedLinkSlackRoute: AuthedLinkSlackRoute,
 }
 

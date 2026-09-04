@@ -16,7 +16,6 @@ import {
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
-import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import type { ActorAgentResolver } from "./agents/agent-resolver";
 import type { AgentActor } from "./agents/profile-types";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
@@ -707,9 +706,14 @@ class GovernedBuiltInAgent extends BuiltInAgent {
     return super.use(...middlewares);
   }
 
+
   run(input: RunAgentInput): Observable<BaseEvent> {
+    const answeredByResume = new Set(
+      (input.resume ?? []).map((entry) => entry.interruptId),
+    );
     return super.run({
       ...input,
+      messages: sanitizeSeededHistory(input.messages, answeredByResume),
       forwardedProps: governedRunForwardedProps(
         input,
         this.botId,
@@ -718,7 +722,6 @@ class GovernedBuiltInAgent extends BuiltInAgent {
       ),
     });
   }
-
   clone(): GovernedBuiltInAgent {
     const cloned = new GovernedBuiltInAgent(
       this.configuration,

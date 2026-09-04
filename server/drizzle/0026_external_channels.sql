@@ -57,16 +57,4 @@ CREATE UNIQUE INDEX "external_thread_bindings_provider_thread_idx" ON "external_
 CREATE INDEX "external_thread_bindings_creator_thread_idx" ON "external_thread_bindings" USING btree ("created_by_user_id","channels_thread_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "external_thread_messages_thread_message_idx" ON "external_thread_messages" USING btree ("channels_thread_id","message_id");--> statement-breakpoint
 CREATE INDEX "external_thread_messages_thread_sequence_idx" ON "external_thread_messages" USING btree ("channels_thread_id","sequence" DESC NULLS LAST);--> statement-breakpoint
-CREATE UNIQUE INDEX "external_user_links_openbot_workspace_idx" ON "external_user_links" USING btree ("provider","provider_tenant_id","openbot_user_id");--> statement-breakpoint
-CREATE FUNCTION "reject_external_thread_binding_mutation"()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-	RAISE EXCEPTION 'External thread bindings are append-only';
-END;
-$$;--> statement-breakpoint
-CREATE TRIGGER "external_thread_bindings_append_only"
-BEFORE UPDATE OR DELETE ON "external_thread_bindings"
-FOR EACH ROW
-EXECUTE FUNCTION "reject_external_thread_binding_mutation"();
+CREATE UNIQUE INDEX "external_user_links_openbot_workspace_idx" ON "external_user_links" USING btree ("provider","provider_tenant_id","openbot_user_id");

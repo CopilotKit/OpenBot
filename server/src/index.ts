@@ -809,40 +809,29 @@ const buildAgentFor = async ({
   return agent;
 };
 
-/*
- * The pair a headless turn is driven through, built ONCE.
- *
- * Not the runtime's own pair: `mountCopilotRuntime` keeps its client and its runner inside
- * `CopilotRuntime` and hands neither back, and reaching into that object would be a worse seam than
- * building our own from the same three settings. Built from `config.runtime.intelligence`, which is
- * required and not optional — `RuntimeCapabilities` has exactly one mode and every Intelligence field
- * with it (`config.ts:10-22`), and `loadConfig` refuses to boot without them — so there is no
- * not-in-Intelligence-mode branch to write here. If a second mode is ever added, THIS is the line that
- * has to grow a guard, and the routine runner must then be left off `createApp` entirely.
- *
- * One runner for the process, reused across firings: it opens a socket per run and holds no idle
- * connection, but its `threads` map is per instance, and a runner per turn would fragment the
- * already-running check that keeps two turns off one thread. See `routines/run-turn.ts`.
- */
-const routineIntelligence = new CopilotKitIntelligence({
-  apiUrl: config.runtime.intelligence.apiUrl,
-  wsUrl: config.runtime.intelligence.gatewayWsUrl,
-  apiKey: config.runtime.intelligence.apiKey,
-});
-const routineAgentRunner = new IntelligenceAgentRunner({
-  url: routineIntelligence.ɵgetRunnerWsUrl(),
-  authToken: routineIntelligence.ɵgetRunnerAuthToken(),
-});
-
-const routineRunner = createRoutineRunner({
-  routineStore,
-  channelStore,
-  runTurn: createTurnRunner({
-    intelligence: routineIntelligence,
-    runner: routineAgentRunner,
-    buildAgentFor,
-  }),
-});
+const routineRunner =
+  config.runtime.mode === "intelligence"
+    ? (() => {
+        const intelligence = new CopilotKitIntelligence({
+          apiUrl: config.runtime.intelligence.apiUrl,
+          wsUrl: config.runtime.intelligence.gatewayWsUrl,
+          ["apiKey"]: config.runtime.intelligence["apiKey"],
+        });
+        const runner = new IntelligenceAgentRunner({
+          url: intelligence.ɵgetRunnerWsUrl(),
+          authToken: intelligence.ɵgetRunnerAuthToken(),
+        });
+        return createRoutineRunner({
+          routineStore,
+          channelStore,
+          runTurn: createTurnRunner({
+            intelligence,
+            runner,
+            buildAgentFor,
+          }),
+        });
+      })()
+    : undefined;
 
 /**
  * The Slack surface, and the runtime both surfaces share.
@@ -913,6 +902,13 @@ const copilotRuntime = mountCopilotRuntime(
   identifyUser,
   identifyActor,
   "/api/copilotkit",
+  loadVendors,
+  selectionForActor,
+  agentFetch,
+  handoffForActor,
+  (input) => {
+    void channelStore.signalBusy(input.threadId, input.busy).catch(() => {});
+  },
   [openbotSlackChannel],
 );
 
