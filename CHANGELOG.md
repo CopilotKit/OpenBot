@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.6
+
 ### Setting up needs one Intelligence credential, not two
 
 `COPILOTKIT_LICENSE_TOKEN` is no longer required. Managed Intelligence derives entitlement from the
