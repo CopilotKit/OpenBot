@@ -458,6 +458,11 @@ agents:
 - Explicit `disabled` makes computer tools and routes unavailable.
 - Explicit `enabled` makes the tools and routes exist, but every acting call still requires CEL policy approval.
 
+This is durable agent-package/configuration state, not a skill capability or a CEL decision. No skill,
+skill attachment, or CEL rule can change an agent from `disabled` to `enabled`. CEL is evaluated only
+after the entitlement gate is already `enabled`, and can authorize or refuse that individual acting
+call without changing the stored entitlement.
+
 The two types are told different amounts, which is easy to miss. A `built-in` agent gets its
 `system_prompt`; a `remote-ag-ui` agent has none, and its `role_description` is the only instruction
 it ever receives from the package. Write that sentence as the whole brief for the Bot, not as a

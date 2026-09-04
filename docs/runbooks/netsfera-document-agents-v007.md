@@ -199,6 +199,10 @@ browse and hands a document request to the collector; the collector reaches a re
 unreviewed host is refused with its rule; login uses human takeover and then returns work; and
 `/crear-proveedor-documental` interviews, rehearses, and renders a native save card. Saving creates a
 personal skill without silently attaching it; **Put it on a Bot** attaches it to the collector.
+Neither a provider skill nor its attachment can enable computer access: `computer_access` persists in
+the agent package/configuration, and only its explicit `enabled` state opens the entitlement gate.
+CEL is evaluated afterwards for each acting call; it may authorize or refuse that call, but it cannot
+change `disabled` to `enabled`.
 
 A provider run enumerates candidates first, shows the required selection fields, uses `askChoice` for
 individual selection or `askApproval` for the complete set, and acts only on the approved set. The
