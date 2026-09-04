@@ -1,7 +1,10 @@
 import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { lastValueFrom } from "rxjs";
 import { toArray } from "rxjs/operators";
-import { OpenBotChannelAgent, type OpenBotChannelAgentDependencies } from "../slack/channel-agent";
+import {
+  OpenBotChannelAgent,
+  type OpenBotChannelAgentDependencies,
+} from "../slack/channel-agent";
 import { runWithSlackExecution } from "../slack/execution-context";
 import type { FeishuMessage, FeishuTransport } from "./transport";
 
@@ -61,7 +64,10 @@ export function createOpenBotFeishuChannel({
     }
 
     const providerThreadId =
-      message.threadId ?? message.rootId ?? message.replyToMessageId ?? message.messageId;
+      message.threadId ??
+      message.rootId ??
+      message.replyToMessageId ??
+      message.messageId;
     const conversationKey = `feishu:${transport.tenantKey}:${message.chatId}:${providerThreadId}`;
     const execution = {
       actor: resolved.actor,
@@ -72,7 +78,11 @@ export function createOpenBotFeishuChannel({
       providerThreadId,
       messageText: message.content,
     };
-    const agent = new OpenBotChannelAgent(conversationKey, agentDeps, execution);
+    const agent = new OpenBotChannelAgent(
+      conversationKey,
+      agentDeps,
+      execution,
+    );
     const input: RunAgentInput = {
       threadId: conversationKey,
       runId: crypto.randomUUID(),
@@ -89,7 +99,9 @@ export function createOpenBotFeishuChannel({
     );
     const reply = assistantText(events);
     if (reply) {
-      await transport.send(message.chatId, reply, { replyTo: message.messageId });
+      await transport.send(message.chatId, reply, {
+        replyTo: message.messageId,
+      });
     }
   }
 

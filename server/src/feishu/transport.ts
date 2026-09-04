@@ -1,7 +1,4 @@
-import {
-  createLarkChannel,
-  type LarkChannel,
-} from "@larksuiteoapi/node-sdk";
+import { createLarkChannel, type LarkChannel } from "@larksuiteoapi/node-sdk";
 
 export type FeishuMessage = {
   messageId: string;

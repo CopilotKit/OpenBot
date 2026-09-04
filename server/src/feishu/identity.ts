@@ -35,7 +35,9 @@ export function createFeishuIdentityResolver({
 
     const baseUrl = new URL(appUrl ?? "");
     if (baseUrl.protocol !== "https:" && baseUrl.hostname !== "localhost") {
-      throw new Error("Feishu link setup requires an absolute OPENBOT_APP_URL.");
+      throw new Error(
+        "Feishu link setup requires an absolute OPENBOT_APP_URL.",
+      );
     }
     const token = await mintExternalLinkToken(
       {

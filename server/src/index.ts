@@ -818,7 +818,7 @@ const routineRunner =
         const intelligence = new CopilotKitIntelligence({
           apiUrl: config.runtime.intelligence.apiUrl,
           wsUrl: config.runtime.intelligence.gatewayWsUrl,
-          ["apiKey"]: config.runtime.intelligence["apiKey"],
+          apiKey: config.runtime.intelligence.apiKey,
         });
         const runner = new IntelligenceAgentRunner({
           url: intelligence.ɵgetRunnerWsUrl(),

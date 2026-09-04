@@ -63,7 +63,10 @@ export class OpenBotChannelAgent extends AbstractAgent {
     execution?: SlackExecution,
     executionForRun?: () => SlackExecution | undefined,
   ) {
-    super({ agentId: "openbot-external", description: "OpenBot external channel router" });
+    super({
+      agentId: "openbot-external",
+      description: "OpenBot external channel router",
+    });
     this.channelsConversationKey = channelsConversationKey;
     this.routing = deps.routing;
     this.store = deps.store;

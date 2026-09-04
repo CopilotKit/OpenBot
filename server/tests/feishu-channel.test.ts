@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { AbstractAgent, type BaseEvent, type RunAgentInput } from "@ag-ui/client";
+import {
+  AbstractAgent,
+  type BaseEvent,
+  type RunAgentInput,
+} from "@ag-ui/client";
 import { of } from "rxjs";
 import type { ActorAgentResolver } from "../src/agents/agent-resolver";
 import type { ExternalThreadStore } from "../src/external/thread-store";
@@ -10,17 +14,34 @@ import type { FeishuTransport } from "../src/feishu/transport";
 class ReplyAgent extends AbstractAgent {
   run(_input: RunAgentInput) {
     return of(
-      { type: "TEXT_MESSAGE_START", messageId: "reply-1", role: "assistant" } as BaseEvent,
-      { type: "TEXT_MESSAGE_CONTENT", messageId: "reply-1", delta: "风险已审阅" } as BaseEvent,
+      {
+        type: "TEXT_MESSAGE_START",
+        messageId: "reply-1",
+        role: "assistant",
+      } as BaseEvent,
+      {
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: "reply-1",
+        delta: "风险已审阅",
+      } as BaseEvent,
       { type: "TEXT_MESSAGE_END", messageId: "reply-1" } as BaseEvent,
-      { type: "RUN_FINISHED", threadId: "thread-1", runId: "run-1" } as BaseEvent,
+      {
+        type: "RUN_FINISHED",
+        threadId: "thread-1",
+        runId: "run-1",
+      } as BaseEvent,
     );
   }
 }
 
 function harness() {
-  const sent: Array<{ chatId: string; markdown: string; replyTo?: string }> = [];
-  let onMessage: ((message: Parameters<Parameters<FeishuTransport["onMessage"]>[0]>[0]) => Promise<void>) | undefined;
+  const sent: Array<{ chatId: string; markdown: string; replyTo?: string }> =
+    [];
+  let onMessage:
+    | ((
+        message: Parameters<Parameters<FeishuTransport["onMessage"]>[0]>[0],
+      ) => Promise<void>)
+    | undefined;
   const transport: FeishuTransport = {
     tenantKey: "tenant-key",
     onMessage(handler) {
@@ -67,7 +88,12 @@ function harness() {
       user: { id: "alice", name: "Alice" },
     }),
   });
-  return { channel, sent, emit: async (message: Parameters<NonNullable<typeof onMessage>>[0]) => onMessage?.(message) };
+  return {
+    channel,
+    sent,
+    emit: async (message: Parameters<NonNullable<typeof onMessage>>[0]) =>
+      onMessage?.(message),
+  };
 }
 
 describe("Feishu external channel", () => {

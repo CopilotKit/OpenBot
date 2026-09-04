@@ -35,7 +35,9 @@ export const Route = createFileRoute("/_authed/link/feishu")({
 });
 
 /** A claim token is opaque: trim it for requests, but never render or cache it. */
-export function feishuLinkToken(search: Record<string, unknown>): string | null {
+export function feishuLinkToken(
+  search: Record<string, unknown>,
+): string | null {
   if (typeof search.token !== "string") return null;
   const token = search.token.trim();
   return token === "" ? null : token;
@@ -158,7 +160,10 @@ export function FeishuLinkConfirmation({
   onReauthenticate,
   token,
 }: {
-  complete?: (token: string, signal: AbortSignal) => Promise<FeishuLinkResponse>;
+  complete?: (
+    token: string,
+    signal: AbortSignal,
+  ) => Promise<FeishuLinkResponse>;
   load?: (
     token: string,
     signal: AbortSignal,

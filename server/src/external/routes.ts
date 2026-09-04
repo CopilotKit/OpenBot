@@ -80,9 +80,11 @@ export function createExternalLinkRoutes({
 }: ExternalLinkRoutesOptions) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
-  routes.get("/:provider", requireUser, async (context) => {
+  const inspectLink = async (
+    context: Context<{ Variables: AppVariables }>,
+    provider: "slack" | "feishu",
+  ) => {
     try {
-      const provider = context.req.param("provider");
       const claim = await readExternalLinkToken(
         context.req.query("token"),
         encryptionKey,
@@ -96,13 +98,15 @@ export function createExternalLinkRoutes({
     } catch {
       return invalidLinkResponse(context);
     }
-  });
+  };
 
-  routes.post("/:provider", requireUser, async (context) => {
+  const confirmLink = async (
+    context: Context<{ Variables: AppVariables }>,
+    provider: "slack" | "feishu",
+  ) => {
     const body = await context.req.json().catch(() => null);
     let claim: ExternalProviderIdentity;
     try {
-      const provider = context.req.param("provider");
       claim = await readExternalLinkToken(tokenFrom(body), encryptionKey);
       if (claim.provider !== provider) return invalidLinkResponse(context);
     } catch {
@@ -135,7 +139,18 @@ export function createExternalLinkRoutes({
     }
 
     return context.json({ linked: true });
-  });
+  };
+
+  routes.get("/slack", requireUser, (context) => inspectLink(context, "slack"));
+  routes.post("/slack", requireUser, (context) =>
+    confirmLink(context, "slack"),
+  );
+  routes.get("/feishu", requireUser, (context) =>
+    inspectLink(context, "feishu"),
+  );
+  routes.post("/feishu", requireUser, (context) =>
+    confirmLink(context, "feishu"),
+  );
 
   routes.use("/threads/*", async (context, next) => {
     context.header("Cache-Control", "no-store");

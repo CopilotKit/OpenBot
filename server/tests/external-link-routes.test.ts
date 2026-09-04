@@ -614,7 +614,7 @@ describe("external Slack link confirmation routes", () => {
       loadConfig(testEnvironment()),
       undefined,
       undefined,
-      ...(Array.from({ length: 20 }) as never[]),
+      ...(Array.from({ length: 21 }) as never[]),
       externalLinkRoutes,
     );
 

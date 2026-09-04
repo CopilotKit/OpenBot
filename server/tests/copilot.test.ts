@@ -1,5 +1,4 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { HttpAgent } from "@ag-ui/client";
 import type { AbstractAgent, RunAgentInput } from "@ag-ui/client";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { EMPTY } from "rxjs";

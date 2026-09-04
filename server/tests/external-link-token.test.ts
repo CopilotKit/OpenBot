@@ -55,7 +55,9 @@ describe("external Slack link tokens", () => {
 
     const token = await mintExternalLinkToken(feishuIdentity, KEY, NOW);
 
-    expect(await readExternalLinkToken(token, KEY, NOW)).toEqual(feishuIdentity);
+    expect(await readExternalLinkToken(token, KEY, NOW)).toEqual(
+      feishuIdentity,
+    );
   });
 
   test("mints a structurally wider identity as the exact approved claim shape", async () => {

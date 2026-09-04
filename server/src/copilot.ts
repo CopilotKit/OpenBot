@@ -11,10 +11,7 @@ import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import type { Observable } from "rxjs";
 import { defer, finalize, from, switchMap } from "rxjs";
 import { z } from "zod";
-import {
-  COMPUTER_GUIDANCE,
-  PROVENANCE_GUIDANCE,
-} from "../../shared/bot-prompt";
+import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
 import type { ActorAgentResolver } from "./agents/agent-resolver";
 import type { AgentActor } from "./agents/profile-types";
@@ -706,7 +703,6 @@ class GovernedBuiltInAgent extends BuiltInAgent {
     return super.use(...middlewares);
   }
 
-
   run(input: RunAgentInput): Observable<BaseEvent> {
     const answeredByResume = new Set(
       (input.resume ?? []).map((entry) => entry.interruptId),
@@ -784,68 +780,6 @@ class ComposedRemoteAgent extends AbstractAgent {
   abortRun(): void {
     this.active?.abortRun();
     super.abortRun();
-  }
-}
-
-/**
- * A built-in Bot that will not hand the model provider a conversation it is going to refuse.
- *
- * FOUND LIVE, ON CHAT. One person's next three messages each failed with
- * `AI_MissingToolResultsError: Tool result is missing for tool call chatcmpl-tool-8dd56dc7497c5ea9`,
- * thrown out of the AI SDK's `convertToLanguageModelPrompt`. A frontend tool handler had been torn
- * down while its call was open, so the agent's live messages in the browser carried an assistant
- * message whose tool call never got a result. The durable store did not have it, nothing was going
- * to answer it, and every retry sent it straight back up as `input.messages`. The conversation was
- * finished until the person worked out for themselves to start another one.
- *
- * The guard has to be on this side of `run`. `BuiltInAgent.run` converts `input.messages` itself,
- * with no seam in between, so wrapping the agent is the only place left to stand. The reasoning for
- * why a dangling call is DROPPED rather than repaired, and why ids are never changed, is in
- * `agents/history-sanitize.ts`, where the routines path found the same failure first.
- *
- * A RESUMED CALL IS NOT A DANGLE. `run` appends a tool result for each `input.resume` entry by
- * `interruptId` AFTER converting the messages, so a call that a resume is about to answer must
- * survive this pass or the appended result lands on nothing.
- */
-class BuiltInAgentWithSaneHistory extends BuiltInAgent {
-  /**
-   * The configuration, held a second time because the base class keeps its own copy private and
-   * {@link clone} has to build another one of THIS class rather than of the base.
-   */
-  private readonly configuration: BuiltInAgentConfiguration;
-
-  constructor(configuration: BuiltInAgentConfiguration) {
-    super(configuration);
-    this.configuration = configuration;
-  }
-
-  run(input: RunAgentInput): Observable<BaseEvent> {
-    const answeredByResume = new Set(
-      (input.resume ?? []).map((entry) => entry.interruptId),
-    );
-    return super.run({
-      ...input,
-      messages: sanitizeSeededHistory(input.messages, answeredByResume),
-    });
-  }
-
-  /**
-   * Carried by hand, for the same reason {@link RunBuiltAgent.clone} is.
-   *
-   * The runtime clones an agent before every run, and the base class's clone hard-codes
-   * `new BuiltInAgent(this.config)`: inherited unchanged, the very first message anybody sends
-   * would go through an agent that does none of the above. The middleware list is copied because
-   * the base clone copies it, and it is reached through a cast because `AbstractAgent` declares it
-   * private. Nothing registers middleware on a built-in Bot today, and this is here so that the day
-   * something does, it is not lost in a clone.
-   */
-  clone(): BuiltInAgentWithSaneHistory {
-    const cloned = new BuiltInAgentWithSaneHistory(this.configuration);
-    type WithMiddlewares = { middlewares: unknown[] };
-    (cloned as unknown as WithMiddlewares).middlewares = [
-      ...(this as unknown as WithMiddlewares).middlewares,
-    ];
-    return cloned;
   }
 }
 
@@ -1136,12 +1070,12 @@ export function mountCopilotRuntime(
   identifyUser: IdentifyUser,
   identifyActor: IdentifyActor,
   basePath = "/api/copilotkit",
-  loadVendors?: () => Promise<readonly string[]>,
-  selectionForActor?: (actorId: string) => ToolSelection,
+  _loadVendors?: () => Promise<readonly string[]>,
+  _selectionForActor?: (actorId: string) => ToolSelection,
   /** The fetch remote agents are dialled with. See {@link buildAgents}. */
-  agentFetch?: AgentFetch,
+  _agentFetch?: AgentFetch,
   /** How a run gets its tool for handing work on. Absent means no Bot is offered one. */
-  handoffForActor?: (actorId: string) => HandoffForRun,
+  _handoffForActor?: (actorId: string) => HandoffForRun,
   /**
    * Told when a run starts and ends on a thread, so a channel can show it is working.
    *
@@ -1199,7 +1133,7 @@ export function mountCopilotRuntime(
   const intelligenceClient = new IntelligenceKnowingANewThread({
     apiUrl: config.runtime.intelligence.apiUrl,
     wsUrl: config.runtime.intelligence.gatewayWsUrl,
-    ["apiKey"]: config.runtime.intelligence["apiKey"],
+    apiKey: config.runtime.intelligence.apiKey,
   });
 
   const runtime = new CopilotRuntime({

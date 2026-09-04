@@ -134,7 +134,6 @@ export type FeishuConfig = {
   tenantKey: string;
 };
 
-
 export type DeploymentConfig = {
   /** The port the API listens on. Named `PORT` or `SERVER_PORT`; see `serverPort`. */
   port: number;
@@ -843,7 +842,8 @@ function feishuConfig(environment: Environment): FeishuConfig | undefined {
       "FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_TENANT_KEY must be configured together",
     );
   }
-  return { appId: appId!, appSecret: appSecret!, tenantKey: tenantKey! };
+  if (!appId || !appSecret || !tenantKey) return undefined;
+  return { appId, appSecret, tenantKey };
 }
 
 /**
