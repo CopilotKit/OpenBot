@@ -2,7 +2,6 @@
   "mode": "enforce",
   "deny": [
     "bot.id == \"jefe-erp\" && matches(tool.name, \"^computer_\")",
-    "bot.id == \"recolector-documentos\" && matches(tool.name, \"^computer_\")",
     "bot.id == \"recolector-documentos\" && tool.name in [\"computer_run_command\",\"computer_write_file\"]",
     "bot.id == \"recolector-documentos\" && intent in [\"navigate\",\"activate\",\"type\"] && page.host != \"\" && !(page.host in [\"chatgpt.com\",\"auth.openai.com\",\"platform.openai.com\",\"accounts.hetzner.com\",\"console.hetzner.cloud\"])",
     "bot.id == \"recolector-documentos\" && intent in [\"navigate\",\"activate\",\"type\"] && (contains(page.url, \"payment\") || contains(page.url, \"billing/plan\") || contains(page.url, \"member\") || contains(page.url, \"credential\") || contains(page.url, \"api-key\") || contains(page.url, \"password\"))",

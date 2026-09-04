@@ -17,6 +17,7 @@ function context(overrides: Partial<PolicyContext> = {}): PolicyContext {
     bot: { id: "jefe-erp" },
     actor: { id: "operator" },
     page: { url: "https://erp.netsfera.es", host: "erp.netsfera.es" },
+    element: { ref: "neutral", role: "button", name: "Open document" },
     ...overrides,
   };
 }
@@ -97,6 +98,29 @@ function renderedOverlayPolicy(): ActionPolicy {
   return JSON.parse((policy as string).replaceAll("$$", "$")) as ActionPolicy;
 }
 
+function decide(botId: string, toolName: string, host: string) {
+  const policy = renderedOverlayPolicy();
+  return evaluateActionPolicy(
+    policy,
+    context({
+      bot: { id: botId },
+      tool: { name: toolName },
+      intent:
+        toolName === "computer_navigate"
+          ? "navigate"
+          : toolName === "computer_write_file"
+            ? "write_file"
+            : toolName === "computer_run_command"
+              ? "run_command"
+              : "read",
+      page: {
+        host,
+        url: host ? `https://${host}/` : "",
+      },
+    }),
+  );
+}
+
 function changedPaths(
   before: unknown,
   after: unknown,
@@ -161,21 +185,55 @@ describe("the rendered Netsfera production overlay", () => {
     ]);
   });
 
-  test.each(["jefe-erp", "recolector-documentos"])(
-    "%s is denied every computer tool at G0",
-    (botId) => {
-      const policy = renderedOverlayPolicy();
-      const decision = evaluateActionPolicy(
-        policy,
-        context({
-          bot: { id: botId },
-          tool: { name: "computer_navigate" },
-          intent: "navigate",
-        }),
-      );
+  test.each([
+    ["jefe-erp", "computer_navigate", "chatgpt.com", false],
+    ["recolector-documentos", "computer_navigate", "chatgpt.com", true],
+    ["recolector-documentos", "computer_navigate", "evil.example", false],
+    ["recolector-documentos", "computer_run_command", "", false],
+    ["recolector-documentos", "computer_write_file", "", false],
+  ])("governs %s %s on %s", (botId, toolName, host, allowed) => {
+    expect(decide(botId, toolName, host).allowed).toBe(allowed);
+  });
 
-      expect(decision.allowed).toBe(false);
-      expect(decision.source).toBe("deny");
-    },
-  );
+  test.each([
+    "Purchase subscription",
+    "Upgrade plan",
+    "Payment method",
+    "API key",
+    "Password",
+  ])("denies collector interaction with sensitive element %s", (name) => {
+    const decision = evaluateActionPolicy(
+      renderedOverlayPolicy(),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: "computer_click" },
+        intent: "activate",
+        page: { host: "chatgpt.com", url: "https://chatgpt.com/settings" },
+        element: { ref: "sensitive", role: "button", name },
+      }),
+    );
+
+    expect(decision.allowed).toBe(false);
+    expect(decision.source).toBe("deny");
+  });
+
+  test.each([
+    ["computer_list_files", "downloads/", true],
+    ["computer_read_file", "downloads/invoice.pdf", true],
+    ["computer_list_files", "workspace/", false],
+    ["computer_read_file", "workspace/secrets.env", false],
+  ])("permits %s only in downloads/", (toolName, path, allowed) => {
+    const decision = evaluateActionPolicy(
+      renderedOverlayPolicy(),
+      context({
+        bot: { id: "recolector-documentos" },
+        tool: { name: toolName },
+        intent: toolName === "computer_list_files" ? "list_files" : "read_file",
+        page: { host: "", url: "" },
+        file: { path, name: path.split("/").at(-1) ?? "", extension: "" },
+      }),
+    );
+
+    expect(decision.allowed).toBe(allowed);
+  });
 });

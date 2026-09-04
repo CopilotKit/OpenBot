@@ -43,14 +43,14 @@ function netsferaPolicy(): ActionPolicy {
   return JSON.parse(readFileSync(netsferaPolicyPath, "utf8")) as ActionPolicy;
 }
 
-describe("the Netsfera G0 computer policy", () => {
+describe("the Netsfera collector computer policy", () => {
   const policy = netsferaPolicy();
 
   test("is an explicit checked-in deployment policy", () => {
     expect(existsSync(netsferaPolicyPath)).toBe(true);
   });
 
-  test("refuses the G0 actions", () => {
+  test("keeps Jefe ERP computerless and denies unreviewed collector actions", () => {
     const denied = [
       {
         bot: "jefe-erp",
@@ -93,7 +93,7 @@ describe("the Netsfera G0 computer policy", () => {
     }
   });
 
-  test("keeps the later collector boundary expressions parseable for its future promotion", () => {
+  test("allows only reviewed collector browser and download actions", () => {
     const allowed = [
       context({
         bot: { id: "recolector-documentos" },
@@ -125,17 +125,7 @@ describe("the Netsfera G0 computer policy", () => {
     ];
 
     for (const input of allowed) {
-      // The entitlement and the G0-wide collector denial both win today. Isolate the later CEL
-      // allow expression so a future Task 9 promotion cannot discover a broken rule by relying on
-      // fail-closed behaviour at runtime.
-      const rule = policy.allow.find((candidate) =>
-        candidate.includes(input.tool.name),
-      );
-      expect(rule).toBeDefined();
-      const decision = evaluateActionPolicy(
-        { mode: "enforce", deny: [], allow: [rule as string] },
-        input,
-      );
+      const decision = evaluateActionPolicy(policy, input);
       expect(decision.allowed).toBe(true);
       expect(decision.source).toBe("allow");
     }
@@ -166,14 +156,9 @@ describe("the Netsfera G0 computer policy", () => {
       }),
     ];
 
-    for (const [rule, input] of policy.deny
-      .slice(2)
-      .map((rule, index) => [rule, denied[index]] as const)) {
-      expect(input).toBeDefined();
-      const decision = evaluateActionPolicy(
-        { mode: "enforce", deny: [rule], allow: ["true"] },
-        input as PolicyContext,
-      );
+    for (const input of denied) {
+      const decision = evaluateActionPolicy(policy, input);
+      expect(decision.allowed).toBe(false);
       expect(decision.source).toBe("deny");
     }
   });
