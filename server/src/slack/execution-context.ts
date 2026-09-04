@@ -1,10 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { AgentActor } from "../agents/profile-types";
+import type { ExternalProvider } from "../external/schema-types";
 
-export type SlackExecution = {
+export type ExternalChannelExecution = {
   readonly actor: Readonly<AgentActor>;
   readonly applicationUser: Readonly<{ id: string; name: string }>;
-  readonly provider: "slack";
+  readonly provider: ExternalProvider;
   readonly providerTenantId: string;
   readonly providerConversationId: string;
   readonly providerThreadId: string;
@@ -13,6 +14,8 @@ export type SlackExecution = {
   readonly messageText: string;
   agentId?: string;
 };
+
+export type SlackExecution = ExternalChannelExecution;
 
 const executionStorage = new AsyncLocalStorage<SlackExecution>();
 const PROTECTED_FIELDS = [

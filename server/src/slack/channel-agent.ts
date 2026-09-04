@@ -63,7 +63,7 @@ export class OpenBotChannelAgent extends AbstractAgent {
     execution?: SlackExecution,
     executionForRun?: () => SlackExecution | undefined,
   ) {
-    super({ agentId: "openbot-slack", description: "OpenBot Slack router" });
+    super({ agentId: "openbot-external", description: "OpenBot external channel router" });
     this.channelsConversationKey = channelsConversationKey;
     this.routing = deps.routing;
     this.store = deps.store;
@@ -82,7 +82,7 @@ export class OpenBotChannelAgent extends AbstractAgent {
       this.execution;
     if (!execution) {
       throw new Error(
-        "A Slack agent run requires a private execution context.",
+        "An external channel agent run requires a private execution context.",
       );
     }
     const work = defer(() => {

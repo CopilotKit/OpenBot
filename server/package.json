@@ -17,6 +17,7 @@
     "@better-auth/sso": "^1.7.1",
     "@copilotkit/channels": "0.9.0",
     "@copilotkit/runtime": "1.69.0",
+    "@larksuiteoapi/node-sdk": "1.73.3",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-auth": "^1.7.1",
     "cel-js": "^0.8.2",
