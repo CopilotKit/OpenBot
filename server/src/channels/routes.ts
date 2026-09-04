@@ -935,6 +935,12 @@ export function parseActivityInput(
   if (object.agentId !== null && typeof object.agentId !== "string") {
     return { ok: false, error: "Agent ID must be a string or null." };
   }
+  if (
+    typeof object.agentId === "string" &&
+    object.agentId.trim().length === 0
+  ) {
+    return { ok: false, error: "Agent ID must be a string or null." };
+  }
   if (typeof object.at !== "string") {
     return { ok: false, error: "Timestamp is required." };
   }
