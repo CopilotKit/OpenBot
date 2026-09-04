@@ -49,7 +49,7 @@ function namedAsAllowed(
     return false;
   }
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  const host = url.host.toLowerCase().replace(/^\[/, "").replace(/\]/, "");
+  const host = url.port ? `${hostname}:${url.port}` : hostname;
   return allowedHosts.has(host) || allowedHosts.has(hostname);
 }
 

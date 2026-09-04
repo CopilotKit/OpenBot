@@ -354,13 +354,34 @@ export function createAgentRoutes(
     if (!parsed.ok) return context.json({ error: parsed.error }, 400);
 
     try {
-      const agent = await store.create(context.var.actor, parsed.value);
+      /*
+       * A coworker with no address runs here, on the text this form already requires.
+       *
+       * "Agent endpoint (optional)" was not optional on the recommended one-container image: with
+       * nothing to bind to, `create` refused with "This deployment has no managed Bot", so a person
+       * could not make a coworker at all on the image the README tells them to deploy. The role
+       * description is what such a coworker runs on — the same field a `built_in` Bot in the tenant
+       * package carries, for the same purpose — and passing it only when no endpoint was given keeps
+       * every other path exactly as it was: give an address and it is a remote Bot, as before.
+       */
+      const agent = await store.create(context.var.actor, {
+        ...parsed.value,
+        ...(parsed.value.endpoint
+          ? {}
+          : { systemPrompt: parsed.value.roleDescription }),
+      });
       /*
        * The endpoint, because that is where conversation content will be sent, and whether a key was
        * attached, because "this Bot authenticates" is a fact and the key itself never is.
+       *
+       * And who may reach it. `visibility` is not a display preference: `accessFilter` admits a
+       * `public` coworker to every signed-in person, and `canRunAgent` is `canAccessAgent`, so public
+       * means everybody in the deployment may act as this Bot and spend the grants it holds. A row
+       * that cannot say which it was cannot reconstruct who could use this coworker at the time.
        */
       await record(context, "bot.created", agent.id, {
         name: parsed.value.name,
+        visibility: parsed.value.visibility,
         ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
         hasKey: Boolean(parsed.value.auth),
       });
@@ -385,10 +406,22 @@ export function createAgentRoutes(
         context.req.param("agentId"),
         parsed.value,
       );
-      // What changed, not the new values. Repointing the endpoint is the dangerous edit and is worth
-      // naming; a replaced key is worth knowing about and is never worth recording.
+      /*
+       * What changed, not the new values. Repointing the endpoint is the dangerous edit and is worth
+       * naming; a replaced key is worth knowing about and is never worth recording.
+       *
+       * `visibility` is carried the way `name` is — on every row, whether or not this edit moved it —
+       * because it is the second dangerous edit and the route has no before to compare against.
+       * Public admits every signed-in person to this coworker, and `canRunAgent` is `canAccessAgent`,
+       * so it hands them the right to act as it and spend what it was granted. Without the value on
+       * each row, an edit that opened a coworker to the whole deployment is byte-identical to one
+       * that corrected its title, and the trail cannot say when it was opened or by whom. Recorded on
+       * every row rather than only on the row that changed it, so reading the trail forward tells you
+       * what was reachable at any point, which is what an incident asks.
+       */
       await record(context, "bot.updated", agent.id, {
         name: parsed.value.name,
+        visibility: parsed.value.visibility,
         ...(parsed.value.endpoint ? { endpoint: parsed.value.endpoint } : {}),
         ...(parsed.value.auth ? { keyReplaced: true } : {}),
       });

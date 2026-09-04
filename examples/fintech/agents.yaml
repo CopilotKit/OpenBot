@@ -8,6 +8,16 @@ agents:
     avatar_seed: general-assistant
     type: built-in
     system_prompt: You are a helpful general assistant. Give clear, concise, and accurate answers.
+    # Turns this Bot into the one you make coworkers with, and this line is the whole gate: the app
+    # offers `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` only to a Bot holding this
+    # slug. Remove it and making a coworker in a conversation stops working, with nothing on any
+    # screen to say why.
+    #
+    # On this Bot rather than Knowledge because it is the one somebody talks to first and the one
+    # with no specialism to dilute. Knowledge narrows to document tools per run, and adding a job
+    # with nothing to do with documents to that list is how the narrowing stops working for both.
+    skills:
+      - bot-creator
   - id: knowledge
     name: Knowledge
     title: Company Knowledge

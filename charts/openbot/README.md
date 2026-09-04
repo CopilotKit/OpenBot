@@ -19,17 +19,17 @@ docker manifest inspect ghcr.io/copilotkit/openbot:v0.0.4 | grep architecture
 ```
 
 **Intelligence credentials.** OpenBot requires CopilotKit Intelligence and the chart refuses to
-install without `secrets.intelligenceApiKey` and `secrets.licenseToken`. Both come from the CLI, on
-any machine with a browser:
+install without `secrets.intelligenceApiKey`. It comes from the CLI, on any machine with a browser:
 
 ```sh
 npx --yes copilotkit@latest login           # browser sign-in
 npx --yes copilotkit@latest project select  # prints the cpk-... runtime key
-npx --yes copilotkit@latest license --print # prints the licence token
 ```
 
-`--print` rather than `--write` here: `--write` puts the token in a local `.env`, which is what a
-laptop wants and not what you are about to paste into a Secret. The free plan is enough to install.
+That key is the only Intelligence credential a managed install needs; the free plan is enough.
+`secrets.licenseToken` is optional and exists for a self-hosted Intelligence that issues its own
+licence. `npx --yes copilotkit@latest license --print` prints one without writing it to a local
+`.env`, which is what you want for something you are about to paste into a Secret.
 
 **A default StorageClass**, or a named one. Both a Bot's computer and the bundled database ask for
 a volume, and a fresh cluster often has no class marked default. See

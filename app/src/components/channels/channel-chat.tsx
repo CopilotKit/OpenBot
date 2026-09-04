@@ -161,12 +161,26 @@ export function ChannelChat({
           channel.threadId,
           runtimeAgentId,
         );
-        // Never overwrite local messages that arrived while history was loading.
-        if (
-          current &&
-          stored.messages.length > 0 &&
-          agent.messages.length === 0
-        ) {
+        /*
+         * The durable store wins when it is ahead of what the join delivered.
+         *
+         * The join replaces the agent's messages with the realtime gateway's snapshot of the thread,
+         * and that snapshot can lag the store: a turn that finished, was persisted and answered in
+         * full came back from the join without its last exchange, on every reload, with no
+         * unreadable count to explain the gap. Restoring only into an empty agent kept that stale
+         * snapshot for good.
+         *
+         * So the store is applied when it holds more than the agent does AND everything the agent
+         * holds is in the store. The second half is the guard this replaced: a message typed while
+         * history was loading is not in the store yet, so it is never overwritten, and a run still
+         * streaming has messages the store has not seen, so its snapshot is never rolled back.
+         */
+        const local = agent.messages;
+        const storedIds = new Set(stored.messages.map((m) => m.id));
+        const storeIsAhead =
+          stored.messages.length > local.length &&
+          local.every((m) => storedIds.has(m.id));
+        if (current && stored.messages.length > 0 && storeIsAhead) {
           agent.setMessages(stored.messages);
         }
         /*

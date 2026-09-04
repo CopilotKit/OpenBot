@@ -304,7 +304,20 @@ describe("agent lifecycle routes", () => {
     expect(store.calls).toEqual([
       ["list", actor, false],
       ["get", actor, "agent-1"],
-      ["create", actor, validInput],
+      /*
+       * `create` carries a system prompt and `update` does not, and that difference is the point.
+       * This input names no endpoint, so on a deployment with no Bot in the box the coworker runs
+       * here on its own role description rather than being refused — the form calls the endpoint
+       * optional and it now is. `update` is deliberately untouched: changing an existing Bot's type
+       * is a different act and must not happen through the edit path.
+       *
+       * The other create in this file passes an endpoint and correctly gets no prompt.
+       */
+      [
+        "create",
+        actor,
+        { ...validInput, systemPrompt: validInput.roleDescription },
+      ],
       ["update", actor, "agent-1", validInput],
       ["duplicate", actor, "agent-1"],
       ["setHidden", actor, "agent-1", true],

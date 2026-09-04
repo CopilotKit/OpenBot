@@ -15,6 +15,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
+import { handoffRoster } from "@/lib/agents/handoff-roster";
 import { setHandoffGrantMutationOptions } from "@/lib/agents/mutations";
 import {
   agentHandoffQueryOptions,
@@ -38,29 +39,27 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
   const queryClient = useQueryClient();
   const handoff = useQuery(agentHandoffQueryOptions(agentId));
   const agents = useQuery(agentListQueryOptions());
+  /*
+   * The roster this person has hidden, read so a grant pointing into it can still be taken away.
+   *
+   * Hiding is a per-person display preference and the grants are not filtered by it at all, so
+   * joining the grants against the visible roster alone dropped live grants off the only screen that
+   * manages them. See `handoffRoster`, which is where that join now happens.
+   */
+  const hiddenAgents = useQuery(agentListQueryOptions(true));
   const setGrant = useMutation(setHandoffGrantMutationOptions(queryClient));
 
   if (handoff.isPending || !handoff.data) return null;
   const { enabled, canGrant, reachable, grantable } = handoff.data;
 
-  /*
-   * A Bot may not be granted itself, and the server refuses it, so it is not offered here either.
-   * Hidden Bots are already absent from this list.
-   */
-  const others = (agents.data ?? []).filter(
-    (candidate) => candidate.id !== agentId,
-  );
-  const granted = others.filter((candidate) =>
-    reachable.includes(candidate.id),
-  ).length;
-  /*
-   * On a Bot that cannot be a grantee only the leftovers are shown: a stale grant may still be
-   * revoked — taking away is always allowed — but offering switches that can only bounce off the
-   * server's refusal is the thing the explanation item above replaces.
-   */
-  const candidates = grantable
-    ? others
-    : others.filter((candidate) => reachable.includes(candidate.id));
+  // A Bot may not be granted itself, and the server refuses it, so it is not offered here either.
+  const { candidates, granted, total } = handoffRoster({
+    agentId,
+    roster: agents.data ?? [],
+    hidden: hiddenAgents.data ?? [],
+    reachable,
+    grantable,
+  });
 
   // Nothing to say to somebody who cannot change it and has nothing to read.
   if (!canGrant && reachable.length === 0) return null;
@@ -72,9 +71,9 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
           Bots it may ask
         </h2>
         {/* The current answer at a glance, so the list below is detail rather than homework. */}
-        {grantable && others.length > 0 ? (
+        {grantable && total > 0 ? (
           <span className="text-muted-foreground text-xs tabular-nums">
-            {granted} of {others.length}
+            {granted} of {total}
           </span>
         ) : null}
       </header>
@@ -121,7 +120,7 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
         </p>
       ) : null}
 
-      {grantable && others.length === 0 ? (
+      {grantable && total === 0 ? (
         <Empty className="h-[180px] border border-dashed">
           <EmptyHeader>
             <EmptyTitle className="text-muted-foreground">
@@ -147,7 +146,16 @@ export function HandoffPanel({ agentId }: { agentId: string }) {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{candidate.name}</ItemTitle>
-                <ItemDescription>{candidate.title}</ItemDescription>
+                {/*
+                 * Said on the row, because otherwise it is a coworker that is not on your roster
+                 * appearing in a list with no explanation. It is here only because this Bot may
+                 * already ask it, and that is the sentence a person needs to decide what to do.
+                 */}
+                <ItemDescription>
+                  {candidate.hidden
+                    ? `${candidate.title} · hidden from your roster`
+                    : candidate.title}
+                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Switch

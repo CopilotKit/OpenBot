@@ -307,7 +307,14 @@ describe("tenant YAML validation", () => {
         systemPrompt:
           "You are a helpful general assistant. Give clear, concise, and accurate answers.",
       },
-      skills: [],
+      /*
+       * One skill, and it is a gate rather than a preference. The app offers `list_bots`,
+       * `read_bot`, `list_bot_skills` and `save_bot` only to a Bot holding `bot-creator`, so this
+       * line is what makes making a coworker in a conversation possible at all. Dropped from the
+       * package, the feature stops working with nothing on any screen to say why, which is exactly
+       * why it is asserted here rather than left to whoever edits the YAML next.
+       */
+      skills: ["bot-creator"],
     });
     // The pairing the shipped package makes, which is the whole reason Knowledge narrows to document
     // tools rather than being offered everything its grants hold.

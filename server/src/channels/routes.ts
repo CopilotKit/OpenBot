@@ -33,6 +33,7 @@ import {
   type ChannelEventHub,
 } from "./events";
 import { upgradeWebSocket } from "./socket";
+import { oneLine } from "./text";
 import type { ThreadIdentity } from "./thread-identity";
 
 export type AgentChannel = {
@@ -45,6 +46,8 @@ export type AgentChannel = {
 
 /** A channel plus the last thing said in it, which is what a roster renders. */
 export type ChannelSummary = AgentChannel & {
+  /** A few words about the conversation, or null. Readers fall back to the channel's name. */
+  summary: string | null;
   lastMessage: string | null;
   lastMessageAt: Date | null;
   lastMessageAgentId: string | null;
@@ -211,20 +214,9 @@ const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
 const MAX_CHANNEL_NAME_CODE_POINTS = 120;
 const MAX_ACTIVITY_CODE_POINTS = 200;
 
-/**
- * Reduce a message to one line of plain text.
- *
- * A preview is rendered as text wherever a roster appears, so control characters have nothing to do
- * there: at best they are invisible, at worst a terminal escape somebody put in a message follows it
- * into a log. Newlines collapse to spaces because a preview is one line by definition.
- */
+/** Reduce a message to the one line a roster draws. See `oneLine` for why it is shared. */
 function previewOf(text: string) {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point.
-  const flattened = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
-  const collapsed = flattened.replace(/\s+/g, " ");
-  const codePoints = Array.from(collapsed);
-  if (codePoints.length <= MAX_ACTIVITY_CODE_POINTS) return collapsed;
-  return `${codePoints.slice(0, MAX_ACTIVITY_CODE_POINTS - 1).join("")}…`;
+  return oneLine(text, MAX_ACTIVITY_CODE_POINTS);
 }
 
 function channelName(names: string[]) {
@@ -479,6 +471,7 @@ export function createChannelStore(
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           deletedAt: agentProfiles.deletedAt,
+          channelSummary: channels.summary,
           lastMessage: channels.lastMessage,
           lastMessageAt: channels.lastMessageAt,
           lastMessageAgentId: channels.lastMessageAgentId,
@@ -537,6 +530,7 @@ export function createChannelStore(
           agentIds: [row.agentId],
           threadId: row.threadId,
           active: row.deletedAt === null,
+          summary: row.channelSummary,
           lastMessage: row.lastMessage,
           lastMessageAt: row.lastMessageAt,
           lastMessageAgentId: row.lastMessageAgentId,
@@ -908,10 +902,22 @@ type ActivityInputParseResult =
 /**
  * Parse a reported message.
  *
- * `at` comes from the client that saw the message, because only it knows when the message arrived, * but it is never trusted as a clock: the store compares it against what is stored and only ever
- * moves forwards, so a wrong one can lose a report, not corrupt the row.
+ * `at` comes from the client that saw the message, because only it knows when the message arrived,
+ * and it may say when, but not later than now. The store compares it against what is stored and
+ * only ever moves forwards, and that guard is shared with every other clock in the deployment:
+ * the routine runner's, a relayed handoff answer's, every other member's browser. A browser whose
+ * clock ran seven minutes ahead used to stamp the row seven minutes into the future, and it was
+ * not that report that got lost — every correct one for the next seven minutes was, silently: a
+ * routine's reply landed in the thread and never on the roster. Clamped rather than refused,
+ * because clocks are a little ahead all the time and a report a second early is still the report.
+ * A stamp in the past is kept as it is, so a person's message and the reply, reported separately
+ * by the same clock, still land in the order that clock saw them.
  */
-export function parseActivityInput(input: unknown): ActivityInputParseResult {
+export function parseActivityInput(
+  input: unknown,
+  /** The server's own clock, injectable so a test can be about a specific gap. */
+  now: Date = new Date(),
+): ActivityInputParseResult {
   if (!isChannelInputObject(input)) {
     return { ok: false, error: "Activity must be a JSON object." };
   }
@@ -923,13 +929,20 @@ export function parseActivityInput(input: unknown): ActivityInputParseResult {
   if (object.agentId !== null && typeof object.agentId !== "string") {
     return { ok: false, error: "Agent ID must be a string or null." };
   }
+  if (
+    typeof object.agentId === "string" &&
+    object.agentId.trim().length === 0
+  ) {
+    return { ok: false, error: "Agent ID must be a string or null." };
+  }
   if (typeof object.at !== "string") {
     return { ok: false, error: "Timestamp is required." };
   }
-  const at = new Date(object.at);
-  if (Number.isNaN(at.getTime())) {
+  const reported = new Date(object.at);
+  if (Number.isNaN(reported.getTime())) {
     return { ok: false, error: "Timestamp must be an ISO-8601 date." };
   }
+  const at = reported.getTime() > now.getTime() ? now : reported;
 
   return {
     ok: true,
@@ -1169,6 +1182,7 @@ function channelDto(channel: AgentChannel): AgentChannel {
 function channelSummaryDto(channel: ChannelSummary) {
   return {
     ...channelDto(channel),
+    summary: channel.summary,
     lastMessage: channel.lastMessage,
     // Serialised as ISO-8601 so the browser gets a string it can sort and format.
     lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,

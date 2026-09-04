@@ -47,7 +47,23 @@ export type AgentProfileStore = {
     actor: AgentActor,
     id: string,
   ): Promise<AgentProfile | null>;
-  create(actor: AgentActor, input: CreateAgentInput): Promise<AgentProfile>;
+  create(
+    actor: AgentActor,
+    input: CreateAgentInput & {
+      /**
+       * The standing instruction for a coworker with nowhere else to run.
+       *
+       * Only consulted when there is neither an endpoint nor a Bot in the box, and it is what makes
+       * that a `built_in` coworker rather than a refusal. `POST /api/agents` never sends it — the
+       * form has no such field — so a hand-made Bot on a deployment without a managed agent is
+       * refused exactly as it is today.
+       *
+       * Not on `CreateAgentInput`, so `update` cannot take it: changing an existing Bot's type is a
+       * different act with different consequences, and this is the creation path.
+       */
+      systemPrompt?: string;
+    },
+  ): Promise<AgentProfile>;
   update(
     actor: AgentActor,
     id: string,
@@ -183,6 +199,74 @@ function endpointOf(configuration: unknown): string | null {
   return typeof endpoint === "string" ? endpoint : null;
 }
 
+/**
+ * The instruction a Bot in the box runs on, read back out of its stored configuration.
+ *
+ * The mirror of {@link endpointOf}, and needed for the same reason: a copy has to be made of what
+ * the original actually was, and for a `built_in` coworker the prompt IS the coworker. Trimmed and
+ * required to be non-empty, matching `registeredAgentFromRow`, which will not build a Bot from a
+ * blank one either.
+ */
+function systemPromptOf(configuration: unknown): string | null {
+  if (!configuration || typeof configuration !== "object") return null;
+  const prompt = (configuration as { systemPrompt?: unknown }).systemPrompt;
+  if (typeof prompt !== "string") return null;
+  const trimmed = prompt.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/** What a coworker is, and what it runs on: the two `agents` columns a copy has to reproduce. */
+export type AgentRun = {
+  type: "built_in" | "remote_ag_ui";
+  configuration: Record<string, unknown>;
+};
+
+/**
+ * What a duplicate runs on, decided from what the original ran on.
+ *
+ * WHY THIS IS NOT JUST THE ENDPOINT. Duplicate used to rebuild the copy from `source.endpoint` alone
+ * and write `type: "remote_ag_ui"` flat. #328 fixed the half of that a coworker with its own endpoint
+ * saw. The other half is a coworker that has no endpoint because it is not supposed to have one: a
+ * `built_in` Bot's configuration is `{ systemPrompt }`, so the endpoint read came back null, the copy
+ * fell through to the managed Bot, and the prompt was dropped on the floor.
+ *
+ * That copy is the failure this repository already has a paragraph about. It looks identical on every
+ * screen and its whole instruction becomes `standingRoleMessage` — see the note above that function
+ * in `copilot.ts`, which names the compliance Bot that answered a filing question with invented
+ * thresholds because one sentence of role description was all that reached it. The default tenant
+ * package ships two `built_in` coworkers, and one of them, `Knowledge`, is a careful
+ * do-not-fabricate instruction. Copy it and you get a coworker with the name, the title, the avatar,
+ * and none of that.
+ *
+ * The type is carried too, not only the configuration. A copy written as `remote_ag_ui` also cannot
+ * be granted handoff for the rest of its life: `agentRunsHere` and `botsReachableFrom` both key on
+ * `agents.type == "built_in"`, so the original may hand work on and its copy silently may not.
+ *
+ * `null` means there is nothing to run this copy on, which the caller turns into
+ * {@link ManagedAgentUnavailableError}. That can now only happen for a source that had neither an
+ * endpoint nor a prompt on a deployment with no managed Bot — never for a `built_in` source, which
+ * brings its own instruction and needs no managed Bot to fall back to.
+ *
+ * `auth` is deliberately not carried: it is a reference into the vault, and two coworkers sharing one
+ * credential would mean rotating either one's key silently changed the other's.
+ */
+export function runForDuplicate(
+  source: { type: "built_in" | "remote_ag_ui"; configuration: unknown },
+  managed: Record<string, unknown> | undefined,
+): AgentRun | null {
+  const systemPrompt = systemPromptOf(source.configuration);
+  if (source.type === "built_in" && systemPrompt) {
+    return { type: "built_in", configuration: { systemPrompt } };
+  }
+
+  const endpoint = endpointOf(source.configuration);
+  if (endpoint) {
+    return { type: "remote_ag_ui", configuration: { endpoint } };
+  }
+
+  return managed ? { type: "remote_ag_ui", configuration: managed } : null;
+}
+
 async function findAccessibleProfile(
   executor: DatabaseExecutor,
   actor: AgentActor,
@@ -307,34 +391,58 @@ export function createAgentProfileStore(
         const endpoint = input.endpoint
           ? { endpoint: input.endpoint }
           : managedConfiguration;
-        if (!endpoint) {
+        const systemPrompt = input.systemPrompt?.trim();
+        if (endpoint) {
+          await transaction.insert(agents).values({
+            id,
+            name: input.name,
+            type: "remote_ag_ui",
+            // Their endpoint if they gave one, ours if they did not. Validated before it reaches
+            // here; see endpoint.ts for why a stored URL is a security decision and not a text
+            // field.
+            //
+            // The key, if there is one, goes to the vault and only its reference is stored here. See
+            // auth-header.ts for why a bearer token must not sit next to the endpoint.
+            configuration: {
+              ...endpoint,
+              ...(input.auth && vault
+                ? {
+                    auth: await storeAgentAuth({
+                      store: vault.store,
+                      encryptionKey: vault.encryptionKey,
+                      agentId: id,
+                      header: input.auth.header,
+                      value: input.auth.value,
+                      executor: transaction,
+                    }),
+                  }
+                : {}),
+            },
+          });
+        } else if (systemPrompt) {
+          /*
+           * Nowhere to send it, so it runs here.
+           *
+           * This is the shape General Assistant and Knowledge already have, and the shape
+           * `registeredAgentFromRow` reads: `built_in` plus a non-empty `configuration.systemPrompt`.
+           * A key is deliberately not written on this branch — a key authenticates to an address and
+           * this coworker has none, so storing one would leave a live credential in the vault that
+           * nothing can ever present.
+           */
+          await transaction.insert(agents).values({
+            id,
+            name: input.name,
+            type: "built_in",
+            configuration: { systemPrompt },
+          });
+        } else {
+          /*
+           * No address, no Bot in the box, and no instruction to run on. There is nothing to create:
+           * a `built_in` row with an empty prompt is a coworker `registeredAgentFromRow` drops on
+           * the floor, and the Bot would exist on every screen while answering nobody.
+           */
           throw new ManagedAgentUnavailableError();
         }
-        await transaction.insert(agents).values({
-          id,
-          name: input.name,
-          type: "remote_ag_ui",
-          // Their endpoint if they gave one, ours if they did not. Validated before it reaches here;
-          // see endpoint.ts for why a stored URL is a security decision and not a text field.
-          //
-          // The key, if there is one, goes to the vault and only its reference is stored here. See
-          // auth-header.ts for why a bearer token must not sit next to the endpoint.
-          configuration: {
-            ...endpoint,
-            ...(input.auth && vault
-              ? {
-                  auth: await storeAgentAuth({
-                    store: vault.store,
-                    encryptionKey: vault.encryptionKey,
-                    agentId: id,
-                    header: input.auth.header,
-                    value: input.auth.value,
-                    executor: transaction,
-                  }),
-                }
-              : {}),
-          },
-        });
         await transaction.insert(agentProfiles).values({
           agentId: id,
           ownerUserId: actor.id,
@@ -369,7 +477,7 @@ export function createAgentProfileStore(
            * it alone" rather than "remove it".
            */
           const [row] = await transaction
-            .select({ configuration: agents.configuration })
+            .select({ configuration: agents.configuration, type: agents.type })
             .from(agents)
             .where(eq(agents.id, id))
             .limit(1);
@@ -377,8 +485,29 @@ export function createAgentProfileStore(
             string,
             unknown
           >;
+          /**
+           * A coworker that runs here runs on its role description, so editing one has to move both.
+           *
+           * `create` writes the role description into `configuration.systemPrompt` for a coworker
+           * with no address, and that prompt is the ONLY instruction such a coworker ever gets:
+           * `registeredAgentFromRow` gives a `built_in` agent its `systemPrompt` and no standing
+           * role message, so `agentProfiles.roleDescription` never reaches it. Left out of this
+           * merge, an edit wrote the new text to the profile every screen reads and left the Bot
+           * running on the original — permanently, with nothing anywhere to say so. That is the
+           * worst shape a failed edit can take, and it is the same one the endpoint comment above
+           * describes.
+           *
+           * Only for `built_in`, and that matters. A remote Bot has no `systemPrompt` and must not
+           * acquire one — its instruction travels as the standing role message instead — and the
+           * tenant package's Bots, whose `system_prompt` is deliberately not their
+           * `role_description`, cannot reach this code at all: `requireManageable` above throws
+           * `ProtectedAgentError` for anything the package owns.
+           */
           const configuration = {
             ...previous,
+            ...(row?.type === "built_in"
+              ? { systemPrompt: input.roleDescription }
+              : {}),
             ...(input.endpoint ? { endpoint: input.endpoint } : {}),
             ...(input.auth && vault
               ? {
@@ -437,15 +566,35 @@ export function createAgentProfileStore(
         const source = await findAccessibleProfile(transaction, actor, id);
         if (!source) throw new AgentNotFoundError(id);
 
-        if (!managedConfiguration) {
+        /*
+         * The stored row, because a profile does not carry what a copy has to reproduce.
+         *
+         * `AgentProfile` projects `endpoint` out of the configuration and nothing else, which is all
+         * an edit form needs and half of what this needs: a `built_in` coworker has no endpoint and
+         * a prompt instead. Read here rather than widened into the profile, so the DTO every surface
+         * gets does not start carrying a Bot's instructions. Inside the transaction, and after the
+         * access check, so this cannot read a row the caller may not see.
+         */
+        const [stored] = await transaction
+          .select({ type: agents.type, configuration: agents.configuration })
+          .from(agents)
+          .where(eq(agents.id, id))
+          .limit(1);
+        if (!stored) throw new AgentNotFoundError(id);
+
+        // `auth` is a vault reference and is deliberately not carried: see `runForDuplicate`.
+        const run = runForDuplicate(stored, managedConfiguration);
+        // After the source read, so a source that brings its own endpoint or its own prompt needs no
+        // managed Bot to fall back to.
+        if (!run) {
           throw new ManagedAgentUnavailableError();
         }
         const duplicateId = newAgentId();
         await transaction.insert(agents).values({
           id: duplicateId,
           name: source.name,
-          type: "remote_ag_ui",
-          configuration: managedConfiguration,
+          type: run.type,
+          configuration: run.configuration,
         });
         await transaction.insert(agentProfiles).values({
           agentId: duplicateId,

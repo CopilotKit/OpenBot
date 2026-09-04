@@ -187,8 +187,15 @@
     {
       "idx": 26,
       "version": "7",
-      "when": 1788305606900,
-      "tag": "0026_user_instructions",
+      "when": 1788271863590,
+      "tag": "0026_channel_summary",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788543624826,
+      "tag": "0027_user_instructions",
       "breakpoints": true
     }
   ]

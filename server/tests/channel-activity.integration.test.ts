@@ -223,6 +223,8 @@ describe("channel activity", () => {
     expect((await store.list(owner)).channels).toEqual([
       {
         ...channel,
+        // Nothing has named this conversation: the sweep that does runs outside this store.
+        summary: null,
         lastMessage: "Categorized three expenses.",
         lastMessageAgentId: agentId,
         lastMessageAt: at,
@@ -345,6 +347,33 @@ describe("channel activity", () => {
     expect(
       (await store.list(owner)).channels.map((channel) => channel.id),
     ).toEqual([busy.id, quiet.id]);
+  });
+
+  test("a title rides along on the roster without touching its order", async () => {
+    const owner = await createUser();
+    const agentId = await createAgent(owner);
+    const quiet = await createChannel(owner, [agentId]);
+    const busy = await createChannel(owner, [agentId]);
+
+    await store.recordActivity(owner, busy.id, {
+      agentId,
+      at: new Date(),
+      text: "Said something.",
+    });
+    // Named the older, quieter conversation, which is the case that would expose a summary leaking
+    // into the ordering: it sorts second before and must still sort second after.
+    await database
+      .update(channels)
+      .set({ summary: "An older subject", summaryAt: new Date() })
+      .where(eq(channels.id, quiet.id));
+
+    const roster = (await store.list(owner)).channels;
+
+    expect(roster.map((channel) => channel.id)).toEqual([busy.id, quiet.id]);
+    expect(roster.map((channel) => channel.summary)).toEqual([
+      null,
+      "An older subject",
+    ]);
   });
 });
 
