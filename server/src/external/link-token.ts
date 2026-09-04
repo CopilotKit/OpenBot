@@ -1,5 +1,6 @@
 import { seal, unseal } from "../auth/signed-value";
 import type { ExternalProviderIdentity } from "./schema-types";
+import { isExternalProvider } from "./schema-types";
 
 export const EXTERNAL_LINK_TTL_MS = 10 * 60_000;
 
@@ -56,7 +57,7 @@ function asClaim(value: unknown): ExternalLinkClaim | null {
   const claim = value as Partial<ExternalLinkClaim>;
   const { issuedAt, expiresAt } = claim;
   if (
-    claim.provider !== "slack" ||
+    !isExternalProvider(claim.provider) ||
     !isNonEmptyString(claim.providerTenantId) ||
     !isNonEmptyString(claim.providerUserId) ||
     (claim.providerEmail !== null && typeof claim.providerEmail !== "string") ||

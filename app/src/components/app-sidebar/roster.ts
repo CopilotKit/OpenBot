@@ -4,17 +4,17 @@ import type { ExternalThreadSummary } from "@/lib/external/queries";
 
 export type SidebarRosterRow =
   | { kind: "openbot"; channel: ChannelSummary }
-  | { kind: "slack"; thread: ExternalThreadSummary };
+  | { kind: "external"; thread: ExternalThreadSummary };
 
 export type RosterSourceStatus = "pending" | "success" | "error";
 
 const openbotChannelRoute = "/channel/$channelId" as const;
-const slackThreadRoute = "/slack/thread/$threadId" as const;
+const externalThreadRoute = "/external/$provider/thread/$threadId" as const;
 
 export function rosterKey(row: SidebarRosterRow): string {
   return row.kind === "openbot"
     ? `openbot:${row.channel.id}`
-    : `slack:${row.thread.threadId}`;
+    : `external:${row.thread.provider}:${row.thread.threadId}`;
 }
 
 function activityAt(row: SidebarRosterRow): string {
@@ -24,7 +24,7 @@ function activityAt(row: SidebarRosterRow): string {
 
 export function conversationRoster(
   channels: ChannelSummary[] = [],
-  slackThreads: ExternalThreadSummary[] = [],
+  externalThreads: ExternalThreadSummary[] = [],
 ): SidebarRosterRow[] {
   const nativeRows = channels.map(
     (channel): SidebarRosterRow & { kind: "openbot" } => ({
@@ -32,9 +32,9 @@ export function conversationRoster(
       channel,
     }),
   );
-  const slackRows = slackThreads.map(
-    (thread): SidebarRosterRow & { kind: "slack" } => ({
-      kind: "slack",
+  const externalRows = externalThreads.map(
+    (thread): SidebarRosterRow & { kind: "external" } => ({
+      kind: "external",
       thread,
     }),
   );
@@ -43,7 +43,7 @@ export function conversationRoster(
   );
   const remaining = [
     ...nativeRows.filter((row) => !row.channel.pinned),
-    ...slackRows,
+    ...externalRows,
   ];
 
   return [
@@ -93,22 +93,25 @@ export function rosterDestination(row: SidebarRosterRow): LinkOptions {
         params: { channelId: row.channel.id },
       })
     : linkOptions({
-        to: slackThreadRoute,
-        params: { threadId: row.thread.threadId },
+        to: externalThreadRoute,
+        params: {
+          provider: row.thread.provider,
+          threadId: row.thread.threadId,
+        },
       });
 }
 
 export function shouldShowEmptyRoster(
   channels: readonly ChannelSummary[] | undefined,
-  slackThreads: readonly ExternalThreadSummary[] | undefined,
+  externalThreads: readonly ExternalThreadSummary[] | undefined,
   channelsLoaded: boolean,
-  slackThreadsLoaded: boolean,
+  externalThreadsLoaded: boolean,
 ): boolean {
   return (
     channelsLoaded &&
-    slackThreadsLoaded &&
+    externalThreadsLoaded &&
     channels?.length === 0 &&
-    slackThreads?.length === 0
+    externalThreads?.length === 0
   );
 }
 
@@ -116,12 +119,12 @@ export function shouldShowSearchEmpty(
   visibleRows: readonly SidebarRosterRow[],
   query: string,
   channelsStatus: RosterSourceStatus,
-  slackThreadsStatus: RosterSourceStatus,
+  externalThreadsStatus: RosterSourceStatus,
 ): boolean {
   return (
     query.trim().length > 0 &&
     channelsStatus === "success" &&
-    slackThreadsStatus === "success" &&
+    externalThreadsStatus === "success" &&
     visibleRows.length === 0
   );
 }

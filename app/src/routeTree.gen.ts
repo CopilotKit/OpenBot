@@ -42,7 +42,7 @@ import { Route as AuthedSettingsComponentsGalleryIndexRouteImport } from './rout
 import { Route as AuthedSettingsComponentsGalleryNameRouteImport } from './routes/_authed/settings/components-gallery/$name'
 import { Route as AuthedSettingsConnectedAccountsIndexRouteImport } from './routes/_authed/settings/connected-accounts/index'
 import { Route as AuthedSettingsConnectedAccountsKeyRouteImport } from './routes/_authed/settings/connected-accounts/$key'
-import { Route as AuthedAppSlackThreadThreadIdRouteImport } from './routes/_authed/_app/slack/thread/$threadId'
+import { Route as AuthedAppExternalProviderThreadThreadIdRouteImport } from './routes/_authed/_app/external/$provider/thread/$threadId'
 import { Route as AuthedAdminPluginsKeyToolsToolRouteImport } from './routes/_authed/admin/plugins/$key_.tools.$tool'
 
 const AuthedRoute = AuthedRouteImport.update({
@@ -216,10 +216,10 @@ const AuthedSettingsConnectedAccountsKeyRoute =
     path: '/connected-accounts/$key',
     getParentRoute: () => AuthedSettingsRouteRoute,
   } as any)
-const AuthedAppSlackThreadThreadIdRoute =
-  AuthedAppSlackThreadThreadIdRouteImport.update({
-    id: '/slack/thread/$threadId',
-    path: '/slack/thread/$threadId',
+const AuthedAppExternalProviderThreadThreadIdRoute =
+  AuthedAppExternalProviderThreadThreadIdRouteImport.update({
+    id: '/external/$provider/thread/$threadId',
+    path: '/external/$provider/thread/$threadId',
     getParentRoute: () => AuthedAppRoute,
   } as any)
 const AuthedAdminPluginsKeyToolsToolRoute =
@@ -261,7 +261,7 @@ export interface FileRoutesByFullPath {
   '/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
-  '/slack/thread/$threadId': typeof AuthedAppSlackThreadThreadIdRoute
+  '/external/$provider/thread/$threadId': typeof AuthedAppExternalProviderThreadThreadIdRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRoutesByTo {
@@ -294,7 +294,7 @@ export interface FileRoutesByTo {
   '/admin/plugins': typeof AuthedAdminPluginsIndexRoute
   '/settings/components-gallery': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/settings/connected-accounts': typeof AuthedSettingsConnectedAccountsIndexRoute
-  '/slack/thread/$threadId': typeof AuthedAppSlackThreadThreadIdRoute
+  '/external/$provider/thread/$threadId': typeof AuthedAppExternalProviderThreadThreadIdRoute
   '/admin/plugins/$key/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRoutesById {
@@ -332,7 +332,7 @@ export interface FileRoutesById {
   '/_authed/admin/plugins/': typeof AuthedAdminPluginsIndexRoute
   '/_authed/settings/components-gallery/': typeof AuthedSettingsComponentsGalleryIndexRoute
   '/_authed/settings/connected-accounts/': typeof AuthedSettingsConnectedAccountsIndexRoute
-  '/_authed/_app/slack/thread/$threadId': typeof AuthedAppSlackThreadThreadIdRoute
+  '/_authed/_app/external/$provider/thread/$threadId': typeof AuthedAppExternalProviderThreadThreadIdRoute
   '/_authed/admin/plugins/$key_/tools/$tool': typeof AuthedAdminPluginsKeyToolsToolRoute
 }
 export interface FileRouteTypes {
@@ -369,7 +369,7 @@ export interface FileRouteTypes {
     | '/admin/plugins/'
     | '/settings/components-gallery/'
     | '/settings/connected-accounts/'
-    | '/slack/thread/$threadId'
+    | '/external/$provider/thread/$threadId'
     | '/admin/plugins/$key/tools/$tool'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -402,7 +402,7 @@ export interface FileRouteTypes {
     | '/admin/plugins'
     | '/settings/components-gallery'
     | '/settings/connected-accounts'
-    | '/slack/thread/$threadId'
+    | '/external/$provider/thread/$threadId'
     | '/admin/plugins/$key/tools/$tool'
   id:
     | '__root__'
@@ -439,7 +439,7 @@ export interface FileRouteTypes {
     | '/_authed/admin/plugins/'
     | '/_authed/settings/components-gallery/'
     | '/_authed/settings/connected-accounts/'
-    | '/_authed/_app/slack/thread/$threadId'
+    | '/_authed/_app/external/$provider/thread/$threadId'
     | '/_authed/admin/plugins/$key_/tools/$tool'
   fileRoutesById: FileRoutesById
 }
@@ -681,11 +681,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsConnectedAccountsKeyRouteImport
       parentRoute: typeof AuthedSettingsRouteRoute
     }
-    '/_authed/_app/slack/thread/$threadId': {
-      id: '/_authed/_app/slack/thread/$threadId'
-      path: '/slack/thread/$threadId'
-      fullPath: '/slack/thread/$threadId'
-      preLoaderRoute: typeof AuthedAppSlackThreadThreadIdRouteImport
+    '/_authed/_app/external/$provider/thread/$threadId': {
+      id: '/_authed/_app/external/$provider/thread/$threadId'
+      path: '/external/$provider/thread/$threadId'
+      fullPath: '/external/$provider/thread/$threadId'
+      preLoaderRoute: typeof AuthedAppExternalProviderThreadThreadIdRouteImport
       parentRoute: typeof AuthedAppRoute
     }
     '/_authed/admin/plugins/$key_/tools/$tool': {
@@ -766,7 +766,7 @@ interface AuthedAppRouteChildren {
   AuthedAppChannelChannelIdRoute: typeof AuthedAppChannelChannelIdRoute
   AuthedAppChannelNewRoute: typeof AuthedAppChannelNewRoute
   AuthedAppAgentsIndexRoute: typeof AuthedAppAgentsIndexRoute
-  AuthedAppSlackThreadThreadIdRoute: typeof AuthedAppSlackThreadThreadIdRoute
+  AuthedAppExternalProviderThreadThreadIdRoute: typeof AuthedAppExternalProviderThreadThreadIdRoute
 }
 
 const AuthedAppRouteChildren: AuthedAppRouteChildren = {
@@ -777,7 +777,8 @@ const AuthedAppRouteChildren: AuthedAppRouteChildren = {
   AuthedAppChannelChannelIdRoute: AuthedAppChannelChannelIdRoute,
   AuthedAppChannelNewRoute: AuthedAppChannelNewRoute,
   AuthedAppAgentsIndexRoute: AuthedAppAgentsIndexRoute,
-  AuthedAppSlackThreadThreadIdRoute: AuthedAppSlackThreadThreadIdRoute,
+  AuthedAppExternalProviderThreadThreadIdRoute:
+    AuthedAppExternalProviderThreadThreadIdRoute,
 }
 
 const AuthedAppRouteWithChildren = AuthedAppRoute._addFileChildren(

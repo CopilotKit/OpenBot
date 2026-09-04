@@ -62,7 +62,7 @@ function expectAssignedToRisk(error: unknown): void {
   if (error instanceof ExternalThreadConflictError) {
     expect(error.agentName).toBe("Risk Analyst");
     expect(error.message).toBe(
-      "This Slack thread is already assigned to Risk Analyst.",
+      "This external thread is already assigned to Risk Analyst.",
     );
   }
 }

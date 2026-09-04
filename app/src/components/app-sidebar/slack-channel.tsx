@@ -13,8 +13,8 @@ export const SlackChannel = memo(function SlackChannel({
 }) {
   return (
     <Link
-      to="/slack/thread/$threadId"
-      params={{ threadId: thread.threadId }}
+      to="/external/$provider/thread/$threadId"
+      params={{ provider: thread.provider, threadId: thread.threadId }}
       type="button"
       className="flex flex-row py-2 px-2 gap-2 items-center w-full hover:bg-foreground/5 rounded-lg [contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]"
       activeProps={{
@@ -48,7 +48,7 @@ export function SlackChannelContent({
               {thread.agentName}
             </span>
             <span className="shrink-0 rounded border border-border/70 px-1 py-0 text-[10px] leading-4 text-muted-foreground">
-              Slack
+              {thread.provider === "feishu" ? "Feishu" : "Slack"}
             </span>
           </div>
           <div className="shrink-0 text-[12px] text-muted-foreground/70">

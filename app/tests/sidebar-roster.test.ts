@@ -80,10 +80,10 @@ describe("sidebar conversation roster", () => {
 
     expect(rows.map(rosterKey)).toEqual([
       "openbot:pinned-old",
-      "slack:slack-newest",
+      "external:slack:slack-newest",
+      "external:slack:slack-tie",
       "openbot:tie-a",
       "openbot:tie-z",
-      "slack:slack-tie",
       "openbot:unpinned-new",
     ]);
   });
@@ -108,10 +108,10 @@ describe("sidebar conversation roster", () => {
       "openbot:alpha",
     ]);
     expect(matchingRoster(rows, "handoff").map(rosterKey)).toEqual([
-      "slack:beta",
+      "external:slack:beta",
     ]);
     expect(matchingRoster(rows, "support").map(rosterKey)).toEqual([
-      "slack:beta",
+      "external:slack:beta",
     ]);
     expect(matchingRoster(rows, "missing")).toEqual([]);
     expect(matchingRoster(rows, "   ")).toBe(rows);
@@ -141,8 +141,17 @@ describe("sidebar conversation roster", () => {
     expect(rosterName(slackRow)).toBe("Slack Agent");
     expect(rosterLastMessage(slackRow)).toBe("Slack preview");
     expect(rosterDestination(slackRow)).toEqual({
-      to: "/slack/thread/$threadId",
-      params: { threadId: "slack-thread" },
+      to: "/external/$provider/thread/$threadId",
+      params: { provider: "slack", threadId: "slack-thread" },
+    });
+
+    const feishuRow = conversationRoster(
+      [],
+      [slack("feishu-thread", { provider: "feishu" })],
+    )[0];
+    expect(rosterDestination(feishuRow)).toEqual({
+      to: "/external/$provider/thread/$threadId",
+      params: { provider: "feishu", threadId: "feishu-thread" },
     });
   });
 

@@ -1,0 +1,2 @@
+ALTER TABLE "external_thread_bindings" DROP CONSTRAINT "external_thread_bindings_provider_slack_check";--> statement-breakpoint
+ALTER TABLE "external_thread_bindings" ADD CONSTRAINT "external_thread_bindings_provider_check" CHECK ("external_thread_bindings"."provider" IN ('slack', 'feishu'));

@@ -210,7 +210,7 @@ function SlackRow({
 }: {
   animateVisibility: boolean;
   animateOrder: boolean;
-  thread: SidebarRosterRow & { kind: "slack" };
+  thread: SidebarRosterRow & { kind: "external" };
 }) {
   const shouldReduceMotion = useReducedMotion();
   return (

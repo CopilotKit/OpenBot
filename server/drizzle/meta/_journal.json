@@ -190,6 +190,13 @@
       "when": 1788523117178,
       "tag": "0026_external_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788524036987,
+      "tag": "0027_external_provider_feishu",
+      "breakpoints": true
     }
   ]
 }

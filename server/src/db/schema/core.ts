@@ -286,8 +286,8 @@ export const externalThreadBindings = pgTable(
   },
   (table) => [
     check(
-      "external_thread_bindings_provider_slack_check",
-      sql`${table.provider} = 'slack'`,
+      "external_thread_bindings_provider_check",
+      sql`${table.provider} IN ('slack', 'feishu')`,
     ),
     uniqueIndex("external_thread_bindings_provider_thread_idx").on(
       table.provider,

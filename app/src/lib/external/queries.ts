@@ -2,11 +2,13 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { client } from "@/lib/client";
 import type { Message } from "@ag-ui/core";
 
+export type ExternalProvider = "slack" | "feishu";
+
 export type ExternalThreadTarget = {
   threadId: string;
   agentId: string;
   agentName: string;
-  provider: "slack";
+  provider: ExternalProvider;
   readOnly: true;
 };
 
@@ -54,7 +56,7 @@ export function externalThreadTarget(value: unknown): ExternalThreadTarget {
     !isNonEmptyString(target.threadId) ||
     !isNonEmptyString(target.agentId) ||
     !isNonEmptyString(target.agentName) ||
-    target.provider !== "slack" ||
+    (target.provider !== "slack" && target.provider !== "feishu") ||
     target.readOnly !== true
   ) {
     throw new Error(EXTERNAL_THREAD_ERROR);

@@ -5,6 +5,7 @@ import {
   externalThreadBindings,
   externalThreadMessages,
 } from "../db/schema";
+import type { ExternalProvider } from "./schema-types";
 
 export type ExternalTranscriptMessage = {
   id: string;
@@ -14,7 +15,7 @@ export type ExternalTranscriptMessage = {
 
 export type ExternalThreadBindingInput = {
   channelsThreadId: string;
-  provider: "slack";
+  provider: ExternalProvider;
   providerTenantId: string;
   providerConversationId: string;
   providerThreadId: string;
@@ -34,7 +35,7 @@ export type ExternalThreadBinding = Omit<
 
 export type ExternalThreadSummary = {
   threadId: string;
-  provider: "slack";
+  provider: ExternalProvider;
   agentId: string;
   agentName: string;
   lastMessage: string | null;
@@ -53,12 +54,12 @@ export type ExternalThreadListQuery = {
   limit?: number;
 };
 
-/** An established Slack thread cannot be switched to another coworker. */
+/** An established provider thread cannot be switched to another coworker. */
 export class ExternalThreadConflictError extends Error {
   readonly agentName: string;
 
   constructor(agentName: string) {
-    super(`This Slack thread is already assigned to ${agentName}.`);
+    super(`This external thread is already assigned to ${agentName}.`);
     this.name = "ExternalThreadConflictError";
     this.agentName = agentName;
   }
