@@ -1,17 +1,15 @@
-/**
- * What the runtime can do. There is exactly one answer because CopilotKit Intelligence is required
- * for durable threads and memory. Configuration the product cannot function without belongs at the
- * boot boundary.
- */
+/** What the runtime can do, locally or with CopilotKit Intelligence. */
 import { singleUserEnabled } from "./auth/dev-actor";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
 
-export type RuntimeCapabilities = {
-  mode: "intelligence";
-  durableHistory: true;
-  intelligence: IntelligenceSettings;
-};
+export type RuntimeCapabilities =
+  | { mode: "sse"; durableHistory: false }
+  | {
+      mode: "intelligence";
+      durableHistory: true;
+      intelligence: IntelligenceSettings;
+    };
 
 /** The Intelligence contract. Every field is required; see runtimeCapabilities. */
 export type IntelligenceSettings = {
@@ -557,13 +555,7 @@ function oktaAuth(
   return { ...client, issuer };
 }
 
-/**
- * Resolve the Intelligence contract, or refuse to start.
- *
- * All four values are required together. A partial set is the more dangerous shape than none at all:
- * it means somebody intended to configure Intelligence and got it wrong, so failing on the partial
- * set alone (as this did) let a completely unconfigured deployment through as if that were a choice.
- */
+/** Use local SSE unless the complete Intelligence contract is configured. */
 function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const settings = {
     apiUrl: url(environment, "INTELLIGENCE_API_URL"),
@@ -572,18 +564,22 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     licenseToken: optional(environment, "COPILOTKIT_LICENSE_TOKEN"),
   };
 
-  const missing = Object.entries({
-    INTELLIGENCE_API_URL: settings.apiUrl,
-    INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
-    INTELLIGENCE_API_KEY: settings.apiKey,
-    COPILOTKIT_LICENSE_TOKEN: settings.licenseToken,
-  })
-    .filter(([, value]) => !value)
-    .map(([name]) => name);
+  const configured = Object.values(settings).filter(Boolean).length;
+  if (configured === 0) {
+    return { mode: "sse", durableHistory: false };
+  }
 
-  if (missing.length > 0) {
+  if (configured < Object.keys(settings).length) {
+    const missing = Object.entries({
+      INTELLIGENCE_API_URL: settings.apiUrl,
+      INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
+      INTELLIGENCE_API_KEY: settings.apiKey,
+      COPILOTKIT_LICENSE_TOKEN: settings.licenseToken,
+    })
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
     throw new Error(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${missing.join(", ")}`,
+      `CopilotKit Intelligence is partially configured. Missing: ${missing.join(", ")}`,
     );
   }
 

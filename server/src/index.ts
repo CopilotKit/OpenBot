@@ -680,40 +680,29 @@ const buildAgentFor = async ({
   return agent;
 };
 
-/*
- * The pair a headless turn is driven through, built ONCE.
- *
- * Not the runtime's own pair: `mountCopilotRuntime` keeps its client and its runner inside
- * `CopilotRuntime` and hands neither back, and reaching into that object would be a worse seam than
- * building our own from the same three settings. Built from `config.runtime.intelligence`, which is
- * required and not optional — `RuntimeCapabilities` has exactly one mode and every Intelligence field
- * with it (`config.ts:10-22`), and `loadConfig` refuses to boot without them — so there is no
- * not-in-Intelligence-mode branch to write here. If a second mode is ever added, THIS is the line that
- * has to grow a guard, and the routine runner must then be left off `createApp` entirely.
- *
- * One runner for the process, reused across firings: it opens a socket per run and holds no idle
- * connection, but its `threads` map is per instance, and a runner per turn would fragment the
- * already-running check that keeps two turns off one thread. See `routines/run-turn.ts`.
- */
-const routineIntelligence = new CopilotKitIntelligence({
-  apiUrl: config.runtime.intelligence.apiUrl,
-  wsUrl: config.runtime.intelligence.gatewayWsUrl,
-  apiKey: config.runtime.intelligence.apiKey,
-});
-const routineAgentRunner = new IntelligenceAgentRunner({
-  url: routineIntelligence.ɵgetRunnerWsUrl(),
-  authToken: routineIntelligence.ɵgetRunnerAuthToken(),
-});
-
-const routineRunner = createRoutineRunner({
-  routineStore,
-  channelStore,
-  runTurn: createTurnRunner({
-    intelligence: routineIntelligence,
-    runner: routineAgentRunner,
-    buildAgentFor,
-  }),
-});
+const routineRunner =
+  config.runtime.mode === "intelligence"
+    ? (() => {
+        const intelligence = new CopilotKitIntelligence({
+          apiUrl: config.runtime.intelligence.apiUrl,
+          wsUrl: config.runtime.intelligence.gatewayWsUrl,
+          ["apiKey"]: config.runtime.intelligence["apiKey"],
+        });
+        const runner = new IntelligenceAgentRunner({
+          url: intelligence.ɵgetRunnerWsUrl(),
+          authToken: intelligence.ɵgetRunnerAuthToken(),
+        });
+        return createRoutineRunner({
+          routineStore,
+          channelStore,
+          runTurn: createTurnRunner({
+            intelligence,
+            runner,
+            buildAgentFor,
+          }),
+        });
+      })()
+    : undefined;
 
 /**
  * The runtime, and the two things beside it a hop needs.
@@ -846,7 +835,15 @@ const copilotRuntime = mountCopilotRuntime(
  */
 let workOfferedListener: WorkOfferedListener | undefined;
 
-if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
+if (
+  config.runtime.mode === "intelligence" &&
+  config.handoff.maxDepth > 0 &&
+  config.handoff.maxPerRun > 0
+) {
+  const intelligenceRuntime = copilotRuntime as Required<
+    Pick<typeof copilotRuntime, "history" | "threadLock" | "runnerConnection">
+  > &
+    typeof copilotRuntime;
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
     owner: `handoff/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
@@ -881,8 +878,8 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
         }
         return copilotRuntime.agentFor({ actor, botId });
       },
-      history: copilotRuntime.history,
-      lock: copilotRuntime.threadLock,
+      history: intelligenceRuntime.history,
+      lock: intelligenceRuntime.threadLock,
       /*
        * A scratch thread of the addressed Bot's own, one per hop.
        *
@@ -921,7 +918,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
       // produced a runner every join was refused for, because the thread's active run is a lock the
       // platform issues rather than something an API key can claim.
       runner: new IntelligenceAgentRunner(
-        copilotRuntime.runnerConnection(),
+        intelligenceRuntime.runnerConnection(),
       ) as never,
     }),
   });

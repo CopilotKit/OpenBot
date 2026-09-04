@@ -41,6 +41,21 @@ const productionEnvironment = {
   KEY_ENCRYPTION_KEY: "b3BlbmJvdC1wcm9kdWN0aW9uLXRlc3Qta2V5LTMyMzI=",
 };
 
+test("uses local SSE runtime without Intelligence credentials", () => {
+  const {
+    INTELLIGENCE_API_URL: _,
+    INTELLIGENCE_GATEWAY_WS_URL: __,
+    INTELLIGENCE_API_KEY: ___,
+    COPILOTKIT_LICENSE_TOKEN: ____,
+    ...environment
+  } = baseEnvironment;
+
+  expect(loadConfig(environment).runtime).toEqual({
+    mode: "sse",
+    durableHistory: false,
+  });
+});
+
 const {
   GOOGLE_OAUTH_CLIENT_ID: _googleId,
   GOOGLE_OAUTH_CLIENT_SECRET: _googleSecret,
@@ -89,34 +104,20 @@ describe("deployment configuration", () => {
     expect(config.auth).toBeUndefined();
   });
 
-  // The product does not have a mode without Intelligence, so each of these is a refusal to boot
-  // rather than a degraded capability. Named individually because a deployment that sets three of
-  // four is the likeliest real mistake, and the message has to say which one is missing.
   test.each([
     "INTELLIGENCE_API_URL",
     "INTELLIGENCE_GATEWAY_WS_URL",
     "INTELLIGENCE_API_KEY",
     "COPILOTKIT_LICENSE_TOKEN",
-  ])("refuses to start when %s is missing", (name) => {
+  ])("refuses partial Intelligence configuration missing %s", (name) => {
     const environment: Record<string, string | undefined> = {
       ...baseEnvironment,
     };
     delete environment[name];
 
     expect(() => loadConfig(environment)).toThrow(
-      `CopilotKit Intelligence is required and is not configured. Missing: ${name}`,
+      `CopilotKit Intelligence is partially configured. Missing: ${name}`,
     );
-  });
-
-  test("refuses to start when Intelligence is absent entirely, rather than degrading", () => {
-    expect(() =>
-      loadConfig({
-        DATABASE_URL: baseEnvironment.DATABASE_URL,
-        KEY_ENCRYPTION_KEY: baseEnvironment.KEY_ENCRYPTION_KEY,
-        MANAGED_AGENT_AG_UI_URL: baseEnvironment.MANAGED_AGENT_AG_UI_URL,
-        MANAGED_AGENT_TOKEN: baseEnvironment.MANAGED_AGENT_TOKEN,
-      }),
-    ).toThrow("CopilotKit Intelligence is required and is not configured");
   });
 
   test("rejects incomplete OAuth client configuration", () => {

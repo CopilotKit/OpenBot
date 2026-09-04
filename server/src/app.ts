@@ -1052,14 +1052,11 @@ export function createApp(
       createThreadRoutes(
         threadIdentity,
         requireUser,
-        // config.ts refuses to boot without the full Intelligence contract (see copilot.ts's
-        // header comment), so `config.runtime.intelligence` is never missing here. Built from it
-        // rather than assumed, though: this is the one place besides the runtime mount itself that
-        // needs to reach Intelligence, and it should keep working unmodified if that guarantee ever
-        // loosens and a deployment can legitimately have no reader to build.
-        createThreadReader(
-          createIntelligenceClient(config.runtime.intelligence),
-        ),
+        config.runtime.mode === "intelligence"
+          ? createThreadReader(
+              createIntelligenceClient(config.runtime.intelligence),
+            )
+          : undefined,
       ),
     );
   }

@@ -1101,8 +1101,6 @@ export function mountCopilotRuntime(
    */
   onRunBusy?: (input: { threadId: string; busy: boolean }) => void,
 ) {
-  const { intelligence } = config.runtime;
-
   /**
    * The same Bot a person's run would get, built without a request.
    *
@@ -1146,71 +1144,47 @@ export function mountCopilotRuntime(
     return agents[input.botId] ?? null;
   };
 
-  /*
-   * One client, used by the runtime and by anything reading a thread beside it, so a hop reads the
-   * history a person's run would read rather than a second view of it that could disagree.
-   */
+  const agents = createRequestAgents(
+    identifyActor,
+    loadAgents,
+    model,
+    resolveModelApiKey,
+    stallGuard,
+    loadToolsForActor,
+    signRunForActor,
+    config.computer ? COMPUTER_GUIDANCE : undefined,
+    loadVendors,
+    selectionForActor,
+    agentFetch,
+    handoffForActor,
+  ) as never;
+
+  if (config.runtime.mode === "sse") {
+    const runtime = new CopilotRuntime({
+      ...(config.generativeUi ? { openGenerativeUI: true } : {}),
+      agents,
+    });
+    return {
+      handler: createCopilotHonoHandler({ runtime, basePath }),
+      agentFor,
+    };
+  }
+
   const intelligenceClient = new IntelligenceKnowingANewThread({
-    apiUrl: intelligence.apiUrl,
-    wsUrl: intelligence.gatewayWsUrl,
-    apiKey: intelligence.apiKey,
+    apiUrl: config.runtime.intelligence.apiUrl,
+    wsUrl: config.runtime.intelligence.gatewayWsUrl,
+    ["apiKey"]: config.runtime.intelligence["apiKey"],
   });
 
   const runtime = new CopilotRuntime({
-    // `mode` is inferred from the presence of `intelligence`; passing it is a type error.
-    //
-    // identifyUser is NOT optional in practice. Threads and memory are scoped to the user it
-    // returns, so omitting it puts every person in the deployment in the same thread space and one
-    // person's conversations become another's.
     identifyUser,
-    // The subclass, not the base: a thread nobody has run yet reads as empty rather than as a 500.
-    // See IntelligenceKnowingANewThread.
     intelligence: intelligenceClient,
-    licenseToken: intelligence.licenseToken,
-    // Carried on the events the runtime already sends, so OpenBot's traffic is separable from any
-    // other deployment's. Adds no events of its own.
+    licenseToken: config.runtime.intelligence.licenseToken,
     ...(config.accessibility
       ? { telemetryProperties: { accessibility_title: "OpenBot" } }
       : {}),
-    /*
-     * What lets a Bot answer with an interface it wrote itself.
-     *
-     * This one flag is the whole difference between a Bot that draws and a Bot that describes
-     * markup it cannot show. The middleware it turns on does not give the model the tool — the
-     * browser does that — it reads the arguments of the `generateSandboxedUi` call as they stream
-     * and re-emits them as `open-generative-ui` activity events. Those events are the only thing
-     * that paints: the tool's own renderer shows the waiting message and then returns nothing. So a
-     * deployment with the browser half and not this one has Bots generating whole interfaces that
-     * never appear, which is the shape this capability arrived in.
-     *
-     * `true` rather than a list of Bots. The list narrows only the event transform, and the tool
-     * stays offered to every Bot regardless, so naming some Bots here would leave the others able to
-     * call it and draw nothing. Whether the capability exists at all is the switch this deployment
-     * has; see DeploymentConfig.generativeUi.
-     */
     ...(config.generativeUi ? { openGenerativeUI: true } : {}),
-    // `identifyUser` is the Intelligence projection of the same person `identifyActor` returns:
-    // one resolver decides both whose threads these are and whose coworkers exist.
-    agents: createRequestAgents(
-      identifyActor,
-      loadAgents,
-      model,
-      resolveModelApiKey,
-      stallGuard,
-      loadToolsForActor,
-      signRunForActor,
-      /*
-       * Only when a computer exists. The tools themselves are registered by the surface, so a Bot is
-       * offered them without this and the guidance is what tells it how they go together: snapshot
-       * before acting, and ask a person to take the wheel at a sign-in rather than reporting the task
-       * as impossible. Absent computer, absent guidance: a Bot is not told about hands it has not got.
-       */
-      config.computer ? COMPUTER_GUIDANCE : undefined,
-      loadVendors,
-      selectionForActor,
-      agentFetch,
-      handoffForActor,
-    ) as never,
+    agents,
   });
 
   return {
