@@ -88,16 +88,47 @@ test("controller interface requires an inherited lock and cannot mutate an activ
   const input = helperFixture();
   const manifest = join(input.root, "activation.manifest");
   try {
-    const withoutFD = run(["bash", helperPath, "--reviewed-controller", "config", "--format", "json"], input.root, input.env);
+    const withoutFD = run(
+      [
+        "bash",
+        helperPath,
+        "--reviewed-controller",
+        "config",
+        "--format",
+        "json",
+      ],
+      input.root,
+      input.env,
+    );
     expect(withoutFD.exitCode).toBe(64);
     writeFileSync(manifest, "active\n", { mode: 0o600 });
-    for (const args of ["build openbot", "up --detach", "exec postgres true", "run --rm openbot true", "restart openbot"]) {
-      const blocked = run(["bash", "-c", 'exec 9>"$OPENBOT_DEPLOYMENT_LOCK_FILE"; flock -n 9; "$HELPER" --lock-held-fd 9 --reviewed-controller -f /candidate.yml ' + args], input.root,
-        { ...input.env, HELPER: helperPath, OPENBOT_G1_ACTIVATION_MANIFEST: manifest });
+    for (const args of [
+      "build openbot",
+      "up --detach",
+      "exec postgres true",
+      "run --rm openbot true",
+      "restart openbot",
+    ]) {
+      const blocked = run(
+        [
+          "bash",
+          "-c",
+          'exec 9>"$OPENBOT_DEPLOYMENT_LOCK_FILE"; flock -n 9; "$HELPER" --lock-held-fd 9 --reviewed-controller -f /candidate.yml ' +
+            args,
+        ],
+        input.root,
+        {
+          ...input.env,
+          HELPER: helperPath,
+          OPENBOT_G1_ACTIVATION_MANIFEST: manifest,
+        },
+      );
       expect(blocked.exitCode).toBe(65);
     }
     expect(readFileSync(input.log, "utf8")).toBe("");
-  } finally { rmSync(input.root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(input.root, { recursive: true, force: true });
+  }
 });
 
 test("an inherited FD avoids relocking only when it names and holds the exact lock", () => {

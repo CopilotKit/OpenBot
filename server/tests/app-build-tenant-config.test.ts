@@ -27,6 +27,8 @@ test("the root app-build stage exports its tenant argument to prebuild", () => {
   )?.[1];
 
   expect(appBuildStage).toContain("ARG TENANT_PACKAGE_DIR=../examples/fintech");
-  expect(appBuildStage).toContain("ENV TENANT_PACKAGE_DIR=${TENANT_PACKAGE_DIR}");
+  expect(appBuildStage).toContain(
+    `ENV TENANT_PACKAGE_DIR=\${TENANT_PACKAGE_DIR}`,
+  );
   expect(appBuildStage).toContain("RUN bun run --cwd app build");
 });

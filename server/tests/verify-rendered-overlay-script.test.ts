@@ -11,21 +11,25 @@ import { join } from "node:path";
 
 const scriptPath = "deploy/netsfera/verify-rendered-overlay.sh";
 const reviewedPolicy = JSON.stringify(
-  JSON.parse(readFileSync("deploy/netsfera/agent-computer-policy.json", "utf8")),
+  JSON.parse(
+    readFileSync("deploy/netsfera/agent-computer-policy.json", "utf8"),
+  ),
 );
 
-function renderedStack(options: {
-  g0?: boolean;
-  openbot?: Record<string, unknown>;
-  supervisor?: Record<string, unknown>;
-  networks?: Record<string, unknown>;
-  volumes?: Record<string, unknown>;
-  secrets?: Record<string, unknown>;
-  configs?: Record<string, unknown>;
-  additionalServices?: Record<string, unknown>;
-  extraOpenbotEnvironment?: Record<string, string>;
-  candidatePolicy?: string;
-} = {}) {
+function renderedStack(
+  options: {
+    g0?: boolean;
+    openbot?: Record<string, unknown>;
+    supervisor?: Record<string, unknown>;
+    networks?: Record<string, unknown>;
+    volumes?: Record<string, unknown>;
+    secrets?: Record<string, unknown>;
+    configs?: Record<string, unknown>;
+    additionalServices?: Record<string, unknown>;
+    extraOpenbotEnvironment?: Record<string, string>;
+    candidatePolicy?: string;
+  } = {},
+) {
   const baseOpenbot = {
     image: "openbot:test",
     build: { context: "/opt/openbot/source", dockerfile: "Dockerfile" },
@@ -48,7 +52,8 @@ function renderedStack(options: {
               environment: {
                 ...baseOpenbot.environment,
                 TENANT_PACKAGE_DIR: "../examples/netsfera",
-                AGENT_COMPUTER_POLICY: options.candidatePolicy ?? reviewedPolicy,
+                AGENT_COMPUTER_POLICY:
+                  options.candidatePolicy ?? reviewedPolicy,
                 ...options.extraOpenbotEnvironment,
               },
             }
@@ -79,7 +84,11 @@ function runsRenderedOverlayVerification(
     const baseRender = join(directory, "base.json");
     const candidateRender = join(directory, "candidate.json");
     writeFileSync(baseRender, renderedStack(), { mode: 0o600 });
-    writeFileSync(candidateRender, renderedStack({ g0: true, ...candidateOptions }), { mode: 0o600 });
+    writeFileSync(
+      candidateRender,
+      renderedStack({ g0: true, ...candidateOptions }),
+      { mode: 0o600 },
+    );
     writeFileSync(stat, '#!/usr/bin/env bash\nprintf "%s\\n" 600\n');
     chmodSync(stat, 0o755);
 
@@ -100,7 +109,10 @@ test("the private renderer permits only the reviewed full-stack changes", () => 
 
 test("the private renderer accepts Compose's escaped literal policy dollar", () => {
   const result = runsRenderedOverlayVerification({
-    candidatePolicy: reviewedPolicy.replace("^downloads(/|$)", () => "^downloads(/|$$)"),
+    candidatePolicy: reviewedPolicy.replace(
+      "^downloads(/|$)",
+      () => "^downloads(/|$$)",
+    ),
   });
 
   expect(result.exitCode).toBe(0);
@@ -109,11 +121,16 @@ test("the private renderer accepts Compose's escaped literal policy dollar", () 
 
 test("the private renderer still rejects a genuine candidate policy change", () => {
   const result = runsRenderedOverlayVerification({
-    candidatePolicy: reviewedPolicy.replace("computer_list_files", "computer_write_file"),
+    candidatePolicy: reviewedPolicy.replace(
+      "computer_list_files",
+      "computer_write_file",
+    ),
   });
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr.toString()).toContain("G0 rendered-stack verification failed.");
+  expect(result.stderr.toString()).toContain(
+    "G0 rendered-stack verification failed.",
+  );
 });
 
 test("the private renderer rejects an OpenBot topology change", () => {
@@ -122,7 +139,9 @@ test("the private renderer rejects an OpenBot topology change", () => {
   });
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
+  expect(result.stderr.toString()).toContain(
+    "unreviewed rendered-stack change",
+  );
 });
 
 test("the private renderer rejects another service changing", () => {
@@ -131,7 +150,9 @@ test("the private renderer rejects another service changing", () => {
   });
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
+  expect(result.stderr.toString()).toContain(
+    "unreviewed rendered-stack change",
+  );
 });
 
 test("the private renderer rejects an added service", () => {
@@ -140,7 +161,9 @@ test("the private renderer rejects an added service", () => {
   });
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
+  expect(result.stderr.toString()).toContain(
+    "unreviewed rendered-stack change",
+  );
 });
 
 test("the private renderer rejects an extra OpenBot environment variable", () => {
@@ -149,7 +172,9 @@ test("the private renderer rejects an extra OpenBot environment variable", () =>
   });
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
+  expect(result.stderr.toString()).toContain(
+    "unreviewed rendered-stack change",
+  );
 });
 
 test("the private renderer rejects a top-level network change", () => {
@@ -158,16 +183,23 @@ test("the private renderer rejects a top-level network change", () => {
   });
 
   expect(result.exitCode).not.toBe(0);
-  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
+  expect(result.stderr.toString()).toContain(
+    "unreviewed rendered-stack change",
+  );
 });
 
 test.each([
   ["volume", { volumes: { "openbot-data": { external: true } } }],
   ["secret", { secrets: { database_url: { name: "other_database_url" } } }],
   ["config", { configs: { base_config: { name: "other_config" } } }],
-])("the private renderer rejects a top-level %s change", (_, candidateOptions) => {
-  const result = runsRenderedOverlayVerification(candidateOptions);
+])(
+  "the private renderer rejects a top-level %s change",
+  (_, candidateOptions) => {
+    const result = runsRenderedOverlayVerification(candidateOptions);
 
-  expect(result.exitCode).not.toBe(0);
-  expect(result.stderr.toString()).toContain("unreviewed rendered-stack change");
-});
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "unreviewed rendered-stack change",
+    );
+  },
+);

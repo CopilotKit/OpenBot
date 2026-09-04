@@ -40,9 +40,15 @@ test("recovery wrapper terminates its child before deleting transferred artifact
 test("G0 recovery uses addressable OCI descriptors and never tags a config digest", () => {
   const script = readFileSync(recoveryPath, "utf8");
   expect(script).toContain(`{{index .Descriptor "digest"}}`);
-  expect(script).toContain('recovery_exact_reference="${recovery_reference}@${recovery_descriptor_digest}"');
-  expect(script).toContain('docker image tag "$recovery_exact_reference" "$g0_image_reference"');
-  expect(script).not.toMatch(/docker image tag \"\$(?:live|g0|recovery)_image_id\"/);
+  expect(script).toContain(
+    `recovery_exact_reference="\${recovery_reference}@\${recovery_descriptor_digest}"`,
+  );
+  expect(script).toContain(
+    'docker image tag "$recovery_exact_reference" "$g0_image_reference"',
+  );
+  expect(script).not.toMatch(
+    /docker image tag "\$(?:live|g0|recovery)_image_id"/,
+  );
 });
 
 test("G0 recovery builds under an isolated ref and recreates only OpenBot", () => {
@@ -50,7 +56,9 @@ test("G0 recovery builds under an isolated ref and recreates only OpenBot", () =
   expect(script).toMatch(/local\/openbot:g0-recovery-/);
   expect(script).toContain('-f "$recovery_build_render" build openbot');
   expect(script).toContain("--no-deps --force-recreate openbot");
-  expect(script).not.toMatch(/\b(up|create|restart)\b.*(?:browser|supervisor|worker)/);
+  expect(script).not.toMatch(
+    /\b(up|create|restart)\b.*(?:browser|supervisor|worker)/,
+  );
 });
 
 test("G0 recovery requires exact ff5 source, inactive G1 and bounded health", () => {
@@ -73,7 +81,9 @@ test("G0 recovery evidence records config and descriptor identities without secr
   ]) {
     expect(script).toContain(`printf '${field}=%s\\n'`);
   }
-  expect(script).not.toMatch(/printf[^\n]*(token|secret|password|authorization)/i);
+  expect(script).not.toMatch(
+    /printf[^\n]*(token|secret|password|authorization)/i,
+  );
 });
 
 const accepted = "ff5aa7ebd8ac798887017bfa1f5a471483b0c499";
@@ -117,7 +127,9 @@ function recoveryFixture() {
   );
   executable(
     `${source}/deploy/netsfera/verify-rendered-overlay.sh`,
-    "#!/bin/sh\n[ \"${FAIL_MODE:-}\" != render ]\n",
+    `#!/bin/sh
+[ "\${FAIL_MODE:-}" != render ]
+`,
   );
   executable(
     `${bin}/git`,
@@ -199,15 +211,31 @@ if [ "$1" = run ]; then [ "\${FAIL_MODE:-}" != brand ]; exit; fi
 exit 0
 `,
   );
-  return { root, source, incoming, bin, lock, baseState, liveState, probeState, commands };
+  return {
+    root,
+    source,
+    incoming,
+    bin,
+    lock,
+    baseState,
+    liveState,
+    probeState,
+    commands,
+  };
 }
 
-function runRecovery(input: ReturnType<typeof recoveryFixture>, failMode?: string) {
+function runRecovery(
+  input: ReturnType<typeof recoveryFixture>,
+  failMode?: string,
+) {
   return Bun.spawnSync(["bash", recoveryPath, oldContainer, oldConfig], {
     env: {
       ...process.env,
       PATH: `${input.bin}:/usr/local/bin:/usr/bin:/bin`,
-      OPENBOT_COMPOSE_HELPER: resolve(import.meta.dir, "../../deploy/netsfera/openbot-compose-lock-v1.sh"),
+      OPENBOT_COMPOSE_HELPER: resolve(
+        import.meta.dir,
+        "../../deploy/netsfera/openbot-compose-lock-v1.sh",
+      ),
       OPENBOT_SOURCE_DIR: input.source,
       OPENBOT_INCOMING_DIR: input.incoming,
       OPENBOT_DEPLOYMENT_LOCK_FILE: input.lock,
@@ -248,7 +276,9 @@ test("executable recovery establishes a distinct reviewed config/index/descripto
     expect(log).toContain(`image tag local/openbot:g0-recovery-`);
     expect(log).toContain("up --detach --no-deps --force-recreate openbot");
     expect(log).not.toContain(`image tag ${oldConfig}`);
-    const evidence = readdirSync(input.incoming).find((name) => name.endsWith(".evidence"));
+    const evidence = readdirSync(input.incoming).find((name) =>
+      name.endsWith(".evidence"),
+    );
     expect(evidence).toBeDefined();
     expect(statSync(`${input.incoming}/${evidence}`).mode & 0o777).toBe(0o600);
   } finally {

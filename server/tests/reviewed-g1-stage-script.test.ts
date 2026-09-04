@@ -94,12 +94,23 @@ exit 0
     join(source, "deploy/netsfera/docker-compose.erp-agent.yml"),
     "services:\n  openbot:\n    environment:\n      TENANT_PACKAGE: examples/netsfera\n",
   );
-  executable(join(bin, "openbot-compose-v1.sh"), `#!/bin/sh
+  executable(
+    join(bin, "openbot-compose-v1.sh"),
+    `#!/bin/sh
 printf 'helper %s\\n' "$*" >>"$COMMAND_LOG"
 exec "$LOCKED_HELPER" "$@"
-`);
-  executable(join(source, "deploy/netsfera/verify-netsfera-document-image.sh"),
-    readFileSync(resolve(import.meta.dir, "../../deploy/netsfera/verify-netsfera-document-image.sh"), "utf8"));
+`,
+  );
+  executable(
+    join(source, "deploy/netsfera/verify-netsfera-document-image.sh"),
+    readFileSync(
+      resolve(
+        import.meta.dir,
+        "../../deploy/netsfera/verify-netsfera-document-image.sh",
+      ),
+      "utf8",
+    ),
+  );
 
   executable(
     join(bin, "git"),
@@ -186,13 +197,16 @@ fi
 exec /bin/rm "$@"
 `,
   );
-  executable(join(bin, "mktemp"), `#!/bin/sh
+  executable(
+    join(bin, "mktemp"),
+    `#!/bin/sh
 created=$(/usr/bin/mktemp "$@") || exit $?
 if [ -n "\${RENDER_RECORD:-}" ]; then
   case "$*" in ''|*g1-verify*) printf '%s\\n' "$created" >"$RENDER_RECORD";; esac
 fi
 printf '%s\\n' "$created"
-`);
+`,
+  );
   executable(
     join(bin, "mv"),
     `#!/bin/sh
@@ -251,7 +265,7 @@ if [ "$1" = compose ]; then
       render=""
       previous=""
       for value do if [ "$previous" = -f ]; then render="$value"; fi; previous="$value"; done
-      built_ref=$(awk -F '"image":"' '{ split($2, value, "\\\""); print value[1] }' "$render")
+      built_ref=$(awk -F '"image":"' '{ split($2, value, "\\""); print value[1] }' "$render")
       case "$built_ref" in local/openbot:g1-*) printf '%s\n' "$built_ref" >"$CANDIDATE_TAG_STATE";; *) exit 97;; esac
       exit 0;;
     *" ps -q openbot "*) printf '%s\n' "$LIVE_CONTAINER"; exit 0;;
@@ -463,16 +477,21 @@ function stagedEvidence(input: ReturnType<typeof fixture>) {
   return { path, contents: readFileSync(path, "utf8") };
 }
 
-test.each(["mcp-grant", "bot-grant"])("staging refuses persisted %s before checkout or build", (mode) => {
-  const input = fixture();
-  try {
-    const result = execute(input, mode);
-    expect(result.exitCode).toBe(65);
-    expect(readFileSync(input.sourceState, "utf8").trim()).toBe(original);
-    expect(readFileSync(input.log, "utf8")).not.toContain(" build openbot");
-    expect(existsSync(input.activationManifest)).toBe(false);
-  } finally { rmSync(input.root, { recursive: true, force: true }); }
-});
+test.each(["mcp-grant", "bot-grant"])(
+  "staging refuses persisted %s before checkout or build",
+  (mode) => {
+    const input = fixture();
+    try {
+      const result = execute(input, mode);
+      expect(result.exitCode).toBe(65);
+      expect(readFileSync(input.sourceState, "utf8").trim()).toBe(original);
+      expect(readFileSync(input.log, "utf8")).not.toContain(" build openbot");
+      expect(existsSync(input.activationManifest)).toBe(false);
+    } finally {
+      rmSync(input.root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("stages the reviewed candidate without applying it or changing the live container", () => {
   const input = fixture();
@@ -486,11 +505,19 @@ test("stages the reviewed candidate without applying it or changing the live con
     expect(commands).not.toMatch(/docker compose .*\b(up|create|run)\b/);
     expect(commands).toContain(`docker compose`);
     expect(commands).toContain("helper --lock-held-fd 9 --reviewed-controller");
-    expect(commands.split("\n").filter((line) => line.startsWith("helper ")).length)
-      .toBe(commands.split("\n").filter((line) => line.startsWith("docker compose ")).length);
+    expect(
+      commands.split("\n").filter((line) => line.startsWith("helper ")).length,
+    ).toBe(
+      commands.split("\n").filter((line) => line.startsWith("docker compose "))
+        .length,
+    );
     expect(commands).toContain("docker cp");
     expect(commands).toContain("verify-netsfera-document-package.ts");
-    expect([...new Set(commands.match(/(?:server|app)\/tests\/[^\s]+\.test\.ts/g))].sort()).toEqual([
+    expect(
+      [
+        ...new Set(commands.match(/(?:server|app)\/tests\/[^\s]+\.test\.ts/g)),
+      ].sort(),
+    ).toEqual([
       "app/tests/computer-access.test.ts",
       "server/tests/app-build-tenant-config.test.ts",
       "server/tests/computer-access.test.ts",
@@ -585,12 +612,21 @@ test("staging reports cleanup failure when a stopped platform probe cannot be re
   const input = fixture();
   try {
     const result = Bun.spawnSync(
-      ["sh", stagePath, input.bundle, input.bundleHash, input.advertisedRef, target],
+      [
+        "sh",
+        stagePath,
+        input.bundle,
+        input.bundleHash,
+        input.advertisedRef,
+        target,
+      ],
       { env: { ...environment(input), PROBE_RM_FAIL: "1" } },
     );
     expect(result.exitCode).toBe(71);
     expect(result.stdout.toString()).not.toContain("G1 staging complete");
-    expect(readdirSync(input.incoming).filter((name) => name.endsWith(".evidence"))).toHaveLength(0);
+    expect(
+      readdirSync(input.incoming).filter((name) => name.endsWith(".evidence")),
+    ).toHaveLength(0);
   } finally {
     rmSync(input.root, { recursive: true, force: true });
   }
@@ -630,11 +666,20 @@ test("post-apply verification refuses an MCP grant introduced after staging", ()
   try {
     expect(execute(input).exitCode).toBe(0);
     const evidence = stagedEvidence(input);
-    expect(Bun.spawnSync(["bash", activationPath, "activate", evidence.path], { env: environment(input) }).exitCode).toBe(0);
+    expect(
+      Bun.spawnSync(["bash", activationPath, "activate", evidence.path], {
+        env: environment(input),
+      }).exitCode,
+    ).toBe(0);
     writeFileSync(input.liveImageState, `${candidateImage}\n`);
-    const checked = Bun.spawnSync(["sh", verifierPath, "post-apply", evidence.path], { env: environment(input, "mcp-grant") });
+    const checked = Bun.spawnSync(
+      ["sh", verifierPath, "post-apply", evidence.path],
+      { env: environment(input, "mcp-grant") },
+    );
     expect(checked.exitCode).toBe(65);
-  } finally { rmSync(input.root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(input.root, { recursive: true, force: true });
+  }
 });
 
 test("persistent G1 activation survives a systemd-style locked helper start and deactivates to G0", () => {
@@ -755,63 +800,135 @@ test.each([
   }
 });
 
-test.each(["unknown-with-newline", "unknown-without-newline", "duplicate", "missing", "reordered", "blank-record", "no-final-newline"])(
-  "locked helper rejects noncanonical manifest: %s", (fault) => {
-    const input = fixture();
-    try {
-      expect(execute(input).exitCode).toBe(0);
-      const evidence = stagedEvidence(input);
-      expect(Bun.spawnSync(["bash", activationPath, "activate", evidence.path], { env: environment(input) }).exitCode).toBe(0);
-      let contents = readFileSync(input.activationManifest, "utf8");
-      if (fault === "unknown-with-newline") contents += "unknown=value\n";
-      if (fault === "unknown-without-newline") contents += "unknown=value";
-      if (fault === "duplicate") contents += `candidate_commit=${target}`;
-      if (fault === "missing") contents = contents.split("\n").slice(1).join("\n");
-      if (fault === "reordered") { const lines = contents.trimEnd().split("\n"); [lines[0], lines[1]] = [lines[1], lines[0]]; contents = lines.join("\n") + "\n"; }
-      if (fault === "blank-record") contents += "\n";
-      if (fault === "no-final-newline") contents = contents.trimEnd();
-      writeFileSync(input.activationManifest, contents);
-      writeFileSync(input.log, "");
-      const checked = Bun.spawnSync(["bash", lockedHelperPath, "restart", "openbot"], { env: environment(input) });
-      expect(checked.exitCode).not.toBe(0);
-      expect(readFileSync(input.log, "utf8")).not.toMatch(/restart openbot/);
-    } finally { rmSync(input.root, { recursive: true, force: true }); }
-  },
-);
+test.each([
+  "unknown-with-newline",
+  "unknown-without-newline",
+  "duplicate",
+  "missing",
+  "reordered",
+  "blank-record",
+  "no-final-newline",
+])("locked helper rejects noncanonical manifest: %s", (fault) => {
+  const input = fixture();
+  try {
+    expect(execute(input).exitCode).toBe(0);
+    const evidence = stagedEvidence(input);
+    expect(
+      Bun.spawnSync(["bash", activationPath, "activate", evidence.path], {
+        env: environment(input),
+      }).exitCode,
+    ).toBe(0);
+    let contents = readFileSync(input.activationManifest, "utf8");
+    if (fault === "unknown-with-newline") contents += "unknown=value\n";
+    if (fault === "unknown-without-newline") contents += "unknown=value";
+    if (fault === "duplicate") contents += `candidate_commit=${target}`;
+    if (fault === "missing")
+      contents = contents.split("\n").slice(1).join("\n");
+    if (fault === "reordered") {
+      const lines = contents.trimEnd().split("\n");
+      [lines[0], lines[1]] = [lines[1], lines[0]];
+      contents = `${lines.join("\n")}\n`;
+    }
+    if (fault === "blank-record") contents += "\n";
+    if (fault === "no-final-newline") contents = contents.trimEnd();
+    writeFileSync(input.activationManifest, contents);
+    writeFileSync(input.log, "");
+    const checked = Bun.spawnSync(
+      ["bash", lockedHelperPath, "restart", "openbot"],
+      { env: environment(input) },
+    );
+    expect(checked.exitCode).not.toBe(0);
+    expect(readFileSync(input.log, "utf8")).not.toMatch(/restart openbot/);
+  } finally {
+    rmSync(input.root, { recursive: true, force: true });
+  }
+});
 
-test.each(["helper", "verifier"].flatMap((consumer) =>
-  ["failure", "signal", "signal-hup", "signal-int", "cleanup", "failure-cleanup"].map((mode) => [consumer, mode] as const),
-))("%s consumer preserves errors, cancellation and render cleanup: %s", (consumer, mode) => {
+test.each(
+  ["helper", "verifier"].flatMap((consumer) =>
+    [
+      "failure",
+      "signal",
+      "signal-hup",
+      "signal-int",
+      "cleanup",
+      "failure-cleanup",
+    ].map((mode) => [consumer, mode] as const),
+  ),
+)(
+  "%s consumer preserves errors, cancellation and render cleanup: %s",
+  (consumer, mode) => {
     const input = fixture();
     try {
       expect(execute(input).exitCode).toBe(0);
       const evidence = stagedEvidence(input);
       if (consumer === "helper") {
-        expect(Bun.spawnSync(["bash", activationPath, "activate", evidence.path], { env: environment(input) }).exitCode).toBe(0);
+        expect(
+          Bun.spawnSync(["bash", activationPath, "activate", evidence.path], {
+            env: environment(input),
+          }).exitCode,
+        ).toBe(0);
       }
       const renderRecord = join(input.root, "render-record");
       const temporaryDirectory = join(input.root, "consumer-temporary");
       mkdirSync(temporaryDirectory);
-      const command = consumer === "helper"
-        ? ["bash", lockedHelperPath, "restart", "openbot"]
-        : ["sh", verifierPath, "pre-apply", evidence.path];
+      const command =
+        consumer === "helper"
+          ? ["bash", lockedHelperPath, "restart", "openbot"]
+          : ["sh", verifierPath, "pre-apply", evidence.path];
       writeFileSync(input.log, "");
-      const result = Bun.spawnSync(["bash", "-c", 'export CONSUMER_PID=$$; exec "$@"', "consumer", ...command], { env: {
-        ...environment(input),
-        TMPDIR: temporaryDirectory,
-        RENDER_RECORD: renderRecord,
-        CONSUMER_RENDER_MODE: mode.startsWith("failure") ? "failure" : mode.startsWith("signal") ? "signal" : "",
-        CONSUMER_SIGNAL: mode === "signal-hup" ? "HUP" : mode === "signal-int" ? "INT" : "TERM",
-        FAIL_CONSUMER_CLEANUP: mode.includes("cleanup") ? "1" : "0",
-      } });
-      expect(result.exitCode, `${consumer}/${mode}: ${result.stderr}`).toBe(mode.includes("cleanup") ? 71 : mode === "signal" ? 143 : mode === "signal-hup" ? 129 : mode === "signal-int" ? 130 : 42);
+      const result = Bun.spawnSync(
+        [
+          "bash",
+          "-c",
+          'export CONSUMER_PID=$$; exec "$@"',
+          "consumer",
+          ...command,
+        ],
+        {
+          env: {
+            ...environment(input),
+            TMPDIR: temporaryDirectory,
+            RENDER_RECORD: renderRecord,
+            CONSUMER_RENDER_MODE: mode.startsWith("failure")
+              ? "failure"
+              : mode.startsWith("signal")
+                ? "signal"
+                : "",
+            CONSUMER_SIGNAL:
+              mode === "signal-hup"
+                ? "HUP"
+                : mode === "signal-int"
+                  ? "INT"
+                  : "TERM",
+            FAIL_CONSUMER_CLEANUP: mode.includes("cleanup") ? "1" : "0",
+          },
+        },
+      );
+      expect(result.exitCode, `${consumer}/${mode}: ${result.stderr}`).toBe(
+        mode.includes("cleanup")
+          ? 71
+          : mode === "signal"
+            ? 143
+            : mode === "signal-hup"
+              ? 129
+              : mode === "signal-int"
+                ? 130
+                : 42,
+      );
       const privateRender = readFileSync(renderRecord, "utf8").trim();
       expect(existsSync(privateRender)).toBe(mode.includes("cleanup"));
-      if (mode.includes("cleanup")) expect(result.stderr.toString()).toContain("render cleanup failed");
+      if (mode.includes("cleanup"))
+        expect(result.stderr.toString()).toContain("render cleanup failed");
       expect(result.stdout.toString()).not.toContain("verification passed");
-      expect(readFileSync(input.log, "utf8")).not.toMatch(/docker compose .*restart openbot/);
-    } finally { rmSync(input.root, { recursive: true, force: true }); }
-});
+      expect(readFileSync(input.log, "utf8")).not.toMatch(
+        /docker compose .*restart openbot/,
+      );
+    } finally {
+      rmSync(input.root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("deactivation cuts a tampered G1 binding and restores the evidenced G0 tag", () => {
   const input = fixture();
@@ -1433,7 +1550,16 @@ test("rejects a noncanonical advertised ref even when it points at the requested
   }
 });
 
-test.each(["checkout", "tests", "render", "build", "brand", "post-status", "package", "overlay-blob"])(
+test.each([
+  "checkout",
+  "tests",
+  "render",
+  "build",
+  "brand",
+  "post-status",
+  "package",
+  "overlay-blob",
+])(
   "restores exact G0 source and configured image after %s failure without applying Compose",
   (failure) => {
     const input = fixture();
@@ -1517,13 +1643,35 @@ test("fails preflight before capture when a required dependency is missing", () 
     // Hide the system jq as well: this fixture must work on hosts with jq installed.
     const isolated = join(input.root, "isolated-bin");
     mkdirSync(isolated);
-    for (const command of ["sh", "awk", "chmod", "cut", "date", "df", "docker", "flock", "git", "grep"]) {
-      const actual = command === "docker" || command === "git" || command === "df"
-        ? join(input.bin, command) : Bun.which(command)!;
+    for (const command of [
+      "sh",
+      "awk",
+      "chmod",
+      "cut",
+      "date",
+      "df",
+      "docker",
+      "flock",
+      "git",
+      "grep",
+    ]) {
+      const actual =
+        command === "docker" || command === "git" || command === "df"
+          ? join(input.bin, command)
+          : Bun.which(command)!;
       executable(join(isolated, command), `#!/bin/sh\nexec ${actual} "$@"\n`);
     }
-    const result = Bun.spawnSync(["/bin/sh", stagePath, input.bundle, input.bundleHash, input.advertisedRef, target],
-      { env: { ...environment(input), PATH: isolated } });
+    const result = Bun.spawnSync(
+      [
+        "/bin/sh",
+        stagePath,
+        input.bundle,
+        input.bundleHash,
+        input.advertisedRef,
+        target,
+      ],
+      { env: { ...environment(input), PATH: isolated } },
+    );
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr.toString()).toContain("missing required command: jq");
     expect(readFileSync(input.sourceState, "utf8").trim()).toBe(original);

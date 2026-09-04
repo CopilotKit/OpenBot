@@ -13,10 +13,7 @@ describe("COMPUTER_EXTRA_HOSTS", () => {
       parseComputerExtraHosts(
         "erp.netsfera.es=100.64.10.20,mail.netsfera.es=100.127.1.2",
       ),
-    ).toEqual([
-      "erp.netsfera.es:100.64.10.20",
-      "mail.netsfera.es:100.127.1.2",
-    ]);
+    ).toEqual(["erp.netsfera.es:100.64.10.20", "mail.netsfera.es:100.127.1.2"]);
   });
 
   test.each([

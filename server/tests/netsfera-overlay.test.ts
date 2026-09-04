@@ -33,7 +33,7 @@ function renderedOverlay() {
       "    image: busybox:latest",
       "    build:",
       "      context: .",
-      "    ports: [\"127.0.0.1:3001:3001\"]",
+      '    ports: ["127.0.0.1:3001:3001"]',
       "    security_opt: [no-new-privileges:true]",
       "    volumes: [openbot-data:/data]",
       "    networks: [openbot-hardened]",
@@ -121,11 +121,7 @@ function decide(botId: string, toolName: string, host: string) {
   );
 }
 
-function changedPaths(
-  before: unknown,
-  after: unknown,
-  prefix = "",
-): string[] {
+function changedPaths(before: unknown, after: unknown, prefix = ""): string[] {
   if (JSON.stringify(before) === JSON.stringify(after)) return [];
   const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === "object" && !Array.isArray(value);
@@ -133,7 +129,9 @@ function changedPaths(
   if (isObjectRecord(before) || isObjectRecord(after)) {
     const beforeObject = isObjectRecord(before) ? before : {};
     const afterObject = isObjectRecord(after) ? after : {};
-    return [...new Set([...Object.keys(beforeObject), ...Object.keys(afterObject)])]
+    return [
+      ...new Set([...Object.keys(beforeObject), ...Object.keys(afterObject)]),
+    ]
       .flatMap((key) =>
         changedPaths(
           beforeObject[key],
@@ -144,9 +142,7 @@ function changedPaths(
       .sort();
   }
 
-  if (
-    before === null || after === null || typeof before !== typeof after
-  ) {
+  if (before === null || after === null || typeof before !== typeof after) {
     return [prefix];
   }
   return [prefix];

@@ -1,9 +1,18 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const wrapperPath = resolve(import.meta.dir, "../../deploy/netsfera/verify-reviewed-promotion-wrapper.sh");
+const wrapperPath = resolve(
+  import.meta.dir,
+  "../../deploy/netsfera/verify-reviewed-promotion-wrapper.sh",
+);
 
 function run(command: string[], cwd: string) {
   const result = Bun.spawnSync(command, { cwd });
@@ -24,7 +33,8 @@ function fixture() {
   run(["git", "add", "."], source);
   run(["git", "commit", "-qm", "base"], source);
   run(["mkdir", "-p", join(source, "deploy/netsfera")], source);
-  const reviewedScript = "#!/usr/bin/env bash\nprintf reviewed > \"$WRAPPER_MARKER\"\n";
+  const reviewedScript =
+    '#!/usr/bin/env bash\nprintf reviewed > "$WRAPPER_MARKER"\n';
   const relativePath = "deploy/netsfera/promote-reviewed-g0.sh";
   writeFileSync(join(source, relativePath), reviewedScript);
   chmodSync(join(source, relativePath), 0o755);
@@ -40,15 +50,36 @@ function fixture() {
   writeFileSync(transferred, reviewedScript);
   chmodSync(transferred, 0o700);
   return {
-    root, source, incoming, marker, target, advertisedRef, bundle, transferred,
+    root,
+    source,
+    incoming,
+    marker,
+    target,
+    advertisedRef,
+    bundle,
+    transferred,
     bundleHash: run(["sha256sum", bundle], root).split(" ")[0],
   };
 }
 
 function invoke(input: ReturnType<typeof fixture>) {
   return Bun.spawnSync(
-    ["bash", wrapperPath, input.bundle, input.bundleHash, input.advertisedRef, input.target, input.transferred],
-    { env: { ...process.env, OPENBOT_SOURCE_DIR: input.source, WRAPPER_MARKER: input.marker } },
+    [
+      "bash",
+      wrapperPath,
+      input.bundle,
+      input.bundleHash,
+      input.advertisedRef,
+      input.target,
+      input.transferred,
+    ],
+    {
+      env: {
+        ...process.env,
+        OPENBOT_SOURCE_DIR: input.source,
+        WRAPPER_MARKER: input.marker,
+      },
+    },
   );
 }
 
@@ -66,10 +97,15 @@ test("executes transferred promotion bytes only when they match the verified rev
 test("refuses changed transferred promotion bytes before they execute", () => {
   const input = fixture();
   try {
-    writeFileSync(input.transferred, "#!/usr/bin/env bash\nprintf tampered > \"$WRAPPER_MARKER\"\n");
+    writeFileSync(
+      input.transferred,
+      '#!/usr/bin/env bash\nprintf tampered > "$WRAPPER_MARKER"\n',
+    );
     const result = invoke(input);
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.toString()).toContain("reviewed promotion script bytes do not match");
+    expect(result.stderr.toString()).toContain(
+      "reviewed promotion script bytes do not match",
+    );
     expect(() => readFileSync(input.marker)).toThrow();
   } finally {
     rmSync(input.root, { recursive: true, force: true });

@@ -3,10 +3,7 @@ const HOSTNAME =
 
 function isTailnetIpv4(value: string): boolean {
   const parts = value.split(".");
-  if (
-    parts.length !== 4 ||
-    parts.some((part) => !/^\d{1,3}$/.test(part))
-  ) {
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) {
     return false;
   }
   const octets = parts.map(Number);

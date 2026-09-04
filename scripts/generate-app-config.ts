@@ -4,7 +4,10 @@ import { loadApplicationConfiguration } from "./application-config";
 
 const projectRoot = resolve(import.meta.dir, "..");
 const applicationConfiguration = await loadApplicationConfiguration();
-const outputPath = resolve(projectRoot, "app/src/lib/generated/application-config.ts");
+const outputPath = resolve(
+  projectRoot,
+  "app/src/lib/generated/application-config.ts",
+);
 
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(

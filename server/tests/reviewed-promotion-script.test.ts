@@ -1,10 +1,23 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const scriptPath = resolve(import.meta.dir, "../../deploy/netsfera/promote-reviewed-g0.sh");
-const lockedHelperPath = resolve(import.meta.dir, "../../deploy/netsfera/openbot-compose-lock-v1.sh");
+const scriptPath = resolve(
+  import.meta.dir,
+  "../../deploy/netsfera/promote-reviewed-g0.sh",
+);
+const lockedHelperPath = resolve(
+  import.meta.dir,
+  "../../deploy/netsfera/openbot-compose-lock-v1.sh",
+);
 const realGit = Bun.which("git")!;
 
 function run(command: string[], cwd: string) {
@@ -27,10 +40,13 @@ function promotionFixture() {
   const state = join(root, "state");
   const cleanupCounter = join(root, "cleanup-counter");
   run(["mkdir", source, incoming, fakeBin], root);
-  makeExecutable(join(fakeBin, "openbot-compose-v1.sh"), `#!/bin/sh
+  makeExecutable(
+    join(fakeBin, "openbot-compose-v1.sh"),
+    `#!/bin/sh
 printf 'helper %s\\n' "$*" >>"$FAKE_LOG"
 exec "$LOCKED_HELPER" "$@"
-`);
+`,
+  );
   run(["git", "init", "-q"], source);
   run(["git", "config", "user.email", "promotion@test"], source);
   run(["git", "config", "user.name", "Promotion Test"], source);
@@ -39,7 +55,10 @@ exec "$LOCKED_HELPER" "$@"
   run(["git", "commit", "-qm", "original"], source);
   const original = run(["git", "rev-parse", "HEAD"], source);
   run(["mkdir", "-p", join(source, "deploy/netsfera")], source);
-  makeExecutable(join(source, "deploy/netsfera/verify-rendered-overlay.sh"), "#!/usr/bin/env bash\nexit 0\n");
+  makeExecutable(
+    join(source, "deploy/netsfera/verify-rendered-overlay.sh"),
+    "#!/usr/bin/env bash\nexit 0\n",
+  );
   writeFileSync(join(source, "reviewed.txt"), "reviewed\n");
   run(["git", "add", "."], source);
   run(["git", "commit", "-qm", "reviewed"], source);
@@ -52,9 +71,14 @@ exec "$LOCKED_HELPER" "$@"
   run(["git", "checkout", "--detach", original], source);
   chmodSync(bundle, 0o600);
 
-  makeExecutable(join(fakeBin, "jq"), "#!/usr/bin/env bash\ncat >/dev/null\nprintf '%s\\n' openbot:test\n");
+  makeExecutable(
+    join(fakeBin, "jq"),
+    "#!/usr/bin/env bash\ncat >/dev/null\nprintf '%s\\n' openbot:test\n",
+  );
   makeExecutable(join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
-  makeExecutable(join(fakeBin, "rm"), `#!/usr/bin/env bash
+  makeExecutable(
+    join(fakeBin, "rm"),
+    `#!/usr/bin/env bash
 if [[ "\${FAKE_FAIL_MODE:-}" == *cleanup-failure* ]] && [[ "$*" == *g0-promotion* ]]; then
   printf 'simulated cleanup failure\\n' >&2
   exit 55
@@ -65,15 +89,21 @@ if [[ "\${FAKE_FAIL_MODE:-}" == *cleanup-first-failure* ]] && [[ "$*" == *g0-pro
   exit 55
 fi
 exec /bin/rm "$@"
-`);
-  makeExecutable(join(fakeBin, "git"), `#!/usr/bin/env bash
+`,
+  );
+  makeExecutable(
+    join(fakeBin, "git"),
+    `#!/usr/bin/env bash
 if [[ "\${FAKE_FAIL_MODE:-}" == *rollback-status* ]] && [ "$1" = -C ] && [ "$3" = status ] && [ "$("$REAL_GIT" -C "$2" rev-parse HEAD)" = "$FAKE_ORIGINAL" ]; then
   printf 'simulated rollback status failure\\n' >&2
   exit 41
 fi
 exec "$REAL_GIT" "$@"
-`);
-  makeExecutable(join(fakeBin, "docker"), `#!/usr/bin/env bash
+`,
+  );
+  makeExecutable(
+    join(fakeBin, "docker"),
+    `#!/usr/bin/env bash
 set -eu
 printf 'docker %s\\n' "$*" >> "$FAKE_LOG"
 if [ "$1" = compose ]; then
@@ -122,12 +152,25 @@ if [ "$1" = run ]; then
   exit 0
 fi
 exit 0
-`);
+`,
+  );
 
   const bundleHash = run(["sha256sum", bundle], root).split(" ")[0];
   const owner = `${run(["id", "-un"], root)}:${run(["id", "-gn"], root)}`;
   return {
-    root, source, incoming, bundle, target, original, advertisedRef, bundleHash, fakeBin, log, state, cleanupCounter, owner,
+    root,
+    source,
+    incoming,
+    bundle,
+    target,
+    original,
+    advertisedRef,
+    bundleHash,
+    fakeBin,
+    log,
+    state,
+    cleanupCounter,
+    owner,
   };
 }
 
@@ -137,7 +180,14 @@ function execute(
   imageBrand?: "product-only" | "wrong-product",
 ) {
   return Bun.spawnSync(
-    ["bash", scriptPath, fixture.bundle, fixture.bundleHash, fixture.advertisedRef, fixture.target],
+    [
+      "bash",
+      scriptPath,
+      fixture.bundle,
+      fixture.bundleHash,
+      fixture.advertisedRef,
+      fixture.target,
+    ],
     {
       env: {
         ...process.env,
@@ -150,7 +200,10 @@ function execute(
         LOCKED_HELPER: lockedHelperPath,
         OPENBOT_COMPOSE_HELPER: join(fixture.fakeBin, "openbot-compose-v1.sh"),
         OPENBOT_DEPLOYMENT_LOCK_FILE: join(fixture.root, "deployment.lock"),
-        OPENBOT_G1_ACTIVATION_MANIFEST: join(fixture.root, "activation.manifest"),
+        OPENBOT_G1_ACTIVATION_MANIFEST: join(
+          fixture.root,
+          "activation.manifest",
+        ),
         OPENBOT_G1_ACTIVATION_MARKER: join(fixture.root, "activation.marker"),
         ...(failMode ? { FAKE_FAIL_MODE: failMode } : {}),
         ...(imageBrand ? { FAKE_IMAGE_BRAND: imageBrand } : {}),
@@ -177,29 +230,57 @@ function expectScopedUpCommands(log: string) {
   }
 }
 
-test.each(["skill-grant", "mcp-grant", "bot-grant"])("promotion permits only instruction grants: %s", (grant) => {
-  const fixture = promotionFixture();
-  try {
-    const result = execute(fixture, grant);
-    if (grant === "skill-grant") expect(result.exitCode, result.stderr.toString()).toBe(0);
-    else {
-      expect(result.exitCode).toBe(65);
-      expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.original);
-      expect(readFileSync(fixture.log, "utf8")).not.toContain(" build openbot");
+test.each(["skill-grant", "mcp-grant", "bot-grant"])(
+  "promotion permits only instruction grants: %s",
+  (grant) => {
+    const fixture = promotionFixture();
+    try {
+      const result = execute(fixture, grant);
+      if (grant === "skill-grant")
+        expect(result.exitCode, result.stderr.toString()).toBe(0);
+      else {
+        expect(result.exitCode).toBe(65);
+        expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(
+          fixture.original,
+        );
+        expect(readFileSync(fixture.log, "utf8")).not.toContain(
+          " build openbot",
+        );
+      }
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
     }
-  } finally { rmSync(fixture.root, { recursive: true, force: true }); }
-});
+  },
+);
 
 test("rejects a mismatched reviewed-bundle digest before changing the source checkout", () => {
   const fixture = promotionFixture();
   try {
-    const result = Bun.spawnSync(["bash", scriptPath, fixture.bundle, "0".repeat(64), fixture.advertisedRef, fixture.target], {
-      env: { ...process.env, OPENBOT_SOURCE_DIR: fixture.source, OPENBOT_INCOMING_DIR: fixture.incoming },
-    });
+    const result = Bun.spawnSync(
+      [
+        "bash",
+        scriptPath,
+        fixture.bundle,
+        "0".repeat(64),
+        fixture.advertisedRef,
+        fixture.target,
+      ],
+      {
+        env: {
+          ...process.env,
+          OPENBOT_SOURCE_DIR: fixture.source,
+          OPENBOT_INCOMING_DIR: fixture.incoming,
+        },
+      },
+    );
 
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.toString()).toContain("reviewed bundle SHA-256 mismatch");
-    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.original);
+    expect(result.stderr.toString()).toContain(
+      "reviewed bundle SHA-256 mismatch",
+    );
+    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(
+      fixture.original,
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -210,15 +291,24 @@ test("promotes only openbot from the exact candidate render and keeps unique evi
   try {
     const result = execute(fixture);
     expect(result.exitCode).toBe(0);
-    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.target);
+    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(
+      fixture.target,
+    );
     expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
-    expect(readFileSync(fixture.log, "utf8")).toContain("helper --lock-held-fd 9 --reviewed-controller");
+    expect(readFileSync(fixture.log, "utf8")).toContain(
+      "helper --lock-held-fd 9 --reviewed-controller",
+    );
     const commands = readFileSync(fixture.log, "utf8").split("\n");
-    expect(commands.filter((line) => line.startsWith("helper ")).length)
-      .toBe(commands.filter((line) => line.startsWith("docker compose ")).length);
-    const evidence = readdirSync(fixture.incoming).filter((name) => name.endsWith(".evidence"));
+    expect(commands.filter((line) => line.startsWith("helper ")).length).toBe(
+      commands.filter((line) => line.startsWith("docker compose ")).length,
+    );
+    const evidence = readdirSync(fixture.incoming).filter((name) =>
+      name.endsWith(".evidence"),
+    );
     expect(evidence).toHaveLength(1);
-    expect(readFileSync(join(fixture.incoming, evidence[0]), "utf8")).toContain(`target_commit=${fixture.target}`);
+    expect(readFileSync(join(fixture.incoming, evidence[0]), "utf8")).toContain(
+      `target_commit=${fixture.target}`,
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -229,7 +319,9 @@ test("accepts the baked NETSFERA ERP product even when Vite removed unused tenan
   try {
     const result = execute(fixture, undefined, "product-only");
     expect(result.exitCode).toBe(0);
-    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.target);
+    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(
+      fixture.target,
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -240,33 +332,46 @@ test("rejects a baked image without the exact NETSFERA ERP product and rolls bac
   try {
     const result = execute(fixture, undefined, "wrong-product");
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.toString()).toContain("restoring recorded OpenBot source and image");
-    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.original);
+    expect(result.stderr.toString()).toContain(
+      "restoring recorded OpenBot source and image",
+    );
+    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(
+      fixture.original,
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
-test.each(["after-build", "after-apply"])("rolls back and verifies the prior service after %s failure", (failure) => {
-  const fixture = promotionFixture();
-  try {
-    const result = execute(fixture, failure);
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.toString()).toContain("restoring recorded OpenBot source and image");
-    expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(fixture.original);
-    expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
-    expect(readFileSync(fixture.state, "utf8")).toBe("restored");
-  } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
+test.each(["after-build", "after-apply"])(
+  "rolls back and verifies the prior service after %s failure",
+  (failure) => {
+    const fixture = promotionFixture();
+    try {
+      const result = execute(fixture, failure);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr.toString()).toContain(
+        "restoring recorded OpenBot source and image",
+      );
+      expect(run(["git", "rev-parse", "HEAD"], fixture.source)).toBe(
+        fixture.original,
+      );
+      expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
+      expect(readFileSync(fixture.state, "utf8")).toBe("restored");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("attempts rollback even when private cleanup fails", () => {
   const fixture = promotionFixture();
   try {
     const result = execute(fixture, "after-build,cleanup-failure");
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.toString()).toContain("restoring recorded OpenBot source and image");
+    expect(result.stderr.toString()).toContain(
+      "restoring recorded OpenBot source and image",
+    );
     expect(readFileSync(fixture.state, "utf8")).toBe("restored");
     expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
   } finally {
@@ -279,7 +384,9 @@ test("reports cleanup failure after a successful promotion when the first cleanu
   try {
     const result = execute(fixture, "cleanup-first-failure");
     expect(result.exitCode).toBe(71);
-    expect(result.stderr.toString()).toContain("promotion cleanup failed after rollback");
+    expect(result.stderr.toString()).toContain(
+      "promotion cleanup failed after rollback",
+    );
     expect(readFileSync(fixture.state, "utf8")).toBe("applied");
     expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
   } finally {
@@ -292,7 +399,9 @@ test("reports CRITICAL and exits 70 when rollback status verification fails", ()
   try {
     const result = execute(fixture, "after-build,rollback-status");
     expect(result.exitCode).toBe(70);
-    expect(result.stderr.toString()).toContain("CRITICAL: automatic rollback is incomplete");
+    expect(result.stderr.toString()).toContain(
+      "CRITICAL: automatic rollback is incomplete",
+    );
     expectScopedUpCommands(readFileSync(fixture.log, "utf8"));
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
@@ -303,16 +412,28 @@ test("does not overwrite evidence or rollback tags on a retry", () => {
   const fixture = promotionFixture();
   try {
     expect(execute(fixture).exitCode).toBe(0);
-    const firstEvidence = readdirSync(fixture.incoming).filter((name) => name.endsWith(".evidence"));
-    run(["git", "update-ref", fixture.advertisedRef, fixture.target], fixture.source);
-    run(["git", "bundle", "create", fixture.bundle, fixture.advertisedRef], fixture.source);
+    const firstEvidence = readdirSync(fixture.incoming).filter((name) =>
+      name.endsWith(".evidence"),
+    );
+    run(
+      ["git", "update-ref", fixture.advertisedRef, fixture.target],
+      fixture.source,
+    );
+    run(
+      ["git", "bundle", "create", fixture.bundle, fixture.advertisedRef],
+      fixture.source,
+    );
     run(["git", "update-ref", "-d", fixture.advertisedRef], fixture.source);
     chmodSync(fixture.bundle, 0o600);
     expect(execute(fixture).exitCode).toBe(0);
-    const evidence = readdirSync(fixture.incoming).filter((name) => name.endsWith(".evidence"));
+    const evidence = readdirSync(fixture.incoming).filter((name) =>
+      name.endsWith(".evidence"),
+    );
     expect(evidence).toHaveLength(2);
     expect(new Set(evidence).size).toBe(2);
-    expect(firstEvidence[0]).not.toBe(evidence.find((name) => name !== firstEvidence[0]));
+    expect(firstEvidence[0]).not.toBe(
+      evidence.find((name) => name !== firstEvidence[0]),
+    );
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

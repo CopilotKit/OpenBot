@@ -328,7 +328,10 @@ export type EnsureOptions = {
  * off the host, and none of them costs a Bot anything it legitimately needs: a browser and a
  * filesystem under `/workspace`.
  */
-export function computerHostConfig(names: ComputerNames, options: EnsureOptions) {
+export function computerHostConfig(
+  names: ComputerNames,
+  options: EnsureOptions,
+) {
   return {
     // The Bot's own storage. This is what turns the path confinement inside the computer from a
     // boundary between a Bot and the host into a boundary between one Bot and another.
