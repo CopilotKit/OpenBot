@@ -19,6 +19,40 @@ the coworker went on being asked while the only screen that could stop it had st
 A coworker you have hidden now appears in that list when a grant already points at it, marked as
 hidden from your roster, so it can be switched off. One you have hidden with nothing granted to it
 stays hidden.
+### A tool call that failed no longer reads as one that worked
+
+The audit page draws a row it does not recognise as `Allowed`, which is right for the many rows that
+are neither a refusal nor a failure. Two rows that are failures were falling through to it: a
+connector tool call this deployment permitted and the vendor did not complete, and a component's
+data read that was granted and then broke. Both were drawn in the same muted colour as a call that
+went through, and neither appeared under `Did not happen`, so the view an administrator opens to ask
+what did not work here was short by exactly the rows they came for. A per-person connector fails on
+this path every time somebody's token expires, so this was the most common failure the product has
+and the one the trail was quietest about. Both now read as `Did not happen`, and both are in that
+saved view. Neither is filed as a refusal: nothing was forbidden on either row.
+### A stray space in NODE_ENV no longer lets the public example key through
+
+A deployment that never changed `KEY_ENCRYPTION_KEY` encrypts its credential vault with the key
+printed in `.env.example`, so the server refuses to start with it under `NODE_ENV=production`. That
+refusal compared the variable exactly as written, while the other production refusal beside it —
+private-host browsing — trimmed first. Both read the same env file, and a trailing space there is
+invisible: Docker's `env_file` preserves it and so does every hosting dashboard with a text box. So
+`NODE_ENV=production ` tripped one refusal, slipped past the other, and started the deployment on the
+public key with only a warning at boot. Both gates now ask the same question the same way.
+## 0.0.6
+
+### Setting up needs one Intelligence credential, not two
+
+`COPILOTKIT_LICENSE_TOKEN` is no longer required. Managed Intelligence derives entitlement from the
+project key, so the second credential people were sent to fetch had stopped existing, and startup
+was still refusing to boot without it. A deployment now needs `INTELLIGENCE_API_URL`,
+`INTELLIGENCE_GATEWAY_WS_URL` and `INTELLIGENCE_API_KEY`. A licence token is still read and still
+forwarded to the runtime when set, which is what a self-hosted Intelligence with its own licence
+needs.
+
+The Helm chart failed harder than the docs did: it *required* `secrets.licenseToken`, so a
+managed-Intelligence install was refused at `helm install` rather than merely misdocumented. That
+value is now optional.
 
 ### Duplicating a coworker keeps the endpoint it was copied from
 
@@ -118,6 +152,22 @@ roster never said so. A reported time is now capped at the server's own clock.
 bound a random port while the published mapping still pointed at 4300. Empty now means the default
 4300; a non-numeric or out-of-range value refuses to start instead of binding port 30 from a typo
 like `30o0`.
+### Tool arguments and results are redacted in the audit trail whatever their spelling
+
+The sensitive-key list redacted `tool_result` and `tool_arguments` but not `toolResult` and
+`toolArguments`, which is the spelling MCP and computer tool calls use. Those payloads were stored
+verbatim in `audit_events.payload`, nested ones included, while every other sensitive key already
+carried both spellings. New rows are redacted; rows already written are not rewritten, so a
+deployment that has been running MCP or computer tools still holds unredacted arguments and results
+in its existing trail.
+
+### An IPv6 address listed in `AGENT_ENDPOINT_ALLOWED_HOSTS` is now actually allowed
+
+A bracketed IPv6 host was normalised one way when the list was read and another way when an endpoint
+was checked, so the two could never match: `[::1]:8080` became `::1]:8080` on one side and
+`::1:8080` on the other. Registering a Bot at a listed IPv6 address was refused as a private
+address anyway. IPv4 was unaffected.
+
 ### An empty `PORT` no longer starts the server on a port nobody asked for
 
 `PORT` and `SERVER_PORT` name one number, and either is meant to move the server. A `PORT` that was
@@ -127,6 +177,12 @@ ignored, the number parsed to `NaN`, and the server came up on an ephemeral port
 that polls `SERVER_PORT` reported it had never started. An empty value now counts as unset, the way
 every other setting already treats it, and a value that is not a whole port number (`30o1` used to
 start the server on port 30) refuses to start instead.
+
+### `TRUSTED_ORIGINS` falls back to the port the app is actually served on
+
+Unset, it fell back to `http://localhost:3000`, while the app is served on 3010 everywhere else in
+this repository. `appUrl` reads the first trusted origin, so a deployment that left the variable
+blank built OAuth redirects against a port nothing was listening on.
 
 ### Coworkers are made in a wizard and managed in a dialog
 
@@ -240,6 +296,33 @@ showing a conversation that had been deleted until the page was reloaded.
 A server now tells the browsers it is holding to refetch when its subscription is re-established.
 Nothing to configure, and no change for a deployment whose database connection never drops.
 
+### A Bot can answer with a picture instead of describing one
+
+Ask for a chart and a Bot replied in prose, or handed back a fenced block of HTML for somebody to
+read instead of look at. Set `OPENBOT_GENERATIVE_UI=true` and it may answer with an interface it
+writes itself, drawn in the transcript. Off unless asked for, and deliberately so: it runs code a
+model wrote, so a deployment acquires the capability by choosing it rather than by upgrading.
+
+### The sidebar collapses, and the roster is reachable on a phone
+
+The sidebar could always collapse, but nothing in the app ever drew the trigger. The only
+affordance was a 16px transparent rail carrying `tabIndex={-1}`, which the eye could not find and
+the keyboard could not reach. Below 768px that same sidebar becomes a sheet whose open state starts
+false, so with no trigger the roster was unreachable on a phone, and the roster is how you reach a
+channel, Skills, Agents and your own account. There is now a toggle in the header each screen
+already draws, with Cmd/Ctrl+B on it, and the collapsed choice survives a reload: the state was
+written to a cookie that nothing ever read back. Fifteen screens that previously drew no header bar
+gain 40px above their heading, because the toggle has to sit at the pane's edge.
+
+### A button drawn as a link answers the keyboard and announces itself
+
+Six controls navigate rather than submit, so they render a router link through the shared button:
+New skill, New agent, the sidebar's new-channel control, two empty-state returns, and the back
+button that draws on five routes. Base UI was told each was a native `<button>`, so it wrote
+`type="button"` onto an anchor, where it means nothing, and skipped the two things a non-button
+needs: the `role="button"` that tells a screen reader what the control is, and Space-key
+activation, which a `<button>` gets from the browser and an anchor does not.
+
 ### A Bot's answer comes back to the conversation that asked
 
 **This reverses what 0.0.5 shipped.** The 0.0.5 notes below say the asking Bot does not relay text
@@ -327,6 +410,17 @@ cluster and is not empty is now refused with a sentence naming the mount to use 
 
 Reported by [@jerelvelarde](https://github.com/CopilotKit/OpenBot/issues/269) with the container logs
 for both mount paths, which is what made the two failure modes separable.
+
+### Turning on network policies no longer leaves the culler pod open
+
+`networkPolicy.enabled` rendered policies selecting the server and the computers. The culler
+CronJob's pod carries `component: culler` and was selected by neither, and a pod no policy selects
+keeps the cluster default rather than being denied. So the switch fenced the API and the computers
+and left open the one pod that wakes every five minutes carrying the API's whole environment,
+`KEY_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET` included, with a token allowed to create, patch and
+delete Sandboxes. It has a third policy now, narrower than the other two, and
+`networkPolicy.cullerExtraEgress` narrows its database egress separately from `extraEgress`. A
+render that leaves any pod unfenced is refused by the chart checks.
 
 ### A sign-in a site opens in a new window is shown, and can be clicked
 

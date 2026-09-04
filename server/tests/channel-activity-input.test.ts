@@ -52,4 +52,17 @@ describe("parsing a reported message", () => {
     expect(parsed.value.text).toBe("hello");
     expect(parsed.value.agentId).toBe("agent-1");
   });
+
+  test("refuses a whitespace-only agent ID rather than looking it up", () => {
+    // "   " used to trim to "" and fall through to a 404 "Agent not found";
+    // a malformed field is a 400 naming the field.
+    const parsed = parseActivityInput(
+      { text: "hello", agentId: "   ", at: "2026-09-03T09:00:00.000Z" },
+      now,
+    );
+    expect(parsed).toEqual({
+      ok: false,
+      error: "Agent ID must be a string or null.",
+    });
+  });
 });
