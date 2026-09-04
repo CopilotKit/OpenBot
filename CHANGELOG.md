@@ -29,6 +29,14 @@ The tools run in the browser as the signed-in person, over the same `POST /api/p
 person uses, so who may take a slug is answered the same way and the `configuration.changed` audit
 row is written the same way.
 
+### Resetting a computer clears the activity pane
+
+Resetting a Bot's computer deletes the browser profile it worked on, but the activity pane beside the
+chat went on listing the commands and file operations that ran there. They sat alongside anything the
+Bot did afterwards with nothing to tell the two apart, and only reloading the page cleared them. The
+pane now forgets a Bot's history when that Bot's computer is reset. Stopping a browser is unchanged:
+the profile survives a stop and is meant to resume, so what it did is still true of the machine.
+
 ### A person can set standing instructions that every coworker follows
 
 Settings now has a box for standing instructions: one piece of text per person, saved once and
