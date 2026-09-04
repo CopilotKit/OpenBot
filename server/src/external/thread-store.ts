@@ -5,7 +5,7 @@ import {
   externalThreadBindings,
   externalThreadMessages,
 } from "../db/schema";
-import type { ExternalProvider } from "./schema-types";
+import { isExternalProvider, type ExternalProvider } from "./schema-types";
 
 export type ExternalTranscriptMessage = {
   id: string;
@@ -129,10 +129,10 @@ const externalRecency = sql<Date>`coalesce(${latestMessageAt}, ${externalThreadB
 function asBinding(
   row: Omit<ExternalThreadBinding, "provider"> & { provider: string },
 ): ExternalThreadBinding {
-  if (row.provider !== "slack") {
+  if (!isExternalProvider(row.provider)) {
     throw new Error("External thread binding has an unsupported provider.");
   }
-  return { ...row, provider: "slack" };
+  return { ...row, provider: row.provider };
 }
 
 function isSameBinding(
@@ -261,6 +261,7 @@ export function createExternalThreadStore(
     const rows = await database
       .select({
         threadId: externalThreadBindings.channelsThreadId,
+        provider: externalThreadBindings.provider,
         agentId: externalThreadBindings.agentId,
         agentName: agents.name,
         lastMessage: latestMessageContent,
@@ -292,7 +293,7 @@ export function createExternalThreadStore(
     return {
       threads: wanted.map((row) => ({
         threadId: row.threadId,
-        provider: "slack" as const,
+        provider: isExternalProvider(row.provider) ? row.provider : "slack",
         agentId: row.agentId,
         agentName: row.agentName,
         lastMessage:

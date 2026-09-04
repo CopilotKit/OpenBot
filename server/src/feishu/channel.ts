@@ -48,58 +48,65 @@ export function createOpenBotFeishuChannel({
 
   async function handleMessage(message: FeishuMessage): Promise<void> {
     if (message.chatType === "group" && !message.mentionedBot) return;
-    const resolved = await resolveUser({
-      provider: "feishu",
-      providerTenantId: transport.tenantKey,
-      providerUserId: message.senderId,
-    });
-    if (!resolved) return;
-    if (resolved.kind === "unlinked") {
-      await transport.send(
-        message.chatId,
-        `请先关联 OpenBot 账户：[打开关联页面](${resolved.linkUrl})`,
-        { replyTo: message.messageId },
-      );
-      return;
-    }
+    try {
+      const resolved = await resolveUser({
+        provider: "feishu",
+        providerTenantId: transport.tenantKey,
+        providerUserId: message.senderId,
+      });
+      if (!resolved) return;
+      if (resolved.kind === "unlinked") {
+        await transport.send(
+          message.chatId,
+          `请先关联 OpenBot 账户：[打开关联页面](${resolved.linkUrl})`,
+          { replyTo: message.messageId },
+        );
+        return;
+      }
 
-    const providerThreadId =
-      message.threadId ??
-      message.rootId ??
-      message.replyToMessageId ??
-      message.messageId;
-    const conversationKey = `feishu:${transport.tenantKey}:${message.chatId}:${providerThreadId}`;
-    const execution = {
-      actor: resolved.actor,
-      applicationUser: resolved.user,
-      provider: "feishu" as const,
-      providerTenantId: transport.tenantKey,
-      providerConversationId: message.chatId,
-      providerThreadId,
-      messageText: message.content,
-    };
-    const agent = new OpenBotChannelAgent(
-      conversationKey,
-      agentDeps,
-      execution,
-    );
-    const input: RunAgentInput = {
-      threadId: conversationKey,
-      runId: crypto.randomUUID(),
-      state: {},
-      messages: [
-        { id: message.messageId, role: "user", content: message.content },
-      ],
-      tools: [],
-      context: [],
-      forwardedProps: {},
-    };
-    const events = await runWithSlackExecution(execution, () =>
-      lastValueFrom(agent.run(input).pipe(toArray())),
-    );
-    const reply = assistantText(events);
-    if (reply) {
-      await transport.send(message.chatId, reply, {
+      const providerThreadId =
+        message.threadId ??
+        message.rootId ??
+        message.replyToMessageId ??
+        message.messageId;
+      const conversationKey = `feishu:${transport.tenantKey}:${message.chatId}:${providerThreadId}`;
+      const execution = {
+        actor: resolved.actor,
+        applicationUser: resolved.user,
+        provider: "feishu" as const,
+        providerTenantId: transport.tenantKey,
+        providerConversationId: message.chatId,
+        providerThreadId,
+        messageText: message.content,
+      };
+      const agent = new OpenBotChannelAgent(
+        conversationKey,
+        agentDeps,
+        execution,
+      );
+      const input: RunAgentInput = {
+        threadId: conversationKey,
+        runId: crypto.randomUUID(),
+        state: {},
+        messages: [
+          { id: message.messageId, role: "user", content: message.content },
+        ],
+        tools: [],
+        context: [],
+        forwardedProps: {},
+      };
+      const events = await runWithSlackExecution(execution, () =>
+        lastValueFrom(agent.run(input).pipe(toArray())),
+      );
+      const reply = assistantText(events);
+      if (reply) {
+        await transport.send(message.chatId, reply, {
+          replyTo: message.messageId,
+        });
+      }
+    } catch (error) {
+      console.error("OpenBot Feishu turn failed", error);
+      await transport.send(message.chatId, "此消息暂时无法处理，请稍后重试。", {
         replyTo: message.messageId,
       });
     }
