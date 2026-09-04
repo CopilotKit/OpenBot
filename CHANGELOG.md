@@ -8,6 +8,24 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot's computer is waited for properly on Podman, and the supervisor can reach the engine there
+
+Two things stopped OpenBot running on Podman, which nothing had tried before.
+
+The supervisor could not reach the engine at all: `The supervisor could not reach Docker`. The socket
+is there and the mount is right, but Podman's virtual machine runs SELinux and labels the socket in a
+way a container is not allowed to read. The supervisor now declares `label=disable`, which is what
+that needs and which changes nothing on Docker.
+
+Then every cold start of a computer raced the first request to it. Readiness was read off the image's
+`HEALTHCHECK`, and Podman does not report one: its images are OCI-manifest, the OCI image config has
+no healthcheck field, and the instruction is dropped both when Podman builds an image and when it
+pulls one that has it. With no health to read, the supervisor fell back to accepting a container that
+was merely running, and a running container is not a browser that is answering, so the first request
+arrived at a port nothing was listening on and came back as a computer that is not running. The
+supervisor now states the healthcheck when it creates a computer instead of inheriting it, so
+readiness no longer depends on how the image was built. On Docker the behaviour is unchanged.
+
 ## 0.0.7
 
 ### The published service images are zstd rather than gzip

@@ -223,6 +223,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # To register an entry per Bot as each computer is created.
       - spire-server-socket:/tmp/spire-server/private
+    security_opt:
+      # The engine socket carries an SELinux label this container is not allowed to read.
+      - label=disable
     healthcheck:
       test: ["CMD-SHELL", "bun -e \"await fetch('http://localhost:4300/health')\""]
       interval: 10s
