@@ -8,6 +8,25 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### An IPv6 address in `AGENT_ENDPOINT_ALLOWED_HOSTS` now matches however it is written
+
+The endpoint check compares the list against the address as the URL parser spells it, compressed
+and lower-case, while the list kept each IPv6 entry as the operator wrote it. `[0:0:0:0:0:0:0:1]:8443`
+was therefore a line that silently never matched, the failure the list's other refusals exist to
+prevent. Stripping the brackets on both sides also folded two different names into one, so naming
+`[fd00::1:8443]`, an address, admitted `[fd00::1]:8443`, another address on a port, and the other way
+round. Bracketed entries are now stored in the parser's spelling, with the port kept as written, and
+compared with their brackets on; an entry the parser does not read as an address is refused at boot,
+naming the entry, as a URL or a wildcard already was. Names and IPv4 entries are unaffected.
+### A Bot's own decline is only recorded against a Bot the caller may reach
+
+A Bot reports that it declined a request through the person's session, and the audit row says
+`reportedBy: the Bot itself`. The route wrote that row for any agent id in the path, without asking
+whether the caller could reach that Bot, so any signed-in person could put a decline, in any words,
+against any coworker, one they cannot see included, and an administrator reading the trail would take
+it for something the Bot said. The route now asks the store first, as every other route on a Bot
+does, and answers not found for a Bot the caller cannot reach, writing nothing.
+
 ### The engine socket the supervisor is given can be pointed somewhere else
 
 Compose mounted `/var/run/docker.sock` into the supervisor as a fixed path. That is correct for
@@ -93,6 +112,14 @@ unattended save could replace a skill somebody is already using.
 The tools run in the browser as the signed-in person, over the same `POST /api/plugins/skills` a
 person uses, so who may take a slug is answered the same way and the `configuration.changed` audit
 row is written the same way.
+
+### Resetting a computer clears the activity pane
+
+Resetting a Bot's computer deletes the browser profile it worked on, but the activity pane beside the
+chat went on listing the commands and file operations that ran there. They sat alongside anything the
+Bot did afterwards with nothing to tell the two apart, and only reloading the page cleared them. The
+pane now forgets a Bot's history when that Bot's computer is reset. Stopping a browser is unchanged:
+the profile survives a stop and is meant to resume, so what it did is still true of the machine.
 
 ### A person can set standing instructions that every coworker follows
 
