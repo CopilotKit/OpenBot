@@ -4,7 +4,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use openbot_desktop_lib::{acquire, deployment, engine, env as openbot_env, stack, windows as win};
+use openbot_desktop_lib::{
+    acquire, deployment, engine, env as openbot_env, stack, supervise, windows as win,
+};
 
 /// The deployment this app installs.
 ///
@@ -18,7 +20,8 @@ use tauri::{Emitter, Manager};
 /// What the shell is running, so the window and the tray say the same thing.
 #[derive(Default)]
 struct Shell {
-    children: Mutex<Vec<std::process::Child>>,
+    /// Named, because a restart policy that cannot say which process died cannot start it again.
+    children: Mutex<Vec<(&'static str, std::process::Child)>>,
     root: Mutex<Option<PathBuf>>,
 }
 
@@ -232,12 +235,11 @@ async fn start_stack(
     .map_err(|error| format!("the wait did not run: {error}"))?;
 
     let shell = app.state::<Shell>();
-    shell
-        .children
-        .lock()
-        .unwrap()
-        .extend(started.into_iter().map(|(_, child)| child));
-    *shell.root.lock().unwrap() = Some(root);
+    shell.children.lock().unwrap().extend(started);
+    *shell.root.lock().unwrap() = Some(root.clone());
+
+    // From here the shell is the restart policy `worker/src/index.ts` says it does not have.
+    supervise_host_processes(app.clone(), root, logs, bun);
 
     outcome.inspect_err(|error| report(&app, "answering", false, error.clone()))?;
     report(&app, "answering", true, "the API and the app are answering");
@@ -261,7 +263,10 @@ fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
 /// right to call that a bug.
 fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), String> {
     let shell = app.state::<Shell>();
-    for mut child in shell.children.lock().unwrap().drain(..) {
+    // Cleared first, so the watcher stops before anything is killed and does not read a death it
+    // caused as one worth answering.
+    *shell.root.lock().unwrap() = None;
+    for (_, mut child) in shell.children.lock().unwrap().drain(..) {
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -393,6 +398,82 @@ fn which_bun() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
 }
 
+/// Watch the three host processes and start one again when it dies.
+///
+/// The policy is in `supervise.rs`; this is the loop that applies it. It ends when the stack is
+/// stopped, which is what clearing the root means, so stopping does not race a restart.
+fn supervise_host_processes(app: tauri::AppHandle, root: PathBuf, logs: PathBuf, bun: PathBuf) {
+    std::thread::spawn(move || {
+        let mut watches: Vec<supervise::Watch> = stack::HOST_PROCESSES
+            .iter()
+            .map(|process| supervise::Watch::new(process.name))
+            .collect();
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let shell = app.state::<Shell>();
+            if shell.root.lock().unwrap().is_none() {
+                return;
+            }
+
+            // Which ones have died. Collected rather than acted on under the lock, because a
+            // restart waits, and waiting while holding the children is how Stop would block on a
+            // backoff nobody asked it to sit through.
+            let dead: Vec<&'static str> = {
+                let mut children = shell.children.lock().unwrap();
+                let mut dead = Vec::new();
+                for (name, child) in children.iter_mut() {
+                    if let Ok(Some(_)) = child.try_wait() {
+                        dead.push(*name);
+                    }
+                }
+                dead
+            };
+
+            for name in dead {
+                let Some(watch) = watches.iter_mut().find(|watch| watch.name == name) else {
+                    continue;
+                };
+                if !watch.should_restart(std::time::Instant::now()) {
+                    report(&app, name, false, watch.gave_up());
+                    continue;
+                }
+                report(
+                    &app,
+                    name,
+                    false,
+                    format!("{name} stopped. Starting it again."),
+                );
+                std::thread::sleep(supervise::backoff(watch.restarts - 1));
+
+                if shell.root.lock().unwrap().is_none() {
+                    return;
+                }
+                let Some(process) = stack::HOST_PROCESSES
+                    .iter()
+                    .find(|process| process.name == name)
+                else {
+                    continue;
+                };
+                match stack::spawn_host_process(process, &root, &logs, &bun) {
+                    Ok(child) => {
+                        let mut children = shell.children.lock().unwrap();
+                        children.retain(|(held, _)| *held != name);
+                        children.push((name, child));
+                        report(&app, name, true, "started again");
+                    }
+                    Err(error) => report(
+                        &app,
+                        name,
+                        false,
+                        format!("{name} would not start: {error}"),
+                    ),
+                }
+            }
+        }
+    });
+}
+
 /// Point the window at OpenBot if it is up, and at the setup screen if it is not.
 ///
 /// Used by the tray and by a second launch, both of which happen at moments when the caller has no
@@ -509,12 +590,13 @@ fn main() {
             if matches!(event, tauri::RunEvent::Exit) {
                 let shell = app.state::<Shell>();
                 {
+                    *shell.root.lock().unwrap() = None;
                     let mut children = shell.children.lock().unwrap();
-                    for child in children.iter_mut() {
+                    for (_, child) in children.iter_mut() {
                         ask_to_stop(child);
                     }
                     std::thread::sleep(std::time::Duration::from_millis(1500));
-                    for child in children.iter_mut() {
+                    for (_, child) in children.iter_mut() {
                         let _ = child.kill();
                         let _ = child.wait();
                     }

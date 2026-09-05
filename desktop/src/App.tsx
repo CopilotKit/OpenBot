@@ -28,21 +28,31 @@ export function App() {
   const [root, setRoot] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [modelKey, setModelKey] = useState("");
-  const [apiUrl, setApiUrl] = useState("https://api.intelligence.copilotkit.ai");
-  const [wsUrl, setWsUrl] = useState("wss://realtime.intelligence.copilotkit.ai");
+  const [apiUrl, setApiUrl] = useState(
+    "https://api.intelligence.copilotkit.ai",
+  );
+  const [wsUrl, setWsUrl] = useState(
+    "wss://realtime.intelligence.copilotkit.ai",
+  );
   const [steps, setSteps] = useState<Progress[]>([]);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [failure, setFailure] = useState("");
 
   useEffect(() => {
-    invoke<EngineStatus>("detect_engine").then(setEngine).catch(() => undefined);
+    invoke<EngineStatus>("detect_engine")
+      .then(setEngine)
+      .catch(() => undefined);
     invoke<string>("default_root")
       .then(async (found) => {
         setRoot(found);
         // A stack this app started may still be up from a previous window. Ask, rather than
         // offering to set up something that is already running.
-        if (await invoke<boolean>("already_running", { root: found }).catch(() => false)) {
+        if (
+          await invoke<boolean>("already_running", { root: found }).catch(
+            () => false,
+          )
+        ) {
           setRunning(true);
           // Already up from a previous window: show it, rather than a screen about it.
           await invoke("show_openbot").catch(() => undefined);
@@ -53,7 +63,11 @@ export function App() {
       .then(async (found) => {
         setBlocker(found);
         if (found) {
-          setInstruction(await invoke<string>("windows_blocker_instruction", { blocker: found }));
+          setInstruction(
+            await invoke<string>("windows_blocker_instruction", {
+              blocker: found,
+            }),
+          );
         }
       })
       .catch(() => undefined);
@@ -61,7 +75,9 @@ export function App() {
       // One row per step, updated in place. A step that reports twice is the same step saying
       // more, and a list that grows a line each time reads as a log rather than as progress.
       setSteps((current) => {
-        const at = current.findIndex((step) => step.step === event.payload.step);
+        const at = current.findIndex(
+          (step) => step.step === event.payload.step,
+        );
         if (at === -1) return [...current, event.payload];
         const next = [...current];
         next[at] = event.payload;
@@ -93,7 +109,9 @@ export function App() {
       setFailure(String(error));
     } finally {
       setBusy(false);
-      invoke<EngineStatus>("detect_engine").then(setEngine).catch(() => undefined);
+      invoke<EngineStatus>("detect_engine")
+        .then(setEngine)
+        .catch(() => undefined);
     }
   }
 
@@ -161,17 +179,32 @@ export function App() {
           </div>
           <div className="field">
             <label htmlFor="root">Where OpenBot lives</label>
-            <input id="root" value={root} onChange={(event) => setRoot(event.target.value)} spellCheck={false} />
+            <input
+              id="root"
+              value={root}
+              onChange={(event) => setRoot(event.target.value)}
+              spellCheck={false}
+            />
           </div>
           <details>
             <summary>Self-hosted Intelligence</summary>
             <div className="field" style={{ marginTop: "0.75rem" }}>
               <label htmlFor="api">API URL</label>
-              <input id="api" value={apiUrl} onChange={(event) => setApiUrl(event.target.value)} spellCheck={false} />
+              <input
+                id="api"
+                value={apiUrl}
+                onChange={(event) => setApiUrl(event.target.value)}
+                spellCheck={false}
+              />
             </div>
             <div className="field">
               <label htmlFor="ws">Gateway WebSocket URL</label>
-              <input id="ws" value={wsUrl} onChange={(event) => setWsUrl(event.target.value)} spellCheck={false} />
+              <input
+                id="ws"
+                value={wsUrl}
+                onChange={(event) => setWsUrl(event.target.value)}
+                spellCheck={false}
+              />
             </div>
           </details>
         </>
@@ -181,7 +214,9 @@ export function App() {
         <div className="steps">
           {steps.map((step) => (
             <div className="step" key={step.step}>
-              <span className={`mark ${step.ok ? "good" : "bad"}`}>{step.ok ? "✓" : "✗"}</span>
+              <span className={`mark ${step.ok ? "good" : "bad"}`}>
+                {step.ok ? "✓" : "✗"}
+              </span>
               <span>{label(step.step)}</span>
               <span className="detail">{step.detail}</span>
             </div>
@@ -199,15 +234,32 @@ export function App() {
       <div className="row">
         {running ? (
           <>
-            <button onClick={() => invoke("show_openbot").catch(() => undefined)}>
+            <button
+              type="button"
+              onClick={() => invoke("show_openbot").catch(() => undefined)}
+            >
               Show OpenBot
             </button>
-            <button className="secondary" onClick={stop} disabled={busy}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={stop}
+              disabled={busy}
+            >
               Stop OpenBot
             </button>
           </>
         ) : (
-          <button onClick={start} disabled={busy || apiKey.trim() === "" || modelKey.trim() === "" || root.trim() === ""}>
+          <button
+            type="button"
+            onClick={start}
+            disabled={
+              busy ||
+              apiKey.trim() === "" ||
+              modelKey.trim() === "" ||
+              root.trim() === ""
+            }
+          >
             {busy ? "Working…" : "Start OpenBot"}
           </button>
         )}
