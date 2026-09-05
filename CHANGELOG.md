@@ -8,6 +8,26 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The server connects to Postgres on Windows, and `localhost` is no longer a coin toss
+
+Two separate faults, both of which stop a deployment reaching its own database and neither of which
+says so.
+
+The connection address went to Bun as a URL. Bun reads such a URL's path, the database name, as the
+path of a unix socket, ignores the host and the port, and fails to open a socket Windows does not
+have (oven-sh/bun#27713). The server could not reach Postgres there at all, while `psql` inside the
+container and a plain TCP connection from the same machine both worked, which makes it look like a
+network fault rather than a parsing one. The address is now passed in parts, and `DATABASE_URL` is
+removed from the environment as it is read, because Bun prefers that variable to the parts it was
+handed and would otherwise put the address straight back through the same parser. A URL with no host
+or no database is now refused by name instead of connecting somewhere nobody chose.
+
+Separately, Compose published its loopback ports on `127.0.0.1` only. `localhost` resolves to `::1`
+and `127.0.0.1` in an order the platform decides, and a client handed `::1` first does not fall back
+to the other, so the same configuration worked on one machine and failed on the next for a reason
+nothing in the error mentions. Every loopback port is now published on both addresses. Both are
+loopback, so nothing became reachable from another host.
+
 ### A bad `COMPUTER_MEMORY_BYTES` refuses to start the supervisor, instead of capping a computer at 512 bytes
 
 `COMPUTER_MEMORY_BYTES=512m` used to parse as `512` via `parseInt`, which Docker accepts as a memory
