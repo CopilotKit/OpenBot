@@ -85,7 +85,13 @@ jobs:
         working-directory: desktop
       - run: bun run typecheck
         working-directory: desktop
-      - run: bun run build
+      # `tauri build`, not `cargo build --release`. tauri-build emits `cargo:rustc-cfg=dev`
+      # for anything the Tauri CLI did not build, so a plain cargo release binary still points
+      # at the dev server and shows "Could not connect to localhost" when it is run. That
+      # compiles, proves the Rust, and proves nothing about the thing people install.
+      #
+      # Bundling is included because the bundle is the product, and because the failures live
+      # there: the Windows resource step needs an .ico, and macOS wants an .icns, neither of
+      # which a compile would miss.
+      - run: bun run tauri build
         working-directory: desktop
-      - run: cargo build --release
-        working-directory: desktop/src-tauri
