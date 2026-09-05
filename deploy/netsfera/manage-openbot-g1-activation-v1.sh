@@ -161,6 +161,10 @@ case "$action" in
       printf '%s\n' 'OPENBOT_G1_ACTIVATION=activate'
       exit 0
     fi
+    # Re-read all staged gates, including the policy that will win at boot, under
+    # the same lock immediately before installing the activation binding.
+    "${source_directory}/deploy/netsfera/verify-staged-g1.sh" \
+      --lock-held-fd "$lock_fd" pre-apply "$evidence"
     mkdir -p "$(dirname "$manifest")"
     activation_mutation_started=1
     install -m 600 "$expected_manifest" "${manifest}.new.$$"

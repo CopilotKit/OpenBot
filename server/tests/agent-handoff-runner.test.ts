@@ -33,6 +33,7 @@ function runner(options?: {
   }) => Promise<void>;
   /** What the delivery says the Bot answered. Null — nothing worth relaying — unless a test cares. */
   answer?: string | null;
+  continuation?: { threadId: string; channelId: string };
 }) {
   const calls: Array<{ verb: string; key: string; owner?: string }> = [];
   const events: string[] = [];
@@ -94,7 +95,10 @@ function runner(options?: {
         deliver: async ({ work, message, shown, assertion }) => {
           delivered.push({ message, assertion });
           await options?.deliver?.({ work, message, shown });
-          return { answer: options?.answer ?? null };
+          return {
+            answer: options?.answer ?? null,
+            continuation: options?.continuation,
+          };
         },
       },
     }),
@@ -102,6 +106,32 @@ function runner(options?: {
 }
 
 describe("delivering a hop", () => {
+  test("a pending interactive request records its destination and relays where to continue", async () => {
+    const {
+      runner: sweep,
+      written,
+      offered,
+    } = runner({
+      answer:
+        "Please continue in /channel/collector-channel; browser work is pending.",
+      continuation: {
+        threadId: "collector-thread",
+        channelId: "collector-channel",
+      },
+    });
+    await sweep.sweep();
+    expect(
+      written.find((row) => row.eventType === "agent.handoff_delivered")
+        ?.payload,
+    ).toMatchObject({
+      thread: "thread-1",
+      continuationThread: "collector-thread",
+      continuationChannel: "collector-channel",
+      outcome: "awaiting-human-continuation",
+    });
+    expect(offered[0]?.answerIn).toBe("thread-1");
+    expect(offered[0]?.task).toContain("/channel/collector-channel");
+  });
   test("runs the addressed Bot and finishes the work as its owner", async () => {
     const { runner: sweep, calls, delivered } = runner();
 

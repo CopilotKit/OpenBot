@@ -11,10 +11,37 @@
  * an answer nothing had recorded, which is the failure nobody can debug: the first Bot says it handed
  * the work over, the second says it answered, and no row anywhere agrees.
  */
-import type { AbstractAgent, BaseEvent } from "@ag-ui/client";
-import type { Observable } from "rxjs";
+import {
+  AbstractAgent,
+  type BaseEvent,
+  EventType,
+  type RunAgentInput,
+} from "@ag-ui/client";
+import { Observable } from "rxjs";
+import type { ChannelStore } from "../channels/routes";
 import type { HandoffDelivery } from "./handoff-runner";
 import { textOf } from "./message-text";
+import type { AgentProfileStore } from "./profile-store";
+import type { AgentActor } from "./profile-types";
+
+/** Only local agents explicitly granted computer access need a browser continuation. */
+export function createInteractiveHandoffResolver(options: {
+  actorFor: (id: string) => Promise<AgentActor | null>;
+  profiles: Pick<AgentProfileStore, "get">;
+  channels: Pick<ChannelStore, "direct">;
+}) {
+  return async ({ actorId, botId }: { actorId: string; botId: string }) => {
+    const actor = await options.actorFor(actorId);
+    if (!actor) throw new Error("The handoff actor could not be confirmed");
+    const profile = await options.profiles.get(actor, botId);
+    if (!profile)
+      throw new Error("The handoff recipient could not be confirmed");
+    if (profile.computerAccess !== "enabled" || profile.endpoint !== null)
+      return null;
+    const channel = await options.channels.direct(actor, botId);
+    return { channelId: channel.id, threadId: channel.threadId };
+  };
+}
 
 /** Whatever runs an agent against a thread and records what it did. */
 export type ThreadRunner = {
@@ -103,6 +130,16 @@ export function createHandoffDelivery(options: {
    */
   mintThreadId: () => string;
   /**
+   * Opt-in for a recipient requiring interactive computer tools. Resolve the
+   * actor's existing direct channel, or create it through the normal channel
+   * store. Null keeps ordinary scratch-and-relay delivery. A forward opt-in
+   * records a receipt only; the person starts the actual work in that channel.
+   */
+  interactiveConversationFor?: (input: {
+    actorId: string;
+    botId: string;
+  }) => Promise<{ threadId: string; channelId: string } | null>;
+  /**
    * Tell the roster a conversation moved, when a turn put words in it.
    *
    * A HOP HAS NOBODY WATCHING. A conversation's place in the list and the line under its name are
@@ -150,6 +187,7 @@ export function createHandoffDelivery(options: {
     runner,
     lock,
     mintThreadId,
+    interactiveConversationFor,
     announce,
     setBusy,
     newRunId,
@@ -158,7 +196,7 @@ export function createHandoffDelivery(options: {
 
   return {
     async deliver({ work, message, shown, assertion }) {
-      const agent = await agentFor({
+      let agent = await agentFor({
         actorId: work.actorId,
         botId: work.toBotId,
       });
@@ -169,6 +207,29 @@ export function createHandoffDelivery(options: {
          * mid-edit, and both of those come back.
          */
         throw new Error(`${work.toBotId} could not be built for this run`);
+      }
+
+      const continuation = !work.answerIn
+        ? await interactiveConversationFor?.({
+            actorId: work.actorId,
+            botId: work.toBotId,
+          })
+        : undefined;
+      if (continuation) {
+        const name = work.toName ?? work.toBotId;
+        const receipt =
+          `The request has been recorded for ${name}. Please continue in ` +
+          `[the conversation with ${name}](/channel/${encodeURIComponent(continuation.channelId)}) ` +
+          "before browser work or document selection/approval. Those steps and any saving remain pending.";
+        // A platform-recorded receipt under the addressed agent's identity, with
+        // no model or tool execution. The next human turn builds the real agent.
+        agent = new HandoffReceiptAgent(work.toBotId, receipt);
+        shown = [
+          `${work.fromName ?? work.fromBotId} asked ${name} for this on your behalf: ${work.task}`,
+          ...(work.constraints ? [`Constraints: ${work.constraints}`] : []),
+          ...(work.expecting ? [`Expected result: ${work.expecting}`] : []),
+        ].join("\n\n");
+        message = shown;
       }
 
       /*
@@ -190,9 +251,9 @@ export function createHandoffDelivery(options: {
        *
        * The runner publishes the turn to the platform rather than back through the observable, so
        * the text exists nowhere this function can read after the fact — the events are the one
-       * chance to hear it. It is what the relay carries back to the conversation that asked, and
-       * with the answer no longer landing in a channel of its own, this is the only copy a person
-       * will ever be shown.
+       * chance to hear it. It is what the relay carries back to the conversation that asked.
+       * For ordinary scratch-thread hops, that relay is the only copy a person will be shown;
+       * interactive receipts also remain visible in the recipient's direct conversation.
        */
       const said: string[] = [];
       let saying = "";
@@ -228,21 +289,19 @@ export function createHandoffDelivery(options: {
       /*
        * The conversation this turn runs in.
        *
-       * Named on the hop for the kind that goes backwards — the asking Bot speaking in the
-       * conversation the person is watching, to relay an answer or a failure. Every forward hop
-       * runs in a scratch thread of the addressed Bot's own, because a thread has exactly one
-       * agent; what it says there comes back to the person through the relay, not the thread.
+       * A backwards hop returns to the asking Bot's thread. An ordinary forward hop uses a
+       * scratch thread; an interactive receipt uses the addressed Bot's direct channel so the
+       * person can continue there. Every destination still belongs to exactly one agent.
        */
       const where: { threadId: string } = work.answerIn
         ? { threadId: work.answerIn }
-        : { threadId: mintThreadId() };
+        : (continuation ?? { threadId: mintThreadId() });
 
       /*
-       * A forward hop lights the asking channel while it runs, because its own run is in a scratch
-       * thread nobody sees. A backwards hop — a relay or a notice — runs in the asking thread
-       * itself, so the runtime's own thread lock already lights it through `onRunBusy`, and
-       * signalling here too would double up. So this covers only the leg the lock cannot: the
-       * addressed Bot thinking, off-screen, on behalf of a channel the person is watching.
+       * A forward hop lights the asking channel while it runs elsewhere, in a scratch thread or
+       * the recipient's direct conversation. A backwards hop — a relay or a notice — runs in
+       * the asking thread itself, so the runtime's own thread lock already lights it through
+       * `onRunBusy`, and signalling here too would double up.
        */
       const lightsAskingChannel = !work.answerIn;
       if (lightsAskingChannel) {
@@ -252,18 +311,16 @@ export function createHandoffDelivery(options: {
       }
       try {
         /*
-         * The conversation that ASKED, not the one it is answering in. The addressed Bot is joining
-         * something already in progress and has to have read it; its own conversation is new and
-         * empty, and reading that would tell it nothing.
-         *
-         * READ BEFORE THE LOCK IS TAKEN, deliberately. The lock is on `where.threadId` and this read
-         * is of `work.threadId` — a conversation the lock never protected — and the read is the one
-         * call here that throws on a platform error. Thrown while holding the lock it would leak it
-         * until the TTL: on a relay that lock is the asking conversation itself, so the person could
-         * not type for two minutes and the retry would collide with the hop's own leftover hold.
+         * Ordinary hops read the asking conversation. An interactive receipt preserves the
+         * collector's own conversation; its request already carries the task and constraints.
+         * Read before acquiring the lock so a failed read cannot leak a hold. Only the new
+         * attributed request is persisted below, never a copied source transcript.
          */
         const prior = conversationOnly(
-          await history({ threadId: work.threadId, actorId: work.actorId }),
+          await history({
+            threadId: continuation?.threadId ?? work.threadId,
+            actorId: work.actorId,
+          }),
         );
 
         /*
@@ -428,9 +485,50 @@ export function createHandoffDelivery(options: {
        * What came back, for the runner to relay. Null when the turn produced no words at all —
        * a run that only called tools — which the runner treats as nothing worth carrying back.
        */
-      return { answer: said.length > 0 ? said.join("\n\n") : null };
+      return {
+        answer: said.length > 0 ? said.join("\n\n") : null,
+        ...(continuation ? { continuation } : {}),
+      };
     },
   };
+}
+
+/** Record an honest receipt using the same native thread runner and run lock. */
+class HandoffReceiptAgent extends AbstractAgent {
+  constructor(
+    agentId: string,
+    private readonly receipt: string,
+  ) {
+    super({ agentId });
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    const messageId = `handoff-receipt-${input.runId}`;
+    return new Observable((subscriber) => {
+      subscriber.next({
+        type: EventType.RUN_STARTED,
+        threadId: input.threadId,
+        runId: input.runId,
+      });
+      subscriber.next({
+        type: EventType.TEXT_MESSAGE_START,
+        messageId,
+        role: "assistant",
+      });
+      subscriber.next({
+        type: EventType.TEXT_MESSAGE_CONTENT,
+        messageId,
+        delta: this.receipt,
+      });
+      subscriber.next({ type: EventType.TEXT_MESSAGE_END, messageId });
+      subscriber.next({
+        type: EventType.RUN_FINISHED,
+        threadId: input.threadId,
+        runId: input.runId,
+      });
+      subscriber.complete();
+    });
+  }
 }
 
 /**

@@ -346,6 +346,9 @@ else
   fi
 fi
 
+"${source_directory}/deploy/netsfera/verify-reviewed-action-policy.sh" --lock-held-fd "${inherited_fd:-9}" \
+  "${source_directory}/deploy/netsfera/agent-computer-policy.json"
+
 if ! cleanup_render; then
   printf '%s\n' 'staged verifier render cleanup failed' >&2
   exit 71

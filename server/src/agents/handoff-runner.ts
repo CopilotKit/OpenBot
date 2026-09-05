@@ -47,9 +47,8 @@ export type HandoffDelivery = {
    * the Bot said: a Bot that answers "I could not find that" has answered, and retrying would ask it
    * the same question again and bill for the same non-answer.
    *
-   * Resolves with what the Bot said, because its turn runs in a scratch thread nobody is shown:
-   * the words it comes back with exist for the relay or not at all. Null means a turn of nothing
-   * but tool calls, which is a turn that happened and nothing worth carrying back.
+   * Resolves with what the Bot said (or the recorded interactive receipt), so it can be relayed
+   * to the asking conversation. Null means a turn of nothing but tool calls, with no words to relay.
    */
   deliver: (input: {
     work: HandoffWork;
@@ -71,7 +70,11 @@ export type HandoffDelivery = {
     shown?: string;
     /** The signed statement of the run it is starting, carrying its depth. */
     assertion: string;
-  }) => Promise<{ answer: string | null }>;
+  }) => Promise<{
+    answer: string | null;
+    /** An acknowledged request whose interactive work awaits the person here. */
+    continuation?: { threadId: string; channelId: string };
+  }>;
 };
 
 export type HandoffRunReport = {
@@ -347,7 +350,7 @@ export function createHandoffRunner(options: {
 
           try {
             const shown = summarise(work);
-            const { answer } = await delivery.deliver({
+            const { answer, continuation } = await delivery.deliver({
               work,
               message: attribute(work),
               ...(shown ? { shown } : {}),
@@ -418,6 +421,14 @@ export function createHandoffRunner(options: {
                 to: work.toBotId,
                 run: work.runId,
                 depth: work.depth,
+                ...(continuation
+                  ? {
+                      thread: work.threadId,
+                      continuationThread: continuation.threadId,
+                      continuationChannel: continuation.channelId,
+                      outcome: "awaiting-human-continuation",
+                    }
+                  : {}),
                 ms: Date.now() - startedAt,
               },
             });

@@ -46,6 +46,34 @@ function netsferaPolicy(): ActionPolicy {
 describe("the Netsfera collector computer policy", () => {
   const policy = netsferaPolicy();
 
+  test.each([
+    ["computer_key", "Enter", "activate", false],
+    ["computer_key", "Space", "activate", false],
+    ["computer_key", " ", "activate", false],
+    ["computer_key", "NumpadEnter", "activate", false],
+    ["computer_type", "Enter", "activate", false],
+    ["computer_type", "", "type", true],
+    ["computer_key", "Tab", "type", true],
+    ["computer_key", "ArrowDown", "type", true],
+  ] as const)(
+    "collector %s %s intent=%s permits=%s",
+    (tool, key, intent, allowed) => {
+      const decision = evaluateActionPolicy(
+        policy,
+        context({
+          bot: { id: "recolector-documentos" },
+          tool: { name: tool },
+          key,
+          intent,
+          page: { host: "chatgpt.com", url: "https://chatgpt.com/invoices" },
+          element: { ref: "", role: "", name: "" },
+        }),
+      );
+      expect(decision.forward).toBe(allowed);
+      if (!allowed) expect(decision.reason).toContain("take control");
+    },
+  );
+
   test("is an explicit checked-in deployment policy", () => {
     expect(existsSync(netsferaPolicyPath)).toBe(true);
   });

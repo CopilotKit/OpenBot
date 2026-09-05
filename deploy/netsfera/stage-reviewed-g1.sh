@@ -364,6 +364,9 @@ if test -n "$(git -C "$source_directory" status --porcelain)"; then
   exit 65
 fi
 
+"${source_directory}/deploy/netsfera/verify-reviewed-action-policy.sh" --lock-held-fd 9 \
+  "${source_directory}/deploy/netsfera/agent-computer-policy.json"
+
 git clone --quiet --no-hardlinks "$source_directory" "$test_source_directory"
 git -C "$test_source_directory" checkout --detach "$target_commit" >/dev/null
 docker run --rm -v "${test_source_directory}:/source:rw" -w /source "$bun_test_image" sh -ceu '
@@ -491,6 +494,9 @@ if test "$(git -C "$source_directory" show "${target_commit}:deploy/netsfera/doc
   exit 65
 fi
 
+"${source_directory}/deploy/netsfera/verify-reviewed-action-policy.sh" --lock-held-fd 9 \
+  "${source_directory}/deploy/netsfera/agent-computer-policy.json"
+
 if ! (set -C; {
   printf 'g0_source_commit=%s\n' "$g0_source_commit"
   printf 'accepted_g0_source_commit=%s\n' "$accepted_g0_source_commit"
@@ -512,6 +518,7 @@ if ! (set -C; {
   printf 'candidate_apply_render_sha256=%s\n' "$candidate_apply_render_hash"
   printf 'bun_test_image=%s\n' "$bun_test_image"
   printf '%s\n' 'live_container_health=healthy'
+  printf '%s\n' 'stored_action_policy=absent-or-reviewed-equivalent'
 } >"$evidence_file") 2>/dev/null; then
   printf '%s\n' 'refusing to overwrite existing staging evidence' >&2
   exit 65

@@ -303,6 +303,15 @@ export function evaluateActionPolicy(
 
 /** A refusal a person can act on: what was refused, and on what. */
 function describeRefusal(context: PolicyContext, expression: string): string {
+  if (
+    context.intent === "activate" &&
+    ["computer_key", "computer_type"].includes(context.tool.name)
+  ) {
+    return (
+      `This deployment's policy blocks keyboard activation on ${context.page.host} ` +
+      `by the rule \`${expression}\`. Ask the person to take control before submitting or activating it.`
+    );
+  }
   // A tool call is named by its server and its tool, and nothing else here fits it. The browser
   // fields are all present on an MCP context and all empty, deliberately, so that a rule written
   // about a page evaluates to false rather than being unevaluable. That makes every one of the

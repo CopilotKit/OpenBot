@@ -35,6 +35,14 @@ const lockedHelperPath = resolve(
   "../../deploy/netsfera/openbot-compose-lock-v1.sh",
 );
 const target = "a".repeat(40);
+const runtimePath = resolve(
+  import.meta.dir,
+  "../../deploy/netsfera/verify-openbot-runtime.sh",
+);
+const restartPath = resolve(
+  import.meta.dir,
+  "../../deploy/netsfera/restart-staged-g1.sh",
+);
 const original = "ff5aa7ebd8ac798887017bfa1f5a471483b0c499";
 const liveContainer = "1".repeat(64);
 const oldImage = `sha256:${"2".repeat(64)}`;
@@ -82,6 +90,9 @@ function fixture() {
   writeFileSync(probeImageState, "absent\n");
   writeFileSync(headCount, "0\n");
   writeFileSync(log, "");
+  writeFileSync(join(root, "stored-policy.json"), "null\n");
+  writeFileSync(join(root, "live-container"), `${liveContainer}\n`);
+  writeFileSync(join(root, "started-at"), "2026-09-05T10:00:00Z\n");
   writeFileSync(lock, "", { mode: 0o600 });
   executable(
     join(source, "deploy/netsfera/verify-rendered-overlay.sh"),
@@ -111,6 +122,18 @@ exec "$LOCKED_HELPER" "$@"
       "utf8",
     ),
   );
+  for (const name of [
+    "verify-reviewed-action-policy.sh",
+    "verify-staged-g1.sh",
+    "agent-computer-policy.json",
+    "verify-openbot-runtime.sh",
+  ]) {
+    const path = resolve(import.meta.dir, "../../deploy/netsfera", name);
+    if (existsSync(path)) {
+      writeFileSync(join(source, "deploy/netsfera", name), readFileSync(path));
+      chmodSync(join(source, "deploy/netsfera", name), 0o755);
+    }
+  }
 
   executable(
     join(bin, "git"),
@@ -150,6 +173,17 @@ esac
 `,
   );
   executable(
+    join(bin, "curl"),
+    `#!/bin/sh
+printf 'curl %s\\n' "$*" >>"$COMMAND_LOG"
+case "\${FAIL_MODE:-}" in
+  route) printf 503;;
+  route-after) if grep -q '11:00:00' "$STARTED_AT"; then printf 503; else printf 200; fi;;
+  *) printf 200;;
+esac
+`,
+  );
+  executable(
     join(bin, "jq"),
     `#!/bin/sh
 set -eu
@@ -170,7 +204,7 @@ case "$joined" in
   *' .services.openbot.image '*)
     cat >/dev/null
     printf '%s\n' openbot:test;;
-  *) exit 2;;
+  *) exec /usr/bin/jq "$@";;
 esac
 `,
   );
@@ -227,7 +261,19 @@ printf 'docker %s\n' "$*" >>"$COMMAND_LOG"
 if [ "$1" = compose ]; then
   case " $* " in
     *" exec "*)
+      case "$*" in
+        *"FROM action_policy"*)
+          if [ "\${FAIL_MODE:-}" = policy-query ]; then exit 35; fi
+          if [ "\${FAIL_MODE:-}" = policy-after-restart ] && grep -q '11:00:00' "$STARTED_AT"; then
+            printf '%s\\n' '{"mode":"enforce","deny":[],"allow":["true"]}'; exit 0
+          fi
+          cat "$STORED_POLICY"; exit 0;;
+      esac
       if [ "\${FAIL_MODE:-}" = mcp-grant ] || [ "\${FAIL_MODE:-}" = bot-grant ]; then printf 'recolector-documentos\\t%s\\tforbidden\\n' "\${FAIL_MODE%-grant}"; fi
+      exit 0;;
+    *" restart openbot "*)
+      if [ "\${ALLOW_LIVE_APPLY:-0}" != 1 ]; then exit 99; fi
+      if [ "\${FAIL_MODE:-}" != no-restart ]; then printf '2026-09-05T11:00:00Z\\n' >"$STARTED_AT"; fi
       exit 0;;
     *" up "*)
       if [ "\${ALLOW_LIVE_APPLY:-0}" != 1 ]; then printf 'forbidden live apply\n' >&2; exit 99; fi
@@ -237,6 +283,11 @@ if [ "$1" = compose ]; then
       exit 0;;
     *" create "*|*" run "*) printf 'forbidden live apply\n' >&2; exit 99;;
     *" config "*)
+      case " $* " in *" --services "*)
+        printf 'openbot\\npostgres\\nbot-backend-ts\\n'
+        if [ "\${FAIL_MODE:-}" != missing-service ]; then printf 'supervisor\\n'; fi
+        exit 0;;
+      esac
       if printf '%s' "$*" | grep -q 'g1-stage-.*.image.yml'; then
         case "\${CONSUMER_RENDER_MODE:-}" in
           failure) exit 42;;
@@ -268,7 +319,14 @@ if [ "$1" = compose ]; then
       built_ref=$(awk -F '"image":"' '{ split($2, value, "\\""); print value[1] }' "$render")
       case "$built_ref" in local/openbot:g1-*) printf '%s\n' "$built_ref" >"$CANDIDATE_TAG_STATE";; *) exit 97;; esac
       exit 0;;
-    *" ps -q openbot "*) printf '%s\n' "$LIVE_CONTAINER"; exit 0;;
+    *" ps -q openbot "*) cat "$LIVE_CONTAINER_STATE"; exit 0;;
+    *" ps --all -q "*)
+      if [ "\${FAIL_MODE:-}" = empty-inventory ]; then exit 0; fi
+      for value do service="$value"; done
+      if [ "\${FAIL_MODE:-}" = missing-service ] && [ "$service" = supervisor ]; then exit 1; fi
+      if [ "\${FAIL_MODE:-}" = missing-container ] && [ "$service" = postgres ]; then exit 0; fi
+      if [ "$service" = openbot ]; then cat "$LIVE_CONTAINER_STATE"; else printf '%s\\n' "$service-container"; fi
+      exit 0;;
   esac
 fi
 if [ "$1" = image ] && [ "$2" = inspect ]; then
@@ -337,6 +395,19 @@ if [ "$1" = rm ]; then
 fi
 if [ "$1" = inspect ]; then
   case "$*" in
+    *State.StartedAt*) cat "$STARTED_AT";;
+    *RestartCount*)
+      if [ "\${FAIL_MODE:-}" = restart-loop ] && grep -q '11:00:00' "$STARTED_AT"; then printf '1\\n'; else printf '0\\n'; fi;;
+    *State.Status*)
+      case "\${FAIL_MODE:-}" in
+        after-unhealthy) if grep -q '11:00:00' "$STARTED_AT"; then printf 'running unhealthy\\n'; else printf 'running healthy\\n'; fi;;
+        stopped) printf 'exited healthy\\n';;
+        unhealthy) printf 'running unhealthy\\n';;
+        no-healthcheck) printf 'running none\\n';;
+        missing-computer)
+          case "$*" in *openbot-computer-general-assistant*) exit 1;; *) printf 'running healthy\\n';; esac;;
+        *) printf 'running healthy\\n';;
+      esac;;
     *State.Health*)
       count=$(cat "$HEALTH_COUNT"); count=$((count + 1)); printf '%s\n' "$count" >"$HEALTH_COUNT"
       if [ "\${ROLLBACK_FAULT:-}" = rollback-health ] && [ "$count" -gt 1 ]; then printf 'unhealthy\n'; else printf 'healthy\n'; fi;;
@@ -408,10 +479,14 @@ function environment(
     OPENBOT_SUPERVISOR_COMPOSE_FILE: "/unused/supervisor.yml",
     OPENBOT_PHASE2_COMPOSE_FILE: "/unused/phase2.yml",
     COMMAND_LOG: input.log,
+    STORED_POLICY: join(input.root, "stored-policy.json"),
     SOURCE_STATE: input.sourceState,
     IMAGE_STATE: input.imageState,
     CANDIDATE_TAG_STATE: input.candidateTagState,
     LIVE_IMAGE_STATE: input.liveImageState,
+    LIVE_CONTAINER_STATE: join(input.root, "live-container"),
+    STARTED_AT: join(input.root, "started-at"),
+    OPENBOT_HEALTH_TIMEOUT_SECONDS: "1",
     HEALTH_COUNT: input.healthCount,
     HEAD_COUNT: input.headCount,
     CLEANUP_MARKER: join(input.root, "cleanup-marker"),
@@ -476,6 +551,265 @@ function stagedEvidence(input: ReturnType<typeof fixture>) {
   const path = join(input.incoming, evidenceNames[0]);
   return { path, contents: readFileSync(path, "utf8") };
 }
+
+const reviewedPolicy = JSON.parse(
+  readFileSync(
+    resolve(
+      import.meta.dir,
+      "../../deploy/netsfera/agent-computer-policy.json",
+    ),
+    "utf8",
+  ),
+);
+const divergentPolicies = [
+  ["permissive", { mode: "enforce", deny: [], allow: ["true"] }],
+  ["dry-run", { ...reviewedPolicy, mode: "dry-run" }],
+  [
+    "stale restrictive",
+    {
+      ...reviewedPolicy,
+      deny: [
+        ...reviewedPolicy.deny,
+        'bot.id == "recolector-documentos" && matches(tool.name, "^computer_")',
+      ],
+    },
+  ],
+] as const;
+
+test.each(divergentPolicies)(
+  "staging blocks %s stored policy without overwriting it",
+  (_name, policy) => {
+    const input = fixture();
+    try {
+      const bytes = JSON.stringify(policy);
+      writeFileSync(join(input.root, "stored-policy.json"), bytes);
+      const result = execute(input);
+      expect(result.exitCode, result.stderr.toString()).toBe(65);
+      expect(readFileSync(join(input.root, "stored-policy.json"), "utf8")).toBe(
+        bytes,
+      );
+      expect(readFileSync(input.log, "utf8")).not.toContain(" build openbot");
+      expect(existsSync(input.activationManifest)).toBe(false);
+    } finally {
+      rmSync(input.root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each(["pre-oneoff", "pre-apply", "post-apply", "activate"])(
+  "%s rechecks effective stored policy after staging",
+  (phase) => {
+    for (const [_name, policy] of divergentPolicies) {
+      const input = fixture();
+      try {
+        expect(execute(input).exitCode).toBe(0);
+        const evidence = stagedEvidence(input);
+        if (phase === "post-apply") {
+          expect(
+            Bun.spawnSync(["bash", activationPath, "activate", evidence.path], {
+              env: environment(input),
+            }).exitCode,
+          ).toBe(0);
+          writeFileSync(input.liveImageState, `${candidateImage}\n`);
+        }
+        writeFileSync(
+          join(input.root, "stored-policy.json"),
+          JSON.stringify(policy),
+        );
+        const result = Bun.spawnSync(
+          [
+            phase === "activate" ? "bash" : "sh",
+            phase === "activate" ? activationPath : verifierPath,
+            phase,
+            evidence.path,
+          ],
+          { env: environment(input) },
+        );
+        expect(result.exitCode, result.stderr.toString()).toBe(65);
+        expect(result.stderr.toString()).toContain("stored action policy");
+        if (phase === "activate")
+          expect(existsSync(input.activationManifest)).toBe(false);
+      } finally {
+        rmSync(input.root, { recursive: true, force: true });
+      }
+    }
+  },
+);
+
+test("staging accepts the reviewed policy with different JSON layout and key order", () => {
+  const input = fixture();
+  try {
+    const policy = JSON.parse(
+      readFileSync(
+        resolve(
+          import.meta.dir,
+          "../../deploy/netsfera/agent-computer-policy.json",
+        ),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      join(input.root, "stored-policy.json"),
+      JSON.stringify(
+        { allow: policy.allow, deny: policy.deny, mode: policy.mode },
+        null,
+        3,
+      ),
+    );
+    const result = execute(input);
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+  } finally {
+    rmSync(input.root, { recursive: true, force: true });
+  }
+});
+
+test.each(["policy-query", "empty", "malformed"])(
+  "staging fails closed on %s policy evidence",
+  (mode) => {
+    const input = fixture();
+    try {
+      if (mode !== "policy-query")
+        writeFileSync(
+          join(input.root, "stored-policy.json"),
+          mode === "empty" ? "" : "garbage",
+        );
+      expect(execute(input, mode).exitCode).toBe(65);
+    } finally {
+      rmSync(input.root, { recursive: true, force: true });
+    }
+  },
+);
+
+function lockedRun(
+  input: ReturnType<typeof fixture>,
+  script: string,
+  args: string[] = [],
+  mode?: string,
+) {
+  return Bun.spawnSync(
+    [
+      "bash",
+      "-c",
+      'exec 9>"$OPENBOT_DEPLOYMENT_LOCK_FILE"; flock -n 9; "$CHECK_SCRIPT" --lock-held-fd 9 "$@"',
+      "checked",
+      ...args,
+    ],
+    {
+      env: {
+        ...environment(input, mode),
+        CHECK_SCRIPT: script,
+        ALLOW_LIVE_APPLY: "1",
+      },
+    },
+  );
+}
+
+test.each([
+  "healthy",
+  "no-healthcheck",
+  "missing-service",
+  "empty-inventory",
+  "missing-container",
+  "stopped",
+  "unhealthy",
+  "missing-computer",
+])(
+  "runtime inventory and bounded health: %s",
+  (mode) => {
+    const input = fixture();
+    try {
+      const result = lockedRun(input, runtimePath, [], mode);
+      const healthy = mode === "healthy" || mode === "no-healthcheck";
+      expect(result.exitCode, result.stderr.toString()).toBe(healthy ? 0 : 65);
+      if (healthy) {
+        for (const name of [
+          "openbot",
+          "postgres",
+          "bot-backend-ts",
+          "supervisor",
+          "openbot-computer-general-assistant",
+        ]) {
+          expect(result.stdout.toString()).toContain(name);
+        }
+        expect(readFileSync(input.log, "utf8")).toContain(
+          "helper --lock-held-fd 9 config --quiet",
+        );
+      }
+    } finally {
+      rmSync(input.root, { recursive: true, force: true });
+    }
+  },
+  5000,
+);
+
+test.each([
+  "healthy",
+  "no-restart",
+  "route",
+  "unhealthy",
+  "after-unhealthy",
+  "route-after",
+  "policy-after-restart",
+  "restart-loop",
+])(
+  "persistence acceptance performs and proves a real helper restart: %s",
+  (mode) => {
+    const input = fixture();
+    try {
+      expect(execute(input).exitCode).toBe(0);
+      const evidence = stagedEvidence(input);
+      expect(
+        Bun.spawnSync(["bash", activationPath, "activate", evidence.path], {
+          env: environment(input),
+        }).exitCode,
+      ).toBe(0);
+      writeFileSync(input.liveImageState, `${candidateImage}\n`);
+      const result = lockedRun(
+        input,
+        restartPath,
+        [evidence.path, "https://approved.example/health", "200"],
+        mode,
+      );
+      expect(result.exitCode, result.stderr.toString()).toBe(
+        mode === "healthy" ? 0 : 65,
+      );
+      if (
+        [
+          "after-unhealthy",
+          "route-after",
+          "policy-after-restart",
+          "restart-loop",
+        ].includes(mode)
+      ) {
+        expect(readFileSync(input.log, "utf8")).toContain(
+          "helper --lock-held-fd 9 restart openbot",
+        );
+      }
+      if (mode === "healthy") {
+        expect(result.stdout.toString()).toContain(
+          `restart_before_container=${liveContainer}`,
+        );
+        expect(result.stdout.toString()).toContain(
+          `restart_after_container=${liveContainer}`,
+        );
+        expect(result.stdout.toString()).toContain(
+          "restart_before_started_at=2026-09-05T10:00:00Z",
+        );
+        expect(result.stdout.toString()).toContain(
+          "restart_after_started_at=2026-09-05T11:00:00Z",
+        );
+        expect(result.stdout.toString()).toContain("restart_observed=true");
+        expect(result.stdout.toString()).toContain(
+          "staged G1 verification passed: post-apply",
+        );
+        expect(result.stdout.toString()).toContain("external_http_status=200");
+      }
+    } finally {
+      rmSync(input.root, { recursive: true, force: true });
+    }
+  },
+  5000,
+);
 
 test.each(["mcp-grant", "bot-grant"])(
   "staging refuses persisted %s before checkout or build",

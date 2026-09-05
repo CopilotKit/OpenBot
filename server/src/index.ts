@@ -10,7 +10,10 @@ import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
 import { createHandoffDesk, HANDOFF_KIND } from "./agents/handoff";
-import { createHandoffDelivery } from "./agents/handoff-delivery";
+import {
+  createHandoffDelivery,
+  createInteractiveHandoffResolver,
+} from "./agents/handoff-delivery";
 import { createHandoffRunner } from "./agents/handoff-runner";
 import { handoffTool } from "./agents/handoff-tool";
 import { createAgentProfileStore } from "./agents/profile-store";
@@ -910,6 +913,11 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
       },
       history: copilotRuntime.history,
       lock: copilotRuntime.threadLock,
+      interactiveConversationFor: createInteractiveHandoffResolver({
+        actorFor,
+        profiles: agentProfileStore,
+        channels: channelStore,
+      }),
       /*
        * A scratch thread of the addressed Bot's own, one per hop.
        *

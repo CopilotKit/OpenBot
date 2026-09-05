@@ -1028,7 +1028,11 @@ export function intentOf(
     // A type carrying `submit` ends in Enter, and the same reasoning applies to it: what the
     // keypress does is press whatever the form activates, whichever tool asked for it.
     case "computer_type":
-      return key && ACTIVATING_KEYS.has(key) ? "activate" : "type";
+      // Playwright accepts chords such as Control+Enter. The final key still
+      // activates a focused control; modifiers must not disguise that intent.
+      return key && ACTIVATING_KEYS.has(key.split("+").at(-1) ?? key)
+        ? "activate"
+        : "type";
     case "computer_navigate":
       return "navigate";
     case "computer_read":

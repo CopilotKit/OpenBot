@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { createInteractiveHandoffResolver } from "../src/agents/handoff-delivery";
 import {
   AgentNotFoundError,
   createAgentProfileStore,
@@ -482,6 +483,47 @@ describe("a pinned channel in a paged roster", () => {
  * with the answers split between them.
  */
 describe("finding or making a person's channel with one Bot", () => {
+  test("interactive handoff reuses a visible recipient-owned thread and excludes another actor", async () => {
+    const owner = await createUser();
+    const outsider = await createUser();
+    const agentId = await createAgent(owner, "Document collector");
+    await database
+      .update(agents)
+      .set({
+        type: "built_in",
+        configuration: {
+          systemPrompt: "Collect documents.",
+          computerAccess: "enabled",
+        },
+      })
+      .where(eq(agents.id, agentId));
+    const resolve = createInteractiveHandoffResolver({
+      actorFor: async (id) => (id === owner.id ? owner : outsider),
+      profiles: profileStore,
+      channels: store,
+    });
+    const [first, retry] = await Promise.all([
+      resolve({ actorId: owner.id, botId: agentId }),
+      resolve({ actorId: owner.id, botId: agentId }),
+    ]);
+    expect(first).not.toBeNull();
+    if (!first) throw new Error("No interactive conversation was created");
+    createdChannelIds.push(first.channelId);
+    expect(retry).toEqual(first);
+    expect(await store.get(owner, first.channelId)).toMatchObject({
+      agentIds: [agentId],
+      threadId: first.threadId,
+      active: true,
+    });
+    expect((await store.list(owner)).channels.map((row) => row.id)).toContain(
+      first.channelId,
+    );
+    expect(await store.get(outsider, first.channelId)).toBeNull();
+    await expect(
+      resolve({ actorId: outsider.id, botId: agentId }),
+    ).rejects.toThrow("could not be confirmed");
+  });
+
   test("two at once get the same conversation, not one each", async () => {
     const owner = await createUser();
     const agentId = await createAgent(owner, "Knowledge");

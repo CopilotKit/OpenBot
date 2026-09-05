@@ -149,6 +149,30 @@ function changedPaths(before: unknown, after: unknown, prefix = ""): string[] {
 }
 
 describe("the rendered Netsfera production overlay", () => {
+  test.each([
+    ["computer_key", "Enter", "activate", false],
+    ["computer_key", "Space", "activate", false],
+    ["computer_type", "Enter", "activate", false],
+    ["computer_type", "", "type", true],
+    ["computer_key", "Tab", "type", true],
+  ] as const)(
+    "collector %s %s activation boundary",
+    (tool, key, intent, allowed) => {
+      const decision = evaluateActionPolicy(
+        renderedOverlayPolicy(),
+        context({
+          bot: { id: "recolector-documentos" },
+          tool: { name: tool },
+          key,
+          intent,
+          page: { host: "chatgpt.com", url: "https://chatgpt.com/invoices" },
+          element: { ref: "neutral", role: "textbox", name: "Period" },
+        }),
+      );
+      expect(decision.forward).toBe(allowed);
+    },
+  );
+
   test("has the same executable policy as the reviewed artifact", () => {
     const artifact = JSON.parse(
       readFileSync(policyPath, "utf8"),

@@ -22,7 +22,7 @@ Stop without changing the host if any input is missing, or if any of these condi
 netsfera-openbot.service is not active
 the Compose helper is absent or config -q fails
 the source tree is dirty
-any required container is unhealthy
+any required service/container is absent, stopped, or unhealthy where it has a healthcheck
 the source commit is not ff5aa7ebd8ac798887017bfa1f5a471483b0c499
 the activation marker or manifest unexpectedly exists
 the approved external Tailscale/ingress route is unknown
@@ -46,9 +46,16 @@ test "$(git -C /opt/openbot/source rev-parse HEAD)" = \
   ff5aa7ebd8ac798887017bfa1f5a471483b0c499
 test ! -e /etc/netsfera/bot-zero-trust/enable-openbot-g1
 test ! -e /etc/netsfera/bot-zero-trust/openbot-g1-activation.manifest
-for id in $(/usr/local/lib/netsfera/openbot-compose-v1.sh ps -q); do
-  test "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$id")" = healthy
+for service in openbot postgres bot-backend-ts supervisor; do
+  ids="$(/usr/local/lib/netsfera/openbot-compose-v1.sh ps --all -q "$service")"
+  test -n "$ids"
+  for id in $ids; do
+    state="$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id")"
+    test "$state" = 'running healthy' || test "$state" = 'running none'
+  done
 done
+state="$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' openbot-computer-general-assistant)"
+test "$state" = 'running healthy' || test "$state" = 'running none'
 ```
 
 Confirm the approved route separately before and after activation, using the approved request and
@@ -139,16 +146,32 @@ always `refs/netsfera-review/$candidate_sha`; retain the evidence path it emits 
 
 This stages without applying. Review the evidence against the local candidate: candidate commit,
 image/configuration/index/descriptor identities, G0 baseline, functional-overlay SHA-256,
-exact-image-overlay SHA-256, candidate render SHA-256, and `live_container_unchanged=true`. Confirm
-the marker and manifest remain absent.
+exact-image-overlay SHA-256, candidate render SHA-256, `live_container_health=healthy`, and
+`stored_action_policy=absent-or-reviewed-equivalent`. Staging checks that the live container ID and
+image still equal the emitted `g0_container_id` and `g0_image_id` before completing. Confirm the marker
+and manifest remain absent. No `live_container_unchanged` field is emitted or required.
+
+The effective `action_policy` row must be absent or equal to the reviewed `mode`, `deny`, and `allow`
+values. JSON layout/key order do not matter; CEL text and rule ordering remain exact, since the first
+matching rule is part of Audit. A permissive policy, a dry-run policy, or a stale restrictive policy
+blocks staging, pre-apply, and post-apply. These scripts only read the row. Reconciliation is an
+explicit operator action with its own review; do not delete or overwrite it automatically.
 
 The stopped candidate probe validates the exact image's package content only: it creates a stopped
 container, reads copied package bytes with an isolated offline reader, and checks
 `jefe-erp` is disabled, `recolector-documentos` is enabled, its skills are exactly
 `skill-creator` and `crear-proveedor-documental`, and neither target has a capability grant at this
 stage. It does not start candidate services, synchronize the package, or prove host service health.
-The simulated Docker pipeline observation is not evidence of a real host build, service start, or
-restart; those are verified only in the following activation and persistence steps.
+The staging unit fixture simulates `docker cp` and the reader's output. Its pass is not evidence of
+real image contents. The real stopped-image probe must pass on the production candidate during
+staging and again at pre-apply; never replace that gate with unit-fixture output. The probe does not
+prove service start or restart; those are verified below.
+
+For additional local coverage, build the package-only
+`server/tests/fixtures/netsfera-document-image.Dockerfile` and pass its immutable image reference to
+`verify-netsfera-document-image.sh` with a private temporary parent directory. This exercises real
+`docker create`, `docker cp`, and the isolated reader, without starting the source image. It remains
+supplemental evidence: the production image must pass the same probe on the host before apply.
 
 Stop on any evidence mismatch. Do not activate until a reviewer approves this evidence.
 
@@ -163,24 +186,38 @@ cd /opt/openbot
 test "$(stat -c '%u:%g %a' /var/lock/openbot-deployment.lock)" = '0:0 600'
 exec 9>/var/lock/openbot-deployment.lock
 flock -n 9
+# The activation manager invokes the commit-bound pre-apply verifier immediately
+# before installing the manifest, passing this same FD 9. It validates the
+# effective stored policy as well as the real stopped-image probe and G0 state.
 /usr/local/lib/netsfera/manage-openbot-g1-activation-v1.sh \
   --lock-held-fd 9 activate /root/openbot-incoming/g1-stage-REPLACE.evidence
 /usr/local/lib/netsfera/openbot-compose-v1.sh --lock-held-fd 9 up --detach --remove-orphans
+/opt/openbot/source/deploy/netsfera/verify-openbot-runtime.sh --lock-held-fd 9
 /opt/openbot/source/deploy/netsfera/verify-staged-g1.sh \
   --lock-held-fd 9 post-apply /root/openbot-incoming/g1-stage-REPLACE.evidence
 /usr/local/lib/netsfera/manage-openbot-g1-activation-v1.sh \
   --lock-held-fd 9 verify /root/openbot-incoming/g1-stage-REPLACE.evidence
-/usr/local/lib/netsfera/openbot-compose-v1.sh --lock-held-fd 9 up --detach --remove-orphans
-/opt/openbot/source/deploy/netsfera/verify-staged-g1.sh \
-  --lock-held-fd 9 post-apply /root/openbot-incoming/g1-stage-REPLACE.evidence
+# Both route arguments come from the approved maintenance inputs, not an env file.
+/opt/openbot/source/deploy/netsfera/restart-staged-g1.sh --lock-held-fd 9 \
+  /root/openbot-incoming/g1-stage-REPLACE.evidence "$approved_route" "$expected_http_status"
+flock -u 9
+exec 9>&-
 ```
 
 Replace the evidence placeholder with the reviewed path actually emitted by staging. Never create the
 legacy marker. Then, still under the reviewed helper path, verify the exact staged image identity,
-healthy containers, manifest binding, approved external route, and absence of restart loops. Invoke
-the helper a second time and repeat those checks; the same exact image and functional overlay must
-remain active after that helper restart/persistence check. Preserve health output, exact references
-and digests, render hash, route result, and relevant audit event IDs as mode-0600 evidence.
+healthy containers, manifest binding, approved external route, and absence of restart loops.
+`restart-staged-g1.sh` uses the authoritative helper's `restart openbot` operation under the inherited
+FD; a repeated no-op `up` is insufficient. It records the before/after container IDs, `StartedAt`
+timestamps and restart counts, requires a changed ID or start timestamp, and rejects new automatic
+restarts. Before and after restart it checks the complete required inventory, exact image,
+manifest/overlay/render binding, stored policy, and the approved route's expected HTTP status.
+The health wait is bounded to 120 seconds (at most 600 if explicitly configured); route requests are
+bounded to 30 seconds each. A missing/stopped service cannot pass an empty loop, and a running
+service without a healthcheck is accepted. Preserve its `restart_observed=true`, health output,
+exact references/digests, render hash, route results and relevant audit event IDs as mode-0600 evidence.
+This exercises the manifest-bound helper used by `netsfera-openbot.service`; do not call
+`systemctl restart` while holding FD 9, since the unit must acquire that lock itself.
 
 ## Post-deploy agent configuration and acceptance
 
@@ -195,7 +232,13 @@ After the candidate is healthy and persistent across the helper restart:
 4. Confirm there is no reverse grant. Do not grant an MCP tool to either agent in this release.
 
 Exercise the live journey in this order: existing channels/history remain reachable; Jefe ERP cannot
-browse and hands a document request to the collector; the collector reaches a reviewed host but an
+browse and hands a document request to the collector. The native handoff records the task,
+constraints and expected result in a collector-owned direct conversation accessible to that person.
+It posts a receipt with a continuation link and audits `awaiting-human-continuation`, including the
+source thread and destination thread/channel references. The headless delivery has no browser, Choice or
+Approval actions: the person must open the linked collector conversation and continue there before
+those actions occur. Confirm the collector model did not run during that receipt and Jefe truthfully
+reports that the interactive work is pending. Then the collector reaches a reviewed host but an
 unreviewed host is refused with its rule; login uses human takeover and then returns work; and
 `/crear-proveedor-documental` interviews, rehearses, and renders a native save card. Saving creates a
 personal skill without silently attaching it; **Put it on a Bot** attaches it to the collector.
@@ -209,7 +252,9 @@ individual selection or `askApproval` for the complete set, and acts only on the
 selection table includes provider, document identifier, issue date, period, amount, currency, file
 type, and source whenever the portal exposes them.
 Rejection performs no document action. Login, password, 2FA, CAPTCHA, consent, account switching,
-and unsafe/sensitive steps require human takeover; credentials and one-time codes are never recorded
+and unsafe/sensitive steps require human takeover. Enter, Space and submit-on-type activations are
+denied even from an unnamed focus or a neutral field; request takeover for those actions. Ordinary
+non-submit typing and non-activating keys remain available. Credentials and one-time codes are never recorded
 in a skill or chat. To add a provider, first review the portal and authentication hosts, update and
 redeploy the reviewed policy artifact, and only then invoke `/crear-proveedor-documental`. Skill
 creation never edits policy.

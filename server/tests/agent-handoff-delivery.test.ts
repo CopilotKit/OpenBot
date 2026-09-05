@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { AbstractAgent, BaseEvent, Message } from "@ag-ui/client";
+import { AbstractAgent, type BaseEvent, type Message } from "@ag-ui/client";
 import { Observable } from "rxjs";
 import { createHandoffDelivery } from "../src/agents/handoff-delivery";
 import type { HandoffWork } from "../src/agents/handoff-runner";
@@ -27,6 +27,132 @@ const PRIOR: Message[] = [
 ];
 
 const FINISHED = [{ type: "RUN_FINISHED" }] as unknown as BaseEvent[];
+
+describe("interactive handoff continuation", () => {
+  async function attempt(
+    options: {
+      busy?: boolean;
+      denied?: boolean;
+      relay?: boolean;
+      optIn?: boolean;
+    } = {},
+  ) {
+    const requests: Array<
+      Parameters<
+        Parameters<typeof createHandoffDelivery>[0]["runner"]["run"]
+      >[0]
+    > = [];
+    const released: string[] = [];
+    const announced: string[] = [];
+    let modelRuns = 0;
+    let resolved = 0;
+    const agent = new (class extends AbstractAgent {
+      run() {
+        modelRuns++;
+        return new Observable<BaseEvent>((subscriber) => subscriber.complete());
+      }
+    })({ agentId: "recolector-documentos" });
+    const delivery = createHandoffDelivery({
+      agentFor: async () => (options.denied ? null : agent),
+      history: async () => PRIOR,
+      mintThreadId: () => "scratch-thread",
+      newRunId: () => "new-run",
+      interactiveConversationFor: async () => {
+        resolved++;
+        return options.optIn === false
+          ? null
+          : { threadId: "collector-thread", channelId: "collector-channel" };
+      },
+      announce: async ({ threadId }) => {
+        announced.push(threadId);
+      },
+      lock: {
+        acquire: async () => (options.busy ? null : { runId: "platform-run" }),
+        renew: async () => {},
+        release: async ({ threadId }) => {
+          released.push(threadId);
+        },
+      },
+      runner: {
+        run: (request) => {
+          requests.push(request);
+          return new Observable<BaseEvent>((subscriber) => {
+            void request.agent.runAgent(request.input as never).then(
+              () => subscriber.complete(),
+              (error) => subscriber.error(error),
+            );
+          });
+        },
+      },
+    });
+    const result = await delivery.deliver({
+      work: {
+        ...WORK,
+        fromBotId: "jefe-erp",
+        toBotId: "recolector-documentos",
+        task: "List September invoices",
+        constraints: "Metadata only",
+        expecting: "A selection table",
+        ...(options.relay ? { answerIn: "thread-1" } : {}),
+      },
+      message: "the ask",
+      shown: "Jefe asked for September invoices",
+      assertion: "signed",
+    });
+    return { requests, released, announced, modelRuns, resolved, result };
+  }
+
+  test("records a collector-owned request and truthful receipt without running its model", async () => {
+    const { requests, released, announced, modelRuns, result } =
+      await attempt();
+    expect(requests[0]?.threadId).toBe("collector-thread");
+    expect(requests[0]?.input).toMatchObject({
+      tools: [],
+      forwardedProps: { openbotRun: "signed" },
+    });
+    const kept = JSON.stringify(requests[0]?.persistedInputMessages);
+    expect(kept).toContain("List September invoices");
+    expect(kept).toContain("Metadata only");
+    expect(kept).toContain("A selection table");
+    expect(kept).toContain("jefe-erp");
+    expect(modelRuns).toBe(0);
+    expect(result.answer).toContain("/channel/collector-channel");
+    expect(result.answer).toContain("continue");
+    expect(result.answer).toContain("pending");
+    expect(result.continuation).toEqual({
+      threadId: "collector-thread",
+      channelId: "collector-channel",
+    });
+    expect(released).toEqual(["collector-thread"]);
+    expect(announced).toEqual(["collector-thread"]);
+  });
+
+  test("a busy collector conversation remains retryable", async () => {
+    await expect(attempt({ busy: true })).rejects.toThrow(
+      "collector-thread is busy",
+    );
+  });
+
+  test("actor/agent refusal still prevents delivery", async () => {
+    await expect(attempt({ denied: true })).rejects.toThrow(
+      "could not be built",
+    );
+  });
+
+  test("a normal forward hop retains scratch execution", async () => {
+    const { requests, modelRuns, result } = await attempt({ optIn: false });
+    expect(requests[0]?.threadId).toBe("scratch-thread");
+    expect(modelRuns).toBe(1);
+    expect(result.continuation).toBeUndefined();
+  });
+
+  test("relays keep the asking conversation even for an interactive recipient", async () => {
+    const { requests, resolved, modelRuns } = await attempt({ relay: true });
+    expect(requests[0]?.threadId).toBe("thread-1");
+    expect(resolved).toBe(0);
+    expect(modelRuns).toBe(1);
+  });
+});
 
 /** Enough of an agent for the delivery to hand a conversation to. */
 function stubAgent(): AbstractAgent {

@@ -12,6 +12,9 @@ agents:
       concrete task to Recolector de documentos if the handoff tool offers it. Never claim that an
       ERP lookup, handoff, provider visit, or download happened unless a tool result says it did. If
       no suitable capability is available, say exactly what is missing.
+      A handoff receipt means the request was recorded, not that a portal was visited. When it
+      supplies a continuation link, ask the person to continue in the collector conversation;
+      browsing and document selection or approval remain pending until then.
   - id: recolector-documentos
     name: Recolector de documentos
     title: Documentos externos
@@ -27,6 +30,9 @@ agents:
       Never purchase, upgrade, change payment methods, administer members, create credentials, or
       claim a file was downloaded without a saved-file tool result. When native download is not
       available, open the approved document, request human control, and report human_save_required.
+      Continue a handed-over request only in this interactive conversation with the person.
+      Request takeover for Enter, Space, and submit-on-type activation; ordinary typing without
+      submit and non-activating keys may still be used when the policy allows them.
     skills:
       - skill-creator
       - crear-proveedor-documental

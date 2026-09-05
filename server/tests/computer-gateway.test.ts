@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AuditEventInput, AuditStore } from "../src/audit";
 import { StaleSnapshotError } from "../src/computer/client";
 import {
@@ -193,6 +195,83 @@ function fakeAudit() {
 
 const ACTOR = { id: "dev-local-user" };
 const PERMISSIVE: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
+
+describe("the reviewed collector keyboard boundary", () => {
+  test.each([
+    "Enter",
+    "Space",
+    " ",
+    "NumpadEnter",
+    "Control+Enter",
+    "Shift+Space",
+    "submit",
+  ])("%s cannot activate from a neutral field or absent ref", async (key) => {
+    const policy = JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../deploy/netsfera/agent-computer-policy.json",
+        ),
+        "utf8",
+      ),
+    ) as ActionPolicy;
+    const { gateway, calls, rows } = await gatewayWith(policy, {
+      routes: {
+        "/snapshot": () =>
+          Response.json({ ...SNAPSHOT, url: "https://chatgpt.com/invoices" }),
+      },
+    });
+    await gateway.snapshot("recolector-documentos");
+    const action =
+      key === "submit"
+        ? gateway.type("recolector-documentos", ACTOR, {
+            ref: "e1",
+            snapshotId: 7,
+            text: "2026",
+            submit: true,
+          })
+        : gateway.key("recolector-documentos", ACTOR, { key });
+    await expect(action).rejects.toThrow("take control");
+    expect(calls).toEqual([]);
+    expect(rows.at(-1)?.payload).toMatchObject({
+      bot: "recolector-documentos",
+      actor: ACTOR.id,
+      decision: { source: "deny", allowed: false, carriedOut: false },
+    });
+    await gateway.requestHelp(
+      "recolector-documentos",
+      ACTOR,
+      "Please take control to submit.",
+    );
+    expect(calls).toEqual(["requestHelp"]);
+  });
+
+  test("ordinary typing and non-activating keys still reach the computer", async () => {
+    const policy = JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../deploy/netsfera/agent-computer-policy.json",
+        ),
+        "utf8",
+      ),
+    ) as ActionPolicy;
+    const { gateway, calls } = await gatewayWith(policy, {
+      routes: {
+        "/snapshot": () =>
+          Response.json({ ...SNAPSHOT, url: "https://chatgpt.com/invoices" }),
+      },
+    });
+    await gateway.snapshot("recolector-documentos");
+    await gateway.type("recolector-documentos", ACTOR, {
+      ref: "e1",
+      snapshotId: 7,
+      text: "2026",
+    });
+    await gateway.key("recolector-documentos", ACTOR, { key: "Tab" });
+    expect(calls).toEqual(["type", "key"]);
+  });
+});
 
 async function gatewayWith(
   policy: ActionPolicy | undefined,
