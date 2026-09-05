@@ -167,6 +167,17 @@ export function createPeopleStore(
         sql`(${users.email} ilike ${pattern} escape '\\' or coalesce(${users.name}, '') ilike ${pattern} escape '\\')`,
       );
     }
+    if (cursor) {
+      filters.push(
+        sql`(
+          (${users.lastSignedInAt} is null and (${cursor.lastSignedInAt}::timestamptz is not null or ${users.email} > ${cursor.email}))
+          or (${users.lastSignedInAt} is not null and ${cursor.lastSignedInAt}::timestamptz is not null and (
+            ${users.lastSignedInAt} < ${cursor.lastSignedInAt}::timestamptz
+            or (${users.lastSignedInAt} = ${cursor.lastSignedInAt}::timestamptz and ${users.email} > ${cursor.email})
+          ))
+        )`,
+      );
+    }
 
     const rows = await database
       .select({
@@ -185,13 +196,12 @@ export function createPeopleStore(
         providers: sql<
           string[]
         >`coalesce(array_agg(distinct ${accounts.providerId}) filter (where ${accounts.providerId} is not null), '{}')`,
-        lastSignedInAt: sql<Date | null>`max(${sessions.createdAt})`,
+        lastSignedInAt: users.lastSignedInAt,
         revoked: sql<boolean>`bool_or(${revokedAccess.email} is not null)`,
       })
       .from(users)
       .leftJoin(userRoles, eq(userRoles.userId, users.id))
       .leftJoin(accounts, eq(accounts.userId, users.id))
-      .leftJoin(sessions, eq(sessions.userId, users.id))
       .leftJoin(
         revokedAccess,
         eq(revokedAccess.email, sql`lower(${users.email})`),
@@ -205,26 +215,7 @@ export function createPeopleStore(
        * signed in floats above everybody who just did. On a deployment of any size that is the
        * whole first screen given to people who have never used it.
        */
-      /*
-       * The keyset, applied after grouping because it is about the aggregate.
-       *
-       * The sort is (last sign-in desc nulls last, email asc), so the cursor has to compare on both
-       * or two people who signed in within the same millisecond would hide each other. `nulls last`
-       * is why this is written out rather than a plain tuple comparison: a null on the descending
-       * side sorts after every value, which is the opposite of what `<` says about it.
-       */
-      .having(
-        cursor
-          ? sql`(
-              (max(${sessions.createdAt}) is null and (${cursor.lastSignedInAt}::timestamptz is not null or ${users.email} > ${cursor.email}))
-              or (max(${sessions.createdAt}) is not null and ${cursor.lastSignedInAt}::timestamptz is not null and (
-                max(${sessions.createdAt}) < ${cursor.lastSignedInAt}::timestamptz
-                or (max(${sessions.createdAt}) = ${cursor.lastSignedInAt}::timestamptz and ${users.email} > ${cursor.email})
-              ))
-            )`
-          : undefined,
-      )
-      .orderBy(sql`max(${sessions.createdAt}) desc nulls last`, users.email)
+      .orderBy(sql`${users.lastSignedInAt} desc nulls last`, users.email)
       // One more than asked for, so "is there another page" is answered without a second count
       // query over the same aggregate.
       .limit(limit + 1);

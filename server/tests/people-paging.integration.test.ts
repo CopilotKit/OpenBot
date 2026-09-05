@@ -41,6 +41,7 @@ async function person(
     email: `${id}@openbot.test`,
     name: name ?? `Person ${index}`,
     emailVerified: true,
+    lastSignedInAt: signedInAt,
   });
   if (signedInAt) {
     await database.insert(sessions).values({

@@ -85,6 +85,7 @@ export const users = pgTable("users", {
   onboardingCompletedAt: timestamp("onboarding_completed_at", {
     withTimezone: true,
   }),
+  lastSignedInAt: timestamp("last_signed_in_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

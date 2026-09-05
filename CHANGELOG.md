@@ -10,6 +10,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## 0.0.9
 
+### The People screen keeps a person's last sign-in when their sessions go away
+
+`Last signed in` was `max(sessions.created_at)`, so it disappeared whenever the session rows behind
+it did: on sign-out, on expiry, and when an administrator removed somebody. Restoring them did not
+bring it back, and the person moved to the bottom of the list as somebody who had never signed in.
+The moment of each sign-in is now recorded on the person, so the answer survives all three, and a
+removed person's row shows when they were last here instead of leaving it out. Existing deployments
+are backfilled from whatever sessions they still hold.
+
 ### A message can carry files
 
 Pick them, drag them onto the composer or paste them in: up to eight files on one message, images up

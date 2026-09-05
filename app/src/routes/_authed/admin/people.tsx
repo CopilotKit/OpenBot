@@ -54,7 +54,8 @@ function describe(person: Person): string {
     ? `last signed in ${new Date(person.lastSignedInAt).toLocaleDateString()}`
     : "never signed in";
 
-  if (person.revoked) return `Access removed · ${providers || "no provider"}`;
+  if (person.revoked)
+    return `Access removed · ${providers || "no provider"} · ${when}`;
   if (person.configuredAdmin) {
     return `Administrator by configuration · ${when}`;
   }

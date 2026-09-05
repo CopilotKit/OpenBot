@@ -239,6 +239,20 @@
       "when": 1789066859018,
       "tag": "0033_attachments_uploaded_by_index",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789162066485,
+      "tag": "0034_last_signed_in_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789162076466,
+      "tag": "0035_backfill_last_signed_in_at",
+      "breakpoints": true
     }
   ]
 }
