@@ -17,7 +17,6 @@
  * tries again on the next tick. So every phase below gets its own try/catch, and nothing here ever
  * lets a phase's error reach the top and take the process down.
  */
-import { randomUUID } from "node:crypto";
 import { createDatabase } from "../../server/src/db/client";
 import { createRoutineStore } from "../../server/src/routines/store";
 import {
@@ -27,63 +26,34 @@ import {
   type RoutineSweepOptions,
 } from "../../server/src/routines/sweep";
 import { createWorkQueue } from "../../server/src/work/queue";
+import { loadWorkerEnv, routineRunUrl } from "./env";
 import { workerStatus } from "./status";
 
 console.info(`OpenBot worker status: ${workerStatus().status}`);
 
 /*
- * Refused up front, for the reason `fire-routines.ts` refuses up front: a loop that started anyway
- * would open a run row for every routine it offers itself and collect a 401 on every dispatch,
- * forever, with the only evidence a line in the server's audit trail. Said once, loudly, before the
- * first tick, is the difference between a worker that failed to start and a deployment where
- * routines quietly do nothing.
- */
-const workerSharedSecret = process.env.WORKER_SHARED_SECRET;
-if (!workerSharedSecret) {
-  throw new Error(
-    "WORKER_SHARED_SECRET is not set, so this worker cannot authenticate itself to /internal/routines/run and no routine could be fired.",
-  );
-}
-
-/*
- * Read from the environment rather than from `DeploymentConfig`/`loadConfig`, and deliberately so.
+ * The worker's three settings, parsed and validated in one place (`./env`).
  *
- * `loadConfig` demands the whole server deployment's configuration — Intelligence credentials, key
- * encryption, auth — because it answers "what can this deployment do". This process is handed exactly
- * three settings by `scripts/start.sh` (`DATABASE_URL`, `SERVER_INTERNAL_URL`,
- * `WORKER_SHARED_SECRET`); calling `loadConfig(process.env)` here would refuse to start over
- * settings this loop has no opinion about and does not need. Where this process can reach its own API
- * server is a fact about where this process runs, same as `fire-routines.ts` argues for
- * `SERVER_INTERNAL_URL` alone — this file extends that reasoning to the secret and the database too.
+ * Refused up front, for the reason `fire-routines.ts` refuses up front: a loop that
+ * started anyway would open a run row for every routine it offers itself and collect
+ * a 401 on every dispatch, forever, with the only evidence a line in the server's
+ * audit trail. Said once, loudly, before the first tick, is the difference between a
+ * worker that failed to start and a deployment where routines quietly do nothing.
+ *
+ * Read from the environment rather than from `DeploymentConfig`/`loadConfig`, and
+ * deliberately so. `loadConfig` demands the whole server deployment's configuration —
+ * Intelligence credentials, key encryption, auth — because it answers "what can this
+ * deployment do". This process is handed exactly three settings by `scripts/start.sh`
+ * (`DATABASE_URL`, `SERVER_INTERNAL_URL`, `WORKER_SHARED_SECRET`); calling
+ * `loadConfig(process.env)` here would refuse to start over settings this loop has no
+ * opinion about and does not need.
  */
-const serverInternalUrl = process.env.SERVER_INTERNAL_URL;
-if (!serverInternalUrl) {
-  throw new Error(
-    "SERVER_INTERNAL_URL is not set, so this worker does not know where to hand a routine run.",
-  );
-}
-
-/*
- * Refused for the same reason as the two checks above: a loop that started anyway would hand
- * `createDatabase` an empty connection string and fail on the first query with no indication of
- * what was actually missing.
- */
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  throw new Error(
-    "DATABASE_URL is not set, so this worker has no database to read routines from or claim them in.",
-  );
-}
+const { workerSharedSecret, serverInternalUrl, databaseUrl, owner } =
+  loadWorkerEnv();
 
 const database = createDatabase(databaseUrl);
 const queue = createWorkQueue(database);
 const routineStore = createRoutineStore(database);
-
-// A name for the lease, so a stuck claim can be traced back to the process that took it. Mirrors
-// `fire-routines.ts`: `HOSTNAME` is not set by bash, so without the random fallback every worker
-// started by `scripts/start.sh` would share the owner "routines/laptop" and `ours()` could no
-// longer tell one worker's lease apart from another's.
-const owner = `routines/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`;
 
 /**
  * Hand one opened run to the server, which owns everything about running it.
@@ -94,7 +64,7 @@ const owner = `routines/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`;
  * `last_error` needs.
  */
 async function dispatch(routineRunId: string): Promise<void> {
-  const response = await fetch(`${serverInternalUrl}/internal/routines/run`, {
+  const response = await fetch(routineRunUrl(serverInternalUrl), {
     method: "POST",
     headers: {
       authorization: `Bearer ${workerSharedSecret}`,
