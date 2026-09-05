@@ -185,6 +185,48 @@ pub fn spawn_host_process(
     command.spawn()
 }
 
+/// Which Compose services are not running, and the last thing each said.
+///
+/// `compose up` succeeds once it has asked for everything; a service that then exits is not its
+/// problem. Both Bots exit immediately without a model key, saying exactly that, and without this
+/// the window reports a healthy stack while nothing can answer a question.
+pub fn services_that_exited(engine: Engine, root: &Path) -> Vec<(String, String)> {
+    let Ok(output) = compose_command(engine, root)
+        .args(["ps", "-a", "--format", "{{.Service}}\t{{.State}}"])
+        .output()
+    else {
+        return Vec::new();
+    };
+
+    let mut dead = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some((service, state)) = line.split_once('\t') else {
+            continue;
+        };
+        if !state.trim().eq_ignore_ascii_case("exited") {
+            continue;
+        }
+        // `migrate` is meant to exit: it is run to completion, not raised.
+        if service.trim() == "migrate" {
+            continue;
+        }
+        let why = compose_command(engine, root)
+            .args(["logs", "--tail", "3", service.trim()])
+            .output()
+            .ok()
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+            .unwrap_or_default();
+        let why = why
+            .lines()
+            .rfind(|line| !line.trim().is_empty())
+            .unwrap_or("no reason in its log")
+            .trim()
+            .to_string();
+        dead.push((service.trim().to_string(), why));
+    }
+    dead
+}
+
 /// Refuse to start if something already holds a port this deployment needs.
 ///
 /// Found the hard way: another deployment was listening on 3001, so the readiness check below was

@@ -64,10 +64,20 @@ fn secret() -> String {
 /// about which the resolver picked.
 pub fn compose(
     intelligence: &Intelligence,
+    model: &Model,
     engine: &EngineStatus,
     ports: &Ports,
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
+
+    // Left out entirely when blank: written empty, Compose passes an empty string and the Bot's own
+    // refusal becomes a confusing one about a key that is set and useless.
+    if !model.openai_api_key.trim().is_empty() {
+        env.insert(
+            "OPENAI_API_KEY".into(),
+            model.openai_api_key.trim().to_string(),
+        );
+    }
 
     env.insert("INTELLIGENCE_API_URL".into(), intelligence.api_url.clone());
     env.insert(
@@ -126,6 +136,22 @@ pub fn compose(
     env.insert("LANGGRAPH_PORT".into(), ports.langgraph.to_string());
     env.insert("SUPERVISOR_PORT".into(), ports.supervisor.to_string());
 
+    // The whole deployment is on this machine, so the server must be allowed to talk to it.
+    //
+    // The private-address floor stops a hosted deployment reaching into its own network, which is
+    // right there and wrong here: the supervisor, the computers and the Bots are all on loopback by
+    // design. Without this the server refuses to call its own supervisor and the failure arrives as
+    // an Unauthorized wrapped in a 500, which names neither the address nor the rule.
+    env.insert("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS".into(), "true".into());
+
+    // Which package the deployment runs. Without it the server falls back rather than using the one
+    // that came with the deployment, and the Bots somebody was given are not the Bots they get.
+    env.insert("TENANT_PACKAGE_DIR".into(), "../examples/fintech".into());
+
+    // The one person, named. `OPENBOT_SINGLE_USER` says there is nobody else; this says who that
+    // somebody is, so the routes that ask what an actor may do have an actor to answer about.
+    env.insert("INITIAL_ADMIN_EMAILS".into(), "dev@openbot.local".into());
+
     // One machine, one person, no sign-in.
     //
     // The server refuses to start with no identity provider rather than serve a deployment where
@@ -151,6 +177,16 @@ pub struct Intelligence {
     pub api_url: String,
     pub gateway_ws_url: String,
     pub api_key: String,
+}
+
+/// The model credential, which belongs to the provider and not to the harness.
+///
+/// Both Bots the deployment ships refuse to start without one, saying so plainly: "This Bot cannot
+/// answer without a model." Choosing between providers is its own screen later; this is the one key
+/// without which nothing answers at all.
+#[derive(Clone, Debug, Default)]
+pub struct Model {
+    pub openai_api_key: String,
 }
 
 /// Write the file, replacing only what this owns.
@@ -204,7 +240,12 @@ mod tests {
 
     #[test]
     fn every_shared_secret_is_generated_rather_than_the_published_dev_default() {
-        let env = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         for key in [
             "COMPUTER_TOKEN",
             "SUPERVISOR_TOKEN",
@@ -222,14 +263,59 @@ mod tests {
 
     #[test]
     fn two_installs_do_not_share_a_key() {
-        let a = compose(&intelligence(), &engine_status(None), &Ports::default());
-        let b = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let a = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
+        let b = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         assert_ne!(a.get("KEY_ENCRYPTION_KEY"), b.get("KEY_ENCRYPTION_KEY"));
     }
 
     #[test]
+    fn the_server_may_reach_its_own_supervisor_on_loopback() {
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
+        assert_eq!(
+            env.get("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS")
+                .map(String::as_str),
+            Some("true"),
+            "everything a desktop install talks to is on this machine"
+        );
+    }
+
+    #[test]
+    fn the_deployment_runs_its_own_package_rather_than_a_fallback() {
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
+        assert_eq!(
+            env.get("TENANT_PACKAGE_DIR").map(String::as_str),
+            Some("../examples/fintech")
+        );
+    }
+
+    #[test]
     fn a_desktop_install_is_single_user_or_the_server_refuses_to_start() {
-        let env = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         assert_eq!(
             env.get("OPENBOT_SINGLE_USER").map(String::as_str),
             Some("true")
@@ -238,7 +324,12 @@ mod tests {
 
     #[test]
     fn the_worker_is_told_where_the_server_is_or_it_refuses_to_start() {
-        let env = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         assert_eq!(
             env.get("SERVER_INTERNAL_URL").map(String::as_str),
             Some("http://127.0.0.1:3001")
@@ -247,7 +338,12 @@ mod tests {
 
     #[test]
     fn the_supervisor_url_is_set_or_every_bot_shares_one_browser() {
-        let env = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         assert_eq!(
             env.get("COMPUTER_SUPERVISOR_URL").map(String::as_str),
             Some("http://127.0.0.1:4500")
@@ -256,11 +352,17 @@ mod tests {
 
     #[test]
     fn the_engine_socket_is_written_only_when_the_default_is_wrong() {
-        let without = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let without = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         assert!(!without.contains_key("ENGINE_SOCKET"));
 
         let with = compose(
             &intelligence(),
+            &Model::default(),
             &engine_status(Some("/run/user/501/podman/podman.sock")),
             &Ports::default(),
         );
@@ -272,7 +374,12 @@ mod tests {
 
     #[test]
     fn addresses_name_an_address_rather_than_localhost() {
-        let env = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         for key in [
             "DATABASE_URL",
             "AGENT_COMPUTER_URL",
@@ -290,7 +397,12 @@ mod tests {
         let path = dir.join(".env");
         std::fs::write(&path, "OPENAI_API_KEY=sk-somebodys-own\n# a comment\n").unwrap();
 
-        let env = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         write(&path, &env).unwrap();
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -309,9 +421,19 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
 
-        let first = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let first = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         write(&path, &first).unwrap();
-        let second = compose(&intelligence(), &engine_status(None), &Ports::default());
+        let second = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+        );
         write(&path, &second).unwrap();
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -321,5 +443,56 @@ mod tests {
             "the key was written twice"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+
+    fn intelligence() -> Intelligence {
+        Intelligence {
+            api_url: "https://api.example".into(),
+            gateway_ws_url: "wss://realtime.example".into(),
+            api_key: "key".into(),
+        }
+    }
+
+    fn engine() -> EngineStatus {
+        EngineStatus {
+            engine: None,
+            responding: true,
+            engine_socket: None,
+            detail: String::new(),
+        }
+    }
+
+    #[test]
+    fn the_model_key_is_written_when_one_is_given() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                openai_api_key: "sk-a-real-one".into(),
+            },
+            &engine(),
+            &Ports::default(),
+        );
+        assert_eq!(
+            env.get("OPENAI_API_KEY").map(String::as_str),
+            Some("sk-a-real-one")
+        );
+    }
+
+    #[test]
+    fn a_blank_model_key_is_left_out_rather_than_written_empty() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                openai_api_key: "   ".into(),
+            },
+            &engine(),
+            &Ports::default(),
+        );
+        assert!(!env.contains_key("OPENAI_API_KEY"));
     }
 }

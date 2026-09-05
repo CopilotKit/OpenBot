@@ -27,6 +27,7 @@ export function App() {
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [modelKey, setModelKey] = useState("");
   const [apiUrl, setApiUrl] = useState("https://api.intelligence.copilotkit.ai");
   const [wsUrl, setWsUrl] = useState("wss://realtime.intelligence.copilotkit.ai");
   const [steps, setSteps] = useState<Progress[]>([]);
@@ -64,6 +65,7 @@ export function App() {
         apiUrl,
         gatewayWsUrl: wsUrl,
         apiKey,
+        openaiApiKey: modelKey,
       });
       setRunning(true);
     } catch (error) {
@@ -125,6 +127,18 @@ export function App() {
             />
           </div>
           <div className="field">
+            <label htmlFor="model">Model key</label>
+            <input
+              id="model"
+              type="password"
+              value={modelKey}
+              onChange={(event) => setModelKey(event.target.value)}
+              placeholder="an OpenAI key, so the Bots can answer"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <div className="field">
             <label htmlFor="root">Where OpenBot lives</label>
             <input id="root" value={root} onChange={(event) => setRoot(event.target.value)} spellCheck={false} />
           </div>
@@ -167,7 +181,7 @@ export function App() {
             Stop OpenBot
           </button>
         ) : (
-          <button onClick={start} disabled={busy || apiKey.trim() === "" || root.trim() === ""}>
+          <button onClick={start} disabled={busy || apiKey.trim() === "" || modelKey.trim() === "" || root.trim() === ""}>
             {busy ? "Working…" : "Start OpenBot"}
           </button>
         )}
@@ -201,6 +215,12 @@ function label(step: string): string {
       return "Deployment";
     case "env":
       return "Settings";
+    case "ports":
+      return "Ports";
+    case "dependencies":
+      return "Dependencies";
+    case "answering":
+      return "Answering";
     case "services":
       return "Containers";
     case "migrate":

@@ -96,6 +96,7 @@ async fn start_stack(
     api_url: String,
     gateway_ws_url: String,
     api_key: String,
+    openai_api_key: String,
 ) -> Result<(), String> {
     let root = PathBuf::from(root);
 
@@ -147,6 +148,7 @@ async fn start_stack(
             gateway_ws_url,
             api_key,
         },
+        &openbot_env::Model { openai_api_key },
         &status,
         &openbot_env::Ports::default(),
     );
@@ -159,6 +161,13 @@ async fn start_stack(
 
     stack::migrate(found, &root)?;
     report(&app, "migrate", true, "migrations applied");
+
+    // `compose up` succeeds once it has asked for everything. A service that then exits is not its
+    // problem, and both Bots exit immediately without a model key. Reported rather than passed
+    // over, or the window shows a healthy stack while nothing can answer a question.
+    for (name, why) in stack::services_that_exited(found, &root) {
+        report(&app, "services", false, format!("{name} stopped: {why}"));
+    }
 
     // Before spawning: if these are already held, whatever answers later is not ours.
     let ports = openbot_env::Ports::default();
