@@ -63,14 +63,14 @@ export function createSandboxedRoutes(
       sampleArguments?: Record<string, unknown>;
     } | null;
 
-    if (!body?.slug || !body.title) {
+    if (!body?.slug || !body.title?.trim()) {
       return context.json({ error: "A name and a title are required." }, 400);
     }
 
     try {
       const component = await store.save({
         slug: body.slug,
-        title: body.title,
+        title: body.title.trim(),
         description: body.description ?? "",
         html: body.html ?? "",
         css: body.css ?? "",

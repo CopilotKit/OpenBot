@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A sandboxed component cannot be saved with a blank title
+
+`POST /api/sandboxed` accepted a title of spaces. The slug has a pattern of its own and refuses one,
+but the title is a separate field with no check, so the component reached the grid with nothing to
+read: an administrator could not tell it from the next one, and a Bot granted it was told the
+component is called "   ". The title is now trimmed, and one that is only whitespace is refused the
+way a missing one always was. The two endpoints of the same shape, `POST /api/servers/custom` and
+`POST /api/skills`, already did this.
+
 ### The server connects to Postgres on Windows, and `localhost` is no longer a coin toss
 
 Two separate faults, both of which stop a deployment reaching its own database and neither of which
