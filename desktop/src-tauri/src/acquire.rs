@@ -62,7 +62,11 @@ pub fn machine_exists() -> bool {
 /// belonged to 5.7, where libkrun was the default.
 pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome {
     if machine_exists() {
-        return StepOutcome { step: Step::CreateMachine, ok: true, detail: format!("{MACHINE} already exists.") };
+        return StepOutcome {
+            step: Step::CreateMachine,
+            ok: true,
+            detail: format!("{MACHINE} already exists."),
+        };
     }
     match podman(&[
         "machine",
@@ -75,18 +79,36 @@ pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome 
         "--disk-size",
         &disk_gib.to_string(),
     ]) {
-        Ok(_) => StepOutcome { step: Step::CreateMachine, ok: true, detail: format!("{MACHINE} created.") },
-        Err(error) => StepOutcome { step: Step::CreateMachine, ok: false, detail: explain_machine_error(&error) },
+        Ok(_) => StepOutcome {
+            step: Step::CreateMachine,
+            ok: true,
+            detail: format!("{MACHINE} created."),
+        },
+        Err(error) => StepOutcome {
+            step: Step::CreateMachine,
+            ok: false,
+            detail: explain_machine_error(&error),
+        },
     }
 }
 
 pub fn start_machine() -> StepOutcome {
     match podman(&["machine", "start", MACHINE]) {
-        Ok(_) => StepOutcome { step: Step::StartMachine, ok: true, detail: format!("{MACHINE} started.") },
-        Err(error) if error.contains("already running") => {
-            StepOutcome { step: Step::StartMachine, ok: true, detail: format!("{MACHINE} was already running.") }
-        }
-        Err(error) => StepOutcome { step: Step::StartMachine, ok: false, detail: explain_machine_error(&error) },
+        Ok(_) => StepOutcome {
+            step: Step::StartMachine,
+            ok: true,
+            detail: format!("{MACHINE} started."),
+        },
+        Err(error) if error.contains("already running") => StepOutcome {
+            step: Step::StartMachine,
+            ok: true,
+            detail: format!("{MACHINE} was already running."),
+        },
+        Err(error) => StepOutcome {
+            step: Step::StartMachine,
+            ok: false,
+            detail: explain_machine_error(&error),
+        },
     }
 }
 
@@ -117,7 +139,9 @@ fn explain_machine_error(error: &str) -> String {
 /// A process that answers is not a process holding the current configuration, so this asks the
 /// engine for its server version rather than whether a binary exists.
 pub fn health_gate(binary: &str) -> StepOutcome {
-    let output = Command::new(binary).args(["version", "--format", "{{.Server.APIVersion}}"]).output();
+    let output = Command::new(binary)
+        .args(["version", "--format", "{{.Server.APIVersion}}"])
+        .output();
     match output {
         Ok(out) if out.status.success() && !out.stdout.is_empty() => StepOutcome {
             step: Step::HealthGate,
@@ -127,9 +151,16 @@ pub fn health_gate(binary: &str) -> StepOutcome {
         Ok(out) => StepOutcome {
             step: Step::HealthGate,
             ok: false,
-            detail: format!("{binary} did not answer: {}", String::from_utf8_lossy(&out.stderr).trim()),
+            detail: format!(
+                "{binary} did not answer: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
         },
-        Err(error) => StepOutcome { step: Step::HealthGate, ok: false, detail: format!("{binary} could not be run: {error}") },
+        Err(error) => StepOutcome {
+            step: Step::HealthGate,
+            ok: false,
+            detail: format!("{binary} could not be run: {error}"),
+        },
     }
 }
 
@@ -150,14 +181,21 @@ mod tests {
     #[test]
     fn the_local_system_refusal_is_turned_into_an_instruction() {
         let explained = explain_machine_error("Error code: Wsl/WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED");
-        assert!(explained.contains("as you"), "did not say whose session it needs: {explained}");
+        assert!(
+            explained.contains("as you"),
+            "did not say whose session it needs: {explained}"
+        );
         assert!(!explained.contains("0xffffffff"));
     }
 
     #[test]
     fn the_missing_component_refusal_asks_for_the_restart_it_needs() {
-        let explained = explain_machine_error("Error code: Wsl/WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED");
-        assert!(explained.contains("restart"), "did not mention the restart: {explained}");
+        let explained =
+            explain_machine_error("Error code: Wsl/WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED");
+        assert!(
+            explained.contains("restart"),
+            "did not mention the restart: {explained}"
+        );
     }
 
     #[test]

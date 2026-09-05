@@ -19,7 +19,13 @@ use crate::engine::Engine;
 
 /// The services Compose owns. `migrate` is deliberately absent: it is run once, to completion,
 /// rather than raised, and treating it as a long-lived service makes it look like a crash loop.
-const SERVICES: [&str; 5] = ["postgres", "supervisor", "agent-computer", "agent-bot", "agent-langgraph"];
+const SERVICES: [&str; 5] = [
+    "postgres",
+    "supervisor",
+    "agent-computer",
+    "agent-bot",
+    "agent-langgraph",
+];
 
 /// The three that are not containers, in the order they are started.
 ///
@@ -27,9 +33,21 @@ const SERVICES: [&str; 5] = ["postgres", "supervisor", "agent-computer", "agent-
 /// it owns. Nothing here waits on the others: each is supervised on its own and reports its own
 /// state, so a worker that dies does not take the window with it.
 pub const HOST_PROCESSES: [HostProcess; 3] = [
-    HostProcess { name: "server", cwd: "server", script: "src/index.ts" },
-    HostProcess { name: "app", cwd: "app", script: "" },
-    HostProcess { name: "worker", cwd: "worker", script: "src/index.ts" },
+    HostProcess {
+        name: "server",
+        cwd: "server",
+        script: "src/index.ts",
+    },
+    HostProcess {
+        name: "app",
+        cwd: "app",
+        script: "",
+    },
+    HostProcess {
+        name: "worker",
+        cwd: "worker",
+        script: "src/index.ts",
+    },
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -132,7 +150,10 @@ pub fn spawn_host_process(
     } else {
         command.args(["--env-file=../.env", process.script]);
     }
-    command.stdout(Stdio::from(out)).stderr(Stdio::from(err)).stdin(Stdio::null());
+    command
+        .stdout(Stdio::from(out))
+        .stderr(Stdio::from(err))
+        .stdin(Stdio::null());
     command.spawn()
 }
 
@@ -167,7 +188,10 @@ mod tests {
 
     #[test]
     fn the_server_starts_before_the_app_that_talks_to_it() {
-        let server = HOST_PROCESSES.iter().position(|p| p.name == "server").unwrap();
+        let server = HOST_PROCESSES
+            .iter()
+            .position(|p| p.name == "server")
+            .unwrap();
         let app = HOST_PROCESSES.iter().position(|p| p.name == "app").unwrap();
         assert!(server < app);
     }

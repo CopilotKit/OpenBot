@@ -23,7 +23,14 @@ struct Progress {
 }
 
 fn report(app: &tauri::AppHandle, step: &str, ok: bool, detail: impl Into<String>) {
-    let _ = app.emit("setup:progress", Progress { step: step.into(), ok, detail: detail.into() });
+    let _ = app.emit(
+        "setup:progress",
+        Progress {
+            step: step.into(),
+            ok,
+            detail: detail.into(),
+        },
+    );
 }
 
 #[tauri::command]
@@ -90,11 +97,16 @@ async fn start_stack(
     };
 
     let settings = openbot_env::compose(
-        &openbot_env::Intelligence { api_url, gateway_ws_url, api_key },
+        &openbot_env::Intelligence {
+            api_url,
+            gateway_ws_url,
+            api_key,
+        },
         &status,
         &openbot_env::Ports::default(),
     );
-    openbot_env::write(&root.join(".env"), &settings).map_err(|e| format!("could not write .env: {e}"))?;
+    openbot_env::write(&root.join(".env"), &settings)
+        .map_err(|e| format!("could not write .env: {e}"))?;
     report(&app, "env", true, ".env written");
 
     stack::up(found, &root)?;
@@ -142,10 +154,17 @@ fn default_root() -> String {
 
 /// `bun` from PATH, or the places an installer puts it when PATH has not been reloaded.
 fn which_bun() -> Option<PathBuf> {
-    if std::process::Command::new("bun").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+    if std::process::Command::new("bun")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
         return Some(PathBuf::from("bun"));
     }
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok()?;
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
     let candidates = [
         PathBuf::from(&home).join(".bun/bin/bun"),
         PathBuf::from(&home).join(".bun/bin/bun.exe"),

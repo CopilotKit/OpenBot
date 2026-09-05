@@ -18,8 +18,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use rand::RngCore;
 
 use crate::engine::EngineStatus;
@@ -38,7 +38,15 @@ pub struct Ports {
 
 impl Default for Ports {
     fn default() -> Self {
-        Self { app: 3010, server: 3001, postgres: 5432, computer: 4100, bot: 4200, langgraph: 4201, supervisor: 4500 }
+        Self {
+            app: 3010,
+            server: 3001,
+            postgres: 5432,
+            computer: 4100,
+            bot: 4200,
+            langgraph: 4201,
+            supervisor: 4500,
+        }
     }
 }
 
@@ -54,11 +62,18 @@ fn secret() -> String {
 /// Addresses use `127.0.0.1` rather than `localhost` deliberately. Compose publishes on both
 /// loopback addresses, so either would connect, but naming one removes a whole class of question
 /// about which the resolver picked.
-pub fn compose(intelligence: &Intelligence, engine: &EngineStatus, ports: &Ports) -> BTreeMap<String, String> {
+pub fn compose(
+    intelligence: &Intelligence,
+    engine: &EngineStatus,
+    ports: &Ports,
+) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
 
     env.insert("INTELLIGENCE_API_URL".into(), intelligence.api_url.clone());
-    env.insert("INTELLIGENCE_GATEWAY_WS_URL".into(), intelligence.gateway_ws_url.clone());
+    env.insert(
+        "INTELLIGENCE_GATEWAY_WS_URL".into(),
+        intelligence.gateway_ws_url.clone(),
+    );
     env.insert("INTELLIGENCE_API_KEY".into(), intelligence.api_key.clone());
 
     env.insert("KEY_ENCRYPTION_KEY".into(), secret());
@@ -70,10 +85,19 @@ pub fn compose(intelligence: &Intelligence, engine: &EngineStatus, ports: &Ports
 
     env.insert(
         "DATABASE_URL".into(),
-        format!("postgres://openbot:openbot@127.0.0.1:{}/openbot", ports.postgres),
+        format!(
+            "postgres://openbot:openbot@127.0.0.1:{}/openbot",
+            ports.postgres
+        ),
     );
-    env.insert("TRUSTED_ORIGINS".into(), format!("http://127.0.0.1:{}", ports.app));
-    env.insert("AGENT_COMPUTER_URL".into(), format!("http://127.0.0.1:{}", ports.computer));
+    env.insert(
+        "TRUSTED_ORIGINS".into(),
+        format!("http://127.0.0.1:{}", ports.app),
+    );
+    env.insert(
+        "AGENT_COMPUTER_URL".into(),
+        format!("http://127.0.0.1:{}", ports.computer),
+    );
     env.insert(
         "MANAGED_AGENT_AG_UI_URL".into(),
         format!("http://127.0.0.1:{}/ag-ui", ports.langgraph),
@@ -165,10 +189,18 @@ mod tests {
     #[test]
     fn every_shared_secret_is_generated_rather_than_the_published_dev_default() {
         let env = compose(&intelligence(), &engine_status(None), &Ports::default());
-        for key in ["COMPUTER_TOKEN", "SUPERVISOR_TOKEN", "WORKER_SHARED_SECRET", "KEY_ENCRYPTION_KEY"] {
+        for key in [
+            "COMPUTER_TOKEN",
+            "SUPERVISOR_TOKEN",
+            "WORKER_SHARED_SECRET",
+            "KEY_ENCRYPTION_KEY",
+        ] {
             let value = env.get(key).expect(key);
             assert!(!value.contains("openbot-dev"), "{key} kept a dev default");
-            assert!(value.len() > 20, "{key} is too short to be a generated secret");
+            assert!(
+                value.len() > 20,
+                "{key} is too short to be a generated secret"
+            );
         }
     }
 
@@ -182,7 +214,10 @@ mod tests {
     #[test]
     fn the_supervisor_url_is_set_or_every_bot_shares_one_browser() {
         let env = compose(&intelligence(), &engine_status(None), &Ports::default());
-        assert_eq!(env.get("COMPUTER_SUPERVISOR_URL").map(String::as_str), Some("http://127.0.0.1:4500"));
+        assert_eq!(
+            env.get("COMPUTER_SUPERVISOR_URL").map(String::as_str),
+            Some("http://127.0.0.1:4500")
+        );
     }
 
     #[test]
@@ -190,14 +225,26 @@ mod tests {
         let without = compose(&intelligence(), &engine_status(None), &Ports::default());
         assert!(!without.contains_key("ENGINE_SOCKET"));
 
-        let with = compose(&intelligence(), &engine_status(Some("/run/user/501/podman/podman.sock")), &Ports::default());
-        assert_eq!(with.get("ENGINE_SOCKET").map(String::as_str), Some("/run/user/501/podman/podman.sock"));
+        let with = compose(
+            &intelligence(),
+            &engine_status(Some("/run/user/501/podman/podman.sock")),
+            &Ports::default(),
+        );
+        assert_eq!(
+            with.get("ENGINE_SOCKET").map(String::as_str),
+            Some("/run/user/501/podman/podman.sock")
+        );
     }
 
     #[test]
     fn addresses_name_an_address_rather_than_localhost() {
         let env = compose(&intelligence(), &engine_status(None), &Ports::default());
-        for key in ["DATABASE_URL", "AGENT_COMPUTER_URL", "COMPUTER_SUPERVISOR_URL", "MANAGED_AGENT_AG_UI_URL"] {
+        for key in [
+            "DATABASE_URL",
+            "AGENT_COMPUTER_URL",
+            "COMPUTER_SUPERVISOR_URL",
+            "MANAGED_AGENT_AG_UI_URL",
+        ] {
             assert!(!env[key].contains("localhost"), "{key} says localhost");
         }
     }
@@ -213,7 +260,10 @@ mod tests {
         write(&path, &env).unwrap();
 
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("OPENAI_API_KEY=sk-somebodys-own"), "dropped a setting it does not own");
+        assert!(
+            written.contains("OPENAI_API_KEY=sk-somebodys-own"),
+            "dropped a setting it does not own"
+        );
         assert!(written.contains("# a comment"));
         assert!(written.contains("COMPUTER_SUPERVISOR_URL="));
         std::fs::remove_dir_all(&dir).ok();
@@ -231,7 +281,11 @@ mod tests {
         write(&path, &second).unwrap();
 
         let written = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(written.matches("KEY_ENCRYPTION_KEY=").count(), 1, "the key was written twice");
+        assert_eq!(
+            written.matches("KEY_ENCRYPTION_KEY=").count(),
+            1,
+            "the key was written twice"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

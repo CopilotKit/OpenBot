@@ -97,7 +97,10 @@ pub fn read_step(data_dir: &Path) -> SetupStep {
 
 pub fn write_step(data_dir: &Path, step: SetupStep) -> std::io::Result<()> {
     std::fs::create_dir_all(data_dir)?;
-    std::fs::write(state_path(data_dir), serde_json::to_string(&step).unwrap_or_default())
+    std::fs::write(
+        state_path(data_dir),
+        serde_json::to_string(&step).unwrap_or_default(),
+    )
 }
 
 /// Read the machine and say which of the four, if any, is in the way.
@@ -110,9 +113,17 @@ pub fn blocker() -> Option<Blocker> {
     use std::process::Command;
 
     let firmware_ok = Command::new("powershell")
-        .args(["-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled"])
+        .args([
+            "-NoProfile",
+            "-Command",
+            "(Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled",
+        ])
         .output()
-        .map(|out| String::from_utf8_lossy(&out.stdout).to_lowercase().contains("true"))
+        .map(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .to_lowercase()
+                .contains("true")
+        })
         .unwrap_or(false);
     if !firmware_ok {
         return Some(Blocker::VirtualizationDisabled);
@@ -139,7 +150,11 @@ pub fn blocker() -> Option<Blocker> {
         .unwrap_or_default();
 
     if features != "Enabled" {
-        return Some(if elevated { Blocker::WslAbsent } else { Blocker::NotAdministrator });
+        return Some(if elevated {
+            Blocker::WslAbsent
+        } else {
+            Blocker::NotAdministrator
+        });
     }
 
     let default_version = Command::new("wsl.exe")
@@ -165,7 +180,12 @@ mod tests {
 
     #[test]
     fn each_blocker_names_its_own_fix_rather_than_saying_setup_failed() {
-        for blocker in [Blocker::WslAbsent, Blocker::WslOne, Blocker::VirtualizationDisabled, Blocker::NotAdministrator] {
+        for blocker in [
+            Blocker::WslAbsent,
+            Blocker::WslOne,
+            Blocker::VirtualizationDisabled,
+            Blocker::NotAdministrator,
+        ] {
             let text = blocker.instruction();
             assert!(text.len() > 40, "{blocker:?} has no instruction");
             assert!(!text.to_lowercase().contains("setup failed"));
@@ -175,26 +195,41 @@ mod tests {
     #[test]
     fn the_two_we_cannot_fix_say_who_has_to() {
         assert!(!Blocker::VirtualizationDisabled.ours_to_fix());
-        assert!(Blocker::VirtualizationDisabled.instruction().contains("firmware"));
+        assert!(Blocker::VirtualizationDisabled
+            .instruction()
+            .contains("firmware"));
         assert!(!Blocker::NotAdministrator.ours_to_fix());
-        assert!(Blocker::NotAdministrator.instruction().contains("administrator"));
+        assert!(Blocker::NotAdministrator
+            .instruction()
+            .contains("administrator"));
     }
 
     #[test]
     fn the_two_we_can_fix_promise_the_restart_they_will_cost() {
         for blocker in [Blocker::WslAbsent, Blocker::WslOne] {
             assert!(blocker.ours_to_fix());
-            assert!(blocker.instruction().contains("restart"), "{blocker:?} hides the restart");
+            assert!(
+                blocker.instruction().contains("restart"),
+                "{blocker:?} hides the restart"
+            );
         }
     }
 
     #[test]
     fn the_step_survives_the_restart_that_ends_the_process() {
         let dir = std::env::temp_dir().join(format!("openbot-winstate-{}", std::process::id()));
-        assert_eq!(read_step(&dir), SetupStep::Start, "an unknown machine starts at the beginning");
+        assert_eq!(
+            read_step(&dir),
+            SetupStep::Start,
+            "an unknown machine starts at the beginning"
+        );
 
         write_step(&dir, SetupStep::AwaitingRestart).unwrap();
-        assert_eq!(read_step(&dir), SetupStep::AwaitingRestart, "the step did not survive being written");
+        assert_eq!(
+            read_step(&dir),
+            SetupStep::AwaitingRestart,
+            "the step did not survive being written"
+        );
 
         write_step(&dir, SetupStep::FeaturesReady).unwrap();
         assert_eq!(read_step(&dir), SetupStep::FeaturesReady);
