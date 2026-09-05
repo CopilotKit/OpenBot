@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 
-use crate::engine::Engine;
+use crate::engine::Address;
 
 /// The services Compose owns. `migrate` is deliberately absent: it is run once, to completion,
 /// rather than raised, and treating it as a long-lived service makes it look like a crash loop.
@@ -76,8 +76,8 @@ pub struct StackStatus {
     pub detail: String,
 }
 
-fn compose_command(engine: Engine, root: &Path) -> Command {
-    let mut command = Command::new(engine.binary());
+fn compose_command(engine: &Address, root: &Path) -> Command {
+    let mut command = engine.command();
     command.current_dir(root).args(["compose"]);
     command
 }
@@ -87,12 +87,12 @@ fn compose_command(engine: Engine, root: &Path) -> Command {
 /// `--no-build` is the point of the whole published-images job: a desktop install has no toolchain,
 /// and without it Compose quietly starts compiling Chromium. Failing loudly on a missing image is
 /// the better answer, because it names a pull that did not happen.
-pub fn up(engine: Engine, root: &Path) -> Result<(), String> {
+pub fn up(engine: &Address, root: &Path) -> Result<(), String> {
     let output = compose_command(engine, root)
         .args(["up", "-d", "--no-build"])
         .args(SERVICES)
         .output()
-        .map_err(|error| format!("could not run {} compose: {error}", engine.binary()))?;
+        .map_err(|error| format!("could not run {} compose: {error}", engine.engine.binary()))?;
 
     if output.status.success() {
         return Ok(());
@@ -105,7 +105,7 @@ pub fn up(engine: Engine, root: &Path) -> Result<(), String> {
 /// A release step rather than a start step, for the reason `server/Dockerfile` gives: two replicas
 /// starting together would race, and a failed migration should stop the start rather than leave a
 /// half-migrated database serving.
-pub fn migrate(engine: Engine, root: &Path) -> Result<(), String> {
+pub fn migrate(engine: &Address, root: &Path) -> Result<(), String> {
     // No `--no-build` here: `compose run` does not take it, and passing it fails on the flag rather
     // than on anything to do with migrations. Building is prevented the other way, by
     // `IMAGE_PULL_POLICY=missing` in the environment, which makes the service pull instead.
@@ -120,7 +120,7 @@ pub fn migrate(engine: Engine, root: &Path) -> Result<(), String> {
     Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
 }
 
-pub fn down(engine: Engine, root: &Path) -> Result<(), String> {
+pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     let output = compose_command(engine, root)
         .args(["down"])
         .output()
@@ -240,7 +240,7 @@ pub fn stop_processes_under(_root: &Path) -> usize {
 /// `compose up` succeeds once it has asked for everything; a service that then exits is not its
 /// problem. Both Bots exit immediately without a model key, saying exactly that, and without this
 /// the window reports a healthy stack while nothing can answer a question.
-pub fn services_that_exited(engine: Engine, root: &Path) -> Vec<(String, String)> {
+pub fn services_that_exited(engine: &Address, root: &Path) -> Vec<(String, String)> {
     let Ok(output) = compose_command(engine, root)
         .args(["ps", "-a", "--format", "{{.Service}}\t{{.State}}"])
         .output()

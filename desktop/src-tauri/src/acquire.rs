@@ -14,6 +14,8 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+use crate::engine::{Address, Engine};
+
 /// Named so a caller can say which step failed rather than that a step did.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -134,12 +136,22 @@ fn explain_machine_error(error: &str) -> String {
     error.to_string()
 }
 
+/// How to reach the machine this app just started.
+///
+/// Always by name. The default connection belongs to whoever set it, and after `machine init` it is
+/// usually still pointing somewhere else.
+pub fn address() -> Address {
+    Address::new(Engine::Podman, Some(MACHINE.to_string()))
+}
+
 /// The gate before Compose is touched.
 ///
 /// A process that answers is not a process holding the current configuration, so this asks the
 /// engine for its server version rather than whether a binary exists.
-pub fn health_gate(binary: &str) -> StepOutcome {
-    let output = Command::new(binary)
+pub fn health_gate(address: &Address) -> StepOutcome {
+    let binary = address.engine.binary();
+    let output = address
+        .command()
         .args(["version", "--format", "{{.Server.APIVersion}}"])
         .output();
     match output {
@@ -172,6 +184,13 @@ pub fn download_dir(cache: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_machine_this_app_starts_is_addressed_by_name_not_by_the_default_connection() {
+        let addressed = address();
+        assert_eq!(addressed.connection.as_deref(), Some(MACHINE));
+        assert_eq!(addressed.engine, Engine::Podman);
+    }
 
     #[test]
     fn the_machine_has_its_own_name_so_an_existing_one_is_not_adopted() {

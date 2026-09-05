@@ -79,7 +79,7 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, S
         return Err(started.detail);
     }
 
-    let gate = acquire::health_gate(engine::Engine::Podman.binary());
+    let gate = acquire::health_gate(&acquire::address());
     report(&app, "health-gate", gate.ok, gate.detail.clone());
     if !gate.ok {
         return Err(gate.detail);
@@ -138,7 +138,7 @@ async fn start_stack(
     }
 
     let status = engine::detect();
-    let Some(found) = status.engine.filter(|_| status.responding) else {
+    let Some(found) = status.address.clone().filter(|_| status.responding) else {
         return Err(status.detail);
     };
 
@@ -151,21 +151,22 @@ async fn start_stack(
         &openbot_env::Model { openai_api_key },
         &status,
         &openbot_env::Ports::default(),
+        &deployment::image_variables(&root)?,
     );
     openbot_env::write(&root.join(".env"), &settings)
         .map_err(|e| format!("could not write .env: {e}"))?;
     report(&app, "env", true, ".env written");
 
-    stack::up(found, &root)?;
+    stack::up(&found, &root)?;
     report(&app, "services", true, "containers up");
 
-    stack::migrate(found, &root)?;
+    stack::migrate(&found, &root)?;
     report(&app, "migrate", true, "migrations applied");
 
     // `compose up` succeeds once it has asked for everything. A service that then exits is not its
     // problem, and both Bots exit immediately without a model key. Reported rather than passed
     // over, or the window shows a healthy stack while nothing can answer a question.
-    for (name, why) in stack::services_that_exited(found, &root) {
+    for (name, why) in stack::services_that_exited(&found, &root) {
         report(&app, "services", false, format!("{name} stopped: {why}"));
     }
 
@@ -254,8 +255,8 @@ fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
         .unwrap_or_else(|| PathBuf::from(&root));
     stack::stop_processes_under(&root);
 
-    if let Some(found) = engine::detect().engine {
-        stack::down(found, &root)?;
+    if let Some(found) = engine::detect().address {
+        stack::down(&found, &root)?;
     }
     *shell.root.lock().unwrap() = None;
     Ok(())

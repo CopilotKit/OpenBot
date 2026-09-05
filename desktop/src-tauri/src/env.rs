@@ -67,6 +67,7 @@ pub fn compose(
     model: &Model,
     engine: &EngineStatus,
     ports: &Ports,
+    images: &[(String, String)],
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
 
@@ -173,6 +174,14 @@ pub fn compose(
     // reason to compile Chromium.
     env.insert("IMAGE_PULL_POLICY".into(), "missing".into());
 
+    // Which images, by digest, from the release's own manifest. Compose's defaults are local build
+    // names, so leaving these unset does not fall back to something workable: it asks a registry
+    // for `openbot-supervisor:latest`, which nobody publishes, and the denial that comes back
+    // reads as a login problem.
+    for (variable, reference) in images {
+        env.insert(variable.clone(), reference.clone());
+    }
+
     // Only rootless Podman on Linux needs this; see engine.rs.
     if let Some(socket) = &engine.engine_socket {
         env.insert("ENGINE_SOCKET".into(), socket.clone());
@@ -238,9 +247,23 @@ mod tests {
         }
     }
 
+    /// A pinned image per Compose variable, as a release manifest supplies.
+    fn pinned() -> Vec<(String, String)> {
+        crate::deployment::IMAGE_VARIABLES
+            .iter()
+            .map(|(published, variable)| {
+                (
+                    (*variable).to_string(),
+                    format!("ghcr.io/copilotkit/openbot-{published}@sha256:abc"),
+                )
+            })
+            .collect()
+    }
+
     fn engine_status(socket: Option<&str>) -> EngineStatus {
         EngineStatus {
             engine: None,
+            address: None,
             responding: true,
             engine_socket: socket.map(str::to_string),
             detail: String::new(),
@@ -254,6 +277,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         for key in [
             "COMPUTER_TOKEN",
@@ -277,12 +301,14 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         let b = compose(
             &intelligence(),
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         assert_ne!(a.get("KEY_ENCRYPTION_KEY"), b.get("KEY_ENCRYPTION_KEY"));
     }
@@ -294,6 +320,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         assert_eq!(
             env.get("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS")
@@ -310,6 +337,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         assert_eq!(
             env.get("TENANT_PACKAGE_DIR").map(String::as_str),
@@ -324,6 +352,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         assert_eq!(
             env.get("OPENBOT_SINGLE_USER").map(String::as_str),
@@ -338,6 +367,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         assert_eq!(
             env.get("SERVER_INTERNAL_URL").map(String::as_str),
@@ -352,6 +382,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         assert_eq!(
             env.get("COMPUTER_SUPERVISOR_URL").map(String::as_str),
@@ -366,6 +397,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         assert!(!without.contains_key("ENGINE_SOCKET"));
 
@@ -374,6 +406,7 @@ mod tests {
             &Model::default(),
             &engine_status(Some("/run/user/501/podman/podman.sock")),
             &Ports::default(),
+            &pinned(),
         );
         assert_eq!(
             with.get("ENGINE_SOCKET").map(String::as_str),
@@ -388,6 +421,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         for key in [
             "DATABASE_URL",
@@ -411,6 +445,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         write(&path, &env).unwrap();
 
@@ -435,6 +470,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         write(&path, &first).unwrap();
         let second = compose(
@@ -442,6 +478,7 @@ mod tests {
             &Model::default(),
             &engine_status(None),
             &Ports::default(),
+            &pinned(),
         );
         write(&path, &second).unwrap();
 
@@ -467,12 +504,42 @@ mod model_tests {
         }
     }
 
+    fn pinned() -> Vec<(String, String)> {
+        crate::deployment::IMAGE_VARIABLES
+            .iter()
+            .map(|(published, variable)| {
+                (
+                    (*variable).to_string(),
+                    format!("ghcr.io/copilotkit/openbot-{published}@sha256:abc"),
+                )
+            })
+            .collect()
+    }
+
     fn engine() -> EngineStatus {
         EngineStatus {
             engine: None,
+            address: None,
             responding: true,
             engine_socket: None,
             detail: String::new(),
+        }
+    }
+
+    #[test]
+    fn every_image_is_named_by_digest_so_compose_never_reaches_for_a_local_build() {
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+        );
+        for (_, variable) in crate::deployment::IMAGE_VARIABLES {
+            let reference = env
+                .get(variable)
+                .unwrap_or_else(|| panic!("{variable} is not set, so Compose would build instead"));
+            assert!(reference.contains("@sha256:"), "{variable}={reference}");
         }
     }
 
@@ -485,6 +552,7 @@ mod model_tests {
             },
             &engine(),
             &Ports::default(),
+            &pinned(),
         );
         assert_eq!(
             env.get("OPENAI_API_KEY").map(String::as_str),
@@ -501,6 +569,7 @@ mod model_tests {
             },
             &engine(),
             &Ports::default(),
+            &pinned(),
         );
         assert!(!env.contains_key("OPENAI_API_KEY"));
     }

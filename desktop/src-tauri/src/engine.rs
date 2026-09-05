@@ -13,6 +13,13 @@
 //!   supervisor is handed a dead socket and reports that it cannot reach Docker.
 //! - **Windows.** `podman machine` again, on WSL2, and the same in-VM symlink as macOS. WSL refuses
 //!   to run as LocalSystem, so none of this can be done from a service; see `windows.rs`.
+//!
+//! One rule cuts across all three: **never address Podman through its ambient default connection.**
+//! `podman` sends every command to whichever machine is marked default, and that machine belongs to
+//! whoever made it. A person with a stopped machine of their own gets `Cannot connect to Podman`
+//! from a machine of ours that is running perfectly well, which reads as our bug and is unfixable
+//! from the error. So the engine is carried as an `Address` and every invocation names its
+//! connection. Docker has one daemon and needs none of this.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -37,9 +44,47 @@ impl Engine {
     }
 }
 
+/// How to talk to the engine: which binary, and which connection when the default is not ours.
+///
+/// `--connection` and not `DOCKER_HOST`: Podman ignores `DOCKER_HOST` when choosing its own
+/// connection, and the flag is the only form that also reaches the Compose provider, which is where
+/// most of the work happens.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Address {
+    pub engine: Engine,
+    /// A Podman machine by name. `None` means the default connection is already the right one.
+    pub connection: Option<String>,
+}
+
+impl Address {
+    pub fn new(engine: Engine, connection: Option<String>) -> Self {
+        Self { engine, connection }
+    }
+
+    /// A command aimed at this engine, and the only way one should be built.
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(self.engine.binary());
+        if let Some(connection) = &self.connection {
+            command.args(["--connection", connection]);
+        }
+        command
+    }
+
+    /// Answering now, not merely installed. A binary that prints help proves nothing.
+    pub fn responds(&self) -> bool {
+        self.command()
+            .args(["version", "--format", "{{.Server.APIVersion}}"])
+            .output()
+            .map(|out| out.status.success() && !out.stdout.is_empty())
+            .unwrap_or(false)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EngineStatus {
     pub engine: Option<Engine>,
+    /// How to reach it, carried so no later call has to guess again.
+    pub address: Option<Address>,
     /// Answering now, not merely installed. A binary on PATH proves nothing.
     pub responding: bool,
     /// What Compose should mount as the engine socket, when the default is wrong.
@@ -48,17 +93,33 @@ pub struct EngineStatus {
     pub detail: String,
 }
 
-/// Ask an engine whether it is actually up.
+/// A Podman machine that is running now, preferred over starting a second one.
 ///
-/// `version` and not `--help`: a binary that prints help is installed, and a binary that answers
-/// `version` has a daemon or a machine behind it. The whole point of the health gate is to fail
-/// before Compose does, with a sentence that says which.
-fn responds(binary: &str) -> bool {
-    Command::new(binary)
-        .args(["version", "--format", "{{.Server.APIVersion}}"])
+/// Somebody who already has a machine up is handed it rather than made to wait while a duplicate
+/// boots beside it. Ours is preferred among running machines only so that repeat launches settle on
+/// the same one.
+fn running_machine(preferred: &str) -> Option<String> {
+    let output = Command::new("podman")
+        .args(["machine", "list", "--format", "json"])
         .output()
-        .map(|out| out.status.success() && !out.stdout.is_empty())
-        .unwrap_or(false)
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let machines: Vec<MachineListing> = serde_json::from_slice(&output.stdout).ok()?;
+    let running = || machines.iter().filter(|machine| machine.running);
+    running()
+        .find(|machine| machine.name == preferred)
+        .or_else(|| running().next())
+        .map(|machine| machine.name.clone())
+}
+
+#[derive(Deserialize)]
+struct MachineListing {
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "Running")]
+    running: bool,
 }
 
 fn installed(binary: &str) -> bool {
@@ -96,13 +157,18 @@ pub fn rootless_socket() -> Option<PathBuf> {
 /// What is here, before anything is installed.
 pub fn detect() -> EngineStatus {
     for engine in [Engine::Docker, Engine::Podman] {
-        if responds(engine.binary()) {
-            return EngineStatus {
-                engine: Some(engine),
-                responding: true,
-                engine_socket: socket_override(engine),
-                detail: format!("{} is answering.", engine.binary()),
-            };
+        let address = Address::new(engine, None);
+        if address.responds() {
+            return answering(address);
+        }
+    }
+
+    // Podman's default connection can name a machine that is not running while another one is. That
+    // is not "no engine", and creating a second machine in answer to it is the wrong repair.
+    if let Some(machine) = running_machine(crate::acquire::MACHINE) {
+        let address = Address::new(Engine::Podman, Some(machine));
+        if address.responds() {
+            return answering(address);
         }
     }
 
@@ -110,6 +176,7 @@ pub fn detect() -> EngineStatus {
         if installed(engine.binary()) {
             return EngineStatus {
                 engine: Some(engine),
+                address: None,
                 responding: false,
                 engine_socket: None,
                 detail: format!(
@@ -122,9 +189,25 @@ pub fn detect() -> EngineStatus {
 
     EngineStatus {
         engine: None,
+        address: None,
         responding: false,
         engine_socket: None,
         detail: "No container engine found.".into(),
+    }
+}
+
+fn answering(address: Address) -> EngineStatus {
+    let engine = address.engine;
+    let detail = match &address.connection {
+        Some(machine) => format!("{} is answering on {machine}.", engine.binary()),
+        None => format!("{} is answering.", engine.binary()),
+    };
+    EngineStatus {
+        engine: Some(engine),
+        engine_socket: socket_override(engine),
+        address: Some(address),
+        responding: true,
+        detail,
     }
 }
 
@@ -155,11 +238,41 @@ mod tests {
         // the wrong one of those sends them looking for a menu bar icon that is not there.
         let missing = EngineStatus {
             engine: None,
+            address: None,
             responding: false,
             engine_socket: None,
             detail: "No container engine found.".into(),
         };
         assert!(missing.engine.is_none());
         assert!(!missing.responding);
+    }
+
+    #[test]
+    fn a_podman_machine_is_named_on_every_command_it_is_addressed_with() {
+        let address = Address::new(Engine::Podman, Some("openbot".into()));
+        let command = address.command();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy())
+            .collect();
+        assert_eq!(args, ["--connection", "openbot"]);
+    }
+
+    #[test]
+    fn docker_is_addressed_bare_because_it_has_one_daemon_and_no_connections() {
+        let command = Address::new(Engine::Docker, None).command();
+        assert_eq!(command.get_args().count(), 0);
+        assert_eq!(command.get_program(), "docker");
+    }
+
+    #[test]
+    fn an_answering_engine_says_which_machine_answered() {
+        let status = answering(Address::new(Engine::Podman, Some("openbot".into())));
+        assert!(status.responding);
+        assert!(status.detail.contains("openbot"), "{}", status.detail);
+        assert_eq!(
+            status.address.unwrap().connection.as_deref(),
+            Some("openbot")
+        );
     }
 }
