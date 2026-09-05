@@ -71,6 +71,14 @@ export function App() {
         }
       })
       .catch(() => undefined);
+    // Why the stack stopped, if it did while this screen was not loaded. The supervisor gives up
+    // and sends the window back here, and without this the person arrives at a setup screen with
+    // no indication that anything happened.
+    invoke<string | null>("last_failure")
+      .then((found) => {
+        if (found) setFailure(found);
+      })
+      .catch(() => undefined);
     const stop = listen<Progress>("setup:progress", (event) => {
       // One row per step, updated in place. A step that reports twice is the same step saying
       // more, and a list that grows a line each time reads as a log rather than as progress.

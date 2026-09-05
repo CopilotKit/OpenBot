@@ -22,6 +22,12 @@ use tauri::{Emitter, Manager};
 struct Shell {
     /// Named, because a restart policy that cannot say which process died cannot start it again.
     children: Mutex<Vec<(&'static str, std::process::Child)>>,
+    /// Why the stack stopped, kept for the screen that has not loaded yet.
+    ///
+    /// Going back to the setup screen is a navigation, and a navigation is a fresh page: React
+    /// remounts with no progress and the sentence explaining what happened is lost at the one
+    /// moment it is worth reading. Held here instead, and asked for on load.
+    last_failure: Mutex<Option<String>>,
     root: Mutex<Option<PathBuf>>,
 }
 
@@ -373,6 +379,14 @@ fn already_running(root: String) -> bool {
         .unwrap_or(false)
 }
 
+/// What stopped the stack, if anything did, and forget it once it has been read.
+///
+/// Cleared on reading so a failure from an hour ago does not greet somebody who has since fixed it.
+#[tauri::command]
+fn last_failure(app: tauri::AppHandle) -> Option<String> {
+    app.state::<Shell>().last_failure.lock().unwrap().take()
+}
+
 #[tauri::command]
 fn default_root() -> String {
     stack::default_root().to_string_lossy().into_owned()
@@ -404,6 +418,10 @@ fn which_bun() -> Option<PathBuf> {
 /// stopped, which is what clearing the root means, so stopping does not race a restart.
 fn supervise_host_processes(app: tauri::AppHandle, root: PathBuf, logs: PathBuf, bun: PathBuf) {
     std::thread::spawn(move || {
+        eprintln!(
+            "[watch] supervising {} host processes",
+            stack::HOST_PROCESSES.len()
+        );
         let mut watches: Vec<supervise::Watch> = stack::HOST_PROCESSES
             .iter()
             .map(|process| supervise::Watch::new(process.name))
@@ -430,12 +448,30 @@ fn supervise_host_processes(app: tauri::AppHandle, root: PathBuf, logs: PathBuf,
                 dead
             };
 
+            if !dead.is_empty() {
+                eprintln!("[watch] dead: {dead:?}");
+            }
             for name in dead {
                 let Some(watch) = watches.iter_mut().find(|watch| watch.name == name) else {
                     continue;
                 };
                 if !watch.should_restart(std::time::Instant::now()) {
-                    report(&app, name, false, watch.gave_up());
+                    // Let go of it. A dead child left in the list is found dead again two seconds
+                    // later, and forever after: the count climbs past what actually happened, the
+                    // window is sent back to the setup screen on a loop, and the giving up that was
+                    // supposed to stop a hot laptop becomes one.
+                    shell
+                        .children
+                        .lock()
+                        .unwrap()
+                        .retain(|(held, _)| *held != name);
+
+                    let reason = watch.gave_up();
+                    report(&app, name, false, reason.clone());
+                    *shell.last_failure.lock().unwrap() = Some(reason);
+                    // Back to the setup screen. By now the window is showing OpenBot, and OpenBot
+                    // is not running: leaving it there is a window that lies.
+                    let _ = show_setup(app.clone());
                     continue;
                 }
                 report(
@@ -512,6 +548,7 @@ fn main() {
             show_openbot,
             show_setup,
             already_running,
+            last_failure,
             default_root,
         ])
         // Closing the window hides it. A tray application whose window is destroyed on close has a
