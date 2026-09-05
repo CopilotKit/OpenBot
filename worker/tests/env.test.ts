@@ -79,9 +79,9 @@ describe("worker env", () => {
   );
 
   test("trims the hostname", () => {
-    expect(
-      loadWorkerEnv({ ...base(), HOSTNAME: "  laptop  " }).owner,
-    ).toBe("routines/laptop");
+    expect(loadWorkerEnv({ ...base(), HOSTNAME: "  laptop  " }).owner).toBe(
+      "routines/laptop",
+    );
   });
 });
 
