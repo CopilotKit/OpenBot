@@ -108,24 +108,49 @@ pub fn write_step(data_dir: &Path, step: SetupStep) -> std::io::Result<()> {
 /// Order matters. Firmware virtualization is checked first because nothing else can be fixed while
 /// it is off, and telling somebody to install WSL when their BIOS will not allow a VM wastes a
 /// restart to arrive at the same place.
+/// Whether this machine can run a virtual machine, from the two things Windows will say about it.
+///
+/// Either answer is enough. `VirtualizationFirmwareEnabled` reports False once a hypervisor has
+/// claimed the extensions, which is exactly the state of a machine where WSL2 already works, so
+/// asking only that sends everybody running Hyper-V to a screen telling them to switch on a
+/// firmware setting that is already on. Measured on Windows Server 2022: firmware False,
+/// hypervisor True.
+// Only `blocker` calls it, and only on Windows, but the rule is pure and the test that pins it
+// should run everywhere rather than on the one platform nobody runs the tests on.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn virtualization_available(hypervisor_present: bool, firmware_enabled: bool) -> bool {
+    hypervisor_present || firmware_enabled
+}
+
 #[cfg(target_os = "windows")]
 pub fn blocker() -> Option<Blocker> {
     use std::process::Command;
 
-    let firmware_ok = Command::new("powershell")
+    // Two questions, not one, and either answer is enough.
+    //
+    // `VirtualizationFirmwareEnabled` reports False once a hypervisor has claimed the extensions,
+    // which is exactly the state of a machine where WSL2 is already working. Asking only that
+    // sends everybody running Hyper-V to a screen telling them to switch on a firmware setting
+    // that is already on, and which they cannot switch on again. Measured on Windows Server 2022:
+    // `VirtualizationFirmwareEnabled: False`, `HypervisorPresent: True`.
+    //
+    // A hypervisor that is present is virtualization that is working, whatever the firmware says
+    // about it. Where neither is true the firmware really is the thing to change.
+    let reported = Command::new("powershell")
         .args([
             "-NoProfile",
             "-Command",
-            "(Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled",
+            "'hypervisor=' + (Get-CimInstance Win32_ComputerSystem).HypervisorPresent; \
+             'firmware=' + ((Get-CimInstance Win32_Processor | \
+               ForEach-Object { $_.VirtualizationFirmwareEnabled }) -contains $true)",
         ])
         .output()
-        .map(|out| {
-            String::from_utf8_lossy(&out.stdout)
-                .to_lowercase()
-                .contains("true")
-        })
-        .unwrap_or(false);
-    if !firmware_ok {
+        .map(|out| String::from_utf8_lossy(&out.stdout).to_lowercase())
+        .unwrap_or_default();
+    if !virtualization_available(
+        reported.contains("hypervisor=true"),
+        reported.contains("firmware=true"),
+    ) {
         return Some(Blocker::VirtualizationDisabled);
     }
 
@@ -177,6 +202,19 @@ pub fn blocker() -> Option<Blocker> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_machine_already_running_a_hypervisor_is_not_told_to_switch_virtualization_on() {
+        // The state of every machine where WSL2 already works, and the one this got wrong.
+        assert!(virtualization_available(true, false));
+        assert!(virtualization_available(true, true));
+        assert!(virtualization_available(false, true));
+    }
+
+    #[test]
+    fn a_machine_with_neither_is_the_one_whose_firmware_is_the_thing_to_change() {
+        assert!(!virtualization_available(false, false));
+    }
 
     #[test]
     fn each_blocker_names_its_own_fix_rather_than_saying_setup_failed() {
