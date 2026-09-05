@@ -48,6 +48,36 @@ describe("asking a person", () => {
     expect(said).toContain("the person in this conversation");
   });
 
+  /*
+   * A routine's Bot stopping to ask is the case worth finding: nobody is in the conversation to
+   * answer, so the row has to say the question was raised by a schedule rather than by a person.
+   */
+  test("the row says what started the run, not only whose authority it had", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: { ...FROM, initiator: { kind: "routine", id: "routine_7" } },
+      route: askTheirOwnPerson,
+      auditStore: store,
+    });
+
+    await tool.execute({ question: "which account?" });
+
+    expect(written[0]?.initiator).toEqual({ kind: "routine", id: "routine_7" });
+  });
+
+  test("a run that says nothing leaves the row filed as a person's", async () => {
+    const { written, store } = recorder();
+    const tool = escalationTool({
+      from: FROM,
+      route: askTheirOwnPerson,
+      auditStore: store,
+    });
+
+    await tool.execute({ question: "which account?" });
+
+    expect(written[0]?.initiator).toBe(undefined);
+  });
+
   test("the question is on the record", async () => {
     const { written, store } = recorder();
     const tool = escalationTool({

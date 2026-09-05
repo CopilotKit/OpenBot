@@ -1042,7 +1042,7 @@ export function createRequestAgents(
     initiator?: AuditInitiator,
   ) => LoadToolsForBot,
   /** Resolved per request, because what it signs is who this request turned out to be. */
-  signRunForActor?: (actorId: string) => SignRun,
+  signRunForActor?: (actorId: string, initiator?: AuditInitiator) => SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
   computerGuidance?: string,
   /** Which vendors this deployment connects to, held by a Bot or not. Absent means none. */
@@ -1194,7 +1194,7 @@ export function mountCopilotRuntime(
     actorId: string,
     initiator?: AuditInitiator,
   ) => LoadToolsForBot,
-  signRunForActor?: (actorId: string) => SignRun,
+  signRunForActor?: (actorId: string, initiator?: AuditInitiator) => SignRun,
   basePath = "/api/copilotkit",
   loadVendors?: () => Promise<readonly string[]>,
   selectionForActor?: (actorId: string) => ToolSelection,
@@ -1252,7 +1252,7 @@ export function mountCopilotRuntime(
       resolveModelApiKey,
       stallGuard,
       loadToolsForActor?.(actor.id, input.initiator),
-      signRunForActor?.(actor.id),
+      signRunForActor?.(actor.id, input.initiator),
       config.computer ? COMPUTER_GUIDANCE : undefined,
       loadVendors,
       selectionForActor?.(actor.id),

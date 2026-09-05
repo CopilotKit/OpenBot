@@ -124,6 +124,7 @@ export function escalationTool(options: {
           targetType: "agent",
           targetId: from.botId,
           ...(from.actorId ? { actorUserId: from.actorId } : {}),
+          ...(from.initiator ? { initiator: from.initiator } : {}),
           payload: {
             bot: from.botId,
             run: from.runId,

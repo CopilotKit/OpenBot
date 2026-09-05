@@ -548,9 +548,10 @@ const loadInstructionsForActor = (actorId: string) => () =>
  * neither is read out of the request body any more.
  */
 const signRunForActor =
-  (actorId: string) => (botId: string, runId: string, threadId?: string) =>
+  (actorId: string, initiator: AuditInitiator = PERSON_INITIATOR) =>
+  (botId: string, runId: string, threadId?: string) =>
     mintRunAssertion(
-      { botId, actorId, runId, threadId },
+      { botId, actorId, runId, threadId, initiator },
       config.keyEncryptionKey,
     );
 
@@ -685,7 +686,7 @@ const buildAgentFor = async ({
     resolveRuntimeModelApiKey,
     stallGuard,
     loadToolsForActor(actor.id, initiator),
-    signRunForActor(actor.id),
+    signRunForActor(actor.id, initiator),
     config.computer ? COMPUTER_GUIDANCE : undefined,
     loadVendors,
     selectionForActor(actor.id),
@@ -796,6 +797,9 @@ const copilotRuntime = mountCopilotRuntime(
       runId: input.runId,
       threadId: input.threadId,
       depth: from?.depth ?? 0,
+      // Read from the assertion for the reason `depth` is: the run is rebuilt from parts here, and
+      // a field left out of this object is a field the desk and the escalation never see.
+      initiator: from?.initiator ?? PERSON_INITIATOR,
     };
     /*
      * The caps are checked BEFORE the grants query, not inside the tool that would discard it.

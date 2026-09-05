@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { type AuditInitiator, PERSON_INITIATOR } from "../audit";
 import { sign, verify } from "../auth/signed-value";
 
 /**
@@ -102,6 +103,17 @@ export type RunAssertion = {
    * Optional on the way in so an assertion minted before this existed still reads, and read as zero.
    */
   depth?: number;
+  /**
+   * What started this run, for the audit rows written by whoever holds the assertion.
+   *
+   * IT TRAVELS HERE FOR THE REASON `depth` DOES: a hop is A to B on up to two pods, and the thing
+   * that knows a routine began the run is the process that claimed the routine, not the one writing
+   * the row. Signed with the rest, so a Bot cannot relabel its own run as a person's.
+   *
+   * Optional on the way in so an assertion minted before this existed still reads, and read as a
+   * person, which is what those runs were.
+   */
+  initiator?: AuditInitiator;
 };
 
 type SignedRun = RunAssertion & { exp: number };
@@ -121,6 +133,7 @@ export function mintRunAssertion(
   const payload: SignedRun = {
     ...run,
     depth: run.depth ?? 0,
+    initiator: run.initiator ?? PERSON_INITIATOR,
     exp: now + RUN_TTL_MS,
   };
   const value = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -175,10 +188,28 @@ export function readRunAssertion(
         payload.depth >= 0
           ? payload.depth
           : 0,
+      // Read as a person on anything unclear, for the reason depth reads as zero: an assertion
+      // minted before this existed carries none, and a person is what those runs were.
+      initiator: readInitiator(payload.initiator),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * The initiator a signed payload carries, narrowed back to the union.
+ *
+ * A kind that is not one this deployment writes is read as a person rather than kept, so a field
+ * from a future version cannot arrive as a string the Audit screen has no branch for.
+ */
+function readInitiator(value: unknown): AuditInitiator {
+  if (!value || typeof value !== "object") return PERSON_INITIATOR;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind === "person" || kind === "deployment") return { kind };
+  if (kind !== "routine" && kind !== "handoff") return PERSON_INITIATOR;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && id ? { kind, id } : PERSON_INITIATOR;
 }
 
 export type CallVerdict =
