@@ -668,23 +668,43 @@ function agentEndpointAllowedHosts(
         `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must name one host. Patterns are not accepted: list each address instead.`,
       );
     }
-    hosts.add(normalizeAllowedHost(host));
+    hosts.add(normalizeAllowedHost(entry, host));
   }
   return hosts;
 }
 
-function normalizeAllowedHost(host: string): string {
-  // IPv6 is bracketed as [host] or [host]:port. Strip the brackets and keep the port.
-  if (host.startsWith("[")) {
-    const close = host.indexOf("]");
-    if (close === -1) return host.replace(/^\[/, "").replace(/\]$/, "");
-    const ipv6 = host.slice(1, close).toLowerCase();
-    const rest = host.slice(close + 1);
-    if (!rest) return ipv6;
-    if (rest.startsWith(":")) return `${ipv6}${rest.toLowerCase()}`;
-    return `${ipv6}${rest.toLowerCase()}`;
+/**
+ * An IPv6 entry, spelled the way the endpoint check will see it.
+ *
+ * `namedAsAllowed` compares against `URL.hostname`, which the parser canonicalises: compressed,
+ * lower-case, in brackets. An entry kept as written matched only when the operator happened to
+ * write it that way, so `[0:0:0:0:0:0:0:1]:8443` was a line that silently never matched, which is
+ * the failure the URL and wildcard refusals above exist to prevent. Stripping the brackets instead
+ * folded two different names into one: `[::1]:8443`, an address and a port, and `[::1:8443]`, an
+ * address, both became `::1:8443`, so naming either admitted the other.
+ *
+ * The address goes through the URL parser rather than a hand-written normaliser, so the spelling
+ * here is the parser's own and cannot drift from it. The port is kept as written, since the parser
+ * drops a scheme's default port and an operator who wrote `:80` meant that port. A bracketed entry
+ * the parser refuses is not an address, and is refused the way a URL is: at boot, naming the entry.
+ */
+function normalizeAllowedHost(entry: string, host: string): string {
+  if (!host.startsWith("[")) return host;
+  const close = host.indexOf("]");
+  const address = close === -1 ? host : host.slice(0, close + 1);
+  const port = close === -1 ? "" : host.slice(close + 1);
+  const refusal = () =>
+    new Error(
+      `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must be a host, optionally with a port, and not a URL.`,
+    );
+  if (port && !/^:\d{1,5}$/.test(port)) throw refusal();
+  let hostname: string;
+  try {
+    hostname = new URL(`http://${address}`).hostname;
+  } catch {
+    throw refusal();
   }
-  return host;
+  return `${hostname}${port}`;
 }
 
 function privateHostsAllowed(environment: Environment): boolean {

@@ -8,6 +8,90 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### An IPv6 address in `AGENT_ENDPOINT_ALLOWED_HOSTS` now matches however it is written
+
+The endpoint check compares the list against the address as the URL parser spells it, compressed
+and lower-case, while the list kept each IPv6 entry as the operator wrote it. `[0:0:0:0:0:0:0:1]:8443`
+was therefore a line that silently never matched, the failure the list's other refusals exist to
+prevent. Stripping the brackets on both sides also folded two different names into one, so naming
+`[fd00::1:8443]`, an address, admitted `[fd00::1]:8443`, another address on a port, and the other way
+round. Bracketed entries are now stored in the parser's spelling, with the port kept as written, and
+compared with their brackets on; an entry the parser does not read as an address is refused at boot,
+naming the entry, as a URL or a wildcard already was. Names and IPv4 entries are unaffected.
+### A Bot's own decline is only recorded against a Bot the caller may reach
+
+A Bot reports that it declined a request through the person's session, and the audit row says
+`reportedBy: the Bot itself`. The route wrote that row for any agent id in the path, without asking
+whether the caller could reach that Bot, so any signed-in person could put a decline, in any words,
+against any coworker, one they cannot see included, and an administrator reading the trail would take
+it for something the Bot said. The route now asks the store first, as every other route on a Bot
+does, and answers not found for a Bot the caller cannot reach, writing nothing.
+
+### The engine socket the supervisor is given can be pointed somewhere else
+
+Compose mounted `/var/run/docker.sock` into the supervisor as a fixed path. That is correct for
+Docker, and for Podman on macOS, where `podman machine` symlinks it to the rootless socket inside the
+virtual machine. It is wrong for rootless Podman on Linux, where the path is either absent or, with
+`podman-docker` installed, a symlink to `/run/podman/podman.sock`, the rootful socket, which is not
+the one running. The supervisor held a dead socket and every attempt to give a Bot a computer failed
+with a message about not reaching Docker.
+
+The mount source is now `ENGINE_SOCKET`, defaulting to `/var/run/docker.sock`, so nothing changes
+unless it is set. On rootless Podman on Linux, set it to `$XDG_RUNTIME_DIR/podman/podman.sock`.
+
+### A Bot's computer is waited for properly on Podman, and the supervisor can reach the engine there
+
+Two things stopped OpenBot running on Podman, which nothing had tried before.
+
+The supervisor could not reach the engine at all: `The supervisor could not reach Docker`. The socket
+is there and the mount is right, but Podman's virtual machine runs SELinux and labels the socket in a
+way a container is not allowed to read. The supervisor now declares `label=disable`, which is what
+that needs and which changes nothing on Docker.
+
+Then every cold start of a computer raced the first request to it. Readiness was read off the image's
+`HEALTHCHECK`, and Podman does not report one: its images are OCI-manifest, the OCI image config has
+no healthcheck field, and the instruction is dropped both when Podman builds an image and when it
+pulls one that has it. With no health to read, the supervisor fell back to accepting a container that
+was merely running, and a running container is not a browser that is answering, so the first request
+arrived at a port nothing was listening on and came back as a computer that is not running. The
+supervisor now states the healthcheck when it creates a computer instead of inheriting it, so
+readiness no longer depends on how the image was built. On Docker the behaviour is unchanged.
+
+## 0.0.7
+
+### The published service images are zstd rather than gzip
+
+An image pull was already a compressed transfer, so this is not compression where there was none; it
+is a better algorithm for the same job. `agent-computer` goes from 962 MB to 886 MB on the wire, and
+zstd inflates several times faster, which on 2 GB of Chromium is worth more than the 8%. The saving
+comes from recompressing the layers that arrived from somebody else's registry, where nearly all of
+the bytes are, so the images no longer share layers with a gzip pull of the same base.
+
+This applies to the five `ghcr.io/copilotkit/openbot-<service>` images and not to
+`ghcr.io/copilotkit/openbot`. Reading a zstd layer needs a client that supports it, which Podman and
+current containerd do; the single image is pulled by deployments running whatever they have, so it
+stays gzip.
+
+### A release publishes every service's image, not just the one
+
+`ghcr.io/copilotkit/openbot` was the only image a release produced, so anything running the Compose
+stack built `agent-computer`, the supervisor, both Bots and the migration image from source on
+every machine. That needs a toolchain and it needs several minutes, most of them Chromium, and it
+is the difference between a deployment and a laptop being able to start at all.
+
+Each of those is now published beside it, at `ghcr.io/copilotkit/openbot-<service>`, carrying both
+`linux/amd64` and `linux/arm64` so one reference works on a server and on an arm64 laptop. Every
+image gets its own build provenance attestation, and `container-images.json` on the release pins a
+digest for all of them rather than for one.
+
+Nothing changes for a checkout: unset, `COMPUTER_IMAGE`, `SUPERVISOR_IMAGE`, `BOT_IMAGE`,
+`LANGGRAPH_IMAGE` and `SERVER_IMAGE` name local tags and Compose builds them as before. Point them
+at published digests and set `IMAGE_PULL_POLICY=missing` to pull instead. `docs/releasing.md` shows
+reading the references out of `container-images.json`; `docs/configuration.md` lists the settings.
+
+CI now builds those five Dockerfiles too. Nothing did before, because they are built by
+`docker compose up --build`, which only the smoke journey runs and which cannot run in CI, so a
+broken one surfaced during a release after the first image had already been pushed.
 ### A skill can be written in the conversation instead of retyped into a form
 
 A skill is four fields and an instruction a Bot follows, and the instruction is the one that decides
