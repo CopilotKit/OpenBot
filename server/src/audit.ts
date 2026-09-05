@@ -579,15 +579,34 @@ export function createAuditReader(database: Database): AuditReader {
   };
 }
 
+export class AuditQueryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuditQueryError";
+  }
+}
+
 export function auditQueryFromUrl(url: URL): AuditEventQuery {
-  const requestedLimit = Number.parseInt(
-    url.searchParams.get("limit") ?? "50",
-    10,
-  );
+  const rawLimit = url.searchParams.get("limit") ?? "50";
+  const trimmedLimit = rawLimit.trim();
+  const requestedLimit = /^\d+$/.test(trimmedLimit)
+    ? Number.parseInt(trimmedLimit, 10)
+    : Number.NaN;
   const limit = Number.isFinite(requestedLimit)
     ? Math.min(Math.max(requestedLimit, 1), 100)
     : 50;
   const optional = (name: string) => url.searchParams.get(name) ?? undefined;
+
+  const from = optional("from");
+  if (from !== undefined && Number.isNaN(Date.parse(from))) {
+    throw new AuditQueryError(
+      'Query parameter "from" must be a valid date.',
+    );
+  }
+  const to = optional("to");
+  if (to !== undefined && Number.isNaN(Date.parse(to))) {
+    throw new AuditQueryError('Query parameter "to" must be a valid date.');
+  }
 
   return {
     cursor: optional("cursor"),
@@ -596,7 +615,7 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
     actorUserId: optional("actorUserId"),
     targetType: optional("targetType"),
     targetId: optional("targetId"),
-    from: optional("from"),
-    to: optional("to"),
+    from,
+    to,
   };
 }

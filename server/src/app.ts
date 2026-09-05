@@ -8,6 +8,7 @@ import { createAgentRoutes } from "./agents/routes";
 import {
   type AuditReader,
   type AuditStore,
+  AuditQueryError,
   auditQueryFromUrl,
   recordAuditEvent,
 } from "./audit";
@@ -456,9 +457,16 @@ export function createApp(
       return context.json({ error: "Audit logging is not configured." }, 503);
     }
 
-    return context.json(
-      await auditReader.list(auditQueryFromUrl(new URL(context.req.url))),
-    );
+    try {
+      return context.json(
+        await auditReader.list(auditQueryFromUrl(new URL(context.req.url))),
+      );
+    } catch (error) {
+      if (error instanceof AuditQueryError) {
+        return context.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
   });
   /*
    * Who is here, and what they may do.
