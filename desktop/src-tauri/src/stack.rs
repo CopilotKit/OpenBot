@@ -125,7 +125,10 @@ pub fn migrate(engine: &Address, root: &Path) -> Result<(), String> {
 /// Matching on this rather than on a name prefix. `openbot-` is also the prefix of a kind cluster's
 /// nodes and of anything else somebody has called openbot, and stopping a person's Kubernetes
 /// cluster because it shares six letters with this one would be unforgivable.
-const SUPERVISOR_LABEL: &str = "openbot.supervisor=true";
+/// Written as the whole filter, `label=` and all. Handed to the engine without that prefix it
+/// answers `invalid filter`, and it does so at the moment somebody is being told their stack has
+/// stopped, so the prefix belongs with the label rather than at the call site.
+const SUPERVISOR_FILTER: &str = "label=openbot.supervisor=true";
 
 /// Stop the computers the supervisor made, which Compose does not know about.
 ///
@@ -136,7 +139,7 @@ const SUPERVISOR_LABEL: &str = "openbot.supervisor=true";
 pub fn stop_computers(engine: &Address) -> Result<(), String> {
     let listed = engine
         .command()
-        .args(["ps", "--quiet", "--filter", SUPERVISOR_LABEL])
+        .args(["ps", "--quiet", "--filter", SUPERVISOR_FILTER])
         .output()
         .map_err(|error| format!("could not list the Bots' computers: {error}"))?;
     if !listed.status.success() {
@@ -243,23 +246,29 @@ pub fn spawn_host_process(
 /// are running. That is also how this session's own orphans hid twice.
 #[cfg(unix)]
 pub fn stop_processes_under(root: &Path) -> usize {
-    let Ok(listing) = Command::new("/bin/ps").args(["-ax", "-o", "pid="]).output() else {
+    // One call, not one per process. Asking lsof about every pid in turn is what makes Stop look
+    // like a hang: a busy machine has several hundred processes, each invocation costs a fork and a
+    // few hundred milliseconds, and the person watching has been given no reason to think anything
+    // is happening. `-d cwd` over all processes is a single pass.
+    let Ok(listing) = Command::new("/usr/sbin/lsof")
+        .args(["-d", "cwd", "-Fpn"])
+        .output()
+    else {
         return 0;
     };
 
     let mut stopped = 0;
-    for pid in String::from_utf8_lossy(&listing.stdout)
-        .split_whitespace()
-        .filter_map(|pid| pid.parse::<i32>().ok())
-    {
-        let Ok(cwd) = Command::new("/usr/sbin/lsof")
-            .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
-            .output()
-        else {
+    let mut pid = None;
+    // -F output is one field per line: `p<pid>` starts a process, `n<path>` gives its directory.
+    for line in String::from_utf8_lossy(&listing.stdout).lines() {
+        if let Some(found) = line.strip_prefix('p') {
+            pid = found.parse::<i32>().ok();
+            continue;
+        }
+        let Some(dir) = line.strip_prefix('n') else {
             continue;
         };
-        let cwd = String::from_utf8_lossy(&cwd.stdout);
-        let Some(dir) = cwd.lines().find_map(|line| line.strip_prefix('n')) else {
+        let Some(found) = pid else {
             continue;
         };
         if !Path::new(dir).starts_with(root) {
@@ -267,7 +276,7 @@ pub fn stop_processes_under(root: &Path) -> usize {
         }
         // Asked first; the caller waits before it insists.
         unsafe {
-            libc::kill(pid, libc::SIGTERM);
+            libc::kill(found, libc::SIGTERM);
         }
         stopped += 1;
     }
@@ -574,11 +583,14 @@ mod tests {
 
     #[test]
     fn the_bots_computers_are_found_by_label_rather_than_by_a_name_that_starts_with_openbot() {
-        assert!(SUPERVISOR_LABEL.starts_with("openbot.supervisor="));
+        // A name filter would also match a kind cluster's nodes, which are called
+        // openbot-control-plane and openbot-worker and belong to somebody else.
         assert!(
-            !SUPERVISOR_LABEL.contains("name"),
-            "a kind cluster's nodes are also called openbot-something"
+            SUPERVISOR_FILTER.starts_with("label="),
+            "without this the engine answers `invalid filter`: {SUPERVISOR_FILTER}"
         );
+        assert!(SUPERVISOR_FILTER.contains("openbot.supervisor=true"));
+        assert!(!SUPERVISOR_FILTER.contains("name="));
     }
 
     #[test]

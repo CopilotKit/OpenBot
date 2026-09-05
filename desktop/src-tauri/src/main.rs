@@ -459,24 +459,37 @@ fn main() {
                 .icon_as_template(true)
                 .tooltip("OpenBot")
                 .menu(&menu)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "open" => show_whichever_applies(app),
-                    // Stop without quitting: the stack is what costs something to leave running,
-                    // and somebody who wants it stopped does not necessarily want the icon gone.
-                    "stop" => {
-                        let app = app.clone();
-                        std::thread::spawn(move || {
-                            let root = default_root();
-                            let _ = stop_everything(&app, &PathBuf::from(root));
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.eval("window.location.reload()");
-                            }
-                        });
+                .on_menu_event(|app, event| {
+                    match event.id().as_ref() {
+                        "open" => show_whichever_applies(app),
+                        // Stop without quitting: the stack is what costs something to leave running,
+                        // and somebody who wants it stopped does not necessarily want the icon gone.
+                        "stop" => {
+                            let app = app.clone();
+                            std::thread::spawn(move || {
+                                let root = default_root();
+                                eprintln!("[tray] stopping the stack under {root}");
+                                match stop_everything(&app, &PathBuf::from(root)) {
+                                    Ok(()) => {
+                                        eprintln!("[tray] stopped");
+                                        report(&app, "stopped", true, "OpenBot has been stopped");
+                                    }
+                                    // Said rather than swallowed. A menu item that fails silently is
+                                    // worse than one that is not there: the person believes the stack
+                                    // is down and it is not.
+                                    Err(problem) => {
+                                        eprintln!("[tray] stop failed: {problem}");
+                                        report(&app, "stopped", false, problem);
+                                    }
+                                }
+                                let _ = show_setup(app.clone());
+                            });
+                        }
+                        // Exit rather than hide: quitting from the tray is a decision to stop, and the
+                        // exit handler below is what stops the processes with it.
+                        "quit" => app.exit(0),
+                        _ => {}
                     }
-                    // Exit rather than hide: quitting from the tray is a decision to stop, and the
-                    // exit handler below is what stops the processes with it.
-                    "quit" => app.exit(0),
-                    _ => {}
                 })
                 .build(app)?;
             Ok(())
