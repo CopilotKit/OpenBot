@@ -24,7 +24,15 @@ services:
       # the name and leaves the address. Proven from inside `agent-computer`, where the gateway on
       # :5432 answered and began authenticating as `openbot` on `openbot`, with the password in
       # this file. The server on the host still reaches it, because that is what loopback is.
+      # Both loopback addresses, because `localhost` is not one address.
+      #
+      # It resolves to ::1 and 127.0.0.1 in an order the platform decides, and a client that gets
+      # ::1 first does not fall back: Bun and Node both fail the connection outright rather than
+      # trying the other. Publishing on one of them makes `localhost` work on some machines and not
+      # others, for a reason nothing in the error mentions. Publishing on both is still loopback,
+      # so nothing here is reachable from another host.
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "[::1]:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -74,6 +82,7 @@ services:
       # Loopback only. This process drives a browser holding real logins; COMPUTER_TOKEN is the
       # request control, and loopback keeps the surface off routed networks.
       - "127.0.0.1:${COMPUTER_PORT:-4100}:4100"
+      - "[::1]:${COMPUTER_PORT:-4100}:4100"
     # Per-Bot egress, in a file of its own because the names are not knowable here.
     #
     # `EGRESS_PROXY_<BOT>` is derived from the Bot's id, so there is no fixed list to write out the
@@ -217,6 +226,7 @@ services:
       # COMPUTER_NETWORK and reaches the supervisor as `supervisor:4300`, which is unaffected because
       # the process still listens on every interface inside its own container.
       - "127.0.0.1:${SUPERVISOR_PORT:-4500}:4300"
+      - "[::1]:${SUPERVISOR_PORT:-4500}:4300"
     volumes:
       # Read-only because this service only ever needs to ask; it is still root-equivalent, which is
       # the whole reason nothing else here gets it.
@@ -253,6 +263,7 @@ services:
       # on the machine before they can even try it. Nothing legitimate reaches a Bot from another
       # host: the server calls it over localhost, and other containers use the compose network.
       - "127.0.0.1:${BOT_PORT:-4200}:4200"
+      - "[::1]:${BOT_PORT:-4200}:4200"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       # Server sends this on every call to the managed Bot. It refuses to start without it.
@@ -281,6 +292,7 @@ services:
     ports:
       # Loopback, for the same reason as agent-bot above.
       - "127.0.0.1:${LANGGRAPH_PORT:-4201}:4201"
+      - "[::1]:${LANGGRAPH_PORT:-4201}:4201"
     environment:
       # The selected provider reads its own key. Models requiring the Responses API use
       # BOT_RESPONSES_API instead of changing the streaming loop here.
