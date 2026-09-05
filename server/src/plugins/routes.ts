@@ -232,7 +232,7 @@ export function createPluginRoutes(
       url?: string;
       credentialId?: string;
     } | null;
-    if (!body?.id || !body.title || !body.url) {
+    if (!body?.id?.trim() || !body?.title?.trim() || !body?.url?.trim()) {
       return context.json(
         { error: "A name, a title and a URL are required." },
         400,
@@ -241,9 +241,9 @@ export function createPluginRoutes(
 
     try {
       const server = await store.addCustomServer({
-        id: body.id,
-        title: body.title,
-        url: body.url,
+        id: body.id.trim(),
+        title: body.title.trim(),
+        url: body.url.trim(),
         credentialId: body.credentialId,
         by: actorEmail(context),
       });
