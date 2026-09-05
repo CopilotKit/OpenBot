@@ -715,14 +715,14 @@ function privateHostsAllowed(environment: Environment): boolean {
  * its meaning.
  */
 export function durationMs(value: string): number {
-  const match = /^(\d+)\s*(ms|s|m|h)?$/.exec(value.trim());
+  const match = /^(\d+)\s*(ms|s|m|h)?$/i.exec(value.trim());
   if (!match) {
     throw new Error(
       `"${value}" is not a duration. Write it as 30s, 30m, 2h, or a plain number of milliseconds.`,
     );
   }
   const amount = Number(match[1]);
-  switch (match[2]) {
+  switch (match[2]?.toLowerCase()) {
     case "h":
       return amount * 3_600_000;
     case "m":
