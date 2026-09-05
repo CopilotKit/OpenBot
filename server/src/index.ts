@@ -41,6 +41,7 @@ import { createChannelTitler } from "./channels/titler";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
 import { createComputerGateway } from "./computer/gateway";
+import { computerTools } from "./computer/tools";
 import { createPageFrameStore } from "./computer/page-frames";
 import { startPolicyListener } from "./computer/policy-listener";
 import {
@@ -835,7 +836,47 @@ const copilotRuntime = mountCopilotRuntime(
       route: askTheirOwnPerson,
       auditStore: bootAuditStore,
     });
-    return passing ? [passing, asking] : [asking];
+
+    /*
+     * The Bot's own computer, as tools this process runs.
+     *
+     * Here rather than in the browser because this is the only place that holds the gateway, the
+     * actor and the Bot at once — and because a run with nobody watching has to be able to reach a
+     * computer at all. See `computer/tools.ts` for what moved and what deliberately did not.
+     *
+     * Absent when the deployment configured no computer provider, which is the correct answer:
+     * offering a model a browser that does not exist buys a run of confident failures.
+     */
+    /*
+     * Only a real `users` row may go in the audit table's foreign key column, so the local
+     * development actor carries an id and no `userId`. Writing it there fails the constraint and
+     * loses the row entirely, which is the one outcome worse than an unattributed one. The same rule
+     * the HTTP path applies in `computer/routes.ts`.
+     */
+    const isRealUser = actorId !== DEV_ACTOR.id;
+    const driving = computerGateway
+      ? computerTools({
+          gateway: computerGateway,
+          botId,
+          actor: { id: actorId, ...(isRealUser ? { userId: actorId } : {}) },
+          recordRefusal: async ({ botId: declining, reason, request }) => {
+            await recordAuditEvent(bootAuditStore, {
+              eventType: "bot.declined",
+              targetType: "agent",
+              targetId: declining,
+              ...(isRealUser ? { actorUserId: actorId } : {}),
+              payload: {
+                bot: declining,
+                reason: reason.slice(0, 500),
+                ...(request ? { request: request.slice(0, 500) } : {}),
+                reportedBy: "the Bot itself",
+              },
+            });
+          },
+        })
+      : [];
+
+    return [...(passing ? [passing] : []), asking, ...driving];
   },
   // A run started or ended on a thread; light the channel it belongs to. Fire-and-forget, keyed by
   // thread, and a scratch thread maps to no channel and signals nowhere.
