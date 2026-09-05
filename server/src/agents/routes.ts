@@ -215,6 +215,21 @@ export function createAgentRoutes(
       return context.json({ error: "A reason is required." }, 400);
     }
 
+    /*
+     * The same question every other route here asks first: is this a Bot the caller may reach?
+     *
+     * The row says "reportedBy: the Bot itself", and the Bot reports through the person's session,
+     * so the trail's only way of knowing the report came from a Bot is that the person could have
+     * been talking to that Bot. Without this check, any signed-in person could write a decline
+     * against any id at all, a coworker they cannot see included, and an administrator reading the
+     * trail would take it for something the Bot said. Not found rather than forbidden, as the store
+     * answers everywhere else, so the check does not confirm which ids exist.
+     */
+    const agent = await store.get(context.var.actor, agentId);
+    if (!agent) {
+      return context.json({ error: "Agent not found." }, 404);
+    }
+
     if (auditStore) {
       const actor = context.var.actor;
       await recordAuditEvent(auditStore, {
