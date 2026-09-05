@@ -574,7 +574,7 @@ export function createPluginRoutes(
       global?: boolean;
       tools?: unknown;
     } | null;
-    if (!body?.slug || !body.title || !body.instructions) {
+    if (!body?.slug || !body?.title?.trim() || !body?.instructions?.trim()) {
       return context.json(
         { error: "A slug, a title and instructions are required." },
         400,
@@ -617,9 +617,9 @@ export function createPluginRoutes(
     try {
       await store.installSkill({
         slug: body.slug,
-        title: body.title,
+        title: body.title.trim(),
         summary: body.summary ?? "",
-        instructions: body.instructions,
+        instructions: body.instructions.trim(),
         ownerUserId: body.global ? null : actor.id,
         ...(tools === undefined ? {} : { tools }),
         by: actorEmail(context),
