@@ -44,6 +44,8 @@ export function App() {
         // offering to set up something that is already running.
         if (await invoke<boolean>("already_running", { root: found }).catch(() => false)) {
           setRunning(true);
+          // Already up from a previous window: show it, rather than a screen about it.
+          await invoke("show_openbot").catch(() => undefined);
         }
       })
       .catch(() => undefined);
@@ -77,6 +79,8 @@ export function App() {
         openaiApiKey: modelKey,
       });
       setRunning(true);
+      // The window becomes OpenBot. Nobody double-clicked this to look at a status screen.
+      await invoke("show_openbot").catch(() => undefined);
     } catch (error) {
       setFailure(String(error));
     } finally {
@@ -115,7 +119,7 @@ export function App() {
       <h1>{running ? "OpenBot is running" : "Set up OpenBot"}</h1>
       <p className="lede">
         {running
-          ? "The stack is up. Open the app, or stop it from here or the menu bar."
+          ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
           : engine?.responding
             ? `Using ${engine.engine === "docker" ? "Docker" : "Podman"}. It is answering, so nothing needs installing.`
             : "No container engine is answering yet. OpenBot will install Podman and create its machine."}
@@ -187,8 +191,8 @@ export function App() {
       <div className="row">
         {running ? (
           <>
-            <button onClick={() => invoke("open_openbot").catch(() => undefined)}>
-              Open OpenBot
+            <button onClick={() => invoke("show_openbot").catch(() => undefined)}>
+              Show OpenBot
             </button>
             <button className="secondary" onClick={stop} disabled={busy}>
               Stop OpenBot

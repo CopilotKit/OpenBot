@@ -261,17 +261,53 @@ fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Open the deployment in a browser.
+/// Show OpenBot itself in this window.
 ///
-/// `localhost` rather than an address, deliberately and against the rule the rest of this file
-/// follows: the app's dev server binds `[::1]` and not `127.0.0.1`, so naming either one guesses
-/// wrong half the time. `localhost` is whichever it bound, and every one of them is trusted.
+/// The point of a desktop application is that it is the application. A window that sets things up
+/// and then sends somebody to a browser tab is a launcher, and nobody wanted a launcher: they
+/// double-clicked OpenBot to get OpenBot.
+///
+/// So the window navigates to the running app, and the tray keeps the controls that would otherwise
+/// have nowhere to live. Setup comes back if the stack is stopped, because then there is something
+/// to set up again.
+///
+/// `localhost` rather than an address, against the rule the rest of this file follows: the app's
+/// dev server binds `[::1]` and not `127.0.0.1`, so naming either one guesses wrong half the time.
+/// Every spelling of it is trusted, so whichever it bound is the right one.
 #[tauri::command]
-fn open_openbot(app: tauri::AppHandle) -> Result<(), String> {
+fn show_openbot(app: tauri::AppHandle) -> Result<(), String> {
     let port = openbot_env::Ports::default().app;
-    tauri_plugin_opener::OpenerExt::opener(&app)
-        .open_url(format!("http://localhost:{port}"), None::<&str>)
-        .map_err(|error| format!("could not open the app: {error}"))
+    let url = format!("http://localhost:{port}");
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the OpenBot window is not there to show it in")?;
+    window
+        .navigate(
+            url.parse()
+                .map_err(|error| format!("{url} is not a URL: {error}"))?,
+        )
+        .map_err(|error| format!("could not show OpenBot: {error}"))
+}
+
+/// Put the setup screen back, when there is something to set up again.
+#[tauri::command]
+fn show_setup(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("the OpenBot window is not there")?;
+    // Whatever this build serves its own interface from, dev server or bundle.
+    let setup = if cfg!(debug_assertions) {
+        "http://localhost:3020".to_string()
+    } else {
+        "tauri://localhost".to_string()
+    };
+    window
+        .navigate(
+            setup
+                .parse()
+                .map_err(|error| format!("{setup} is not a URL: {error}"))?,
+        )
+        .map_err(|error| format!("could not go back to setup: {error}"))
 }
 
 /// Is a deployment this app manages already running?
@@ -331,7 +367,6 @@ fn which_bun() -> Option<PathBuf> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_opener::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             detect_engine,
@@ -340,7 +375,8 @@ fn main() {
             prepare_engine,
             start_stack,
             stop_stack,
-            open_openbot,
+            show_openbot,
+            show_setup,
             already_running,
             default_root,
         ])
@@ -361,9 +397,14 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => {
-                        let port = openbot_env::Ports::default().app;
-                        let _ = tauri_plugin_opener::OpenerExt::opener(app)
-                            .open_url(format!("http://localhost:{port}"), None::<&str>);
+                        if let Some(window) = app.get_webview_window("main") {
+                            let port = openbot_env::Ports::default().app;
+                            if let Ok(url) = format!("http://localhost:{port}").parse() {
+                                let _ = window.navigate(url);
+                            }
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
                     }
                     // Exit rather than hide: quitting from the tray is a decision to stop, and the
                     // exit handler below is what stops the processes with it.
