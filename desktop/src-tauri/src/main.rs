@@ -236,17 +236,71 @@ async fn start_stack(
 /// running: its files and browser profile are volumes, and killing it here would sign somebody out
 /// of everything their Bot had logged into.
 #[tauri::command]
-fn stop_stack(app: tauri::AppHandle) -> Result<(), String> {
+fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
     let shell = app.state::<Shell>();
     for mut child in shell.children.lock().unwrap().drain(..) {
         let _ = child.kill();
         let _ = child.wait();
     }
-    let root = shell.root.lock().unwrap().clone();
-    if let (Some(root), Some(found)) = (root, engine::detect().engine) {
+
+    // The window may be a second one, holding no handles to a stack that is still up. Stop what is
+    // there rather than only what this window started, or Stop is a button that does nothing and
+    // reports success.
+    let root = shell
+        .root
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(&root));
+    stack::stop_processes_under(&root);
+
+    if let Some(found) = engine::detect().engine {
         stack::down(found, &root)?;
     }
+    *shell.root.lock().unwrap() = None;
     Ok(())
+}
+
+/// Open the deployment in a browser.
+///
+/// `localhost` rather than an address, deliberately and against the rule the rest of this file
+/// follows: the app's dev server binds `[::1]` and not `127.0.0.1`, so naming either one guesses
+/// wrong half the time. `localhost` is whichever it bound, and every one of them is trusted.
+#[tauri::command]
+fn open_openbot(app: tauri::AppHandle) -> Result<(), String> {
+    let port = openbot_env::Ports::default().app;
+    tauri_plugin_opener::OpenerExt::opener(&app)
+        .open_url(format!("http://localhost:{port}"), None::<&str>)
+        .map_err(|error| format!("could not open the app: {error}"))
+}
+
+/// Is a deployment this app manages already running?
+///
+/// The shell keeps what it started in memory, so closing the window and opening it again forgets a
+/// stack that is still up. Without asking, the second launch offers to set up something already
+/// running, and the port check then reports OpenBot as a foreign process holding its own port.
+///
+/// Asked of the deployment rather than of a file: a stamp says a deployment was installed, and only
+/// an answer on the port says one is running now.
+#[tauri::command]
+fn already_running(root: String) -> bool {
+    let root = PathBuf::from(&root);
+    if deployment::installed(&root).is_none() {
+        return false;
+    }
+    let port = openbot_env::Ports::default().server;
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .ok()
+        .and_then(|client| {
+            client
+                .get(format!("http://127.0.0.1:{port}/api/capabilities"))
+                .send()
+                .ok()
+        })
+        .map(|response| response.status().is_success())
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -277,6 +331,7 @@ fn which_bun() -> Option<PathBuf> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             detect_engine,
@@ -285,8 +340,39 @@ fn main() {
             prepare_engine,
             start_stack,
             stop_stack,
+            open_openbot,
+            already_running,
             default_root,
         ])
+        .setup(|app| {
+            // The menu bar the window's own text refers to. Two items, because there are two things
+            // somebody wants from a status icon: get to it, or stop it.
+            use tauri::menu::{Menu, MenuItem};
+            use tauri::tray::TrayIconBuilder;
+
+            let open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &quit])?;
+
+            TrayIconBuilder::with_id("openbot")
+                .icon(app.default_window_icon().unwrap().clone())
+                .icon_as_template(true)
+                .tooltip("OpenBot")
+                .menu(&menu)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "open" => {
+                        let port = openbot_env::Ports::default().app;
+                        let _ = tauri_plugin_opener::OpenerExt::opener(app)
+                            .open_url(format!("http://localhost:{port}"), None::<&str>);
+                    }
+                    // Exit rather than hide: quitting from the tray is a decision to stop, and the
+                    // exit handler below is what stops the processes with it.
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .build(app)?;
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("the OpenBot window could not be created")
         .run(|app, event| {

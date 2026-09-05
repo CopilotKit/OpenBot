@@ -185,6 +185,56 @@ pub fn spawn_host_process(
     command.spawn()
 }
 
+/// Stop the host processes belonging to a deployment, whoever started them.
+///
+/// Handles are not enough. A window opened a second time recognises a stack that is still up but
+/// holds nothing to stop it with, so a Stop button that only kills its own children is a button
+/// that does nothing and says it worked.
+///
+/// Found by their working directory, not their command line: all three run as
+/// `bun … src/index.ts`, and the only thing that says which deployment they belong to is where they
+/// are running. That is also how this session's own orphans hid twice.
+#[cfg(unix)]
+pub fn stop_processes_under(root: &Path) -> usize {
+    let Ok(listing) = Command::new("/bin/ps").args(["-ax", "-o", "pid="]).output() else {
+        return 0;
+    };
+
+    let mut stopped = 0;
+    for pid in String::from_utf8_lossy(&listing.stdout)
+        .split_whitespace()
+        .filter_map(|pid| pid.parse::<i32>().ok())
+    {
+        let Ok(cwd) = Command::new("/usr/sbin/lsof")
+            .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+            .output()
+        else {
+            continue;
+        };
+        let cwd = String::from_utf8_lossy(&cwd.stdout);
+        let Some(dir) = cwd.lines().find_map(|line| line.strip_prefix('n')) else {
+            continue;
+        };
+        if !Path::new(dir).starts_with(root) {
+            continue;
+        }
+        // Asked first; the caller waits before it insists.
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        stopped += 1;
+    }
+    stopped
+}
+
+#[cfg(not(unix))]
+pub fn stop_processes_under(_root: &Path) -> usize {
+    // Windows has no cheap equivalent of asking by working directory. The children this window
+    // started are stopped by their handles; a stack left by an earlier window is stopped by
+    // Compose, and its host processes end with the session.
+    0
+}
+
 /// Which Compose services are not running, and the last thing each said.
 ///
 /// `compose up` succeeds once it has asked for everything; a service that then exits is not its

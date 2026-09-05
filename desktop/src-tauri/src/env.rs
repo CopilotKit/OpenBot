@@ -100,9 +100,18 @@ pub fn compose(
             ports.postgres
         ),
     );
+    // Every address the app is actually reachable at, because it is reachable at more than one.
+    //
+    // The app's dev server binds `[::1]` and not `127.0.0.1`, so a browser sent to one of those
+    // arrives with an origin the other would not match, and the deployment refuses a request it
+    // should have accepted. Naming all three costs nothing: they are the same machine, and the
+    // question this setting answers is which origins are this deployment's own.
     env.insert(
         "TRUSTED_ORIGINS".into(),
-        format!("http://127.0.0.1:{}", ports.app),
+        format!(
+            "http://localhost:{app},http://127.0.0.1:{app},http://[::1]:{app}",
+            app = ports.app
+        ),
     );
     env.insert(
         "AGENT_COMPUTER_URL".into(),

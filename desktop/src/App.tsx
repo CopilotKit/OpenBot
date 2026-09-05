@@ -37,7 +37,16 @@ export function App() {
 
   useEffect(() => {
     invoke<EngineStatus>("detect_engine").then(setEngine).catch(() => undefined);
-    invoke<string>("default_root").then(setRoot).catch(() => undefined);
+    invoke<string>("default_root")
+      .then(async (found) => {
+        setRoot(found);
+        // A stack this app started may still be up from a previous window. Ask, rather than
+        // offering to set up something that is already running.
+        if (await invoke<boolean>("already_running", { root: found }).catch(() => false)) {
+          setRunning(true);
+        }
+      })
+      .catch(() => undefined);
     invoke<Blocker | null>("windows_blocker")
       .then(async (found) => {
         setBlocker(found);
@@ -79,7 +88,7 @@ export function App() {
   async function stop() {
     setBusy(true);
     try {
-      await invoke("stop_stack");
+      await invoke("stop_stack", { root });
       setRunning(false);
     } catch (error) {
       setFailure(String(error));
@@ -177,9 +186,14 @@ export function App() {
 
       <div className="row">
         {running ? (
-          <button className="secondary" onClick={stop} disabled={busy}>
-            Stop OpenBot
-          </button>
+          <>
+            <button onClick={() => invoke("open_openbot").catch(() => undefined)}>
+              Open OpenBot
+            </button>
+            <button className="secondary" onClick={stop} disabled={busy}>
+              Stop OpenBot
+            </button>
+          </>
         ) : (
           <button onClick={start} disabled={busy || apiKey.trim() === "" || modelKey.trim() === "" || root.trim() === ""}>
             {busy ? "Working…" : "Start OpenBot"}
