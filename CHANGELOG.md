@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot's own decline is only recorded against a Bot the caller may reach
+
+A Bot reports that it declined a request through the person's session, and the audit row says
+`reportedBy: the Bot itself`. The route wrote that row for any agent id in the path, without asking
+whether the caller could reach that Bot, so any signed-in person could put a decline, in any words,
+against any coworker, one they cannot see included, and an administrator reading the trail would take
+it for something the Bot said. The route now asks the store first, as every other route on a Bot
+does, and answers not found for a Bot the caller cannot reach, writing nothing.
+
 ### The engine socket the supervisor is given can be pointed somewhere else
 
 Compose mounted `/var/run/docker.sock` into the supervisor as a fixed path. That is correct for
