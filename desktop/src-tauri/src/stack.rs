@@ -106,8 +106,11 @@ pub fn up(engine: Engine, root: &Path) -> Result<(), String> {
 /// starting together would race, and a failed migration should stop the start rather than leave a
 /// half-migrated database serving.
 pub fn migrate(engine: Engine, root: &Path) -> Result<(), String> {
+    // No `--no-build` here: `compose run` does not take it, and passing it fails on the flag rather
+    // than on anything to do with migrations. Building is prevented the other way, by
+    // `IMAGE_PULL_POLICY=missing` in the environment, which makes the service pull instead.
     let output = compose_command(engine, root)
-        .args(["run", "--rm", "--no-build", "migrate"])
+        .args(["run", "--rm", "migrate"])
         .output()
         .map_err(|error| format!("could not run migrations: {error}"))?;
 
@@ -127,6 +130,31 @@ pub fn down(engine: Engine, root: &Path) -> Result<(), String> {
         return Ok(());
     }
     Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
+/// Install the deployment's dependencies.
+///
+/// The three host processes are `bun` processes run from the source, so the source alone is not
+/// enough: without this the server stops at `ENOENT while resolving package 'zod'` and the app at
+/// `vite: command not found`, and neither says the word `node_modules`. Run after a fetch and
+/// skipped when the directory is already there, because it takes minutes.
+pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
+    if root.join("node_modules").exists() {
+        return Ok(());
+    }
+    let output = Command::new(bun)
+        .current_dir(root)
+        .args(["install", "--frozen-lockfile"])
+        .output()
+        .map_err(|error| format!("could not run bun install: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "installing the deployment's dependencies failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
 }
 
 /// Start one host process, with its output on disk rather than nowhere.
@@ -157,6 +185,104 @@ pub fn spawn_host_process(
     command.spawn()
 }
 
+/// Wait until the API answers, or say why it never did.
+///
+/// Spawning is not starting. Each of these three can exit in the first second for a reason that has
+/// nothing to do with the others, and a shell that reports "running" because it called `spawn`
+/// three times is telling somebody the stack is up while nothing is listening. That is worse than
+/// an error, because the next thing they do is open a page that will not load and go looking for
+/// the fault in the wrong place.
+///
+/// So: watch the child, and watch the port. Whichever fails first is what gets reported, with the
+/// tail of the log that explains it.
+pub fn wait_until_answering(
+    children: &mut [(&'static str, std::process::Child)],
+    logs: &Path,
+    port: u16,
+    patience: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + patience;
+    let health = format!("http://127.0.0.1:{port}/api/capabilities");
+
+    while std::time::Instant::now() < deadline {
+        for (name, child) in children.iter_mut() {
+            if let Ok(Some(status)) = child.try_wait() {
+                return Err(format!(
+                    "{name} stopped straight away ({status}). {}",
+                    tail_of(logs, name)
+                ));
+            }
+        }
+
+        if reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+            .ok()
+            .and_then(|client| client.get(&health).send().ok())
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(750));
+    }
+
+    Err(format!(
+        "the API never answered on port {port}. {}",
+        tail_of(logs, "server")
+    ))
+}
+
+/// The last few lines of a process's log, which is where the reason is.
+fn tail_of(logs: &Path, name: &str) -> String {
+    let Ok(text) = std::fs::read_to_string(logs.join(format!("{name}.log"))) else {
+        return format!("Nothing was written to {name}.log.");
+    };
+    let tail: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(3)
+        .collect();
+    if tail.is_empty() {
+        return format!("{name}.log is empty.");
+    }
+    let mut lines = tail;
+    lines.reverse();
+    format!("Last from {name}.log: {}", lines.join(" / "))
+}
+
+/// What a directory has to contain before it can be raised.
+///
+/// Checked and named rather than discovered by failing: without this the first symptom is
+/// `os error 2` from writing `.env`, which says nothing about a missing deployment, and the second
+/// is Compose reporting no configuration file. Both are the same fact and neither says it.
+pub fn deployment_problem(root: &Path) -> Option<String> {
+    if !root.exists() {
+        return Some(format!(
+            "{} does not exist yet. OpenBot needs a copy of the deployment there before it can \
+             start one.",
+            root.display()
+        ));
+    }
+    if !root.join("docker-compose.yml").exists() {
+        return Some(format!(
+            "{} is not an OpenBot deployment: it has no docker-compose.yml.",
+            root.display()
+        ));
+    }
+    for directory in ["server", "app", "worker"] {
+        if !root.join(directory).exists() {
+            return Some(format!(
+                "{} is missing its {directory} directory, so that process cannot be started.",
+                root.display()
+            ));
+        }
+    }
+    None
+}
+
 /// Where the shell keeps the deployment it manages.
 pub fn default_root() -> PathBuf {
     dirs_home().join("OpenBot")
@@ -172,6 +298,41 @@ fn dirs_home() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_root_is_named_rather_than_left_to_errno() {
+        let missing = std::env::temp_dir().join("openbot-not-here-at-all");
+        let problem = deployment_problem(&missing).expect("a missing root is a problem");
+        assert!(problem.contains("does not exist"), "{problem}");
+        assert!(!problem.contains("os error"), "leaked an errno: {problem}");
+    }
+
+    #[test]
+    fn a_directory_that_is_not_a_deployment_says_which_part_is_missing() {
+        let dir = std::env::temp_dir().join(format!("openbot-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let problem = deployment_problem(&dir).expect("an empty directory is not a deployment");
+        assert!(problem.contains("docker-compose.yml"), "{problem}");
+
+        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+        let problem = deployment_problem(&dir).expect("still missing the three processes");
+        assert!(problem.contains("server"), "{problem}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_complete_deployment_has_no_problem() {
+        let dir = std::env::temp_dir().join(format!("openbot-complete-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+        for directory in ["server", "app", "worker"] {
+            std::fs::create_dir_all(dir.join(directory)).unwrap();
+        }
+        assert!(deployment_problem(&dir).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn migrate_is_not_raised_as_a_service() {

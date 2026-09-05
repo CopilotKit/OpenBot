@@ -4,7 +4,14 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use openbot_desktop_lib::{acquire, engine, env as openbot_env, stack, windows as win};
+use openbot_desktop_lib::{acquire, deployment, engine, env as openbot_env, stack, windows as win};
+
+/// The deployment this app installs.
+///
+/// Pinned rather than "latest": the images a release runs are pinned per release, so the tree that
+/// names them has to be too, and an app that fetches whatever shipped this morning is not a version
+/// anybody can be given. Moved deliberately, with the app.
+const DEPLOYMENT_VERSION: &str = "v0.0.7";
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
@@ -91,6 +98,44 @@ async fn start_stack(
     api_key: String,
 ) -> Result<(), String> {
     let root = PathBuf::from(root);
+
+    // The installer does not carry the deployment; it fetches one. Skipped when the recorded
+    // version already matches, so a restart is not a download.
+    if deployment::needs_fetch(&root, DEPLOYMENT_VERSION) {
+        report(
+            &app,
+            "deployment",
+            true,
+            format!("fetching {DEPLOYMENT_VERSION}"),
+        );
+        // On a blocking thread, not this one. A blocking HTTP client builds its own runtime, and
+        // dropping one inside an async context panics the worker rather than returning an error:
+        // "Cannot drop a runtime in a context where blocking is not allowed". The window survives
+        // that, which is worse than a crash, because the only symptom is a step that never ends.
+        let target = root.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            deployment::fetch(&target, DEPLOYMENT_VERSION)
+        })
+        .await
+        .map_err(|error| format!("the download did not run: {error}"))?
+        .inspect_err(|error| {
+            report(&app, "deployment", false, error.clone());
+        })?;
+    }
+    report(
+        &app,
+        "deployment",
+        true,
+        format!("{DEPLOYMENT_VERSION} in {}", root.display()),
+    );
+
+    // Belt and braces: a fetch that reported success and left something out is still not a
+    // deployment, and Compose's own error would not say which part was missing.
+    if let Some(problem) = stack::deployment_problem(&root) {
+        report(&app, "deployment", false, problem.clone());
+        return Err(problem);
+    }
+
     let status = engine::detect();
     let Some(found) = status.engine.filter(|_| status.responding) else {
         return Err(status.detail);
@@ -117,14 +162,53 @@ async fn start_stack(
 
     let logs = root.join(".logs");
     let bun = which_bun().ok_or("bun was not found, so the API server cannot be started")?;
-    let shell = app.state::<Shell>();
+
+    // The source alone will not run: without this the server stops at a package it cannot resolve
+    // and the app at a missing `vite`, neither of which mentions dependencies.
+    report(&app, "dependencies", true, "installing");
+    {
+        let target = root.clone();
+        let bun = bun.clone();
+        tauri::async_runtime::spawn_blocking(move || stack::install_dependencies(&target, &bun))
+            .await
+            .map_err(|error| format!("the install did not run: {error}"))?
+            .inspect_err(|error| report(&app, "dependencies", false, error.clone()))?;
+    }
+    report(&app, "dependencies", true, "installed");
+
+    let mut started = Vec::new();
     for process in stack::HOST_PROCESSES.iter() {
         let child = stack::spawn_host_process(process, &root, &logs, &bun)
             .map_err(|e| format!("could not start {}: {e}", process.name))?;
-        shell.children.lock().unwrap().push(child);
+        started.push((process.name, child));
         report(&app, process.name, true, "started");
     }
+
+    // Spawning is not starting. Nothing is called running until the API answers.
+    let logs_for_wait = logs.clone();
+    let (outcome, started) = tauri::async_runtime::spawn_blocking(move || {
+        let mut started = started;
+        let outcome = stack::wait_until_answering(
+            &mut started,
+            &logs_for_wait,
+            openbot_env::Ports::default().server,
+            std::time::Duration::from_secs(180),
+        );
+        (outcome, started)
+    })
+    .await
+    .map_err(|error| format!("the wait did not run: {error}"))?;
+
+    let shell = app.state::<Shell>();
+    shell
+        .children
+        .lock()
+        .unwrap()
+        .extend(started.into_iter().map(|(_, child)| child));
     *shell.root.lock().unwrap() = Some(root);
+
+    outcome.inspect_err(|error| report(&app, "answering", false, error.clone()))?;
+    report(&app, "answering", true, "the API is answering");
     Ok(())
 }
 
@@ -185,6 +269,44 @@ fn main() {
             stop_stack,
             default_root,
         ])
-        .run(tauri::generate_context!())
-        .expect("the OpenBot window could not be created");
+        .build(tauri::generate_context!())
+        .expect("the OpenBot window could not be created")
+        .run(|app, event| {
+            // Nothing this started may outlive it.
+            //
+            // A child that survives the window is the failure Tauri has a standing issue about: an
+            // orphaned server keeps port 3001, the next launch cannot bind it, and nothing on
+            // screen says why. Asked to stop first, then made to, because a server given a moment
+            // closes its database connections and one that is shot does not.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                let shell = app.state::<Shell>();
+                let mut children = shell.children.lock().unwrap();
+                for child in children.iter_mut() {
+                    ask_to_stop(child);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                for child in children.iter_mut() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                children.clear();
+            }
+        });
+}
+
+/// Ask a child to stop, rather than shooting it.
+///
+/// On Unix that is SIGTERM, which the runtime turns into an ordinary shutdown. Windows has no
+/// equivalent for a process without a console, so there it is the same as being killed; the wait
+/// below is what gives a well-behaved process its moment either way.
+fn ask_to_stop(child: &std::process::Child) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(child.id() as i32, libc::SIGTERM);
+    }
+    #[cfg(not(unix))]
+    let _ = child;
 }

@@ -106,7 +106,7 @@ export function App() {
         {running
           ? "The stack is up. Open the app, or stop it from here or the menu bar."
           : engine?.responding
-            ? `Using ${engine.engine}. It is answering, so nothing needs installing.`
+            ? `Using ${engine.engine === "docker" ? "Docker" : "Podman"}. It is answering, so nothing needs installing.`
             : "No container engine is answering yet. OpenBot will install Podman and create its machine."}
       </p>
 
@@ -116,6 +116,7 @@ export function App() {
             <label htmlFor="key">Intelligence project key</label>
             <input
               id="key"
+              type="password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               placeholder="the key from your Intelligence project"
@@ -196,6 +197,8 @@ function label(step: string): string {
       return "Starting the machine";
     case "health-gate":
       return "Engine answering";
+    case "deployment":
+      return "Deployment";
     case "env":
       return "Settings";
     case "services":

@@ -110,6 +110,14 @@ pub fn compose(
         format!("http://127.0.0.1:{}", ports.supervisor),
     );
 
+    // The worker refuses to start without this, by design: it is a fact about where this process
+    // runs, and it would rather stop than guess. `start.sh` sets it at run time, so a `.env` copied
+    // from a developer's machine does not carry it either.
+    env.insert(
+        "SERVER_INTERNAL_URL".into(),
+        format!("http://127.0.0.1:{}", ports.server),
+    );
+
     env.insert("APP_PORT".into(), ports.app.to_string());
     env.insert("SERVER_PORT".into(), ports.server.to_string());
     env.insert("POSTGRES_PORT".into(), ports.postgres.to_string());
@@ -209,6 +217,15 @@ mod tests {
         let a = compose(&intelligence(), &engine_status(None), &Ports::default());
         let b = compose(&intelligence(), &engine_status(None), &Ports::default());
         assert_ne!(a.get("KEY_ENCRYPTION_KEY"), b.get("KEY_ENCRYPTION_KEY"));
+    }
+
+    #[test]
+    fn the_worker_is_told_where_the_server_is_or_it_refuses_to_start() {
+        let env = compose(&intelligence(), &engine_status(None), &Ports::default());
+        assert_eq!(
+            env.get("SERVER_INTERNAL_URL").map(String::as_str),
+            Some("http://127.0.0.1:3001")
+        );
     }
 
     #[test]

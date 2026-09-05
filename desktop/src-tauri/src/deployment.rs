@@ -1,0 +1,231 @@
+//! Putting the deployment on disk, which is not what the installer carries.
+//!
+//! The installer stays small: a Tauri binary and nothing else. What it needs to run a deployment —
+//! `docker-compose.yml`, `server`, `app`, `worker`, the tenant package — is fetched on first run and
+//! kept beside it, at a version this app records. Two things follow from that split, and both are
+//! the reason for it: the download stays a download rather than becoming part of every installer,
+//! and the deployment can be moved forward on its own without shipping a new app.
+//!
+//! What is fetched is the release's own source tarball, at a tag. Not `main`: an app that pulls
+//! whatever is on a branch this morning is not a version anybody can be given, and the images the
+//! stack runs are pinned per release, so the tree that names them has to be pinned too.
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+/// Written beside the deployment so the app can tell what it already put there.
+const STAMP: &str = ".openbot-deployment";
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Installed {
+    pub version: String,
+}
+
+/// The tarball GitHub publishes for a tag.
+///
+/// A release asset rather than a branch, and https rather than git, so nothing needs a git client
+/// or credentials to get a deployment.
+pub fn tarball_url(version: &str) -> String {
+    format!("https://github.com/CopilotKit/OpenBot/archive/refs/tags/{version}.tar.gz")
+}
+
+pub fn stamp_path(root: &Path) -> PathBuf {
+    root.join(STAMP)
+}
+
+/// What version is already there, if any.
+pub fn installed(root: &Path) -> Option<Installed> {
+    std::fs::read_to_string(stamp_path(root))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+}
+
+pub fn record(root: &Path, version: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(root)?;
+    let stamp = Installed {
+        version: version.to_string(),
+    };
+    std::fs::write(
+        stamp_path(root),
+        serde_json::to_string(&stamp).unwrap_or_default(),
+    )
+}
+
+/// Whether anything needs fetching.
+///
+/// Answered from the stamp rather than by looking for files, so a half-extracted directory from an
+/// interrupted download is replaced rather than trusted: the stamp is written last, and its absence
+/// means the fetch did not finish.
+pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
+    match installed(root) {
+        Some(found) => found.version != wanted,
+        None => true,
+    }
+}
+
+/// Everything the three host processes and Compose need from the tree.
+///
+/// Named rather than "the whole repository" because most of it is not needed to run: the charts, the
+/// docs, the tests and the Dockerfiles are not part of a deployment, and copying them makes the
+/// directory look like a place to develop rather than a place something runs.
+pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
+
+/// The rest of what a deployment needs, which is not what it is checked for.
+pub const ALSO_COPIED: [&str; 5] = ["shared", "examples", "package.json", "bun.lock", "scripts"];
+
+/// Fetch the tagged tarball and lay the deployment out under `root`.
+///
+/// The stamp is written last. Anything that fails before that leaves a directory without one, which
+/// `needs_fetch` treats as absent, so an interrupted download is retried rather than half-run.
+pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
+    let response = reqwest::blocking::Client::builder()
+        .user_agent("openbot-desktop")
+        .build()
+        .map_err(|error| format!("could not prepare the download: {error}"))?
+        .get(tarball_url(version))
+        .send()
+        .map_err(|error| format!("could not reach GitHub to fetch {version}: {error}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub answered {} for {version}. Is that a released version?",
+            response.status()
+        ));
+    }
+
+    let body = response
+        .bytes()
+        .map_err(|error| format!("the download of {version} did not finish: {error}"))?;
+
+    std::fs::create_dir_all(root)
+        .map_err(|error| format!("could not make {}: {error}", root.display()))?;
+
+    let decoder = flate2::read::GzDecoder::new(&body[..]);
+    let mut archive = tar::Archive::new(decoder);
+    let entries = archive
+        .entries()
+        .map_err(|error| format!("the download of {version} is not readable: {error}"))?;
+
+    for entry in entries {
+        let mut entry = entry.map_err(|error| format!("could not read the download: {error}"))?;
+        let path = entry
+            .path()
+            .map_err(|error| format!("could not read a path in the download: {error}"))?
+            .into_owned();
+
+        // GitHub wraps everything in one directory named for the tag. Strip it, so the deployment
+        // lands at `root` rather than at `root/OpenBot-0.0.7`.
+        let mut parts = path.components();
+        parts.next();
+        let relative: PathBuf = parts.collect();
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+
+        // Only what a deployment needs. The rest of the tree is a place to develop, not to run.
+        let wanted = relative
+            .components()
+            .next()
+            .map(|first| {
+                let name = first.as_os_str().to_string_lossy().into_owned();
+                REQUIRED.contains(&name.as_str()) || ALSO_COPIED.contains(&name.as_str())
+            })
+            .unwrap_or(false);
+        if !wanted {
+            continue;
+        }
+
+        // Nothing outside `root`, whatever the archive says. A tarball is somebody else's file.
+        let destination = root.join(&relative);
+        if !destination.starts_with(root) {
+            return Err(format!(
+                "the download tried to write outside {}",
+                root.display()
+            ));
+        }
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("could not make {}: {error}", parent.display()))?;
+        }
+        entry
+            .unpack(&destination)
+            .map_err(|error| format!("could not write {}: {error}", destination.display()))?;
+    }
+
+    record(root, version).map_err(|error| format!("could not record the version: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_tarball_is_a_tag_rather_than_a_branch() {
+        let url = tarball_url("v0.0.7");
+        assert!(url.contains("/refs/tags/v0.0.7"), "{url}");
+        assert!(!url.contains("/heads/"), "a branch is not a version: {url}");
+        assert!(
+            url.starts_with("https://"),
+            "must not need a git client: {url}"
+        );
+    }
+
+    #[test]
+    fn an_empty_directory_needs_fetching() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-empty-{}", std::process::id()));
+        assert!(needs_fetch(&dir, "v0.0.7"));
+    }
+
+    #[test]
+    fn a_recorded_version_is_not_fetched_again() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-same-{}", std::process::id()));
+        record(&dir, "v0.0.7").unwrap();
+        assert!(!needs_fetch(&dir, "v0.0.7"));
+        assert!(
+            needs_fetch(&dir, "v0.0.8"),
+            "a newer version has to be fetched"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_interrupted_fetch_is_replaced_rather_than_trusted() {
+        // Files present, stamp absent: what an interrupted extract leaves behind. The stamp is
+        // written last precisely so this case is distinguishable.
+        let dir = std::env::temp_dir().join(format!("openbot-dep-partial-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("server")).unwrap();
+        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+        assert!(
+            needs_fetch(&dir, "v0.0.7"),
+            "a directory with no stamp is not a deployment"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unreadable_stamp_is_treated_as_absent_rather_than_fatal() {
+        let dir = std::env::temp_dir().join(format!("openbot-dep-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(stamp_path(&dir), "{ not json").unwrap();
+        assert!(installed(&dir).is_none());
+        assert!(needs_fetch(&dir, "v0.0.7"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn what_is_required_is_what_the_stack_actually_runs() {
+        // The check in stack.rs looks for exactly these, so the two cannot drift apart.
+        for entry in ["docker-compose.yml", "server", "app", "worker"] {
+            assert!(
+                REQUIRED.contains(&entry),
+                "{entry} is not required but is checked for"
+            );
+        }
+        assert!(
+            !REQUIRED.contains(&"charts"),
+            "a deployment is not a place to develop"
+        );
+        assert!(!REQUIRED.contains(&"docs"));
+    }
+}
