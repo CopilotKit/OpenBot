@@ -22,6 +22,12 @@ use tauri::{Emitter, Manager};
 struct Shell {
     /// Named, because a restart policy that cannot say which process died cannot start it again.
     children: Mutex<Vec<(&'static str, std::process::Child)>>,
+    /// Which run is the current one.
+    ///
+    /// Stopping and starting again inside two seconds would otherwise leave the previous watcher
+    /// alive beside the new one, both answering the same death, and a process restarted twice is
+    /// one process and one orphan holding a port.
+    generation: std::sync::atomic::AtomicU64,
     /// Why the stack stopped, kept for the screen that has not loaded yet.
     ///
     /// Going back to the setup screen is a navigation, and a navigation is a fresh page: React
@@ -245,7 +251,11 @@ async fn start_stack(
     *shell.root.lock().unwrap() = Some(root.clone());
 
     // From here the shell is the restart policy `worker/src/index.ts` says it does not have.
-    supervise_host_processes(app.clone(), root, logs, bun);
+    let generation = shell
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+    supervise_host_processes(app.clone(), root, logs, bun, generation);
 
     outcome.inspect_err(|error| report(&app, "answering", false, error.clone()))?;
     report(&app, "answering", true, "the API and the app are answering");
@@ -269,8 +279,11 @@ fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
 /// right to call that a bug.
 fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), String> {
     let shell = app.state::<Shell>();
-    // Cleared first, so the watcher stops before anything is killed and does not read a death it
+    // Ended first, so the watcher stops before anything is killed and does not read a death it
     // caused as one worth answering.
+    shell
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     *shell.root.lock().unwrap() = None;
     for (_, mut child) in shell.children.lock().unwrap().drain(..) {
         let _ = child.kill();
@@ -416,7 +429,13 @@ fn which_bun() -> Option<PathBuf> {
 ///
 /// The policy is in `supervise.rs`; this is the loop that applies it. It ends when the stack is
 /// stopped, which is what clearing the root means, so stopping does not race a restart.
-fn supervise_host_processes(app: tauri::AppHandle, root: PathBuf, logs: PathBuf, bun: PathBuf) {
+fn supervise_host_processes(
+    app: tauri::AppHandle,
+    root: PathBuf,
+    logs: PathBuf,
+    bun: PathBuf,
+    generation: u64,
+) {
     std::thread::spawn(move || {
         eprintln!(
             "[watch] supervising {} host processes",
@@ -430,7 +449,10 @@ fn supervise_host_processes(app: tauri::AppHandle, root: PathBuf, logs: PathBuf,
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let shell = app.state::<Shell>();
-            if shell.root.lock().unwrap().is_none() {
+            // Not this run's any more, or no run at all.
+            if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+                || shell.root.lock().unwrap().is_none()
+            {
                 return;
             }
 
@@ -482,7 +504,11 @@ fn supervise_host_processes(app: tauri::AppHandle, root: PathBuf, logs: PathBuf,
                 );
                 std::thread::sleep(supervise::backoff(watch.restarts - 1));
 
-                if shell.root.lock().unwrap().is_none() {
+                // Asked again after the backoff: a stop, or another start, may have happened while
+                // this was waiting, and starting a process into either is how an orphan is made.
+                if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+                    || shell.root.lock().unwrap().is_none()
+                {
                     return;
                 }
                 let Some(process) = stack::HOST_PROCESSES
