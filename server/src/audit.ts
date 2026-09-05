@@ -599,9 +599,7 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
 
   const from = optional("from");
   if (from !== undefined && Number.isNaN(Date.parse(from))) {
-    throw new AuditQueryError(
-      'Query parameter "from" must be a valid date.',
-    );
+    throw new AuditQueryError('Query parameter "from" must be a valid date.');
   }
   const to = optional("to");
   if (to !== undefined && Number.isNaN(Date.parse(to))) {
