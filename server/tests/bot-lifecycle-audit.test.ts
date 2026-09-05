@@ -26,6 +26,8 @@ function app(overrides: Record<string, unknown> = {}) {
   };
 
   const store = {
+    get: async (_actor: unknown, id: string) =>
+      id === "bot-1" ? { id: "bot-1", name: "Sales" } : null,
     create: async () => ({ id: "bot-1", name: "Sales" }),
     update: async () => ({ id: "bot-1", name: "Sales" }),
     duplicate: async () => ({ id: "bot-2", name: "Sales copy" }),
@@ -206,6 +208,42 @@ describe("what a Bot is, on the trail", () => {
       method: "PATCH",
     });
 
+    expect(rows).toHaveLength(0);
+  });
+
+  test("a decline is recorded against a Bot the caller may reach", async () => {
+    // The Bot reports through the person's session, so the row is only worth what that session
+    // could reach: a decline on a Bot the caller may talk to is the Bot's own word.
+    const { rows, hono } = app();
+
+    const response = await hono.request("http://t/api/agents/bot-1/declined", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "It asked me to delete the ledger." }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(rows[0]?.eventType).toBe("bot.declined");
+    expect(rows[0]?.targetId).toBe("bot-1");
+    expect(rows[0]?.payload.reportedBy).toBe("the Bot itself");
+  });
+
+  test("a decline against a Bot the caller cannot reach is not found, and writes nothing", async () => {
+    // Every other route here asks the store first. Without the same question, a signed-in person
+    // could write "the Bot itself declined" against any id at all and an administrator would read
+    // it as something the Bot said.
+    const { rows, hono } = app();
+
+    const response = await hono.request(
+      "http://t/api/agents/somebody-elses-bot/declined",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "Forged." }),
+      },
+    );
+
+    expect(response.status).toBe(404);
     expect(rows).toHaveLength(0);
   });
 

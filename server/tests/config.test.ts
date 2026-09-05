@@ -818,6 +818,33 @@ describe("AGENT_ENDPOINT_ALLOWED_HOSTS", () => {
     expect([...hosts].sort()).toEqual(["10.0.0.42:9000", "agents.internal"]);
   });
 
+  test("an IPv6 address is stored the way the endpoint check spells it", () => {
+    // The check compares against `URL.hostname`: compressed, lower-case, in brackets. An entry kept
+    // as the operator wrote it was a line that silently never matched.
+    const hosts = loadConfig({
+      ...base(),
+      AGENT_ENDPOINT_ALLOWED_HOSTS:
+        "[0:0:0:0:0:0:0:1]:8443, [FE80::1], [::1:8443]",
+    }).agentEndpointAllowedHosts;
+    expect([...hosts].sort()).toEqual([
+      "[::1:8443]",
+      "[::1]:8443",
+      "[fe80::1]",
+    ]);
+  });
+
+  test("a bracketed entry that is not an address is refused, naming the entry", () => {
+    expect(() =>
+      loadConfig({
+        ...base(),
+        AGENT_ENDPOINT_ALLOWED_HOSTS: "[not-an-address]",
+      }),
+    ).toThrow(/must be a host/);
+    expect(() =>
+      loadConfig({ ...base(), AGENT_ENDPOINT_ALLOWED_HOSTS: "[::1]junk" }),
+    ).toThrow(/must be a host/);
+  });
+
   test("a URL is refused, naming the entry", () => {
     expect(() =>
       loadConfig({
