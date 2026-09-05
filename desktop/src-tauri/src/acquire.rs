@@ -155,11 +155,22 @@ pub fn health_gate(address: &Address) -> StepOutcome {
         .args(["version", "--format", "{{.Server.APIVersion}}"])
         .output();
     match output {
-        Ok(out) if out.status.success() && !out.stdout.is_empty() => StepOutcome {
-            step: Step::HealthGate,
-            ok: true,
-            detail: format!("engine API {}", String::from_utf8_lossy(&out.stdout).trim()),
-        },
+        Ok(out) if out.status.success() && !out.stdout.is_empty() => {
+            // An engine that answers is not an engine that can raise the stack. Asked here, where
+            // there is a sentence to put it in, rather than left to Compose to discover.
+            if !address.composes() {
+                return StepOutcome {
+                    step: Step::HealthGate,
+                    ok: false,
+                    detail: missing_compose(binary),
+                };
+            }
+            StepOutcome {
+                step: Step::HealthGate,
+                ok: true,
+                detail: format!("engine API {}", String::from_utf8_lossy(&out.stdout).trim()),
+            }
+        }
         Ok(out) => StepOutcome {
             step: Step::HealthGate,
             ok: false,
@@ -176,6 +187,22 @@ pub fn health_gate(address: &Address) -> StepOutcome {
     }
 }
 
+/// What to install, named, rather than seven errors about a file that is not there.
+///
+/// Compose v2 rather than `podman-compose`: v2 is what the stack was tested against, and it is what
+/// reads the healthchecks and `depends_on` conditions in `docker-compose.yml`. `podman-compose` is
+/// a separate reimplementation with its own coverage of those, and choosing it here would mean
+/// shipping a deployment nobody has run.
+pub fn missing_compose(binary: &str) -> String {
+    let install = if cfg!(target_os = "linux") {
+        "Install Compose v2: `sudo apt install docker-compose-v2` on Debian or Ubuntu, or \
+         `sudo dnf install docker-compose` on Fedora."
+    } else {
+        "Install Compose v2 and make sure `docker-compose` is on PATH."
+    };
+    format!("{binary} is answering, but it has no Compose to run the stack with. {install}")
+}
+
 /// Where a downloaded installer is kept, so a failed run can be retried without downloading again.
 pub fn download_dir(cache: &Path) -> std::path::PathBuf {
     cache.join("openbot-engine")
@@ -184,6 +211,19 @@ pub fn download_dir(cache: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_compose_names_what_to_install_rather_than_what_was_not_found() {
+        let said = missing_compose("podman");
+        assert!(said.contains("podman"), "{said}");
+        assert!(said.to_lowercase().contains("install"), "{said}");
+        // The engine's own answer names docker-compose, which reads as "install Docker" to
+        // somebody who chose Podman on purpose.
+        assert!(
+            !said.contains("7 errors"),
+            "the engine's own wording helps nobody: {said}"
+        );
+    }
 
     #[test]
     fn the_machine_this_app_starts_is_addressed_by_name_not_by_the_default_connection() {

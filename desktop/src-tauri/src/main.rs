@@ -157,6 +157,15 @@ async fn start_stack(
         return Err(status.detail);
     };
 
+    // Checked here as well as in the health gate, because the gate only runs when an engine had to
+    // be installed. A machine that already had Podman skips all of that and arrives at Compose,
+    // which is exactly the machine this was found on.
+    if !found.composes() {
+        let problem = acquire::missing_compose(found.engine.binary());
+        report(&app, "engine", false, problem.clone());
+        return Err(problem);
+    }
+
     let settings = openbot_env::compose(
         &openbot_env::Intelligence {
             api_url,

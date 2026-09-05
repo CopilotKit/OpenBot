@@ -70,6 +70,21 @@ impl Address {
         command
     }
 
+    /// Whether Compose can actually run through this engine.
+    ///
+    /// Podman ships no compose implementation. `podman compose` looks for an external provider on
+    /// PATH and, finding none, answers with seven errors naming `docker-compose`, which is a
+    /// baffling thing to read on a machine where Docker was deliberately not installed. Docker
+    /// Desktop puts a provider on PATH, which is why this went unnoticed until the stack was
+    /// started on a Linux machine that had only Podman.
+    pub fn composes(&self) -> bool {
+        self.command()
+            .args(["compose", "version"])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+    }
+
     /// Answering now, not merely installed. A binary that prints help proves nothing.
     pub fn responds(&self) -> bool {
         self.command()
