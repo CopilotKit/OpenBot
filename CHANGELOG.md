@@ -18,6 +18,14 @@ prevent. Stripping the brackets on both sides also folded two different names in
 round. Bracketed entries are now stored in the parser's spelling, with the port kept as written, and
 compared with their brackets on; an entry the parser does not read as an address is refused at boot,
 naming the entry, as a URL or a wildcard already was. Names and IPv4 entries are unaffected.
+### A Bot's own decline is only recorded against a Bot the caller may reach
+
+A Bot reports that it declined a request through the person's session, and the audit row says
+`reportedBy: the Bot itself`. The route wrote that row for any agent id in the path, without asking
+whether the caller could reach that Bot, so any signed-in person could put a decline, in any words,
+against any coworker, one they cannot see included, and an administrator reading the trail would take
+it for something the Bot said. The route now asks the store first, as every other route on a Bot
+does, and answers not found for a Bot the caller cannot reach, writing nothing.
 
 ### The engine socket the supervisor is given can be pointed somewhere else
 
