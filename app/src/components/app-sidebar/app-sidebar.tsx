@@ -89,15 +89,16 @@ const MAX_ANIMATED_ROWS = 60;
 /**
  * The roster, narrowed to what the person typed.
  *
- * Matches the channel's name and the last thing said in it, because those are the two things the
- * row actually shows — searching against something invisible returns results a person cannot
- * account for. Message history beyond the last line is not here to search: it lives in the thread
- * store, and reaching for it is a server endpoint rather than a filter.
+ * Matches the channel's name, its summary, and the last message, because those are the things the
+ * row can actually show — searching against something invisible returns results a person cannot
+ * account for. The last message is included because it is still what the second line draws until the
+ * conversation has been named. Message history beyond that line is not here to search: it lives in
+ * the thread store, and reaching for it is a server endpoint rather than a filter.
  *
  * An empty query returns the input array unchanged rather than a copy, so typing and clearing does
  * not hand `AnimatePresence` a new array identity and restage the whole list.
  */
-function matchingChannels(
+export function matchingChannels(
   channels: ChannelSummary[] | undefined,
   query: string,
 ): ChannelSummary[] {
@@ -109,7 +110,7 @@ function matchingChannels(
     return channels;
   }
   return channels.filter((channel) =>
-    [channel.name, channel.lastMessage].some((field) =>
+    [channel.name, channel.summary, channel.lastMessage].some((field) =>
       field?.toLowerCase().includes(needle),
     ),
   );
@@ -190,6 +191,7 @@ function ChannelRow({
         channelId={channel.id}
         participantIds={channel.agentIds}
         name={channel.name}
+        summary={channel.summary ?? undefined}
         lastMessage={channel.lastMessage ?? undefined}
         lastMessageAt={
           channel.lastMessageAt

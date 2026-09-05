@@ -46,6 +46,11 @@ import type { RoutineRunner } from "./routines/runner";
 import type { IntentRouter } from "./routing/classify";
 import { createRoutingRoutes } from "./routing/routes";
 import type { PackageStatusReader } from "./tenant-package";
+import {
+  INSTRUCTIONS_LIMIT,
+  InstructionsTooLongError,
+  type UserInstructionsStore,
+} from "./user-instructions";
 
 /**
  * One row for something an administrator did to somebody's access.
@@ -202,6 +207,17 @@ export function createApp(
    * nothing can finish.
    */
   onboardingStore?: OnboardingStore,
+  /**
+   * One person's standing instructions, which every built-in coworker they run is told.
+   *
+   * Appended last, like everything above it: these are positional, so inserting one anywhere else
+   * silently shifts every existing call site's arguments by one.
+   *
+   * Absent leaves the routes answering 503 rather than "you have written none". The difference
+   * matters on exactly this screen: a person who cannot be told what they saved would otherwise be
+   * shown an empty box, and the obvious thing to do with an empty box is fill it in again.
+   */
+  userInstructions?: UserInstructionsStore,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -343,6 +359,89 @@ export function createApp(
     return context.json({
       onboarding: await onboardingStore.status(context.var.actor.id),
     });
+  });
+  /*
+   * A person's own standing instructions, read and written by the person they belong to.
+   *
+   * `requireUser` and never `requireAdmin`, and scoped to `context.var.actor.id` rather than to
+   * anything in the path or the body. There is deliberately no route here for reading somebody
+   * else's or writing on their behalf: these instructions go into a prompt that then speaks as that
+   * person's coworker, so a way to set them for another account would be a way to put words in
+   * somebody's mouth in every channel they work in. An administrator has no business here either,
+   * for the same reason.
+   */
+  app.get("/api/settings/instructions", requireUser, async (context) => {
+    if (!userInstructions) {
+      return context.json(
+        { error: "Standing instructions are not available." },
+        503,
+      );
+    }
+
+    return context.json({
+      // "" is what having written none looks like to a text box, and the store's null is what it
+      // looks like to a database. The translation happens once, here.
+      instructions: (await userInstructions.read(context.var.actor.id)) ?? "",
+    });
+  });
+  app.put("/api/settings/instructions", requireUser, async (context) => {
+    if (!userInstructions) {
+      return context.json(
+        { error: "Standing instructions are not available." },
+        503,
+      );
+    }
+
+    const body = (await context.req.json().catch(() => undefined)) as
+      | { instructions?: unknown }
+      | undefined;
+
+    if (typeof body?.instructions !== "string") {
+      return context.json({ error: "Send the instructions to save." }, 400);
+    }
+
+    /*
+     * The cap is the store's rule, so the store is what enforces it and this catches the refusal
+     * rather than checking the length again. A second copy of `> 4000` here is a second place for
+     * the number to be changed in only one of them.
+     */
+    let saved: string;
+    try {
+      saved = await userInstructions.write(
+        context.var.actor.id,
+        body.instructions,
+      );
+    } catch (error) {
+      if (error instanceof InstructionsTooLongError) {
+        return context.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
+
+    /*
+     * The trail records that they changed and how long they now are, NEVER what they say.
+     *
+     * The audit table is append-only and read by administrators, and this is a person's own note
+     * about how they want to be spoken to. Recording the text would put it somewhere they cannot
+     * edit it and somebody else can read it, which is not what a preferences screen promises. The
+     * length is enough to answer the question a trail is for: when did this change, and to what
+     * extent.
+     */
+    if (auditStore) {
+      await recordAuditEvent(auditStore, {
+        eventType: "configuration.changed",
+        targetType: "user_instructions",
+        targetId: context.var.actor.id,
+        actorUserId: context.var.actor.id,
+        payload: {
+          change: saved === "" ? "instructions_cleared" : "instructions_saved",
+          characters: saved.length,
+          limit: INSTRUCTIONS_LIMIT,
+        },
+      });
+    }
+
+    return context.json({ instructions: saved });
   });
   app.get("/api/admin/status", requireUser, (context) => {
     const denied = requireAdmin(context);

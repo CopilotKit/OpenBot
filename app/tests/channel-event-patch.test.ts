@@ -222,3 +222,65 @@ describe("a busy signal", () => {
     );
   });
 });
+
+/**
+ * A conversation the server has just named.
+ *
+ * Written by a sweep some seconds after the message that prompted it, so it arrives on its own long
+ * after that message was announced.
+ */
+describe("a summary", () => {
+  test("patches only the summary, leaving the last message alone", () => {
+    const data = cache([
+      channel("a", {
+        lastMessage: "Said something.",
+        lastMessageAt: "2024-04-01T00:00:00.000Z",
+        lastMessageAgentId: "agent-1",
+      }),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({ channelId: "a", summary: "Expense categories" }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels[0]).toEqual({
+      ...(data.pages[0]?.channels[0] as ChannelSummary),
+      summary: "Expense categories",
+    });
+  });
+
+  test("does not move the row it names", () => {
+    // Naming a conversation is not something anybody said in it. A row that jumped to the top
+    // seconds after the message that put it there would read as a second message arriving.
+    const data = cache([
+      channel("recent", { lastMessageAt: "2024-04-02T00:00:00.000Z" }),
+      channel("older", { lastMessageAt: "2024-04-01T00:00:00.000Z" }),
+    ]);
+
+    const patched = applyChannelEvent(
+      data,
+      event({ channelId: "older", summary: "Something older" }),
+    );
+
+    expect(patched).not.toBe("unknown");
+    if (patched === "unknown") return;
+    expect(patched.pages[0]?.channels.map((row) => row.id)).toEqual([
+      "recent",
+      "older",
+    ]);
+  });
+
+  test("returns the same cache when the row already says so", () => {
+    const data = cache([channel("a", { summary: "Expense categories" })]);
+
+    expect(
+      applyChannelEvent(
+        data,
+        event({ channelId: "a", summary: "Expense categories" }),
+      ),
+    ).toBe(data);
+  });
+});

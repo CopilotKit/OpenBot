@@ -77,12 +77,12 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
    ```sh
    npx --yes copilotkit@latest login
    npx --yes copilotkit@latest project select
-   npx --yes copilotkit@latest license --write
    ```
 
    Put the `cpk-...` runtime key from `project select` in `.env` as
-   `INTELLIGENCE_API_KEY`. `license --write` writes
-   `COPILOTKIT_LICENSE_TOKEN` into the existing `.env`.
+   `INTELLIGENCE_API_KEY`. That is the only Intelligence credential you need:
+   managed Intelligence derives entitlement from the project key, so there is
+   no separate licence token to fetch.
 
 3. Fill the remaining required values:
 
@@ -156,7 +156,7 @@ Leave `EMBEDDED_POSTGRES` off and set `DATABASE_URL` to point at a database you 
 - **Bring your own agent**: any AG-UI endpoint is a Bot, on a framework or hand-written. Endpoints are validated with the same target checks used for browser navigation, and an auth header is stored write-only.
 - **Components instead of prose**: compiled React components live in `app/src/components/gallery/`, sandboxed ones are authored in `/admin/playground` and published with no deployment. Every call asks the server whether the component exists, is published, and is not withheld from that Bot. Data functions are granted per component.
 - **Governed MCP**: Google Drive and Notion ship in the catalogue, reached as the person asking. The catalogue carries only vendors this deployment stands behind, so adding one is a review of that vendor. Custom servers must pass URL checks; unknown tools and custom-server tools are treated as writes, and a catalogue tool the server advertises but does not name as a write classifies as a read. A Bot is told which connectors exist here and which it holds, so it says it has not been granted one rather than browsing to the vendor's website.
-- **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer.
+- **Skills are instructions, not capabilities**: personal skills attach only to Bots their author owns, deployment skills are admin-owned, and both are invoked with `/` in the composer. A Bot granted the shipped `skill-creator` skill can write one with you in the conversation, and saves it only when you press the button on the card.
 - **Sign in with what your company already has**: Google, Microsoft or Okta from the environment, or a company's own SAML or OpenID Connect provider registered while the deployment runs and routed by email domain. Any one turns sign-in on; several may be configured at once.
 - **Decide who gets in**: `/admin/people` lists everybody who has signed in, promotes and demotes them, and removes access, which ends the session they are using and stops the next sign-in. Every change is on the audit trail.
 - **An audit trail you can read**: `/admin/audit` lists what was permitted, what was refused and what failed, and every refusal carries the rule that caused it.
@@ -204,7 +204,10 @@ See [docs/configuration.md](docs/configuration.md) and [docs/coworkers.md](docs/
 - `INTELLIGENCE_API_URL`
 - `INTELLIGENCE_GATEWAY_WS_URL`
 - `INTELLIGENCE_API_KEY`
-- `COPILOTKIT_LICENSE_TOKEN`
+
+`COPILOTKIT_LICENSE_TOKEN` is optional. A self-hosted Intelligence with its own
+licence can still set it and it is forwarded to the runtime; managed Intelligence
+does not issue one and startup no longer asks for it.
 
 Settings worth knowing:
 

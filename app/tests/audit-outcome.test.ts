@@ -53,6 +53,30 @@ describe("what the trail says a row was", () => {
     expect(outcomeOf("agent.stream_stalled")).toBe("did-not-happen");
   });
 
+  /*
+   * The two acting surfaces have to answer this the same way.
+   *
+   * A browser action that was permitted and then failed was already drawn as "Did not happen". The
+   * same shape on the other two surfaces — a tool call the vendor did not complete, a component read
+   * that broke — fell through to "Allowed", which is what the page says about a call that worked.
+   */
+  test("tells a permitted call that failed from one that went through", () => {
+    // Written by `callTool` after the policy allowed the call and the vendor answered `isError` or
+    // the attempt threw. A per-person connector fails here on every expired refresh token.
+    expect(outcomeOf("mcp.call_failed")).toBe("did-not-happen");
+    // Granted, attempted, and the read broke. Not a refusal, and not an allowance either.
+    expect(outcomeOf("component.function_failed")).toBe("did-not-happen");
+    // The surface that already got this right, kept here so the three cannot drift apart again.
+    expect(outcomeOf("computer.action_failed")).toBe("did-not-happen");
+  });
+
+  test("a failed call is not filed as something this deployment refused", () => {
+    // The other wrong answer. Nothing was forbidden on either row, and filing a broken call as a
+    // policy event teaches a reader to distrust the policy events that are real.
+    expect(outcomeOf("mcp.call_failed")).not.toBe("refused");
+    expect(outcomeOf("component.function_failed")).not.toBe("refused");
+  });
+
   test("still calls something that went through allowed", () => {
     for (const eventType of [
       "computer.action_allowed",
@@ -99,6 +123,20 @@ describe("the saved views ask the same question the rows do", () => {
     for (const eventType of filtered) {
       expect(outcomeOf(eventType)).toBe("did-not-happen");
     }
+  });
+
+  /*
+   * The half of the failure that is harder to see. A row drawn in the wrong colour is at least on
+   * the page; a row missing from this view is absent from the answer to "what did not happen here",
+   * and the view is not empty, it is just short.
+   */
+  test("Did not happen names the calls that were permitted and failed", () => {
+    const filtered = eventTypeFilter(DID_NOT_HAPPEN_EVENT_TYPES)
+      .replace("?eventType=", "")
+      .split(",");
+
+    expect(filtered).toContain("mcp.call_failed");
+    expect(filtered).toContain("component.function_failed");
   });
 
   test("no event type is in both families", () => {

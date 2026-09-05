@@ -77,6 +77,8 @@ jobs:
     needs: metadata
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.components.outputs.components }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,6 +96,11 @@ jobs:
             echo "::error::CHANGELOG.md has no section for ${VERSION#v}."
             exit 1
           }
+      # The services published alongside the image above. Read from the tree rather than written
+      # here, because CI checks the same file when it proves those Dockerfiles still build, so the
+      # set that is tested and the set that is published cannot drift apart.
+      - id: components
+        run: echo "components=$(jq -c . .github/published-images.json)" >> "$GITHUB_OUTPUT"
 
   # The same checks CI runs, against the commit being published. This is the gate: nothing is built
   # or tagged unless they pass here, on this exact tree.
@@ -156,12 +163,181 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
+  # The images the installer pulls instead of building. `docker-compose.yml` builds these from
+  # source on every machine, which needs a toolchain and several minutes a desktop install does not
+  # have. Published here, from the same commit as the image above, so a deployment and a laptop run
+  # the same code.
+  #
+  # Two architectures, because the machines are laptops: arm64 Macs and amd64 everything else. Built
+  # on native runners rather than under QEMU. Emulated `bun install` and `vite build` are a known
+  # source of release-day flakiness, and arm64 runners are free to a public repository, so emulation
+  # would be the slower and less reliable option at no saving.
+  component-images:
+    name: ${{ matrix.image }} ${{ matrix.platform.arch }}
+    needs: [metadata, verify, checks]
+    if: needs.metadata.outputs.is_release == 'true'
+    runs-on: ${{ matrix.platform.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # One image failing should not hide whether the others build, and a half-finished run leaves
+      # nothing deployable: these builds are pushed untagged, and the tags are written by the job
+      # below only once both architectures of an image exist.
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.verify.outputs.components) }}
+        platform:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Pushed by digest and deliberately untagged. A tag written here would name one architecture,
+      # and the two jobs for one image would race to own it, so the last to finish would decide what
+      # the tag meant.
+      #
+      # zstd, not gzip. A pull is already a compressed transfer, so this is not about compressing
+      # something that was not; it is a better algorithm for the same job. Measured on
+      # `agent-computer`, the image that matters: 962 MB becomes 886 MB, and it inflates several
+      # times faster, which is worth more than the 8% on 2 GB of Chromium. `force-compression`
+      # is what reaches the layers that came from somebody else's registry, which is where almost
+      # all of the bytes are; without it only our own thin layers change and the saving rounds to
+      # nothing. The cost is that these images no longer share layers with a gzip pull of the same
+      # base, and that a client which cannot read zstd cannot read them, which is why this is here
+      # and not on the `openbot` image above: that one is pulled by servers with whatever they have,
+      # and these are pulled by an installer that ships Podman.
+      - id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.image }}/Dockerfile
+          platforms: linux/${{ matrix.platform.arch }}
+          # `oci-mediatypes=true` because zstd layers have no Docker-schema2 media type to be
+          # described by. It is buildx's default for this exporter and is stated rather than
+          # assumed, since the push fails without it and the reason would not be obvious.
+          outputs: type=image,name=ghcr.io/copilotkit/openbot-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,compression=zstd,force-compression=true
+          # Scoped per image and per architecture. One shared scope would have ten builds
+          # overwriting each other's cache and none of them reading their own.
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform.arch }}
+          provenance: true
+          sbom: true
+      # A matrix job's outputs are not addressable by the jobs that consume them, so the digest
+      # travels as a file. One artifact per image and architecture, because same-named artifacts
+      # from different matrix legs collide.
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          ARCH: ${{ matrix.platform.arch }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p digests
+          echo "$DIGEST" > "digests/$ARCH"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-${{ matrix.image }}-${{ matrix.platform.arch }}
+          path: digests/
+          retention-days: 1
+
+  # Two per-architecture images become one reference. Whatever pulls it, a laptop or a cluster, names
+  # the manifest list and gets its own architecture without being told which one it is.
+  component-manifests:
+    name: ${{ matrix.image }} manifest
+    needs: [metadata, verify, checks, component-images]
+    if: needs.metadata.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Same identity and the same reason as the image above: the attestation says which workflow,
+      # repository and commit produced this, and there is no key to hold.
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.verify.outputs.components) }}
+    steps:
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: digest-${{ matrix.image }}-*
+          path: digests
+          merge-multiple: true
+      - id: merge
+        name: Write the tags over both architectures
+        env:
+          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Both architectures or neither. A manifest list holding one of them installs on half the
+          # machines and looks exactly like one holding both until somebody's laptop says
+          # "no matching manifest".
+          refs=()
+          for arch in amd64 arm64; do
+            digest="$(cat "digests/$arch")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            refs+=("$REPOSITORY@$digest")
+          done
+          docker buildx imagetools create \
+            --tag "$REPOSITORY:$VERSION" \
+            --tag "$REPOSITORY:$COMMIT" \
+            --tag "$REPOSITORY:latest" \
+            "${refs[@]}"
+          # The list's own digest, which is what anything downstream pins. Read back from the
+          # registry rather than derived here, and checked, so a template that stops returning a
+          # digest fails now instead of writing something unusable into the release.
+          digest="$(docker buildx imagetools inspect "$REPOSITORY:$VERSION" --format '{{.Manifest.Digest}}')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          subject-digest: ${{ steps.merge.outputs.digest }}
+          push-to-registry: true
+      # For the same reason the digests above travel as files: a matrix cannot hand a value to a
+      # later job.
+      - name: Record the manifest
+        env:
+          NAME: ${{ matrix.image }}
+          REPOSITORY: ghcr.io/copilotkit/openbot-${{ matrix.image }}
+          DIGEST: ${{ steps.merge.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p manifests
+          jq -n --arg name "$NAME" --arg repository "$REPOSITORY" --arg digest "$DIGEST" \
+            '{name: $name, repository: $repository, digest: $digest}' > "manifests/$NAME.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: manifest-${{ matrix.image }}
+          path: manifests/
+          retention-days: 1
+
   # The tag and the release, last, so nothing is announced that was not built. The manifest is the
   # useful artefact: it pins the digest, so a deploy or a rollback names an exact image rather than a
   # tag somebody could move.
   github-release:
     name: tag and release
-    needs: [metadata, verify, checks, image]
+    needs: [metadata, verify, checks, image, component-manifests]
     if: needs.metadata.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -173,14 +349,36 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: manifest-*
+          path: manifests
+          merge-multiple: true
       - name: Write the image manifest
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
           DIGEST: ${{ needs.image.outputs.digest }}
           COMMIT: ${{ github.sha }}
+          COMPONENTS: ${{ needs.verify.outputs.components }}
         run: |
           set -euo pipefail
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          # Every image this release published, or the file is not written. A missing entry is a
+          # service whatever reads this would quietly build from source instead, which is the thing
+          # publishing them was for, and it would only be noticed on somebody's laptop.
+          expected="$(jq -r 'length' <<< "$COMPONENTS")"
+          found="$(find manifests -name '*.json' -type f | wc -l | tr -d ' ')"
+          if [ "$found" != "$expected" ]; then
+            echo "::error::Expected $expected component manifests, found $found."
+            exit 1
+          fi
+          components="$(jq -s 'map({
+            (.name): {
+              repository: .repository,
+              digest: .digest,
+              reference: (.repository + "@" + .digest),
+            }
+          }) | add' manifests/*.json)"
           # `jq`, not `bun`: this job deliberately checks out without credentials and installs no
           # toolchain, so reaching for the repository's runtime here is a step that was never taken.
           # It was, and the tag was never cut: the manifest step died on `bun: command not found`
@@ -191,16 +389,17 @@ jobs:
             --arg digest "$DIGEST" \
             --arg commit "$COMMIT" \
             --arg repository "ghcr.io/copilotkit/openbot" \
+            --argjson components "$components" \
             '{
               version: $version,
               commit: $commit,
-              images: {
+              images: ({
                 openbot: {
                   repository: $repository,
                   digest: $digest,
                   reference: ($repository + "@" + $digest),
                 },
-              },
+              } + $components),
             }' > container-images.json
           cat container-images.json
       - name: Tag and publish

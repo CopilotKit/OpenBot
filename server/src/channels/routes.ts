@@ -33,6 +33,7 @@ import {
   type ChannelEventHub,
 } from "./events";
 import { upgradeWebSocket } from "./socket";
+import { oneLine } from "./text";
 import type { ThreadIdentity } from "./thread-identity";
 
 export type AgentChannel = {
@@ -45,6 +46,8 @@ export type AgentChannel = {
 
 /** A channel plus the last thing said in it, which is what a roster renders. */
 export type ChannelSummary = AgentChannel & {
+  /** A few words about the conversation, or null. Readers fall back to the channel's name. */
+  summary: string | null;
   lastMessage: string | null;
   lastMessageAt: Date | null;
   lastMessageAgentId: string | null;
@@ -211,20 +214,9 @@ const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
 const MAX_CHANNEL_NAME_CODE_POINTS = 120;
 const MAX_ACTIVITY_CODE_POINTS = 200;
 
-/**
- * Reduce a message to one line of plain text.
- *
- * A preview is rendered as text wherever a roster appears, so control characters have nothing to do
- * there: at best they are invisible, at worst a terminal escape somebody put in a message follows it
- * into a log. Newlines collapse to spaces because a preview is one line by definition.
- */
+/** Reduce a message to the one line a roster draws. See `oneLine` for why it is shared. */
 function previewOf(text: string) {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point.
-  const flattened = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
-  const collapsed = flattened.replace(/\s+/g, " ");
-  const codePoints = Array.from(collapsed);
-  if (codePoints.length <= MAX_ACTIVITY_CODE_POINTS) return collapsed;
-  return `${codePoints.slice(0, MAX_ACTIVITY_CODE_POINTS - 1).join("")}…`;
+  return oneLine(text, MAX_ACTIVITY_CODE_POINTS);
 }
 
 function channelName(names: string[]) {
@@ -479,6 +471,7 @@ export function createChannelStore(
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           deletedAt: agentProfiles.deletedAt,
+          channelSummary: channels.summary,
           lastMessage: channels.lastMessage,
           lastMessageAt: channels.lastMessageAt,
           lastMessageAgentId: channels.lastMessageAgentId,
@@ -537,6 +530,7 @@ export function createChannelStore(
           agentIds: [row.agentId],
           threadId: row.threadId,
           active: row.deletedAt === null,
+          summary: row.channelSummary,
           lastMessage: row.lastMessage,
           lastMessageAt: row.lastMessageAt,
           lastMessageAgentId: row.lastMessageAgentId,
@@ -935,6 +929,12 @@ export function parseActivityInput(
   if (object.agentId !== null && typeof object.agentId !== "string") {
     return { ok: false, error: "Agent ID must be a string or null." };
   }
+  if (
+    typeof object.agentId === "string" &&
+    object.agentId.trim().length === 0
+  ) {
+    return { ok: false, error: "Agent ID must be a string or null." };
+  }
   if (typeof object.at !== "string") {
     return { ok: false, error: "Timestamp is required." };
   }
@@ -1182,6 +1182,7 @@ function channelDto(channel: AgentChannel): AgentChannel {
 function channelSummaryDto(channel: ChannelSummary) {
   return {
     ...channelDto(channel),
+    summary: channel.summary,
     lastMessage: channel.lastMessage,
     // Serialised as ISO-8601 so the browser gets a string it can sort and format.
     lastMessageAt: channel.lastMessageAt?.toISOString() ?? null,

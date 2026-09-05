@@ -8,6 +8,18 @@ agents:
     avatar_seed: general-assistant
     type: built-in
     system_prompt: You are a helpful general assistant. Give clear, concise, and accurate answers.
+    # Turns this Bot into the one you make coworkers with, and this line is the whole gate: the app
+    # offers `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` only to a Bot holding
+    # `bot-creator`. Remove it and making a coworker in a conversation stops working, with nothing on
+    # any screen to say why.
+    #
+    # Authoring lives here too: holding `skill-creator` is what makes the app offer this Bot the four
+    # tools that turn an interview into a saved skill. Both are on the general assistant because it is
+    # the Bot somebody already has open, and the one with no specialism to dilute. Knowledge narrows
+    # to document tools per run, so putting either on it is how that narrowing stops working.
+    skills:
+      - bot-creator
+      - skill-creator
   - id: knowledge
     name: Knowledge
     title: Company Knowledge

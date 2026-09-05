@@ -20,10 +20,50 @@ export type ChannelResyncEvent = { resync: true };
 /** What arrives on the socket. `resync` is the discriminant; an activity event never carries it. */
 export type ChannelSocketMessage = ChannelActivityEvent | ChannelResyncEvent;
 
-export function isResync(
-  message: ChannelSocketMessage,
-): message is ChannelResyncEvent {
-  return (message as ChannelResyncEvent).resync === true;
+export function isResync(message: unknown): message is ChannelResyncEvent {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as ChannelResyncEvent).resync === true
+  );
+}
+
+/**
+ * Whether a parsed socket payload has the shape of anything this roster handles.
+ *
+ * The `try` around `JSON.parse` is not enough: `JSON.parse("null")` succeeds with
+ * `null`, and `JSON.parse("5")` succeeds with `5`, and both used to reach `isResync`
+ * — `null.resync` throwing a `TypeError` inside `onmessage` for the first, and a
+ * spurious roster-wide refetch for the second when the channel id came back
+ * `undefined`. Binary frames arrive as `Blob` rather than text and never parse.
+ */
+export function isChannelSocketMessage(
+  value: unknown,
+): value is ChannelSocketMessage {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Parse one socket frame into something the roster can act on, or `null` to drop it.
+ *
+ * Pure and exported so the drop rules are provable without a socket: unparseable
+ * text, non-object JSON (`null`, numbers, strings, arrays) and activity events with
+ * no string channel id are all ignored rather than crashing or refetching the roster.
+ */
+export function parseChannelSocketMessage(
+  data: unknown,
+): ChannelSocketMessage | null {
+  if (typeof data !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (!isChannelSocketMessage(parsed)) return null;
+  if (isResync(parsed)) return parsed;
+  if (typeof parsed.channelId !== "string") return null;
+  return parsed;
 }
 
 export type ChannelActivityEvent = {
@@ -31,6 +71,8 @@ export type ChannelActivityEvent = {
   lastMessage: string | null;
   lastMessageAt: string | null;
   lastMessageAgentId: string | null;
+  /** The channel's newly written summary. Absent on an ordinary activity event. */
+  summary?: string;
   /** The channel is gone from every member's roster. Absent on an ordinary activity event. */
   deleted?: true;
   /**
@@ -94,6 +136,16 @@ export function applyChannelEvent(
   );
   const previous = page.channels[index];
   if (!previous) return data;
+
+  /* One field, and no re-sort: naming a conversation is not something anybody said in it. */
+  if (activity.summary !== undefined) {
+    if (previous.summary === activity.summary) return data;
+    const channels = page.channels.slice();
+    channels[index] = { ...previous, summary: activity.summary };
+    const pages = data.pages.slice();
+    pages[holdingPage] = { ...page, channels };
+    return { ...data, pages };
+  }
 
   /*
    * A pin patches the one field it is about.
@@ -171,12 +223,8 @@ export function useChannelEvents() {
       };
 
       socket.onmessage = (message) => {
-        let parsed: ChannelSocketMessage;
-        try {
-          parsed = JSON.parse(message.data as string);
-        } catch {
-          return;
-        }
+        const parsed = parseChannelSocketMessage(message.data);
+        if (!parsed) return;
 
         // Refetch rather than patch: there is no delta to apply. Checked before anything reads
         // `channelId`, because this message has none.

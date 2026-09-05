@@ -807,6 +807,212 @@ describe("where a Bot says its answer came from", () => {
 });
 
 /**
+ * The person's own standing instructions, and where they land in a prompt.
+ *
+ * The third instruction carrier. A role is the coworker's and reads the same to everybody; a skill
+ * is pulled in for one task. This is the person's, and it is true of every task they ask for, which
+ * is why the only interesting properties are about placement and precedence rather than about
+ * content: WHERE it sits relative to the role, that it is absent when nobody has written any, that
+ * it never reaches a Bot at somebody else's endpoint, and that failing to read it costs a paragraph
+ * rather than a run.
+ */
+describe("a person's standing instructions", () => {
+  const assistant = {
+    id: "general-assistant",
+    name: "General Assistant",
+    type: "built_in" as const,
+    systemPrompt: "Be helpful.",
+  };
+  const model = { provider: "openai" as const, defaultModel: "gpt-5.6-terra" };
+
+  const promptWith = (instructions: string | null) =>
+    builtInAgentConfiguration(
+      assistant,
+      model,
+      "openai-secret",
+      [],
+      undefined,
+      [],
+      instructions,
+    ).prompt as string;
+
+  test("carries the block, its precedence sentence, and the person's own words", () => {
+    const prompt = promptWith("Write in British English.");
+
+    expect(prompt).toContain(
+      "The person you are working with has standing instructions that apply in every channel and every task, alongside your role: Write in British English.",
+    );
+    /*
+     * The precedence sentence is part of the block rather than decoration. Two standing instructions
+     * in one prompt is a conflict resolved by whichever the model read last, and the resolution is
+     * not symmetric: "always answer in one line" must not quietly override a role that exists to
+     * produce a filing with its sources in it.
+     */
+    expect(prompt).toContain(
+      "Where the two conflict, the role decides what you do and these decide how you do it.",
+    );
+  });
+
+  test("sits after the role and before everything the deployment adds", () => {
+    const prompt = builtInAgentConfiguration(
+      assistant,
+      model,
+      "openai-secret",
+      [{ name: "mcp__google-drive__search_files" }] as never[],
+      "Computer guidance.",
+      [],
+      "Write in British English.",
+    ).prompt as string;
+
+    // The role, then who it is working for, then what it holds, then its hands. Asserted as
+    // positions rather than as presence, because the order is the part that was decided.
+    expect(prompt.indexOf("Be helpful.")).toBeLessThan(
+      prompt.indexOf("standing instructions that apply in every channel"),
+    );
+    expect(
+      prompt.indexOf("standing instructions that apply in every channel"),
+    ).toBeLessThan(prompt.indexOf("google-drive"));
+    expect(prompt.indexOf("google-drive")).toBeLessThan(
+      prompt.indexOf("Computer guidance."),
+    );
+  });
+
+  test.each([[null], [undefined], [""], ["   \n  "]])(
+    "adds nothing at all when there are none: %j",
+    (instructions) => {
+      const prompt = promptWith(instructions as string | null);
+
+      expect(prompt).not.toContain("standing instructions");
+      // Byte for byte what a deployment had before any of this existed, which is what most people
+      // on most days get.
+      expect(prompt).toBe(`Be helpful.\n\n${PROVENANCE_GUIDANCE}`);
+    },
+  );
+
+  test("is read once for a whole roster, and only when somebody built-in will be told it", async () => {
+    let reads = 0;
+    const loadInstructions = async () => {
+      reads += 1;
+      return "Write in British English.";
+    };
+
+    await buildAgents(
+      [
+        assistant,
+        { ...assistant, id: "second-assistant", name: "Second Assistant" },
+      ],
+      model,
+      "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      loadInstructions,
+    );
+    // One person, one row: asking per Bot would be the same read once for each of them.
+    expect(reads).toBe(1);
+
+    await buildAgents(
+      [
+        {
+          id: "risk",
+          name: "Risk",
+          type: "remote_ag_ui",
+          endpoint: "http://risk.internal/ag-ui",
+        },
+      ],
+      model,
+      "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      loadInstructions,
+    );
+    /*
+     * Not read at all for a roster with nothing built-in. A remote Bot composes its own prompt at
+     * somebody else's endpoint, so this deployment has nowhere to put the text and no reason to pay
+     * for reading it.
+     */
+    expect(reads).toBe(1);
+  });
+
+  test("never reaches a Bot at somebody else's endpoint", () => {
+    const content = standingRoleMessage({
+      id: "risk",
+      name: "Risk",
+      title: "Risk & Compliance",
+      roleDescription: "Investigate policies and controls.",
+    }).content;
+
+    expect(content).not.toContain("standing instructions that apply");
+  });
+
+  test("costs a paragraph rather than a run when it cannot be read", async () => {
+    const agents = await buildAgents(
+      [assistant],
+      model,
+      "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        throw new Error("The database is unreachable.");
+      },
+    );
+
+    // The Bot is still built and still answers. A preferences row is not worth a conversation.
+    expect(agents["general-assistant"]).toBeInstanceOf(BuiltInAgent);
+  });
+
+  test("is resolved for whoever the request turned out to be", async () => {
+    const asked: string[] = [];
+    const factory = createRequestAgents(
+      async () => ({ id: "user-7", role: "user" as const }),
+      async () => [assistant],
+      model,
+      async () => "openai-secret",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (actorId) => async () => {
+        asked.push(actorId);
+        return "Write in British English.";
+      },
+    );
+
+    await factory({
+      request: new Request("http://openbot.test/api/copilotkit"),
+    });
+
+    /*
+     * The actor from `identifyActor`, never anything in the request body. This text goes into a
+     * prompt that then speaks as that person's coworker in every channel they work in, so which
+     * person it belongs to is the session's answer and nobody else's.
+     */
+    expect(asked).toEqual(["user-7"]);
+  });
+});
+
+/**
  * The dangling tool call, refused before it reaches the model provider.
  *
  * FOUND LIVE. Three consecutive attempts to say anything in one conversation failed with

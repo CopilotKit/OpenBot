@@ -307,7 +307,14 @@ describe("tenant YAML validation", () => {
         systemPrompt:
           "You are a helpful general assistant. Give clear, concise, and accurate answers.",
       },
-      skills: [],
+      /*
+       * One skill each, and both are gates rather than preferences. `bot-creator` is what makes the
+       * app offer `list_bots`, `read_bot`, `list_bot_skills` and `save_bot`; `skill-creator` is what
+       * makes it offer the four tools that turn an interview into a saved skill. Dropped from the
+       * package, either feature stops working with nothing on any screen to say why, which is why the
+       * pairing is asserted here rather than left to whoever edits the YAML next.
+       */
+      skills: ["bot-creator", "skill-creator"],
     });
     // The pairing the shipped package makes, which is the whole reason Knowledge narrows to document
     // tools rather than being offered everything its grants hold.
@@ -319,6 +326,19 @@ describe("tenant YAML validation", () => {
       "whats-changed",
       "who-owns-this",
     ]);
+    /*
+     * The skill that writes skills, shipped with no declared tools on purpose. Its tools are the app's
+     * own rather than a connector's, so they are not `serverId/toolName` refs; a declaration here would
+     * name nothing, and selection only ever narrows MCP tools.
+     */
+    const creator = tenantPackage.skills.find(
+      (skill) => skill.slug === "skill-creator",
+    );
+    expect(creator?.title).toBe("Write a skill");
+    expect(creator?.tools).toEqual([]);
+    // The instruction is the whole feature, so pin the two ends of the loop it prescribes.
+    expect(creator?.instructions).toContain("Interview first");
+    expect(creator?.instructions).toContain("save_skill");
     expect(tenantPackage.channels).toContainEqual({
       id: "general-assistant",
       name: "General Assistant",

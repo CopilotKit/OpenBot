@@ -13,12 +13,18 @@ export type RuntimeCapabilities = {
   intelligence: IntelligenceSettings;
 };
 
-/** The Intelligence contract. Every field is required; see runtimeCapabilities. */
+/**
+ * The Intelligence contract. Three values are required; see runtimeCapabilities.
+ *
+ * `licenseToken` is optional. Managed Intelligence derives entitlement from the project key, and
+ * `@copilotkit/runtime` declares `licenseToken` optional with a `COPILOTKIT_LICENSE_TOKEN` fallback
+ * of its own. A deployment that still holds one keeps passing it; nothing here requires it.
+ */
 export type IntelligenceSettings = {
   apiUrl: string;
   gatewayWsUrl: string;
   apiKey: string;
-  licenseToken: string;
+  licenseToken?: string;
 };
 
 export type DockerComputerConfig = {
@@ -323,6 +329,27 @@ function optional(environment: Environment, name: string): string | undefined {
 }
 
 /**
+ * Whether this deployment says it is in production, which is what the two hard refusals turn on.
+ *
+ * ONE PLACE, BECAUSE THE TWO GATES DID NOT AGREE. Both refuse a local-only setting on a deployed
+ * server — the example encryption key, and private-host browsing — and both compare `NODE_ENV`
+ * against `"production"`. The private-hosts gate read it through `optional`, so the comparison
+ * trimmed; the key gate compared `environment.NODE_ENV` raw.
+ *
+ * Both sides of that comparison come out of the same file. `NODE_ENV=production ` with a trailing
+ * space — invisible in an env file, and preserved verbatim by Docker's `env_file` and by every
+ * hosting dashboard with a text box — therefore tripped one refusal and slipped past the other. The
+ * one it slipped past is the one that decides whether the credential vault may be encrypted with a
+ * key printed in this repository.
+ *
+ * A helper rather than a second `optional` call, so the next gate that needs this question cannot
+ * pick the wrong way to ask it.
+ */
+function isProduction(environment: Environment): boolean {
+  return optional(environment, "NODE_ENV") === "production";
+}
+
+/**
  * The key in `.env.example`, which every clone of this repository starts with.
  *
  * It is a valid key, which is the whole problem: it is the right length and the right encoding, so
@@ -344,7 +371,7 @@ function keyEncryptionKey(environment: Environment): string {
    * in any deployment.
    */
   if (value === PLACEHOLDER_KEY) {
-    if (environment.NODE_ENV === "production") {
+    if (isProduction(environment)) {
       throw new Error(
         "KEY_ENCRYPTION_KEY is still the example key from .env.example, which is public. Generate one with: openssl rand -base64 32",
       );
@@ -560,9 +587,15 @@ function oktaAuth(
 /**
  * Resolve the Intelligence contract, or refuse to start.
  *
- * All four values are required together. A partial set is the more dangerous shape than none at all:
- * it means somebody intended to configure Intelligence and got it wrong, so failing on the partial
- * set alone (as this did) let a completely unconfigured deployment through as if that were a choice.
+ * The three addressing values are required together. A partial set is the more dangerous shape than
+ * none at all: it means somebody intended to configure Intelligence and got it wrong, so failing on
+ * the partial set alone (as this did) let a completely unconfigured deployment through as if that
+ * were a choice.
+ *
+ * COPILOTKIT_LICENSE_TOKEN IS NO LONGER ONE OF THEM. Managed Intelligence issues a single project
+ * key and derives entitlement from it, and requiring a second credential here sent people hunting
+ * for a token the platform had stopped handing out. It is still read and still forwarded when a
+ * deployment sets one, which is what a self-hosted Intelligence with its own licence needs.
  */
 function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
   const settings = {
@@ -576,7 +609,6 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     INTELLIGENCE_API_URL: settings.apiUrl,
     INTELLIGENCE_GATEWAY_WS_URL: settings.gatewayWsUrl,
     INTELLIGENCE_API_KEY: settings.apiKey,
-    COPILOTKIT_LICENSE_TOKEN: settings.licenseToken,
   })
     .filter(([, value]) => !value)
     .map(([name]) => name);
@@ -636,23 +668,43 @@ function agentEndpointAllowedHosts(
         `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must name one host. Patterns are not accepted: list each address instead.`,
       );
     }
-    hosts.add(normalizeAllowedHost(host));
+    hosts.add(normalizeAllowedHost(entry, host));
   }
   return hosts;
 }
 
-function normalizeAllowedHost(host: string): string {
-  // IPv6 is bracketed as [host] or [host]:port. Strip the brackets and keep the port.
-  if (host.startsWith("[")) {
-    const close = host.indexOf("]");
-    if (close === -1) return host.replace(/^\[/, "").replace(/\]$/, "");
-    const ipv6 = host.slice(1, close).toLowerCase();
-    const rest = host.slice(close + 1);
-    if (!rest) return ipv6;
-    if (rest.startsWith(":")) return `${ipv6}${rest.toLowerCase()}`;
-    return `${ipv6}${rest.toLowerCase()}`;
+/**
+ * An IPv6 entry, spelled the way the endpoint check will see it.
+ *
+ * `namedAsAllowed` compares against `URL.hostname`, which the parser canonicalises: compressed,
+ * lower-case, in brackets. An entry kept as written matched only when the operator happened to
+ * write it that way, so `[0:0:0:0:0:0:0:1]:8443` was a line that silently never matched, which is
+ * the failure the URL and wildcard refusals above exist to prevent. Stripping the brackets instead
+ * folded two different names into one: `[::1]:8443`, an address and a port, and `[::1:8443]`, an
+ * address, both became `::1:8443`, so naming either admitted the other.
+ *
+ * The address goes through the URL parser rather than a hand-written normaliser, so the spelling
+ * here is the parser's own and cannot drift from it. The port is kept as written, since the parser
+ * drops a scheme's default port and an operator who wrote `:80` meant that port. A bracketed entry
+ * the parser refuses is not an address, and is refused the way a URL is: at boot, naming the entry.
+ */
+function normalizeAllowedHost(entry: string, host: string): string {
+  if (!host.startsWith("[")) return host;
+  const close = host.indexOf("]");
+  const address = close === -1 ? host : host.slice(0, close + 1);
+  const port = close === -1 ? "" : host.slice(close + 1);
+  const refusal = () =>
+    new Error(
+      `AGENT_ENDPOINT_ALLOWED_HOSTS entry "${entry}" must be a host, optionally with a port, and not a URL.`,
+    );
+  if (port && !/^:\d{1,5}$/.test(port)) throw refusal();
+  let hostname: string;
+  try {
+    hostname = new URL(`http://${address}`).hostname;
+  } catch {
+    throw refusal();
   }
-  return host;
+  return `${hostname}${port}`;
 }
 
 function privateHostsAllowed(environment: Environment): boolean {
@@ -660,9 +712,9 @@ function privateHostsAllowed(environment: Environment): boolean {
     return false;
   }
 
-  // Through `optional`, so the comparison trims. Read raw, `NODE_ENV="production "` out of an env
-  // file would slip past a gate that the switch beside it, which does trim, would still trip.
-  if (optional(environment, "NODE_ENV") === "production") {
+  // Through `isProduction`, so the comparison trims. Read raw, `NODE_ENV="production "` out of an
+  // env file would slip past a gate that the switch beside it, which does trim, would still trip.
+  if (isProduction(environment)) {
     throw new Error(
       "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS=true is for local development only: it lets a Bot reach this deployment's own network. Remove it from this deployment's environment.",
     );
@@ -683,14 +735,14 @@ function privateHostsAllowed(environment: Environment): boolean {
  * its meaning.
  */
 export function durationMs(value: string): number {
-  const match = /^(\d+)\s*(ms|s|m|h)?$/.exec(value.trim());
+  const match = /^(\d+)\s*(ms|s|m|h)?$/i.exec(value.trim());
   if (!match) {
     throw new Error(
       `"${value}" is not a duration. Write it as 30s, 30m, 2h, or a plain number of milliseconds.`,
     );
   }
   const amount = Number(match[1]);
-  switch (match[2]) {
+  switch (match[2]?.toLowerCase()) {
     case "h":
       return amount * 3_600_000;
     case "m":

@@ -5,6 +5,7 @@ import {
   PageSection,
   PageShell,
 } from "@/components/layout/page-shell";
+import { StandingInstructions } from "@/components/settings/standing-instructions";
 import { useTheme } from "@/components/theme-provider";
 import {
   Item,
@@ -56,6 +57,11 @@ function RouteComponent() {
           </Item>
         </PageRows>
       </PageSection>
+      {/*
+       * Above the shortcuts and below the appearance switch, because it is the only thing on this
+       * screen that changes what a coworker says rather than what this browser looks like.
+       */}
+      <StandingInstructions />
       {/*
        * Drawn from the same registry the listeners match against, so this list is what the keys
        * actually do rather than what somebody remembered they did. Read-only on purpose: these

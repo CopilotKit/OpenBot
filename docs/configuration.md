@@ -23,9 +23,11 @@ bash scripts/start.sh
 | `INTELLIGENCE_API_URL`        | CopilotKit Intelligence API URL.                                                                      |
 | `INTELLIGENCE_GATEWAY_WS_URL` | CopilotKit Intelligence realtime gateway URL.                                                         |
 | `INTELLIGENCE_API_KEY`        | Runtime key for the Intelligence project.                                                             |
-| `COPILOTKIT_LICENSE_TOKEN`    | License token for the Intelligence project.                                                           |
 
-All four Intelligence values are required together. Missing any of them stops server startup.
+The three above are required together. Missing any of them stops server startup.
+
+`COPILOTKIT_LICENSE_TOKEN` is optional: managed Intelligence issues no licence token, and a
+self-hosted Intelligence that has one sets this and has it forwarded to the runtime.
 
 `MANAGED_AGENT_AG_UI_URL` names the Bot in the box: the default endpoint for coworkers created in
 the product. It needs `MANAGED_AGENT_TOKEN` beside it, or the server refuses to start. Unset, the
@@ -301,6 +303,14 @@ The supervisor also reads:
 - `COMPUTER_MEMORY_BYTES`
 - `DOCKER_SOCKET`
 
+`ENGINE_SOCKET` is separate from those, because it is read by Compose rather than by the supervisor:
+it is the host path mounted into the supervisor as `/var/run/docker.sock`. Unset, it is
+`/var/run/docker.sock`, which is right for Docker and for Podman on macOS, where `podman machine`
+symlinks that path to the rootless socket. Rootless Podman on Linux needs
+`ENGINE_SOCKET=$XDG_RUNTIME_DIR/podman/podman.sock`: there the default path is either missing or a
+symlink to the rootful socket, which is not the one running, and the supervisor reports that it
+cannot reach Docker.
+
 `COMPUTER_NAMESPACE` defaults to `openbot` and names the deployment a computer belongs to. It is part
 of every container and volume name the supervisor derives, and the supervisor acts only on computers
 carrying it, so two deployments on one Docker host never adopt each other's.
@@ -323,6 +333,32 @@ When optional SPIRE services are used:
 - the supervisor reads `SPIRE_SOCKET`, `SPIRE_AGENT_ID`, `SPIRE_TRUST_DOMAIN`, and `SPIRE_AGENT_SOCKET_VOLUME`;
 - computers read `SPIFFE_ENDPOINT_SOCKET`;
 - Compose also uses `SPIRE_JOIN_TOKEN` and `COMPOSE_PROJECT_NAME`.
+
+## Images
+
+Every service `docker-compose.yml` can build is published by a release, so a machine can run the
+stack without a toolchain and without waiting for Chromium to build.
+
+| Service           | Setting             | Published image                            |
+| ----------------- | ------------------- | ------------------------------------------ |
+| `agent-computer`  | `COMPUTER_IMAGE`    | `ghcr.io/copilotkit/openbot-agent-computer` |
+| `supervisor`      | `SUPERVISOR_IMAGE`  | `ghcr.io/copilotkit/openbot-supervisor`     |
+| `agent-bot`       | `BOT_IMAGE`         | `ghcr.io/copilotkit/openbot-agent-bot`      |
+| `agent-langgraph` | `LANGGRAPH_IMAGE`   | `ghcr.io/copilotkit/openbot-agent-langgraph`|
+| `migrate`         | `SERVER_IMAGE`      | `ghcr.io/copilotkit/openbot-server`         |
+
+Unset, each names a local tag and Compose builds it, which is what a checkout of this repository
+does. Set to a published reference, pinned by digest, together with `IMAGE_PULL_POLICY=missing`,
+Compose pulls instead. Both architectures are in every image, so the same reference works on an
+arm64 laptop and an amd64 server.
+
+`IMAGE_PULL_POLICY` is needed because a service carrying a `build` section builds by default
+however its image is named. It is also not a promise that nothing is built: a pull that fails falls
+back to building, which suits a developer and does not suit a machine with no toolchain, where the
+useful answer is that the image could not be fetched. Somewhere that must never build, override the
+`build` sections away instead.
+
+`docs/releasing.md` shows reading the digests straight out of a release's `container-images.json`.
 
 ## Ports
 
@@ -497,6 +533,8 @@ Each skill becomes a deployment skill on boot: everybody sees it in the `/` menu
 `tools` is why this file matters beyond the instructions. A Bot holding more than twelve tools is offered, per run, only the tools of the skills that match the message, so the matching needs skills to match against. Shipping the declaration with the skill is what makes connecting a connector the only step; without it a deployment has no skills, nothing matches, and the narrowing never switches on.
 
 Refs are `serverId/toolName`, the same form a grant is written in. A package may name tools for a connector nobody has added — the ref sits inert until that connector exists, because what a Bot is offered is always intersected with what it was granted. **Naming a tool here grants nothing.**
+
+One slug is load-bearing. A Bot granted `skill-creator` is offered the four tools that let a conversation end in a saved skill, so a package shipping that skill should also grant it to a Bot in `agents.yaml` — shipping it and granting it to nobody boots a deployment where writing a skill in the composer quietly does nothing. It declares no `tools`, and should not: those four are the app's own rather than a connector's, so they are not `serverId/toolName` refs. See [architecture.md](architecture.md#writing-a-skill-in-a-conversation).
 
 Slugs are lowercase letters, digits and hyphens. If a package ships a slug somebody in the deployment already wrote a skill under, theirs keeps the name, the package loses that skill, and startup continues.
 

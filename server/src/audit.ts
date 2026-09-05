@@ -485,7 +485,10 @@ export async function recordAuditEvent(
 export function createAuditStore(database: Database): AuditStore {
   return {
     insert: async (event) => {
-      await database.insert(auditEvents).values(event);
+      await database.insert(auditEvents).values({
+        ...event,
+        payload: redactAuditPayload(event.payload) as Record<string, unknown>,
+      });
     },
   };
 }
