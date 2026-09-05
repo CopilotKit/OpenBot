@@ -160,6 +160,15 @@ async fn start_stack(
     stack::migrate(found, &root)?;
     report(&app, "migrate", true, "migrations applied");
 
+    // Before spawning: if these are already held, whatever answers later is not ours.
+    let ports = openbot_env::Ports::default();
+    if let Some(problem) =
+        stack::port_already_taken(&[("API server", ports.server), ("app", ports.app)])
+    {
+        report(&app, "ports", false, problem.clone());
+        return Err(problem);
+    }
+
     let logs = root.join(".logs");
     let bun = which_bun().ok_or("bun was not found, so the API server cannot be started")?;
 

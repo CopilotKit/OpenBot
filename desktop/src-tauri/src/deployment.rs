@@ -72,7 +72,17 @@ pub fn needs_fetch(root: &Path, wanted: &str) -> bool {
 pub const REQUIRED: [&str; 4] = ["docker-compose.yml", "server", "app", "worker"];
 
 /// The rest of what a deployment needs, which is not what it is checked for.
-pub const ALSO_COPIED: [&str; 5] = ["shared", "examples", "package.json", "bun.lock", "scripts"];
+pub const ALSO_COPIED: [&str; 7] = [
+    "shared",
+    "examples",
+    "package.json",
+    "bun.lock",
+    "scripts",
+    // Every package's tsconfig extends this one. Without it vite fails inside `parseExtends`, in a
+    // stack trace that names the parser and not the missing file.
+    "tsconfig.base.json",
+    "bunfig.toml",
+];
 
 /// Fetch the tagged tarball and lay the deployment out under `root`.
 ///
@@ -211,6 +221,14 @@ mod tests {
         assert!(installed(&dir).is_none());
         assert!(needs_fetch(&dir, "v0.0.7"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_shared_tsconfig_is_copied_or_every_package_fails_to_parse_its_own() {
+        assert!(
+            ALSO_COPIED.contains(&"tsconfig.base.json"),
+            "app, server and worker all extend it"
+        );
     }
 
     #[test]

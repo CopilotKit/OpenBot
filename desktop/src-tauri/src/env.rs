@@ -126,6 +126,14 @@ pub fn compose(
     env.insert("LANGGRAPH_PORT".into(), ports.langgraph.to_string());
     env.insert("SUPERVISOR_PORT".into(), ports.supervisor.to_string());
 
+    // One machine, one person, no sign-in.
+    //
+    // The server refuses to start with no identity provider rather than serve a deployment where
+    // every visitor is an administrator, which is the right refusal on a server and the wrong
+    // question on a laptop: there is nobody else here. Saying so explicitly is how that refusal is
+    // answered, and it is the same switch `ci.yml` uses for the same reason.
+    env.insert("OPENBOT_SINGLE_USER".into(), "true".into());
+
     // Pull the published images rather than build them. A desktop install has no toolchain and no
     // reason to compile Chromium.
     env.insert("IMAGE_PULL_POLICY".into(), "missing".into());
@@ -217,6 +225,15 @@ mod tests {
         let a = compose(&intelligence(), &engine_status(None), &Ports::default());
         let b = compose(&intelligence(), &engine_status(None), &Ports::default());
         assert_ne!(a.get("KEY_ENCRYPTION_KEY"), b.get("KEY_ENCRYPTION_KEY"));
+    }
+
+    #[test]
+    fn a_desktop_install_is_single_user_or_the_server_refuses_to_start() {
+        let env = compose(&intelligence(), &engine_status(None), &Ports::default());
+        assert_eq!(
+            env.get("OPENBOT_SINGLE_USER").map(String::as_str),
+            Some("true")
+        );
     }
 
     #[test]

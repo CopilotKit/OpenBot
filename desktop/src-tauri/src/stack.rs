@@ -185,6 +185,29 @@ pub fn spawn_host_process(
     command.spawn()
 }
 
+/// Refuse to start if something already holds a port this deployment needs.
+///
+/// Found the hard way: another deployment was listening on 3001, so the readiness check below was
+/// satisfied by a server this shell had never started. Everything looked green and none of it was
+/// ours. Checked before anything is spawned, because afterwards the two are indistinguishable from
+/// outside.
+pub fn port_already_taken(ports: &[(&'static str, u16)]) -> Option<String> {
+    for (name, port) in ports {
+        if std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], *port)),
+            std::time::Duration::from_millis(300),
+        )
+        .is_ok()
+        {
+            return Some(format!(
+                "Something is already listening on port {port}, which OpenBot uses for the {name}. \
+                 Stop it, or change the port, and start again."
+            ));
+        }
+    }
+    None
+}
+
 /// Wait until the API answers, or say why it never did.
 ///
 /// Spawning is not starting. Each of these three can exit in the first second for a reason that has
@@ -332,6 +355,26 @@ mod tests {
         }
         assert!(deployment_problem(&dir).is_none());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_port_nobody_holds_is_not_reported_as_taken() {
+        // 0 is never listening; this asserts the check does not invent a problem.
+        assert!(port_already_taken(&[("nothing", 1)]).is_none());
+    }
+
+    #[test]
+    fn a_held_port_is_named_along_with_what_uses_it() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let problem =
+            port_already_taken(&[("API server", port)]).expect("a held port is a problem");
+        assert!(problem.contains(&port.to_string()), "{problem}");
+        assert!(
+            problem.contains("API server"),
+            "must say what it is for: {problem}"
+        );
     }
 
     #[test]
