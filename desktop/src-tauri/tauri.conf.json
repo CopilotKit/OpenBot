@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenBot",
+  "version": "0.0.0",
+  "identifier": "ai.copilotkit.openbot.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:3020",
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenBot",
+        "width": 900,
+        "height": 640,
+        "minWidth": 720,
+        "minHeight": 560,
+        "resizable": true
+      }
+    ],
+    "security": { "csp": null },
+    "trayIcon": {
+      "id": "openbot",
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true,
+      "tooltip": "OpenBot"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "nsis", "appimage", "deb", "rpm"],
+    "icon": ["icons/icon.png"],
+    "copyright": "CopilotKit",
+    "category": "DeveloperTool",
+    "shortDescription": "Run OpenBot on your own machine",
+    "longDescription": "OpenBot Desktop installs the container engine, raises the stack, and keeps it running."
+  }
+}

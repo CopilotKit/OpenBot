@@ -1,0 +1,48 @@
+:root {
+  color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ink: #111827;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --ground: #ffffff;
+  --accent: #111827;
+  --bad: #b91c1c;
+  --good: #15803d;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f3f4f6;
+    --muted: #9ca3af;
+    --line: #374151;
+    --ground: #0b0f19;
+    --accent: #f3f4f6;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); }
+main { max-width: 42rem; margin: 0 auto; padding: 2.5rem 1.5rem; }
+h1 { font-size: 1.35rem; margin: 0 0 0.35rem; }
+p.lede { color: var(--muted); margin: 0 0 1.75rem; line-height: 1.5; }
+label { display: block; font-size: 0.82rem; font-weight: 600; margin: 0 0 0.3rem; }
+input {
+  width: 100%; padding: 0.55rem 0.7rem; border: 1px solid var(--line);
+  border-radius: 0.5rem; background: transparent; color: inherit; font: inherit;
+}
+button {
+  padding: 0.55rem 1rem; border-radius: 0.5rem; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--ground); font: inherit; font-weight: 600; cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--ink); }
+button:disabled { opacity: 0.5; cursor: default; }
+.field { margin-bottom: 1rem; }
+.row { display: flex; gap: 0.6rem; align-items: center; margin-top: 1.5rem; }
+.steps { border: 1px solid var(--line); border-radius: 0.6rem; margin-top: 1.5rem; overflow: hidden; }
+.step { display: flex; gap: 0.6rem; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--line); font-size: 0.88rem; }
+.step:last-child { border-bottom: none; }
+.step .mark { width: 1.1rem; flex: none; }
+.step .detail { color: var(--muted); }
+.bad { color: var(--bad); }
+.good { color: var(--good); }
+.blocker { border: 1px solid var(--bad); border-radius: 0.6rem; padding: 1rem; margin-top: 1.5rem; }
+.blocker h2 { font-size: 0.95rem; margin: 0 0 0.4rem; }
+.blocker p { margin: 0; color: var(--muted); line-height: 1.5; }
