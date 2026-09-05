@@ -1,7 +1,7 @@
 // A window, not a console. Release builds on Windows must not open one behind the app.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use openbot_desktop_lib::{acquire, deployment, engine, env as openbot_env, stack, windows as win};
@@ -157,9 +157,19 @@ async fn start_stack(
         .map_err(|e| format!("could not write .env: {e}"))?;
     report(&app, "env", true, ".env written");
 
+    // Said before rather than after. On a machine that has never run OpenBot this pulls five
+    // images, and a person watching a button that says "Working" has no way to tell a download
+    // from a hang.
+    report(
+        &app,
+        "services",
+        true,
+        "pulling images and starting containers",
+    );
     stack::up(&found, &root)?;
     report(&app, "services", true, "containers up");
 
+    report(&app, "migrate", true, "applying migrations");
     stack::migrate(&found, &root)?;
     report(&app, "migrate", true, "migrations applied");
 
@@ -210,7 +220,10 @@ async fn start_stack(
         let outcome = stack::wait_until_answering(
             &mut started,
             &logs_for_wait,
-            openbot_env::Ports::default().server,
+            &stack::Ready {
+                api: openbot_env::Ports::default().server,
+                app: openbot_env::Ports::default().app,
+            },
             std::time::Duration::from_secs(180),
         );
         (outcome, started)
@@ -227,7 +240,7 @@ async fn start_stack(
     *shell.root.lock().unwrap() = Some(root);
 
     outcome.inspect_err(|error| report(&app, "answering", false, error.clone()))?;
-    report(&app, "answering", true, "the API is answering");
+    report(&app, "answering", true, "the API and the app are answering");
     Ok(())
 }
 
@@ -238,6 +251,15 @@ async fn start_stack(
 /// of everything their Bot had logged into.
 #[tauri::command]
 fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
+    stop_everything(&app, &PathBuf::from(&root))
+}
+
+/// Take the whole stack down: the host processes, anything left over, and the containers.
+///
+/// One implementation, because there are three ways to ask for it (the button, the menu bar, and
+/// quitting) and a person who used one of them and got a different amount of stopping would be
+/// right to call that a bug.
+fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), String> {
     let shell = app.state::<Shell>();
     for mut child in shell.children.lock().unwrap().drain(..) {
         let _ = child.kill();
@@ -252,14 +274,15 @@ fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
         .lock()
         .unwrap()
         .clone()
-        .unwrap_or_else(|| PathBuf::from(&root));
+        .unwrap_or_else(|| fallback_root.to_path_buf());
     stack::stop_processes_under(&root);
 
-    if let Some(found) = engine::detect().address {
-        stack::down(&found, &root)?;
-    }
+    let outcome = match engine::detect().address {
+        Some(found) => stack::down(&found, &root),
+        None => Ok(()),
+    };
     *shell.root.lock().unwrap() = None;
-    Ok(())
+    outcome
 }
 
 /// Show OpenBot itself in this window.
@@ -278,7 +301,12 @@ fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
 #[tauri::command]
 fn show_openbot(app: tauri::AppHandle) -> Result<(), String> {
     let port = openbot_env::Ports::default().app;
-    let url = format!("http://localhost:{port}");
+    // Where it answered, not where it was asked to listen. A dev server binds whichever loopback
+    // its runtime resolved `localhost` to, and navigating to the other one shows a blank window
+    // that looks like the app failing to start.
+    let url = stack::app_url(port).ok_or_else(|| {
+        format!("OpenBot is not answering on port {port} yet, so there is nothing to show.")
+    })?;
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there to show it in")?;
@@ -365,8 +393,32 @@ fn which_bun() -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.exists())
 }
 
+/// Point the window at OpenBot if it is up, and at the setup screen if it is not.
+///
+/// Used by the tray and by a second launch, both of which happen at moments when the caller has no
+/// idea which of the two the person should be looking at.
+fn show_whichever_applies(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if let Some(url) = stack::app_url(openbot_env::Ports::default().app) {
+        if let Ok(parsed) = url.parse() {
+            let _ = window.navigate(parsed);
+        }
+    }
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
 fn main() {
     tauri::Builder::default()
+        // A second launch is somebody looking for the window they already have, not a request for a
+        // second stack. Without this both copies bind the same ports and the loser reports a
+        // failure that belongs to the winner.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_whichever_applies(app);
+        }))
         .plugin(tauri_plugin_shell::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
@@ -381,6 +433,16 @@ fn main() {
             already_running,
             default_root,
         ])
+        // Closing the window hides it. A tray application whose window is destroyed on close has a
+        // menu item that points at nothing: `get_webview_window` returns None from then on, and the
+        // only way back is to quit and start again, with a stack still running that nothing on
+        // screen can reach.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             // The menu bar the window's own text refers to. Two items, because there are two things
             // somebody wants from a status icon: get to it, or stop it.
@@ -388,8 +450,9 @@ fn main() {
             use tauri::tray::TrayIconBuilder;
 
             let open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
+            let stop = MenuItem::with_id(app, "stop", "Stop OpenBot", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &stop, &quit])?;
 
             TrayIconBuilder::with_id("openbot")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -397,15 +460,18 @@ fn main() {
                 .tooltip("OpenBot")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "open" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let port = openbot_env::Ports::default().app;
-                            if let Ok(url) = format!("http://localhost:{port}").parse() {
-                                let _ = window.navigate(url);
+                    "open" => show_whichever_applies(app),
+                    // Stop without quitting: the stack is what costs something to leave running,
+                    // and somebody who wants it stopped does not necessarily want the icon gone.
+                    "stop" => {
+                        let app = app.clone();
+                        std::thread::spawn(move || {
+                            let root = default_root();
+                            let _ = stop_everything(&app, &PathBuf::from(root));
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.eval("window.location.reload()");
                             }
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        });
                     }
                     // Exit rather than hide: quitting from the tray is a decision to stop, and the
                     // exit handler below is what stops the processes with it.
@@ -424,21 +490,37 @@ fn main() {
             // orphaned server keeps port 3001, the next launch cannot bind it, and nothing on
             // screen says why. Asked to stop first, then made to, because a server given a moment
             // closes its database connections and one that is shot does not.
-            if matches!(
-                event,
-                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
-            ) {
+            // `Exit` only. `ExitRequested` fires first and for the same quit, and running this
+            // twice means a second SIGTERM to a process that has already gone and another wait
+            // nobody is watching.
+            if matches!(event, tauri::RunEvent::Exit) {
                 let shell = app.state::<Shell>();
-                let mut children = shell.children.lock().unwrap();
-                for child in children.iter_mut() {
-                    ask_to_stop(child);
+                {
+                    let mut children = shell.children.lock().unwrap();
+                    for child in children.iter_mut() {
+                        ask_to_stop(child);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    for child in children.iter_mut() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                    children.clear();
                 }
-                std::thread::sleep(std::time::Duration::from_millis(1500));
-                for child in children.iter_mut() {
-                    let _ = child.kill();
-                    let _ = child.wait();
+
+                // The containers too. Leaving five of them running behind an application that is
+                // no longer on screen is the one outcome nobody can act on: there is no window to
+                // stop them from and nothing to say they are there.
+                let root = shell
+                    .root
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from(default_root()));
+                stack::stop_processes_under(&root);
+                if let Some(found) = engine::detect().address {
+                    let _ = stack::down(&found, &root);
                 }
-                children.clear();
             }
         });
 }

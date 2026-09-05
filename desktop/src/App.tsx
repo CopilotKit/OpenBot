@@ -58,7 +58,15 @@ export function App() {
       })
       .catch(() => undefined);
     const stop = listen<Progress>("setup:progress", (event) => {
-      setSteps((current) => [...current, event.payload]);
+      // One row per step, updated in place. A step that reports twice is the same step saying
+      // more, and a list that grows a line each time reads as a log rather than as progress.
+      setSteps((current) => {
+        const at = current.findIndex((step) => step.step === event.payload.step);
+        if (at === -1) return [...current, event.payload];
+        const next = [...current];
+        next[at] = event.payload;
+        return next;
+      });
     });
     return () => {
       stop.then((unlisten) => unlisten());
@@ -171,8 +179,8 @@ export function App() {
 
       {steps.length > 0 && (
         <div className="steps">
-          {steps.map((step, index) => (
-            <div className="step" key={`${step.step}-${index}`}>
+          {steps.map((step) => (
+            <div className="step" key={step.step}>
               <span className={`mark ${step.ok ? "good" : "bad"}`}>{step.ok ? "✓" : "✗"}</span>
               <span>{label(step.step)}</span>
               <span className="detail">{step.detail}</span>

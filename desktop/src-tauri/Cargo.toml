@@ -26,6 +26,7 @@ base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
 flate2 = "1"
 tar = "0.4"
+tauri-plugin-single-instance = "2.0.0-rc.5"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

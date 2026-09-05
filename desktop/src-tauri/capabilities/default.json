@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the setup window is allowed to do. Commands this app defines are always callable; everything under core: is not, and has to be granted here.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

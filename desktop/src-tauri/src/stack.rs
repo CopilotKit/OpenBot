@@ -120,7 +120,54 @@ pub fn migrate(engine: &Address, root: &Path) -> Result<(), String> {
     Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
 }
 
+/// The label the supervisor stamps on every container it creates.
+///
+/// Matching on this rather than on a name prefix. `openbot-` is also the prefix of a kind cluster's
+/// nodes and of anything else somebody has called openbot, and stopping a person's Kubernetes
+/// cluster because it shares six letters with this one would be unforgivable.
+const SUPERVISOR_LABEL: &str = "openbot.supervisor=true";
+
+/// Stop the computers the supervisor made, which Compose does not know about.
+///
+/// A Bot's computer is created at runtime, not declared in `docker-compose.yml`, so `compose down`
+/// leaves it running: an idle Ubuntu container per Bot, with the application gone and nothing on
+/// screen to stop it from. Stopped rather than removed, because the supervisor starts an existing
+/// owned container back up and the Bot keeps the profile and workspace volumes attached to it.
+pub fn stop_computers(engine: &Address) -> Result<(), String> {
+    let listed = engine
+        .command()
+        .args(["ps", "--quiet", "--filter", SUPERVISOR_LABEL])
+        .output()
+        .map_err(|error| format!("could not list the Bots' computers: {error}"))?;
+    if !listed.status.success() {
+        return Err(String::from_utf8_lossy(&listed.stderr).trim().to_string());
+    }
+
+    let running: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    if running.is_empty() {
+        return Ok(());
+    }
+
+    let stopped = engine
+        .command()
+        .arg("stop")
+        .args(&running)
+        .output()
+        .map_err(|error| format!("could not stop the Bots' computers: {error}"))?;
+    if stopped.status.success() {
+        return Ok(());
+    }
+    Err(String::from_utf8_lossy(&stopped.stderr).trim().to_string())
+}
+
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
+    // Before Compose, because the supervisor is what would otherwise start another one while this
+    // is happening.
+    stop_computers(engine)?;
+
     let output = compose_command(engine, root)
         .args(["down"])
         .output()
@@ -310,14 +357,61 @@ pub fn port_already_taken(ports: &[(&'static str, u16)]) -> Option<String> {
 ///
 /// So: watch the child, and watch the port. Whichever fails first is what gets reported, with the
 /// tail of the log that explains it.
+/// The two things that have to answer before anybody is told the stack is up.
+///
+/// The API alone is not enough. The window navigates to the app, so a person told "running" who
+/// then gets a blank window has been told something that is not true, and the API was answering the
+/// whole time.
+pub struct Ready {
+    pub api: u16,
+    pub app: u16,
+}
+
+/// Both loopbacks, in the order a person is most likely to type.
+///
+/// A process that binds one and not the other is normal rather than broken: Node resolves
+/// `localhost` to `::1` and bun to `127.0.0.1`, so which one a service ends up on depends on what
+/// started it. Asking both is how a check stays true either way.
+const LOOPBACKS: [&str; 2] = ["127.0.0.1", "[::1]"];
+
+/// Where a port is answering, or `None`.
+///
+/// Returns the address that worked rather than a boolean, so a caller that has to send somebody
+/// there can use the one that answered instead of guessing again.
+pub fn answering_at(port: u16, path: &str) -> Option<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .ok()?;
+    LOOPBACKS.iter().find_map(|host| {
+        let base = format!("http://{host}:{port}");
+        client
+            .get(format!("{base}{path}"))
+            .send()
+            .ok()
+            .filter(|response| response.status().is_success())
+            .map(|_| base)
+    })
+}
+
+/// Where the app is answering, for the window to be pointed at.
+pub fn app_url(port: u16) -> Option<String> {
+    answering_at(port, "/")
+}
+
+/// Wait until the stack is genuinely usable, or say which part is not.
+///
+/// Watches the children as well as the ports, because three processes that died leave a port
+/// unanswered for the same length of time as three that are still starting, and only one of those
+/// is worth waiting out.
 pub fn wait_until_answering(
     children: &mut [(&'static str, std::process::Child)],
     logs: &Path,
-    port: u16,
+    ready: &Ready,
     patience: std::time::Duration,
 ) -> Result<(), String> {
     let deadline = std::time::Instant::now() + patience;
-    let health = format!("http://127.0.0.1:{port}/api/capabilities");
+    let mut api_up = false;
 
     while std::time::Instant::now() < deadline {
         for (name, child) in children.iter_mut() {
@@ -329,22 +423,24 @@ pub fn wait_until_answering(
             }
         }
 
-        if reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-            .ok()
-            .and_then(|client| client.get(&health).send().ok())
-            .map(|response| response.status().is_success())
-            .unwrap_or(false)
-        {
+        api_up = api_up || answering_at(ready.api, "/api/capabilities").is_some();
+        if api_up && app_url(ready.app).is_some() {
             return Ok(());
         }
 
         std::thread::sleep(std::time::Duration::from_millis(750));
     }
 
+    if api_up {
+        return Err(format!(
+            "the API is answering, but the app never did on port {}. {}",
+            ready.app,
+            tail_of(logs, "app")
+        ));
+    }
     Err(format!(
-        "the API never answered on port {port}. {}",
+        "the API never answered on port {}. {}",
+        ready.api,
         tail_of(logs, "server")
     ))
 }
@@ -474,6 +570,31 @@ mod tests {
         // Raised alongside the others it exits immediately, and Compose reports a service that will
         // not stay up. It is run to completion instead, by `migrate`.
         assert!(!SERVICES.contains(&"migrate"));
+    }
+
+    #[test]
+    fn the_bots_computers_are_found_by_label_rather_than_by_a_name_that_starts_with_openbot() {
+        assert!(SUPERVISOR_LABEL.starts_with("openbot.supervisor="));
+        assert!(
+            !SUPERVISOR_LABEL.contains("name"),
+            "a kind cluster's nodes are also called openbot-something"
+        );
+    }
+
+    #[test]
+    fn readiness_asks_both_loopbacks_because_a_runtime_picks_one() {
+        assert!(LOOPBACKS.contains(&"127.0.0.1"));
+        assert!(
+            LOOPBACKS.contains(&"[::1]"),
+            "an IPv6-only bind still counts as answering"
+        );
+    }
+
+    #[test]
+    fn nothing_is_answering_on_a_port_nothing_is_listening_on() {
+        // Port 1 needs privilege to bind, so this asks about a port that cannot quietly be
+        // somebody else's server.
+        assert_eq!(answering_at(1, "/"), None);
     }
 
     #[test]

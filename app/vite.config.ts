@@ -12,6 +12,11 @@ export default defineConfig({
     },
   },
   server: {
+    // Both loopbacks, which is what `::` gets you: Node opens a dual-stack socket, so 127.0.0.1 and
+    // ::1 both answer. Left to itself Vite binds whichever one this runtime resolves `localhost`
+    // to, which is ::1 under Node and 127.0.0.1 under bun, and the other address is then refused.
+    // Whoever is told the URL has no way to know which they were given.
+    host: "::",
     port: Number.parseInt(process.env.APP_PORT ?? "3010", 10),
     strictPort: true,
     proxy: {
