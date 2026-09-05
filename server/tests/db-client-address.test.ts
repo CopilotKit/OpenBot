@@ -51,3 +51,19 @@ describe("the database address", () => {
     expect(() => createDatabase({ max: 1 })).toThrow(/connection string/);
   });
 });
+
+describe("connection parameters on the URL", () => {
+  test("survive, because a dropped application_name turns a lock test into a timeout", async () => {
+    const named = createDatabase(
+      "postgres://openbot:openbot@127.0.0.1:5432/openbot?application_name=db_client_address_probe",
+    );
+
+    const rows = await named.execute(
+      "select application_name from pg_stat_activity where pid = pg_backend_pid()",
+    );
+
+    expect(
+      (rows as Array<{ application_name: string }>)[0]?.application_name,
+    ).toBe("db_client_address_probe");
+  });
+});

@@ -41,6 +41,16 @@ function addressOf(databaseUrl: string) {
       "DATABASE_URL names no database. Expected postgres://user:password@host:port/database.",
     );
   }
+  /*
+   * The query string is carried across as connection parameters, not dropped.
+   *
+   * `?application_name=…` is the one that matters here: the profile store's serialization tests
+   * name a session that way and then look for it in `pg_stat_activity`, so losing it turns a lock
+   * test into a three second timeout with nothing to say why. Anything else Postgres accepts on a
+   * URL, `sslmode` and the rest, travels the same way.
+   */
+  const connection = Object.fromEntries(url.searchParams);
+
   return {
     adapter: "postgres" as const,
     hostname: url.hostname,
@@ -48,6 +58,7 @@ function addressOf(databaseUrl: string) {
     username: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),
     database,
+    ...(Object.keys(connection).length > 0 ? { connection } : {}),
   };
 }
 
