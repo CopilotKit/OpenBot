@@ -102,6 +102,18 @@ and the two places that have no person at all, the start-up rows and the two una
 refusals, say so rather than borrowing the default. A deployment that has never run a routine or a hop
 sees `A person` on every row a person made, which is what it was before this existed.
 
+The value travels inside the signed run assertion, beside `depth`, for the reason `depth` does: a hop
+is one run on one pod handing to another run on another, and the process that knows a routine began
+it is the one that claimed the routine, not the one writing the row. Anything holding the assertion
+holds the answer, so a tool call, a hop offered or refused at the desk, a Bot stopping to ask its
+person, and a stream that stalls all say the same thing without each being told separately. A Bot
+cannot relabel its own run, because the assertion is signed by the deployment, and a kind this
+deployment does not write is read as a person rather than kept.
+
+Computer actions are the one family that carries no initiator, and correctly so: the computer tools
+are browser actions, executed by the person's own session, so a headless run has no way to drive the
+computer at all today. A row there is a person's because a person's browser wrote it.
+
 ## Human control and secrets
 
 Handovers are audited as control events:

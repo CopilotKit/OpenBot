@@ -66,8 +66,10 @@ they had taken it themselves. Telling the two apart meant correlating timestamps
 `routine_runs` by hand, and there was nothing at all to correlate a hop against.
 
 Every audit row now also names what caused it: a person, a routine, another Bot handing work on, or
-the deployment itself. The Audit screen has a **Started by** column and a **Nobody watching** view
-that answers the question directly. An unattended run is the one nobody is there to notice going
+the deployment itself. It travels inside the signed run assertion, so a tool call, a hop, a Bot
+stopping to ask its person and a stalled stream all say it, and a Bot cannot relabel its own run.
+The Audit screen has a **Started by** column and a **Nobody watching** view that answers the
+question directly. An unattended run is the one nobody is there to notice going
 wrong, which is the reason it is worth being able to find.
 
 The fourth of those exists so the column never overclaims. Two rows have no person behind them at

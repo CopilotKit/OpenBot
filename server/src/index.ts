@@ -699,6 +699,7 @@ const buildAgentFor = async ({
     // The owner's own standing instructions. A routine is their work done while they are asleep, so
     // it is written the way they asked for it to be written, exactly as their chat turn would be.
     loadInstructionsForActor(actor.id),
+    initiator,
   );
   const agent = agents[agentId];
   if (!agent) {

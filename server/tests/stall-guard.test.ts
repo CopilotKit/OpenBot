@@ -79,6 +79,24 @@ describe("a Bot that stops streaming", () => {
     expect(body.endsWith("\n\n")).toBe(true);
   });
 
+  test("the row says what started the run, so a routine's stall is not a person's", async () => {
+    const audit = collecting();
+    const guard = createStallGuard({ stallMs: 60, auditStore: audit.store });
+    const watched = guard.watch(
+      { ...BOT, initiator: { kind: "routine", id: "routine_7" } },
+      async () => sse(saysNothing()),
+    );
+
+    const response = await watched("http://bot.internal/ag-ui", RUN_REQUEST);
+    await new Response(response.body).text();
+    guard.stop();
+
+    const row = audit.rows.find(
+      (event) => event.eventType === "agent.stream_stalled",
+    );
+    expect(row?.initiator).toEqual({ kind: "routine", id: "routine_7" });
+  });
+
   test("leaves a row naming the Bot, the turn and how long the silence was", async () => {
     const audit = collecting();
     const guard = createStallGuard({ stallMs: 60, auditStore: audit.store });

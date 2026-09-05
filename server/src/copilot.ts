@@ -362,6 +362,7 @@ export async function buildAgents(
    * carry standing instructions, which is what every deployment did before they existed.
    */
   loadInstructions?: LoadInstructions,
+  initiator?: AuditInitiator,
 ): Promise<Record<string, AbstractAgent>> {
   const vendors = await loadVendors().catch(() => [] as readonly string[]);
   /*
@@ -393,6 +394,7 @@ export async function buildAgents(
           agentFetch,
           handoff,
           instructions ?? null,
+          initiator,
         ),
       ]),
     ),
@@ -422,6 +424,7 @@ async function buildAgent(
   handoff?: HandoffForRun,
   /** Already resolved by {@link buildAgents}, so one roster costs one read. */
   standingInstructions: string | null = null,
+  initiator?: AuditInitiator,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -496,6 +499,7 @@ async function buildAgent(
       connectedVendors,
       narrowing ? offeredFor : undefined,
       agentFetch,
+      initiator,
     );
   }
 
@@ -621,6 +625,7 @@ function remoteAgentWithStandingRole(
   narrow?: (input: RunAgentInput) => Promise<GrantedTool[]>,
   /** The fetch this agent is dialled with. See {@link buildAgents}. */
   agentFetch?: AgentFetch,
+  initiator?: AuditInitiator,
 ) {
   const remote = new HttpAgent({
     url: agent.endpoint,
@@ -633,7 +638,11 @@ function remoteAgentWithStandingRole(
     ...(stallGuard
       ? {
           fetch: stallGuard.watch(
-            { id: agent.id, name: agent.name },
+            {
+              id: agent.id,
+              name: agent.name,
+              ...(initiator ? { initiator } : {}),
+            },
             agentFetch,
           ),
         }
@@ -959,6 +968,8 @@ export async function resolveRuntimeAgents(
    * are positional and moving one shifts every existing call site by one.
    */
   loadInstructions?: LoadInstructions,
+  /** Appended after `loadInstructions`, for the positional reason it gives. */
+  initiator?: AuditInitiator,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -990,6 +1001,7 @@ export async function resolveRuntimeAgents(
     agentFetch,
     handoff,
     loadInstructions,
+    initiator,
   );
 }
 
@@ -1263,6 +1275,7 @@ export function mountCopilotRuntime(
       // what each of them was granted, on every delivery and again on every retry.
       input.botId,
       loadInstructionsForActor?.(actor.id),
+      input.initiator,
     );
     return agents[input.botId] ?? null;
   };
