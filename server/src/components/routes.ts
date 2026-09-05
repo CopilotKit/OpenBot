@@ -95,11 +95,13 @@ export function createComponentRoutes(
       >;
       if (
         typeof name !== "string" ||
-        !name ||
+        !name.trim() ||
         typeof title !== "string" ||
+        !title.trim() ||
         typeof kind !== "string" ||
+        !kind.trim() ||
         typeof description !== "string" ||
-        !description
+        !description.trim()
       ) {
         return [];
       }
