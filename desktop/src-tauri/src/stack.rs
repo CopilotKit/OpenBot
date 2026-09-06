@@ -51,6 +51,13 @@ pub const HOST_PROCESSES: [HostProcess; 3] = [
 ];
 
 #[derive(Clone, Copy, Debug)]
+/// One of the three processes Compose does not run.
+///
+/// The app is started through the package's own `dev` script, which runs Vite through bun rather
+/// than through its shebang. `node_modules/.bin/vite` begins `#!/usr/bin/env node`, so a machine
+/// with bun and no Node starts the app, fails with `node: command not found`, and is restarted
+/// five more times before this gives up on it. Which is what happened on the Linux machine this
+/// was tested on, and would happen to anybody who installed OpenBot without also having Node.
 pub struct HostProcess {
     pub name: &'static str,
     pub cwd: &'static str,

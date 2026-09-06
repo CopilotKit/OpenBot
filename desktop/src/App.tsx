@@ -150,9 +150,12 @@ export function App() {
 
   return (
     <main>
-      <h1>{running ? "OpenBot is running" : "Set up OpenBot"}</h1>
+      {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
+          back here, and a heading that still says everything is running while the box underneath
+          names the process that stopped is a screen arguing with itself. */}
+      <h1>{running && !failure ? "OpenBot is running" : "Set up OpenBot"}</h1>
       <p className="lede">
-        {running
+        {running && !failure
           ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
           : engine?.responding
             ? `Using ${engine.engine === "docker" ? "Docker" : "Podman"}. It is answering, so nothing needs installing.`
