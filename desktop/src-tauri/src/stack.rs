@@ -47,7 +47,7 @@ pub const HOST_PROCESSES: [HostProcess; 3] = [
         name: "app",
         cwd: "app",
         script: "",
-        package_script: "serve",
+        package_script: APP_SCRIPT,
     },
     HostProcess {
         name: "worker",
@@ -523,8 +523,38 @@ pub fn deployment_problem(root: &Path) -> Option<String> {
             ));
         }
     }
-    None
+    missing_script(root)
 }
+
+/// Whether the deployment on disk is one this app knows how to start.
+///
+/// The shell and the deployment are versioned apart: the app is installed once and the deployment
+/// is fetched at a tag. So an app can meet a deployment older than the scripts it calls, and the
+/// symptom is the worst kind: every step passes, the app process exits 1 on "Script not found",
+/// the supervisor restarts it five times, and the sentence a person is finally shown names a
+/// process rather than the mismatch.
+fn missing_script(root: &Path) -> Option<String> {
+    let manifest = root.join("app").join("package.json");
+    let Ok(text) = std::fs::read_to_string(&manifest) else {
+        return Some(format!("{} cannot be read.", manifest.display()));
+    };
+    let has = serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|json| json.get("scripts")?.get(APP_SCRIPT).cloned())
+        .is_some();
+    if has {
+        return None;
+    }
+    Some(format!(
+        "The deployment in {} is older than this version of OpenBot: its app has no \"{APP_SCRIPT}\" \
+         script, so there is no way to serve it. Install a newer OpenBot, or delete that directory \
+         and start again to fetch a deployment that matches.",
+        root.display()
+    ))
+}
+
+/// The package script that serves the app. Named once, because two places must agree on it.
+const APP_SCRIPT: &str = "serve";
 
 /// Where the shell keeps the deployment it manages.
 pub fn default_root() -> PathBuf {
@@ -566,6 +596,26 @@ mod tests {
     }
 
     #[test]
+    fn a_deployment_older_than_this_app_is_named_as_that_rather_than_left_to_fail() {
+        let dir = std::env::temp_dir().join(format!("openbot-old-{}", std::process::id()));
+        for part in ["server", "app", "worker"] {
+            std::fs::create_dir_all(dir.join(part)).unwrap();
+        }
+        std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
+        // What v0.0.7 shipped: a dev script and nothing to serve a build with.
+        std::fs::write(
+            dir.join("app").join("package.json"),
+            r#"{"scripts":{"dev":"vite","build":"vite build"}}"#,
+        )
+        .unwrap();
+
+        let problem = deployment_problem(&dir).expect("an older deployment is a problem");
+        assert!(problem.contains(APP_SCRIPT), "{problem}");
+        assert!(problem.to_lowercase().contains("older"), "{problem}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_complete_deployment_has_no_problem() {
         let dir = std::env::temp_dir().join(format!("openbot-complete-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -573,6 +623,11 @@ mod tests {
         for directory in ["server", "app", "worker"] {
             std::fs::create_dir_all(dir.join(directory)).unwrap();
         }
+        std::fs::write(
+            dir.join("app").join("package.json"),
+            r#"{"scripts":{"serve":"vite preview"}}"#,
+        )
+        .unwrap();
         assert!(deployment_problem(&dir).is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
