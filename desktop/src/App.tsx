@@ -172,7 +172,7 @@ export function App() {
                  step exists in the enum and no function fills it. It creates the machine, which
                  is the part that is built. */
               (engine?.detail ??
-                "No container engine is answering yet. Install Podman Desktop or Docker Desktop, then start OpenBot again.")}
+              "No container engine is answering yet. Install Podman Desktop or Docker Desktop, then start OpenBot again.")}
       </p>
 
       {!running && (
