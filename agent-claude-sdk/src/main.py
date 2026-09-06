@@ -59,6 +59,6 @@ async def health():
 
 add_claude_fastapi_endpoint(
     app=app,
-    adapter=ClaudeAgentAdapter(),
+    adapter=ClaudeAgentAdapter(name="openbot"),
     path="/",
 )
