@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A component the server refused is no longer drawn anyway
+
+A sandboxed component asks the server at call time whether the Bot may still use it, and a refusal
+is recorded so the drawing can be replaced with a card saying so. The renderer looked that refusal
+up under `props.toolCall.id`, which is the shape a tool HANDLER is given; a renderer's props carry
+the id flat, as `toolCallId`. The lookup key was therefore always undefined, the refusal was never
+found, and the component rendered as though it had been allowed -- so revoking a component from a
+Bot did not take effect on screen until the five-second grant poll caught up, and a failed decision
+request showed nothing at all.
+
 ### The server connects to Postgres on Windows, and `localhost` is no longer a coin toss
 
 Two separate faults, both of which stop a deployment reaching its own database and neither of which
