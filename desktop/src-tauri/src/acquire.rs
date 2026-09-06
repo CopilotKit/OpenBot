@@ -20,6 +20,9 @@ use crate::engine::{Address, Engine};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Step {
+    /// Not used. Installing an engine is designed and not built: nothing here downloads Podman,
+    /// and the screens no longer say it does. Kept so the sequence a person is shown reads the
+    /// same when it is.
     InstallEngine,
     CreateMachine,
     StartMachine,

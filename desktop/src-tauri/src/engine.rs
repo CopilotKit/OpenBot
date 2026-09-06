@@ -195,7 +195,7 @@ pub fn detect() -> EngineStatus {
                 responding: false,
                 engine_socket: None,
                 detail: format!(
-                    "{} is installed but not answering. Start it, or let this install Podman.",
+                    "{} is installed but not answering. Start it and try again.",
                     engine.binary()
                 ),
             };
@@ -207,7 +207,7 @@ pub fn detect() -> EngineStatus {
         address: None,
         responding: false,
         engine_socket: None,
-        detail: "No container engine found.".into(),
+        detail: "No container engine found. Install Podman Desktop or Docker Desktop first.".into(),
     }
 }
 
@@ -256,7 +256,8 @@ mod tests {
             address: None,
             responding: false,
             engine_socket: None,
-            detail: "No container engine found.".into(),
+            detail: "No container engine found. Install Podman Desktop or Docker Desktop first."
+                .into(),
         };
         assert!(missing.engine.is_none());
         assert!(!missing.responding);

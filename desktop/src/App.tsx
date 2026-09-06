@@ -162,7 +162,11 @@ export function App() {
           ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
           : engine?.responding
             ? `Using ${engine.engine === "docker" ? "Docker" : "Podman"}. It is answering, so nothing needs installing.`
-            : "No container engine is answering yet. OpenBot will install Podman and create its machine."}
+            : /* Not "OpenBot will install Podman": nothing here installs an engine. The step
+                 exists in the enum and no function fills it, so a machine without one gets
+                 "could not run podman" after being promised otherwise. It creates the machine,
+                 which is the part that is built. */
+              "No container engine is answering yet. Install Podman Desktop or Docker Desktop, then start OpenBot again."}
       </p>
 
       {!running && (
