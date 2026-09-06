@@ -9,7 +9,7 @@
 //! needs elevation. So the two halves run in different contexts, and the elevated half is the only
 //! part that may be handed to a helper. See `windows.rs`.
 
-use crate::quiet::command;
+use crate::quiet::{command, said as command_said};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -52,7 +52,7 @@ fn podman(args: &[&str]) -> Result<String, String> {
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
     }
-    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    Err(command_said(&output.stderr))
 }
 
 /// Does this app's machine already exist?
@@ -177,10 +177,7 @@ pub fn health_gate(address: &Address) -> StepOutcome {
         Ok(out) => StepOutcome {
             step: Step::HealthGate,
             ok: false,
-            detail: format!(
-                "{binary} did not answer: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
+            detail: format!("{binary} did not answer: {}", command_said(&out.stderr)),
         },
         Err(error) => StepOutcome {
             step: Step::HealthGate,
@@ -197,11 +194,18 @@ pub fn health_gate(address: &Address) -> StepOutcome {
 /// a separate reimplementation with its own coverage of those, and choosing it here would mean
 /// shipping a deployment nobody has run.
 pub fn missing_compose(binary: &str) -> String {
+    // Named per platform, because the generic sentence sent a Windows install looking for a
+    // package manager it does not have. Podman ships no Compose provider on Windows either, which
+    // was measured rather than assumed: a fresh Podman 6.1.1 there stops at exactly this gate.
     let install = if cfg!(target_os = "linux") {
         "Install Compose v2: `sudo apt install docker-compose-v2` on Debian or Ubuntu, or \
          `sudo dnf install docker-compose` on Fedora."
+    } else if cfg!(target_os = "windows") {
+        "Install Compose v2: either install Docker Desktop, or download `docker-compose` from \
+         github.com/docker/compose/releases and put it beside the engine on PATH."
     } else {
-        "Install Compose v2 and make sure `docker-compose` is on PATH."
+        "Install Compose v2: `brew install docker-compose`, or install Docker Desktop, and make \
+         sure `docker-compose` is on PATH."
     };
     format!("{binary} is answering, but it has no Compose to run the stack with. {install}")
 }
@@ -214,6 +218,24 @@ pub fn download_dir(cache: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whatever platform the tests run on, the sentence must not send somebody to a tool that
+    /// platform does not have. Windows measured this the hard way: the generic wording named a
+    /// PATH convention and nothing that would put anything on it.
+    #[test]
+    fn the_compose_instruction_suits_the_platform_it_is_shown_on() {
+        let said = missing_compose("podman");
+        if cfg!(target_os = "windows") {
+            assert!(said.contains("github.com/docker/compose"), "{said}");
+            assert!(!said.contains("apt"), "{said}");
+            assert!(!said.contains("brew"), "{said}");
+        } else if cfg!(target_os = "linux") {
+            assert!(said.contains("apt"), "{said}");
+        } else {
+            assert!(said.contains("brew"), "{said}");
+            assert!(!said.contains("apt"), "{said}");
+        }
+    }
 
     #[test]
     fn a_missing_compose_names_what_to_install_rather_than_what_was_not_found() {

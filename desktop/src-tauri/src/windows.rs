@@ -46,6 +46,8 @@ pub enum Blocker {
     WslAbsent,
     /// WSL1 is present and has to be converted.
     WslOne,
+    /// The features are on but the WSL2 kernel is not there, so nothing can actually run.
+    WslNoKernel,
     /// Virtualization is off in firmware. Only the person, in their BIOS, can fix this.
     VirtualizationDisabled,
     /// The account cannot elevate.
@@ -70,6 +72,16 @@ impl Blocker {
                  as an administrator, run `wsl --set-default-version 2`, restart Windows, and \
                  start OpenBot again."
             }
+            // Measured on Windows Server 2022. `wsl --install` enabled both features and stopped
+            // there, leaving the inbox WSL with no kernel, and `Get-WindowsOptionalFeature` says
+            // Enabled for exactly that state. Nothing looked wrong until `podman machine init`
+            // died on `wsl --import ... --version 2` with `exit status 0xffffffff`, which is not
+            // a sentence anybody can act on.
+            Blocker::WslNoKernel => {
+                "Windows Subsystem for Linux is switched on but its Linux kernel is missing, so \
+                 nothing can run inside it yet. Open Windows Terminal or PowerShell as an \
+                 administrator, run `wsl --update`, restart Windows, and start OpenBot again."
+            }
             Blocker::VirtualizationDisabled => {
                 "Virtualization is switched off in this machine's firmware. It has to be turned on \
                  there, which OpenBot cannot do: restart, open the firmware settings, and enable \
@@ -91,11 +103,29 @@ impl Blocker {
     /// every blocker screen currently tells a person what to run. Kept because the two halves are
     /// genuinely different: WSL is installable and a firmware setting is not.
     pub fn ours_to_fix(self) -> bool {
-        matches!(self, Blocker::WslAbsent | Blocker::WslOne)
+        matches!(
+            self,
+            Blocker::WslAbsent | Blocker::WslOne | Blocker::WslNoKernel
+        )
     }
 }
 
 /// The persisted step, beside the rest of the app's data.
+/// Whether WSL has a kernel to run, given what `wsl --version` said and whether the kernel file
+/// that the update package installs is on disk.
+///
+/// Both are asked because either alone is wrong. `wsl --version` is absent from the older inbox
+/// `wsl.exe` on builds where WSL2 nevertheless works perfectly, having had its kernel installed by
+/// the standalone update package, so refusing on that alone would block a machine that is fine.
+/// The kernel file alone is not enough either: a modern WSL reports its kernel version without
+/// that path necessarily being the one in use.
+///
+/// So this only says "no kernel" when **neither** answers, which is the state actually measured on
+/// a Server 2022 machine where `wsl --install` had enabled the features and done nothing else.
+pub fn wsl_kernel_present(version_output: &str, kernel_file_exists: bool) -> bool {
+    kernel_file_exists || version_output.to_lowercase().contains("kernel version")
+}
+
 pub fn state_path(data_dir: &Path) -> PathBuf {
     data_dir.join("windows-setup.json")
 }
@@ -203,6 +233,25 @@ pub fn blocker() -> Option<Blocker> {
         return Some(Blocker::WslOne);
     }
 
+    let version_output = command("wsl.exe")
+        .args(["--version"])
+        .output()
+        .map(|out| {
+            // wsl.exe writes UTF-16, which arrives here with a NUL between every character.
+            String::from_utf8_lossy(&out.stdout).replace('\0', "")
+        })
+        .unwrap_or_default();
+    let kernel_file_exists = std::env::var("SystemRoot")
+        .map(|root| {
+            Path::new(&root)
+                .join(r"System32\lxss\tools\kernel")
+                .exists()
+        })
+        .unwrap_or(false);
+    if !wsl_kernel_present(&version_output, kernel_file_exists) {
+        return Some(Blocker::WslNoKernel);
+    }
+
     None
 }
 
@@ -250,6 +299,8 @@ mod tests {
     #[test]
     fn the_two_installable_blockers_name_the_command_that_fixes_them() {
         assert!(Blocker::WslAbsent.instruction().contains("wsl --install"));
+        assert!(Blocker::WslNoKernel.instruction().contains("wsl --update"));
+
         assert!(Blocker::WslOne
             .instruction()
             .contains("wsl --set-default-version 2"));
@@ -320,5 +371,35 @@ mod tests {
         std::fs::write(state_path(&dir), "{ not json").unwrap();
         assert_eq!(read_step(&dir), SetupStep::Start);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The state measured on Server 2022: features on, inbox `wsl.exe` that does not know
+    /// `--version`, no kernel file. This is what let the app march on and fail inside Podman.
+    #[test]
+    fn no_kernel_when_neither_the_version_nor_the_file_says_so() {
+        assert!(!wsl_kernel_present(
+            "Invalid command line option: --version",
+            false
+        ));
+    }
+
+    /// A modern WSL answers `--version` with its kernel, and is fine even if that particular
+    /// path is not the kernel in use.
+    #[test]
+    fn a_reported_kernel_is_enough_on_its_own() {
+        assert!(wsl_kernel_present(
+            "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2",
+            false
+        ));
+    }
+
+    /// The older builds that matter: `wsl.exe` predates `--version`, but the update package put
+    /// a kernel on disk and WSL2 works. Refusing these would block a working machine.
+    #[test]
+    fn the_kernel_file_is_enough_on_its_own() {
+        assert!(wsl_kernel_present(
+            "Invalid command line option: --version",
+            true
+        ));
     }
 }

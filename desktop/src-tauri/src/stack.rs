@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::quiet::command;
+use crate::quiet::{command, said as command_said};
 
 use serde::{Deserialize, Serialize};
 
@@ -115,7 +115,7 @@ pub fn up(engine: &Address, root: &Path) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
     }
-    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    Err(command_said(&output.stderr))
 }
 
 /// Apply migrations, once, to completion.
@@ -135,7 +135,7 @@ pub fn migrate(engine: &Address, root: &Path) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
     }
-    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    Err(command_said(&output.stderr))
 }
 
 /// The label the supervisor stamps on every container it creates.
@@ -161,7 +161,7 @@ pub fn stop_computers(engine: &Address) -> Result<(), String> {
         .output()
         .map_err(|error| format!("could not list the Bots' computers: {error}"))?;
     if !listed.status.success() {
-        return Err(String::from_utf8_lossy(&listed.stderr).trim().to_string());
+        return Err(command_said(&listed.stderr));
     }
 
     let running: Vec<String> = String::from_utf8_lossy(&listed.stdout)
@@ -181,7 +181,7 @@ pub fn stop_computers(engine: &Address) -> Result<(), String> {
     if stopped.status.success() {
         return Ok(());
     }
-    Err(String::from_utf8_lossy(&stopped.stderr).trim().to_string())
+    Err(command_said(&stopped.stderr))
 }
 
 pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
@@ -197,7 +197,7 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
     }
-    Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    Err(command_said(&output.stderr))
 }
 
 /// Install the deployment's dependencies.
@@ -228,7 +228,7 @@ pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
     }
     Err(format!(
         "installing the deployment's dependencies failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        command_said(&output.stderr)
     ))
 }
 

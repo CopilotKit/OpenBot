@@ -36,9 +36,88 @@ pub fn command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
     command
 }
 
+/// What a command said, fit to put in front of somebody.
+///
+/// Two things make raw stderr the wrong thing to render. Terminal escapes: Podman underlines its
+/// own notices, so the card showed a literal `[4m>>>>` before the message on every Linux failure.
+/// And Podman's compose shim prefixes *every* invocation, successful or not, with a line naming
+/// the external provider it is about to run, so the first thing a person read when the stack
+/// failed was a sentence about `docker-compose` that had nothing to do with the failure.
+///
+/// Only that one known prefix is dropped, and only from the front. Everything else a command says
+/// is kept: guessing which of somebody else's lines are unimportant is how real errors disappear.
+pub fn said(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let mut clean = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            clean.push(c);
+            continue;
+        }
+        // CSI: ESC [ ... final byte in @-~. Anything else after ESC is a short sequence whose
+        // next character is the whole of it.
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                for inner in chars.by_ref() {
+                    if ('@'..='~').contains(&inner) {
+                        break;
+                    }
+                }
+            }
+            Some(_) => {
+                chars.next();
+            }
+            None => {}
+        }
+    }
+
+    clean
+        .lines()
+        .skip_while(|line| {
+            line.trim_start()
+                .trim_start_matches('>')
+                .trim_start()
+                .starts_with("Executing external compose provider")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::command;
+
+    /// The failure this was written for: Podman underlines its provider notice, and the card
+    /// rendered the escape bytes as text in front of the real message.
+    #[test]
+    fn strips_terminal_escapes_and_the_provider_notice() {
+        let raw = b"\x1b[4m>>>> Executing external compose provider \"/usr/libexec/docker/cli-plugins/docker-compose\". Please refer to the documentation for details.\x1b[0m\nError: mkdir /var/run/docker.sock: permission denied\n";
+        assert_eq!(
+            super::said(raw),
+            "Error: mkdir /var/run/docker.sock: permission denied"
+        );
+    }
+
+    /// Everything that is not that one notice survives, including lines that merely mention
+    /// compose. Dropping somebody else's output by guesswork loses real errors.
+    #[test]
+    fn keeps_every_other_line() {
+        let raw = b"Error: compose failed\nCaused by: no such image\n";
+        assert_eq!(
+            super::said(raw),
+            "Error: compose failed\nCaused by: no such image"
+        );
+    }
+
+    /// A message with no escapes and no notice comes back exactly as it went in, trimmed.
+    #[test]
+    fn leaves_plain_text_alone() {
+        assert_eq!(super::said(b"  plain failure  \n"), "plain failure");
+    }
 
     /// The wrapper has to still run things. A flag typed wrongly is a command that never starts,
     /// and every caller discards the error, so the shell would report an engine that is not there.
