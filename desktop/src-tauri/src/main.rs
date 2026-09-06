@@ -13,7 +13,7 @@ use openbot_desktop_lib::{
 /// Pinned rather than "latest": the images a release runs are pinned per release, so the tree that
 /// names them has to be too, and an app that fetches whatever shipped this morning is not a version
 /// anybody can be given. Moved deliberately, with the app.
-const DEPLOYMENT_VERSION: &str = "v0.0.7";
+const DEPLOYMENT_VERSION: &str = "v0.0.8";
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
