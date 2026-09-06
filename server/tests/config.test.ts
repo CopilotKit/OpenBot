@@ -1,5 +1,7 @@
-import { describe, expect, spyOn, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { configuredAuthProviders, loadConfig } from "../src/config";
 
 // Intelligence is part of the MINIMUM contract, so it belongs in the base environment every other
@@ -20,6 +22,14 @@ const baseEnvironment = {
   MANAGED_AGENT_AG_UI_URL: " http://localhost:4200/ag-ui ",
   MANAGED_AGENT_TOKEN: "managed-agent-token",
 };
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 
 /**
  * The same deployment with nothing signing anybody in.
@@ -95,25 +105,72 @@ describe("deployment configuration", () => {
     ).toBe("T05QFA4BW9X");
   });
 
-  test("loads Feishu long-connection credentials only as a complete set", () => {
+  test("loads multiple Feishu applications from a local credentials file", () => {
+    const directory = mkdtempSync(join(tmpdir(), "openbot-feishu-apps-"));
+    temporaryDirectories.push(directory);
+    const file = join(directory, "feishu-apps.json");
+    writeFileSync(
+      file,
+      JSON.stringify([
+        {
+          appId: " cli_a1 ",
+          appSecret: " secret-a ",
+          tenantKey: " tenant-a ",
+        },
+        {
+          appId: "cli_b2",
+          appSecret: "secret-b",
+          tenantKey: "tenant-b",
+        },
+      ]),
+    );
+
     expect(
       loadConfig({
         ...baseEnvironment,
-        FEISHU_APP_ID: " cli_a1 ",
-        FEISHU_APP_SECRET: " secret ",
-        FEISHU_TENANT_KEY: " tenant-key ",
-      }).feishu,
-    ).toEqual({
-      appId: "cli_a1",
-      appSecret: "secret",
-      tenantKey: "tenant-key",
-    });
+        OPENBOT_FEISHU_APPS_FILE: file,
+      }).feishuApps,
+    ).toEqual([
+      { appId: "cli_a1", appSecret: "secret-a", tenantKey: "tenant-a" },
+      { appId: "cli_b2", appSecret: "secret-b", tenantKey: "tenant-b" },
+    ]);
+  });
 
-    expect(() =>
-      loadConfig({ ...baseEnvironment, FEISHU_APP_ID: "cli_a1" }),
-    ).toThrow(
-      "FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_TENANT_KEY must be configured together",
+  test("rejects malformed, incomplete, and duplicate Feishu applications", () => {
+    const directory = mkdtempSync(join(tmpdir(), "openbot-feishu-apps-"));
+    temporaryDirectories.push(directory);
+    const file = join(directory, "feishu-apps.json");
+    const load = (value: unknown) => {
+      writeFileSync(file, JSON.stringify(value));
+      return () =>
+        loadConfig({
+          ...baseEnvironment,
+          OPENBOT_FEISHU_APPS_FILE: file,
+        });
+    };
+
+    expect(load({ appId: "cli_a1" })).toThrow(
+      `${file} must contain a JSON array of Feishu applications`,
     );
+    expect(load([{ appId: "cli_a1", appSecret: "secret" }])).toThrow(
+      `${file}[0].tenantKey must be a non-empty string`,
+    );
+    expect(
+      load([
+        { appId: "cli_a1", appSecret: "secret-a", tenantKey: "tenant-a" },
+        { appId: "cli_a1", appSecret: "secret-b", tenantKey: "tenant-b" },
+      ]),
+    ).toThrow(`${file} contains duplicate appId "cli_a1"`);
+    expect(
+      load([
+        { appId: "cli_a1", appSecret: "secret-a", tenantKey: "tenant-a" },
+        { appId: "cli_b2", appSecret: "secret-b", tenantKey: "tenant-a" },
+      ]),
+    ).toThrow(`${file} contains duplicate tenantKey "tenant-a"`);
+  });
+
+  test("keeps Feishu disabled without a local applications file", () => {
+    expect(loadConfig(baseEnvironment).feishuApps).toEqual([]);
   });
 
   test.each(["unknown", " UNKNOWN "])(
