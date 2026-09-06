@@ -713,6 +713,22 @@ export function createComputerGateway(
      */
     async resetComputer(botId: string, actor: ActionActor) {
       const result = await provider.reset(botId);
+      /*
+       * The row goes in HERE, before the two deletes below, because this line is the point of no
+       * return: the profile is already gone and nothing after it can put the logins back.
+       *
+       * Both clears are Postgres deletes, and a connection reset, a failover or a statement timeout
+       * in either used to throw before the row was written -- leaving a computer wiped with nothing
+       * on the trail to say who wiped it, which is the one outcome the note above rules out. The
+       * failure still propagates, so the caller is told the clears did not finish.
+       */
+      await writeControlEvent(auditStore, "computer.reset", {
+        botId,
+        actor,
+        reason: result.cleared
+          ? "the computer and its saved state were deleted"
+          : "no saved state was present to delete",
+      });
       // The refs the last snapshot handed out describe a page that no longer exists, and a fresh
       // computer counts generations from one again, so the row has to go with the profile.
       await snapshots.clear(botId);
@@ -725,13 +741,6 @@ export function createComputerGateway(
        * anything a person would recognise as private.
        */
       await pageFrames?.clear(botId);
-      await writeControlEvent(auditStore, "computer.reset", {
-        botId,
-        actor,
-        reason: result.cleared
-          ? "the computer and its saved state were deleted"
-          : "no saved state was present to delete",
-      });
       return result;
     },
 

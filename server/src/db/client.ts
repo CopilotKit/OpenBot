@@ -3,11 +3,25 @@ import { drizzle } from "drizzle-orm/bun-sql";
 import * as schema from "./schema";
 
 /**
- * `max` is exposed so tests can pin the pool to a single connection. Code that opens a transaction
- * and then reads on a second connection deadlocks once every pooled connection is inside such a
- * transaction; a pool of one turns that from a load-dependent production hang into an immediate,
- * reproducible failure.
+ * One percent-decoded part of the address, or a refusal that names it.
+ *
+ * A password is where this bites. `postgres://openbot:100%pure@host:5432/openbot` is a string
+ * `new URL` accepts without complaint, and `decodeURIComponent` then rejects with `URIError: URI
+ * error` -- a message that names neither `DATABASE_URL` nor which part of it was wrong, thrown out
+ * of the one function whose whole job is to make a connection failure legible. A `%` that starts no
+ * escape is a common thing to find in a generated password, and every other malformed address here
+ * is answered with a sentence saying what to fix.
  */
+function decodePart(value: string, part: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new TypeError(
+      `DATABASE_URL has a ${part} that is not percent-encoded. A literal "%" must be written "%25".`,
+    );
+  }
+}
+
 /**
  * The address, taken apart, because Bun will not take it whole on every platform.
  *
@@ -35,7 +49,7 @@ function addressOf(databaseUrl: string) {
       "DATABASE_URL names no host. Expected postgres://user:password@host:port/database.",
     );
   }
-  const database = decodeURIComponent(url.pathname.replace(/^\//, ""));
+  const database = decodePart(url.pathname.replace(/^\//, ""), "database name");
   if (database === "") {
     throw new TypeError(
       "DATABASE_URL names no database. Expected postgres://user:password@host:port/database.",
@@ -55,13 +69,19 @@ function addressOf(databaseUrl: string) {
     adapter: "postgres" as const,
     hostname: url.hostname,
     port: url.port === "" ? 5432 : Number(url.port),
-    username: decodeURIComponent(url.username),
-    password: decodeURIComponent(url.password),
+    username: decodePart(url.username, "username"),
+    password: decodePart(url.password, "password"),
     database,
     ...(Object.keys(connection).length > 0 ? { connection } : {}),
   };
 }
 
+/**
+ * `max` is exposed so tests can pin the pool to a single connection. Code that opens a transaction
+ * and then reads on a second connection deadlocks once every pooled connection is inside such a
+ * transaction; a pool of one turns that from a load-dependent production hang into an immediate,
+ * reproducible failure.
+ */
 export function createDatabase(
   databaseUrl: string,
   options: { max?: number } = {},

@@ -3,6 +3,7 @@ import { EventEncoder } from "@ag-ui/encoder";
 import { serve } from "bun";
 import OpenAI from "openai";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
+import { listenPort } from "../../shared/listen-port";
 import { toProviderMessages } from "./history";
 
 /**
@@ -16,7 +17,12 @@ import { toProviderMessages } from "./history";
  * running where its effects are visible to the person watching.
  */
 
-const PORT = Number.parseInt(process.env.PORT ?? "4200", 10);
+const resolvedPort = listenPort(process.env.PORT, 4200);
+if (!resolvedPort.ok) {
+  console.error(resolvedPort.reason);
+  process.exit(1);
+}
+const PORT = resolvedPort.port;
 const MANAGED_AGENT_TOKEN = process.env.MANAGED_AGENT_TOKEN?.trim();
 if (!MANAGED_AGENT_TOKEN) {
   console.error(

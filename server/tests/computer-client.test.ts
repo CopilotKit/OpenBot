@@ -395,3 +395,69 @@ describe("the deadline a call is given", () => {
     ).resolves.toBeDefined();
   });
 });
+
+describe("a person's Stop", () => {
+  /*
+   * Stop is the person saying "not that". The transport already answers it that way when the signal
+   * is already aborted before the request leaves; the signal is handed to fetch precisely so Stop can
+   * also land mid-flight, and that half was reported as a dead computer. The message is not only what
+   * the model reads: the gateway writes it into the action's audit row as `failure`, so a person's
+   * Stop was recorded as an outage.
+   */
+  test("a Stop that lands mid-action is reported as a stop, not as a dead computer", async () => {
+    const controller = new AbortController();
+    const aborting = ((_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          // What fetch does when the signal it was given aborts.
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+        controller.abort();
+      })) as unknown as typeof fetch;
+
+    const transport = createComputerTransport({ fetchImpl: aborting });
+
+    await expect(
+      transport.post(
+        "http://computer",
+        "bot-1",
+        "/click",
+        {},
+        controller.signal,
+      ),
+    ).rejects.toThrow("The action was stopped.");
+  });
+
+  test("a Stop pressed before the request leaves still says the same thing", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const transport = createComputerTransport({
+      fetchImpl: (() => {
+        throw new Error("the request should never have been sent");
+      }) as unknown as typeof fetch,
+    });
+
+    await expect(
+      transport.post(
+        "http://computer",
+        "bot-1",
+        "/click",
+        {},
+        controller.signal,
+      ),
+    ).rejects.toThrow("The action was stopped.");
+  });
+
+  test("a computer that is really unreachable still says so", async () => {
+    const transport = createComputerTransport({
+      fetchImpl: (() =>
+        Promise.reject(
+          new Error("connect ECONNREFUSED"),
+        )) as unknown as typeof fetch,
+    });
+
+    await expect(
+      transport.post("http://computer", "bot-1", "/click", {}),
+    ).rejects.toThrow("The assistant's computer is not running.");
+  });
+});

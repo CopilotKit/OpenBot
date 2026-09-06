@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { SKILL_CREATOR_SLUG } from "@/lib/skills/proposal";
 
@@ -15,7 +16,9 @@ import { SKILL_CREATOR_SLUG } from "@/lib/skills/proposal";
  * Read from the file rather than from a fixture, because the file is what ships.
  */
 
-const packageDir = new URL("../../examples/fintech", import.meta.url).pathname;
+const packageDir = fileURLToPath(
+  new URL("../../examples/fintech", import.meta.url),
+);
 
 const shipped = parse(readFileSync(`${packageDir}/skills.yaml`, "utf8")) as {
   skills: { slug: string; title: string; instructions: string }[];
