@@ -576,6 +576,42 @@ fn show_whichever_applies(app: &tauri::AppHandle) {
     let _ = window.set_focus();
 }
 
+/// What each of the three items does, wherever it was chosen from.
+///
+/// The tray and the window menu carry the same items, so they share one function: two copies would
+/// be two chances for Stop to mean something different depending on where somebody clicked.
+fn chose(app: &tauri::AppHandle, item: &str) {
+    match item {
+        "open" => show_whichever_applies(app),
+        // Stop without quitting: the stack is what costs something to leave running, and somebody
+        // who wants it stopped does not necessarily want the application gone.
+        "stop" => {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let root = default_root();
+                eprintln!("[menu] stopping the stack under {root}");
+                match stop_everything(&app, &PathBuf::from(root)) {
+                    Ok(()) => {
+                        eprintln!("[menu] stopped");
+                        report(&app, "stopped", true, "OpenBot has been stopped");
+                    }
+                    // Said rather than swallowed. A menu item that fails silently is worse than one
+                    // that is not there: the person believes the stack is down and it is not.
+                    Err(problem) => {
+                        eprintln!("[menu] stop failed: {problem}");
+                        report(&app, "stopped", false, problem);
+                    }
+                }
+                let _ = show_setup(app.clone());
+            });
+        }
+        // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
+        // the processes with it.
+        "quit" => app.exit(0),
+        _ => {}
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         // A second launch is somebody looking for the window they already have, not a request for a
@@ -640,39 +676,33 @@ fn main() {
                 .icon_as_template(true)
                 .tooltip("OpenBot")
                 .menu(&menu)
-                .on_menu_event(|app, event| {
-                    match event.id().as_ref() {
-                        "open" => show_whichever_applies(app),
-                        // Stop without quitting: the stack is what costs something to leave running,
-                        // and somebody who wants it stopped does not necessarily want the icon gone.
-                        "stop" => {
-                            let app = app.clone();
-                            std::thread::spawn(move || {
-                                let root = default_root();
-                                eprintln!("[tray] stopping the stack under {root}");
-                                match stop_everything(&app, &PathBuf::from(root)) {
-                                    Ok(()) => {
-                                        eprintln!("[tray] stopped");
-                                        report(&app, "stopped", true, "OpenBot has been stopped");
-                                    }
-                                    // Said rather than swallowed. A menu item that fails silently is
-                                    // worse than one that is not there: the person believes the stack
-                                    // is down and it is not.
-                                    Err(problem) => {
-                                        eprintln!("[tray] stop failed: {problem}");
-                                        report(&app, "stopped", false, problem);
-                                    }
-                                }
-                                let _ = show_setup(app.clone());
-                            });
-                        }
-                        // Exit rather than hide: quitting from the tray is a decision to stop, and the
-                        // exit handler below is what stops the processes with it.
-                        "quit" => app.exit(0),
-                        _ => {}
-                    }
-                })
+                .on_menu_event(|app, event| chose(app, event.id().as_ref()))
                 .build(app)?;
+
+            // The same three items on the window itself, because the tray cannot be relied on and
+            // Stop lives nowhere else.
+            //
+            // Two ways it fails, both measured rather than guessed. A bare Linux window manager has
+            // no StatusNotifierWatcher, so the icon is never drawn at all. On Windows the icon
+            // appears and then does not come back if Explorer restarts, because re-adding it on
+            // `TaskbarCreated` is the application's job and nothing does it. Either way the window
+            // is hidden on close, the stack keeps running, and the only thing that can stop it is
+            // an icon that is not there.
+            // Its own items, not the tray's: a menu item belongs to one menu, and the two menus
+            // outlive each other. The ids match so both arrive at the same function.
+            use tauri::menu::Submenu;
+            let window_open = MenuItem::with_id(app, "open", "Open OpenBot", true, None::<&str>)?;
+            let window_stop = MenuItem::with_id(app, "stop", "Stop OpenBot", true, None::<&str>)?;
+            let window_quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            // A submenu, because a top-level entry in a menu bar has to be one to open at all.
+            let openbot = Submenu::with_items(
+                app,
+                "OpenBot",
+                true,
+                &[&window_open, &window_stop, &window_quit],
+            )?;
+            app.set_menu(Menu::with_items(app, &[&openbot])?)?;
+            app.on_menu_event(|app, event| chose(app, event.id().as_ref()));
             Ok(())
         })
         .build(tauri::generate_context!())
