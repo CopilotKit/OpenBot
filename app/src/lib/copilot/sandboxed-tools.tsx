@@ -75,13 +75,20 @@ function SandboxedTool({
   const isHeld = description !== undefined;
 
   const render = useCallback(
+    // `toolCallId`, not `toolCall.id`: a renderer's props carry the id flat,
+    // which is the shape gallery-tools and computer-tools already read and
+    // the one the library's own DefaultToolCallRenderer destructures. The
+    // handler below is the other shape, `context.toolCall.id`, and reading
+    // that one here meant the key was always undefined -- so a refusal the
+    // server had just recorded was never found, and the component the server
+    // refused was drawn instead of the card saying it was not allowed.
     (props: {
       args?: Record<string, unknown>;
       status?: string;
-      toolCall?: { id?: string };
+      toolCallId?: string;
     }) => {
-      const refusal = props.toolCall?.id
-        ? refusals.get(props.toolCall.id)
+      const refusal = props.toolCallId
+        ? refusals.get(props.toolCallId)
         : undefined;
       if (refusal) {
         return <RefusedCard reason={refusal} title={component.name} />;
