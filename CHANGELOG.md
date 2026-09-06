@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A password with a `%` in it says so, instead of failing as `URI error`
+
+`DATABASE_URL` is taken apart before it reaches Bun, and each part is percent-decoded. A part
+holding a `%` that starts no escape -- `postgres://openbot:100%pure@host:5432/openbot`, which a
+generated password produces often enough -- is a string `new URL` accepts and `decodeURIComponent`
+rejects, so the server stopped with `URIError: URI error` and named neither the variable nor the
+part. It now refuses with the same kind of sentence as every other malformed address: which part is
+wrong, and that a literal `%` must be written `%25`.
+
+A correctly encoded password is unaffected.
+
 ### The server connects to Postgres on Windows, and `localhost` is no longer a coin toss
 
 Two separate faults, both of which stop a deployment reaching its own database and neither of which

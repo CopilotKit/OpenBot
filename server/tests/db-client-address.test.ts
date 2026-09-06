@@ -46,6 +46,37 @@ describe("the database address", () => {
     ).toThrow(/names no database/);
   });
 
+  test("refuses a password holding a percent that starts no escape, naming the part", () => {
+    /*
+     * `new URL` accepts this and `decodeURIComponent` does not, so the refusal used to be a bare
+     * `URIError: URI error` naming neither DATABASE_URL nor the password -- out of the one function
+     * whose job is to make a connection failure legible. A generated password is a common place to
+     * find a literal `%`.
+     */
+    expect(() =>
+      createDatabase("postgres://openbot:100%pure@127.0.0.1:5432/openbot"),
+    ).toThrow(/DATABASE_URL has a password that is not percent-encoded/);
+  });
+
+  test("refuses a username holding one too", () => {
+    expect(() =>
+      createDatabase("postgres://open%bot:openbot@127.0.0.1:5432/openbot"),
+    ).toThrow(/DATABASE_URL has a username that is not percent-encoded/);
+  });
+
+  test("refuses a database name holding one too", () => {
+    expect(() =>
+      createDatabase("postgres://openbot:openbot@127.0.0.1:5432/open%bot"),
+    ).toThrow(/DATABASE_URL has a database name that is not percent-encoded/);
+  });
+
+  test("still accepts a password that IS percent-encoded, decoding it", () => {
+    // The escape a correctly written password uses: `%40` is `@`, which cannot be written raw.
+    expect(() =>
+      createDatabase("postgres://openbot:p%40ss@127.0.0.1:5432/openbot"),
+    ).not.toThrow();
+  });
+
   test("still refuses pool options where the address belongs", () => {
     // @ts-expect-error the wrong-way-round call this guard exists for
     expect(() => createDatabase({ max: 1 })).toThrow(/connection string/);
