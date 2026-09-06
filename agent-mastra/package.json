@@ -1,0 +1,11 @@
+{
+  "name": "@openbot/agent-mastra",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@ag-ui/mastra": "*",
+    "@ai-sdk/openai": "*",
+    "@mastra/core": "*",
+    "mastra": "*"
+  }
+}

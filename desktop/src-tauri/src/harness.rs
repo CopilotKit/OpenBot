@@ -71,13 +71,17 @@ pub struct Harness {
 /// and Cloudflare Agents are all In Progress, and a picker that offers a harness which cannot yet
 /// answer is worse than a shorter picker.
 ///
-/// Mastra is left out for a different reason, and it is not a judgement on Mastra. There is no way
-/// to serve it over AG-UI today without breaking the no-adapters rule. `@mastra/agui`, which is
-/// Mastra's own server-side helper, peer-depends on `@mastra/core >=0.10.7 <0.12.0` and was last
-/// published in July 2025; core is now 1.64. `@ag-ui/mastra`, from the AG-UI repository, is a
-/// client abstraction and exposes no HTTP handler. Shipping Mastra would therefore mean either a
-/// year-old core or an HTTP layer of ours, and the second is the thing this list exists to avoid.
-/// It goes back on the day either package moves.
+/// Mastra is left out for a different reason, and it is not a judgement on Mastra. Its server-side
+/// route does exist and it runs: `registerCopilotKit` from `@ag-ui/mastra/copilotkit`, registered
+/// with Mastra's own server, answers and reports its agent. What it serves is the **CopilotKit
+/// Runtime** protocol, not AG-UI: it wants `{"method": ...}` and refuses a `RunAgentInput`. A Bot
+/// in OpenBot is an AG-UI URL, so the two do not meet.
+///
+/// Two ways to close that, neither of them a harness image. OpenBot could accept a CopilotKit
+/// Runtime endpoint as a second kind of Bot, which is defensible because that runtime is
+/// CopilotKit's own rather than a third party's. Or Mastra could publish a plain AG-UI route. Until
+/// one happens, offering Mastra would mean writing the AG-UI layer here, which is the single thing
+/// this list exists to avoid.
 pub fn catalogue() -> Vec<Harness> {
     let ours = |id: &str, name: &str, summary: &str, maintainer: Maintainer| Harness {
         id: id.into(),
