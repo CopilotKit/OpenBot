@@ -56,13 +56,19 @@ impl Blocker {
     /// What the screen says. Each names the specific fix, and the one we cannot perform says so.
     pub fn instruction(self) -> &'static str {
         match self {
+            // Says what to run, because OpenBot does not do it. The screen used to say "OpenBot
+            // can install it", and nothing in this application installs anything: there is no
+            // button under the sentence and no code behind one. Somebody read that, waited, and
+            // had been told to wait for something that was never going to happen.
             Blocker::WslAbsent => {
-                "Windows Subsystem for Linux is not installed. OpenBot can install it. \
-                 Windows will need to restart once."
+                "Windows Subsystem for Linux is not installed. Open Windows Terminal or PowerShell \
+                 as an administrator, run `wsl --install`, restart Windows, and start OpenBot \
+                 again."
             }
             Blocker::WslOne => {
-                "Windows Subsystem for Linux is at version 1. OpenBot can convert it to version 2. \
-                 Windows will need to restart once."
+                "Windows Subsystem for Linux is at version 1. Open Windows Terminal or PowerShell \
+                 as an administrator, run `wsl --set-default-version 2`, restart Windows, and \
+                 start OpenBot again."
             }
             Blocker::VirtualizationDisabled => {
                 "Virtualization is switched off in this machine's firmware. It has to be turned on \
@@ -78,6 +84,12 @@ impl Blocker {
     }
 
     /// Whether the shell can clear this itself. Two of the four are ours; two are not.
+    /// Whether OpenBot could fix this itself, one day.
+    ///
+    /// Nothing acts on this yet. `wsl --install` needs elevation and a restart, and the resumable
+    /// state machine that would carry somebody across that reboot is designed and not built, so
+    /// every blocker screen currently tells a person what to run. Kept because the two halves are
+    /// genuinely different: WSL is installable and a firmware setting is not.
     pub fn ours_to_fix(self) -> bool {
         matches!(self, Blocker::WslAbsent | Blocker::WslOne)
     }
@@ -214,6 +226,33 @@ mod tests {
     #[test]
     fn a_machine_with_neither_is_the_one_whose_firmware_is_the_thing_to_change() {
         assert!(!virtualization_available(false, false));
+    }
+
+    #[test]
+    fn no_blocker_screen_offers_to_do_something_this_application_does_not_do() {
+        // The screen said "OpenBot can install it" while nothing installed anything and there was
+        // no button to press. Seen on Windows Server 2022 with WSL genuinely disabled.
+        for blocker in [
+            Blocker::WslAbsent,
+            Blocker::WslOne,
+            Blocker::VirtualizationDisabled,
+            Blocker::NotAdministrator,
+        ] {
+            let said = blocker.instruction();
+            // "OpenBot cannot" is the honest half of this and must survive the check.
+            assert!(
+                !said.contains("OpenBot can install") && !said.contains("OpenBot can convert"),
+                "promises what nothing does: {said}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_installable_blockers_name_the_command_that_fixes_them() {
+        assert!(Blocker::WslAbsent.instruction().contains("wsl --install"));
+        assert!(Blocker::WslOne
+            .instruction()
+            .contains("wsl --set-default-version 2"));
     }
 
     #[test]
