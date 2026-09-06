@@ -24,6 +24,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::quiet::command;
+
 use serde::{Deserialize, Serialize};
 
 /// Which engine is in use, because the answer changes what is mounted and what is reported.
@@ -63,7 +65,7 @@ impl Address {
 
     /// A command aimed at this engine, and the only way one should be built.
     pub fn command(&self) -> Command {
-        let mut command = Command::new(self.engine.binary());
+        let mut command = command(self.engine.binary());
         if let Some(connection) = &self.connection {
             command.args(["--connection", connection]);
         }
@@ -114,7 +116,7 @@ pub struct EngineStatus {
 /// boots beside it. Ours is preferred among running machines only so that repeat launches settle on
 /// the same one.
 fn running_machine(preferred: &str) -> Option<String> {
-    let output = Command::new("podman")
+    let output = command("podman")
         .args(["machine", "list", "--format", "json"])
         .output()
         .ok()?;
@@ -138,7 +140,7 @@ struct MachineListing {
 }
 
 fn installed(binary: &str) -> bool {
-    Command::new(binary)
+    command(binary)
         .arg("--version")
         .output()
         .map(|out| out.status.success())

@@ -3,6 +3,7 @@ pub mod acquire;
 pub mod deployment;
 pub mod engine;
 pub mod env;
+pub mod quiet;
 pub mod stack;
 pub mod supervise;
 pub mod windows;

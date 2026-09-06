@@ -9,8 +9,8 @@
 //! needs elevation. So the two halves run in different contexts, and the elevated half is the only
 //! part that may be handed to a helper. See `windows.rs`.
 
+use crate::quiet::command;
 use std::path::Path;
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -45,7 +45,7 @@ pub struct StepOutcome {
 pub const MACHINE: &str = "openbot";
 
 fn podman(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("podman")
+    let output = command("podman")
         .args(args)
         .output()
         .map_err(|error| format!("could not run podman: {error}"))?;

@@ -13,6 +13,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::quiet::command;
+
 use serde::{Deserialize, Serialize};
 
 use crate::engine::Address;
@@ -215,7 +217,7 @@ pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
     // ask for. And they are not all portable: `@scarf/scarf` shells out to `node`, which a machine
     // that has bun need not have, so the install fails at "node: command not found" after the
     // containers are already up. Found on a Linux machine with bun and no node.
-    let output = Command::new(bun)
+    let output = command(bun)
         .current_dir(root)
         .args(["install", "--frozen-lockfile", "--ignore-scripts"])
         .output()
@@ -244,7 +246,7 @@ pub fn spawn_host_process(
     let out = std::fs::File::create(logs.join(format!("{}.log", process.name)))?;
     let err = out.try_clone()?;
 
-    let mut command = Command::new(bun);
+    let mut command = command(bun);
     command.current_dir(root.join(process.cwd));
     if process.script.is_empty() {
         command.args(["run", process.package_script]);
@@ -273,7 +275,7 @@ pub fn stop_processes_under(root: &Path) -> usize {
     // like a hang: a busy machine has several hundred processes, each invocation costs a fork and a
     // few hundred milliseconds, and the person watching has been given no reason to think anything
     // is happening. `-d cwd` over all processes is a single pass.
-    let Ok(listing) = Command::new("/usr/sbin/lsof")
+    let Ok(listing) = command("/usr/sbin/lsof")
         .args(["-d", "cwd", "-Fpn"])
         .output()
     else {

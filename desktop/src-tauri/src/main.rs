@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use openbot_desktop_lib::{
-    acquire, deployment, engine, env as openbot_env, stack, supervise, windows as win,
+    acquire, deployment, engine, env as openbot_env, quiet, stack, supervise, windows as win,
 };
 
 /// The deployment this app installs.
@@ -35,6 +35,13 @@ struct Shell {
     /// moment it is worth reading. Held here instead, and asked for on load.
     last_failure: Mutex<Option<String>>,
     root: Mutex<Option<PathBuf>>,
+    /// Where the shell's own interface lives, read from the window rather than spelled out.
+    ///
+    /// Tauri does not serve the bundle from the same address on every platform: macOS and Linux
+    /// get `tauri://localhost`, Windows gets `http://tauri.localhost`. Spelling one of them into
+    /// the code means Stop leaves Windows staring at a page whose servers have just been killed,
+    /// which is what it did. The window knows its own address, so it is asked once and kept.
+    setup_url: Mutex<Option<String>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -360,12 +367,15 @@ fn show_setup(app: tauri::AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there")?;
-    // Whatever this build serves its own interface from, dev server or bundle.
-    let setup = if cfg!(debug_assertions) {
-        "http://localhost:3020".to_string()
-    } else {
-        "tauri://localhost".to_string()
-    };
+    // Whatever this build serves its own interface from, recorded at startup from the window
+    // itself. The dev server is the fallback because in development that is where it starts.
+    let setup = app
+        .state::<Shell>()
+        .setup_url
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| "http://localhost:3020".to_string());
     window
         .navigate(
             setup
@@ -419,7 +429,7 @@ fn default_root() -> String {
 
 /// `bun` from PATH, or the places an installer puts it when PATH has not been reloaded.
 fn which_bun() -> Option<PathBuf> {
-    if std::process::Command::new("bun")
+    if quiet::command("bun")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -589,6 +599,16 @@ fn main() {
             last_failure,
             default_root,
         ])
+        // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
+        // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
+        // to walk it home, and Save as offers to write the page to disk as `Webpage, complete`.
+        // macOS never showed this because Tauri suppresses it there in release builds; Windows has
+        // no such setting, and Tauri has no configuration option for it either, so the page is
+        // asked to refuse. Every navigation, because the window navigates to OpenBot and back.
+        .on_page_load(|window, _| {
+            let _ = window
+                .eval("document.addEventListener('contextmenu', e => e.preventDefault(), true)");
+        })
         // Closing the window hides it. A tray application whose window is destroyed on close has a
         // menu item that points at nothing: `get_webview_window` returns None from then on, and the
         // only way back is to quit and start again, with a stack still running that nothing on
@@ -600,6 +620,11 @@ fn main() {
             }
         })
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                // Asked before anything navigates away from it.
+                *app.state::<Shell>().setup_url.lock().unwrap() = Some(window.url()?.to_string());
+            }
+
             // The menu bar the window's own text refers to. Two items, because there are two things
             // somebody wants from a status icon: get to it, or stop it.
             use tauri::menu::{Menu, MenuItem};

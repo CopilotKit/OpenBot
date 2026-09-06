@@ -136,7 +136,7 @@ fn virtualization_available(hypervisor_present: bool, firmware_enabled: bool) ->
 
 #[cfg(target_os = "windows")]
 pub fn blocker() -> Option<Blocker> {
-    use std::process::Command;
+    use crate::quiet::command;
 
     // Two questions, not one, and either answer is enough.
     //
@@ -148,7 +148,7 @@ pub fn blocker() -> Option<Blocker> {
     //
     // A hypervisor that is present is virtualization that is working, whatever the firmware says
     // about it. Where neither is true the firmware really is the thing to change.
-    let reported = Command::new("powershell")
+    let reported = command("powershell")
         .args([
             "-NoProfile",
             "-Command",
@@ -166,7 +166,7 @@ pub fn blocker() -> Option<Blocker> {
         return Some(Blocker::VirtualizationDisabled);
     }
 
-    let elevated = Command::new("powershell")
+    let elevated = command("powershell")
         .args([
             "-NoProfile",
             "-Command",
@@ -176,7 +176,7 @@ pub fn blocker() -> Option<Blocker> {
         .map(|out| String::from_utf8_lossy(&out.stdout).to_lowercase().contains("true"))
         .unwrap_or(false);
 
-    let features = Command::new("powershell")
+    let features = command("powershell")
         .args([
             "-NoProfile",
             "-Command",
@@ -194,7 +194,7 @@ pub fn blocker() -> Option<Blocker> {
         });
     }
 
-    let default_version = Command::new("wsl.exe")
+    let default_version = command("wsl.exe")
         .args(["--status"])
         .output()
         .map(|out| String::from_utf8_lossy(&out.stdout).replace('\0', ""))
