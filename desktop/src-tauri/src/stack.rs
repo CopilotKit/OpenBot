@@ -37,16 +37,23 @@ pub const HOST_PROCESSES: [HostProcess; 3] = [
         name: "server",
         cwd: "server",
         script: "src/index.ts",
+        package_script: "",
     },
+    // `serve`, not `dev`. The dev server sets NODE_ENV to development, and the SDK reads that to
+    // decide whether to draw its developer inspector, so a desktop install opened its first window
+    // on CopilotKit's "What's New" panel covering OpenBot entirely. An installed application should
+    // not be running a development server at all: this builds once and serves the build.
     HostProcess {
         name: "app",
         cwd: "app",
         script: "",
+        package_script: "serve",
     },
     HostProcess {
         name: "worker",
         cwd: "worker",
         script: "src/index.ts",
+        package_script: "",
     },
 ];
 
@@ -61,8 +68,10 @@ pub const HOST_PROCESSES: [HostProcess; 3] = [
 pub struct HostProcess {
     pub name: &'static str,
     pub cwd: &'static str,
-    /// Empty means the package's own `dev` script rather than a file, which is how the app is run.
+    /// Empty means a package script rather than a file, which is how the app is run.
     pub script: &'static str,
+    /// The package script to run when `script` is empty.
+    pub package_script: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -238,7 +247,7 @@ pub fn spawn_host_process(
     let mut command = Command::new(bun);
     command.current_dir(root.join(process.cwd));
     if process.script.is_empty() {
-        command.args(["run", "dev"]);
+        command.args(["run", process.package_script]);
     } else {
         command.args(["--env-file=../.env", process.script]);
     }
@@ -621,6 +630,19 @@ mod tests {
         // Port 1 needs privilege to bind, so this asks about a port that cannot quietly be
         // somebody else's server.
         assert_eq!(answering_at(1, "/"), None);
+    }
+
+    #[test]
+    fn the_app_is_served_as_a_build_rather_than_by_a_development_server() {
+        let app = HOST_PROCESSES
+            .iter()
+            .find(|process| process.name == "app")
+            .expect("the app is one of the three");
+        assert_eq!(
+            app.package_script, "serve",
+            "`dev` sets NODE_ENV=development, and the SDK draws its developer inspector over the \
+             application when it reads that"
+        );
     }
 
     #[test]
