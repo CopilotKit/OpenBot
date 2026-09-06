@@ -10,6 +10,69 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## 0.0.8
 
+### A desktop shell that installs OpenBot and then becomes it
+
+One window, on macOS, Windows and Linux. From a machine with nothing on it, one click fetches the
+deployment for this release, pins every image to the digest the release published, generates the
+secrets that are OpenBot's to generate, raises the containers, applies the migrations, installs the
+dependencies, starts the host processes, waits until both the API and the app answer, and then shows
+OpenBot in the same window. It is not a launcher for a browser tab. Stop takes the stack down, closing
+the window hides it to the tray, a second launch hands over the window that already exists, and
+quitting stops what starting started. Windows is told what it needs before anything else runs: WSL,
+its kernel, virtualisation and administrator rights are each named with the command that fixes them,
+because none of them is something OpenBot can fix on somebody's behalf.
+
+### A title or name that is only spaces is refused rather than stored
+
+Sandboxed components, skills, custom servers and the component catalogue each accepted a title, slug
+or id made entirely of whitespace, and stored it. What came back was a row nobody could identify and,
+in the catalogue's case, entries that were empty strings. Each endpoint now refuses those the way it
+refuses a missing field, and the catalogue drops empty entries instead of keeping them.
+
+### A malformed socket message no longer takes the screen down
+
+The live screen and the channel socket both assumed every payload they received was an object of the
+shape they expected. Anything else threw inside the handler, which in a browser means the surface
+stops updating with nothing on screen to say why. Both check the shape first and ignore what does not
+match.
+
+### The worker refuses a bad server URL when it starts, not when it first needs it
+
+`SERVER_INTERNAL_URL` was read as a string and used as one. A value that was not an http or https URL
+failed later, inside whichever call happened first, with an error about that call rather than about
+the setting. The worker validates its environment up front now and normalises the URL, so a typo stops
+it immediately and says which variable is wrong.
+
+### A sandbox template that is not valid JSON is reported as a sandbox error
+
+A malformed template surfaced as a raw parse error from whatever tried to read it. It is a
+`SandboxError` now, which is what the caller already handles and what the surface already knows how to
+show.
+
+### A duration written in capitals is understood
+
+`durationMs` accepted `30s` and refused `30S`. Units are read case-insensitively now.
+
+### The supervisor refuses a `HostPort` that is not a port
+
+The value went through a bare `parseInt`, so `80abc` became 80 and an out-of-range number was used as
+given. Digits and range are checked, and anything else refuses to start rather than binding somewhere
+nobody asked for.
+
+### The audit endpoint refuses a bad date or limit instead of guessing
+
+An unparseable `from` or `to`, or a `limit` that was not a whole number, was coerced and the query ran
+against whatever came out. All three are parsed strictly now and a bad one answers 400.
+
+### Chat content that does not parse is dropped rather than thrown
+
+One malformed entry in a user message threw and took the whole message with it. The malformed part is
+dropped and the rest is delivered.
+
+### The example package is read by a path the host accepts
+
+It was addressed by a URL pathname, which is not a path on Windows. It is read by a real path now.
+
 ### The app can be served from a built bundle, and listens on both loopbacks
 
 The app's only start script was `dev`, which runs a Vite dev server. That meant `NODE_ENV=development`
