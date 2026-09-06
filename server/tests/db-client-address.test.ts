@@ -27,10 +27,26 @@ describe("the database address", () => {
     expect(process.env.DATABASE_URL).toBeUndefined();
   });
 
-  test("refuses a connection string that is not a URL, naming what it got", () => {
+  test("refuses a connection string that is not a URL", () => {
     expect(() => createDatabase("://openbot@/openbot")).toThrow(
-      /DATABASE_URL is not a URL/,
+      /DATABASE_URL is not a valid URL/,
     );
+  });
+
+  test("does not put the password in the message when the URL will not parse", () => {
+    // A stray character in a generated password is the likeliest reason `new URL` throws here, so
+    // the refusal must not echo the string it was given: DATABASE_URL carries the credential, and a
+    // message quoting it would write the password into the log line that reports the fault. The
+    // invalid port makes `new URL` throw with the secret still present in the input.
+    const secret = "s3cr3t-p4ssw0rd";
+    let message = "";
+    try {
+      createDatabase(`postgres://openbot:${secret}@127.0.0.1:notaport/openbot`);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toMatch(/DATABASE_URL is not a valid URL/);
+    expect(message).not.toContain(secret);
   });
 
   test("refuses a URL with no host, which would otherwise parse and connect nowhere", () => {

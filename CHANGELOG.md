@@ -17,6 +17,13 @@ type, the natural way to watch for outages, read every Stop as one. A stop now w
 `computer.action_stopped`: the action did not happen and nothing broke. The audit page already groups
 it with the other did-not-happen outcomes, and a policy dry-run skips it the way it skips a failure,
 since both sit beside a decision row that is already scored.
+### A malformed `DATABASE_URL` is refused without printing the password
+
+`DATABASE_URL` is taken apart before it reaches Bun, and the string most likely to fail that parse is
+one with a stray character in the password. The refusal for an unparseable value quoted the whole
+string back to name the fault, which wrote the database password into the log line that reported it.
+It now names the variable and the shape it expects, the way the other refusals beside it already do,
+and never echoes the value.
 
 ### Wiping a computer is recorded even if clearing its stored state fails
 

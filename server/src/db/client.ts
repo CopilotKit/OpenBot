@@ -40,8 +40,12 @@ function addressOf(databaseUrl: string) {
   try {
     url = new URL(databaseUrl);
   } catch {
+    // The value is not echoed back. DATABASE_URL holds the database password, and the one string
+    // most likely to fail `new URL` is one with a stray character in that password, so printing it
+    // to name the fault would put the credential in the log line that reports it. Name the variable
+    // and the shape it expects, the way every other refusal in this function does.
     throw new TypeError(
-      `DATABASE_URL is not a URL: ${JSON.stringify(databaseUrl)}`,
+      "DATABASE_URL is not a valid URL. Expected postgres://user:password@host:port/database.",
     );
   }
   if (url.hostname === "") {
