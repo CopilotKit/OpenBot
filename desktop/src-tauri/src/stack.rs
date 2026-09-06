@@ -192,9 +192,16 @@ pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
     if root.join("node_modules").exists() {
         return Ok(());
     }
+    // `--ignore-scripts`, for two reasons that point the same way.
+    //
+    // A postinstall script is arbitrary code from somebody else's package, and an installer that
+    // runs it on a person's machine while they watch a progress bar is doing something they did not
+    // ask for. And they are not all portable: `@scarf/scarf` shells out to `node`, which a machine
+    // that has bun need not have, so the install fails at "node: command not found" after the
+    // containers are already up. Found on a Linux machine with bun and no node.
     let output = Command::new(bun)
         .current_dir(root)
-        .args(["install", "--frozen-lockfile"])
+        .args(["install", "--frozen-lockfile", "--ignore-scripts"])
         .output()
         .map_err(|error| format!("could not run bun install: {error}"))?;
 
