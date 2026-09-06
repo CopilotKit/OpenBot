@@ -103,13 +103,26 @@ export async function readSandboxTemplate(
       `COMPUTER_SANDBOX_TEMPLATE_FILE points at ${path}, which cannot be read. That file is what a Bot's computer is cut from; the chart mounts it when computers.mode is sandbox.`,
     );
   }
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
-  if (!parsed.podTemplate) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new SandboxError(
+      `${path} is not valid JSON, so there is nothing to make a computer from.`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new SandboxError(
+      `${path} is not valid JSON, so there is nothing to make a computer from.`,
+    );
+  }
+  const podTemplate = (parsed as Record<string, unknown>).podTemplate;
+  if (!podTemplate) {
     throw new SandboxError(
       `${path} has no podTemplate, so there is nothing to make a computer from.`,
     );
   }
-  return parsed;
+  return parsed as Record<string, unknown>;
 }
 
 /** How long a read token is reused before the file is consulted again. */
