@@ -155,6 +155,18 @@ export function createComputerTransport(
           : AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
+      /*
+       * The caller's own abort is answered first, and says what the check above the fetch says.
+       *
+       * The signal is handed to fetch precisely so a Stop can land mid-flight, and a fetch aborted
+       * that way rejects with an AbortError, which is neither a TimeoutError nor a computer that is
+       * not running. Both of the other answers are statements about the infrastructure, and this
+       * message is not only read by the model: the gateway writes it into the action's audit row as
+       * `failure`, so a person pressing Stop was recorded as an outage.
+       */
+      if (caller?.aborted) {
+        throw new ComputerUnavailableError("The action was stopped.");
+      }
       throw new ComputerUnavailableError(
         error instanceof Error && error.name === "TimeoutError"
           ? "The assistant's computer did not respond in time."

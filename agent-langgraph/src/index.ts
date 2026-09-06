@@ -12,6 +12,7 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
+import { listenPort } from "../../shared/listen-port";
 import { toLangChainMessages } from "./history";
 import { readReasoningEffort } from "./model-options";
 import { streamRun } from "./stream";
@@ -36,7 +37,12 @@ import { streamRun } from "./stream";
  * The graph provides model orchestration without changing that contract.
  */
 
-const PORT = Number.parseInt(process.env.PORT ?? "4201", 10);
+const resolvedPort = listenPort(process.env.PORT, 4201);
+if (!resolvedPort.ok) {
+  console.error(resolvedPort.reason);
+  process.exit(1);
+}
+const PORT = resolvedPort.port;
 const MANAGED_AGENT_TOKEN = process.env.MANAGED_AGENT_TOKEN?.trim();
 if (!MANAGED_AGENT_TOKEN) {
   console.error(

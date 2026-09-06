@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import {
@@ -288,7 +289,7 @@ describe("tenant YAML validation", () => {
 
   test("loads the mounted fintech package without a theme file", async () => {
     const tenantPackage = await loadTenantPackage(
-      new URL("../../examples/fintech", import.meta.url).pathname,
+      fileURLToPath(new URL("../../examples/fintech", import.meta.url)),
     );
 
     expect(tenantPackage.tenantId).toBe("openbot");

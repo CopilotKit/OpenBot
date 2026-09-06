@@ -16,6 +16,46 @@ was written, so the most destructive button in the product could leave a wiped c
 login gone, no undo -- with nothing on the trail to say who wiped it or when. The row is now written
 as soon as the profile is gone, which is the point after which nothing can be put back. A failure in
 either delete is still reported to the caller.
+### Pressing Stop is recorded as a stop, not as a computer that is not running
+
+The computer transport answered a Stop correctly only when it arrived before the request left. The
+caller's signal is handed to `fetch` precisely so a Stop can also land mid-action, and a fetch
+aborted that way rejects with an `AbortError`, which fell through to the message for a computer that
+cannot be reached. The person was told their own click had failed because the assistant's computer
+was not running, and the gateway wrote that sentence into the action's audit row as its failure --
+so a deliberate stop read back as an outage. A genuinely unreachable computer and a timeout still
+say what they said.
+### A component the server refused is no longer drawn anyway
+
+A sandboxed component asks the server at call time whether the Bot may still use it, and a refusal
+is recorded so the drawing can be replaced with a card saying so. The renderer looked that refusal
+up under `props.toolCall.id`, which is the shape a tool HANDLER is given; a renderer's props carry
+the id flat, as `toolCallId`. The lookup key was therefore always undefined, the refusal was never
+found, and the component rendered as though it had been allowed -- so revoking a component from a
+Bot did not take effect on screen until the five-second grant poll caught up, and a failed decision
+request showed nothing at all.
+### A component whose name has a stray space is the same component
+
+The catalogue announcement asked whether each component's `name`, `title`, `kind` and `description`
+were more than whitespace, and then published the untrimmed strings. A `name` is a component's
+identity -- it is what `syncCatalogue` compares against what is already published, what `decide` and
+`listForAgent` look up, and what a grant names -- so a build shipping `" weatherPanel "` added a
+second catalogue row beside `weatherPanel`: published, ungranted by anybody, and impossible to hold
+a Bot back from under the name people use. The four fields are now stored as the strings the guard
+approved.
+### A password with a `%` in it says so, instead of failing as `URI error`
+
+`DATABASE_URL` is taken apart before it reaches Bun, and each part is percent-decoded. A part
+holding a `%` that starts no escape -- `postgres://openbot:100%pure@host:5432/openbot`, which a
+generated password produces often enough -- is a string `new URL` accepts and `decodeURIComponent`
+rejects, so the server stopped with `URIError: URI error` and named neither the variable nor the
+part. It now refuses with the same kind of sentence as every other malformed address: which part is
+wrong, and that a literal `%` must be written `%25`.
+
+A correctly encoded password is unaffected.
+### An empty Bot `PORT` is unset, so NaN never reaches Bun.serve
+
+`PORT=` on `agent-bot` and `agent-langgraph` used to parse as `NaN` (`??` does not treat empty as absent) and `Bun.serve` bound an ephemeral port while compose still published 4200/4201. A prefix typo (`42o0`) started on 42. Empty now means the shipped default; anything that is not a whole port number refuses to start.
 
 ### The server connects to Postgres on Windows, and `localhost` is no longer a coin toss
 

@@ -64,18 +64,30 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
     };
 
     socket.onmessage = async (event) => {
-      let message: {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+      // A frame that is not an object (`null`, a number, a string, an array) has
+      // no `type` to read: reaching for it throws a `TypeError` inside this
+      // handler and stops the live view from drawing further frames. Drop it.
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      ) {
+        return;
+      }
+      const message = parsed as {
         type: string;
         data?: string;
         width?: number;
         height?: number;
         error?: string;
       };
-      try {
-        message = JSON.parse(String(event.data));
-      } catch {
-        return;
-      }
+      if (typeof message.type !== "string") return;
       if (message.type === "error") {
         onProblem?.(message.error ?? "The screen could not be shown.");
         return;
