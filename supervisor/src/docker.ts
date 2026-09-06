@@ -151,6 +151,20 @@ function portOf(ports?: Docker.Port[] | undefined): number | undefined {
 }
 
 /**
+ * A published port from `inspect`, which Docker reports as a string.
+ *
+ * The daemon hands back `""` before a port is assigned and anything at all when it
+ * misbehaves, so a bare `parseInt` turns `"abc"` into a `NaN` port and `"0"` into a
+ * port nothing can dial. Only digits in range are a port; anything else is no port.
+ */
+export function parseHostPort(value: unknown): number | undefined {
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return undefined;
+  const port = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) return undefined;
+  return port;
+}
+
+/**
  * Whether a labelled thing belongs to this deployment.
  *
  * Containers created before the namespace label existed carry the default namespace, so an existing
@@ -209,9 +223,10 @@ async function inspectOwned(names: ComputerNames): Promise<{
     if (!ours(info.Config?.Labels)) return null;
     const published =
       info.NetworkSettings?.Ports?.[COMPUTER_PORT]?.[0]?.HostPort;
+    const port = parseHostPort(published);
     return {
       status: info.State?.Status ?? "unknown",
-      ...(published ? { port: Number.parseInt(published, 10) } : {}),
+      ...(port !== undefined ? { port } : {}),
       // The resolved image, not the tag it was started from. A tag moves when the image is
       // rebuilt; this is what the container is actually running.
       ...(info.Image ? { image: info.Image } : {}),

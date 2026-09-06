@@ -17,6 +17,28 @@ the id flat, as `toolCallId`. The lookup key was therefore always undefined, the
 found, and the component rendered as though it had been allowed -- so revoking a component from a
 Bot did not take effect on screen until the five-second grant poll caught up, and a failed decision
 request showed nothing at all.
+### A component whose name has a stray space is the same component
+
+The catalogue announcement asked whether each component's `name`, `title`, `kind` and `description`
+were more than whitespace, and then published the untrimmed strings. A `name` is a component's
+identity -- it is what `syncCatalogue` compares against what is already published, what `decide` and
+`listForAgent` look up, and what a grant names -- so a build shipping `" weatherPanel "` added a
+second catalogue row beside `weatherPanel`: published, ungranted by anybody, and impossible to hold
+a Bot back from under the name people use. The four fields are now stored as the strings the guard
+approved.
+### A password with a `%` in it says so, instead of failing as `URI error`
+
+`DATABASE_URL` is taken apart before it reaches Bun, and each part is percent-decoded. A part
+holding a `%` that starts no escape -- `postgres://openbot:100%pure@host:5432/openbot`, which a
+generated password produces often enough -- is a string `new URL` accepts and `decodeURIComponent`
+rejects, so the server stopped with `URIError: URI error` and named neither the variable nor the
+part. It now refuses with the same kind of sentence as every other malformed address: which part is
+wrong, and that a literal `%` must be written `%25`.
+
+A correctly encoded password is unaffected.
+### An empty Bot `PORT` is unset, so NaN never reaches Bun.serve
+
+`PORT=` on `agent-bot` and `agent-langgraph` used to parse as `NaN` (`??` does not treat empty as absent) and `Bun.serve` bound an ephemeral port while compose still published 4200/4201. A prefix typo (`42o0`) started on 42. Empty now means the shipped default; anything that is not a whole port number refuses to start.
 
 ### The server connects to Postgres on Windows, and `localhost` is no longer a coin toss
 
