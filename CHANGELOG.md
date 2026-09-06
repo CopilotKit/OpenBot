@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The desktop app refuses a deployment download that writes outside its own directory
+
+The shell fetches the release tarball and lays it out under the directory it manages. The check that
+kept an entry inside that directory compared paths lexically -- `root.join(path).starts_with(root)`
+-- and `Path::starts_with` matches components without resolving `..`, so `app/../../elsewhere`
+started with the root and still landed outside it. An entry has to begin with a directory a
+deployment wants, which `app` does, so the file filter did not stop it either. Every component of a
+path inside the tree is now required to be an ordinary name, and the traversal is refused by name.
+
 ## 0.0.8
 
 ### A desktop shell that installs OpenBot and then becomes it
