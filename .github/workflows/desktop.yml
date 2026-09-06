@@ -95,3 +95,16 @@ jobs:
       # which a compile would miss.
       - run: bun run tauri build
         working-directory: desktop
+      # Keep what was built. Without this the only way to try an installer is to build one on
+      # the machine you are trying it on, which is not what anybody installs.
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: openbot-desktop-${{ matrix.platform.name }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/**/*.exe
+            desktop/src-tauri/target/release/bundle/**/*.AppImage
+            desktop/src-tauri/target/release/bundle/**/*.deb
+            desktop/src-tauri/target/release/bundle/**/*.rpm
+          if-no-files-found: error
+          retention-days: 7
