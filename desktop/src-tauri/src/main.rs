@@ -340,15 +340,18 @@ fn show_openbot(app: tauri::AppHandle) -> Result<(), String> {
     let url = stack::app_url(port).ok_or_else(|| {
         format!("OpenBot is not answering on port {port} yet, so there is nothing to show.")
     })?;
+    eprintln!("[show] navigating the window to {url}");
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there to show it in")?;
-    window
+    let outcome = window
         .navigate(
             url.parse()
                 .map_err(|error| format!("{url} is not a URL: {error}"))?,
         )
-        .map_err(|error| format!("could not show OpenBot: {error}"))
+        .map_err(|error| format!("could not show OpenBot: {error}"));
+    eprintln!("[show] navigate returned {outcome:?}");
+    outcome
 }
 
 /// Put the setup screen back, when there is something to set up again.

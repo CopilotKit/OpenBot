@@ -112,7 +112,10 @@ export function App() {
       });
       setRunning(true);
       // The window becomes OpenBot. Nobody double-clicked this to look at a status screen.
-      await invoke("show_openbot").catch(() => undefined);
+      //
+      // Said out loud when it does not happen. Swallowed, the window sits on the setup screen
+      // looking like the start failed, while every step on it is ticked.
+      await invoke("show_openbot").catch((error) => setFailure(String(error)));
     } catch (error) {
       setFailure(String(error));
     } finally {
