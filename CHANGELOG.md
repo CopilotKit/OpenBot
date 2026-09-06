@@ -10,6 +10,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## 0.0.8
 
+### The app can be served from a built bundle, and listens on both loopbacks
+
+The app's only start script was `dev`, which runs a Vite dev server. That meant `NODE_ENV=development`
+on a freshly installed product: the SDK drew its developer inspector over the top, with hot reloading
+and source maps behind it. There is a `serve` script now that builds once and serves the build. Both
+it and `dev` hand Vite to Bun directly, because `node_modules/.bin/vite` begins `#!/usr/bin/env node`
+and a machine with Bun and no Node exits 127 without saying why. Vite is also told to listen on `::`,
+since Node resolves `localhost` to `::1` and Bun to `127.0.0.1`, so binding one of them left whoever
+asked for the other looking at nothing.
+
 ### A person's Stop is recorded as a stop, not as a failed action
 
 Pressing Stop mid-action aborts the request, and the gateway wrote that outcome beside the decision
