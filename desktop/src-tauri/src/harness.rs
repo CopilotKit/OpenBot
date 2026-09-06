@@ -70,6 +70,14 @@ pub struct Harness {
 /// Anything the AG-UI table marks In Progress is left out. OpenAI's Agents SDK, AWS Bedrock Agents
 /// and Cloudflare Agents are all In Progress, and a picker that offers a harness which cannot yet
 /// answer is worse than a shorter picker.
+///
+/// Mastra is left out for a different reason, and it is not a judgement on Mastra. There is no way
+/// to serve it over AG-UI today without breaking the no-adapters rule. `@mastra/agui`, which is
+/// Mastra's own server-side helper, peer-depends on `@mastra/core >=0.10.7 <0.12.0` and was last
+/// published in July 2025; core is now 1.64. `@ag-ui/mastra`, from the AG-UI repository, is a
+/// client abstraction and exposes no HTTP handler. Shipping Mastra would therefore mean either a
+/// year-old core or an HTTP layer of ours, and the second is the thing this list exists to avoid.
+/// It goes back on the day either package moves.
 pub fn catalogue() -> Vec<Harness> {
     let ours = |id: &str, name: &str, summary: &str, maintainer: Maintainer| Harness {
         id: id.into(),
@@ -105,12 +113,6 @@ pub fn catalogue() -> Vec<Harness> {
             "LangGraph",
             "Graphs you can change, from LangChain.",
             Maintainer::Partnership,
-        ),
-        ours(
-            "mastra",
-            "Mastra",
-            "TypeScript end to end.",
-            Maintainer::FirstParty,
         ),
         ours(
             "google-adk",
@@ -228,6 +230,14 @@ mod tests {
                 "{absent} is In Progress upstream"
             );
         }
+    }
+
+    /// Mastra is absent while its only server-side package is a year behind its own core. Asserted
+    /// so that putting it back is a deliberate act with this test in front of somebody.
+    #[test]
+    fn mastra_stays_out_while_it_cannot_be_served() {
+        let ids: Vec<String> = catalogue().into_iter().map(|h| h.id).collect();
+        assert!(!ids.contains(&"mastra".to_string()));
     }
 
     /// Codex and Gemini CLI have no integration and we do not write adapters, so they cannot appear
