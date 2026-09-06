@@ -8,6 +8,8 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+## 0.0.8
+
 ### A person's Stop is recorded as a stop, not as a failed action
 
 Pressing Stop mid-action aborts the request, and the gateway wrote that outcome beside the decision
