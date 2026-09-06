@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Wiping a computer is recorded even if clearing its stored state fails
+
+Resetting a computer destroys the profile first and wrote the audit row last, after two Postgres
+deletes. A connection reset, a failover or a statement timeout in either delete threw before the row
+was written, so the most destructive button in the product could leave a wiped computer -- every
+login gone, no undo -- with nothing on the trail to say who wiped it or when. The row is now written
+as soon as the profile is gone, which is the point after which nothing can be put back. A failure in
+either delete is still reported to the caller.
+
 ### The server connects to Postgres on Windows, and `localhost` is no longer a coin toss
 
 Two separate faults, both of which stop a deployment reaching its own database and neither of which

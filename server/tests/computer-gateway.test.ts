@@ -687,6 +687,67 @@ describe("the computer gateway", () => {
     expect(rows[0]?.targetId).toBe("bot-2");
   });
 
+  /*
+   * "The most destructive button we have. Every login the Bot had is gone and no undo exists, so the
+   * row is written whatever happens next."
+   *
+   * The profile is destroyed by `provider.reset` before either of the two Postgres deletes runs, so
+   * a delete that fails cannot put it back -- it can only take the row with it, which is the one
+   * thing that note rules out.
+   */
+  test("resetComputer records the reset even when clearing the stored page fails", async () => {
+    const { provider, fetchImpl } = fakeComputer({
+      resetResult: { cleared: true },
+    });
+    const { store, rows } = fakeAudit();
+    const snapshots: SnapshotStore = {
+      ...createInMemorySnapshotStore(),
+      clear: async () => {
+        throw new Error("connection reset by peer");
+      },
+    };
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      snapshots,
+    });
+
+    await expect(gateway.resetComputer("bot-1", ACTOR)).rejects.toThrow(
+      "connection reset by peer",
+    );
+
+    expect(rows.map((row) => row.eventType)).toContain("computer.reset");
+    expect(rows[0]?.targetId).toBe("bot-1");
+  });
+
+  test("resetComputer records the reset even when clearing the screenshots fails", async () => {
+    const { provider, fetchImpl } = fakeComputer({
+      resetResult: { cleared: true },
+    });
+    const { store, rows } = fakeAudit();
+    const gateway = createComputerGateway({
+      provider,
+      fetchImpl,
+      auditStore: store,
+      policy: () => PERMISSIVE,
+      pageFrames: {
+        clear: async () => {
+          throw new Error("statement timeout");
+        },
+      } as unknown as NonNullable<
+        Parameters<typeof createComputerGateway>[0]["pageFrames"]
+      >,
+    });
+
+    await expect(gateway.resetComputer("bot-1", ACTOR)).rejects.toThrow(
+      "statement timeout",
+    );
+
+    expect(rows.map((row) => row.eventType)).toContain("computer.reset");
+  });
+
   test("computers maps provider status 'running' and 'stopped' directly and preserves egress distinctions", async () => {
     const locations: ComputerLocation[] = [
       {
