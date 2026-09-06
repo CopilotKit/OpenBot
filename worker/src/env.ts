@@ -48,6 +48,16 @@ export function loadWorkerEnv(
       "SERVER_INTERNAL_URL is not set, so this worker does not know where to hand a routine run.",
     );
   }
+  try {
+    const parsed = new URL(serverInternalUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("not http(s)");
+    }
+  } catch {
+    throw new Error(
+      "SERVER_INTERNAL_URL must be a valid http(s) URL, so this worker knows where to hand a routine run.",
+    );
+  }
 
   const databaseUrl = environment.DATABASE_URL?.trim();
   if (!databaseUrl) {
