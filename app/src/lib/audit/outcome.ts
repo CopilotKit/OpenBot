@@ -56,6 +56,8 @@ export const REFUSED_EVENT_TYPES = [
  */
 export const DID_NOT_HAPPEN_EVENT_TYPES = [
   "computer.action_failed",
+  /** A person pressed Stop mid-action: the action did not happen, and nothing broke. */
+  "computer.action_stopped",
   "agent.stream_stalled",
   /** A hop that was accepted, ran out of attempts, and never became the other Bot's turn. */
   "agent.handoff_failed",

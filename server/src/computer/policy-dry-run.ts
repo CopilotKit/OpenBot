@@ -148,7 +148,13 @@ export function dryRunAgainstHistory(
   };
 
   for (const event of events) {
-    if (event.eventType === "computer.action_failed") continue;
+    // Both carry a decision row already in this history, so scoring the outcome row would count the
+    // action twice; a stop is skipped for the same reason a failure is.
+    if (
+      event.eventType === "computer.action_failed" ||
+      event.eventType === "computer.action_stopped"
+    )
+      continue;
     const context = contextFromAuditPayload(event.payload);
     if (!context) continue;
     report.scanned += 1;

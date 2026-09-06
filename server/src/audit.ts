@@ -194,6 +194,10 @@ export const auditEventTypes = [
   // Permitted by policy, attempted, and did not succeed. Its own type because "allowed" reads as
   // "happened", and a trail that cannot tell those apart misleads exactly when it matters most.
   "computer.action_failed",
+  // Permitted, attempted, and stopped mid-action by a person pressing Stop. Kept apart from
+  // `action_failed` because a stop is not an outage: a count of failures that folds in every Stop
+  // reports a broken computer where somebody simply changed their mind.
+  "computer.action_stopped",
   // A person taking the wheel and giving it back. Recorded as a period rather than as keystrokes: the
   // useful fact for an investigator is that a human drove this browser between these two times, and
   // logging every click a person made would bury it while telling nobody anything.

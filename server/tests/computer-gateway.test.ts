@@ -435,6 +435,30 @@ describe("the computer gateway", () => {
     expect(rows[0]?.payload.element).toBeUndefined();
   });
 
+  test("a permitted action stopped mid-flight is recorded as a stop, not a failure", async () => {
+    // A person pressing Stop is not the computer failing. The row still says so in its message, but
+    // its TYPE is `computer.action_stopped`, so a count of `action_failed` rows — the natural way to
+    // measure outages — does not read every Stop as one.
+    const { gateway, rows } = await gatewayWith(PERMISSIVE);
+    const stop = new AbortController();
+    stop.abort();
+
+    await expect(
+      gateway.runCommand(
+        "bot-1",
+        ACTOR,
+        { command: "cat secrets.txt" },
+        stop.signal,
+      ),
+    ).rejects.toThrow(/stopped/);
+
+    // The decision that permitted it, then the outcome — a stop, not a failure.
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.eventType).toBe("computer.action_allowed");
+    expect(rows[1]?.eventType).toBe("computer.action_stopped");
+    expect(rows[1]?.payload.failure).toContain("stopped");
+  });
+
   test("a command the policy refuses is recorded and never reaches the computer", async () => {
     const { gateway, calls, rows } = await gatewayWith({
       ...PERMISSIVE,

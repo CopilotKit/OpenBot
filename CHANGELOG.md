@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A person's Stop is recorded as a stop, not as a failed action
+
+Pressing Stop mid-action aborts the request, and the gateway wrote that outcome beside the decision
+row as a failure — the same `computer.action_failed` type it writes when a computer is unreachable or
+times out. The row's message already said the action was stopped, but anything counting failures by
+type, the natural way to watch for outages, read every Stop as one. A stop now writes its own type,
+`computer.action_stopped`: the action did not happen and nothing broke. The audit page already groups
+it with the other did-not-happen outcomes, and a policy dry-run skips it the way it skips a failure,
+since both sit beside a decision row that is already scored.
+
 ### Wiping a computer is recorded even if clearing its stored state fails
 
 Resetting a computer destroys the profile first and wrote the audit row last, after two Postgres

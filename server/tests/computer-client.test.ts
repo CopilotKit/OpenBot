@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ComputerStoppedError,
+  ComputerUnavailableError,
   createComputerTransport,
   ElementNotFoundError,
   HumanHasControlError,
@@ -310,9 +312,18 @@ describe("the caller's Stop", () => {
     const stop = new AbortController();
     stop.abort();
 
-    expect(
-      client.click({ ref: "e1", snapshotId: 1 }, stop.signal),
-    ).rejects.toBeDefined();
+    // A stop, and a distinguishable one: `ComputerStoppedError` so the gateway types the audit row
+    // `computer.action_stopped` rather than counting a person's Stop as a failed action. It stays a
+    // subclass of `ComputerUnavailableError`, so everything catching an unavailable computer to tell
+    // the model is unaffected.
+    const error = await client
+      .click({ ref: "e1", snapshotId: 1 }, stop.signal)
+      .then(
+        () => null,
+        (reason) => reason,
+      );
+    expect(error).toBeInstanceOf(ComputerStoppedError);
+    expect(error).toBeInstanceOf(ComputerUnavailableError);
     expect(called).toBe(false);
   });
 
