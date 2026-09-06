@@ -1,4 +1,5 @@
 /** What the runtime can do, locally or with CopilotKit Intelligence. */
+import { readFileSync } from "node:fs";
 import { singleUserEnabled } from "./auth/dev-actor";
 import type { ActionPolicy } from "./computer/policy";
 import { parseActionPolicy } from "./computer/policy-store";
@@ -173,8 +174,8 @@ export type DeploymentConfig = {
    * A known managed tenant must still match this value; see slack/tenant-context.ts.
    */
   slackTenantId: string | undefined;
-  /** Feishu long-connection credentials. Absent leaves Feishu disabled. */
-  feishu?: FeishuConfig;
+  /** Feishu applications loaded from a server-local credentials file. Empty leaves Feishu disabled. */
+  feishuApps: readonly FeishuConfig[];
 
   /**
    * Where this deployment is reached from outside, with no trailing slash.
@@ -831,19 +832,49 @@ function slackTenantId(environment: Environment): string | undefined {
   return tenantId;
 }
 
-function feishuConfig(environment: Environment): FeishuConfig | undefined {
-  const appId = optional(environment, "FEISHU_APP_ID");
-  const appSecret = optional(environment, "FEISHU_APP_SECRET");
-  const tenantKey = optional(environment, "FEISHU_TENANT_KEY");
-  const configured = [appId, appSecret, tenantKey].filter(Boolean).length;
-  if (configured === 0) return undefined;
-  if (configured !== 3) {
+function feishuApps(environment: Environment): readonly FeishuConfig[] {
+  const file = optional(environment, "OPENBOT_FEISHU_APPS_FILE");
+  if (!file) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
     throw new Error(
-      "FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_TENANT_KEY must be configured together",
+      `Failed to read ${file}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (!appId || !appSecret || !tenantKey) return undefined;
-  return { appId, appSecret, tenantKey };
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${file} must contain a JSON array of Feishu applications`);
+  }
+
+  const appIds = new Set<string>();
+  const tenantKeys = new Set<string>();
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`${file}[${index}] must be a Feishu application object`);
+    }
+    const record = value as Record<string, unknown>;
+    const field = (name: keyof FeishuConfig): string => {
+      const candidate = record[name];
+      if (typeof candidate !== "string" || !candidate.trim()) {
+        throw new Error(`${file}[${index}].${name} must be a non-empty string`);
+      }
+      return candidate.trim();
+    };
+    const appId = field("appId");
+    const appSecret = field("appSecret");
+    const tenantKey = field("tenantKey");
+    if (appIds.has(appId)) {
+      throw new Error(`${file} contains duplicate appId "${appId}"`);
+    }
+    if (tenantKeys.has(tenantKey)) {
+      throw new Error(`${file} contains duplicate tenantKey "${tenantKey}"`);
+    }
+    appIds.add(appId);
+    tenantKeys.add(tenantKey);
+    return { appId, appSecret, tenantKey };
+  });
 }
 
 /**
@@ -949,7 +980,7 @@ export function loadConfig(
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
   const managedAgent = managedAgentConfig(environment);
-  const feishu = feishuConfig(environment);
+  const configuredFeishuApps = feishuApps(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
@@ -960,7 +991,7 @@ export function loadConfig(
     agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     slackTenantId: slackTenantId(environment),
-    ...(feishu ? { feishu } : {}),
+    feishuApps: configuredFeishuApps,
     publicUrl: (
       optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
     )?.replace(/\/+$/, ""),

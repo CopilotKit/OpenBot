@@ -899,21 +899,21 @@ const openbotSlackChannel = createOpenBotSlackChannel({
  * invisible: it runs, and quietly holds different tools or a different role from the one the person
  * is talking to.
  */
-const feishuChannel = config.feishu
-  ? createOpenBotFeishuChannel({
-      transport: createFeishuTransport(config.feishu),
-      agentDeps: {
-        routing: slackRouting,
-        store: externalThreadStore,
-        resolver: actorAgentResolver,
-      },
-      resolveUser: createFeishuIdentityResolver({
-        store: externalLinkStore,
-        encryptionKey: config.keyEncryptionKey,
-        appUrl: config.appUrl,
-      }),
-    })
-  : undefined;
+const feishuChannels = config.feishuApps.map((feishuApp) =>
+  createOpenBotFeishuChannel({
+    transport: createFeishuTransport(feishuApp),
+    agentDeps: {
+      routing: slackRouting,
+      store: externalThreadStore,
+      resolver: actorAgentResolver,
+    },
+    resolveUser: createFeishuIdentityResolver({
+      store: externalLinkStore,
+      encryptionKey: config.keyEncryptionKey,
+      appUrl: config.appUrl,
+    }),
+  }),
+);
 
 const copilotRuntime = mountCopilotRuntime(
   config,
@@ -931,7 +931,7 @@ const copilotRuntime = mountCopilotRuntime(
   [openbotSlackChannel],
 );
 
-await feishuChannel?.start();
+await Promise.all(feishuChannels.map((channel) => channel.start()));
 
 /*
  * The guard the account-link confirmation runs behind: a person's own session, never Slack's word.
@@ -1384,7 +1384,10 @@ const managedHost = startManagedChannelHost({
   // Each listener holds a connection of its own for the life of the process. Released on the way
   // out, so a watch-mode restart does not leave two behind on every reload.
   stopOthers: [
-    () => feishuChannel?.stop() ?? Promise.resolve(),
+    () =>
+      Promise.all(feishuChannels.map((channel) => channel.stop())).then(
+        () => undefined,
+      ),
     () => channelActivityListener.stop(),
     () => policyListener.stop(),
     () => retentionSweeps.stop(),

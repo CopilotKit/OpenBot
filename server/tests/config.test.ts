@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configuredAuthProviders, loadConfig } from "../src/config";
@@ -29,7 +29,6 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
-
 
 /**
  * The same deployment with nothing signing anybody in.
