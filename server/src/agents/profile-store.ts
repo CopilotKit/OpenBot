@@ -199,6 +199,13 @@ function endpointOf(configuration: unknown): string | null {
   return typeof endpoint === "string" ? endpoint : null;
 }
 
+/** Which agent on a Mastra server this Bot means, when the row names one. */
+function remoteAgentIdOf(configuration: unknown): string | null {
+  if (!configuration || typeof configuration !== "object") return null;
+  const named = (configuration as { remoteAgentId?: unknown }).remoteAgentId;
+  return typeof named === "string" && named.length > 0 ? named : null;
+}
+
 /**
  * The instruction a Bot in the box runs on, read back out of its stored configuration.
  *
@@ -217,7 +224,7 @@ function systemPromptOf(configuration: unknown): string | null {
 
 /** What a coworker is, and what it runs on: the two `agents` columns a copy has to reproduce. */
 export type AgentRun = {
-  type: "built_in" | "remote_ag_ui";
+  type: "built_in" | "remote_ag_ui" | "remote_mastra";
   configuration: Record<string, unknown>;
 };
 
@@ -251,7 +258,10 @@ export type AgentRun = {
  * credential would mean rotating either one's key silently changed the other's.
  */
 export function runForDuplicate(
-  source: { type: "built_in" | "remote_ag_ui"; configuration: unknown },
+  source: {
+    type: "built_in" | "remote_ag_ui" | "remote_mastra";
+    configuration: unknown;
+  },
   managed: Record<string, unknown> | undefined,
 ): AgentRun | null {
   const systemPrompt = systemPromptOf(source.configuration);
@@ -261,6 +271,25 @@ export function runForDuplicate(
 
   const endpoint = endpointOf(source.configuration);
   if (endpoint) {
+    /*
+     * The copy is dialled the way the original was, and that is not cosmetic. A Mastra endpoint
+     * speaks Mastra's client protocol and has no AG-UI route, so a duplicate written as
+     * `remote_ag_ui` would carry the right address and be unable to say anything to it. The Bot
+     * would appear, accept a grant, and answer nothing.
+     *
+     * Which agent on that server comes with it for the same reason: a Mastra endpoint is a roster,
+     * and a copy that forgets the name falls back to a different agent, or refuses. See
+     * `pickFromRoster`.
+     */
+    if (source.type === "remote_mastra") {
+      const remoteAgentId = remoteAgentIdOf(source.configuration);
+      return {
+        type: "remote_mastra",
+        configuration: remoteAgentId
+          ? { endpoint, remoteAgentId }
+          : { endpoint },
+      };
+    }
     return { type: "remote_ag_ui", configuration: { endpoint } };
   }
 

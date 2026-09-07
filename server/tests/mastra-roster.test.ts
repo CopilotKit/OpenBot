@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { runForDuplicate } from "../src/agents/profile-store";
 import { pickFromRoster } from "../src/copilot";
 
 describe("which agent on a Mastra server a Bot means", () => {
@@ -37,5 +38,43 @@ describe("which agent on a Mastra server a Bot means", () => {
     expect(() => pickFromRoster([], { id: "bot-7" })).toThrow(
       /It serves: none/,
     );
+  });
+});
+
+describe("duplicating a Mastra Bot", () => {
+  test("the copy is still dialled as Mastra, carrying the agent it named", () => {
+    // The must-not case. Written as `remote_ag_ui` the copy holds the right address and cannot say
+    // anything to it: a Mastra endpoint has no AG-UI route, so the Bot appears, takes a grant and
+    // answers nothing.
+    expect(
+      runForDuplicate(
+        {
+          type: "remote_mastra",
+          configuration: {
+            endpoint: "http://mastra.test",
+            remoteAgentId: "openbot",
+          },
+        },
+        undefined,
+      ),
+    ).toEqual({
+      type: "remote_mastra",
+      configuration: {
+        endpoint: "http://mastra.test",
+        remoteAgentId: "openbot",
+      },
+    });
+  });
+
+  test("an AG-UI Bot is untouched by that", () => {
+    expect(
+      runForDuplicate(
+        { type: "remote_ag_ui", configuration: { endpoint: "http://a.test" } },
+        undefined,
+      ),
+    ).toEqual({
+      type: "remote_ag_ui",
+      configuration: { endpoint: "http://a.test" },
+    });
   });
 });

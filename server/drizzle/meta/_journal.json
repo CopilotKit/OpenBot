@@ -197,6 +197,13 @@
       "when": 1788543624826,
       "tag": "0027_user_instructions",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788801080312,
+      "tag": "0028_mastra_agent_type",
+      "breakpoints": true
     }
   ]
 }

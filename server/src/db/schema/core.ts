@@ -21,7 +21,13 @@ const updatedAt = () =>
   timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
 
 export const role = pgEnum("role", ["admin", "user"]);
-export const agentType = pgEnum("agent_type", ["built_in", "remote_ag_ui"]);
+export const agentType = pgEnum("agent_type", [
+  "built_in",
+  "remote_ag_ui",
+  // A Mastra server, reached through `@ag-ui/mastra` rather than an AG-UI route of its own. Governed
+  // identically: the difference ends at `remoteTransport`. See migration 0028.
+  "remote_mastra",
+]);
 export const credentialKind = pgEnum("credential_kind", [
   "model",
   "connector",

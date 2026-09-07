@@ -6,9 +6,9 @@ import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import {
+  AuditQueryError,
   type AuditReader,
   type AuditStore,
-  AuditQueryError,
   auditQueryFromUrl,
   recordAuditEvent,
 } from "./audit";
