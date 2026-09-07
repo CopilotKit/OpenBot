@@ -192,6 +192,59 @@ describe("Google Drive", () => {
   });
 });
 
+describe("Context.dev", () => {
+  const entry = catalogueEntry("context-dev");
+
+  test("pins the hosted MCP server and refuses lookalike hosts", () => {
+    expect(entry).not.toBeNull();
+    expect(entry?.transport).toBeUndefined();
+    expect(resolveServerUrl("context-dev")?.url).toBe(
+      "https://mcp.context.dev/mcp",
+    );
+    expect(hostAdmissible(entry!, "https://mcp.context.dev")).toBe(true);
+    expect(hostAdmissible(entry!, "https://mcp.context.dev.evil.test")).toBe(
+      false,
+    );
+    expect(hostAdmissible(entry!, "http://mcp.context.dev")).toBe(false);
+  });
+
+  test("uses Context OAuth with dynamic client registration", () => {
+    if (entry?.auth.kind !== "user-oauth") throw new Error("wrong auth kind");
+    expect(entry.auth).toEqual({
+      kind: "user-oauth",
+      authorizationUrl: "https://mcp.context.dev/authorize",
+      tokenUrl: "https://mcp.context.dev/token",
+      revokeUrl: "https://www.context.dev/oauth2/revoke",
+      scopes: ["api.read", "api.write"],
+      clientRegistration: "dynamic",
+      registrationUrl: "https://mcp.context.dev/register",
+    });
+  });
+
+  test("pins every production tool that is not read-only", () => {
+    expect(entry?.writeTools).toEqual([
+      "parse-document",
+      "web-scrape-html",
+      "web-scrape-markdown",
+      "web-scrape-images",
+      "create-monitor",
+      "update-monitor",
+      "delete-monitor",
+      "run-monitor-now",
+      "submit-batch",
+      "cancel-batch",
+      "delete-batch",
+    ]);
+    for (const name of entry?.writeTools ?? []) {
+      expect(classifyTool(entry, name, true)).toBe("write");
+    }
+    expect(classifyTool(entry, "get-news-search", true)).toBe("read");
+    expect(classifyTool(entry, "web-search", true)).toBe("read");
+    expect(classifyTool(entry, "get-brand", true)).toBe("read");
+    expect(classifyTool(entry, "brand-new-tool", false)).toBe("write");
+  });
+});
+
 describe("Notion", () => {
   const entry = catalogueEntry("notion");
 
