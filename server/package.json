@@ -13,9 +13,12 @@
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",
+    "@ag-ui/mastra": "1.1.2",
     "@better-auth/drizzle-adapter": "^1.7.1",
     "@better-auth/sso": "^1.7.1",
     "@copilotkit/runtime": "1.70.1",
+    "@mastra/client-js": "^1.43.0",
+    "@mastra/core": "^1.64.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-auth": "^1.7.1",
     "cel-js": "^0.8.2",

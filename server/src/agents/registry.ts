@@ -7,7 +7,11 @@ type BuiltInAgent = {
 type RemoteAgent = {
   id: string;
   name: string;
-  type: "remote_ag_ui";
+  /**
+   * How the endpoint is dialled. Both kinds are a URL this deployment posts a run to, and both are
+   * available on the same condition, which is why availability below does not branch on it.
+   */
+  type: "remote_ag_ui" | "remote_mastra";
   endpoint: string;
 };
 type SeededAgent = BuiltInAgent | RemoteAgent;
