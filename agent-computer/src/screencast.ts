@@ -80,6 +80,17 @@ const VIRTUAL_KEY_CODES: Record<string, number> = {
   ArrowRight: 39,
   ArrowDown: 40,
   Delete: 46,
+  ";": 186,
+  "=": 187,
+  ",": 188,
+  "-": 189,
+  ".": 190,
+  "/": 191,
+  "`": 192,
+  "[": 219,
+  "\\": 220,
+  "]": 221,
+  "'": 222,
 };
 
 function virtualKeyCode(key: string): number {

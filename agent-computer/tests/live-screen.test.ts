@@ -356,12 +356,33 @@ describe.skipIf(!asked)("printable punctuation from the live screen", () => {
         modifiers: 0,
       }),
     );
+    // Older OpenBot surfaces did not send the browser keyCode. Keep their punctuation usable while
+    // a deployment rolls the frontend and computer images independently.
+    viewer.socket.send(
+      JSON.stringify({
+        type: "key",
+        event: "down",
+        key: ".",
+        code: "Period",
+        text: ".",
+        modifiers: 0,
+      }),
+    );
+    viewer.socket.send(
+      JSON.stringify({
+        type: "key",
+        event: "up",
+        key: ".",
+        code: "Period",
+        modifiers: 0,
+      }),
+    );
 
     let landed = "";
     await until(
-      () => landed.includes("."),
+      () => landed.includes(".."),
       5_000,
-      "the period to be inserted into the focused field",
+      "periods from current and legacy surfaces to be inserted into the focused field",
       async () => {
         const read = await api("/read", botId);
         landed = ((await read.json()) as { text: string }).text;
