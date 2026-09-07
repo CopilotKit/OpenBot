@@ -1,4 +1,10 @@
+import {
+  IconArrowLeft,
+  IconArrowRight,
+  IconRefresh,
+} from "@tabler/icons-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { pageCoordinates } from "./take-the-wheel";
 
 /**
@@ -177,13 +183,14 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
   /**
    * Keystrokes, forwarded while driving.
    *
-   * Listen on window because canvas cannot hold focus. `preventDefault` keeps Tab and typing directed
-   * at the remote page while takeover is active.
+   * Listen on window so the focused canvas can forward input. Events outside the canvas remain local
+   * so the browser toolbar and the rest of the takeover UI stay keyboard accessible.
    */
   useEffect(() => {
     if (!driving) return;
+    const isScreenEvent = (event: Event) => event.target === canvasRef.current;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") return; // Escape still closes the view.
+      if (event.key === "Escape" || !isScreenEvent(event)) return;
       event.preventDefault();
       send({
         type: "key",
@@ -197,7 +204,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
       });
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key === "Escape") return;
+      if (event.key === "Escape" || !isScreenEvent(event)) return;
       event.preventDefault();
       send({
         type: "key",
@@ -209,6 +216,7 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
     };
     /** Paste arrives as one block; CDP inserts it as text rather than key events. */
     const onPaste = (event: ClipboardEvent) => {
+      if (!isScreenEvent(event)) return;
       const text = event.clipboardData?.getData("text");
       if (!text) return;
       event.preventDefault();
@@ -226,36 +234,75 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
   }, [driving, send]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={`block h-auto w-full ${driving ? "cursor-crosshair" : ""}`}
-      // Only forward input during takeover.
-      {...(driving
-        ? {
-            onMouseDown: onMouse("pressed"),
-            onMouseUp: onMouse("released"),
-            onMouseMove: onMouse("moved"),
-            onContextMenu: (event: React.MouseEvent) => event.preventDefault(),
-            onWheel: (event: React.WheelEvent<HTMLCanvasElement>) => {
-              const point = at(event);
-              if (!point) return;
-              event.preventDefault();
-              send({
-                type: "wheel",
-                ...point,
-                deltaX: event.deltaX,
-                deltaY: event.deltaY,
-                modifiers: modifierBits(event),
-              });
-            },
-          }
-        : {})}
-      aria-label={
-        driving
-          ? "The assistant's screen. You have control: click and type here."
-          : "The assistant's screen, live"
-      }
-      data-connected={connected}
-    />
+    <div className="relative">
+      {driving ? (
+        <div
+          role="toolbar"
+          aria-label="Browser navigation"
+          className="absolute top-2 left-2 z-10 flex gap-1 rounded-lg bg-background/90 p-1 shadow-sm backdrop-blur-sm"
+        >
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            aria-label="Go back"
+            onClick={() => send({ type: "navigation", action: "back" })}
+          >
+            <IconArrowLeft />
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            aria-label="Go forward"
+            onClick={() => send({ type: "navigation", action: "forward" })}
+          >
+            <IconArrowRight />
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            aria-label="Reload page"
+            onClick={() => send({ type: "navigation", action: "reload" })}
+          >
+            <IconRefresh />
+          </Button>
+        </div>
+      ) : null}
+      <canvas
+        ref={canvasRef}
+        tabIndex={driving ? 0 : undefined}
+        className={`block h-auto w-full ${driving ? "cursor-crosshair" : ""}`}
+        // Only forward input during takeover.
+        {...(driving
+          ? {
+              onMouseDown: onMouse("pressed"),
+              onMouseUp: onMouse("released"),
+              onMouseMove: onMouse("moved"),
+              onContextMenu: (event: React.MouseEvent) =>
+                event.preventDefault(),
+              onWheel: (event: React.WheelEvent<HTMLCanvasElement>) => {
+                const point = at(event);
+                if (!point) return;
+                event.preventDefault();
+                send({
+                  type: "wheel",
+                  ...point,
+                  deltaX: event.deltaX,
+                  deltaY: event.deltaY,
+                  modifiers: modifierBits(event),
+                });
+              },
+            }
+          : {})}
+        aria-label={
+          driving
+            ? "The assistant's screen. You have control: click and type here."
+            : "The assistant's screen, live"
+        }
+        data-connected={connected}
+      />
+    </div>
   );
 }

@@ -41,6 +41,10 @@ export type InputMessage =
       text?: string;
       modifiers?: number;
     }
+  | {
+      type: "navigation";
+      action: "back" | "forward" | "reload";
+    }
   | { type: "text"; text: string };
 
 /** What we send back. */
@@ -152,6 +156,13 @@ export async function startScreencast(
 
     async send(message: InputMessage) {
       if (stopped) return;
+      if (message.type === "navigation") {
+        if (message.action === "back") await page.goBack();
+        else if (message.action === "forward") await page.goForward();
+        else if (message.action === "reload") await page.reload();
+        // The WebSocket boundary receives untyped JSON. Unknown actions are deliberately ignored.
+        return;
+      }
       if (message.type === "mouse") {
         await client.send("Input.dispatchMouseEvent", {
           type:
