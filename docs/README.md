@@ -8,6 +8,7 @@ Start with the root [README](../README.md), then use these references:
 - [Coworkers](coworkers.md): durable Bot profiles, channels, visibility, deletion, and external AG-UI registration.
 - [Routines](routines.md): standing instructions a Bot runs on a schedule, the worker that fires them, and who they run as.
 - Plugins, one connector per page — what an administrator registers, what each person consents to, and what the failures mean:
+  - [Context.dev](plugins/context-dev.md)
   - [Google Drive](plugins/google-drive.md)
   - [Notion](plugins/notion.md)
 - [Deployment](deployment.md): the container, what is in the image, minimum sizes, and the platform notes.
