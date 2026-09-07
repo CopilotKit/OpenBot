@@ -240,8 +240,19 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     // is happening.
     stop_computers(engine)?;
 
+    /*
+     * WITH THE PROFILE, OR THE PICKED BOT KEEPS RUNNING.
+     *
+     * Measured: after pressing Stop, `compose ps` still listed `agent-harness`. Compose only acts
+     * on a profiled service when the profile is named, so Stop was leaving the one container the
+     * person actually chose running on their laptop, still holding its port. The next Start then
+     * refused because something was listening on it.
+     *
+     * Named unconditionally rather than only when a harness was picked: this has to stop what an
+     * earlier run started, and whether that run picked one is not something a Stop can know.
+     */
     let output = compose_command(engine, root, &Secrets::new())
-        .args(["down"])
+        .args(["--profile", "harness", "down"])
         .output()
         .map_err(|error| format!("could not stop the stack: {error}"))?;
 
@@ -441,6 +452,55 @@ pub fn services_that_exited(engine: &Address, root: &Path) -> Vec<(String, Strin
     dead
 }
 
+/**
+The ports this deployment's own containers already publish.
+
+MEASURED, AND IT LEAVES A PERSON STUCK. A start that fails after `compose up` leaves the containers
+it raised running, so the next press of Start finds the harness port held and refuses with
+"something is already listening on port 4206, which OpenBot uses for the Bot you picked" — about a
+container OpenBot itself started, which the person never saw and cannot find. There is no way
+forward from that screen.
+
+Our own containers are not a conflict: `compose up` is idempotent and reuses them. The check exists
+to catch somebody ELSE on the port, so what this deployment already publishes is excluded from it.
+
+An engine that cannot be asked returns nothing, which leaves the check exactly as strict as it was.
+*/
+pub fn ports_we_already_publish(engine: &Address, root: &Path) -> std::collections::HashSet<u16> {
+    let Ok(output) = compose_command(engine, root, &Secrets::new())
+        .args(["ps", "--format", "{{.Ports}}"])
+        .output()
+    else {
+        return std::collections::HashSet::new();
+    };
+    let listing = String::from_utf8_lossy(&output.stdout);
+    published_in(&listing)
+}
+
+/**
+The published ports in a `compose ps` listing.
+
+Pure, because the format is the contract and a regex over engine output is exactly the thing that
+should be pinned by a test. A row reads `127.0.0.1:4206->4206/tcp, [::1]:4206->4206/tcp`, and it is
+the number BEFORE the arrow that is taken: the one after it is the port inside the container, which
+nothing on this machine binds.
+*/
+pub fn published_in(listing: &str) -> std::collections::HashSet<u16> {
+    let mut ports = std::collections::HashSet::new();
+    for mapping in listing.split(',') {
+        let Some((host, _)) = mapping.split_once("->") else {
+            continue;
+        };
+        let Some((_, port)) = host.trim().rsplit_once(':') else {
+            continue;
+        };
+        if let Ok(port) = port.trim().parse::<u16>() {
+            ports.insert(port);
+        }
+    }
+    ports
+}
+
 /// Refuse to start if something already holds a port this deployment needs.
 ///
 /// Found the hard way: another deployment was listening on 3001, so the readiness check below was
@@ -448,7 +508,18 @@ pub fn services_that_exited(engine: &Address, root: &Path) -> Vec<(String, Strin
 /// ours. Checked before anything is spawned, because afterwards the two are indistinguishable from
 /// outside.
 pub fn port_already_taken(ports: &[(&'static str, u16)]) -> Option<String> {
+    port_already_taken_except(ports, &std::collections::HashSet::new())
+}
+
+/// The same check, with the ports this deployment already publishes treated as its own.
+pub fn port_already_taken_except(
+    ports: &[(&'static str, u16)],
+    ours: &std::collections::HashSet<u16>,
+) -> Option<String> {
     for (name, port) in ports {
+        if ours.contains(port) {
+            continue;
+        }
         if std::net::TcpStream::connect_timeout(
             &std::net::SocketAddr::from(([127, 0, 0, 1], *port)),
             std::time::Duration::from_millis(300),
@@ -721,6 +792,59 @@ mod tests {
     fn a_port_nobody_holds_is_not_reported_as_taken() {
         // 0 is never listening; this asserts the check does not invent a problem.
         assert!(port_already_taken(&[("nothing", 1)]).is_none());
+    }
+
+    /// The published side of a mapping, which is the only side anything on this machine binds.
+    /// Stop has to name the profile, or the one Bot the person picked keeps running.
+    #[test]
+    fn stopping_names_the_harness_profile() {
+        let source = include_str!("stack.rs");
+        assert!(
+            source.contains(r#".args(["--profile", "harness", "down"])"#),
+            "compose down without the profile leaves agent-harness running"
+        );
+    }
+
+    #[test]
+    fn the_published_ports_are_read_off_a_real_listing() {
+        // Verbatim from `compose ps --format '{{.Ports}}'` against a running deployment.
+        let listing = "127.0.0.1:4200->4200/tcp, [::1]:4200->4200/tcp\n\
+                       127.0.0.1:4206->4206/tcp, [::1]:4206->4206/tcp\n\
+                       127.0.0.1:5544->5432/tcp, [::1]:5544->5432/tcp\n";
+        let found = published_in(listing);
+        assert!(found.contains(&4200) && found.contains(&4206));
+        // The published port, not the one inside the container: nothing on this machine binds 5432.
+        assert!(found.contains(&5544), "the published side was missed");
+        assert!(
+            !found.contains(&5432),
+            "the container's own port was taken as published"
+        );
+    }
+
+    /// A service with no published ports says nothing rather than confusing the parser.
+    #[test]
+    fn a_listing_with_nothing_published_yields_nothing() {
+        assert!(published_in("").is_empty());
+        assert!(published_in("4206/tcp").is_empty());
+    }
+
+    /**
+    A port this deployment already publishes is not a stranger on the port.
+
+    The measured failure: a start that fell over after `compose up` left the harness container
+    running, and the next attempt refused because of it, naming a port the person never chose.
+    */
+    #[test]
+    fn our_own_published_port_is_not_a_conflict() {
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = held.local_addr().unwrap().port();
+        assert!(port_already_taken(&[("Bot you picked", port)]).is_some());
+        let ours = std::collections::HashSet::from([port]);
+        assert_eq!(
+            port_already_taken_except(&[("Bot you picked", port)], &ours),
+            None,
+            "a container this deployment started was treated as somebody else"
+        );
     }
 
     #[test]

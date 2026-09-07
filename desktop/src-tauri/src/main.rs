@@ -285,6 +285,9 @@ async fn start_stack(
         &openbot_env::Ports::default(),
         &deployment::image_variables(&root)?,
         picked.as_ref(),
+        // What a previous start of this deployment already minted. Without it every Start writes a
+        // new KEY_ENCRYPTION_KEY and orphans everything the server had encrypted under the old one.
+        &openbot_desktop_lib::vault::already_given(&root.join(".env"), openbot_env::GENERATED),
     );
     /*
      * The credentials come out here and never reach the file.
@@ -323,8 +326,19 @@ async fn start_stack(
      * its own, so this is not a rare case — anything else using it, including a previous run's
      * container, produces that sentence.
      */
+    /*
+     * Our own containers are not somebody else on the port.
+     *
+     * A start that failed after the containers went up left them running, and the next press of
+     * Start refused because of them, naming a port the person never chose and cannot find. See
+     * `ports_we_already_publish`. `compose up` reuses what is already there, so the only thing this
+     * check is for is a stranger on the port.
+     */
+    let ours = stack::ports_we_already_publish(&found, &root);
     if let Some(picked) = picked.as_ref() {
-        if let Some(problem) = stack::port_already_taken(&[("Bot you picked", picked.port)]) {
+        if let Some(problem) =
+            stack::port_already_taken_except(&[("Bot you picked", picked.port)], &ours)
+        {
             report(&app, "ports", false, problem.clone());
             return Err(problem.into());
         }
@@ -345,7 +359,17 @@ async fn start_stack(
         report(&app, "services", false, format!("{name} stopped: {why}"));
     }
 
-    // Before spawning: if these are already held, whatever answers later is not ours.
+    /*
+     * Reclaim this deployment's own host processes before deciding the ports are taken.
+     *
+     * Same failure as the containers above, by a different route: a start that got as far as
+     * spawning the server and then stopped left it running, and the next attempt refused because
+     * port 3001 was held. By its own server. These are found by working directory, so anything this
+     * stops belongs to this deployment and to no other.
+     */
+    stack::stop_processes_under(&root);
+
+    // Before spawning: if these are still held, whatever answers later is not ours.
     let ports = openbot_env::Ports::default();
     if let Some(problem) =
         stack::port_already_taken(&[("API server", ports.server), ("app", ports.app)])
