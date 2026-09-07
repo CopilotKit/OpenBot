@@ -208,6 +208,13 @@ describe("the rendered Netsfera production overlay", () => {
   test.each([
     ["jefe-erp", "computer_navigate", "chatgpt.com", false],
     ["recolector-documentos", "computer_navigate", "chatgpt.com", true],
+    ["recolector-documentos", "computer_navigate", "invoice.stripe.com", true],
+    [
+      "recolector-documentos",
+      "computer_navigate",
+      "checkout.stripe.com",
+      false,
+    ],
     ["recolector-documentos", "computer_navigate", "evil.example", false],
     ["recolector-documentos", "computer_run_command", "", false],
     ["recolector-documentos", "computer_write_file", "", false],
@@ -238,11 +245,13 @@ describe("the rendered Netsfera production overlay", () => {
   });
 
   test.each([
+    ["computer_list_files", ".", true],
     ["computer_list_files", "downloads/", true],
     ["computer_read_file", "downloads/invoice.pdf", true],
+    ["computer_read_file", ".", false],
     ["computer_list_files", "workspace/", false],
     ["computer_read_file", "workspace/secrets.env", false],
-  ])("permits %s only in downloads/", (toolName, path, allowed) => {
+  ])("limits collector file access for %s at %s", (toolName, path, allowed) => {
     const decision = evaluateActionPolicy(
       renderedOverlayPolicy(),
       context({
