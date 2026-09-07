@@ -207,6 +207,12 @@ pub struct Model {
     pub openai_api_key: String,
 }
 
+/// The line that separates what the shell owns from what it found.
+///
+/// Named rather than written inline, because `write` has to recognise its own from a previous start
+/// as well as put one down.
+const BANNER: &str = "# Written by OpenBot Desktop. Anything else in this file is left alone.";
+
 /// Write the file, replacing only what this owns.
 ///
 /// Lines the shell did not write are kept: somebody who added `OPENAI_API_KEY` by hand, or a
@@ -217,6 +223,15 @@ pub fn write(path: &Path, owned: &BTreeMap<String, String>) -> std::io::Result<(
     let mut out = String::new();
 
     for line in existing.lines() {
+        // The shell's own banner is not one of the lines it did not write. Keeping it and then
+        // writing another one added a banner and a blank line to the file on every start, so a
+        // deployment restarted fifty times had fifty of them above its settings.
+        // The shell's own banner is not one of the lines it did not write. Keeping it and then
+        // writing another one added a banner and a blank line to the file on every start, so a
+        // deployment restarted fifty times had fifty of them above its settings.
+        if line.trim() == BANNER {
+            continue;
+        }
         let key = line.split('=').next().unwrap_or("").trim();
         if key.is_empty() || line.trim_start().starts_with('#') || !owned.contains_key(key) {
             out.push_str(line);
@@ -224,10 +239,15 @@ pub fn write(path: &Path, owned: &BTreeMap<String, String>) -> std::io::Result<(
         }
     }
 
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str("\n# Written by OpenBot Desktop. Anything else in this file is left alone.\n");
+    // The blank lines the removed banners left behind go with them, so the separator below is one
+    // blank line rather than one more on every start.
+    let kept = out.trim_end_matches('\n');
+    let mut out = if kept.is_empty() {
+        String::new()
+    } else {
+        format!("{kept}\n")
+    };
+    out.push_str(&format!("\n{BANNER}\n"));
     for (key, value) in owned {
         out.push_str(&format!("{key}={value}\n"));
     }
@@ -268,6 +288,59 @@ mod tests {
             engine_socket: socket.map(str::to_string),
             detail: String::new(),
         }
+    }
+
+    #[test]
+    fn restarting_does_not_add_a_banner_to_the_file_every_time() {
+        // The banner is a comment, and the preserve pass keeps comments, so the file grew by one
+        // banner and one blank line on every start: fifty restarts, fifty banners.
+        let dir = std::env::temp_dir().join(format!("openbot-env-banner-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+
+        let mut owned = BTreeMap::new();
+        owned.insert("SERVER_PORT".to_string(), "3000".to_string());
+        owned.insert("KEY_ENCRYPTION_KEY".to_string(), "abc=".to_string());
+
+        for _ in 0..5 {
+            write(&path, &owned).unwrap();
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(text.matches(BANNER).count(), 1);
+        // And the file is the same size on the fifth start as on the first.
+        assert_eq!(text.lines().count(), 4);
+    }
+
+    #[test]
+    fn a_comment_somebody_else_wrote_is_still_kept() {
+        // Only the shell's own banner is dropped; the rule about leaving other lines alone stands.
+        let dir = std::env::temp_dir().join(format!("openbot-env-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "# our proxy needs this
+HTTPS_PROXY=http://proxy:8080
+",
+        )
+        .unwrap();
+
+        let mut owned = BTreeMap::new();
+        owned.insert("SERVER_PORT".to_string(), "3000".to_string());
+        write(&path, &owned).unwrap();
+        write(&path, &owned).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(text.contains("# our proxy needs this"));
+        assert!(text.contains("HTTPS_PROXY=http://proxy:8080"));
+        assert_eq!(text.matches("# our proxy needs this").count(), 1);
+        assert_eq!(text.matches(BANNER).count(), 1);
     }
 
     #[test]

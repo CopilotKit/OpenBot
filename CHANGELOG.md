@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The desktop app stops adding a banner to `.env` on every start
+
+`env::write` keeps the lines it did not write, and its own header comment is one of them, so each
+start preserved the previous banner and appended another. A deployment started fifty times had fifty
+copies of "Written by OpenBot Desktop" and fifty blank lines stacked above its settings. The banner
+is now recognised and replaced rather than kept, and comments somebody else put in the file are left
+alone exactly as before.
+
 ## 0.0.8
 
 ### A desktop shell that installs OpenBot and then becomes it
