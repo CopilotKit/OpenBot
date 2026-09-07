@@ -123,6 +123,13 @@ pub fn compose(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CHATGPT_AUTH_FILE",
+            /*
+             * Retired, and cleared for exactly that reason. An earlier version put the ChatGPT
+             * plan's access token here; nothing reads it now, and `write` preserves what it does
+             * not own, so without this line a machine that ran that version would keep somebody's
+             * plan token in a file forever with nothing ever using it again.
+             */
+            "CHATGPT_OAUTH_TOKEN",
         ] {
             env.insert(key.into(), String::new());
         }
@@ -992,6 +999,24 @@ mod model_tests {
             !env.values().any(|value| value.contains(secret)),
             "the plan's store reached the .env"
         );
+    }
+
+    /// A key this app has stopped using is emptied, not left holding a credential forever.
+    #[test]
+    fn the_retired_plan_token_is_cleared() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::OpenAi {
+                    api_key: "sk-x".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+        );
+        assert_eq!(env.get("CHATGPT_OAUTH_TOKEN"), Some(&String::new()));
     }
 
     /// The file is laid down even with no plan, because a missing mount source becomes a directory.
