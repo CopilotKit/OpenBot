@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Starting the desktop app again keeps the secrets the first start generated
+
+The shell generated a fresh set of secrets every time Start was pressed, including the
+`KEY_ENCRYPTION_KEY` that encrypts the credential vault. The database survives a stop, so the second
+session of an installed OpenBot met a vault it could no longer read: every stored credential failed
+to decrypt, with an error that named an operation rather than a cause. It also handed the server a
+`COMPUTER_TOKEN` that no computer created before the restart holds. The secrets an existing `.env`
+already carries are now kept, and only generated when there is nothing usable to keep — a value
+published in this repository does not count, and neither does a `KEY_ENCRYPTION_KEY` the server would
+refuse to start on.
+
 ## 0.0.8
 
 ### A desktop shell that installs OpenBot and then becomes it

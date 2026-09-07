@@ -207,13 +207,58 @@ pub struct Model {
     pub openai_api_key: String,
 }
 
-/// Write the file, replacing only what this owns.
+const MINTED: [&str; 6] = [
+    "AGENT_TOOL_TOKEN",
+    "COMPUTER_TOKEN",
+    "KEY_ENCRYPTION_KEY",
+    "MANAGED_AGENT_TOKEN",
+    "SUPERVISOR_TOKEN",
+    "WORKER_SHARED_SECRET",
+];
+
+const PUBLISHED: [&str; 4] = [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "openbot-dev-supervisor-token",
+    "openbot-dev-computer-token",
+    "openbot-dev-worker-secret",
+];
+
+fn usable(key: &str, value: &str) -> bool {
+    if value.is_empty() || PUBLISHED.contains(&value) {
+        return false;
+    }
+    if key == "KEY_ENCRYPTION_KEY" {
+        return matches!(BASE64.decode(value), Ok(bytes) if bytes.len() == 32);
+    }
+    true
+}
+
+fn carried(existing: &str) -> BTreeMap<String, String> {
+    let mut found = BTreeMap::new();
+    for line in existing.lines() {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if MINTED.contains(&key) && usable(key, value) {
+            found.insert(key.to_string(), value.to_string());
+        }
+    }
+    found
+}
+
+/// Write the file, replacing only what this owns and keeping the secrets it has already minted.
 ///
 /// Lines the shell did not write are kept: somebody who added `OPENAI_API_KEY` by hand, or a
 /// setting a later version of this app does not know about, should not lose it because the stack
 /// was restarted.
 pub fn write(path: &Path, owned: &BTreeMap<String, String>) -> std::io::Result<()> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let carried = carried(&existing);
     let mut out = String::new();
 
     for line in existing.lines() {
@@ -229,6 +274,7 @@ pub fn write(path: &Path, owned: &BTreeMap<String, String>) -> std::io::Result<(
     }
     out.push_str("\n# Written by OpenBot Desktop. Anything else in this file is left alone.\n");
     for (key, value) in owned {
+        let value = carried.get(key).unwrap_or(value);
         out.push_str(&format!("{key}={value}\n"));
     }
 
@@ -489,6 +535,200 @@ mod tests {
             "the key was written twice"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn env_at(dir: &std::path::Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        dir.join(".env")
+    }
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("openbot-env-{name}-{}", std::process::id()))
+    }
+
+    fn fresh() -> BTreeMap<String, String> {
+        compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+        )
+    }
+
+    fn value_of(text: &str, key: &str) -> String {
+        text.lines()
+            .find(|line| line.starts_with(&format!("{key}=")))
+            .map(|line| line.split_once('=').unwrap().1.to_string())
+            .unwrap_or_else(|| panic!("{key} is not in the file"))
+    }
+
+    #[test]
+    fn restarting_keeps_every_secret_the_first_start_minted() {
+        let dir = tmp("restart");
+        let path = env_at(&dir);
+
+        write(&path, &fresh()).unwrap();
+        let after_install = std::fs::read_to_string(&path).unwrap();
+        write(&path, &fresh()).unwrap();
+        let after_restart = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        for key in MINTED {
+            assert_eq!(
+                value_of(&after_install, key),
+                value_of(&after_restart, key),
+                "{key} was re-minted by a restart"
+            );
+        }
+    }
+
+    #[test]
+    fn a_restart_that_re_mints_the_key_would_leave_the_vault_unreadable() {
+        let dir = tmp("vault");
+        let path = env_at(&dir);
+
+        write(&path, &fresh()).unwrap();
+        let installed = value_of(
+            &std::fs::read_to_string(&path).unwrap(),
+            "KEY_ENCRYPTION_KEY",
+        );
+        write(&path, &fresh()).unwrap();
+        let restarted = value_of(
+            &std::fs::read_to_string(&path).unwrap(),
+            "KEY_ENCRYPTION_KEY",
+        );
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(
+            installed, restarted,
+            "every credential encrypted under the first key can no longer be decrypted"
+        );
+    }
+
+    #[test]
+    fn a_first_install_mints_rather_than_finding_nothing_to_carry() {
+        let dir = tmp("first");
+        let path = env_at(&dir);
+        write(&path, &fresh()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        for key in MINTED {
+            let value = value_of(&written, key);
+            assert!(!value.is_empty(), "{key} was written empty");
+            assert!(
+                !PUBLISHED.contains(&value.as_str()),
+                "{key} kept a published value"
+            );
+        }
+    }
+
+    #[test]
+    fn a_published_value_is_replaced_rather_than_carried_forward() {
+        let dir = tmp("published");
+        let path = env_at(&dir);
+        std::fs::write(
+            &path,
+            "KEY_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n\
+             SUPERVISOR_TOKEN=openbot-dev-supervisor-token\n\
+             COMPUTER_TOKEN=openbot-dev-computer-token\n\
+             WORKER_SHARED_SECRET=openbot-dev-worker-secret\n",
+        )
+        .unwrap();
+
+        write(&path, &fresh()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        for published in PUBLISHED {
+            assert!(
+                !written.contains(published),
+                "a .env copied from a developer kept {published}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_key_the_server_would_refuse_is_replaced_rather_than_carried_forward() {
+        for refused in ["", "not base64 at all", "c2hvcnQ="] {
+            let dir = tmp("refused");
+            let path = env_at(&dir);
+            std::fs::write(&path, format!("KEY_ENCRYPTION_KEY={refused}\n")).unwrap();
+
+            write(&path, &fresh()).unwrap();
+            let written = std::fs::read_to_string(&path).unwrap();
+            std::fs::remove_dir_all(&dir).ok();
+
+            let value = value_of(&written, "KEY_ENCRYPTION_KEY");
+            assert_ne!(
+                value, refused,
+                "carried a key the server refuses to start on"
+            );
+            assert_eq!(
+                BASE64.decode(&value).map(|bytes| bytes.len()).unwrap_or(0),
+                32,
+                "wrote a key that is not 32 bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn a_commented_out_secret_is_not_read_as_one() {
+        let dir = tmp("commented");
+        let path = env_at(&dir);
+        std::fs::write(&path, "# KEY_ENCRYPTION_KEY=commented-out-and-not-a-key\n").unwrap();
+
+        write(&path, &fresh()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_ne!(
+            value_of(&written, "KEY_ENCRYPTION_KEY"),
+            "commented-out-and-not-a-key"
+        );
+    }
+
+    #[test]
+    fn a_secret_somebody_set_by_hand_is_the_one_that_is_kept() {
+        let dir = tmp("byhand");
+        let path = env_at(&dir);
+        let theirs = BASE64.encode([7u8; 32]);
+        std::fs::write(&path, format!("KEY_ENCRYPTION_KEY={theirs}\n")).unwrap();
+
+        write(&path, &fresh()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(value_of(&written, "KEY_ENCRYPTION_KEY"), theirs);
+    }
+
+    #[test]
+    fn everything_that_is_not_a_secret_still_takes_this_run_s_value() {
+        let dir = tmp("notsecret");
+        let path = env_at(&dir);
+        write(&path, &fresh()).unwrap();
+
+        let moved = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports {
+                server: 3999,
+                ..Ports::default()
+            },
+            &pinned(),
+        );
+        write(&path, &moved).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(value_of(&written, "SERVER_PORT"), "3999");
+        assert_eq!(
+            value_of(&written, "SERVER_INTERNAL_URL"),
+            "http://127.0.0.1:3999",
+            "a setting that is not a secret was carried forward and is now stale"
+        );
     }
 }
 
