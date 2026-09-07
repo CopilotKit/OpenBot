@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pageCoordinates } from "./take-the-wheel";
+import { socketUrl } from "@/lib/socket-url";
 
 /**
  * Low-latency screencast used while a human is driving the Bot's browser.
@@ -57,10 +58,10 @@ export function LiveScreen({ computerId, driving, onProblem }: Props) {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    // Same origin, so the scheme follows the page: wss when the app is served over https.
-    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    // The server's own address, so no proxy has to carry the upgrade. The scheme still follows
+    // the page: wss when the app is served over https.
     const socket = new WebSocket(
-      `${scheme}://${window.location.host}/api/computers/${encodeURIComponent(computerId)}/stream`,
+      socketUrl(`/api/computers/${encodeURIComponent(computerId)}/stream`),
     );
     socketRef.current = socket;
     let closed = false;

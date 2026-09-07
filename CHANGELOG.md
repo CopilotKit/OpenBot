@@ -90,6 +90,15 @@ by itself.
 
 Nothing about existing rows changes. Every row already written, and every row a person's own click
 writes from now on, reads as a person, because that is what it was.
+### The live screen and live channel updates work again, and one request can no longer end the app
+
+The app opened its two WebSockets against its own address, so they travelled through Vite's `/api`
+proxy. Vite is run through bun, and under bun that proxy does not carry a WebSocket: neither the
+Bot's screen nor live channel updates ever connected, and the browser retried in a loop. Worse, an
+upgrade the server answered with an ordinary HTTP response — a 503 when a Bot's computer is not
+running, which is exactly when somebody opens the screen — crashed the process that served the app,
+taking the server and the worker with it in development. Both sockets now address the server
+directly, so nothing upgrades through the proxy and the proxy no longer offers to carry one.
 
 ## 0.0.8
 

@@ -31,16 +31,16 @@ const serving = {
   port: appPort.port,
   strictPort: true,
   proxy: {
-    // `ws: true` is required for the live screen. Without it Vite answers the upgrade request with
-    // the app's HTML and the socket fails with an opaque error that looks like a server problem.
     "/api": {
       target: `http://localhost:${apiPort.port}`,
-      ws: true,
     },
   },
 };
 
 export default defineConfig({
+  define: {
+    __OPENBOT_SERVER_PORT__: JSON.stringify(String(apiPort.port)),
+  },
   plugins: [tanstackRouter(), react(), tailwindcss()],
   resolve: {
     alias: {
