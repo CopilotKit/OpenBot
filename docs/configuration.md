@@ -262,6 +262,17 @@ then is a row nothing will read.
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run supervised computers under gVisor.                                  |
 | `COMPUTER_SANDBOX`                   | Set to `on` to enable Chromium's own sandbox where the host permits user namespaces. Which way it went is printed at start-up. |
 
+Changing `COMPUTER_BROWSER_MODE` affects new supervised computers. A computer that already exists is
+left running until its image changes or its container is recreated. To apply a mode-only change to
+all computers while preserving their browser profiles and workspaces, apply the new supervisor
+environment and remove only the owned containers (do not remove their volumes):
+
+```sh
+docker ps -aq --filter "label=openbot.namespace=openbot" | xargs -r docker rm -f
+```
+
+The supervisor recreates each computer with the same named volumes on its next request.
+
 `agent-computer` also reads:
 
 - `ACTION_TIMEOUT_MS`

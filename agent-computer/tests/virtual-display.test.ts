@@ -19,6 +19,7 @@ function displayRuntime() {
   const readyWait = deferred<void>();
   const stopWait = deferred<void>();
   const killed = deferred<NodeJS.Signals>();
+  const forceKilled = deferred<void>();
   const signals: NodeJS.Signals[] = [];
   let waits = 0;
   const process: DisplayProcess = {
@@ -27,6 +28,7 @@ function displayRuntime() {
     kill: (signal = "SIGTERM") => {
       signals.push(signal);
       killed.resolve(signal);
+      if (signal === "SIGKILL") forceKilled.resolve();
       return true;
     },
   };
@@ -34,7 +36,16 @@ function displayRuntime() {
     spawn: () => process,
     wait: () => (waits++ === 0 ? readyWait.promise : stopWait.promise),
   };
-  return { runtime, ready, exited, readyWait, stopWait, killed, signals };
+  return {
+    runtime,
+    ready,
+    exited,
+    readyWait,
+    stopWait,
+    killed,
+    forceKilled,
+    signals,
+  };
 }
 
 describe("the virtual display behind a full browser", () => {
@@ -93,5 +104,22 @@ describe("the virtual display behind a full browser", () => {
       "The virtual display did not become ready",
     );
     expect(fake.signals).toEqual(["SIGTERM"]);
+  });
+
+  test("force-kills a display that ignores the graceful stop deadline", async () => {
+    const fake = displayRuntime();
+    const starting = startVirtualDisplay("headed", fake.runtime);
+    fake.ready.resolve(":8");
+    const display = await starting;
+
+    const stopping = display?.stop();
+    expect(await fake.killed.promise).toBe("SIGTERM");
+    fake.stopWait.resolve();
+    await fake.forceKilled.promise;
+    fake.exited.resolve(137);
+    await stopping;
+
+    expect(fake.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(await display?.terminated).toEqual({ code: 137, expected: true });
   });
 });
