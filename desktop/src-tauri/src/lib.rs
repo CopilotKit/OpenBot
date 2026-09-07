@@ -4,6 +4,7 @@ pub mod deployment;
 pub mod engine;
 pub mod env;
 pub mod harness;
+pub mod provider;
 pub mod quiet;
 pub mod stack;
 pub mod supervise;

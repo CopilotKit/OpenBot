@@ -62,6 +62,12 @@ pub struct Harness {
     pub health_path: Option<String>,
     pub credential: Credential,
     pub maintainer: Maintainer,
+    /// The vendored mark's file stem, or `None` where no maintained set has one.
+    ///
+    /// A row with `None` shows its name alone. Nothing is drawn to fill the gap: see
+    /// `desktop/src/marks/README.md` for why an invented monogram is the one thing that would be a
+    /// problem. The name is on every row regardless, so an unmarked row is not a lesser one.
+    pub mark: Option<String>,
 }
 
 /// The list, ranked as the build doc ranks it: stars first, with downloads as the sanity check,
@@ -82,6 +88,10 @@ pub struct Harness {
 /// `registerCopilotKit` in the harness amounted to: that route serves the CopilotKit Runtime
 /// protocol, not AG-UI, and a run reached it and came back asking for a `method` field.
 pub fn catalogue() -> Vec<Harness> {
+    // Marks are vendored under the row's own id, so a row finds its own without a second mapping.
+    // The three with none are named here rather than discovered at draw time, because a missing
+    // file and a brand with no mark are different things and only one of them is a bug.
+    const UNMARKED: [&str; 3] = ["agno", "ag2", "langroid"];
     let ours = |id: &str, name: &str, summary: &str, maintainer: Maintainer| Harness {
         id: id.into(),
         name: name.into(),
@@ -90,6 +100,7 @@ pub fn catalogue() -> Vec<Harness> {
         health_path: Some("/health".into()),
         credential: Credential::AnyProvider,
         maintainer,
+        mark: (!UNMARKED.contains(&id)).then(|| id.to_string()),
     };
 
     vec![
@@ -143,6 +154,7 @@ pub fn catalogue() -> Vec<Harness> {
             health_path: Some("/health".into()),
             credential: Credential::Anthropic,
             maintainer: Maintainer::Community,
+            mark: Some("claude-agent-sdk".into()),
         },
         ours(
             "strands",
@@ -177,6 +189,8 @@ pub fn catalogue() -> Vec<Harness> {
             health_path: None,
             credential: Credential::TheirEndpoint,
             maintainer: Maintainer::Community,
+            // Stands for whatever the person already runs, so no vendor's mark is honest here.
+            mark: None,
         },
     ]
 }
@@ -239,6 +253,37 @@ mod tests {
                 "{absent} is In Progress upstream"
             );
         }
+    }
+
+    /// A named mark has to be a file that is actually there. The failure this catches is silent at
+    /// runtime: a row asks for a mark that was never vendored, and the tile draws empty, which
+    /// looks like a rendering bug rather than a missing asset.
+    #[test]
+    fn every_named_mark_is_vendored() {
+        for harness in catalogue() {
+            let Some(mark) = harness.mark else { continue };
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../src/marks")
+                .join(format!("{mark}.svg"));
+            assert!(
+                path.exists(),
+                "{} names mark {mark}, which is not vendored",
+                harness.id
+            );
+        }
+    }
+
+    /// The unmarked rows are the three brands with no mark in any maintained set. If a fourth
+    /// appears, somebody dropped a mark rather than a brand losing one, and that is worth stopping
+    /// for.
+    #[test]
+    fn only_the_three_brands_without_a_mark_are_unmarked() {
+        let unmarked: Vec<String> = catalogue()
+            .into_iter()
+            .filter(|h| h.mark.is_none() && h.image.is_some())
+            .map(|h| h.id)
+            .collect();
+        assert_eq!(unmarked, vec!["agno", "ag2", "langroid"]);
     }
 
     /// Mastra is offered, and the row is the assertion that the bridge on OpenBot's side works.

@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use openbot_desktop_lib::{
-    acquire, deployment, engine, env as openbot_env, quiet, stack, supervise, windows as win,
+    acquire, deployment, engine, env as openbot_env, harness, provider, quiet, stack, supervise,
+    windows as win,
 };
 
 /// The deployment this app installs.
@@ -427,6 +428,19 @@ fn default_root() -> String {
     stack::default_root().to_string_lossy().into_owned()
 }
 
+/// The harness picker's rows. Data, so the screen is a list and not twelve branches.
+#[tauri::command]
+fn harnesses() -> Vec<harness::Harness> {
+    harness::catalogue()
+}
+
+/// The model screen's rows. Independent of the picker above, and required to stay that way: no
+/// harness on that list is tied to a vendor's models, so choosing one may not narrow this.
+#[tauri::command]
+fn providers() -> Vec<provider::Provider> {
+    provider::catalogue()
+}
+
 /// `bun` from PATH, or the places an installer puts it when PATH has not been reloaded.
 fn which_bun() -> Option<PathBuf> {
     if quiet::command("bun")
@@ -634,6 +648,8 @@ fn main() {
             already_running,
             last_failure,
             default_root,
+            harnesses,
+            providers,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
