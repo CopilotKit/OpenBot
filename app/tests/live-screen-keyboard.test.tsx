@@ -75,6 +75,29 @@ for (const [name, modifier] of [
   });
 }
 
+test("a paste keyup stays local when the modifier was released first", async () => {
+  const socket = await liveSocket();
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "v",
+      code: "KeyV",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  window.dispatchEvent(
+    new KeyboardEvent("keyup", {
+      key: "v",
+      code: "KeyV",
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+
+  expect(socket.sent).toEqual([]);
+});
+
 test("a period carries the browser's virtual key code to the remote screen", async () => {
   const socket = await liveSocket();
   window.dispatchEvent(
