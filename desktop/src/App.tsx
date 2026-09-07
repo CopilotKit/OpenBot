@@ -52,6 +52,49 @@ export function App() {
   const [model, setModel] = useState<ModelChoice | null>(null);
   /** Model credentials a previous run already wrote, so the provider screen arrives filled in. */
   const [alreadyHeld, setAlreadyHeld] = useState<Record<string, string>>({});
+  /*
+   * Signing in to CopilotKit, which is how a managed deployment gets its key.
+   *
+   * The key field stays, behind the self-hosted disclosure, because somebody running their own
+   * Intelligence has a key this sign-in knows nothing about. David's call: sign in on the main
+   * path, paste on the developer one, which is the same shape as the model screen.
+   */
+  const [projects, setProjects] = useState<
+    { id: string; name: string }[] | null
+  >(null);
+  const [signingIn, setSigningIn] = useState(false);
+
+  async function signInToCopilotKit() {
+    setSigningIn(true);
+    setFailure(null);
+    try {
+      await invoke<string>("begin_intelligence_sign_in");
+      setProjects(
+        await invoke<{ id: string; name: string }[]>(
+          "finish_intelligence_sign_in",
+        ),
+      );
+    } catch (error) {
+      setFailure(asProblem(error));
+    } finally {
+      setSigningIn(false);
+    }
+  }
+
+  async function useProject(id: string) {
+    setSigningIn(true);
+    setFailure(null);
+    try {
+      // The key never passes through the window until it exists: it is created for the project
+      // chosen here and put straight into the field this screen already had.
+      setApiKey(await invoke<string>("intelligence_key_for", { project: id }));
+      setProjects(null);
+    } catch (error) {
+      setFailure(asProblem(error));
+    } finally {
+      setSigningIn(false);
+    }
+  }
   const [step, setStep] = useState<"welcome" | "harness" | "model" | "install">(
     "welcome",
   );
@@ -280,18 +323,58 @@ export function App() {
 
       {!running && (
         <>
-          <div className="field">
-            <label htmlFor="key">Intelligence project key</label>
-            <input
-              id="key"
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="the key from your Intelligence project"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
+          {/*
+            Sign in on the main path; paste behind the disclosure.
+
+            This screen used to ask for a key whose only source was two terminal commands, which is
+            the one thing the audience rule forbids. Somebody on managed CopilotKit now signs in and
+            OpenBot creates the key for the project they pick. Somebody running their own
+            Intelligence has a key this sign-in knows nothing about, so the field moves down there
+            with the addresses it belongs with.
+          */}
+          {apiKey ? (
+            <p className="lede">Connected to CopilotKit.</p>
+          ) : projects ? (
+            <>
+              <p className="lede">Which project should OpenBot use?</p>
+              <fieldset className="picker">
+                <legend className="sr-only">Project</legend>
+                {projects.map((project) => (
+                  <button
+                    type="button"
+                    key={project.id}
+                    className="tile"
+                    disabled={signingIn}
+                    onClick={() => useProject(project.id)}
+                  >
+                    <span className="tile-name">{project.name}</span>
+                  </button>
+                ))}
+              </fieldset>
+              {projects.length === 0 && (
+                <p className="footnote">
+                  That account has no projects yet. Make one at copilotkit.ai,
+                  then sign in again.
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="lede">
+                OpenBot keeps your conversations in CopilotKit. Sign in and it
+                sets the rest up for you.
+              </p>
+              <button
+                type="button"
+                disabled={signingIn}
+                onClick={signInToCopilotKit}
+              >
+                {signingIn
+                  ? "Waiting for your browser…"
+                  : "Sign in to CopilotKit"}
+              </button>
+            </>
+          )}
           <div className="field">
             <label htmlFor="root">Where OpenBot lives</label>
             <input
@@ -309,10 +392,22 @@ export function App() {
           */}
           <details>
             <summary>Point at your own Intelligence server</summary>
-            <p className="footnote" style={{ margin: "0.6rem 0 0" }}>
+            <p className="footnote" style={{ margin: "0.6rem 0 0.75rem" }}>
               These default to CopilotKit's managed service. Change them only if
-              you run Intelligence yourself.
+              you run Intelligence yourself, and paste that server's key below.
             </p>
+            <div className="field">
+              <label htmlFor="key">Project key</label>
+              <input
+                id="key"
+                type="password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder="the key from your own Intelligence"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
             <div className="field" style={{ marginTop: "0.75rem" }}>
               <label htmlFor="api">API URL</label>
               <input

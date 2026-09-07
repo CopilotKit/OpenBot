@@ -285,6 +285,63 @@ fn list_projects(product: &str) -> Result<Vec<Project>, String> {
 }
 
 /**
+Ask for a key for the project somebody chose.
+
+`POST /api/keys` with `project_id` and a name, which is the CLI's own call. The name says where the
+key came from, because a person looking at a list of keys months later deserves to know which one
+their laptop is using.
+*/
+pub fn provision_key(product: &str, project_id: &str) -> Result<String, String> {
+    let response = client()?
+        .post(format!("{PRODUCT_API}/api/keys"))
+        .bearer_auth(product)
+        .json(&serde_json::json!({
+            "project_id": project_id,
+            "name": "OpenBot Desktop",
+        }))
+        .send()
+        .map_err(|error| format!("A key could not be created: {error}"))?;
+    if !response.status().is_success() {
+        return Err("CopilotKit would not create a key for that project.".into());
+    }
+    let raw: serde_json::Value = response
+        .json()
+        .map_err(|error| format!("That key came back unreadable: {error}"))?;
+    key_in(&raw).ok_or_else(|| "That key came back without a value in it.".to_string())
+}
+
+/**
+The key itself, out of whatever the endpoint wrapped it in.
+
+Tolerant for the same reason the project list is, and pure so it is testable: this is somebody
+else's response shape, and a setup that fails at the last step because a field moved is the worst
+possible place to be strict.
+*/
+pub fn key_in(raw: &serde_json::Value) -> Option<String> {
+    for at in [
+        raw.get("key"),
+        raw.get("apiKey"),
+        raw.get("data"),
+        Some(raw),
+    ] {
+        let Some(value) = at else { continue };
+        if let Some(text) = value.as_str() {
+            if !text.trim().is_empty() {
+                return Some(text.to_string());
+            }
+        }
+        for field in ["key", "apiKey", "value", "token", "secret"] {
+            if let Some(text) = value.get(field).and_then(|v| v.as_str()) {
+                if !text.trim().is_empty() {
+                    return Some(text.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/**
 The projects in whatever shape that endpoint answers with.
 
 Tolerant on purpose, and pure so it can be tested against real payloads: this is somebody else's
@@ -366,6 +423,26 @@ mod tests {
                 name: "p2".into()
             }]
         );
+    }
+
+    /// The key, wherever that response decided to put it.
+    #[test]
+    fn the_key_is_found_in_the_shapes_that_endpoint_uses() {
+        for raw in [
+            serde_json::json!({"key": "cpk-abc"}),
+            serde_json::json!({"apiKey": "cpk-abc"}),
+            serde_json::json!({"key": {"value": "cpk-abc"}}),
+            serde_json::json!({"data": {"key": "cpk-abc"}}),
+        ] {
+            assert_eq!(key_in(&raw).as_deref(), Some("cpk-abc"), "{raw}");
+        }
+    }
+
+    /// A response with no key is a failure to report, not an empty string to write into `.env`.
+    #[test]
+    fn a_response_without_a_key_yields_nothing() {
+        assert_eq!(key_in(&serde_json::json!({"key": ""})), None);
+        assert_eq!(key_in(&serde_json::json!({"unexpected": true})), None);
     }
 
     #[test]

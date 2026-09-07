@@ -36,6 +36,11 @@ struct Shell {
     /// moment it is worth reading. Held here instead, and asked for on load.
     last_failure: Mutex<Option<openbot_desktop_lib::problem::Problem>>,
     root: Mutex<Option<PathBuf>>,
+    /// An Intelligence sign-in waiting for its loopback callback.
+    signing_in_to_intelligence:
+        Mutex<Option<openbot_desktop_lib::intelligence::SigningInToIntelligence>>,
+    /// The credential that sign-in produced, held so a project can be chosen with it.
+    intelligence_credential: Mutex<Option<String>>,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
     ///
     /// Held for the same reason the Claude one is: a person leaves and comes back in the middle.
@@ -673,6 +678,57 @@ async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String>
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
 
+/// Start signing in to Intelligence and return the address a browser has to open.
+#[tauri::command]
+async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, String> {
+    let (signing, url) = openbot_desktop_lib::intelligence::SigningInToIntelligence::begin()?;
+    *app.state::<Shell>()
+        .signing_in_to_intelligence
+        .lock()
+        .unwrap() = Some(signing);
+    let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
+    Ok(url)
+}
+
+/// Wait for that sign-in, and answer with the projects it can see.
+///
+/// The credential is kept on this side rather than handed to the window: the window's business is
+/// which project, and a credential it never holds is one it cannot leak into a log or a screenshot.
+#[tauri::command]
+async fn finish_intelligence_sign_in(
+    app: tauri::AppHandle,
+) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, String> {
+    let signing = app
+        .state::<Shell>()
+        .signing_in_to_intelligence
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
+    let (credential, projects) = tauri::async_runtime::spawn_blocking(move || signing.finish())
+        .await
+        .map_err(|error| format!("The sign-in did not finish: {error}"))??;
+    *app.state::<Shell>().intelligence_credential.lock().unwrap() = Some(credential);
+    Ok(projects)
+}
+
+/// Create a key for the project somebody chose, and hand it back for the field.
+#[tauri::command]
+async fn intelligence_key_for(app: tauri::AppHandle, project: String) -> Result<String, String> {
+    let credential = app
+        .state::<Shell>()
+        .intelligence_credential
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Sign in to CopilotKit first.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::intelligence::provision_key(&credential, &project)
+    })
+    .await
+    .map_err(|error| format!("A key could not be created: {error}"))?
+}
+
 /// The model screen's rows. Independent of the picker above, and required to stay that way: no
 /// harness on that list is tied to a vendor's models, so choosing one may not narrow this.
 #[tauri::command]
@@ -907,6 +963,9 @@ fn main() {
             finish_claude_sign_in,
             begin_chatgpt_sign_in,
             finish_chatgpt_sign_in,
+            begin_intelligence_sign_in,
+            finish_intelligence_sign_in,
+            intelligence_key_for,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
