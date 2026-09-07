@@ -111,6 +111,61 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, S
     Ok(engine::detect())
 }
 
+/// What the model screen chose, as the window sends it.
+///
+/// Deliberately not the same type as `ModelCredential`: this is whatever arrived over the bridge,
+/// and turning it into a credential is a conversion that can fail. Accepting the credential type
+/// directly would make an impossible combination representable at the boundary.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChosenModel {
+    provider: String,
+    login: String,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+    /// Minted by signing in, never typed. Absent for every path but a plan.
+    token: Option<String>,
+}
+
+impl ChosenModel {
+    fn into_credential(self) -> Result<openbot_env::ModelCredential, String> {
+        let given = |value: Option<String>| value.unwrap_or_default().trim().to_string();
+        match (self.provider.as_str(), self.login.as_str()) {
+            ("openai", "api-key") => Ok(openbot_env::ModelCredential::OpenAi {
+                api_key: given(self.api_key),
+            }),
+            ("anthropic", "api-key") => Ok(openbot_env::ModelCredential::Anthropic {
+                api_key: given(self.api_key),
+            }),
+            ("anthropic", "plan") => {
+                let token = given(self.token);
+                if token.is_empty() {
+                    // Said rather than written blank. A plan with no token produces a stack that
+                    // comes up and a Bot that cannot answer, which reads as a broken product.
+                    return Err("That Claude plan was not signed in to.".into());
+                }
+                Ok(openbot_env::ModelCredential::ClaudePlan { token })
+            }
+            /*
+             * A signed-in ChatGPT plan is not a special case: the login yields a token and the
+             * address to send it to, which is exactly the compatible shape. It arrives here with
+             * `base_url` already filled in by the sign-in, not by a person.
+             */
+            ("openai", "plan") | ("openai-compatible", "endpoint") => {
+                Ok(openbot_env::ModelCredential::Compatible {
+                    base_url: given(self.base_url),
+                    api_key: given(self.api_key.or(self.token)),
+                    model: given(self.model),
+                })
+            }
+            (provider, login) => Err(format!(
+                "{provider} cannot be connected by {login}, which is not a way in that screen offers."
+            )),
+        }
+    }
+}
+
 /// Write the `.env`, raise the containers, migrate, then start the three host processes.
 #[tauri::command]
 async fn start_stack(
@@ -119,7 +174,7 @@ async fn start_stack(
     api_url: String,
     gateway_ws_url: String,
     api_key: String,
-    openai_api_key: String,
+    model: ChosenModel,
 ) -> Result<(), String> {
     let root = PathBuf::from(root);
 
@@ -180,7 +235,9 @@ async fn start_stack(
             gateway_ws_url,
             api_key,
         },
-        &openbot_env::Model { openai_api_key },
+        &openbot_env::Model {
+            credential: model.into_credential()?,
+        },
         &status,
         &openbot_env::Ports::default(),
         &deployment::image_variables(&root)?,

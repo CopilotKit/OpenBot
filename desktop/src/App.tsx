@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { HarnessPicker } from "./HarnessPicker";
+import { type ModelChoice, ProviderPicker } from "./ProviderPicker";
 
 type EngineStatus = {
   engine: "docker" | "podman" | null;
@@ -27,7 +29,16 @@ export function App() {
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [modelKey, setModelKey] = useState("");
+  /*
+   * Which Bot and which model, as two separate answers.
+   *
+   * Held here rather than inside the screens so going Back does not lose what was already chosen:
+   * the flow is resumable at the screen it stopped on, and a wizard that asks twice is one nobody
+   * finishes. `null` means not answered yet, which is what decides the screen below.
+   */
+  const [harness, setHarness] = useState<string | null>(null);
+  const [model, setModel] = useState<ModelChoice | null>(null);
+  const [step, setStep] = useState<"harness" | "model" | "install">("harness");
   const [apiUrl, setApiUrl] = useState(
     "https://api.intelligence.copilotkit.ai",
   );
@@ -108,7 +119,10 @@ export function App() {
         apiUrl,
         gatewayWsUrl: wsUrl,
         apiKey,
-        openaiApiKey: modelKey,
+        // The whole answer from the model screen, so the Rust side decides which keys that
+        // implies. Sending a bare key here is what made `ANTHROPIC_API_KEY` and a plan token
+        // expressible at the same time.
+        model,
       });
       setRunning(true);
       // The window becomes OpenBot. Nobody double-clicked this to look at a status screen.
@@ -151,6 +165,40 @@ export function App() {
     );
   }
 
+  /*
+   * Which Bot, then which model, then install. Before this the screen asked for an OpenAI key in a
+   * password field, which is the developer-shaped main path the audience rule exists to prevent.
+   *
+   * Skipped entirely when a stack is already up: somebody returning to a running OpenBot is not
+   * setting one up, and asking them to pick a Bot again would be the wizard asking twice.
+   */
+  if (!running && step === "harness") {
+    return (
+      <main>
+        <HarnessPicker
+          chosen={harness}
+          onChoose={setHarness}
+          onContinue={() => setStep("model")}
+        />
+      </main>
+    );
+  }
+
+  if (!running && step === "model") {
+    return (
+      <main>
+        <ProviderPicker
+          chosen={model}
+          onChoose={(choice) => {
+            setModel(choice);
+            setStep("install");
+          }}
+          onBack={() => setStep("harness")}
+        />
+      </main>
+    );
+  }
+
   return (
     <main>
       {/* A failure outranks `running`. The supervisor gives up on a process and sends the window
@@ -185,18 +233,6 @@ export function App() {
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               placeholder="the key from your Intelligence project"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="model">Model key</label>
-            <input
-              id="model"
-              type="password"
-              value={modelKey}
-              onChange={(event) => setModelKey(event.target.value)}
-              placeholder="an OpenAI key, so the Bots can answer"
               autoComplete="off"
               spellCheck={false}
             />
@@ -277,11 +313,10 @@ export function App() {
           <button
             type="button"
             onClick={start}
+            // The model is answered by its own screen now, so what is checked here is that it was
+            // answered at all, not that some field on this screen is non-empty.
             disabled={
-              busy ||
-              apiKey.trim() === "" ||
-              modelKey.trim() === "" ||
-              root.trim() === ""
+              busy || apiKey.trim() === "" || !model || root.trim() === ""
             }
           >
             {busy ? "Working…" : "Start OpenBot"}

@@ -62,6 +62,13 @@ fn secret() -> String {
 /// Addresses use `127.0.0.1` rather than `localhost` deliberately. Compose publishes on both
 /// loopback addresses, so either would connect, but naming one removes a whole class of question
 /// about which the resolver picked.
+/// Blank is not a value. See the note in `compose`.
+fn insert_if_given(env: &mut BTreeMap<String, String>, key: &str, value: &str) {
+    if !value.trim().is_empty() {
+        env.insert(key.into(), value.trim().to_string());
+    }
+}
+
 pub fn compose(
     intelligence: &Intelligence,
     model: &Model,
@@ -71,13 +78,38 @@ pub fn compose(
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
 
-    // Left out entirely when blank: written empty, Compose passes an empty string and the Bot's own
-    // refusal becomes a confusing one about a key that is set and useless.
-    if !model.openai_api_key.trim().is_empty() {
-        env.insert(
-            "OPENAI_API_KEY".into(),
-            model.openai_api_key.trim().to_string(),
-        );
+    /*
+     * Only the keys the choice actually implies, and never a blank one: written empty, Compose
+     * passes an empty string and the Bot's refusal becomes a confusing one about a key that is set
+     * and useless.
+     *
+     * THE CLAUDE PLAN DELIBERATELY WRITES NO `ANTHROPIC_API_KEY`. The SDK prefers the key over the
+     * OAuth token, so a stale key from an earlier attempt would quietly bill a person who just
+     * signed in to a plan. Since `write` below preserves lines it does not own, the key is written
+     * as empty here rather than omitted: omitting it would leave an older one in place, which is
+     * the same failure by a different route.
+     */
+    match &model.credential {
+        ModelCredential::None => {}
+        ModelCredential::OpenAi { api_key } => {
+            insert_if_given(&mut env, "OPENAI_API_KEY", api_key);
+        }
+        ModelCredential::Anthropic { api_key } => {
+            insert_if_given(&mut env, "ANTHROPIC_API_KEY", api_key);
+        }
+        ModelCredential::ClaudePlan { token } => {
+            insert_if_given(&mut env, "CLAUDE_CODE_OAUTH_TOKEN", token);
+            env.insert("ANTHROPIC_API_KEY".into(), String::new());
+        }
+        ModelCredential::Compatible {
+            base_url,
+            api_key,
+            model: name,
+        } => {
+            insert_if_given(&mut env, "OPENAI_API_KEY", api_key);
+            insert_if_given(&mut env, "OPENAI_BASE_URL", base_url);
+            insert_if_given(&mut env, "BOT_MODEL", name);
+        }
     }
 
     env.insert("INTELLIGENCE_API_URL".into(), intelligence.api_url.clone());
@@ -200,11 +232,40 @@ pub struct Intelligence {
 /// The model credential, which belongs to the provider and not to the harness.
 ///
 /// Both Bots the deployment ships refuse to start without one, saying so plainly: "This Bot cannot
-/// answer without a model." Choosing between providers is its own screen later; this is the one key
-/// without which nothing answers at all.
+/// answer without a model." Which provider is the person's own screen, and no harness constrains
+/// it: see `provider::catalogue`.
 #[derive(Clone, Debug, Default)]
 pub struct Model {
-    pub openai_api_key: String,
+    pub credential: ModelCredential,
+}
+
+/// How this deployment reaches a model.
+///
+/// One type rather than a bag of optional strings, because the combinations that must never be
+/// written are the whole point. `ANTHROPIC_API_KEY` takes precedence over the plan's OAuth token in
+/// the Claude Agent SDK, so writing both silently bills a person who signed in to a plan they
+/// already pay for. Two fields cannot express "never both"; a choice can.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ModelCredential {
+    /// Nothing chosen. Written as nothing at all rather than as empty strings: an empty key set is
+    /// a key that is present and useless, and the Bot's refusal then names a key it can see.
+    #[default]
+    None,
+    /// A key typed for OpenAI.
+    OpenAi { api_key: String },
+    /// A key typed for Anthropic.
+    Anthropic { api_key: String },
+    /// A Claude plan, signed in to. The token is minted by `claude setup-token` and never typed.
+    ClaudePlan { token: String },
+    /// Anything that speaks the OpenAI wire format, at an address the person gave.
+    ///
+    /// Also where a signed-in ChatGPT plan lands, because that login yields a token and the address
+    /// to send it to, which is this shape and not a special case.
+    Compatible {
+        base_url: String,
+        api_key: String,
+        model: String,
+    },
 }
 
 /// Write the file, replacing only what this owns.
@@ -548,7 +609,9 @@ mod model_tests {
         let env = compose(
             &intelligence(),
             &Model {
-                openai_api_key: "sk-a-real-one".into(),
+                credential: ModelCredential::OpenAi {
+                    api_key: "sk-a-real-one".into(),
+                },
             },
             &engine(),
             &Ports::default(),
@@ -565,12 +628,113 @@ mod model_tests {
         let env = compose(
             &intelligence(),
             &Model {
-                openai_api_key: "   ".into(),
+                credential: ModelCredential::OpenAi {
+                    api_key: "   ".into(),
+                },
             },
             &engine(),
             &Ports::default(),
             &pinned(),
         );
         assert!(!env.contains_key("OPENAI_API_KEY"));
+    }
+
+    /// The must-not case, and the reason `ModelCredential` is a choice rather than two fields.
+    ///
+    /// `ANTHROPIC_API_KEY` wins over the plan's OAuth token in the Claude Agent SDK, so a stack
+    /// carrying both bills a person who signed in to a plan they already pay for. The key is
+    /// written EMPTY rather than left out, because `write` preserves lines it does not own and an
+    /// older key would otherwise survive.
+    #[test]
+    fn a_claude_plan_never_leaves_an_anthropic_key_in_place() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::ClaudePlan {
+                    token: "oauth-token".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            Some(&"oauth-token".to_string())
+        );
+        assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&String::new()));
+    }
+
+    /// An Anthropic key is written as one, and does not become an OpenAI key because that is the
+    /// field this struct used to have.
+    #[test]
+    fn an_anthropic_key_is_an_anthropic_key() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::Anthropic {
+                    api_key: "sk-ant-real".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_API_KEY"),
+            Some(&"sk-ant-real".to_string())
+        );
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+    }
+
+    /// The everything-else row writes all three, since an endpoint without a model name is an
+    /// endpoint that answers with a complaint about a model nobody chose.
+    #[test]
+    fn a_compatible_endpoint_carries_its_address_and_its_model() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::Compatible {
+                    base_url: "https://example.test/v1".into(),
+                    api_key: "sk-whatever".into(),
+                    model: "some-model".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+        );
+        assert_eq!(
+            env.get("OPENAI_BASE_URL"),
+            Some(&"https://example.test/v1".to_string())
+        );
+        assert_eq!(env.get("BOT_MODEL"), Some(&"some-model".to_string()));
+        assert_eq!(env.get("OPENAI_API_KEY"), Some(&"sk-whatever".to_string()));
+        // Nothing about Anthropic is implied by choosing an OpenAI-compatible endpoint.
+        assert!(!env.contains_key("ANTHROPIC_API_KEY"));
+    }
+
+    /// Nothing chosen writes no model keys at all, rather than empty ones.
+    #[test]
+    fn no_choice_writes_no_model_keys() {
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+        );
+        for key in [
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "BOT_MODEL",
+        ] {
+            assert!(
+                !env.contains_key(key),
+                "{key} was written with no choice made"
+            );
+        }
     }
 }
