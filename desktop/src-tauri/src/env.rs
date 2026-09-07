@@ -64,6 +64,21 @@ impl Default for Ports {
     }
 }
 
+/**
+The secrets this shell mints rather than being given.
+
+Named in one place because two things read the list: `compose` keeps whichever of them a previous
+run already produced, and `vault` puts them in the credential store rather than the file.
+*/
+pub const GENERATED: &[&str] = &[
+    "KEY_ENCRYPTION_KEY",
+    "SUPERVISOR_TOKEN",
+    "COMPUTER_TOKEN",
+    "WORKER_SHARED_SECRET",
+    "MANAGED_AGENT_TOKEN",
+    "AGENT_TOOL_TOKEN",
+];
+
 /// 32 random bytes, base64. The shape `KEY_ENCRYPTION_KEY` requires and a fine shape for the rest.
 fn secret() -> String {
     let mut bytes = [0u8; 32];
@@ -91,6 +106,9 @@ pub fn compose(
     images: &[(String, String)],
     // Absent means no harness was picked, and the package's gated rows stay dropped.
     harness: Option<&PickedHarness>,
+    // What a previous run of THIS deployment already minted, so it is not minted again. Empty on a
+    // machine that has never run OpenBot, which is exactly when generating is right.
+    kept: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
 
@@ -184,12 +202,29 @@ pub fn compose(
     );
     env.insert("INTELLIGENCE_API_KEY".into(), intelligence.api_key.clone());
 
-    env.insert("KEY_ENCRYPTION_KEY".into(), secret());
-    env.insert("SUPERVISOR_TOKEN".into(), secret());
-    env.insert("COMPUTER_TOKEN".into(), secret());
-    env.insert("WORKER_SHARED_SECRET".into(), secret());
-    env.insert("MANAGED_AGENT_TOKEN".into(), secret());
-    env.insert("AGENT_TOOL_TOKEN".into(), secret());
+    /*
+     * GENERATED ONCE PER DEPLOYMENT, NOT ONCE PER START.
+     *
+     * `KEY_ENCRYPTION_KEY` is the one that makes this data loss rather than churn: every secret the
+     * server keeps goes through it, and `encrypt-sso-config.ts` names the symptom itself, that a
+     * changed key leaves stored configuration unreadable and sign-in broken until it is registered
+     * again. A new one on every Start quietly orphaned everything the last run had encrypted.
+     *
+     * The rest are kept for a smaller reason that points the same way: a Bot's computer is a
+     * container that outlives a restart and was created holding the old `COMPUTER_TOKEN`, so
+     * rotating buys nothing and can only strand it.
+     *
+     * Two installs still do not share a key. A machine with nothing stored generates, which is what
+     * a first run is.
+     */
+    for key in GENERATED {
+        let value = kept
+            .get(*key)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(secret);
+        env.insert((*key).into(), value);
+    }
 
     env.insert(
         "DATABASE_URL".into(),
@@ -558,6 +593,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         for key in [
             "COMPUTER_TOKEN",
@@ -574,6 +610,59 @@ mod tests {
         }
     }
 
+    /**
+    A SECOND START OF THE SAME DEPLOYMENT KEEPS THE KEY. This is the data-loss one.
+
+    Every secret the server stores goes through `KEY_ENCRYPTION_KEY`, and `encrypt-sso-config.ts`
+    names the symptom itself: a changed key leaves stored configuration unreadable and sign-in
+    broken until it is registered again. The shell used to mint a new one on every Start, so
+    everything the previous run had encrypted was orphaned by pressing a button labelled Start.
+    */
+    #[test]
+    fn starting_again_keeps_what_the_first_start_minted() {
+        let first = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        let kept: BTreeMap<String, String> = GENERATED
+            .iter()
+            .map(|key| ((*key).to_string(), first[*key].clone()))
+            .collect();
+        let second = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &kept,
+        );
+        for key in GENERATED {
+            assert_eq!(first.get(*key), second.get(*key), "{key} was minted again");
+        }
+    }
+
+    /// A blank one is not a value to keep. An empty line is what clearing looks like, not a secret.
+    #[test]
+    fn a_blank_kept_secret_is_minted_rather_than_carried() {
+        let kept = BTreeMap::from([("KEY_ENCRYPTION_KEY".to_string(), "   ".to_string())]);
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &kept,
+        );
+        assert!(env["KEY_ENCRYPTION_KEY"].trim().len() > 20);
+    }
+
     #[test]
     fn two_installs_do_not_share_a_key() {
         let a = compose(
@@ -583,6 +672,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         let b = compose(
             &intelligence(),
@@ -591,6 +681,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_ne!(a.get("KEY_ENCRYPTION_KEY"), b.get("KEY_ENCRYPTION_KEY"));
     }
@@ -604,6 +695,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS")
@@ -622,6 +714,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("TENANT_PACKAGE_DIR").map(String::as_str),
@@ -638,6 +731,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("OPENBOT_SINGLE_USER").map(String::as_str),
@@ -654,6 +748,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("SERVER_INTERNAL_URL").map(String::as_str),
@@ -670,6 +765,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("COMPUTER_SUPERVISOR_URL").map(String::as_str),
@@ -686,6 +782,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert!(!without.contains_key("ENGINE_SOCKET"));
 
@@ -696,6 +793,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             with.get("ENGINE_SOCKET").map(String::as_str),
@@ -712,6 +810,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         for key in [
             "DATABASE_URL",
@@ -737,6 +836,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         write(&path, &env, &BTreeMap::new()).unwrap();
 
@@ -763,6 +863,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         write(&path, &first, &BTreeMap::new()).unwrap();
         let second = compose(
@@ -772,6 +873,7 @@ mod tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         write(&path, &second, &BTreeMap::new()).unwrap();
 
@@ -828,6 +930,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         for (_, variable) in crate::deployment::IMAGE_VARIABLES {
             let reference = env
@@ -850,6 +953,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("OPENAI_API_KEY").map(String::as_str),
@@ -870,6 +974,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
     }
@@ -893,6 +998,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("CLAUDE_CODE_OAUTH_TOKEN"),
@@ -923,6 +1029,7 @@ mod model_tests {
                     mastra,
                     remote_agent_id: String::new(),
                 }),
+                &BTreeMap::new(),
             );
             assert_eq!(
                 env.get("PICKED_HARNESS_KIND").map(String::as_str),
@@ -945,6 +1052,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         for key in [
             "PICKED_HARNESS_IMAGE",
@@ -975,6 +1083,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("CHATGPT_AUTH_FILE"),
@@ -1002,6 +1111,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert!(
             !env.values().any(|value| value.contains(secret)),
@@ -1023,6 +1133,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(env.get("CHATGPT_OAUTH_TOKEN"), Some(&String::new()));
     }
@@ -1084,6 +1195,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("CLAUDE_CODE_OAUTH_TOKEN"),
@@ -1113,6 +1225,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("ANTHROPIC_API_KEY"),
@@ -1138,6 +1251,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         assert_eq!(
             env.get("OPENAI_BASE_URL"),
@@ -1159,6 +1273,7 @@ mod model_tests {
             &Ports::default(),
             &pinned(),
             None,
+            &BTreeMap::new(),
         );
         // Untouched, not cleared: a key somebody set by hand is theirs to keep while the model
         // screen has not answered. See the note in `compose`.
