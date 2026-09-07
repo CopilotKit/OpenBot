@@ -1242,13 +1242,36 @@ console.info(`agent-computer listening on http://localhost:${PORT}`);
  *
  * `stop_grace_period` in docker-compose.yml is what gives this time to run.
  */
+let shuttingDown = false;
+
+async function shutDown(reason: string, exitCode: number): Promise<void> {
+  if (shuttingDown) return;
+  // Set before the first await: a display exiting while Chromium flushes is part of this shutdown,
+  // not a second failure racing it.
+  shuttingDown = true;
+  console.info(`${reason}: closing the browser so its profile is flushed`);
+  await profiles.closeAll();
+  await VIRTUAL_DISPLAY?.stop();
+  process.exit(exitCode);
+}
+
+if (VIRTUAL_DISPLAY) {
+  void VIRTUAL_DISPLAY.terminated.then(({ code, expected }) => {
+    if (expected || shuttingDown) return;
+    console.error(
+      JSON.stringify({
+        type: "computer-virtual-display-exited",
+        exitCode: code,
+      }),
+    );
+    // A headed Chromium cannot recover without its display. Let the container restart policy build
+    // the pair together again instead of advertising a healthy service whose next browser fails.
+    void shutDown("virtual display exited", 1);
+  });
+}
+
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
-    void (async () => {
-      console.info(`${signal}: closing the browser so its profile is flushed`);
-      await profiles.closeAll();
-      await VIRTUAL_DISPLAY?.stop();
-      process.exit(0);
-    })();
+    void shutDown(signal, 0);
   });
 }

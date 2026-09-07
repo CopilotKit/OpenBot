@@ -5,49 +5,93 @@ import {
   type DisplayRuntime,
 } from "../src/virtual-display";
 
-function displayRuntime(ready: boolean) {
-  let stopped = false;
-  let finish = (_code: number) => {};
+function deferred<T>() {
+  let resolve = (_value: T) => {};
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function displayRuntime() {
+  const ready = deferred<string>();
+  const exited = deferred<number>();
+  const readyWait = deferred<void>();
+  const stopWait = deferred<void>();
+  const killed = deferred<NodeJS.Signals>();
+  const signals: NodeJS.Signals[] = [];
+  let waits = 0;
   const process: DisplayProcess = {
-    exited: new Promise<number>((resolve) => {
-      finish = resolve;
-    }),
-    kill: () => {
-      stopped = true;
-      finish(0);
+    ready: ready.promise,
+    exited: exited.promise,
+    kill: (signal = "SIGTERM") => {
+      signals.push(signal);
+      killed.resolve(signal);
       return true;
     },
   };
   const runtime: DisplayRuntime = {
     spawn: () => process,
-    ready: async () => ready,
-    wait: async () => {},
+    wait: () => (waits++ === 0 ? readyWait.promise : stopWait.promise),
   };
-  return { runtime, stopped: () => stopped };
+  return { runtime, ready, exited, readyWait, stopWait, killed, signals };
 }
 
 describe("the virtual display behind a full browser", () => {
   test("does not start for the existing headless mode", async () => {
-    const fake = displayRuntime(true);
+    const fake = displayRuntime();
     expect(await startVirtualDisplay("headless", fake.runtime)).toBeNull();
-    expect(fake.stopped()).toBe(false);
+    expect(fake.signals).toEqual([]);
   });
 
-  test("stays alive for headed Chromium and stops with the computer", async () => {
-    const fake = displayRuntime(true);
-    const display = await startVirtualDisplay("headed", fake.runtime);
+  test("uses the display allocated by the Xvfb process it owns", async () => {
+    const fake = displayRuntime();
+    const starting = startVirtualDisplay("headed", fake.runtime);
+    fake.ready.resolve(":143");
+    const display = await starting;
 
-    expect(display?.name).toBe(":99");
-    expect(fake.stopped()).toBe(false);
-    await display?.stop();
-    expect(fake.stopped()).toBe(true);
+    expect(display?.name).toBe(":143");
+    expect(fake.signals).toEqual([]);
+
+    const stopping = display?.stop();
+    fake.exited.resolve(0);
+    await stopping;
+    expect(fake.signals).toEqual(["SIGTERM"]);
+    expect(await display?.terminated).toEqual({ code: 0, expected: true });
   });
 
-  test("refuses to launch Chromium when the display never becomes ready", async () => {
-    const fake = displayRuntime(false);
-    await expect(startVirtualDisplay("headed", fake.runtime)).rejects.toThrow(
+  test("reports an unexpected exit after the display became ready", async () => {
+    const fake = displayRuntime();
+    const starting = startVirtualDisplay("headed", fake.runtime);
+    fake.ready.resolve(":7");
+    const display = await starting;
+
+    fake.exited.resolve(23);
+
+    expect(await display?.terminated).toEqual({ code: 23, expected: false });
+  });
+
+  test("refuses to launch Chromium when its own display exits before readiness", async () => {
+    const fake = displayRuntime();
+    const starting = startVirtualDisplay("headed", fake.runtime);
+    fake.exited.resolve(17);
+
+    await expect(starting).rejects.toThrow(
+      "The virtual display exited before it became ready (exit 17)",
+    );
+    expect(fake.signals).toEqual([]);
+  });
+
+  test("stops its display after the readiness deadline", async () => {
+    const fake = displayRuntime();
+    const starting = startVirtualDisplay("headed", fake.runtime);
+    fake.readyWait.resolve();
+    expect(await fake.killed.promise).toBe("SIGTERM");
+    fake.exited.resolve(0);
+
+    await expect(starting).rejects.toThrow(
       "The virtual display did not become ready",
     );
-    expect(fake.stopped()).toBe(true);
+    expect(fake.signals).toEqual(["SIGTERM"]);
   });
 });

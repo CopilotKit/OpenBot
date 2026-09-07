@@ -9,7 +9,10 @@ import { join } from "node:path";
  *
  * Asked for explicitly because it needs a virtual display and a real Chromium:
  *
- *   xvfb-run -a env OPENBOT_HEADED_BROWSER=1 bun test tests/headed-browser.test.ts
+ *   OPENBOT_HEADED_BROWSER=1 bun test tests/headed-browser.test.ts
+ *
+ * The computer starts and owns Xvfb itself. Wrapping this command in xvfb-run would hide display
+ * allocation bugs by giving Chromium a second display it does not own.
  */
 const asked = process.env.OPENBOT_HEADED_BROWSER === "1";
 const TOKEN = "headed-browser-test-token";
