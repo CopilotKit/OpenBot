@@ -1,6 +1,7 @@
 import { serve } from "bun";
 import type { Page } from "playwright";
 import { parseAriaSnapshot, type SnapshotElement } from "./aria-snapshot";
+import { browserModeFromEnv } from "./browser-mode";
 import {
   actsOnTheComputer,
   isOpenPath,
@@ -21,6 +22,7 @@ import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
 import { type InputMessage, startScreencast } from "./screencast";
 import { createShell } from "./shell";
 import { createViewerSlot, type ViewerSlot } from "./viewer";
+import { startVirtualDisplay } from "./virtual-display";
 import {
   createWorkspace,
   WorkspaceFileError,
@@ -71,6 +73,17 @@ if (!COMPUTER_TOKEN) {
   );
   process.exit(1);
 }
+
+const BROWSER_MODE = browserModeFromEnv(process.env.COMPUTER_BROWSER_MODE);
+const VIRTUAL_DISPLAY = await startVirtualDisplay(BROWSER_MODE);
+if (VIRTUAL_DISPLAY) process.env.DISPLAY = VIRTUAL_DISPLAY.name;
+console.info(
+  JSON.stringify({
+    type: "computer-browser-mode",
+    mode: BROWSER_MODE,
+    display: VIRTUAL_DISPLAY?.name ?? null,
+  }),
+);
 
 const PORT = numberFromEnv("PORT", 4100);
 const NAVIGATION_TIMEOUT_MS = numberFromEnv("NAVIGATION_TIMEOUT_MS", 30000);
@@ -749,6 +762,7 @@ serve<StreamData>({
         // deployment without it, not a failure, and it is reported rather than omitted so the
         // difference between "no identity here" and "identity broken" is visible.
         identity: await identity(),
+        browserMode: BROWSER_MODE,
       });
     }
 
@@ -1233,6 +1247,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     void (async () => {
       console.info(`${signal}: closing the browser so its profile is flushed`);
       await profiles.closeAll();
+      await VIRTUAL_DISPLAY?.stop();
       process.exit(0);
     })();
   });
