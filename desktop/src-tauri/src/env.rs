@@ -483,13 +483,21 @@ pub fn write_plan_store(dir: &Path, credential: &ModelCredential) -> std::io::Re
     Ok(())
 }
 
-pub fn write(path: &Path, owned: &BTreeMap<String, String>) -> std::io::Result<()> {
+pub fn write(
+    path: &Path,
+    owned: &BTreeMap<String, String>,
+    // Keys to take out and not put back. This is how a credential leaves the file on a machine that
+    // ran a version which wrote it there: the settings move to the store, and without this the old
+    // copy would sit in the file forever, since `write` otherwise keeps every line it does not own.
+    purge: &BTreeMap<String, String>,
+) -> std::io::Result<()> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     let mut out = String::new();
 
     for line in existing.lines() {
         let key = line.split('=').next().unwrap_or("").trim();
-        if key.is_empty() || line.trim_start().starts_with('#') || !owned.contains_key(key) {
+        let ours = owned.contains_key(key) || purge.contains_key(key);
+        if key.is_empty() || line.trim_start().starts_with('#') || !ours {
             out.push_str(line);
             out.push('\n');
         }
@@ -730,7 +738,7 @@ mod tests {
             &pinned(),
             None,
         );
-        write(&path, &env).unwrap();
+        write(&path, &env, &BTreeMap::new()).unwrap();
 
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(
@@ -756,7 +764,7 @@ mod tests {
             &pinned(),
             None,
         );
-        write(&path, &first).unwrap();
+        write(&path, &first, &BTreeMap::new()).unwrap();
         let second = compose(
             &intelligence(),
             &Model::default(),
@@ -765,7 +773,7 @@ mod tests {
             &pinned(),
             None,
         );
-        write(&path, &second).unwrap();
+        write(&path, &second, &BTreeMap::new()).unwrap();
 
         let written = std::fs::read_to_string(&path).unwrap();
         assert_eq!(

@@ -12,4 +12,5 @@ pub mod provider;
 pub mod quiet;
 pub mod stack;
 pub mod supervise;
+pub mod vault;
 pub mod windows;

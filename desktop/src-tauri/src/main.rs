@@ -286,13 +286,24 @@ async fn start_stack(
         &deployment::image_variables(&root)?,
         picked.as_ref(),
     );
-    openbot_env::write(&root.join(".env"), &settings)
+    /*
+     * The credentials come out here and never reach the file.
+     *
+     * `.env` is a settings file, and a settings file is something somebody can open, read out to
+     * support or paste into a chat. A model key, a plan token and the tokens these services prove
+     * themselves to each other with are not settings. They go to this machine's own credential
+     * store, and travel from there to the processes that need them as environment, which is where
+     * a secret can live without being written down. See `vault` for what each platform gets.
+     */
+    let (settings, secrets) = openbot_desktop_lib::vault::split(settings);
+    openbot_env::write(&root.join(".env"), &settings, &secrets)
         .map_err(|e| format!("could not write .env: {e}"))?;
+    openbot_desktop_lib::vault::remember_all(&secrets)?;
     // Beside the `.env` and before the containers, because compose mounts it. See
     // `write_plan_store`: an absent file becomes a directory the sign-in can never write into.
     openbot_env::write_plan_store(&root, &credential)
         .map_err(|e| format!("could not write the sign-in file: {e}"))?;
-    report(&app, "env", true, ".env written");
+    report(&app, "env", true, "settings written, credentials stored");
 
     // Said before rather than after. On a machine that has never run OpenBot this pulls five
     // images, and a person watching a button that says "Working" has no way to tell a download
@@ -320,11 +331,11 @@ async fn start_stack(
     }
 
     // The harness is a service only when one was picked; see `stack::up`.
-    stack::up(&found, &root, picked.is_some())?;
+    stack::up(&found, &root, picked.is_some(), &secrets)?;
     report(&app, "services", true, "containers up");
 
     report(&app, "migrate", true, "applying migrations");
-    stack::migrate(&found, &root)?;
+    stack::migrate(&found, &root, &secrets)?;
     report(&app, "migrate", true, "migrations applied");
 
     // `compose up` succeeds once it has asked for everything. A service that then exits is not its
@@ -361,7 +372,7 @@ async fn start_stack(
 
     let mut started = Vec::new();
     for process in stack::HOST_PROCESSES.iter() {
-        let child = stack::spawn_host_process(process, &root, &logs, &bun)
+        let child = stack::spawn_host_process(process, &root, &logs, &bun, &secrets)
             .map_err(|e| format!("could not start {}: {e}", process.name))?;
         started.push((process.name, child));
         report(&app, process.name, true, "started");
@@ -394,7 +405,7 @@ async fn start_stack(
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1;
-    supervise_host_processes(app.clone(), root, logs, bun, generation);
+    supervise_host_processes(app.clone(), root, logs, bun, secrets, generation);
 
     outcome.inspect_err(|error| report(&app, "answering", false, error.clone()))?;
     report(&app, "answering", true, "the API and the app are answering");
@@ -572,7 +583,9 @@ async fn ask_the_bot(
     question: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let root = PathBuf::from(root);
-    let settings = openbot_env::already_set(
+    // The addresses come from the file and the token from the credential store, which is where
+    // this run put it. Asked for together, because one without the other cannot ask anything.
+    let settings = openbot_desktop_lib::vault::already_given(
         &root.join(".env"),
         &[
             "PICKED_HARNESS_URL",
@@ -642,7 +655,7 @@ anywhere, and only the settings the wizard asks about are read.
 */
 #[tauri::command]
 fn already_configured(root: String) -> std::collections::BTreeMap<String, String> {
-    openbot_env::already_set(
+    openbot_desktop_lib::vault::already_given(
         &PathBuf::from(root).join(".env"),
         &[
             "INTELLIGENCE_API_KEY",
@@ -849,6 +862,9 @@ fn supervise_host_processes(
     root: PathBuf,
     logs: PathBuf,
     bun: PathBuf,
+    // Carried rather than fetched again on each restart. A restart happens when something is
+    // already wrong, and a credential prompt at that moment is the worst time to ask for one.
+    secrets: stack::Secrets,
     generation: u64,
 ) {
     std::thread::spawn(move || {
@@ -944,7 +960,7 @@ fn supervise_host_processes(
                 else {
                     continue;
                 };
-                match stack::spawn_host_process(process, &root, &logs, &bun) {
+                match stack::spawn_host_process(process, &root, &logs, &bun, &secrets) {
                     Ok(child) => {
                         let mut children = shell.children.lock().unwrap();
                         children.retain(|(held, _)| *held != name);

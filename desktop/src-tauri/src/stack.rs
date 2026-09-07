@@ -94,9 +94,22 @@ pub struct StackStatus {
     pub detail: String,
 }
 
-fn compose_command(engine: &Address, root: &Path) -> Command {
+/**
+The credentials a deployment needs, handed to a child process rather than left in its `.env`.
+
+THIS IS WHY THE FILE CAN STOP HOLDING THEM. Compose resolves `${VAR}` from its own environment
+before it reads `.env`, so a secret passed here reaches exactly the containers that declare it and
+is written down nowhere. The host processes take theirs the same way, alongside the `--env-file`
+that still carries the settings.
+
+A `BTreeMap` rather than the vault directly: reading a credential store once per run and passing
+what it gave is one prompt and one failure point, where reading it per command is neither.
+*/
+pub type Secrets = std::collections::BTreeMap<String, String>;
+
+fn compose_command(engine: &Address, root: &Path, secrets: &Secrets) -> Command {
     let mut command = engine.command();
-    command.current_dir(root).args(["compose"]);
+    command.current_dir(root).args(["compose"]).envs(secrets);
     command
 }
 
@@ -105,7 +118,12 @@ fn compose_command(engine: &Address, root: &Path) -> Command {
 /// `--no-build` is the point of the whole published-images job: a desktop install has no toolchain,
 /// and without it Compose quietly starts compiling Chromium. Failing loudly on a missing image is
 /// the better answer, because it names a pull that did not happen.
-pub fn up(engine: &Address, root: &Path, harness: bool) -> Result<(), crate::problem::Problem> {
+pub fn up(
+    engine: &Address,
+    root: &Path,
+    harness: bool,
+    secrets: &Secrets,
+) -> Result<(), crate::problem::Problem> {
     /*
      * The picked harness rides in on its profile.
      *
@@ -114,7 +132,7 @@ pub fn up(engine: &Address, root: &Path, harness: bool) -> Result<(), crate::pro
      * fails the whole `up` rather than the one service nobody asked for. The flag comes before
      * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
      */
-    let mut command = compose_command(engine, root);
+    let mut command = compose_command(engine, root, secrets);
     if harness {
         command.args(["--profile", "harness"]);
     }
@@ -146,11 +164,15 @@ pub fn up(engine: &Address, root: &Path, harness: bool) -> Result<(), crate::pro
 /// A release step rather than a start step, for the reason `server/Dockerfile` gives: two replicas
 /// starting together would race, and a failed migration should stop the start rather than leave a
 /// half-migrated database serving.
-pub fn migrate(engine: &Address, root: &Path) -> Result<(), crate::problem::Problem> {
+pub fn migrate(
+    engine: &Address,
+    root: &Path,
+    secrets: &Secrets,
+) -> Result<(), crate::problem::Problem> {
     // No `--no-build` here: `compose run` does not take it, and passing it fails on the flag rather
     // than on anything to do with migrations. Building is prevented the other way, by
     // `IMAGE_PULL_POLICY=missing` in the environment, which makes the service pull instead.
-    let output = compose_command(engine, root)
+    let output = compose_command(engine, root, secrets)
         .args(["run", "--rm", "migrate"])
         .output()
         .map_err(|error| format!("could not run migrations: {error}"))?;
@@ -218,7 +240,7 @@ pub fn down(engine: &Address, root: &Path) -> Result<(), String> {
     // is happening.
     stop_computers(engine)?;
 
-    let output = compose_command(engine, root)
+    let output = compose_command(engine, root, &Secrets::new())
         .args(["down"])
         .output()
         .map_err(|error| format!("could not stop the stack: {error}"))?;
@@ -270,6 +292,7 @@ pub fn spawn_host_process(
     root: &Path,
     logs: &Path,
     bun: &Path,
+    secrets: &Secrets,
 ) -> std::io::Result<std::process::Child> {
     std::fs::create_dir_all(logs)?;
     let out = std::fs::File::create(logs.join(format!("{}.log", process.name)))?;
@@ -277,6 +300,14 @@ pub fn spawn_host_process(
 
     let mut command = command(bun);
     command.current_dir(root.join(process.cwd));
+    /*
+     * The credentials, alongside the `--env-file` that carries the settings.
+     *
+     * They are not in that file any more, and this is where they rejoin. The environment wins over
+     * the file either way, so a machine still holding an older run's copy is overridden rather than
+     * fought with.
+     */
+    command.envs(secrets);
     if process.script.is_empty() {
         command.args(["run", process.package_script]);
     } else {
@@ -356,7 +387,7 @@ An engine that cannot be asked returns nothing rather than failing. This is only
 explain a failure that has already happened, and a second failure on top of it helps nobody.
 */
 pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> String {
-    compose_command(engine, root)
+    compose_command(engine, root, &Secrets::new())
         .args(["logs", "--tail", &lines.to_string(), service])
         .output()
         .ok()
@@ -374,7 +405,7 @@ pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> 
 /// problem. Both Bots exit immediately without a model key, saying exactly that, and without this
 /// the window reports a healthy stack while nothing can answer a question.
 pub fn services_that_exited(engine: &Address, root: &Path) -> Vec<(String, String)> {
-    let Ok(output) = compose_command(engine, root)
+    let Ok(output) = compose_command(engine, root, &Secrets::new())
         .args(["ps", "-a", "--format", "{{.Service}}\t{{.State}}"])
         .output()
     else {
@@ -393,7 +424,7 @@ pub fn services_that_exited(engine: &Address, root: &Path) -> Vec<(String, Strin
         if service.trim() == "migrate" {
             continue;
         }
-        let why = compose_command(engine, root)
+        let why = compose_command(engine, root, &Secrets::new())
             .args(["logs", "--tail", "3", service.trim()])
             .output()
             .ok()
