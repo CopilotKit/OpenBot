@@ -156,6 +156,23 @@ pub fn wants_the_code(output: &str) -> bool {
 }
 
 /**
+Whether the endpoint refused the code.
+
+Its own answer because the alternative is waiting out the timeout and then saying something vague.
+The CLI prints `OAuth error: …` and offers to retry, so it stays alive and there is nothing further
+to wait for: the code is spent either way and the flow has to start again.
+*/
+pub fn refused_the_code(output: &str) -> bool {
+    // Whitespace-insensitive, for the same reason as the prompt: the words are cursor-positioned
+    // rather than spaced, so the phrase as written never appears in the stripped text.
+    let squashed: String = plain(output)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    squashed.contains("OAuthError:") || squashed.contains("OAutherror:")
+}
+
+/**
 The token in whatever the command printed.
 
 Pure and separate from the running of it, because the shape of this output is the thing here most
@@ -295,21 +312,67 @@ impl SigningIn {
         {
             return Err(self.gave_up("The sign-in stopped before it asked for the code."));
         }
-        // Trimmed, because a code arrives pasted and a trailing newline or space is the person's
-        // clipboard rather than their intent.
-        writeln!(self.writer, "{}", code.trim())
+        /*
+         * `\r`, NOT `\n`, and this is the difference between working and silently not.
+         *
+         * Enter on a terminal is a carriage return, and a TUI reading a pty in raw mode takes that
+         * and not a line feed. Sent `\n` the code appears in the prompt, masked, and is never
+         * submitted: the flow then times out and reports the code was refused, when nothing had
+         * looked at it. Found by dumping the transcript, which ended with the prompt and exactly as
+         * many asterisks as the code had characters.
+         *
+         * Trimmed, because a code arrives pasted and a trailing newline or space is the person's
+         * clipboard rather than their intent.
+         */
+        write!(self.writer, "{}", code.trim())
             .map_err(|e| format!("The code could not be sent to the sign-in: {e}"))?;
         self.writer
             .flush()
             .map_err(|e| format!("The code could not be sent to the sign-in: {e}"))?;
 
-        match self.wait_for(token_in, PATIENCE_FOR_THE_TOKEN) {
-            Some(token) => {
+        /*
+         * Enter goes separately, after a pause, and both details are load-bearing.
+         *
+         * `\r` rather than `\n` because Enter on a terminal is a carriage return and a TUI reading a
+         * pty in raw mode takes that. And on its own rather than appended, because the CLI turns on
+         * bracketed paste and a code arrives as one burst: a 32-character code with the return in
+         * the same write submitted fine, and a 92-character one did not — it sat in the prompt,
+         * masked, until the wait expired, and was then reported as refused when nothing had read it.
+         * Two writes with a gap makes the return a keypress after the input has settled rather than
+         * the tail of a paste.
+         */
+        std::thread::sleep(Duration::from_millis(250));
+        write!(self.writer, "\r")
+            .map_err(|e| format!("The code could not be sent to the sign-in: {e}"))?;
+        self.writer
+            .flush()
+            .map_err(|e| format!("The code could not be sent to the sign-in: {e}"))?;
+
+        // Either answer ends the wait. Watching only for the token means a refused code costs the
+        // whole timeout and is then reported as though nothing had happened.
+        enum Outcome {
+            Token(String),
+            Refused,
+        }
+        let outcome = self.wait_for(
+            |seen| {
+                token_in(seen)
+                    .map(Outcome::Token)
+                    .or_else(|| refused_the_code(seen).then_some(Outcome::Refused))
+            },
+            PATIENCE_FOR_THE_TOKEN,
+        );
+
+        match outcome {
+            Some(Outcome::Token(token)) => {
                 self.stop();
                 Ok(token)
             }
+            Some(Outcome::Refused) => Err(self.gave_up(
+                "That code was refused. A code can only be used once and does not last long, so start the sign-in again and bring back a fresh one.",
+            )),
             None => Err(self.gave_up(
-                "That code was not accepted. Start the sign-in again and copy the code from the                  browser once more.",
+                "That sign-in did not finish. Start it again and approve the request in your browser.",
             )),
         }
     }
@@ -348,6 +411,19 @@ impl SigningIn {
     window and drawn on a screen. Whatever went wrong, the person gets a sentence they can act on.
     */
     fn gave_up(&mut self, saying: &str) -> String {
+        /*
+         * A way to see what the terminal actually said, for diagnosing this by hand.
+         *
+         * Off unless `OPENBOT_SIGNIN_TRANSCRIPT` names a file, because the transcript can contain
+         * the token: a sign-in that printed one in a shape the scan did not match is exactly the
+         * case worth looking at, and exactly the case where the file holds a live credential. Never
+         * on in a build somebody installs, and never in the message handed to the window.
+         */
+        if let Ok(path) = std::env::var("OPENBOT_SIGNIN_TRANSCRIPT") {
+            if let Ok(seen) = self.output.lock() {
+                let _ = std::fs::write(path, seen.as_str());
+            }
+        }
         self.stop();
         saying.to_string()
     }
@@ -405,6 +481,14 @@ mod tests {
         // And still when a terminal does use spaces.
         assert!(wants_the_code("Paste code here if prompted >"));
         assert!(!wants_the_code("Opening browser to sign in…"));
+    }
+
+    /// The refusal, in the shape the CLI writes it. Taken from a real run with a bad code.
+    #[test]
+    fn a_refused_code_is_recognised() {
+        let real = "Paste\u{1b}[8Gcode\u{1b}[13Ghere> ****\r\n\u{1b}[2GOAuth\u{1b}[8Gerror:\u{1b}[15GRequest\u{1b}[23Gfailed\u{1b}[30Gwith\u{1b}[35Gstatus\u{1b}[42Gcode\u{1b}[47G400\r\nPress\u{1b}[7GEnter\u{1b}[13Gto\u{1b}[16Gretry.";
+        assert!(refused_the_code(real), "the real refusal was not seen");
+        assert!(!refused_the_code("Paste code here if prompted >"));
     }
 
     #[test]
