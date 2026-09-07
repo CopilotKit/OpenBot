@@ -589,3 +589,31 @@ details > summary:hover {
   /* Monospace here is for machine output, which is what it is for. */
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/*
+ * The answer on the last screen. Given weight on purpose: it is the one piece of text in the whole
+ * wizard that was produced rather than written, and it is the proof the install actually worked.
+ */
+.answer {
+  margin: 20px 0 4px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--raised);
+  border: 1px solid var(--hair);
+}
+
+.answer-from {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-faint);
+}
+
+.answer-text {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-wrap;
+}

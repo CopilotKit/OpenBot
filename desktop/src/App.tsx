@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { DEFAULT_HARNESS, HarnessPicker } from "./HarnessPicker";
 import { type ModelChoice, ProviderPicker } from "./ProviderPicker";
+import { Ask } from "./Ask";
 import { Welcome } from "./Welcome";
 
 type EngineStatus = {
@@ -24,6 +25,39 @@ type Progress = { step: string; ok: boolean; detail: string };
 type Problem = { said: string; detail?: string | null };
 
 /** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */
+/**
+ * What the last screen offers to ask, mirroring `ask::SUGGESTED`.
+ *
+ * Two copies of one sentence, and a test in `ask.rs` pins what it has to contain. The window needs
+ * it before it calls anything, and the Rust side needs it for the case where somebody clears the
+ * field, so neither can be the only one that has it.
+ */
+const SUGGESTED_QUESTION = "What is 17 times 23?";
+
+/**
+ * A failure, in both registers, wherever one happens.
+ *
+ * One implementation because there is one rule: the sentence is the headline and the real output
+ * lives behind a disclosure. A second copy is how one screen ends up showing an engine dump as its
+ * title.
+ */
+function Failure({ problem }: { problem: Problem }) {
+  return (
+    <div className="blocker" role="alert">
+      <h2>That did not finish</h2>
+      <p>{problem.said}</p>
+      {/* The real output, kept but not the headline. Whoever is debugging opens this; the person
+          reading the sentence above never has to. */}
+      {problem.detail && (
+        <details className="detail-of">
+          <summary>Technical details</summary>
+          <pre>{problem.detail}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function asProblem(thrown: unknown): Problem {
   if (thrown && typeof thrown === "object" && "said" in thrown) {
     return thrown as Problem;
@@ -95,9 +129,9 @@ export function App() {
       setSigningIn(false);
     }
   }
-  const [step, setStep] = useState<"welcome" | "harness" | "model" | "install">(
-    "welcome",
-  );
+  const [step, setStep] = useState<
+    "welcome" | "harness" | "model" | "install" | "ask"
+  >("welcome");
   const [apiUrl, setApiUrl] = useState(
     "https://api.intelligence.copilotkit.ai",
   );
@@ -211,13 +245,16 @@ export function App() {
         harness,
       });
       setRunning(true);
-      // The window becomes OpenBot. Nobody double-clicked this to look at a status screen.
-      //
-      // Said out loud when it does not happen. Swallowed, the window sits on the setup screen
-      // looking like the start failed, while every step on it is ticked.
-      await invoke("show_openbot").catch((error) =>
-        setFailure(asProblem(error)),
-      );
+      /*
+       * One screen short of the handover, on purpose.
+       *
+       * The window used to become OpenBot here, the moment the stack was up. But up is not the
+       * same as working: a refused key or a lapsed plan gives a stack that starts clean and a Bot
+       * that cannot answer, and handing over at this point means somebody discovers that inside
+       * the product with no idea which of their answers caused it. So the last screen asks a
+       * question, and the handover waits for an answer to come back.
+       */
+      setStep("ask");
     } catch (error) {
       setFailure(asProblem(error));
     } finally {
@@ -277,6 +314,31 @@ export function App() {
           onContinue={() => setStep("model")}
           onBack={() => setStep("welcome")}
         />
+      </main>
+    );
+  }
+
+  /*
+   * Shown while the stack is running, which every other screen is skipped for. This is the one
+   * screen that needs a running stack: it is the proof, and there is nothing to ask before there
+   * is something to ask.
+   */
+  if (step === "ask") {
+    return (
+      <main>
+        <Ask
+          suggestion={SUGGESTED_QUESTION}
+          onAsk={(question) =>
+            invoke<string>("ask_the_bot", { root, question })
+          }
+          onOpen={() => {
+            invoke("show_openbot").catch((error) =>
+              setFailure(asProblem(error)),
+            );
+          }}
+          onBack={() => setStep("model")}
+        />
+        {failure && <Failure problem={failure} />}
       </main>
     );
   }
@@ -444,20 +506,7 @@ export function App() {
         </div>
       )}
 
-      {failure && (
-        <div className="blocker" role="alert">
-          <h2>That did not finish</h2>
-          <p>{failure.said}</p>
-          {/* The real output, kept but not the headline. Whoever is debugging opens this; the
-              person reading the sentence above never has to. */}
-          {failure.detail && (
-            <details className="detail-of">
-              <summary>Technical details</summary>
-              <pre>{failure.detail}</pre>
-            </details>
-          )}
-        </div>
-      )}
+      {failure && <Failure problem={failure} />}
 
       <div className="row">
         {running ? (

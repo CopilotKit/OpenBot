@@ -557,6 +557,83 @@ fn default_root() -> String {
 }
 
 /**
+Put the wizard's last question to the Bot, and hand back what it said.
+
+THE DEFINITION OF DONE FOR AN INSTALL. Everything before this proves that things started; only this
+proves the configuration works. See `ask` for why a run that says nothing is a failure rather than
+an empty answer, and why the harness's log is fetched to fill the developer half.
+
+The endpoint and the token come out of the `.env` this run just wrote, not from the window. They are
+facts about the deployment, and a window carrying them would be a second copy to keep in step.
+*/
+#[tauri::command]
+async fn ask_the_bot(
+    root: String,
+    question: String,
+) -> Result<String, openbot_desktop_lib::problem::Problem> {
+    let root = PathBuf::from(root);
+    let settings = openbot_env::already_set(
+        &root.join(".env"),
+        &[
+            "PICKED_HARNESS_URL",
+            "MANAGED_AGENT_AG_UI_URL",
+            "MANAGED_AGENT_TOKEN",
+        ],
+    );
+    // The picked harness if there is one, and the Bot that ships with OpenBot if there is not.
+    // Both speak AG-UI at the same address shape, so this screen does not care which it got.
+    let endpoint = settings
+        .get("PICKED_HARNESS_URL")
+        .filter(|url| !url.trim().is_empty())
+        .or_else(|| settings.get("MANAGED_AGENT_AG_UI_URL"))
+        .cloned()
+        .unwrap_or_default();
+    let token = settings
+        .get("MANAGED_AGENT_TOKEN")
+        .cloned()
+        .unwrap_or_default();
+    if endpoint.trim().is_empty() || token.trim().is_empty() {
+        return Err(openbot_desktop_lib::problem::Problem::plain(
+            "OpenBot cannot find the Bot it just set up. Stop OpenBot and start it again.",
+        ));
+    }
+
+    let question = if question.trim().is_empty() {
+        openbot_desktop_lib::ask::SUGGESTED.to_string()
+    } else {
+        question
+    };
+
+    let asked = tauri::async_runtime::spawn_blocking(move || {
+        match openbot_desktop_lib::ask::ask(&endpoint, &token, &question) {
+            Ok(answer) => Ok(answer),
+            // The empty sentence is `ask` saying it has no reason to give, which is the case the
+            // log exists for. Anything else already carries both halves.
+            Err(problem) if problem.said.is_empty() => Err(None),
+            Err(problem) => Err(Some(problem)),
+        }
+    })
+    .await
+    .map_err(|error| {
+        openbot_desktop_lib::problem::Problem::plain(format!(
+            "The question could not be asked: {error}"
+        ))
+    })?;
+
+    match asked {
+        Ok(answer) => Ok(answer),
+        Err(Some(problem)) => Err(problem),
+        Err(None) => {
+            let log = engine::detect()
+                .address
+                .map(|found| stack::service_log(&found, &root, "agent-harness", 40))
+                .unwrap_or_default();
+            Err(openbot_desktop_lib::ask::why_nothing_came_back(&log))
+        }
+    }
+}
+
+/**
 What a previous run already wrote, so the wizard can arrive filled in.
 
 Returned to the window because that is where the fields are, and it is the same machine and the
@@ -973,6 +1050,7 @@ fn main() {
             begin_intelligence_sign_in,
             finish_intelligence_sign_in,
             intelligence_key_for,
+            ask_the_bot,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing

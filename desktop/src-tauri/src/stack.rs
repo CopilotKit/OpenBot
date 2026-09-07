@@ -345,6 +345,29 @@ pub fn stop_processes_under(_root: &Path) -> usize {
     0
 }
 
+/**
+The tail of one service's log.
+
+For the case where the wire says nothing. A framework that catches its own exception and ends the
+stream leaves the cause here and nowhere else, so this is not a debugging convenience: without it
+the developer half of that failure would be empty. See `ask::why_nothing_came_back`.
+
+An engine that cannot be asked returns nothing rather than failing. This is only ever called to
+explain a failure that has already happened, and a second failure on top of it helps nobody.
+*/
+pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> String {
+    compose_command(engine, root)
+        .args(["logs", "--tail", &lines.to_string(), service])
+        .output()
+        .ok()
+        .map(|out| {
+            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&out.stderr));
+            text.trim().to_string()
+        })
+        .unwrap_or_default()
+}
+
 /// Which Compose services are not running, and the last thing each said.
 ///
 /// `compose up` succeeds once it has asked for everything; a service that then exits is not its
