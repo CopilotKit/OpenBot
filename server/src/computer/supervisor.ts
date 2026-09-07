@@ -48,8 +48,15 @@ export function createDockerSupervisorProvider(
   const doFetch = options.fetchImpl ?? fetch;
   const base = options.baseUrl.replace(/\/$/, "");
   const timeoutMs = options.timeoutMs ?? 120_000;
+  /*
+   * Numeric, never `localhost`.
+   *
+   * `localhost` does not resolve the same way on every operating system — Node prefers `::1`, bun
+   * prefers `127.0.0.1` — so a name here reaches a different interface depending on what started
+   * the process, and a computer that is listening looks like one that is not.
+   */
   const hostForPort =
-    options.hostForPort ?? ((port) => `http://localhost:${port}`);
+    options.hostForPort ?? ((port) => `http://127.0.0.1:${port}`);
 
   /**
    * The last container start time seen for each Bot, from the `/ensure` that located it.

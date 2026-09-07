@@ -8,7 +8,10 @@
 export function Welcome({ onStart }: { onStart: () => void }) {
   return (
     <div className="sheet">
-      <Mark />
+      <div className="lockup">
+        <div className="orb" aria-hidden="true" />
+        <span>OpenBot</span>
+      </div>
       <h1>Your own AI coworkers, on this computer.</h1>
       <p className="lede big">
         They answer questions, use the tools you connect, and can work in a
@@ -24,38 +27,5 @@ export function Welcome({ onStart }: { onStart: () => void }) {
         in to the AI plan you already have.
       </p>
     </div>
-  );
-}
-
-/**
- * The product's own mark.
- *
- * Drawn rather than fetched, because this is the first paint of a window that has no network
- * guarantee yet, and it is two shapes: a filled square for the person and an outlined one beside it
- * for the coworker, overlapping. It is here so the first screen is recognisably a product rather
- * than a form.
- */
-function Mark() {
-  return (
-    <svg
-      width="34"
-      height="34"
-      viewBox="0 0 34 34"
-      fill="none"
-      aria-hidden="true"
-      style={{ marginBottom: "1.5rem" }}
-    >
-      <rect x="1" y="1" width="20" height="20" rx="6" fill="currentColor" />
-      <rect
-        x="13"
-        y="13"
-        width="20"
-        height="20"
-        rx="6"
-        fill="var(--ground)"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-    </svg>
   );
 }

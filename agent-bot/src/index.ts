@@ -241,4 +241,4 @@ serve({
   },
 });
 
-console.info(`agent-bot listening on http://localhost:${PORT}/ag-ui`);
+console.info(`agent-bot listening on http://127.0.0.1:${PORT}/ag-ui`);

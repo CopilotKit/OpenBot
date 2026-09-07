@@ -492,3 +492,73 @@ details > summary:hover {
   white-space: nowrap;
   border: 0;
 }
+
+/*
+ * OpenBot's own mark, and it is the real one.
+ *
+ * An earlier version of this screen shipped a mark I drew: two overlapping squares. That was
+ * invented, which is the same thing this file refuses to do for other people's brands, and there
+ * was no excuse for it — the product has a mark, on its own page.
+ *
+ * The four colours, the sheen positions and the rim are taken from that page's own CSS rather than
+ * eyeballed. What is NOT reproduced is the animated conic spin: the real orb rotates four conic
+ * gradients off an `@property` angle, which is right for a hero at 56px and gratuitous for a 34px
+ * mark on a window that is about to start containers. The composition and the palette are the
+ * brand; the animation is that page's.
+ */
+.orb {
+  --c1: oklch(68% 0.21 350);
+  --c2: oklch(70% 0.18 210);
+  --c3: oklch(66% 0.2 285);
+  --c4: oklch(72% 0.19 325);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  flex: none;
+  background:
+    radial-gradient(circle at 78% 22%, var(--c1), transparent 58%),
+    radial-gradient(circle at 26% 72%, var(--c3), transparent 60%),
+    radial-gradient(circle at 46% 78%, var(--c2), transparent 55%),
+    radial-gradient(circle at 62% 38%, var(--c4), transparent 62%);
+  filter: saturate(0.9);
+}
+
+/* The glassy highlight, which is what stops it reading as a printed-on gradient. */
+.orb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 24%, hsl(0 0% 100% / 0.32), transparent 34%),
+    radial-gradient(circle at 72% 80%, hsl(0 0% 100% / 0.07), transparent 48%);
+  mix-blend-mode: screen;
+}
+
+/* The rim: lit from above, shaded below, so it sits in the page rather than on it. */
+.orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px hsl(0 0% 100% / 0.16),
+    inset 0 2px 4px hsl(0 0% 100% / 0.22),
+    inset 0 -2px 5px hsl(0 0% 0% / 0.4);
+}
+
+.lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.75rem;
+}
+
+.lockup span {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}

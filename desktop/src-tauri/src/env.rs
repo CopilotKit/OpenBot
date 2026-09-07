@@ -383,6 +383,40 @@ pub enum ModelCredential {
 /// Lines the shell did not write are kept: somebody who added `OPENAI_API_KEY` by hand, or a
 /// setting a later version of this app does not know about, should not lose it because the stack
 /// was restarted.
+/**
+What a previous run already put in the `.env`.
+
+So the wizard never asks twice. A person who has set this up before, or whose IT department laid the
+file down for them, should not be made to find a key again — and "find it again" in practice means
+opening a dotfile in a text editor, which is the exact thing this product exists not to require.
+
+Only the settings the wizard asks about are read back. Everything else in that file is somebody
+else's, and this has no business handing it to a window.
+*/
+pub fn already_set(path: &Path, keys: &[&str]) -> BTreeMap<String, String> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return BTreeMap::new();
+    };
+    let mut found = BTreeMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        // Blank is not a value: the writer clears keys a choice does not imply, and offering those
+        // back as though somebody had set them would undo that.
+        if keys.contains(&key) && !value.is_empty() {
+            found.insert(key.to_string(), value.to_string());
+        }
+    }
+    found
+}
+
 pub fn write(path: &Path, owned: &BTreeMap<String, String>) -> std::io::Result<()> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     let mut out = String::new();
@@ -985,5 +1019,55 @@ mod model_tests {
                 "{key} was written with no choice made"
             );
         }
+    }
+
+    /// The wizard does not ask twice for something already in the file.
+    #[test]
+    fn what_is_already_set_is_read_back() {
+        let dir = std::env::temp_dir().join(format!("openbot-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "# a comment\nINTELLIGENCE_API_KEY=already-here\nINTELLIGENCE_API_URL=\nSOMETHING_ELSE=theirs\n",
+        )
+        .unwrap();
+
+        let found = already_set(
+            &path,
+            &[
+                "INTELLIGENCE_API_KEY",
+                "INTELLIGENCE_API_URL",
+                "SOMETHING_ELSE",
+            ],
+        );
+        assert_eq!(
+            found.get("INTELLIGENCE_API_KEY").map(String::as_str),
+            Some("already-here")
+        );
+        // Blank is not a value: the writer clears keys a choice does not imply, and handing those
+        // back would undo that.
+        assert!(!found.contains_key("INTELLIGENCE_API_URL"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Only what the wizard asks about. The rest of that file is somebody else's.
+    #[test]
+    fn nothing_the_wizard_did_not_ask_for_is_read_back() {
+        let dir = std::env::temp_dir().join(format!("openbot-read2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(&path, "PRIVATE_THING=not-yours\nINTELLIGENCE_API_KEY=k\n").unwrap();
+        let found = already_set(&path, &["INTELLIGENCE_API_KEY"]);
+        assert_eq!(found.len(), 1);
+        assert!(!found.contains_key("PRIVATE_THING"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// No file is not an error; it is a first run.
+    #[test]
+    fn a_missing_file_reads_back_nothing() {
+        let found = already_set(Path::new("/nowhere/at/all/.env"), &["INTELLIGENCE_API_KEY"]);
+        assert!(found.is_empty());
     }
 }

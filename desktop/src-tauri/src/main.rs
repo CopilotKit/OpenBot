@@ -439,9 +439,10 @@ fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), S
 /// have nowhere to live. Setup comes back if the stack is stopped, because then there is something
 /// to set up again.
 ///
-/// `localhost` rather than an address, against the rule the rest of this file follows: the app's
-/// dev server binds `[::1]` and not `127.0.0.1`, so naming either one guesses wrong half the time.
-/// Every spelling of it is trusted, so whichever it bound is the right one.
+/// The address is asked for rather than named. `stack::app_url` tries `127.0.0.1` and `[::1]` and
+/// returns whichever answered, because a dev server binds whichever loopback its runtime resolved
+/// and naming one guesses wrong half the time. Never the word `localhost`: it does not resolve the
+/// same way on every operating system, which is the whole reason both are asked.
 #[tauri::command]
 fn show_openbot(app: tauri::AppHandle) -> Result<(), String> {
     let port = openbot_env::Ports::default().app;
@@ -479,7 +480,12 @@ fn show_setup(app: tauri::AppHandle) -> Result<(), String> {
         .lock()
         .unwrap()
         .clone()
-        .unwrap_or_else(|| "http://localhost:3020".to_string());
+        // Asked for, not named, and numeric either way: `localhost` resolves differently per
+        // operating system, so the two loopbacks are tried and whichever answers is used. The
+        // v4 literal is the last resort rather than a hostname.
+        .unwrap_or_else(|| {
+            stack::app_url(3020).unwrap_or_else(|| "http://127.0.0.1:3020".to_string())
+        });
     window
         .navigate(
             setup
@@ -529,6 +535,36 @@ fn last_failure(app: tauri::AppHandle) -> Option<String> {
 #[tauri::command]
 fn default_root() -> String {
     stack::default_root().to_string_lossy().into_owned()
+}
+
+/**
+What a previous run already wrote, so the wizard can arrive filled in.
+
+Returned to the window because that is where the fields are, and it is the same machine and the
+same person: reading their own file back to them is not a disclosure. The key is not logged here or
+anywhere, and only the settings the wizard asks about are read.
+*/
+#[tauri::command]
+fn already_configured(root: String) -> std::collections::BTreeMap<String, String> {
+    openbot_env::already_set(
+        &PathBuf::from(root).join(".env"),
+        &[
+            "INTELLIGENCE_API_KEY",
+            "INTELLIGENCE_API_URL",
+            "INTELLIGENCE_GATEWAY_WS_URL",
+            /*
+             * The model credentials too, so the wizard never asks twice for one of these either.
+             *
+             * A key already in the file is one somebody has already produced, and making them find
+             * it again means opening a dotfile in an editor. Read back for the same reason the
+             * Intelligence key is: it is their own file, on their own machine, and this is the
+             * screen that asks for it.
+             */
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_BASE_URL",
+        ],
+    )
 }
 
 /// The harness picker's rows. Data, so the screen is a list and not twelve branches.
@@ -810,6 +846,7 @@ fn main() {
             default_root,
             harnesses,
             providers,
+            already_configured,
             begin_claude_sign_in,
             finish_claude_sign_in,
         ])

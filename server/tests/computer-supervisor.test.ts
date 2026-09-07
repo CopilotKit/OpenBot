@@ -48,7 +48,9 @@ describe("locating a Bot's computer", () => {
         port: 49213,
       }),
     );
-    expect(await client.locate("sales")).toBe("http://localhost:49213");
+    // Numeric, never `localhost`: it resolves to a different interface depending on the
+    // runtime, so a computer that is listening can look like one that is not.
+    expect(await client.locate("sales")).toBe("http://127.0.0.1:49213");
   });
 
   test("a computer with no address at all is an error, not a fallback", async () => {

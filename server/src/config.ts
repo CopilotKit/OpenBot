@@ -531,7 +531,12 @@ function authConfig(
     secret,
     trustedOrigins: commaSeparated(environment, "TRUSTED_ORIGINS").length
       ? commaSeparated(environment, "TRUSTED_ORIGINS")
-      : ["http://localhost:3010"],
+      : /*
+         * All three spellings of the same place, because this is an allowlist of what a browser
+         * sends and not an address anything dials. `localhost` alone refused a browser pointed at
+         * `127.0.0.1:3010`, which is the address the rest of this deployment hands out.
+         */
+        ["http://127.0.0.1:3010", "http://[::1]:3010", "http://localhost:3010"],
     initialAdminEmails,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),

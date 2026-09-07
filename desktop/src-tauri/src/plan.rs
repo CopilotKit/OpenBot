@@ -429,6 +429,109 @@ impl SigningIn {
     }
 }
 
+/// The image whose `langchain-openai` runs the ChatGPT sign-in.
+///
+/// The LangGraph harness, used as a tool rather than as a Bot for the same reason the Claude one is:
+/// it is the image that already carries the vendor's own login. It is also the default harness, so
+/// on the common path this image is being pulled anyway.
+pub const CHATGPT_SIGN_IN_IMAGE: &str = "openbot-agent-langgraph-agui:v0.0.8";
+
+/// Where the vendor's login persists what it gets.
+const CHATGPT_STORE: &str = "/root/.langchain/chatgpt-auth.json";
+
+/// The port the vendor's login binds, and the port the container publishes to reach it.
+///
+/// Two different numbers on purpose. See `CHATGPT_LOGIN`.
+const CHATGPT_LOOPBACK: u16 = 1455;
+const CHATGPT_RELAY: u16 = 1456;
+
+/**
+The ChatGPT sign-in, as a program handed to the harness image.
+
+WHY THERE IS A RELAY IN HERE. `langchain-openai` refuses a non-loopback callback host on purpose:
+RFC 8252 wants a loopback redirect for a native app, and binding `0.0.0.0` would put the
+authorization code on the local network. But a published Docker port cannot reach a `127.0.0.1`
+listener inside the container. So the vendor's server keeps its loopback bind and this relay accepts
+on `0.0.0.0:1456` and forwards into it. The container publishes 1456 as the host's 1455, which is
+the address the browser is sent to.
+
+AND THE HOST IS LEFT AT ITS DEFAULT, `localhost`, WHICH IS NOT COSMETIC. OpenAI compares the
+redirect URI as a string, and `http://localhost:1455/auth/callback` is what is registered. Passing
+`127.0.0.1` — the same address, a different string — makes the authorize request fail with
+`unknown_error` before any login page is drawn. Measured, twice, before the cause was obvious.
+
+Passed as an argument rather than a mounted file, so the app never has to write a script to disk to
+run one.
+*/
+const CHATGPT_LOGIN: &str = r#"
+import json, socket, threading
+from pathlib import Path
+
+def pump(a, b):
+    try:
+        while True:
+            data = a.recv(65536)
+            if not data:
+                break
+            b.sendall(data)
+    except OSError:
+        pass
+    finally:
+        for s in (a, b):
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+def relay():
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("0.0.0.0", RELAY))
+    listener.listen(8)
+    while True:
+        client, _ = listener.accept()
+        try:
+            upstream = socket.create_connection(("127.0.0.1", LOOPBACK), timeout=10)
+        except OSError:
+            client.close()
+            continue
+        threading.Thread(target=pump, args=(client, upstream), daemon=True).start()
+        threading.Thread(target=pump, args=(upstream, client), daemon=True).start()
+
+threading.Thread(target=relay, daemon=True).start()
+
+from langchain_openai.chatgpt_oauth import login_chatgpt
+
+login_chatgpt(open_browser=False, port=LOOPBACK, timeout=900)
+
+raw = json.loads(Path(STORE).read_text())
+print("OPENBOT_CHATGPT_TOKEN=" + (raw.get("access_token") or raw.get("token") or ""), flush=True)
+"#;
+
+/// The token the vendor's login printed, if it got one.
+///
+/// Its own line rather than scraped out of the store file, because the store shape belongs to the
+/// library and the line is this deployment's own contract with the program above.
+pub fn chatgpt_token_in(output: &str) -> Option<String> {
+    plain(output)
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("OPENBOT_CHATGPT_TOKEN="))
+        .map(str::trim)
+        .find(|token| !token.is_empty())
+        .map(str::to_string)
+}
+
+/// The address a browser has to open for the ChatGPT sign-in.
+///
+/// Printed by the vendor's login as its fallback when `open_browser` is off, which is how this gets
+/// it: OpenBot opens the browser itself so the window can also show the link.
+pub fn openai_url_in(output: &str) -> Option<String> {
+    plain(output)
+        .split_whitespace()
+        .find(|word| word.starts_with("https://auth.openai.com/oauth/authorize"))
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,6 +633,40 @@ mod tests {
     #[test]
     fn a_truncated_token_is_refused() {
         assert_eq!(token_in(&format!("{PLAN_TOKEN_PREFIX}01-abc")), None);
+    }
+
+    /// The token line is this deployment's contract with the program it hands the image.
+    #[test]
+    fn the_chatgpt_token_is_read_off_its_own_line() {
+        let output = "some chatter\nOPENBOT_CHATGPT_TOKEN=abc123\nmore chatter\n";
+        assert_eq!(chatgpt_token_in(output).as_deref(), Some("abc123"));
+        // An empty value is not a token: the store had no access token in it.
+        assert_eq!(chatgpt_token_in("OPENBOT_CHATGPT_TOKEN=\n"), None);
+        assert_eq!(chatgpt_token_in("nothing here"), None);
+    }
+
+    /// The URL the vendor's login prints as its fallback.
+    #[test]
+    fn the_openai_url_is_found() {
+        let real = "https://auth.openai.com/oauth/authorize?client_id=app_x&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback";
+        assert_eq!(
+            openai_url_in(&format!("Open this: {real}\n")).as_deref(),
+            Some(real)
+        );
+        assert_eq!(openai_url_in("no url yet"), None);
+    }
+
+    /// The registered redirect is `localhost`, and the script must not name anything else.
+    ///
+    /// `127.0.0.1` is the same address and a different string, and OAuth registration compares
+    /// strings: passing it makes the authorize request fail with `unknown_error` before a login
+    /// page is ever drawn. That cost two live attempts.
+    #[test]
+    fn the_login_leaves_the_callback_host_alone() {
+        assert!(
+            !CHATGPT_LOGIN.contains("host="),
+            "the script names a callback host; the default `localhost` is what OpenAI registered"
+        );
     }
 
     #[test]

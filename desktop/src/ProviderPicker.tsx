@@ -37,10 +37,18 @@ export type ModelChoice = {
  */
 export function ProviderPicker({
   chosen,
+  held,
   onChoose,
   onBack,
 }: {
   chosen: ModelChoice | null;
+  /**
+   * Credentials a previous run already wrote, by environment name.
+   *
+   * Used to fill the key field for whichever provider is chosen, so somebody who has set this up
+   * before is not sent to find a key they already produced. Their own file, on their own machine.
+   */
+  held: Record<string, string>;
   onChoose: (choice: ModelChoice) => void;
   onBack: () => void;
 }) {
@@ -136,6 +144,15 @@ export function ProviderPicker({
                 setOpen(r.id);
                 // The first way in is the default, which is the plan wherever there is one.
                 setLogin(r.logins[0] ?? null);
+                // Fill from what is already on this machine, if anything.
+                const kept =
+                  r.id === "anthropic"
+                    ? held.ANTHROPIC_API_KEY
+                    : held.OPENAI_API_KEY;
+                setApiKey(kept ?? "");
+                if (r.id === "openai-compatible" && held.OPENAI_BASE_URL) {
+                  setBaseUrl(held.OPENAI_BASE_URL);
+                }
               }}
             />
             <Mark id={r.mark} name={r.name} />

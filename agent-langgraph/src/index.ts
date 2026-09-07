@@ -235,7 +235,9 @@ function buildModel() {
  * here, in this process, and every call it makes goes back through the deployment that granted it.
  */
 const TOOL_URL =
-  process.env.OPENBOT_TOOL_URL ?? "http://localhost:3001/api/agent-tools/call";
+  // Numeric, never `localhost`: it resolves to `::1` under Node and `127.0.0.1` under bun, so a
+  // name here reaches a different interface depending on what started the process.
+  process.env.OPENBOT_TOOL_URL ?? "http://127.0.0.1:3001/api/agent-tools/call";
 const TOOL_TOKEN = process.env.AGENT_TOOL_TOKEN ?? "";
 
 async function callTool(
@@ -457,4 +459,4 @@ serve({
   },
 });
 
-console.info(`agent-langgraph listening on http://localhost:${PORT}/ag-ui`);
+console.info(`agent-langgraph listening on http://127.0.0.1:${PORT}/ag-ui`);

@@ -39,6 +39,8 @@ export function App() {
    */
   const [harness, setHarness] = useState<string | null>(DEFAULT_HARNESS);
   const [model, setModel] = useState<ModelChoice | null>(null);
+  /** Model credentials a previous run already wrote, so the provider screen arrives filled in. */
+  const [alreadyHeld, setAlreadyHeld] = useState<Record<string, string>>({});
   const [step, setStep] = useState<"welcome" | "harness" | "model" | "install">(
     "welcome",
   );
@@ -60,6 +62,22 @@ export function App() {
     invoke<string>("default_root")
       .then(async (found) => {
         setRoot(found);
+        /*
+         * Arrive filled in when a previous run already wrote these.
+         *
+         * The alternative is asking somebody to find a key again, and "find it again" means opening
+         * a dotfile in a text editor — the exact thing this product exists not to require. Their own
+         * file, read back to them on their own machine.
+         */
+        invoke<Record<string, string>>("already_configured", { root: found })
+          .then((set) => {
+            if (set.INTELLIGENCE_API_KEY) setApiKey(set.INTELLIGENCE_API_KEY);
+            if (set.INTELLIGENCE_API_URL) setApiUrl(set.INTELLIGENCE_API_URL);
+            if (set.INTELLIGENCE_GATEWAY_WS_URL)
+              setWsUrl(set.INTELLIGENCE_GATEWAY_WS_URL);
+            setAlreadyHeld(set);
+          })
+          .catch(() => undefined);
         // A stack this app started may still be up from a previous window. Ask, rather than
         // offering to set up something that is already running.
         if (
@@ -203,6 +221,7 @@ export function App() {
     return (
       <main>
         <ProviderPicker
+          held={alreadyHeld}
           chosen={model}
           onChoose={(choice) => {
             setModel(choice);
@@ -261,8 +280,18 @@ export function App() {
               spellCheck={false}
             />
           </div>
+          {/*
+            This used to be headed "Self-hosted Intelligence" over two fields pre-filled with the
+            MANAGED service's addresses, which says the opposite of what it does: somebody opening
+            it to check where their data goes read "self-hosted" and saw CopilotKit's own hosts.
+            The heading now describes the action, and the note says what the defaults are.
+          */}
           <details>
-            <summary>Self-hosted Intelligence</summary>
+            <summary>Point at your own Intelligence server</summary>
+            <p className="footnote" style={{ margin: "0.6rem 0 0" }}>
+              These default to CopilotKit's managed service. Change them only if
+              you run Intelligence yourself.
+            </p>
             <div className="field" style={{ marginTop: "0.75rem" }}>
               <label htmlFor="api">API URL</label>
               <input
