@@ -152,6 +152,44 @@ export type CatalogueEntry = {
  */
 export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
   {
+    key: "context-dev",
+    title: "Context.dev",
+    vendor: "Context.dev",
+    summary:
+      "Live web, company news, files and brand data for whoever is asking.",
+    host: "https://mcp.context.dev",
+    path: "/mcp",
+    auth: {
+      kind: "user-oauth",
+      authorizationUrl: "https://mcp.context.dev/authorize",
+      tokenUrl: "https://mcp.context.dev/token",
+      revokeUrl: "https://www.context.dev/oauth2/revoke",
+      scopes: Object.freeze(["api.read", "api.write"]),
+      clientRegistration: "dynamic",
+      registrationUrl: "https://mcp.context.dev/register",
+    },
+    /*
+     * Every tool Context advertises with `readOnlyHint: false` in its production catalogue. The
+     * scrape tools are here because their optional browser actions can change third-party pages;
+     * parsing, monitors and batches consume credits or create persistent work even when they do not
+     * delete data. Keeping all of them on the governed side is safer than inferring from the verb.
+     */
+    writeTools: Object.freeze([
+      "parse-document",
+      "web-scrape-html",
+      "web-scrape-markdown",
+      "web-scrape-images",
+      "create-monitor",
+      "update-monitor",
+      "delete-monitor",
+      "run-monitor-now",
+      "submit-batch",
+      "cancel-batch",
+      "delete-batch",
+    ]),
+    docsUrl: "https://docs.context.dev/install-mcp",
+  },
+  {
     key: "google-drive",
     title: "Google Drive",
     vendor: "Google",
