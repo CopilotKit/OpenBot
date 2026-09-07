@@ -8,6 +8,15 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A credential pasted with a stray space into the desktop setup screen now works
+
+The setup screen enables its button on `value.trim() !== ""` and then sends the untrimmed string, so
+a key copied from a provider's dashboard with the space the selection picked up arrived intact. The
+model key was trimmed on the way into `.env`; the API URL, the gateway URL and the intelligence key
+entered on the same screen were not, so Compose passed the space through, the provider rejected the
+credential, and the failure the person saw named neither the space nor the field. All four are now
+trimmed the same way.
+
 ## 0.0.8
 
 ### A desktop shell that installs OpenBot and then becomes it
