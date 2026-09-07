@@ -56,8 +56,16 @@ pub fn catalogue() -> Vec<Provider> {
         Provider {
             id: "openai".into(),
             name: "OpenAI".into(),
-            summary: "Sign in with ChatGPT Plus, Pro, Team or Enterprise.".into(),
-            logins: vec![Login::Plan, Login::ApiKey],
+            summary: "Use a key from your OpenAI account.".into(),
+            /*
+             * A key only, for now, and the summary says so rather than promising a sign-in.
+             *
+             * The ChatGPT plan login is proved and belongs here as the default: it is the same
+             * shape as the compatible row, since the login yields a token and the address to send
+             * it to. It is not wired to a command yet, and a screen that offers a button which
+             * cannot finish is worse than one that offers less. Restored the day it is.
+             */
+            logins: vec![Login::ApiKey],
             mark: Some("openai".into()),
             caution: None,
         },

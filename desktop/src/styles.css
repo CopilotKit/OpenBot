@@ -316,3 +316,14 @@ fieldset.picker {
   white-space: nowrap;
   border: 0;
 }
+
+/* The copyable link beside an open that may have silently failed. */
+.fallback {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 0.9rem;
+}
+
+.fallback a {
+  color: var(--ink);
+}

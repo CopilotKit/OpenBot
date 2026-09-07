@@ -36,6 +36,12 @@ struct Shell {
     /// moment it is worth reading. Held here instead, and asked for on load.
     last_failure: Mutex<Option<String>>,
     root: Mutex<Option<PathBuf>>,
+    /// A plan sign-in waiting for the code from the browser.
+    ///
+    /// Held across two commands because a person has to leave and approve in the middle of it, and
+    /// the flow that showed the URL is the only one that can redeem the code: each start mints its
+    /// own PKCE challenge and state, so a second start invalidates the first.
+    signing_in: Mutex<Option<openbot_desktop_lib::plan::SigningIn>>,
     /// Where the shell's own interface lives, read from the window rather than spelled out.
     ///
     /// Tauri does not serve the bundle from the same address on every platform: macOS and Linux
@@ -491,6 +497,62 @@ fn harnesses() -> Vec<harness::Harness> {
     harness::catalogue()
 }
 
+/// Start a Claude plan sign-in and return the address a browser has to open.
+///
+/// Blocking work on a blocking thread: it starts a container and waits on its output, and doing
+/// that on the UI thread is a window that stops repainting mid-setup.
+#[tauri::command]
+async fn begin_claude_sign_in(app: tauri::AppHandle) -> Result<String, String> {
+    /*
+     * The image is decided here, not by the window, and it is the Claude Agent SDK harness whatever
+     * harness the person picked. It is not being used as a Bot: it is the container that happens to
+     * carry Anthropic's bundled CLI, which is what does the OAuth. Letting the screen name an image
+     * would make the sign-in depend on a choice that has nothing to do with it.
+     */
+    let image = openbot_desktop_lib::plan::SIGN_IN_IMAGE.to_string();
+    let address = engine::detect().address.ok_or_else(|| {
+        "No container engine is answering, so the sign-in cannot run.".to_string()
+    })?;
+    let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::plan::SigningIn::begin(&address, &image)
+    })
+    .await
+    .map_err(|error| format!("The sign-in did not run: {error}"))??;
+    *app.state::<Shell>().signing_in.lock().unwrap() = Some(signing);
+
+    /*
+     * Opened here rather than by the window, because the window would need the shell plugin's JS
+     * half for the one call. The URL is returned as well, and the screen shows it: on Linux without
+     * a registered browser, and in a session where the open silently does nothing, a link somebody
+     * can copy is the difference between a stuck screen and a finished sign-in.
+     */
+    let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
+    Ok(url)
+}
+
+/**
+Redeem the code from the browser and return the plan token.
+
+The token crosses to the window and comes back in the model choice, which is the same path a typed
+key takes. It is never logged, and the failure messages never carry the command's output: see
+`SigningIn::gave_up`.
+*/
+#[tauri::command]
+async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<String, String> {
+    // Taken, not borrowed. A sign-in is single-use, and leaving it in place would let a second
+    // attempt write a code into a flow that has already finished.
+    let signing = app
+        .state::<Shell>()
+        .signing_in
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || signing.finish(&code))
+        .await
+        .map_err(|error| format!("The sign-in did not finish: {error}"))?
+}
+
 /// The model screen's rows. Independent of the picker above, and required to stay that way: no
 /// harness on that list is tied to a vendor's models, so choosing one may not narrow this.
 #[tauri::command]
@@ -692,6 +754,7 @@ fn main() {
             show_whichever_applies(app);
         }))
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![
             detect_engine,
@@ -707,6 +770,8 @@ fn main() {
             default_root,
             harnesses,
             providers,
+            begin_claude_sign_in,
+            finish_claude_sign_in,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing

@@ -18,6 +18,8 @@ export type ModelChoice = {
   provider: string;
   login: Login;
   apiKey?: string;
+  /** Minted by signing in, never typed. Only a plan has one. */
+  token?: string;
   baseUrl?: string;
   model?: string;
 };
@@ -48,6 +50,48 @@ export function ProviderPicker({
   const [apiKey, setApiKey] = useState(chosen?.apiKey ?? "");
   const [baseUrl, setBaseUrl] = useState(chosen?.baseUrl ?? "");
   const [model, setModel] = useState(chosen?.model ?? "");
+  /*
+   * The sign-in, mid-flight.
+   *
+   * `url` present means the browser has been sent somewhere and a code is expected back. Kept here
+   * rather than in the Rust side's head because the screen has to show the link: an open that
+   * silently did nothing leaves somebody staring at a code box with no idea where the code comes
+   * from.
+   */
+  const [signInUrl, setSignInUrl] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [token, setToken] = useState(chosen?.token ?? "");
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState("");
+
+  async function beginSignIn() {
+    setBusy(true);
+    setFailure("");
+    try {
+      setSignInUrl(await invoke<string>("begin_claude_sign_in"));
+    } catch (error) {
+      setFailure(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function finishSignIn() {
+    setBusy(true);
+    setFailure("");
+    try {
+      // Held, not shown. It goes on to `start_stack` the same way a typed key does.
+      setToken(await invoke<string>("finish_claude_sign_in", { code }));
+      setSignInUrl(null);
+      setCode("");
+    } catch (error) {
+      setFailure(String(error));
+      // The flow is single-use, so a refused code means starting again rather than retyping.
+      setSignInUrl(null);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     invoke<Provider[]>("providers")
@@ -60,7 +104,7 @@ export function ProviderPicker({
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
   // than after a run fails with something unreadable.
   const ready =
-    login === "plan" ||
+    (login === "plan" && token.trim().length > 0) ||
     (login === "api-key" && apiKey.trim().length > 0) ||
     (login === "endpoint" &&
       baseUrl.trim().startsWith("http") &&
@@ -122,12 +166,56 @@ export function ProviderPicker({
             </div>
           )}
 
-          {login === "plan" && (
-            <p className="lede">
-              Opens {row.name} in your browser. Nothing is typed here and no key
-              is stored.
-            </p>
-          )}
+          {login === "plan" &&
+            (token ? (
+              <p className="lede">
+                Signed in to {row.name}. Your plan will be used, and no key is
+                stored on this machine.
+              </p>
+            ) : signInUrl ? (
+              <>
+                <p className="lede">
+                  Approve the request in your browser, then paste the code it
+                  shows you.
+                </p>
+                {/* Shown as well as opened. On a machine with no registered
+                    browser the open does nothing and says nothing, and a code
+                    box with no link is then a dead end. */}
+                <p className="fallback">
+                  Didn't open?{" "}
+                  <a href={signInUrl} target="_blank" rel="noreferrer">
+                    Open the sign-in page
+                  </a>
+                </p>
+                <div className="field">
+                  <label htmlFor="code">Code from your browser</label>
+                  <input
+                    id="code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={busy || code.trim().length === 0}
+                  onClick={finishSignIn}
+                >
+                  {busy ? "Checking…" : "Finish signing in"}
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="lede">
+                  Opens {row.name} in your browser. Nothing is typed here and no
+                  key is stored.
+                </p>
+                <button type="button" disabled={busy} onClick={beginSignIn}>
+                  {busy ? "Starting…" : `Sign in with ${row.name}`}
+                </button>
+              </>
+            ))}
 
           {login === "api-key" && (
             <div className="field">
@@ -180,6 +268,12 @@ export function ProviderPicker({
           )}
 
           {/* Said before it happens rather than diagnosed after the Bots stop answering. */}
+          {failure && (
+            <p className="caution" role="alert">
+              {failure}
+            </p>
+          )}
+
           {row.caution && (
             <p className="caution">
               {row.caution.says}{" "}
@@ -209,6 +303,7 @@ export function ProviderPicker({
               provider: row.id,
               login,
               apiKey: apiKey.trim() || undefined,
+              token: token.trim() || undefined,
               baseUrl: baseUrl.trim() || undefined,
               model: model.trim() || undefined,
             })

@@ -63,12 +63,25 @@ impl Address {
         Self { engine, connection }
     }
 
+    /// The binary and the arguments that name this engine, and the one place that decides them.
+    ///
+    /// Split out because not every caller can use a `std::process::Command`: the plan sign-in runs
+    /// under a pty and has to build the pty crate's own command type. Both go through here, so a
+    /// machine addressed by name cannot be addressed by name on one path and not the other.
+    pub fn parts(&self) -> (&'static str, Vec<String>) {
+        let mut arguments = Vec::new();
+        if let Some(connection) = &self.connection {
+            arguments.push("--connection".to_string());
+            arguments.push(connection.clone());
+        }
+        (self.engine.binary(), arguments)
+    }
+
     /// A command aimed at this engine, and the only way one should be built.
     pub fn command(&self) -> Command {
-        let mut command = command(self.engine.binary());
-        if let Some(connection) = &self.connection {
-            command.args(["--connection", connection]);
-        }
+        let (binary, arguments) = self.parts();
+        let mut command = command(binary);
+        command.args(arguments);
         command
     }
 
