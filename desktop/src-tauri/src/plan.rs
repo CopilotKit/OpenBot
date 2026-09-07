@@ -460,6 +460,11 @@ redirect URI as a string, and `http://localhost:1455/auth/callback` is what is r
 `127.0.0.1` — the same address, a different string — makes the authorize request fail with
 `unknown_error` before any login page is drawn. Measured, twice, before the cause was obvious.
 
+AND WHAT IS PRINTED IS THE WHOLE STORE, NOT THE ACCESS TOKEN. The access token expires within the
+hour and nothing can renew it; the store carries the refresh token beside it, which is what the
+harness's provider renews from. Carrying only the token yields a Bot that answers until lunchtime
+and then reports an auth failure nobody can account for.
+
 Passed as an argument rather than a mounted file, so the app never has to write a script to disk to
 run one.
 */
@@ -505,7 +510,9 @@ from langchain_openai.chatgpt_oauth import login_chatgpt
 login_chatgpt(open_browser=False, port=LOOPBACK, timeout=900)
 
 raw = json.loads(Path(STORE).read_text())
-print("OPENBOT_CHATGPT_TOKEN=" + (raw.get("access_token") or raw.get("token") or ""), flush=True)
+if not (raw.get("access_token") or raw.get("token")):
+    raise SystemExit("the sign-in finished but left no token behind")
+print("OPENBOT_CHATGPT_STORE=" + json.dumps(raw, separators=(",", ":")), flush=True)
 "#;
 
 /**
@@ -579,15 +586,16 @@ impl SigningInToChatGpt {
         Ok((signing, url))
     }
 
-    /// Wait for the browser redirect to complete the login, and return the token.
+    /// Wait for the browser redirect to complete the login, and return the token store.
     ///
     /// Nothing is sent: the callback is what finishes this, so all there is to do is wait for the
-    /// program to say what it got.
+    /// program to say what it got. What comes back is the vendor's whole store, refresh token
+    /// included, because an access token on its own stops working within the hour.
     pub fn finish(mut self) -> Result<String, String> {
-        match self.wait_for(chatgpt_token_in, PATIENCE_FOR_THE_PERSON) {
-            Some(token) => {
+        match self.wait_for(chatgpt_store_in, PATIENCE_FOR_THE_PERSON) {
+            Some(store) => {
                 self.stop();
-                Ok(token)
+                Ok(store)
             }
             None => {
                 self.stop();
@@ -635,12 +643,14 @@ fn drain<R: Read>(stream: &mut R, into: std::sync::Arc<std::sync::Mutex<String>>
 ///
 /// Its own line rather than scraped out of the store file, because the store shape belongs to the
 /// library and the line is this deployment's own contract with the program above.
-pub fn chatgpt_token_in(output: &str) -> Option<String> {
+pub fn chatgpt_store_in(output: &str) -> Option<String> {
     plain(output)
         .lines()
-        .filter_map(|line| line.trim().strip_prefix("OPENBOT_CHATGPT_TOKEN="))
+        .filter_map(|line| line.trim().strip_prefix("OPENBOT_CHATGPT_STORE="))
         .map(str::trim)
-        .find(|token| !token.is_empty())
+        // A store is an object. Anything else is a half-read line, and writing it to the file the
+        // harness reads would turn a sign-in that looked fine into a Bot that cannot start.
+        .find(|store| store.starts_with('{') && store.ends_with('}') && store.len() > 2)
         .map(str::to_string)
 }
 
@@ -758,14 +768,36 @@ mod tests {
         assert_eq!(token_in(&format!("{PLAN_TOKEN_PREFIX}01-abc")), None);
     }
 
-    /// The token line is this deployment's contract with the program it hands the image.
+    /// The store line is this deployment's contract with the program it hands the image.
     #[test]
-    fn the_chatgpt_token_is_read_off_its_own_line() {
-        let output = "some chatter\nOPENBOT_CHATGPT_TOKEN=abc123\nmore chatter\n";
-        assert_eq!(chatgpt_token_in(output).as_deref(), Some("abc123"));
-        // An empty value is not a token: the store had no access token in it.
-        assert_eq!(chatgpt_token_in("OPENBOT_CHATGPT_TOKEN=\n"), None);
-        assert_eq!(chatgpt_token_in("nothing here"), None);
+    fn the_chatgpt_store_is_read_off_its_own_line() {
+        let output = "some chatter\nOPENBOT_CHATGPT_STORE={\"access_token\":\"a\",\"refresh_token\":\"r\"}\nmore\n";
+        assert_eq!(
+            chatgpt_store_in(output).as_deref(),
+            Some("{\"access_token\":\"a\",\"refresh_token\":\"r\"}")
+        );
+        assert_eq!(chatgpt_store_in("OPENBOT_CHATGPT_STORE=\n"), None);
+        assert_eq!(chatgpt_store_in("nothing here"), None);
+    }
+
+    /// A truncated store is worse than none: it would be written to the file the harness reads.
+    #[test]
+    fn a_half_read_store_line_is_refused() {
+        assert_eq!(chatgpt_store_in("OPENBOT_CHATGPT_STORE={\"access_to"), None);
+        assert_eq!(chatgpt_store_in("OPENBOT_CHATGPT_STORE={}"), None);
+    }
+
+    /// The refresh token is the point of carrying a store, so the program must print all of it.
+    #[test]
+    fn the_login_program_prints_the_whole_store() {
+        assert!(
+            CHATGPT_LOGIN.contains("json.dumps(raw"),
+            "the login must print the store, not one field of it"
+        );
+        assert!(
+            !CHATGPT_LOGIN.contains("OPENBOT_CHATGPT_TOKEN"),
+            "an access token alone expires within the hour and cannot be renewed"
+        );
     }
 
     /// The URL the vendor's login prints as its fallback.

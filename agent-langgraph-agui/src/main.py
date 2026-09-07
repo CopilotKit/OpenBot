@@ -18,9 +18,42 @@ TOKEN_HEADER = "x-openbot-agent-token"
 
 
 def _model():
-    """`provider:model`, which is what `init_chat_model` reads, so the provider stays a choice."""
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
+    """The model this Bot thinks with, chosen by which credential the deployment gave it.
+
+    A SIGNED-IN CHATGPT PLAN IS NOT AN API KEY, and this is the only place that difference shows up.
+    A plan token is a bearer for `chatgpt.com/backend-api/codex`, and `langchain-openai` pins that
+    address and refuses a caller-supplied one on purpose, so pointing `OPENAI_BASE_URL` at it and
+    passing the token as a key does not work and is not meant to. The Codex chat model is the
+    supported way in, and it is selected by the presence of the token rather than by another
+    setting, so nothing can say "plan" while holding a key.
+
+    Everything else keeps `provider:model`, which is what `init_chat_model` reads, so the provider
+    stays the person's choice.
+    """
     model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
+    store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
+    if store and os.path.exists(store):
+        from pathlib import Path
+
+        # Private and experimental, both deliberately. `langchain-openai` exports no public Codex
+        # model and warns in the module that this one is unofficial. That is a maintenance cost we
+        # took knowingly rather than a reason to withhold the plan, because a subscription someone
+        # already pays for is the whole point of offering it on the model screen.
+        from langchain_openai.chat_models.codex import (
+            _ChatOpenAICodex,
+            _FileChatGPTOAuthTokenProvider,
+        )
+
+        # THE STORE FILE, NOT A BARE TOKEN. An access token expires within the hour and cannot be
+        # renewed; the store holds the refresh token, and this provider renews from it. A Bot given
+        # only the access token works until lunchtime and then reports an auth error nobody can
+        # explain.
+        return _ChatOpenAICodex(
+            model=model,
+            token_provider=_FileChatGPTOAuthTokenProvider(path=Path(store)),
+        )
+
+    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
     return init_chat_model(model if ":" in model else f"{provider}:{model}")
 
 

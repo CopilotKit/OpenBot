@@ -81,7 +81,7 @@ export function App() {
     }
   }
 
-  async function useProject(id: string) {
+  async function pickProject(id: string) {
     setSigningIn(true);
     setFailure(null);
     try {
@@ -345,7 +345,7 @@ export function App() {
                     key={project.id}
                     className="tile"
                     disabled={signingIn}
-                    onClick={() => useProject(project.id)}
+                    onClick={() => pickProject(project.id)}
                   >
                     <span className="tile-name">{project.name}</span>
                   </button>

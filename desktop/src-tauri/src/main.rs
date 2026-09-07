@@ -164,16 +164,16 @@ impl ChosenModel {
                 Ok(openbot_env::ModelCredential::ClaudePlan { token })
             }
             /*
-             * A signed-in ChatGPT plan is not a special case: the login yields a token and the
-             * address to send it to, which is exactly the compatible shape. It arrives here with
-             * `base_url` already filled in by the sign-in, not by a person.
+             * The sign-in hands back the vendor's whole token store, not one token, and it travels
+             * in the same field the Claude plan uses. See `ModelCredential::ChatGptPlan`: the
+             * refresh token in there is what keeps the Bot answering past the first hour.
              */
             ("openai", "plan") => {
-                let token = given(self.token);
-                if token.is_empty() {
+                let store = given(self.token);
+                if store.is_empty() {
                     return Err("That ChatGPT plan was not signed in to.".into());
                 }
-                Ok(openbot_env::ModelCredential::ChatGptPlan { token })
+                Ok(openbot_env::ModelCredential::ChatGptPlan { store })
             }
             ("openai-compatible", "endpoint") => {
                 Ok(openbot_env::ModelCredential::Compatible {
@@ -269,6 +269,9 @@ async fn start_stack(
         return Err(problem.into());
     }
 
+    // Named rather than inlined: the store file below is written from the same answer, and reading
+    // the model screen twice could not be relied on to give the same one.
+    let credential = model.into_credential()?;
     let settings = openbot_env::compose(
         &openbot_env::Intelligence {
             api_url,
@@ -276,7 +279,7 @@ async fn start_stack(
             api_key,
         },
         &openbot_env::Model {
-            credential: model.into_credential()?,
+            credential: credential.clone(),
         },
         &status,
         &openbot_env::Ports::default(),
@@ -285,6 +288,10 @@ async fn start_stack(
     );
     openbot_env::write(&root.join(".env"), &settings)
         .map_err(|e| format!("could not write .env: {e}"))?;
+    // Beside the `.env` and before the containers, because compose mounts it. See
+    // `write_plan_store`: an absent file becomes a directory the sign-in can never write into.
+    openbot_env::write_plan_store(&root, &credential)
+        .map_err(|e| format!("could not write the sign-in file: {e}"))?;
     report(&app, "env", true, ".env written");
 
     // Said before rather than after. On a machine that has never run OpenBot this pulls five

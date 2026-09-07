@@ -313,8 +313,18 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      CHATGPT_OAUTH_TOKEN: ${CHATGPT_OAUTH_TOKEN:-}
+      # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
+      # there either way; this variable is what tells the harness to read it.
+      CHATGPT_AUTH_FILE: ${CHATGPT_AUTH_FILE:-}
       BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+    volumes:
+      # A bind mount, not a named volume, and read-write on purpose. The signed-in plan's access
+      # token expires within the hour and the harness renews it, so the renewal has to land back on
+      # this machine or every restart would replay a refresh token that had already been spent.
+      #
+      # The app writes this file before `compose up` for the reason bind mounts make necessary: a
+      # missing source is not an error, it silently becomes a directory.
+      - ./chatgpt-auth.json:/root/.langchain/chatgpt-auth.json
 
   # The same Bot behavior on a framework, exposed as another AG-UI endpoint and registry row.
   agent-langgraph:
