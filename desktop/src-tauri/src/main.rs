@@ -158,10 +158,17 @@ impl ChosenModel {
              * address to send it to, which is exactly the compatible shape. It arrives here with
              * `base_url` already filled in by the sign-in, not by a person.
              */
-            ("openai", "plan") | ("openai-compatible", "endpoint") => {
+            ("openai", "plan") => {
+                let token = given(self.token);
+                if token.is_empty() {
+                    return Err("That ChatGPT plan was not signed in to.".into());
+                }
+                Ok(openbot_env::ModelCredential::ChatGptPlan { token })
+            }
+            ("openai-compatible", "endpoint") => {
                 Ok(openbot_env::ModelCredential::Compatible {
                     base_url: given(self.base_url),
-                    api_key: given(self.api_key.or(self.token)),
+                    api_key: given(self.api_key),
                     model: given(self.model),
                 })
             }

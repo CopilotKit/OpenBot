@@ -101,6 +101,18 @@ pub fn compose(
             insert_if_given(&mut env, "CLAUDE_CODE_OAUTH_TOKEN", token);
             env.insert("ANTHROPIC_API_KEY".into(), String::new());
         }
+        ModelCredential::ChatGptPlan { token } => {
+            insert_if_given(&mut env, "CHATGPT_OAUTH_TOKEN", token);
+            /*
+             * Both cleared, for the same reason the Claude plan clears its key: a key left from an
+             * earlier attempt would be preferred by every OpenAI client in the stack, and the
+             * person who just signed in to a plan would be billed per request instead. The base URL
+             * is cleared too, because the Codex address is the library's to pin and not ours to
+             * write.
+             */
+            env.insert("OPENAI_API_KEY".into(), String::new());
+            env.insert("OPENAI_BASE_URL".into(), String::new());
+        }
         ModelCredential::Compatible {
             base_url,
             api_key,
@@ -257,6 +269,20 @@ pub enum ModelCredential {
     Anthropic { api_key: String },
     /// A Claude plan, signed in to. The token is minted by `claude setup-token` and never typed.
     ClaudePlan { token: String },
+    /**
+    A ChatGPT plan, signed in to.
+
+    NOT the compatible shape below, and that distinction is load-bearing. A plan token is a bearer
+    for `https://chatgpt.com/backend-api/codex`, and `langchain-openai` PINS that address and
+    refuses a caller-supplied one, deliberately, so a token cannot be aimed at somebody else's
+    server and handed over. Writing this as `OPENAI_BASE_URL` plus a key would be us hand-rolling
+    the thing the library exists to prevent, and the Codex path also shapes its requests
+    differently, so it would not have worked anyway.
+
+    The harness picks its model class from the presence of this token. See the harness note in the
+    build doc.
+    */
+    ChatGptPlan { token: String },
     /// Anything that speaks the OpenAI wire format, at an address the person gave.
     ///
     /// Also where a signed-in ChatGPT plan lands, because that login yields a token and the address
@@ -663,6 +689,30 @@ mod model_tests {
             Some(&"oauth-token".to_string())
         );
         assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&String::new()));
+    }
+
+    /// The must-not case for the other plan. A ChatGPT plan token is not an OpenAI key and is not
+    /// aimed with a base URL: the library pins the Codex address precisely so a token cannot be
+    /// pointed at somebody else's server, and a leftover key would outrank the plan.
+    #[test]
+    fn a_chatgpt_plan_writes_no_key_and_aims_at_nothing() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::ChatGptPlan {
+                    token: "oauth-token".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+        );
+        assert_eq!(
+            env.get("CHATGPT_OAUTH_TOKEN"),
+            Some(&"oauth-token".to_string())
+        );
+        assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
+        assert_eq!(env.get("OPENAI_BASE_URL"), Some(&String::new()));
     }
 
     /// An Anthropic key is written as one, and does not become an OpenAI key because that is the

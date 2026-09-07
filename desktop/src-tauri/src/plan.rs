@@ -140,7 +140,19 @@ fn find_all(haystack: &str, needle: &str) -> Vec<usize> {
 /// Asked before writing, so a code is never typed into a prompt that is not there: written early it
 /// is consumed by whatever the TUI is drawing and the flow stalls with no sign of why.
 pub fn wants_the_code(output: &str) -> bool {
-    plain(output).contains("Paste code here")
+    /*
+     * Compared with the spaces taken out of both sides, because the CLI does not use spaces.
+     *
+     * It positions every word with a cursor-column escape instead — `Paste\u{1b}[7Gcode` and so on
+     * — so stripping the escapes leaves "Pastecodehereifprompted" and a match on the phrase as
+     * written never fires. This cost a live sign-in: the code was handed over, and the flow sat in
+     * the wrong wait until it timed out, with the prompt plainly on screen the whole time.
+     */
+    let squashed: String = plain(output)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    squashed.contains("Pastecodehere")
 }
 
 /**
@@ -382,11 +394,16 @@ mod tests {
         assert_eq!(authorize_url_in("Welcome to Claude Code\r\n"), None);
     }
 
-    /// The prompt is only recognised once it is actually drawn.
+    /// The prompt is recognised in the shape the CLI actually writes it.
+    ///
+    /// Which is not with spaces: it moves the cursor between words. The earlier version of this
+    /// test used a fixture with real spaces, passed, and hid a bug that cost a live sign-in.
     #[test]
-    fn the_code_prompt_is_seen_through_the_escapes() {
-        let output = "\u{1b}[38;2;255;255;255mPaste\u{1b}[0m code here if prompted >";
-        assert!(wants_the_code(output));
+    fn the_code_prompt_is_seen_when_the_words_are_cursor_positioned() {
+        let real = "\u{1b}[2G\u{1b}[38;2;255;255;255mPaste\u{1b}[8Gcode\u{1b}[13Ghere\u{1b}[18Gif\u{1b}[21Gprompted\u{1b}[30G>";
+        assert!(wants_the_code(real), "the real prompt shape was not seen");
+        // And still when a terminal does use spaces.
+        assert!(wants_the_code("Paste code here if prompted >"));
         assert!(!wants_the_code("Opening browser to sign in…"));
     }
 
