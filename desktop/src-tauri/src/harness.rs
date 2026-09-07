@@ -60,6 +60,12 @@ pub struct Harness {
     pub image: Option<String>,
     /// Where the container says it is ready.
     pub health_path: Option<String>,
+    /// The port the image listens on, which differs per harness and is fixed by its Dockerfile.
+    ///
+    /// Carried because the one compose service that runs the picked harness has to be told, and
+    /// because the endpoint the Bot is registered at is built from it. `None` only for the row where
+    /// the person supplies the address.
+    pub port: Option<u16>,
     pub credential: Credential,
     pub maintainer: Maintainer,
     /// The vendored mark's file stem, or `None` where no maintained set has one.
@@ -92,11 +98,27 @@ pub fn catalogue() -> Vec<Harness> {
     // The three with none are named here rather than discovered at draw time, because a missing
     // file and a brand with no mark are different things and only one of them is a bug.
     const UNMARKED: [&str; 3] = ["agno", "ag2", "langroid"];
-    let ours = |id: &str, name: &str, summary: &str, maintainer: Maintainer| Harness {
+    /*
+     * The directory is given, not derived from the id, and that is deliberate.
+     *
+     * A release publishes `openbot-<directory>`, taken from the Dockerfile paths in the tree, so
+     * the image name belongs to the directory and not to whatever this list calls the row. Derived
+     * from the id it was wrong for every row — `openbot-harness-crewai` against a published
+     * `openbot-agent-crewai` — and wrong twice for the four whose id does not match their folder.
+     * A picker that names an image nobody publishes fails at the pull, on a first run, with nothing
+     * on screen to say why. `every_image_is_one_a_release_publishes` holds it.
+     */
+    let ours = |id: &str,
+                directory: &str,
+                port: u16,
+                name: &str,
+                summary: &str,
+                maintainer: Maintainer| Harness {
         id: id.into(),
         name: name.into(),
         summary: summary.into(),
-        image: Some(format!("openbot-harness-{id}")),
+        image: Some(format!("openbot-{directory}")),
+        port: Some(port),
         health_path: Some("/health".into()),
         credential: Credential::AnyProvider,
         maintainer,
@@ -106,42 +128,56 @@ pub fn catalogue() -> Vec<Harness> {
     vec![
         ours(
             "crewai",
+            "agent-crewai",
+            4202,
             "CrewAI",
             "Crews of agents with roles and tasks.",
             Maintainer::Partnership,
         ),
         ours(
             "llamaindex",
+            "agent-llamaindex",
+            4204,
             "LlamaIndex",
             "Agents built around your own documents.",
             Maintainer::FirstParty,
         ),
         ours(
             "agno",
+            "agent-agno",
+            4203,
             "Agno",
             "Fast, small, and multi-modal.",
             Maintainer::FirstParty,
         ),
         ours(
             "langgraph",
+            "agent-langgraph-agui",
+            4206,
             "LangGraph",
             "Graphs you can change, from LangChain.",
             Maintainer::Partnership,
         ),
         ours(
             "google-adk",
+            "agent-adk",
+            4208,
             "Google ADK",
             "Google's agent kit. Gemini first, any model after.",
             Maintainer::FirstParty,
         ),
         ours(
             "pydantic-ai",
+            "agent-pydantic-ai",
+            4205,
             "Pydantic AI",
             "Typed agents, validated in and out.",
             Maintainer::FirstParty,
         ),
         ours(
             "microsoft-agent-framework",
+            "agent-microsoft",
+            4211,
             "Microsoft Agent Framework",
             "Microsoft's, model-agnostic by design.",
             Maintainer::FirstParty,
@@ -150,7 +186,8 @@ pub fn catalogue() -> Vec<Harness> {
             id: "claude-agent-sdk".into(),
             name: "Claude Agent SDK".into(),
             summary: "Anthropic's own. The one that takes a Claude plan instead of a key.".into(),
-            image: Some("openbot-harness-claude-agent-sdk".into()),
+            image: Some("openbot-agent-claude-sdk".into()),
+            port: Some(4212),
             health_path: Some("/health".into()),
             credential: Credential::Anthropic,
             maintainer: Maintainer::Community,
@@ -158,24 +195,32 @@ pub fn catalogue() -> Vec<Harness> {
         },
         ours(
             "strands",
+            "agent-strands",
+            4207,
             "AWS Strands",
             "Amazon's. Bedrock first, any model after.",
             Maintainer::FirstParty,
         ),
         ours(
             "ag2",
+            "agent-ag2",
+            4210,
             "AG2",
             "The AutoGen line, continued.",
             Maintainer::FirstParty,
         ),
         ours(
             "langroid",
+            "agent-langroid",
+            4209,
             "Langroid",
             "Multi-agent, deliberately small.",
             Maintainer::Community,
         ),
         ours(
             "mastra",
+            "agent-mastra",
+            4213,
             "Mastra",
             "TypeScript agents, with their own server.",
             Maintainer::Partnership,
@@ -186,6 +231,7 @@ pub fn catalogue() -> Vec<Harness> {
             summary: "Give its address. It is proved with a real AG-UI run before it is saved."
                 .into(),
             image: None,
+            port: None,
             health_path: None,
             credential: Credential::TheirEndpoint,
             maintainer: Maintainer::Community,
@@ -252,6 +298,66 @@ mod tests {
                 !ids.contains(&absent.to_string()),
                 "{absent} is In Progress upstream"
             );
+        }
+    }
+
+    /**
+    Every image this list names is one a release actually publishes.
+
+    The guard on the defect that made this test exist: image names were derived from the row's id
+    and the release derives them from the directory, so all twelve named something that would never
+    be pushed. Nothing caught it, because a wrong image name is correct Rust and fails at the pull
+    on somebody's first run.
+
+    Read from `.github/published-images.json`, which is the same file CI checks against the
+    Dockerfiles in the tree, so the picker, the tests and the release all agree or this fails.
+    */
+    #[test]
+    fn every_image_is_one_a_release_publishes() {
+        let listed = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../.github/published-images.json"),
+        )
+        .expect("published-images.json is not where this test expects it");
+        // Crude on purpose: a substring check needs no JSON parser in a build with no reason to
+        // carry one, and the file is a flat list of quoted names.
+        for harness in catalogue() {
+            let Some(image) = harness.image else { continue };
+            let component = image
+                .strip_prefix("openbot-")
+                .expect("a harness image is named openbot-<component>");
+            assert!(
+                listed.contains(&format!("\"{component}\"")),
+                "{} names image {image}, which no release publishes",
+                harness.id
+            );
+        }
+    }
+
+    /// A harness that is pulled has to say which port it listens on, because the one service that
+    /// runs it is told, and the endpoint the Bot is registered at is built from it.
+    #[test]
+    fn a_pulled_harness_names_its_port() {
+        for harness in catalogue() {
+            assert_eq!(
+                harness.image.is_some(),
+                harness.port.is_some(),
+                "{} has an image and no port, or a port and no image",
+                harness.id
+            );
+        }
+    }
+
+    /// Two harnesses on one port would be one service that cannot run both, and a Bot registered at
+    /// an address belonging to the other.
+    #[test]
+    fn no_two_harnesses_share_a_port() {
+        let mut seen = std::collections::BTreeMap::new();
+        for harness in catalogue() {
+            let Some(port) = harness.port else { continue };
+            if let Some(other) = seen.insert(port, harness.id.clone()) {
+                panic!("{} and {} both claim port {port}", harness.id, other);
+            }
         }
     }
 
