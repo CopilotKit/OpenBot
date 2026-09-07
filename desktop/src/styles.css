@@ -1,223 +1,312 @@
+/*
+ * OpenBot Desktop: the setup window.
+ *
+ * The world is the one the product sits next to: warm off-white ground, near-black text, almost no
+ * chrome, and one rounded focal element per screen. Measured from Grok rather than guessed — the
+ * ground is a warm #F9F8F7 and the hairlines are a warm-tinted black at 4-8% rather than a cool
+ * gray, which is most of why that interface reads calm instead of clinical.
+ *
+ * `universalSans` is deliberately absent: it is xAI's own face and not ours to ship. Inter is the
+ * documented fallback and the system stack is what a desktop window can rely on with no network at
+ * the moment it draws.
+ *
+ * Light is committed rather than defaulted. The use scene is a corporate laptop in an office in the
+ * daytime, and this window is the first thing somebody sees after a download.
+ */
 :root {
-  color-scheme: light dark;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --ink: #111827;
-  --muted: #6b7280;
-  --line: #e5e7eb;
-  --ground: #ffffff;
-  --accent: #111827;
-  --bad: #b91c1c;
-  --good: #15803d;
+  /* Warm, not neutral. Every gray here is tinted from the same 15/13/10 black. */
+  --ground: #f9f8f7;
+  --raised: #ffffff;
+  --ink: #050505;
+  --ink-soft: rgba(15, 13, 10, 0.62);
+  --ink-faint: rgba(15, 13, 10, 0.45);
+  --hair: rgba(15, 13, 10, 0.08);
+  --hair-soft: rgba(15, 13, 10, 0.04);
+  --sunk: rgba(15, 13, 10, 0.04);
+  --accent: #050505;
+  --accent-ink: #ffffff;
+  --bad: #b3261e;
+  --good: #1a7f37;
+
+  /* One radius family: 12px for rows and controls, 16px for the focal card. */
+  --r-row: 12px;
+  --r-card: 16px;
+
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, ui-sans-serif,
+    system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--ground);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #f3f4f6;
-    --muted: #9ca3af;
-    --line: #374151;
-    --ground: #0b0f19;
-    --accent: #f3f4f6;
-  }
-}
+
+/*
+ * NO DARK VARIANT, DELIBERATELY, and this is the one place in the product where that is right.
+ *
+ * This window exists for about five minutes, once, before it becomes OpenBot and hands over to the
+ * app — which does follow the system. A first-run screen is the product's handshake, and the look
+ * committed here is the warm light one measured from the interface this is meant to sit beside.
+ * Following the system instead would mean the first thing half of all installers ever see is a
+ * variant nobody composed against a reference.
+ *
+ * The app this hands over to keeps its own light and dark. Only the setup window is pinned.
+ */
 * {
   box-sizing: border-box;
 }
+
 body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
 }
+
+/*
+ * The window is 900x640 and cannot be resized into something else, so it is composed as a room
+ * rather than a page: one centred column, vertically settled, with the same optical centre on every
+ * step. A wizard whose content jumps position between steps reads as four different screens.
+ */
 main {
-  max-width: 42rem;
-  margin: 0 auto;
-  padding: 2.5rem 1.5rem;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2.5rem 2rem;
 }
+
+.sheet {
+  width: 100%;
+  max-width: 30rem;
+  display: flex;
+  flex-direction: column;
+  /* One authored entrance, on the step rather than on every element. */
+  animation: settle 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet {
+    animation: none;
+  }
+}
+
+/* Where you are, stated quietly. Operate mode: a four-step flow that says nothing about progress
+   makes people wonder how much is left, which is when they close it. */
+.steps-of {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 1.25rem;
+}
+
 h1 {
-  font-size: 1.35rem;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.6rem;
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
   margin: 0 0 0.35rem;
 }
-p.lede {
-  color: var(--muted);
-  margin: 0 0 1.75rem;
-  line-height: 1.5;
+
+.lede {
+  color: var(--ink-soft);
+  margin: 0 0 1.5rem;
+  max-width: 34rem;
 }
-label {
-  display: block;
-  font-size: 0.82rem;
-  font-weight: 600;
-  margin: 0 0 0.3rem;
+
+.lede.big {
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
-input {
-  width: 100%;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  background: transparent;
-  color: inherit;
-  font: inherit;
+
+.footnote {
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+  line-height: 1.55;
+  margin: 1.25rem 0 0;
 }
-button {
-  padding: 0.55rem 1rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: var(--ground);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-button.secondary {
-  background: transparent;
-  color: var(--ink);
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.field {
-  margin-bottom: 1rem;
-}
+
+/* Controls */
 .row {
   display: flex;
   gap: 0.6rem;
   align-items: center;
   margin-top: 1.5rem;
 }
-.steps {
-  border: 1px solid var(--line);
-  border-radius: 0.6rem;
-  margin-top: 1.5rem;
-  overflow: hidden;
+
+button {
+  font: inherit;
+  font-weight: 500;
+  padding: 0.6rem 1.1rem;
+  border-radius: var(--r-row);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
 }
-.step {
+
+button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+button.quiet {
+  background: transparent;
+  color: var(--ink-soft);
+  border-color: var(--hair);
+}
+
+button.quiet:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+  opacity: 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Fields */
+.field {
+  margin-bottom: 0.9rem;
+}
+
+.field label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin-bottom: 0.35rem;
+}
+
+.field input {
+  font: inherit;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--r-row);
+  border: 1px solid var(--hair);
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.field input::placeholder {
+  color: var(--ink-faint);
+}
+
+.field input:focus-visible {
+  border-color: var(--ink-faint);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--sunk);
+}
+
+/* The list of choices. Rows, not a grid of same-size cards. */
+fieldset.picker {
+  border: 0;
+  padding: 0;
+  margin: 0.75rem 0 0;
   display: flex;
-  gap: 0.6rem;
-  padding: 0.6rem 0.8rem;
-  border-bottom: 1px solid var(--line);
-  font-size: 0.88rem;
-}
-.step:last-child {
-  border-bottom: none;
-}
-.step .mark {
-  width: 1.1rem;
-  flex: none;
-}
-.step .detail {
-  color: var(--muted);
-}
-.bad {
-  color: var(--bad);
-}
-.good {
-  color: var(--good);
-}
-.blocker {
-  border: 1px solid var(--bad);
-  border-radius: 0.6rem;
-  padding: 1rem;
-  margin-top: 1.5rem;
-}
-.blocker h2 {
-  font-size: 0.95rem;
-  margin: 0 0 0.4rem;
-}
-.blocker p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-/* The picker: a grid of rows from the catalogue, and never a screen per harness. */
-.lede {
-  color: var(--muted);
-  margin: 0 0 1.25rem;
-  max-width: 46ch;
-}
-
-.picker {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
-}
-
-.picker.providers {
-  grid-template-columns: 1fr;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 17rem;
+  overflow-y: auto;
 }
 
 .tile {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.35rem;
-  padding: 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: transparent;
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-}
-
-/* Base first: the `.tile.wide` rules below are more specific and must win. */
-.tile-name {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-.tile-summary {
-  color: var(--muted);
-  font-size: 0.8rem;
-  line-height: 1.35;
-}
-.tile-note {
-  font-size: 0.7rem;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.1rem 0.45rem;
-}
-
-/* A brand's mark, or its name where no mark exists. Same box either way, so an unmarked row does
-   not read as unfinished. */
-.mark-tile {
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px;
-  border-radius: 10px;
-  background: #fff;
-  border: 1px solid var(--line);
-  flex: none;
-}
-
-.tile.wide {
+  position: relative;
   display: grid;
-  grid-template-columns: 44px 1fr;
-  grid-template-areas: "mark name" "mark summary";
+  grid-template-columns: 32px 1fr;
+  grid-template-areas:
+    "mark name"
+    "mark summary";
   align-items: center;
-  column-gap: 0.9rem;
-  row-gap: 0.15rem;
-}
-
-.tile.wide .mark-tile {
-  grid-area: mark;
-}
-.tile.wide .tile-name {
-  grid-area: name;
-}
-.tile.wide .tile-summary {
-  grid-area: summary;
+  column-gap: 0.7rem;
+  row-gap: 0.1rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--hair-soft);
+  border-radius: var(--r-row);
+  background: var(--raised);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .tile:hover {
-  border-color: var(--muted);
+  border-color: var(--hair);
 }
 
 .tile.chosen {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  border-color: var(--ink);
+}
+
+.mark-tile {
+  grid-area: mark;
+}
+.tile-name {
+  grid-area: name;
+}
+.tile-summary {
+  grid-area: summary;
+}
+.tile-note {
+  grid-column: 2;
+}
+
+.tile-name {
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.tile-summary {
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.tile-note {
+  justify-self: start;
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  background: var(--sunk);
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+  margin-top: 0.15rem;
+}
+
+/* A brand's mark, or its name where no usable mark exists. Same box either way. */
+.mark-tile {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid var(--hair-soft);
+  flex: none;
 }
 
 .mark-tile img {
@@ -225,65 +314,21 @@ button:disabled {
   height: 100%;
 }
 
-/* Less padding than a mark gets: a word needs the width, and "Langroid" broke to "Langr oid". */
 .mark-wordmark {
-  padding: 3px;
+  padding: 2px;
 }
 
 .mark-wordmark span {
-  font-size: 0.58rem;
-  hyphens: none;
-  letter-spacing: -0.02em;
+  font-size: 0.52rem;
   font-weight: 600;
   line-height: 1.05;
   text-align: center;
-  color: #111827;
-  word-break: break-word;
+  letter-spacing: -0.02em;
+  color: #050505;
+  hyphens: none;
 }
 
-.chosen-provider {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 1rem;
-  margin-bottom: 1.25rem;
-}
-
-.segmented {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px;
-  margin-bottom: 0.9rem;
-}
-
-.segmented button {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  border-radius: 999px;
-  padding: 0.3rem 0.8rem;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.segmented button.on {
-  background: var(--accent);
-  color: var(--ground);
-}
-
-.caution {
-  font-size: 0.8rem;
-  color: var(--muted);
-  line-height: 1.45;
-  margin: 0.9rem 0 0;
-}
-
-.caution a {
-  color: var(--ink);
-}
-
-/* The radio itself is not drawn; the tile is. Kept in the layout rather than `display: none` so it
-   is still focusable and still announced. */
+/* The radio is not drawn; the row is. Kept in the layout so it stays focusable and announced. */
 .tile-input {
   position: absolute;
   opacity: 0;
@@ -292,17 +337,148 @@ button:disabled {
   margin: 0;
 }
 
-/* A fieldset is the group, but its default border and padding are not wanted here. */
-fieldset.picker {
-  border: 0;
-  padding: 0;
-  margin: 0 0 1.5rem;
+.tile:has(.tile-input:focus-visible) {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
-/* Keyboard focus has to be visible on the tile, since the control inside it is not. */
-.tile:has(.tile-input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+/* The framework list, which almost nobody should open. */
+details {
+  border-top: 1px solid var(--hair-soft);
+  padding-top: 0.9rem;
+}
+
+details > summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 0.15s ease;
+}
+
+details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+details > summary:hover {
+  color: var(--ink);
+}
+
+/* The chosen provider's own panel: the one raised surface per screen. */
+.chosen-provider {
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  background: var(--raised);
+  padding: 1rem;
+  margin-top: 0.9rem;
+}
+
+.segmented {
+  display: inline-flex;
+  background: var(--sunk);
+  border-radius: 999px;
+  padding: 3px;
+  margin-bottom: 0.9rem;
+}
+
+.segmented button {
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.segmented button.on {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(15, 13, 10, 0.08);
+}
+
+.caution,
+.fallback {
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  line-height: 1.5;
+  margin: 0.9rem 0 0;
+}
+
+.caution a,
+.fallback a {
+  color: var(--ink);
+  text-underline-offset: 2px;
+}
+
+/* Something is in the way, or something failed. */
+.blocker {
+  /* No coloured side border: the heading already carries the state, and a thick accent stripe is
+     decoration standing in for hierarchy. */
+  border: 1px solid var(--hair);
+  border-radius: var(--r-row);
+  background: var(--raised);
+  padding: 0.9rem 1rem;
+  margin: 1rem 0 0;
+}
+
+.blocker h2 {
+  color: var(--bad);
+}
+
+.blocker p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+/* Per-item progress, because this is the slowest screen in the product. */
+.steps {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 1rem 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.82rem;
+}
+
+.step .mark {
+  font-size: 0.75rem;
+}
+
+.step .mark.good {
+  color: var(--good);
+}
+.step .mark.bad {
+  color: var(--bad);
+}
+
+.step .detail {
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+  text-align: right;
 }
 
 .sr-only {
@@ -315,15 +491,4 @@ fieldset.picker {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
-}
-
-/* The copyable link beside an open that may have silently failed. */
-.fallback {
-  font-size: 0.8rem;
-  color: var(--muted);
-  margin: 0 0 0.9rem;
-}
-
-.fallback a {
-  color: var(--ink);
 }

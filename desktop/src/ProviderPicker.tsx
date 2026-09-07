@@ -112,11 +112,11 @@ export function ProviderPicker({
       model.trim().length > 0);
 
   return (
-    <>
-      <h1>Connect a model</h1>
+    <div className="sheet">
+      <p className="steps-of">Step 2 of 2</p>
+      <h1>Connect your AI</h1>
       <p className="lede">
-        This is what your Bots think with. It is a separate choice from the Bot
-        you picked, and any Bot works with any of these.
+        Sign in to the plan you already pay for. No key needed.
       </p>
 
       <fieldset className="picker providers">
@@ -312,6 +312,6 @@ export function ProviderPicker({
           Continue
         </button>
       </div>
-    </>
+    </div>
   );
 }

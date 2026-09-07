@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-import { HarnessPicker } from "./HarnessPicker";
+import { DEFAULT_HARNESS, HarnessPicker } from "./HarnessPicker";
 import { type ModelChoice, ProviderPicker } from "./ProviderPicker";
+import { Welcome } from "./Welcome";
 
 type EngineStatus = {
   engine: "docker" | "podman" | null;
@@ -36,9 +37,11 @@ export function App() {
    * the flow is resumable at the screen it stopped on, and a wizard that asks twice is one nobody
    * finishes. `null` means not answered yet, which is what decides the screen below.
    */
-  const [harness, setHarness] = useState<string | null>(null);
+  const [harness, setHarness] = useState<string | null>(DEFAULT_HARNESS);
   const [model, setModel] = useState<ModelChoice | null>(null);
-  const [step, setStep] = useState<"harness" | "model" | "install">("harness");
+  const [step, setStep] = useState<"welcome" | "harness" | "model" | "install">(
+    "welcome",
+  );
   const [apiUrl, setApiUrl] = useState(
     "https://api.intelligence.copilotkit.ai",
   );
@@ -175,6 +178,14 @@ export function App() {
    * Skipped entirely when a stack is already up: somebody returning to a running OpenBot is not
    * setting one up, and asking them to pick a Bot again would be the wizard asking twice.
    */
+  if (!running && step === "welcome") {
+    return (
+      <main>
+        <Welcome onStart={() => setStep("harness")} />
+      </main>
+    );
+  }
+
   if (!running && step === "harness") {
     return (
       <main>
@@ -182,6 +193,7 @@ export function App() {
           chosen={harness}
           onChoose={setHarness}
           onContinue={() => setStep("model")}
+          onBack={() => setStep("welcome")}
         />
       </main>
     );
