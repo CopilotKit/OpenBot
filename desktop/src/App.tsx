@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { DEFAULT_HARNESS, HarnessPicker } from "./HarnessPicker";
 import { type ModelChoice, ProviderPicker } from "./ProviderPicker";
 import { Ask } from "./Ask";
+import { asProblem, Failure, type Problem } from "./Problem";
 import { Welcome } from "./Welcome";
 
 type EngineStatus = {
@@ -21,10 +22,6 @@ type Blocker =
 
 type Progress = { step: string; ok: boolean; detail: string };
 
-/** What a failed command returns: a sentence for the person, and the real output beside it. */
-type Problem = { said: string; detail?: string | null };
-
-/** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */
 /**
  * What the last screen offers to ask, mirroring `ask::SUGGESTED`.
  *
@@ -33,37 +30,6 @@ type Problem = { said: string; detail?: string | null };
  * field, so neither can be the only one that has it.
  */
 const SUGGESTED_QUESTION = "What is 17 times 23?";
-
-/**
- * A failure, in both registers, wherever one happens.
- *
- * One implementation because there is one rule: the sentence is the headline and the real output
- * lives behind a disclosure. A second copy is how one screen ends up showing an engine dump as its
- * title.
- */
-function Failure({ problem }: { problem: Problem }) {
-  return (
-    <div className="blocker" role="alert">
-      <h2>That did not finish</h2>
-      <p>{problem.said}</p>
-      {/* The real output, kept but not the headline. Whoever is debugging opens this; the person
-          reading the sentence above never has to. */}
-      {problem.detail && (
-        <details className="detail-of">
-          <summary>Technical details</summary>
-          <pre>{problem.detail}</pre>
-        </details>
-      )}
-    </div>
-  );
-}
-
-function asProblem(thrown: unknown): Problem {
-  if (thrown && typeof thrown === "object" && "said" in thrown) {
-    return thrown as Problem;
-  }
-  return { said: String(thrown) };
-}
 
 /**
  * One screen, four states: something is in the way, nothing is set up yet, it is working, it is

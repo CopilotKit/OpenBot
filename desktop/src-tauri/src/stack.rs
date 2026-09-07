@@ -21,13 +21,21 @@ use crate::engine::Address;
 
 /// The services Compose owns. `migrate` is deliberately absent: it is run once, to completion,
 /// rather than raised, and treating it as a long-lived service makes it look like a crash loop.
-const SERVICES: [&str; 5] = [
-    "postgres",
-    "supervisor",
-    "agent-computer",
-    "agent-bot",
-    "agent-langgraph",
-];
+const SERVICES: [&str; 3] = ["postgres", "supervisor", "agent-computer"];
+
+/**
+The Bots that ship with OpenBot, which only run on an API key.
+
+BOTH REFUSE TO START WITHOUT ONE, saying so themselves: "OPENAI_API_KEY is not set. This Bot cannot
+answer without a model." That is correct of them and wrong of us to ignore. Somebody who signs in
+with the ChatGPT or Claude subscription they already pay for has no key by design, so raising these
+gave them two containers that died on startup and two red lines on the setup screen, about Bots they
+never chose.
+
+Started when a key exists and left alone when it does not. The Bot the person actually picked speaks
+its plan and answers either way, which is what the last screen proves.
+*/
+const BOTS_NEEDING_A_KEY: [&str; 2] = ["agent-bot", "agent-langgraph"];
 
 /// The three that are not containers, in the order they are started.
 ///
@@ -122,6 +130,9 @@ pub fn up(
     engine: &Address,
     root: &Path,
     harness: bool,
+    // Whether the model screen produced a key. Without one the bundled Bots cannot start, and
+    // starting them to fail is worse than not starting them: see `BOTS_NEEDING_A_KEY`.
+    a_key_exists: bool,
     secrets: &Secrets,
 ) -> Result<(), crate::problem::Problem> {
     /*
@@ -139,6 +150,11 @@ pub fn up(
     let output = command
         .args(["up", "-d", "--no-build"])
         .args(SERVICES)
+        .args(if a_key_exists {
+            &BOTS_NEEDING_A_KEY[..]
+        } else {
+            &[][..]
+        })
         .args(if harness {
             &["agent-harness"][..]
         } else {
@@ -501,6 +517,36 @@ pub fn published_in(listing: &str) -> std::collections::HashSet<u16> {
     ports
 }
 
+/**
+Wait for ports we just released to actually be free.
+
+A KILL IS NOT INSTANT AND THE CHECK IS. Reclaiming this deployment's own host processes and then
+immediately asking whether their ports are held is a race, and it loses: the socket is still closing
+while the check reads it as somebody else's. Measured as "something is already listening on port
+3010" naming a process that no longer existed by the time anybody looked.
+
+Bounded, and only worth calling when something was actually stopped. A port a stranger holds stays
+held, so this costs the wait once and then reports it.
+*/
+pub fn wait_for_ports_to_clear(ports: &[u16], patience: std::time::Duration) {
+    let deadline = std::time::Instant::now() + patience;
+    while std::time::Instant::now() < deadline {
+        if ports.iter().all(|port| !something_answers(*port)) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// Whether anything accepts a connection on a loopback port right now.
+fn something_answers(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok()
+}
+
 /// Refuse to start if something already holds a port this deployment needs.
 ///
 /// Found the hard way: another deployment was listening on 3001, so the readiness check below was
@@ -520,12 +566,7 @@ pub fn port_already_taken_except(
         if ours.contains(port) {
             continue;
         }
-        if std::net::TcpStream::connect_timeout(
-            &std::net::SocketAddr::from(([127, 0, 0, 1], *port)),
-            std::time::Duration::from_millis(300),
-        )
-        .is_ok()
-        {
+        if something_answers(*port) {
             return Some(format!(
                 "Something is already listening on port {port}, which OpenBot uses for the {name}. \
                  Stop it, or change the port, and start again."
@@ -795,6 +836,22 @@ mod tests {
     }
 
     /// The published side of a mapping, which is the only side anything on this machine binds.
+    /// A plan is not a key, and the Bots that need one are not raised to fail.
+    #[test]
+    fn the_bundled_bots_are_not_started_without_a_key() {
+        // Both say it themselves in their own source; this is the shell agreeing rather than
+        // starting them and reporting their refusal as a failure of the install.
+        assert_eq!(BOTS_NEEDING_A_KEY.len(), 2);
+        assert!(BOTS_NEEDING_A_KEY.contains(&"agent-bot"));
+        assert!(BOTS_NEEDING_A_KEY.contains(&"agent-langgraph"));
+        for bot in BOTS_NEEDING_A_KEY {
+            assert!(
+                !SERVICES.contains(&bot),
+                "{bot} is started unconditionally as well"
+            );
+        }
+    }
+
     /// Stop has to name the profile, or the one Bot the person picked keeps running.
     #[test]
     fn stopping_names_the_harness_profile() {

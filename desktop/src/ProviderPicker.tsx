@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { useEffect, useState } from "react";
 import { Mark } from "./Mark";
 
@@ -70,7 +71,9 @@ export function ProviderPicker({
   const [code, setCode] = useState("");
   const [token, setToken] = useState(chosen?.token ?? "");
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState("");
+  // A problem, not a string: a sign-in failure carries the container's own output, and
+  // stringifying it printed "[object Object]" where the diagnosis should have been.
+  const [failure, setFailure] = useState<Problem | null>(null);
 
   /*
    * The two plans sign in differently, and the screen has to know which.
@@ -82,7 +85,7 @@ export function ProviderPicker({
   async function beginSignIn() {
     if (!row) return;
     setBusy(true);
-    setFailure("");
+    setFailure(null);
     try {
       const start =
         row.id === "anthropic"
@@ -95,7 +98,7 @@ export function ProviderPicker({
         setSignInUrl(null);
       }
     } catch (error) {
-      setFailure(String(error));
+      setFailure(asProblem(error));
       setSignInUrl(null);
     } finally {
       setBusy(false);
@@ -104,14 +107,14 @@ export function ProviderPicker({
 
   async function finishSignIn() {
     setBusy(true);
-    setFailure("");
+    setFailure(null);
     try {
       // Held, not shown. It goes on to `start_stack` the same way a typed key does.
       setToken(await invoke<string>("finish_claude_sign_in", { code }));
       setSignInUrl(null);
       setCode("");
     } catch (error) {
-      setFailure(String(error));
+      setFailure(asProblem(error));
       // The flow is single-use, so a refused code means starting again rather than retyping.
       setSignInUrl(null);
     } finally {
@@ -312,11 +315,7 @@ export function ProviderPicker({
           )}
 
           {/* Said before it happens rather than diagnosed after the Bots stop answering. */}
-          {failure && (
-            <p className="caution" role="alert">
-              {failure}
-            </p>
-          )}
+          {failure && <InlineFailure problem={failure} />}
 
           {row.caution && (
             <p className="caution">

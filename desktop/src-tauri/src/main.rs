@@ -345,7 +345,20 @@ async fn start_stack(
     }
 
     // The harness is a service only when one was picked; see `stack::up`.
-    stack::up(&found, &root, picked.is_some(), &secrets)?;
+    /*
+     * The bundled Bots only when there is a key for them.
+     *
+     * A plan is not a key, and both of them refuse to start without one, so a person signing in
+     * with the subscription they already pay for was handed two dead containers and two red lines
+     * about Bots they never chose. See `BOTS_NEEDING_A_KEY`.
+     */
+    let a_key_exists = matches!(
+        credential,
+        openbot_env::ModelCredential::OpenAi { .. }
+            | openbot_env::ModelCredential::Anthropic { .. }
+            | openbot_env::ModelCredential::Compatible { .. }
+    );
+    stack::up(&found, &root, picked.is_some(), a_key_exists, &secrets)?;
     report(&app, "services", true, "containers up");
 
     report(&app, "migrate", true, "applying migrations");
@@ -367,10 +380,19 @@ async fn start_stack(
      * port 3001 was held. By its own server. These are found by working directory, so anything this
      * stops belongs to this deployment and to no other.
      */
-    stack::stop_processes_under(&root);
+    let reclaimed = stack::stop_processes_under(&root);
 
     // Before spawning: if these are still held, whatever answers later is not ours.
     let ports = openbot_env::Ports::default();
+    if reclaimed > 0 {
+        // A kill is not instant and the check is. Without this the socket of a process this run
+        // just stopped reads as somebody else's, and the refusal names a process that no longer
+        // exists. See `wait_for_ports_to_clear`.
+        stack::wait_for_ports_to_clear(
+            &[ports.server, ports.app],
+            std::time::Duration::from_secs(5),
+        );
+    }
     if let Some(problem) =
         stack::port_already_taken(&[("API server", ports.server), ("app", ports.app)])
     {
@@ -764,16 +786,22 @@ async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<St
 
 /// Start a ChatGPT plan sign-in and return the address a browser has to open.
 #[tauri::command]
-async fn begin_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String> {
+async fn begin_chatgpt_sign_in(
+    app: tauri::AppHandle,
+) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let address = engine::detect().address.ok_or_else(|| {
-        "No container engine is answering, so the sign-in cannot run.".to_string()
+        openbot_desktop_lib::problem::Problem::plain(
+            "No container engine is answering, so the sign-in cannot run.",
+        )
     })?;
     let image = openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE.to_string();
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
     })
     .await
-    .map_err(|error| format!("The sign-in did not run: {error}"))??;
+    .map_err(|error| {
+        openbot_desktop_lib::problem::Problem::plain(format!("The sign-in did not run: {error}"))
+    })??;
     *app.state::<Shell>().signing_in_to_chatgpt.lock().unwrap() = Some(signing);
     let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
     Ok(url)

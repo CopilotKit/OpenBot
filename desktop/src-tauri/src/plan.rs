@@ -491,12 +491,12 @@ def pump(a, b):
 def relay():
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("0.0.0.0", RELAY))
+    listener.bind(("0.0.0.0", __RELAY_PORT__))
     listener.listen(8)
     while True:
         client, _ = listener.accept()
         try:
-            upstream = socket.create_connection(("127.0.0.1", LOOPBACK), timeout=10)
+            upstream = socket.create_connection(("127.0.0.1", __LOOPBACK_PORT__), timeout=10)
         except OSError:
             client.close()
             continue
@@ -507,13 +507,30 @@ threading.Thread(target=relay, daemon=True).start()
 
 from langchain_openai.chatgpt_oauth import login_chatgpt
 
-login_chatgpt(open_browser=False, port=LOOPBACK, timeout=900)
+login_chatgpt(open_browser=False, port=__LOOPBACK_PORT__, timeout=900)
 
-raw = json.loads(Path(STORE).read_text())
+raw = json.loads(Path(__STORE_PATH__).read_text())
 if not (raw.get("access_token") or raw.get("token")):
     raise SystemExit("the sign-in finished but left no token behind")
 print("OPENBOT_CHATGPT_STORE=" + json.dumps(raw, separators=(",", ":")), flush=True)
 "#;
+
+/**
+Fill in the addresses the login program needs.
+
+THE PLACEHOLDERS ARE UNDERSCORED FOR A REASON, and it is not style. They used to be bare words, and
+`OPENBOT_CHATGPT_STORE=` contains one of them: rendering rewrote the program's own marker into
+`print("OPENBOT_CHATGPT_"/root/..."=" + ...)`, which is a syntax error. The container then died
+before it printed anything and the window said "the sign-in never offered a link to open" — a
+failure with no relation to its cause, from a program that no test could see was malformed because
+every test looked at the template rather than the rendering.
+*/
+fn render_login(template: &str) -> String {
+    template
+        .replace("__RELAY_PORT__", &CHATGPT_RELAY.to_string())
+        .replace("__LOOPBACK_PORT__", &CHATGPT_LOOPBACK.to_string())
+        .replace("__STORE_PATH__", &format!("{CHATGPT_STORE:?}"))
+}
 
 /**
 A ChatGPT sign-in in progress.
@@ -529,11 +546,11 @@ pub struct SigningInToChatGpt {
 
 impl SigningInToChatGpt {
     /// Start the flow and return the URL a browser has to open.
-    pub fn begin(engine: &crate::engine::Address, image: &str) -> Result<(Self, String), String> {
-        let program = CHATGPT_LOGIN
-            .replace("RELAY", &CHATGPT_RELAY.to_string())
-            .replace("LOOPBACK", &CHATGPT_LOOPBACK.to_string())
-            .replace("STORE", &format!("{CHATGPT_STORE:?}"));
+    pub fn begin(
+        engine: &crate::engine::Address,
+        image: &str,
+    ) -> Result<(Self, String), crate::problem::Problem> {
+        let program = render_login(CHATGPT_LOGIN);
 
         let (binary, arguments) = engine.parts();
         let mut command = crate::quiet::command(binary);
@@ -560,9 +577,12 @@ impl SigningInToChatGpt {
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
 
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("The sign-in did not start: {error}"))?;
+        let mut child = command.spawn().map_err(|error| {
+            crate::problem::Problem::with(
+                "OpenBot could not start the sign-in with OpenAI.",
+                error.to_string(),
+            )
+        })?;
 
         // Both streams, because the vendor's login prints its fallback URL to whichever it prefers
         // and that is not ours to depend on.
@@ -579,11 +599,38 @@ impl SigningInToChatGpt {
         let mut signing = Self { child, output };
         let url = signing
             .wait_for(openai_url_in, PATIENCE_FOR_THE_LINK)
-            .ok_or_else(|| {
-                signing.stop();
-                "The sign-in never offered a link to open.".to_string()
-            })?;
+            .ok_or_else(|| signing.gave_up())?;
         Ok((signing, url))
+    }
+
+    /**
+    Give up, saying it twice.
+
+    THE CONTAINER'S OUTPUT IS THE WHOLE DIAGNOSIS HERE, and withholding it cost real time. A
+    rendering bug made the login program a syntax error, so it died before printing anything and the
+    window said only "the sign-in never offered a link to open" — true, useless, and unrelatable to
+    its cause. What Python said is now kept beside the sentence, where whoever is debugging can open
+    it and nobody else has to look.
+
+    Unlike the Claude flow's transcript, this is safe to carry: a store is printed on one marked
+    line and only after a successful login, so a run that failed to produce a link has no credential
+    in its output to leak. The marker line is stripped regardless, because "no credential here" is
+    not a thing to be almost sure about.
+    */
+    fn gave_up(&mut self) -> crate::problem::Problem {
+        let said = String::from("OpenBot could not start the sign-in with OpenAI.");
+        let detail = self
+            .output
+            .lock()
+            .map(|seen| {
+                seen.lines()
+                    .filter(|line| !line.contains("OPENBOT_CHATGPT_STORE="))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+        self.stop();
+        crate::problem::Problem::with(said, detail)
     }
 
     /// Wait for the browser redirect to complete the login, and return the token store.
@@ -785,6 +832,34 @@ mod tests {
     fn a_half_read_store_line_is_refused() {
         assert_eq!(chatgpt_store_in("OPENBOT_CHATGPT_STORE={\"access_to"), None);
         assert_eq!(chatgpt_store_in("OPENBOT_CHATGPT_STORE={}"), None);
+    }
+
+    /**
+    THE RENDERED PROGRAM, not the template, because rendering is where it broke.
+
+    A bare `STORE` placeholder rewrote the marker in the program's own print line and the container
+    died on a syntax error. Every assertion here is about the string that is actually handed to
+    Python.
+    */
+    #[test]
+    fn rendering_leaves_the_marker_and_the_addresses_intact() {
+        let program = render_login(CHATGPT_LOGIN);
+        assert!(
+            program.contains(r#"print("OPENBOT_CHATGPT_STORE=" + json.dumps(raw"#),
+            "rendering damaged the line the deployment reads:\n{program}"
+        );
+        assert!(
+            !program.contains("__"),
+            "a placeholder survived rendering:\n{program}"
+        );
+        assert!(program.contains(&format!("(\"0.0.0.0\", {CHATGPT_RELAY})")));
+        assert!(program.contains(&format!("port={CHATGPT_LOOPBACK}")));
+        assert!(program.contains(&format!("{CHATGPT_STORE:?}")));
+        // What the reader looks for has to survive what the writer produces.
+        assert_eq!(
+            chatgpt_store_in("OPENBOT_CHATGPT_STORE={\"a\":1}").as_deref(),
+            Some("{\"a\":1}")
+        );
     }
 
     /// The refresh token is the point of carrying a store, so the program must print all of it.

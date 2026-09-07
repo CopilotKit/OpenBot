@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { asProblem, Failure, type Problem } from "./Problem";
 
 /**
  * The last screen: a question, an answer, and only then the handover.
@@ -27,18 +28,24 @@ export function Ask({
   const [question, setQuestion] = useState(suggestion);
   const [answer, setAnswer] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
-  const [failed, setFailed] = useState(false);
+  /*
+   * THE FAILURE IS THIS SCREEN'S TO SHOW, and it used to be nobody's.
+   *
+   * The catch below recorded that something went wrong and threw the problem away, on the belief
+   * that the screen around this one would render it. Nothing did. A plan that could not answer
+   * produced a "Change the model" button and no sentence at all: the exact silence this screen was
+   * built to replace, on the screen built to replace it.
+   */
+  const [failure, setFailure] = useState<Problem | null>(null);
 
   async function ask() {
     setAsking(true);
-    setFailed(false);
+    setFailure(null);
     setAnswer(null);
     try {
       setAnswer(await onAsk(question));
-    } catch {
-      // The sentence is shown by the screen around this one, which already renders a problem in
-      // both registers. Recording only that it failed keeps one failure in one place.
-      setFailed(true);
+    } catch (error) {
+      setFailure(asProblem(error));
     } finally {
       setAsking(false);
     }
@@ -67,6 +74,8 @@ export function Ask({
         />
       </div>
 
+      {failure && <Failure problem={failure} />}
+
       {answer !== null && (
         <div className="answer">
           <p className="answer-from">Your Bot said</p>
@@ -89,7 +98,7 @@ export function Ask({
          * it. A model screen offered before the failure would be a way to change a choice that was
          * working, which is how somebody breaks a finished install.
          */}
-        {failed && (
+        {failure && (
           <button type="button" className="quiet" onClick={onBack}>
             Change the model
           </button>
