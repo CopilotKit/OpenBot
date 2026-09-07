@@ -519,7 +519,7 @@ export function App() {
             </button>
             <button
               type="button"
-              className="secondary"
+              className="quiet"
               onClick={stop}
               disabled={busy}
             >

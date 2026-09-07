@@ -90,14 +90,14 @@ export function Ask({
          * working, which is how somebody breaks a finished install.
          */}
         {failed && (
-          <button type="button" className="secondary" onClick={onBack}>
+          <button type="button" className="quiet" onClick={onBack}>
             Change the model
           </button>
         )}
         {answer !== null && (
           <button
             type="button"
-            className="secondary"
+            className="quiet"
             onClick={ask}
             disabled={asking}
           >
