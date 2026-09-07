@@ -1,5 +1,7 @@
+import { IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
 import {
   type ControlState,
   readControl,
@@ -615,6 +617,16 @@ export function ComputerView({
               />
               {/* A card holding the screen, with who and the wheel centered beneath it. */}
               <div className="relative flex w-full max-w-[70vw] min-w-0 flex-col rounded-2xl bg-background p-4 shadow-2xl">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  onClick={() => setExpanded(false)}
+                  aria-label="Close the assistant's screen"
+                  className="absolute top-5 right-5 z-20 bg-background/90 shadow-sm backdrop-blur-sm"
+                >
+                  <IconX />
+                </Button>
                 {/*
                   Overlay uses the live socket; the inline card keeps low-cost polling. With no page
                   to draw it reserves the same frame and says the same thing the card does — the
