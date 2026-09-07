@@ -71,17 +71,16 @@ pub struct Harness {
 /// and Cloudflare Agents are all In Progress, and a picker that offers a harness which cannot yet
 /// answer is worse than a shorter picker.
 ///
-/// Mastra is left out for a different reason, and it is not a judgement on Mastra. Its server-side
-/// route does exist and it runs: `registerCopilotKit` from `@ag-ui/mastra/copilotkit`, registered
-/// with Mastra's own server, answers and reports its agent. What it serves is the **CopilotKit
-/// Runtime** protocol, not AG-UI: it wants `{"method": ...}` and refuses a `RunAgentInput`. A Bot
-/// in OpenBot is an AG-UI URL, so the two do not meet.
+/// Mastra is here on different terms from the rest, and the difference is in the server rather than
+/// in this list. Every other row is an image serving an AG-UI route; Mastra's image is a plain
+/// Mastra server, and OpenBot dials it through `getRemoteAgents` from `@ag-ui/mastra`, the bridge
+/// Mastra and AG-UI maintain between them. See `remoteTransport` in server/src/copilot.ts.
 ///
-/// Two ways to close that, neither of them a harness image. OpenBot could accept a CopilotKit
-/// Runtime endpoint as a second kind of Bot, which is defensible because that runtime is
-/// CopilotKit's own rather than a third party's. Or Mastra could publish a plain AG-UI route. Until
-/// one happens, offering Mastra would mean writing the AG-UI layer here, which is the single thing
-/// this list exists to avoid.
+/// It reads as a harness like any other because the difference ends at the transport: a Mastra Bot
+/// arrives as the same `AbstractAgent` and is governed by the same wrapper as an AG-UI one. What
+/// this list still refuses is writing that translation by hand, which is what mounting
+/// `registerCopilotKit` in the harness amounted to: that route serves the CopilotKit Runtime
+/// protocol, not AG-UI, and a run reached it and came back asking for a `method` field.
 pub fn catalogue() -> Vec<Harness> {
     let ours = |id: &str, name: &str, summary: &str, maintainer: Maintainer| Harness {
         id: id.into(),
@@ -163,6 +162,12 @@ pub fn catalogue() -> Vec<Harness> {
             "Multi-agent, deliberately small.",
             Maintainer::Community,
         ),
+        ours(
+            "mastra",
+            "Mastra",
+            "TypeScript agents, with their own server.",
+            Maintainer::Partnership,
+        ),
         Harness {
             id: "byo-url".into(),
             name: "An agent you already run".into(),
@@ -236,12 +241,14 @@ mod tests {
         }
     }
 
-    /// Mastra is absent while its only server-side package is a year behind its own core. Asserted
-    /// so that putting it back is a deliberate act with this test in front of somebody.
+    /// Mastra is offered, and the row is the assertion that the bridge on OpenBot's side works.
+    /// It was out while the only thing a harness could mount served the wrong protocol; it is in
+    /// because `remoteTransport` dials Mastra's own API instead. Removing the row means that path
+    /// regressed, so this fails rather than the picker quietly shrinking.
     #[test]
-    fn mastra_stays_out_while_it_cannot_be_served() {
+    fn mastra_is_offered_now_that_it_is_dialled_through_its_own_bridge() {
         let ids: Vec<String> = catalogue().into_iter().map(|h| h.id).collect();
-        assert!(!ids.contains(&"mastra".to_string()));
+        assert!(ids.contains(&"mastra".to_string()), "Mastra is not offered");
     }
 
     /// Codex and Gemini CLI have no integration and we do not write adapters, so they cannot appear
