@@ -508,6 +508,129 @@ raw = json.loads(Path(STORE).read_text())
 print("OPENBOT_CHATGPT_TOKEN=" + (raw.get("access_token") or raw.get("token") or ""), flush=True)
 "#;
 
+/**
+A ChatGPT sign-in in progress.
+
+NO PTY HERE, unlike the Claude flow, and the difference is what completes it. Anthropic's CLI wants
+a code typed at a prompt, which needs a terminal. This login finishes on its own when the browser
+redirect reaches the callback, so nothing is ever typed and plain pipes are enough.
+*/
+pub struct SigningInToChatGpt {
+    child: std::process::Child,
+    output: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl SigningInToChatGpt {
+    /// Start the flow and return the URL a browser has to open.
+    pub fn begin(engine: &crate::engine::Address, image: &str) -> Result<(Self, String), String> {
+        let program = CHATGPT_LOGIN
+            .replace("RELAY", &CHATGPT_RELAY.to_string())
+            .replace("LOOPBACK", &CHATGPT_LOOPBACK.to_string())
+            .replace("STORE", &format!("{CHATGPT_STORE:?}"));
+
+        let (binary, arguments) = engine.parts();
+        let mut command = crate::quiet::command(binary);
+        command.args(arguments);
+        command.arg("run");
+        command.arg("--rm");
+        /*
+         * Published on loopback only, and on the number the vendor's login advertises.
+         *
+         * The container's relay listens on `CHATGPT_RELAY` and forwards to the login's own
+         * loopback bind; the browser is sent to `CHATGPT_LOOPBACK` on this machine. Both families
+         * are published because a browser resolving the registered `localhost` may pick either, and
+         * which one it picks is not ours to decide.
+         */
+        for host in ["127.0.0.1", "[::1]"] {
+            command.arg("-p");
+            command.arg(format!("{host}:{CHATGPT_LOOPBACK}:{CHATGPT_RELAY}"));
+        }
+        command.arg(image);
+        command.arg("python");
+        command.arg("-u");
+        command.arg("-c");
+        command.arg(program);
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("The sign-in did not start: {error}"))?;
+
+        // Both streams, because the vendor's login prints its fallback URL to whichever it prefers
+        // and that is not ours to depend on.
+        let output = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let held = std::sync::Arc::clone(&output);
+        if let Some(mut out) = child.stdout.take() {
+            std::thread::spawn(move || drain(&mut out, held));
+        }
+        let held = std::sync::Arc::clone(&output);
+        if let Some(mut err) = child.stderr.take() {
+            std::thread::spawn(move || drain(&mut err, held));
+        }
+
+        let mut signing = Self { child, output };
+        let url = signing
+            .wait_for(openai_url_in, PATIENCE_FOR_THE_LINK)
+            .ok_or_else(|| {
+                signing.stop();
+                "The sign-in never offered a link to open.".to_string()
+            })?;
+        Ok((signing, url))
+    }
+
+    /// Wait for the browser redirect to complete the login, and return the token.
+    ///
+    /// Nothing is sent: the callback is what finishes this, so all there is to do is wait for the
+    /// program to say what it got.
+    pub fn finish(mut self) -> Result<String, String> {
+        match self.wait_for(chatgpt_token_in, PATIENCE_FOR_THE_PERSON) {
+            Some(token) => {
+                self.stop();
+                Ok(token)
+            }
+            None => {
+                self.stop();
+                Err("That sign-in did not finish. Start it again and approve the request in your browser.".into())
+            }
+        }
+    }
+
+    fn wait_for<T>(&mut self, found: impl Fn(&str) -> Option<T>, patience: Duration) -> Option<T> {
+        let began = Instant::now();
+        while began.elapsed() < patience {
+            if let Ok(seen) = self.output.lock() {
+                if let Some(value) = found(&seen) {
+                    return Some(value);
+                }
+            }
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                std::thread::sleep(Duration::from_millis(150));
+                return self.output.lock().ok().and_then(|seen| found(&seen));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        None
+    }
+
+    fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Accumulate a child's stream. Never printed: the tail of it is a token.
+fn drain<R: Read>(stream: &mut R, into: std::sync::Arc<std::sync::Mutex<String>>) {
+    let mut buffer = [0u8; 8192];
+    while let Ok(read) = stream.read(&mut buffer) {
+        if read == 0 {
+            break;
+        }
+        let Ok(mut held) = into.lock() else { break };
+        held.push_str(&String::from_utf8_lossy(&buffer[..read]));
+    }
+}
+
 /// The token the vendor's login printed, if it got one.
 ///
 /// Its own line rather than scraped out of the store file, because the store shape belongs to the

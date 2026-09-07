@@ -72,13 +72,31 @@ export function ProviderPicker({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
 
+  /*
+   * The two plans sign in differently, and the screen has to know which.
+   *
+   * Anthropic's CLI wants a code typed back, so that half shows a field. ChatGPT's login finishes
+   * itself when the browser redirect reaches its callback, so that half shows only a wait. Offering
+   * a code box for a flow that never produces one is how a person concludes it is broken.
+   */
   async function beginSignIn() {
+    if (!row) return;
     setBusy(true);
     setFailure("");
     try {
-      setSignInUrl(await invoke<string>("begin_claude_sign_in"));
+      const start =
+        row.id === "anthropic"
+          ? "begin_claude_sign_in"
+          : "begin_chatgpt_sign_in";
+      setSignInUrl(await invoke<string>(start));
+      // ChatGPT needs no code, so the wait starts straight away.
+      if (row.id !== "anthropic") {
+        setToken(await invoke<string>("finish_chatgpt_sign_in"));
+        setSignInUrl(null);
+      }
     } catch (error) {
       setFailure(String(error));
+      setSignInUrl(null);
     } finally {
       setBusy(false);
     }
@@ -192,8 +210,9 @@ export function ProviderPicker({
             ) : signInUrl ? (
               <>
                 <p className="lede">
-                  Approve the request in your browser, then paste the code it
-                  shows you.
+                  {row.id === "anthropic"
+                    ? "Approve the request in your browser, then paste the code it shows you."
+                    : `Approve the request in your browser. ${row.name} will finish this on its own.`}
                 </p>
                 {/* Shown as well as opened. On a machine with no registered
                     browser the open does nothing and says nothing, and a code
@@ -204,23 +223,31 @@ export function ProviderPicker({
                     Open the sign-in page
                   </a>
                 </p>
-                <div className="field">
-                  <label htmlFor="code">Code from your browser</label>
-                  <input
-                    id="code"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <button
-                  type="button"
-                  disabled={busy || code.trim().length === 0}
-                  onClick={finishSignIn}
-                >
-                  {busy ? "Checking…" : "Finish signing in"}
-                </button>
+                {row.id === "anthropic" ? (
+                  <>
+                    <div className="field">
+                      <label htmlFor="code">Code from your browser</label>
+                      <input
+                        id="code"
+                        value={code}
+                        onChange={(e) => setCode(e.target.value)}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy || code.trim().length === 0}
+                      onClick={finishSignIn}
+                    >
+                      {busy ? "Checking…" : "Finish signing in"}
+                    </button>
+                  </>
+                ) : (
+                  <p className="footnote" style={{ margin: 0 }}>
+                    Waiting for you to approve it…
+                  </p>
+                )}
               </>
             ) : (
               <>

@@ -36,6 +36,11 @@ struct Shell {
     /// moment it is worth reading. Held here instead, and asked for on load.
     last_failure: Mutex<Option<String>>,
     root: Mutex<Option<PathBuf>>,
+    /// A ChatGPT sign-in waiting for the browser redirect to complete it.
+    ///
+    /// Held for the same reason the Claude one is: a person leaves and comes back in the middle.
+    /// Unlike that one, nothing is typed here — the callback finishes it.
+    signing_in_to_chatgpt: Mutex<Option<openbot_desktop_lib::plan::SigningInToChatGpt>>,
     /// A plan sign-in waiting for the code from the browser.
     ///
     /// Held across two commands because a person has to leave and approve in the middle of it, and
@@ -629,6 +634,43 @@ async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<St
         .map_err(|error| format!("The sign-in did not finish: {error}"))?
 }
 
+/// Start a ChatGPT plan sign-in and return the address a browser has to open.
+#[tauri::command]
+async fn begin_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String> {
+    let address = engine::detect().address.ok_or_else(|| {
+        "No container engine is answering, so the sign-in cannot run.".to_string()
+    })?;
+    let image = openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE.to_string();
+    let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
+        openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
+    })
+    .await
+    .map_err(|error| format!("The sign-in did not run: {error}"))??;
+    *app.state::<Shell>().signing_in_to_chatgpt.lock().unwrap() = Some(signing);
+    let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
+    Ok(url)
+}
+
+/**
+Wait for the ChatGPT redirect to land, and return the plan token.
+
+Nothing is sent: the browser's callback is what finishes it. So this is a wait rather than a
+redemption, which is why there is no code field on that half of the screen.
+*/
+#[tauri::command]
+async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String> {
+    let signing = app
+        .state::<Shell>()
+        .signing_in_to_chatgpt
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || signing.finish())
+        .await
+        .map_err(|error| format!("The sign-in did not finish: {error}"))?
+}
+
 /// The model screen's rows. Independent of the picker above, and required to stay that way: no
 /// harness on that list is tied to a vendor's models, so choosing one may not narrow this.
 #[tauri::command]
@@ -849,6 +891,8 @@ fn main() {
             already_configured,
             begin_claude_sign_in,
             finish_claude_sign_in,
+            begin_chatgpt_sign_in,
+            finish_chatgpt_sign_in,
         ])
         // A packaged application is not a browser tab. Left alone, WebView2 answers a right-click
         // with Back, Refresh, Save as and Print: Back walks the window out of OpenBot with nothing
