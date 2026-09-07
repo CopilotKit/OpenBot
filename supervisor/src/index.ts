@@ -1,5 +1,6 @@
 import { serve } from "bun";
 import { Hono } from "hono";
+import { environmentFor } from "./environment";
 import {
   ComputerNotAnsweringError,
   DockerUnavailableError,
@@ -68,39 +69,6 @@ const memoryBytes = process.env.COMPUTER_MEMORY_BYTES
   ? Number.parseInt(process.env.COMPUTER_MEMORY_BYTES, 10)
   : undefined;
 const spireSocketVolume = process.env.SPIRE_AGENT_SOCKET_VOLUME;
-
-/**
- * What a computer is told about itself.
- *
- * The egress variables come through so a Bot's traffic still leaves by the route configured for it;
- * everything else a computer needs it already has. Nothing here is caller-supplied: a request says
- * which Bot, never what to run or what to set.
- */
-function environmentFor(botId: string): string[] {
-  const passthrough = Object.entries(process.env).filter(([key]) =>
-    key.startsWith("EGRESS_PROXY"),
-  );
-  /*
-   * The secret the computer demands of its callers. Handed to every container this creates, from
-   * this process's own environment, so the server and the computers share one secret and nothing else
-   * can drive a Bot's browser. Never caller-supplied: a request says which Bot, never what
-   * to set.
-   */
-  const computerToken = process.env.COMPUTER_TOKEN;
-  return [
-    // Which Bot this container is. Read by the computer as the Bot to assume when a request does not
-    // name one. It is normally named per request, so this is the fallback, and for a container that
-    // exists to be one Bot's the fallback must be that Bot rather than the shared default.
-    `COMPUTER_BOT_ID=${botId}`,
-    // Without this the computer refuses to start; it must never answer an unauthenticated caller.
-    ...(computerToken ? [`COMPUTER_TOKEN=${computerToken}`] : []),
-    // Where to ask what it is. Absent, the computer reports no identity and carries on.
-    ...(spireSocketVolume
-      ? ["SPIFFE_ENDPOINT_SOCKET=/tmp/spire-agent/public/api.sock"]
-      : []),
-    ...passthrough.map(([key, value]) => `${key}=${value ?? ""}`),
-  ];
-}
 
 const app = new Hono();
 
