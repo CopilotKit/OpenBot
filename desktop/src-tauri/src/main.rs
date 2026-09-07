@@ -34,7 +34,7 @@ struct Shell {
     /// Going back to the setup screen is a navigation, and a navigation is a fresh page: React
     /// remounts with no progress and the sentence explaining what happened is lost at the one
     /// moment it is worth reading. Held here instead, and asked for on load.
-    last_failure: Mutex<Option<String>>,
+    last_failure: Mutex<Option<openbot_desktop_lib::problem::Problem>>,
     root: Mutex<Option<PathBuf>>,
     /// A ChatGPT sign-in waiting for the browser redirect to complete it.
     ///
@@ -195,7 +195,9 @@ async fn start_stack(
     model: ChosenModel,
     // The row the person picked, by id. Absent registers no Bot of their own.
     harness: Option<String>,
-) -> Result<(), String> {
+    // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
+    // converts to the plain half, so a path without its own sentence reads as it always did.
+) -> Result<(), openbot_desktop_lib::problem::Problem> {
     let root = PathBuf::from(root);
 
     /*
@@ -209,7 +211,7 @@ async fn start_stack(
     // Resolved from the catalogue rather than taken from the window: the image, the port and how
     // it is dialled are facts about the harness, and the window knowing them would be a second
     // list to keep in step. See `harness::picked` for what each refusal is for.
-    let picked = harness::picked(harness.as_deref())?;
+    let picked = harness::picked(harness.as_deref(), DEPLOYMENT_VERSION)?;
 
     // The installer does not carry the deployment; it fetches one. Skipped when the recorded
     // version already matches, so a restart is not a download.
@@ -245,12 +247,12 @@ async fn start_stack(
     // deployment, and Compose's own error would not say which part was missing.
     if let Some(problem) = stack::deployment_problem(&root) {
         report(&app, "deployment", false, problem.clone());
-        return Err(problem);
+        return Err(problem.into());
     }
 
     let status = engine::detect();
     let Some(found) = status.address.clone().filter(|_| status.responding) else {
-        return Err(status.detail);
+        return Err(status.detail.into());
     };
 
     // Checked here as well as in the health gate, because the gate only runs when an engine had to
@@ -259,7 +261,7 @@ async fn start_stack(
     if !found.composes() {
         let problem = acquire::missing_compose(found.engine.binary());
         report(&app, "engine", false, problem.clone());
-        return Err(problem);
+        return Err(problem.into());
     }
 
     let settings = openbot_env::compose(
@@ -301,7 +303,7 @@ async fn start_stack(
     if let Some(picked) = picked.as_ref() {
         if let Some(problem) = stack::port_already_taken(&[("Bot you picked", picked.port)]) {
             report(&app, "ports", false, problem.clone());
-            return Err(problem);
+            return Err(problem.into());
         }
     }
 
@@ -326,7 +328,7 @@ async fn start_stack(
         stack::port_already_taken(&[("API server", ports.server), ("app", ports.app)])
     {
         report(&app, "ports", false, problem.clone());
-        return Err(problem);
+        return Err(problem.into());
     }
 
     let logs = root.join(".logs");
@@ -533,7 +535,7 @@ fn already_running(root: String) -> bool {
 ///
 /// Cleared on reading so a failure from an hour ago does not greet somebody who has since fixed it.
 #[tauri::command]
-fn last_failure(app: tauri::AppHandle) -> Option<String> {
+fn last_failure(app: tauri::AppHandle) -> Option<openbot_desktop_lib::problem::Problem> {
     app.state::<Shell>().last_failure.lock().unwrap().take()
 }
 
@@ -763,7 +765,19 @@ fn supervise_host_processes(
 
                     let reason = watch.gave_up();
                     report(&app, name, false, reason.clone());
-                    *shell.last_failure.lock().unwrap() = Some(reason);
+                    /*
+                     * Both registers here too. `gave_up` names the process and quotes the tail of
+                     * its log, which is the developer half; the person needs to know a piece of
+                     * OpenBot stopped and that starting again is the thing to try.
+                     */
+                    *shell.last_failure.lock().unwrap() =
+                        Some(openbot_desktop_lib::problem::Problem::with(
+                            format!(
+                                "Part of OpenBot ({name}) stopped and could not be started again. \
+                                 Try starting OpenBot once more."
+                            ),
+                            reason,
+                        ));
                     // Back to the setup screen. By now the window is showing OpenBot, and OpenBot
                     // is not running: leaving it there is a window that lies.
                     let _ = show_setup(app.clone());

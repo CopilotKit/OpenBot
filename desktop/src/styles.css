@@ -562,3 +562,30 @@ details > summary:hover {
   font-weight: 600;
   letter-spacing: -0.02em;
 }
+
+/* The developer half of a failure: present, and never the headline. */
+.detail-of {
+  border: 0;
+  padding: 0.6rem 0 0;
+  margin: 0;
+}
+
+.detail-of > summary {
+  font-size: 0.78rem;
+}
+
+.detail-of pre {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.7rem;
+  background: var(--sunk);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 9rem;
+  overflow-y: auto;
+  color: var(--ink-soft);
+  /* Monospace here is for machine output, which is what it is for. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

@@ -20,6 +20,17 @@ type Blocker =
 
 type Progress = { step: string; ok: boolean; detail: string };
 
+/** What a failed command returns: a sentence for the person, and the real output beside it. */
+type Problem = { said: string; detail?: string | null };
+
+/** Anything thrown, as a problem. A bare string keeps working and reads as it always did. */
+function asProblem(thrown: unknown): Problem {
+  if (thrown && typeof thrown === "object" && "said" in thrown) {
+    return thrown as Problem;
+  }
+  return { said: String(thrown) };
+}
+
 /**
  * One screen, four states: something is in the way, nothing is set up yet, it is working, it is
  * running. A wizard with more screens than states is a wizard that asks twice.
@@ -53,7 +64,15 @@ export function App() {
   const [steps, setSteps] = useState<Progress[]>([]);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
-  const [failure, setFailure] = useState("");
+  /*
+   * A failure, in both registers.
+   *
+   * `said` is what a person reads and `detail` is the real output, kept behind a disclosure. One
+   * string could not serve both: the plain sentence alone throws away the evidence, and the raw
+   * engine output alone is how "pull access denied ... may require 'docker login'" ended up as the
+   * headline on a setup screen. See `problem.rs`.
+   */
+  const [failure, setFailure] = useState<Problem | null>(null);
 
   useEffect(() => {
     invoke<EngineStatus>("detect_engine")
@@ -106,7 +125,7 @@ export function App() {
     // Why the stack stopped, if it did while this screen was not loaded. The supervisor gives up
     // and sends the window back here, and without this the person arrives at a setup screen with
     // no indication that anything happened.
-    invoke<string | null>("last_failure")
+    invoke<Problem | null>("last_failure")
       .then((found) => {
         if (found) setFailure(found);
       })
@@ -131,7 +150,7 @@ export function App() {
 
   async function start() {
     setBusy(true);
-    setFailure("");
+    setFailure(null);
     setSteps([]);
     try {
       await invoke("prepare_engine");
@@ -153,9 +172,11 @@ export function App() {
       //
       // Said out loud when it does not happen. Swallowed, the window sits on the setup screen
       // looking like the start failed, while every step on it is ticked.
-      await invoke("show_openbot").catch((error) => setFailure(String(error)));
+      await invoke("show_openbot").catch((error) =>
+        setFailure(asProblem(error)),
+      );
     } catch (error) {
-      setFailure(String(error));
+      setFailure(asProblem(error));
     } finally {
       setBusy(false);
       invoke<EngineStatus>("detect_engine")
@@ -170,7 +191,7 @@ export function App() {
       await invoke("stop_stack", { root });
       setRunning(false);
     } catch (error) {
-      setFailure(String(error));
+      setFailure(asProblem(error));
     } finally {
       setBusy(false);
     }
@@ -331,7 +352,15 @@ export function App() {
       {failure && (
         <div className="blocker" role="alert">
           <h2>That did not finish</h2>
-          <p>{failure}</p>
+          <p>{failure.said}</p>
+          {/* The real output, kept but not the headline. Whoever is debugging opens this; the
+              person reading the sentence above never has to. */}
+          {failure.detail && (
+            <details className="detail-of">
+              <summary>Technical details</summary>
+              <pre>{failure.detail}</pre>
+            </details>
+          )}
         </div>
       )}
 

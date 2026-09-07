@@ -105,7 +105,7 @@ fn compose_command(engine: &Address, root: &Path) -> Command {
 /// `--no-build` is the point of the whole published-images job: a desktop install has no toolchain,
 /// and without it Compose quietly starts compiling Chromium. Failing loudly on a missing image is
 /// the better answer, because it names a pull that did not happen.
-pub fn up(engine: &Address, root: &Path, harness: bool) -> Result<(), String> {
+pub fn up(engine: &Address, root: &Path, harness: bool) -> Result<(), crate::problem::Problem> {
     /*
      * The picked harness rides in on its profile.
      *
@@ -132,7 +132,13 @@ pub fn up(engine: &Address, root: &Path, harness: bool) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
     }
-    Err(command_said(&output.stderr))
+    // Both registers: the sentence is chosen from what the engine said, and what it said is kept
+    // beside it rather than shown as the headline. See `problem.rs`.
+    let raw = command_said(&output.stderr);
+    Err(crate::problem::Problem::with(
+        crate::problem::said_about(&raw),
+        raw,
+    ))
 }
 
 /// Apply migrations, once, to completion.
@@ -140,7 +146,7 @@ pub fn up(engine: &Address, root: &Path, harness: bool) -> Result<(), String> {
 /// A release step rather than a start step, for the reason `server/Dockerfile` gives: two replicas
 /// starting together would race, and a failed migration should stop the start rather than leave a
 /// half-migrated database serving.
-pub fn migrate(engine: &Address, root: &Path) -> Result<(), String> {
+pub fn migrate(engine: &Address, root: &Path) -> Result<(), crate::problem::Problem> {
     // No `--no-build` here: `compose run` does not take it, and passing it fails on the flag rather
     // than on anything to do with migrations. Building is prevented the other way, by
     // `IMAGE_PULL_POLICY=missing` in the environment, which makes the service pull instead.
@@ -152,7 +158,13 @@ pub fn migrate(engine: &Address, root: &Path) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
     }
-    Err(command_said(&output.stderr))
+    // Both registers: the sentence is chosen from what the engine said, and what it said is kept
+    // beside it rather than shown as the headline. See `problem.rs`.
+    let raw = command_said(&output.stderr);
+    Err(crate::problem::Problem::with(
+        crate::problem::said_about(&raw),
+        raw,
+    ))
 }
 
 /// The label the supervisor stamps on every container it creates.

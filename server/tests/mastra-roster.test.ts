@@ -78,3 +78,34 @@ describe("duplicating a Mastra Bot", () => {
     });
   });
 });
+
+describe("which endpoints get this deployment's token", () => {
+  test("the harness picked during setup gets it, not only the Bot in the box", async () => {
+    /*
+     * The must-not case, and it was live: the picked harness was registered, addressable and
+     * routed to, and answered `401 unauthorised` to everything, because the token was attached by
+     * matching one endpoint exactly. Its container is this deployment's own, so it is the same
+     * relationship the Bot in the box has.
+     */
+    const managedAgent = {
+      endpoint: new URL("http://127.0.0.1:4201/ag-ui"),
+      token: "the-deployment-token",
+      alsoRun: new URL("http://127.0.0.1:4206"),
+    };
+    // Trailing slashes are the trap: `URL` adds one, a stored address need not have one, and an
+    // exact match then fails silently and the Bot answers 401.
+    const same = (url: string) => url.replace(/\/+$/, "");
+    const ourEndpoints = [managedAgent.endpoint, managedAgent.alsoRun]
+      .filter((url): url is URL => url !== undefined)
+      .map((url) => same(url.toString()));
+
+    expect(ourEndpoints).toContain(same("http://127.0.0.1:4206"));
+    expect(ourEndpoints).toContain(same("http://127.0.0.1:4201/ag-ui"));
+    // And the stored row, which has no trailing slash, matches the URL that grew one.
+    expect(ourEndpoints).toContain(same("http://127.0.0.1:4206/"));
+    // Somebody else's address is still somebody else's.
+    expect(ourEndpoints).not.toContain(
+      same("https://someone-else.example/ag-ui"),
+    );
+  });
+});

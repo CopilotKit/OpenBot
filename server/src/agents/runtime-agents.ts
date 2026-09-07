@@ -23,7 +23,7 @@ export function createRuntimeAgentLoader(
   /** Resolves a customer agent's key at load time. Absent means no agent can carry one. */
   vault?: { reader: CredentialSecretReader; encryptionKey: string },
   /** Secret for the deployment-managed Bot. Never sent to customer-owned endpoints. */
-  managedAgent?: { endpoint: URL; token: string },
+  managedAgent?: { endpoint: URL; token: string; alsoRun?: URL },
 ) {
   return async (actor: AgentActor): Promise<RegisteredAgent[]> => {
     const [active, tombstones] = await Promise.all([
@@ -47,15 +47,32 @@ export function createRuntimeAgentLoader(
         });
         if (headers) agent.headers = headers;
       }
-      if (
-        agent.type === "remote_ag_ui" &&
-        managedAgent &&
-        agent.endpoint === managedAgent.endpoint.toString()
-      ) {
-        agent.headers = {
-          ...agent.headers,
-          "x-openbot-agent-token": managedAgent.token,
-        };
+      /*
+       * Every endpoint this deployment runs gets the token, not just the first one.
+       *
+       * Matching a single endpoint left the harness picked during setup without it: registered,
+       * addressable, routed to, and answering `401 unauthorised` to everything. Its container is
+       * this deployment's own, started on a port this deployment chose with this token in its
+       * environment, so it is the same relationship the Bot in the box has.
+       */
+      if (agent.type === "remote_ag_ui" && managedAgent) {
+        /*
+         * Compared without a trailing slash, because `URL` adds one and a stored address does not
+         * have to. `new URL("http://127.0.0.1:4206").toString()` is `".../4206/"`, and the row for
+         * that Bot says `".../4206"`, so an exact match silently fails and the Bot answers 401.
+         * The endpoint with a path — the Bot in the box — matched only because a path suppresses
+         * the slash, which is why this went unnoticed until a second endpoint existed.
+         */
+        const same = (url: string) => url.replace(/\/+$/, "");
+        const ours = [managedAgent.endpoint, managedAgent.alsoRun]
+          .filter((url): url is URL => url !== undefined)
+          .some((url) => same(agent.endpoint) === same(url.toString()));
+        if (ours) {
+          agent.headers = {
+            ...agent.headers,
+            "x-openbot-agent-token": managedAgent.token,
+          };
+        }
       }
       registered.set(agent.id, agent);
     }

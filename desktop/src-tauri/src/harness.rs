@@ -251,7 +251,13 @@ nothing because the person is bringing their own address.
 An unknown id is refused here rather than written into `.env`, where it would become a Bot pointing
 at a container nobody started — which looks like a broken Bot rather than a bad pick.
 */
-pub fn picked(id: Option<&str>) -> Result<Option<crate::env::PickedHarness>, String> {
+pub fn picked(
+    id: Option<&str>,
+    // The release whose images these are. Tagged rather than bare: an untagged name means
+    // `:latest` to every engine, which is not a tag any release publishes, so the pull is refused
+    // and the person is shown a registry error about a repository that does exist.
+    version: &str,
+) -> Result<Option<crate::env::PickedHarness>, String> {
     let Some(id) = id.map(str::trim).filter(|id| !id.is_empty()) else {
         return Ok(None);
     };
@@ -268,7 +274,7 @@ pub fn picked(id: Option<&str>) -> Result<Option<crate::env::PickedHarness>, Str
     };
     let mastra = row.id == "mastra";
     Ok(Some(crate::env::PickedHarness {
-        image,
+        image: format!("{image}:{version}"),
         port,
         name: row.name,
         mastra,
@@ -409,23 +415,28 @@ mod tests {
     /// Bot rather than a pick that could not be honoured.
     #[test]
     fn an_unknown_id_is_refused_by_name() {
-        let refusal = picked(Some("not-a-real-harness")).expect_err("it was accepted");
+        let refusal = picked(Some("not-a-real-harness"), "v0.0.0").expect_err("it was accepted");
         assert!(refusal.contains("not-a-real-harness"), "{refusal}");
     }
 
     /// Bringing your own address installs nothing, and that is not a failure.
     #[test]
     fn the_byo_row_resolves_to_nothing_without_complaint() {
-        assert_eq!(picked(Some("byo-url")).expect("it was refused"), None);
-        assert_eq!(picked(None).expect("it was refused"), None);
-        assert_eq!(picked(Some("   ")).expect("it was refused"), None);
+        assert_eq!(
+            picked(Some("byo-url"), "v0.0.0").expect("it was refused"),
+            None
+        );
+        assert_eq!(picked(None, "v0.0.0").expect("it was refused"), None);
+        assert_eq!(picked(Some("   "), "v0.0.0").expect("it was refused"), None);
     }
 
     /// A real row resolves to the image the release publishes and the port that image listens on.
     #[test]
     fn a_real_row_resolves_to_its_image_and_port() {
-        let crewai = picked(Some("crewai")).expect("refused").expect("nothing");
-        assert_eq!(crewai.image, "openbot-agent-crewai");
+        let crewai = picked(Some("crewai"), "v1.2.3")
+            .expect("refused")
+            .expect("nothing");
+        assert_eq!(crewai.image, "openbot-agent-crewai:v1.2.3");
         assert_eq!(crewai.port, 4202);
         assert!(!crewai.mastra);
         assert!(crewai.remote_agent_id.is_empty());
@@ -435,9 +446,38 @@ mod tests {
     /// roster and a Bot that names none gets the only one there or a refusal.
     #[test]
     fn mastra_resolves_as_mastra_and_names_its_agent() {
-        let mastra = picked(Some("mastra")).expect("refused").expect("nothing");
+        let mastra = picked(Some("mastra"), "v0.0.0")
+            .expect("refused")
+            .expect("nothing");
         assert!(mastra.mastra);
         assert_eq!(mastra.remote_agent_id, "openbot");
+    }
+
+    /**
+    Every resolved image carries a tag, and this is the guard that was missing.
+
+    Extracting this resolution out of `start_stack` dropped the version it used to append, so the
+    name reached `.env` bare. An engine reads a bare name as `:latest`, which no release publishes,
+    so `compose up` failed with a registry error about a repository that does exist — after the
+    deployment was laid down and the settings were written, at the last step before the stack came
+    up. Nothing caught it, because a name without a tag is a perfectly good string.
+    */
+    #[test]
+    fn every_resolved_image_carries_its_tag() {
+        for row in catalogue() {
+            if row.image.is_none() {
+                continue;
+            }
+            let resolved = picked(Some(&row.id), "v9.9.9")
+                .expect("refused")
+                .expect("nothing");
+            assert!(
+                resolved.image.ends_with(":v9.9.9"),
+                "{} resolved to {}, which an engine reads as :latest",
+                row.id,
+                resolved.image
+            );
+        }
     }
 
     /// A named mark has to be a file that is actually there. The failure this catches is silent at

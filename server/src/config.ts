@@ -115,8 +115,15 @@ export function configuredAuthProviders(
 
 export type ManagedAgentConfig = {
   endpoint: URL;
-  /** Secret sent only to the managed Bot endpoint. Never stored in an agent row. */
+  /** Secret sent only to endpoints this deployment runs. Never stored in an agent row. */
   token: string;
+  /**
+   * The harness picked during setup, when there is one.
+   *
+   * Also an endpoint this deployment runs: its container was started by this deployment, on a port
+   * it chose, holding this token. It gets the same header for the same reason.
+   */
+  alsoRun?: URL;
 };
 
 /**
@@ -441,7 +448,17 @@ function managedAgentConfig(
   if (!endpoint || !token) {
     return undefined;
   }
-  return { endpoint, token };
+  /*
+   * The harness somebody picked during setup is also an endpoint this deployment runs.
+   *
+   * It is a container this deployment started, on a port this deployment chose, holding the token
+   * this deployment generated — the same relationship the Bot in the box has. It was not getting
+   * the token because that was attached by matching one endpoint exactly, so the picked Bot was
+   * registered, addressable, routed to, and answered every call with 401. Only visible by asking it
+   * something in the window.
+   */
+  const alsoRun = optionalHttpUrl(environment, "PICKED_HARNESS_URL");
+  return { endpoint, token, ...(alsoRun ? { alsoRun } : {}) };
 }
 
 function oauthClient(
