@@ -9,8 +9,9 @@ place for them already, so they go there and the file keeps the settings.
 
 WHAT EACH PLATFORM ACTUALLY GETS.
 
-- **macOS: the login Keychain**, through `security`, which every Mac has. One generic-password item
-  per setting, so a person can see and revoke them one at a time in Keychain Access.
+- **macOS: the login Keychain**, through the Security framework rather than the `security` command,
+  which truncates at 128 bytes without saying so. One generic-password item per setting, so a
+  person can see and revoke them one at a time in Keychain Access.
 - **Windows: DPAPI**, through PowerShell's `ProtectedData`, encrypting to the signed-in user so the
   ciphertext is useless to any other account on the machine, and to anybody who copies the file off
   it.
@@ -19,15 +20,15 @@ WHAT EACH PLATFORM ACTUALLY GETS.
   that a headless or minimal machine does not run, and failing to save a credential because
   `gnome-keyring` is absent would be a worse product than a 0600 file.
 
-THE VALUE NEVER GOES ON A COMMAND LINE. `ps` is readable by every process the person runs, so both
-the Keychain and DPAPI paths write over stdin. `security` documents `-w` as insecure for exactly
-this reason and prompts when it is given last, and a prompt reads a pipe.
+THE VALUE NEVER GOES ON A COMMAND LINE. `ps` is readable by every process the person runs. macOS
+hands the bytes to the framework directly; Windows writes over stdin, since PowerShell reading the
+console to the end has no buffer limit of its own.
 */
 
 use std::collections::BTreeMap;
 // Only the two platforms that hand a value to another program need to write to a pipe, and only
 // the two that keep a file need a path to keep it at.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "windows")]
 use std::io::Write;
 #[cfg(not(target_os = "macos"))]
 use std::path::PathBuf;
@@ -133,56 +134,34 @@ pub fn recall_all(keys: &[&str]) -> BTreeMap<String, String> {
     found
 }
 
+/*
+ * The Keychain through the framework, NOT through the `security` command.
+ *
+ * MEASURED, AND IT SILENTLY CORRUPTS KEYS. `security add-generic-password` takes its password
+ * through a password prompt whose buffer is 128 bytes, and anything longer is cut off with no
+ * error and an exit status of zero. Probed one length at a time: 128 stores 128, 129 stores 128,
+ * 200 stores 128. An OpenAI project key is 164 characters, so every one of them would have been
+ * saved broken and read back broken on the next run, while the run that saved it worked fine
+ * because the value it used came straight from the window. No flag raises that buffer, and the
+ * only ways past the prompt put the credential on a command line where `ps` can read it. This
+ * path has neither a length limit nor an argv.
+ */
 #[cfg(target_os = "macos")]
 pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
-    // `-U` so a second run updates rather than refusing, and `-w` last so the value arrives on
-    // stdin. `security` asks for it twice, the way a password prompt does.
-    let mut child = crate::quiet::command("security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-a",
-            name,
-            "-s",
-            SERVICE,
-            "-w",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|error| keychain_problem(error.to_string()))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = writeln!(stdin, "{value}");
-        let _ = writeln!(stdin, "{value}");
-    }
-    let done = child
-        .wait_with_output()
-        .map_err(|error| keychain_problem(error.to_string()))?;
-    if done.status.success() {
-        return Ok(());
-    }
-    Err(keychain_problem(
-        String::from_utf8_lossy(&done.stderr).to_string(),
-    ))
+    // Set, not add: a second run updates the item rather than colliding with the first.
+    security_framework::passwords::set_generic_password(SERVICE, name, value.as_bytes())
+        .map_err(|error| keychain_problem(error.to_string()))
 }
 
 #[cfg(target_os = "macos")]
 pub fn recall(name: &str) -> Option<String> {
-    let out = crate::quiet::command("security")
-        .args(["find-generic-password", "-a", name, "-s", SERVICE, "-w"])
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    let raw = security_framework::passwords::get_generic_password(SERVICE, name).ok()?;
+    String::from_utf8(raw).ok()
 }
 
 #[cfg(target_os = "macos")]
 pub fn forget(name: &str) {
-    let _ = crate::quiet::command("security")
-        .args(["delete-generic-password", "-a", name, "-s", SERVICE])
-        .output();
+    let _ = security_framework::passwords::delete_generic_password(SERVICE, name);
 }
 
 #[cfg(target_os = "macos")]
@@ -444,5 +423,31 @@ mod tests {
         );
         forget(name);
         assert_eq!(recall(name), None, "forget left the credential behind");
+    }
+
+    /**
+    A long credential survives, because a short one is not the case that broke.
+
+    The `security` command truncated at 128 bytes and reported success, which turned every OpenAI
+    project key into a broken one on the next run. Checked well past the 164 a real key happens to
+    be today: that number is nobody's to promise, and a store proved to four times the longest key
+    anyone issues will not be the thing that fails when somebody issues a longer one.
+    */
+    #[test]
+    #[ignore = "writes to this machine's real credential store"]
+    fn a_long_credential_is_not_truncated() {
+        let name = "OPENBOT_VAULT_LENGTH_TEST";
+        for length in [128, 129, 164, 256, 512] {
+            let value: String = std::iter::repeat_n('k', length).collect();
+            remember(name, &value).expect("could not store");
+            let read = recall(name).unwrap_or_default();
+            assert_eq!(
+                read.len(),
+                length,
+                "a {length}-character credential came back short"
+            );
+            assert_eq!(read, value);
+        }
+        forget(name);
     }
 }
