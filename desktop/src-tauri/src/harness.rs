@@ -241,6 +241,47 @@ pub fn catalogue() -> Vec<Harness> {
     ]
 }
 
+/**
+Which harness a picked id means, as the settings it implies.
+
+Extracted from `start_stack` so the refusals can be tested. Each one is a real state: a window that
+sends an id this build does not have (a downgrade, or a stale page), and the row that installs
+nothing because the person is bringing their own address.
+
+An unknown id is refused here rather than written into `.env`, where it would become a Bot pointing
+at a container nobody started — which looks like a broken Bot rather than a bad pick.
+*/
+pub fn picked(id: Option<&str>) -> Result<Option<crate::env::PickedHarness>, String> {
+    let Some(id) = id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return Ok(None);
+    };
+    // Nothing is installed for somebody bringing their own address, so there is nothing to resolve.
+    if id == "byo-url" {
+        return Ok(None);
+    }
+    let row = catalogue()
+        .into_iter()
+        .find(|row| row.id == id)
+        .ok_or_else(|| format!("There is no Bot called \"{id}\" to install."))?;
+    let (Some(image), Some(port)) = (row.image, row.port) else {
+        return Err(format!("\"{id}\" is not a Bot this can install."));
+    };
+    let mastra = row.id == "mastra";
+    Ok(Some(crate::env::PickedHarness {
+        image,
+        port,
+        name: row.name,
+        mastra,
+        // Our own Mastra image serves one agent, named for the product. Somebody pointing at their
+        // own Mastra server names theirs on the Bot's page.
+        remote_agent_id: if mastra {
+            "openbot".to_string()
+        } else {
+            String::new()
+        },
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +400,44 @@ mod tests {
                 panic!("{} and {} both claim port {port}", harness.id, other);
             }
         }
+    }
+
+    /// An id this build does not have is refused by name, not written into a `.env`.
+    ///
+    /// It happens: a window left open across a downgrade sends an id the catalogue has lost. Passed
+    /// through, it becomes a Bot addressed at a container nobody started, which reads as a broken
+    /// Bot rather than a pick that could not be honoured.
+    #[test]
+    fn an_unknown_id_is_refused_by_name() {
+        let refusal = picked(Some("not-a-real-harness")).expect_err("it was accepted");
+        assert!(refusal.contains("not-a-real-harness"), "{refusal}");
+    }
+
+    /// Bringing your own address installs nothing, and that is not a failure.
+    #[test]
+    fn the_byo_row_resolves_to_nothing_without_complaint() {
+        assert_eq!(picked(Some("byo-url")).expect("it was refused"), None);
+        assert_eq!(picked(None).expect("it was refused"), None);
+        assert_eq!(picked(Some("   ")).expect("it was refused"), None);
+    }
+
+    /// A real row resolves to the image the release publishes and the port that image listens on.
+    #[test]
+    fn a_real_row_resolves_to_its_image_and_port() {
+        let crewai = picked(Some("crewai")).expect("refused").expect("nothing");
+        assert_eq!(crewai.image, "openbot-agent-crewai");
+        assert_eq!(crewai.port, 4202);
+        assert!(!crewai.mastra);
+        assert!(crewai.remote_agent_id.is_empty());
+    }
+
+    /// Mastra is dialled as Mastra and names the agent our image serves, because that endpoint is a
+    /// roster and a Bot that names none gets the only one there or a refusal.
+    #[test]
+    fn mastra_resolves_as_mastra_and_names_its_agent() {
+        let mastra = picked(Some("mastra")).expect("refused").expect("nothing");
+        assert!(mastra.mastra);
+        assert_eq!(mastra.remote_agent_id, "openbot");
     }
 
     /// A named mark has to be a file that is actually there. The failure this catches is silent at

@@ -91,7 +91,38 @@ pub fn compose(
      * as empty here rather than omitted: omitting it would leave an older one in place, which is
      * the same failure by a different route.
      */
+    /*
+     * Every model key, every time, and empty unless the choice implies it.
+     *
+     * Clearing only the one key a given arm conflicts with left the others stale, and `write` below
+     * preserves lines it does not own, so switching from a key to a plan kept the old key in the
+     * file and handed it to every harness. Measured: a run that signed in to a Claude plan still
+     * carried the OPENAI_API_KEY from the run before it. Whichever key a harness reads first then
+     * decides what the person is billed for, which is the failure the plan path exists to avoid.
+     *
+     * Written empty rather than omitted, for the same reason: omitting leaves the old line in place.
+     */
+    if model.credential != ModelCredential::None {
+        for key in [
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CHATGPT_OAUTH_TOKEN",
+        ] {
+            env.insert(key.into(), String::new());
+        }
+    }
     match &model.credential {
+        /*
+         * Nothing chosen touches nothing, deliberately.
+         *
+         * The clearing above is for the case where the model screen HAS answered: whichever keys
+         * that answer does not imply are emptied, so switching from a key to a plan cannot leave
+         * the old key behind for a harness to prefer. With no answer there is nothing to be
+         * consistent with, and a key somebody set by hand is theirs to keep — see `write`, which
+         * preserves lines this does not own.
+         */
         ModelCredential::None => {}
         ModelCredential::OpenAi { api_key } => {
             insert_if_given(&mut env, "OPENAI_API_KEY", api_key);
@@ -101,19 +132,9 @@ pub fn compose(
         }
         ModelCredential::ClaudePlan { token } => {
             insert_if_given(&mut env, "CLAUDE_CODE_OAUTH_TOKEN", token);
-            env.insert("ANTHROPIC_API_KEY".into(), String::new());
         }
         ModelCredential::ChatGptPlan { token } => {
             insert_if_given(&mut env, "CHATGPT_OAUTH_TOKEN", token);
-            /*
-             * Both cleared, for the same reason the Claude plan clears its key: a key left from an
-             * earlier attempt would be preferred by every OpenAI client in the stack, and the
-             * person who just signed in to a plan would be billed per request instead. The base URL
-             * is cleared too, because the Codex address is the library's to pin and not ours to
-             * write.
-             */
-            env.insert("OPENAI_API_KEY".into(), String::new());
-            env.insert("OPENAI_BASE_URL".into(), String::new());
         }
         ModelCredential::Compatible {
             base_url,
@@ -176,23 +197,34 @@ pub fn compose(
      * process here and not a container: it reaches `agent-bot` and `agent-langgraph` the same way,
      * over the port those services publish.
      *
-     * ONE OF THE TWO URLS, NEVER BOTH. The package carries a gated row per kind, and each drops
-     * itself when its endpoint is blank, so writing both would register the same harness twice —
-     * once as a kind that cannot speak to it.
+     * One address and one kind. The package's single row drops itself while the address is blank,
+     * so a deployment that picked nothing registers nothing.
      */
     if let Some(picked) = harness {
         env.insert("PICKED_HARNESS_IMAGE".into(), picked.image.clone());
         env.insert("PICKED_HARNESS_PORT".into(), picked.port.to_string());
         env.insert("PICKED_HARNESS_NAME".into(), picked.name.clone());
-        let url = format!("http://127.0.0.1:{}", picked.port);
-        if picked.mastra {
-            env.insert("PICKED_HARNESS_MASTRA_URL".into(), url);
-            env.insert("PICKED_HARNESS_AG_UI_URL".into(), String::new());
-            insert_if_given(&mut env, "PICKED_HARNESS_AGENT_ID", &picked.remote_agent_id);
-        } else {
-            env.insert("PICKED_HARNESS_AG_UI_URL".into(), url);
-            env.insert("PICKED_HARNESS_MASTRA_URL".into(), String::new());
-        }
+        env.insert(
+            "PICKED_HARNESS_URL".into(),
+            format!("http://127.0.0.1:{}", picked.port),
+        );
+        /*
+         * The kind, as the package spells it.
+         *
+         * Interpolated rather than written as a literal row per kind, because the loader refuses an
+         * unknown `agent.type` by refusing the whole file: a package carrying a literal
+         * `remote-mastra` row stops any server predating that kind from starting at all, picked or
+         * not. Measured, not guessed — it is what a v0.0.8 deployment did.
+         */
+        env.insert(
+            "PICKED_HARNESS_KIND".into(),
+            if picked.mastra {
+                "remote-mastra".to_string()
+            } else {
+                "remote-ag-ui".to_string()
+            },
+        );
+        insert_if_given(&mut env, "PICKED_HARNESS_AGENT_ID", &picked.remote_agent_id);
     }
 
     // Without this the server gives every Bot the same browser. It is the difference between the
@@ -731,7 +763,7 @@ mod model_tests {
             &pinned(),
             None,
         );
-        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
     }
 
     /// The must-not case, and the reason `ModelCredential` is a choice rather than two fields.
@@ -761,12 +793,15 @@ mod model_tests {
         assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&String::new()));
     }
 
-    /// The must-not case for registration. Both addresses written, and the package's two gated
-    /// rows both materialise: the same harness is registered twice, once as a kind that cannot
-    /// speak to it, and the second Bot answers nothing.
+    /// The kind is written the way the package spells it, and the address is the image's own port
+    /// on loopback because the server is a host process rather than a container.
+    ///
+    /// The kind matters beyond correctness: a package carrying a literal `remote-mastra` row stops
+    /// any server predating that kind from starting at all, since the loader refuses an unknown
+    /// `agent.type` by refusing the whole file.
     #[test]
-    fn a_picked_harness_is_addressed_one_way_only() {
-        for mastra in [false, true] {
+    fn a_picked_harness_is_addressed_once_and_named_as_a_kind() {
+        for (mastra, expected) in [(false, "remote-ag-ui"), (true, "remote-mastra")] {
             let env = compose(
                 &intelligence(),
                 &Model::default(),
@@ -781,23 +816,13 @@ mod model_tests {
                     remote_agent_id: String::new(),
                 }),
             );
-            let ag_ui = env
-                .get("PICKED_HARNESS_AG_UI_URL")
-                .cloned()
-                .unwrap_or_default();
-            let mastra_url = env
-                .get("PICKED_HARNESS_MASTRA_URL")
-                .cloned()
-                .unwrap_or_default();
-            assert!(
-                ag_ui.is_empty() != mastra_url.is_empty(),
-                "mastra={mastra} wrote ag-ui={ag_ui:?} and mastra={mastra_url:?}"
+            assert_eq!(
+                env.get("PICKED_HARNESS_KIND").map(String::as_str),
+                Some(expected)
             );
-            // Loopback, because the server is a host process and not a container.
-            assert!(
-                ag_ui.starts_with("http://127.0.0.1:4202")
-                    || mastra_url.starts_with("http://127.0.0.1:4202"),
-                "the address is not the image's own port on loopback"
+            assert_eq!(
+                env.get("PICKED_HARNESS_URL").map(String::as_str),
+                Some("http://127.0.0.1:4202")
             );
         }
     }
@@ -816,8 +841,8 @@ mod model_tests {
         for key in [
             "PICKED_HARNESS_IMAGE",
             "PICKED_HARNESS_PORT",
-            "PICKED_HARNESS_AG_UI_URL",
-            "PICKED_HARNESS_MASTRA_URL",
+            "PICKED_HARNESS_URL",
+            "PICKED_HARNESS_KIND",
         ] {
             assert!(
                 !env.contains_key(key),
@@ -851,6 +876,39 @@ mod model_tests {
         assert_eq!(env.get("OPENAI_BASE_URL"), Some(&String::new()));
     }
 
+    /// Switching provider does not leave the last one's key behind.
+    ///
+    /// Measured, not imagined: a run that signed in to a Claude plan still carried the
+    /// OPENAI_API_KEY written by the run before it, and every harness was handed both. Whichever a
+    /// harness reads first then decides what the person is billed for, which is the whole thing the
+    /// plan path exists to avoid.
+    #[test]
+    fn answering_the_model_screen_clears_the_keys_it_does_not_imply() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::ClaudePlan {
+                    token: "oauth-token".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            Some(&"oauth-token".to_string())
+        );
+        for cleared in ["OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY"] {
+            assert_eq!(
+                env.get(cleared),
+                Some(&String::new()),
+                "{cleared} survived a switch to a Claude plan"
+            );
+        }
+    }
+
     /// An Anthropic key is written as one, and does not become an OpenAI key because that is the
     /// field this struct used to have.
     #[test]
@@ -871,7 +929,7 @@ mod model_tests {
             env.get("ANTHROPIC_API_KEY"),
             Some(&"sk-ant-real".to_string())
         );
-        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
     }
 
     /// The everything-else row writes all three, since an endpoint without a model name is an
@@ -899,7 +957,7 @@ mod model_tests {
         assert_eq!(env.get("BOT_MODEL"), Some(&"some-model".to_string()));
         assert_eq!(env.get("OPENAI_API_KEY"), Some(&"sk-whatever".to_string()));
         // Nothing about Anthropic is implied by choosing an OpenAI-compatible endpoint.
-        assert!(!env.contains_key("ANTHROPIC_API_KEY"));
+        assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&String::new()));
     }
 
     /// Nothing chosen writes no model keys at all, rather than empty ones.
@@ -913,12 +971,14 @@ mod model_tests {
             &pinned(),
             None,
         );
+        // Untouched, not cleared: a key somebody set by hand is theirs to keep while the model
+        // screen has not answered. See the note in `compose`.
         for key in [
             "OPENAI_API_KEY",
             "OPENAI_BASE_URL",
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
-            "BOT_MODEL",
+            "CHATGPT_OAUTH_TOKEN",
         ] {
             assert!(
                 !env.contains_key(key),
