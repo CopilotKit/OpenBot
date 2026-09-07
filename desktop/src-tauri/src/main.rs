@@ -188,8 +188,45 @@ async fn start_stack(
     gateway_ws_url: String,
     api_key: String,
     model: ChosenModel,
+    // The row the person picked, by id. Absent registers no Bot of their own.
+    harness: Option<String>,
 ) -> Result<(), String> {
     let root = PathBuf::from(root);
+
+    /*
+     * Resolved from the catalogue rather than taken from the window.
+     *
+     * The image, the port and how it is dialled are facts about the harness, and the window
+     * knowing them would mean two lists to keep in step. An id that is not in the catalogue is
+     * refused here rather than written into `.env`, where it would become a Bot pointing at a
+     * container nobody started.
+     */
+    let picked = match harness.as_deref().filter(|id| !id.trim().is_empty()) {
+        None => None,
+        Some("byo-url") => None,
+        Some(id) => {
+            let row = harness::catalogue()
+                .into_iter()
+                .find(|row| row.id == id)
+                .ok_or_else(|| format!("There is no Bot called \"{id}\" to install."))?;
+            let (Some(image), Some(port)) = (row.image, row.port) else {
+                return Err(format!("\"{id}\" is not a Bot this can install."));
+            };
+            Some(openbot_env::PickedHarness {
+                image: format!("{image}:{DEPLOYMENT_VERSION}"),
+                port,
+                name: row.name,
+                mastra: row.id == "mastra",
+                // Our own Mastra image serves one agent, named for the product. A person pointing
+                // at their own Mastra server names theirs on the Bot's page.
+                remote_agent_id: if row.id == "mastra" {
+                    "openbot".to_string()
+                } else {
+                    String::new()
+                },
+            })
+        }
+    };
 
     // The installer does not carry the deployment; it fetches one. Skipped when the recorded
     // version already matches, so a restart is not a download.
@@ -254,6 +291,7 @@ async fn start_stack(
         &status,
         &openbot_env::Ports::default(),
         &deployment::image_variables(&root)?,
+        picked.as_ref(),
     );
     openbot_env::write(&root.join(".env"), &settings)
         .map_err(|e| format!("could not write .env: {e}"))?;
@@ -268,7 +306,8 @@ async fn start_stack(
         true,
         "pulling images and starting containers",
     );
-    stack::up(&found, &root)?;
+    // The harness is a service only when one was picked; see `stack::up`.
+    stack::up(&found, &root, picked.is_some())?;
     report(&app, "services", true, "containers up");
 
     report(&app, "migrate", true, "applying migrations");

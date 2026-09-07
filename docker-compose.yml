@@ -281,6 +281,41 @@ services:
       timeout: 5s
       retries: 5
 
+  # The harness somebody picked during setup, whichever one it is.
+  #
+  # ONE SERVICE RATHER THAN TWELVE, because a picked harness is a choice and not twelve branches in
+  # this file. The image and the port come from `.env`, which the shell writes from the pick, and
+  # both are facts about the image: each harness fixes its own port in its own Dockerfile.
+  #
+  # Behind a profile so a deployment that has picked nothing does not try to start it. Without that
+  # an unset `PICKED_HARNESS_IMAGE` becomes a request to pull the empty string, which fails the
+  # whole `compose up` rather than the one service nobody asked for.
+  #
+  # No `build:`, so `pull_policy` cannot be `build` here as it is elsewhere: this image is only ever
+  # published, never built from this tree.
+  agent-harness:
+    profiles: ["harness"]
+    image: ${PICKED_HARNESS_IMAGE:-}
+    pull_policy: missing
+    ports:
+      # Loopback, and on the image's own port on both sides. The server is a host process, so it
+      # reaches this the same way it reaches agent-bot: over the published port, not the compose
+      # network.
+      - "127.0.0.1:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
+      - "[::1]:${PICKED_HARNESS_PORT:-4202}:${PICKED_HARNESS_PORT:-4202}"
+    environment:
+      # Every harness refuses without this; it is what makes the endpoint the server's alone.
+      MANAGED_AGENT_TOKEN: ${MANAGED_AGENT_TOKEN:-}
+      # Whichever the model screen chose. A harness reads the one its provider needs and ignores the
+      # rest, and the ones the choice did not imply are written empty rather than left stale: see
+      # `ModelCredential`.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      CHATGPT_OAUTH_TOKEN: ${CHATGPT_OAUTH_TOKEN:-}
+      BOT_MODEL: ${BOT_MODEL:-gpt-5.5}
+
   # The same Bot behavior on a framework, exposed as another AG-UI endpoint and registry row.
   agent-langgraph:
     build:

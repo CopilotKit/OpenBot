@@ -105,10 +105,27 @@ fn compose_command(engine: &Address, root: &Path) -> Command {
 /// `--no-build` is the point of the whole published-images job: a desktop install has no toolchain,
 /// and without it Compose quietly starts compiling Chromium. Failing loudly on a missing image is
 /// the better answer, because it names a pull that did not happen.
-pub fn up(engine: &Address, root: &Path) -> Result<(), String> {
-    let output = compose_command(engine, root)
+pub fn up(engine: &Address, root: &Path, harness: bool) -> Result<(), String> {
+    /*
+     * The picked harness rides in on its profile.
+     *
+     * `agent-harness` is profile-gated so a deployment that picked nothing does not try to start
+     * it: its image comes from `.env`, and unset that is a request to pull the empty string, which
+     * fails the whole `up` rather than the one service nobody asked for. The flag comes before
+     * `up`, because `--profile` is an option of `compose` itself and not of the subcommand.
+     */
+    let mut command = compose_command(engine, root);
+    if harness {
+        command.args(["--profile", "harness"]);
+    }
+    let output = command
         .args(["up", "-d", "--no-build"])
         .args(SERVICES)
+        .args(if harness {
+            &["agent-harness"][..]
+        } else {
+            &[][..]
+        })
         .output()
         .map_err(|error| format!("could not run {} compose: {error}", engine.engine.binary()))?;
 

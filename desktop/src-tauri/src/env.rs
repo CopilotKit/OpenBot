@@ -75,6 +75,8 @@ pub fn compose(
     engine: &EngineStatus,
     ports: &Ports,
     images: &[(String, String)],
+    // Absent means no harness was picked, and the package's gated rows stay dropped.
+    harness: Option<&PickedHarness>,
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
 
@@ -167,6 +169,32 @@ pub fn compose(
         format!("http://127.0.0.1:{}/ag-ui", ports.langgraph),
     );
 
+    /*
+     * The picked harness, if there is one.
+     *
+     * Addressed on loopback rather than by a compose service name, because the server is a host
+     * process here and not a container: it reaches `agent-bot` and `agent-langgraph` the same way,
+     * over the port those services publish.
+     *
+     * ONE OF THE TWO URLS, NEVER BOTH. The package carries a gated row per kind, and each drops
+     * itself when its endpoint is blank, so writing both would register the same harness twice —
+     * once as a kind that cannot speak to it.
+     */
+    if let Some(picked) = harness {
+        env.insert("PICKED_HARNESS_IMAGE".into(), picked.image.clone());
+        env.insert("PICKED_HARNESS_PORT".into(), picked.port.to_string());
+        env.insert("PICKED_HARNESS_NAME".into(), picked.name.clone());
+        let url = format!("http://127.0.0.1:{}", picked.port);
+        if picked.mastra {
+            env.insert("PICKED_HARNESS_MASTRA_URL".into(), url);
+            env.insert("PICKED_HARNESS_AG_UI_URL".into(), String::new());
+            insert_if_given(&mut env, "PICKED_HARNESS_AGENT_ID", &picked.remote_agent_id);
+        } else {
+            env.insert("PICKED_HARNESS_AG_UI_URL".into(), url);
+            env.insert("PICKED_HARNESS_MASTRA_URL".into(), String::new());
+        }
+    }
+
     // Without this the server gives every Bot the same browser. It is the difference between the
     // product this installs and a demo of it.
     env.insert(
@@ -239,6 +267,30 @@ pub struct Intelligence {
     pub api_url: String,
     pub gateway_ws_url: String,
     pub api_key: String,
+}
+
+/**
+The harness somebody picked, as the deployment has to describe it.
+
+Registration is not an API call in this product: Bots come from the tenant package, whose
+`agents.yaml` interpolates `${...}` and drops any Bot whose endpoint comes out blank. So a picked
+harness becomes these settings, the package's own gated row materialises, and seeding registers it.
+Nothing new had to be built to make a Bot appear.
+
+`None` is a deployment that has not picked one, which writes nothing and leaves those rows dropped.
+*/
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PickedHarness {
+    /// The published image, e.g. `openbot-agent-crewai`. Named by the release, not derived.
+    pub image: String,
+    /// The port that image listens on, fixed by its own Dockerfile.
+    pub port: u16,
+    /// What the Bot is called on screen.
+    pub name: String,
+    /// How it is dialled. A Mastra server has no AG-UI route of its own.
+    pub mastra: bool,
+    /// Which agent on that server, for a Mastra roster. Empty means the only one there.
+    pub remote_agent_id: String,
 }
 
 /// The model credential, which belongs to the provider and not to the harness.
@@ -365,6 +417,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         for key in [
             "COMPUTER_TOKEN",
@@ -389,6 +442,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         let b = compose(
             &intelligence(),
@@ -396,6 +450,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_ne!(a.get("KEY_ENCRYPTION_KEY"), b.get("KEY_ENCRYPTION_KEY"));
     }
@@ -408,6 +463,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS")
@@ -425,6 +481,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("TENANT_PACKAGE_DIR").map(String::as_str),
@@ -440,6 +497,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("OPENBOT_SINGLE_USER").map(String::as_str),
@@ -455,6 +513,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("SERVER_INTERNAL_URL").map(String::as_str),
@@ -470,6 +529,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("COMPUTER_SUPERVISOR_URL").map(String::as_str),
@@ -485,6 +545,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert!(!without.contains_key("ENGINE_SOCKET"));
 
@@ -494,6 +555,7 @@ mod tests {
             &engine_status(Some("/run/user/501/podman/podman.sock")),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             with.get("ENGINE_SOCKET").map(String::as_str),
@@ -509,6 +571,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         for key in [
             "DATABASE_URL",
@@ -533,6 +596,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         write(&path, &env).unwrap();
 
@@ -558,6 +622,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         write(&path, &first).unwrap();
         let second = compose(
@@ -566,6 +631,7 @@ mod tests {
             &engine_status(None),
             &Ports::default(),
             &pinned(),
+            None,
         );
         write(&path, &second).unwrap();
 
@@ -621,6 +687,7 @@ mod model_tests {
             &engine(),
             &Ports::default(),
             &pinned(),
+            None,
         );
         for (_, variable) in crate::deployment::IMAGE_VARIABLES {
             let reference = env
@@ -642,6 +709,7 @@ mod model_tests {
             &engine(),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("OPENAI_API_KEY").map(String::as_str),
@@ -661,6 +729,7 @@ mod model_tests {
             &engine(),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert!(!env.contains_key("OPENAI_API_KEY"));
     }
@@ -683,12 +752,78 @@ mod model_tests {
             &engine(),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("CLAUDE_CODE_OAUTH_TOKEN"),
             Some(&"oauth-token".to_string())
         );
         assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&String::new()));
+    }
+
+    /// The must-not case for registration. Both addresses written, and the package's two gated
+    /// rows both materialise: the same harness is registered twice, once as a kind that cannot
+    /// speak to it, and the second Bot answers nothing.
+    #[test]
+    fn a_picked_harness_is_addressed_one_way_only() {
+        for mastra in [false, true] {
+            let env = compose(
+                &intelligence(),
+                &Model::default(),
+                &engine(),
+                &Ports::default(),
+                &pinned(),
+                Some(&PickedHarness {
+                    image: "openbot-agent-crewai".into(),
+                    port: 4202,
+                    name: "CrewAI".into(),
+                    mastra,
+                    remote_agent_id: String::new(),
+                }),
+            );
+            let ag_ui = env
+                .get("PICKED_HARNESS_AG_UI_URL")
+                .cloned()
+                .unwrap_or_default();
+            let mastra_url = env
+                .get("PICKED_HARNESS_MASTRA_URL")
+                .cloned()
+                .unwrap_or_default();
+            assert!(
+                ag_ui.is_empty() != mastra_url.is_empty(),
+                "mastra={mastra} wrote ag-ui={ag_ui:?} and mastra={mastra_url:?}"
+            );
+            // Loopback, because the server is a host process and not a container.
+            assert!(
+                ag_ui.starts_with("http://127.0.0.1:4202")
+                    || mastra_url.starts_with("http://127.0.0.1:4202"),
+                "the address is not the image's own port on loopback"
+            );
+        }
+    }
+
+    /// Nothing picked writes none of it, so the package's gated rows stay dropped.
+    #[test]
+    fn no_harness_picked_writes_no_harness_settings() {
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+        );
+        for key in [
+            "PICKED_HARNESS_IMAGE",
+            "PICKED_HARNESS_PORT",
+            "PICKED_HARNESS_AG_UI_URL",
+            "PICKED_HARNESS_MASTRA_URL",
+        ] {
+            assert!(
+                !env.contains_key(key),
+                "{key} was written with nothing picked"
+            );
+        }
     }
 
     /// The must-not case for the other plan. A ChatGPT plan token is not an OpenAI key and is not
@@ -706,6 +841,7 @@ mod model_tests {
             &engine(),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("CHATGPT_OAUTH_TOKEN"),
@@ -729,6 +865,7 @@ mod model_tests {
             &engine(),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("ANTHROPIC_API_KEY"),
@@ -753,6 +890,7 @@ mod model_tests {
             &engine(),
             &Ports::default(),
             &pinned(),
+            None,
         );
         assert_eq!(
             env.get("OPENAI_BASE_URL"),
@@ -773,6 +911,7 @@ mod model_tests {
             &engine(),
             &Ports::default(),
             &pinned(),
+            None,
         );
         for key in [
             "OPENAI_API_KEY",

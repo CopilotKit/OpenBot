@@ -123,6 +123,9 @@ export function App() {
         // implies. Sending a bare key here is what made `ANTHROPIC_API_KEY` and a plan token
         // expressible at the same time.
         model,
+        // By id only. The image, the port and how it is dialled are facts about the harness, and
+        // the window carrying them would be a second list to keep in step with the catalogue.
+        harness,
       });
       setRunning(true);
       // The window becomes OpenBot. Nobody double-clicked this to look at a status screen.

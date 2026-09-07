@@ -68,3 +68,29 @@ agents:
     avatar_seed: risk-analyst
     type: remote-ag-ui
     endpoint: ${MANAGED_AGENT_AG_UI_URL:-}
+
+  # The Bot somebody picked in setup, in the two ways one can be dialled.
+  #
+  # BOTH ROWS ARE ALWAYS HERE AND AT MOST ONE EVER EXISTS. A Bot whose endpoint interpolates to
+  # nothing is dropped by the loader, and the shell writes exactly one of these two addresses from
+  # the pick, so the other row removes itself. That is what makes registration need no API: the
+  # choice becomes a setting, and seeding does the rest.
+  #
+  # Two rows rather than one because the kind cannot be interpolated: it decides how the endpoint is
+  # dialled, and a Mastra server has no AG-UI route to talk to.
+  - id: picked-harness
+    name: ${PICKED_HARNESS_NAME:-Your Bot}
+    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    role_description: Answer questions and do work, using the tools it has been granted.
+    avatar_seed: picked-harness
+    type: remote-ag-ui
+    endpoint: ${PICKED_HARNESS_AG_UI_URL:-}
+  - id: picked-harness-mastra
+    name: ${PICKED_HARNESS_NAME:-Your Bot}
+    title: ${PICKED_HARNESS_NAME:-Your Bot}
+    role_description: Answer questions and do work, using the tools it has been granted.
+    avatar_seed: picked-harness
+    type: remote-mastra
+    endpoint: ${PICKED_HARNESS_MASTRA_URL:-}
+    # Which agent on that server. Blank means the only one there; see `pickFromRoster`.
+    remote_agent_id: ${PICKED_HARNESS_AGENT_ID:-}
