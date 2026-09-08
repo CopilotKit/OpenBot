@@ -233,8 +233,19 @@ fieldset.picker {
   overflow-y: auto;
 }
 
+/*
+ * A tile carries its own ink, and this is not belt-and-braces.
+ *
+ * MEASURED: the project list rendered as six blank white rectangles. `button` sets
+ * `color: var(--accent-ink)`, which is white, and `.tile` overrode the background to white without
+ * overriding the colour. The provider and Bot rows are `label`s and never inherited it, so the one
+ * tile in the product that is a real button was the one nobody could read. Nothing errored and
+ * nothing looked broken: the names were simply invisible, and the screen asked somebody to choose
+ * between six empty boxes.
+ */
 .tile {
   position: relative;
+  color: var(--ink);
   display: grid;
   grid-template-columns: 32px 1fr;
   grid-template-areas:

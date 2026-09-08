@@ -872,36 +872,52 @@ async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, Str
 #[tauri::command]
 async fn finish_intelligence_sign_in(
     app: tauri::AppHandle,
-) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, String> {
+) -> Result<Vec<openbot_desktop_lib::intelligence::Project>, openbot_desktop_lib::problem::Problem>
+{
     let signing = app
         .state::<Shell>()
         .signing_in_to_intelligence
         .lock()
         .unwrap()
         .take()
-        .ok_or_else(|| "That sign-in is no longer running. Start it again.".to_string())?;
+        .ok_or_else(|| {
+            openbot_desktop_lib::problem::Problem::plain(
+                "That sign-in is no longer running. Start it again.",
+            )
+        })?;
     let (credential, projects) = tauri::async_runtime::spawn_blocking(move || signing.finish())
         .await
-        .map_err(|error| format!("The sign-in did not finish: {error}"))??;
+        .map_err(|error| {
+            openbot_desktop_lib::problem::Problem::plain(format!(
+                "The sign-in did not finish: {error}"
+            ))
+        })??;
     *app.state::<Shell>().intelligence_credential.lock().unwrap() = Some(credential);
     Ok(projects)
 }
 
 /// Create a key for the project somebody chose, and hand it back for the field.
 #[tauri::command]
-async fn intelligence_key_for(app: tauri::AppHandle, project: String) -> Result<String, String> {
+async fn intelligence_key_for(
+    app: tauri::AppHandle,
+    project: String,
+) -> Result<String, openbot_desktop_lib::problem::Problem> {
     let credential = app
         .state::<Shell>()
         .intelligence_credential
         .lock()
         .unwrap()
         .clone()
-        .ok_or_else(|| "Sign in to CopilotKit first.".to_string())?;
+        .ok_or_else(|| {
+            openbot_desktop_lib::problem::Problem::plain("Sign in to CopilotKit first.")
+        })?;
     tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::intelligence::provision_key(&credential, &project)
     })
     .await
-    .map_err(|error| format!("A key could not be created: {error}"))?
+    .map_err(|error| {
+        openbot_desktop_lib::problem::Problem::plain(format!("A key could not be created: {error}"))
+    })?
 }
 
 /// The model screen's rows. Independent of the picker above, and required to stay that way: no
