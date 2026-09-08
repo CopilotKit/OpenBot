@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { useEffect, useState } from "react";
 import { Mark } from "./Mark";
@@ -71,6 +72,14 @@ export function ProviderPicker({
   const [code, setCode] = useState("");
   const [token, setToken] = useState(chosen?.token ?? "");
   const [busy, setBusy] = useState(false);
+  /*
+   * What the sign-in is doing, while it is doing it.
+   *
+   * A plan sign-in runs in a container, so on a first run it installs the engine and boots its
+   * machine first, which is minutes. "Starting…" for that long is a hang as far as anybody
+   * watching is concerned, so the same steps the setup screen lists are shown here as one line.
+   */
+  const [progress, setProgress] = useState<string | null>(null);
   // A problem, not a string: a sign-in failure carries the container's own output, and
   // stringifying it printed "[object Object]" where the diagnosis should have been.
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -86,6 +95,7 @@ export function ProviderPicker({
     if (!row) return;
     setBusy(true);
     setFailure(null);
+    setProgress(null);
     try {
       const start =
         row.id === "anthropic"
@@ -102,6 +112,7 @@ export function ProviderPicker({
       setSignInUrl(null);
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -128,6 +139,18 @@ export function ProviderPicker({
       .catch(() => undefined);
   }, []);
 
+  // The same event the setup screen's step list is built from. Only the newest line is kept: this
+  // is one sentence under a button, not a second copy of that list.
+  useEffect(() => {
+    const stop = listen<{ step: string; ok: boolean; detail: string }>(
+      "setup:progress",
+      (event) => setProgress(event.payload.detail),
+    );
+    return () => {
+      stop.then((off) => off());
+    };
+  }, []);
+
   const row = rows.find((r) => r.id === open) ?? null;
 
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
@@ -135,9 +158,14 @@ export function ProviderPicker({
   const ready =
     (login === "plan" && token.trim().length > 0) ||
     (login === "api-key" && apiKey.trim().length > 0) ||
+    /*
+     * An endpoint needs an address and a model name. NOT A KEY: this row's own summary names
+     * Ollama and vLLM, and neither has one, so requiring a key refused the two examples the screen
+     * offers. The Rust side already treats it as optional and writes `OPENAI_API_KEY` only when it
+     * is given.
+     */
     (login === "endpoint" &&
       baseUrl.trim().startsWith("http") &&
-      apiKey.trim().length > 0 &&
       model.trim().length > 0);
 
   return (
@@ -163,6 +191,10 @@ export function ProviderPicker({
               checked={open === r.id}
               onChange={() => {
                 setOpen(r.id);
+                // A failure belongs to the row that produced it. Left in place, a refused OpenAI
+                // sign-in stayed on screen under the endpoint row's fields, where it read as a
+                // complaint about the address just typed.
+                setFailure(null);
                 // The first way in is the default, which is the plan wherever there is one.
                 setLogin(r.logins[0] ?? null);
                 // Fill from what is already on this machine, if anything.
@@ -276,6 +308,11 @@ export function ProviderPicker({
                 <button type="button" disabled={busy} onClick={beginSignIn}>
                   {busy ? "Starting…" : `Sign in with ${row.name}`}
                 </button>
+                {busy && progress && (
+                  <p className="footnote" style={{ marginBottom: 0 }}>
+                    {progress}
+                  </p>
+                )}
               </>
             ))}
 
@@ -316,7 +353,7 @@ export function ProviderPicker({
                 />
               </div>
               <div className="field">
-                <label htmlFor="ekey">API key</label>
+                <label htmlFor="ekey">API key, if the endpoint needs one</label>
                 <input
                   id="ekey"
                   type="password"
