@@ -24,8 +24,8 @@ This design includes:
 - visible attachment rows in the handoff UI;
 - recipient-only listing, reading, and deletion through governed computer tools;
 - a generic server-side workspace-file transfer tool for connector-managed upload sessions;
-- a Netsfera ERP upload-session endpoint that reuses existing principal authentication, ingestion,
-  duplicate detection, OCR scheduling, and transfer-status handling;
+- the existing Netsfera ERP transfer reservation and upload endpoint, which already provide
+  principal authentication, ingestion, duplicate detection, OCR scheduling, and transfer status;
 - one authenticated approval before the selected ERP upload and proposed association;
 - deletion after confirmed ingestion, proven exact duplicate, explicit rejection, or 30-day expiry.
 
@@ -112,31 +112,34 @@ than returned as text.
 
 ## ERP upload bridge
 
-The existing ERP document reservation is extended to create an opaque, expiring `uploadSessionId`
-bound to the authenticated ERP principal, expected filename, media type, size, SHA-256, target
-record, requested association, and idempotency key. Its MCP result contains the session id and
-reviewable metadata, but no upload URL or bearer token.
+The existing `erp_documents_reserve_upload` tool already creates an opaque, expiring `transferId`
+bound to the authenticated ERP principal, expected filename, media type, size, SHA-256, and
+idempotency key. Its MCP result contains that id and a relative upload path, never an origin or
+bearer token. No new ERP binary protocol is introduced.
 
 OpenBot exposes a governed `transfer_workspace_file` tool with this model-visible input:
 
 ```ts
 type TransferWorkspaceFileInput = {
-  connector: string;
-  uploadSessionId: string;
+  destination: string;
+  transferId: string;
   attachmentId: string;
 };
 ```
 
 The tool resolves the attachment only from the current recipient Bot's inbox. It resolves the named
-connector and its fixed origin and credential from server-side configuration, exports the file from
-the current Bot's computer, and streams it to the connector's fixed binary-upload path. The model
-cannot provide a URL, filesystem destination, authorization header, or expected hash.
+destination, fixed HTTPS origin, path template, and credential from server-side configuration,
+exports the file from the current Bot's computer, and streams it to the destination path derived
+from the validated UUID transfer id. The model cannot provide a URL, filesystem destination,
+authorization header, or expected hash. The Netsfera target derives
+`/api/agent-transfers/<transferId>` and authenticates with the same principal configured on its MCP
+connector.
 
-The ERP upload endpoint authenticates the same principal that reserved the session. It locks and
-consumes the session, rejects expiry/replay, verifies media type, size, magic bytes, and SHA-256, and
-then calls the existing received-invoice ingestion service. An exact existing SHA-256 returns
-`exact_duplicate`; successful persistence returns `ingested`; validation or domain failures return
-stable sanitized codes. The existing OCR worker remains asynchronous.
+The existing ERP upload endpoint authenticates the same principal that reserved the transfer. It
+locks the transfer, rejects expiry/replay, verifies media type, size, magic bytes, and SHA-256, and
+stores the bounded bytes. Jefe ERP then uses the existing `erp_documents_transfer_status` and
+`erp_expenses_ingest` tools. Ingestion reuses exact-duplicate detection and durable OCR scheduling;
+the existing OCR worker remains asynchronous.
 
 Jefe ERP re-reads the affected movement before approval and displays invoice metadata, movement,
 attachment hash, upload, and proposed association. One `askApproval` authorizes that exact upload
@@ -182,9 +185,10 @@ mid-transfer changes, atomic import, rollback of partial batches, retry idempote
 handoff delivery, UI rendering, transfer connector-origin confinement, authentication, audit
 redaction, and deletion/expiry.
 
-ERP tests cover reservation ownership, expected metadata, expiry, replay, streamed byte limits,
-magic bytes, hash mismatch, exact duplicates, ingestion idempotency, OCR scheduling, stale
-association guards, and sanitized results.
+The existing ERP test suite remains the contract suite for reservation ownership, expected metadata,
+expiry, replay, streamed byte limits, magic bytes, hash mismatch, exact duplicates, ingestion
+idempotency, OCR scheduling, and sanitized results. OpenBot adds fixtures that prove its adapter is
+compatible with that existing boundary.
 
 An integration test downloads a fixture PDF into the collector workspace, attaches it to Jefe ERP,
 confirms its inbox path and hash, rejects once with no ERP mutation, approves a second attempt,
@@ -192,11 +196,12 @@ streams it to an ERP test endpoint, verifies ingestion, and confirms deletion of
 
 ## Deployment
 
-The feature is disabled by `HANDOFF_ATTACHMENTS_ENABLED=false`. ERP upload sessions deploy first but
-are not granted. OpenBot schema, computer endpoints, handoff support, UI, transfer tool, and cleanup
-deploy next with the flag disabled. Production enables attachments only for the collector-to-Jefe
-ERP grant, keeps cleanup in dry-run, and exercises one known invoice. After audit, hash, ingestion,
-and deletion evidence agree, normal cleanup is enabled.
+The feature is disabled by `HANDOFF_ATTACHMENTS_ENABLED=false`. No ERP deployment is required unless
+contract verification finds drift in its existing transfer boundary. OpenBot schema, computer
+endpoints, handoff support, UI, transfer tool, and cleanup deploy with the flag disabled. Production
+enables attachments only for the collector-to-Jefe ERP grant, keeps cleanup in dry-run, and exercises
+one known invoice. After audit, hash, ingestion, and deletion evidence agree, normal cleanup is
+enabled.
 
 Rollback disables new attachments and transfers. Existing inbox files remain until the 30-day
 cleanup window or explicit audited deletion; rollback never broadens workspace mounts or restores
