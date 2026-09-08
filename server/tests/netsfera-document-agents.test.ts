@@ -22,6 +22,26 @@ describe("the Netsfera document agents", () => {
     ]);
   });
 
+  test("tells the collector to transfer downloads without using a shell", async () => {
+    const tenant = await loadTenantPackage(
+      new URL("../../examples/netsfera", import.meta.url).pathname,
+    );
+    const collector = tenant.agents.find(
+      (agent) => agent.id === "recolector-documentos",
+    );
+
+    const prompt = collector?.configuration.systemPrompt;
+    expect(prompt).toContain(
+      "call computer_list_files with path downloads",
+    );
+    expect(prompt).toContain(
+      "Do not call computer_run_command",
+    );
+    expect(prompt).toContain(
+      "message_bot validates each attachment",
+    );
+  });
+
   test("ships a provider flow with confirmation and a truthful fallback", async () => {
     const tenant = await loadTenantPackage(
       new URL("../../examples/netsfera", import.meta.url).pathname,
