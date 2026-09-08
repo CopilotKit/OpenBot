@@ -119,6 +119,8 @@ describe("what the wheel stops while a person is driving", () => {
       "/scroll",
       "/exec",
       "/files/write",
+      "/files/attachments/import",
+      "/files/attachments/delete",
     ]) {
       expect(actsOnTheComputer(path)).toBeTrue();
     }
@@ -127,6 +129,7 @@ describe("what the wheel stops while a person is driving", () => {
   test("reading, looking and the handover itself are not acting", () => {
     for (const path of [
       "/files/read",
+      "/files/attachments/export",
       "/files/list",
       "/snapshot",
       "/screenshot",

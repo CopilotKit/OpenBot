@@ -1,7 +1,6 @@
 import { serve } from "bun";
 import type { Page } from "playwright";
 import { parseAriaSnapshot, type SnapshotElement } from "./aria-snapshot";
-import { browserModeFromEnv } from "./browser-mode";
 import {
   actsOnTheComputer,
   isOpenPath,
@@ -9,6 +8,7 @@ import {
   offeredToken,
 } from "./authorisation";
 import { isPlainBotId } from "./bot-id";
+import { browserModeFromEnv } from "./browser-mode";
 import {
   type Control,
   ControlError,
@@ -17,6 +17,12 @@ import {
   NO_SECRET_PENDING,
   TAKE_CONTROL_FIRST,
 } from "./control";
+import {
+  type AttachmentMetadata,
+  deleteInboxAttachment,
+  exportAttachment,
+  importAttachment,
+} from "./file-attachments";
 import { identity } from "./identity";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
 import { type InputMessage, startScreencast } from "./screencast";
@@ -881,6 +887,79 @@ serve<StreamData>({
       } catch (error) {
         return json(
           { error: describe(error, "The file could not be read.") },
+          fileStatus(error),
+        );
+      }
+    }
+
+    if (
+      url.pathname === "/files/attachments/export" &&
+      request.method === "POST"
+    ) {
+      const body = (await request.json().catch(() => null)) as {
+        path?: unknown;
+      } | null;
+      try {
+        const exported = await exportAttachment(
+          workspace,
+          String(body?.path ?? ""),
+        );
+        return new Response(new Uint8Array(exported.bytes), {
+          headers: {
+            "content-type": exported.metadata.mediaType,
+            "content-length": String(exported.metadata.sizeBytes),
+            "x-openbot-attachment-filename": encodeURIComponent(
+              exported.metadata.filename,
+            ),
+            "x-openbot-attachment-sha256": exported.metadata.sha256,
+          },
+        });
+      } catch (error) {
+        return json(
+          { error: describe(error, "The attachment could not be exported.") },
+          fileStatus(error),
+        );
+      }
+    }
+
+    if (
+      url.pathname === "/files/attachments/import" &&
+      request.method === "POST"
+    ) {
+      try {
+        const metadata: AttachmentMetadata = {
+          handoffId: request.headers.get("x-openbot-handoff-id") ?? "",
+          attachmentId: request.headers.get("x-openbot-attachment-id") ?? "",
+          filename: decodeURIComponent(
+            request.headers.get("x-openbot-attachment-filename") ?? "",
+          ),
+          mediaType: request.headers.get("content-type") ?? "",
+          sizeBytes: Number(request.headers.get("content-length") ?? "NaN"),
+          sha256: request.headers.get("x-openbot-attachment-sha256") ?? "",
+        };
+        const bytes = Buffer.from(await request.arrayBuffer());
+        return json(await importAttachment(workspace, metadata, bytes));
+      } catch (error) {
+        return json(
+          { error: describe(error, "The attachment could not be imported.") },
+          fileStatus(error),
+        );
+      }
+    }
+
+    if (
+      url.pathname === "/files/attachments/delete" &&
+      request.method === "POST"
+    ) {
+      const metadata = (await request
+        .json()
+        .catch(() => null)) as AttachmentMetadata | null;
+      try {
+        if (!metadata) throw new WorkspaceFileError("Metadata is required.");
+        return json(await deleteInboxAttachment(workspace, metadata));
+      } catch (error) {
+        return json(
+          { error: describe(error, "The attachment could not be deleted.") },
           fileStatus(error),
         );
       }

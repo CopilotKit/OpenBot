@@ -103,6 +103,7 @@ export function createWorkspace(
   async function resolvePath(
     requested: string,
     forWrite: boolean,
+    options: { refuseSymlinks?: boolean } = {},
   ): Promise<string> {
     if (typeof requested !== "string" || !requested.trim()) {
       throw new WorkspacePathError("A file path is required.");
@@ -125,6 +126,10 @@ export function createWorkspace(
     const root = await realpath(rootPath);
     const target = resolve(root, wanted);
     assertInside(root, target);
+
+    if (options.refuseSymlinks) {
+      await assertNoSymlink(root, target, wanted);
+    }
 
     // Layer three. Resolve what exists on disk and check again, because everything above
     // reasons about the path as text and a symlink makes the text a lie.
@@ -306,6 +311,26 @@ export function createWorkspace(
       return { path: requested, bytes, appended: options.append === true };
     },
   };
+}
+
+/** Refuse every existing link component for file-transfer sources. */
+async function assertNoSymlink(
+  root: string,
+  target: string,
+  shown: string,
+): Promise<void> {
+  const rel = relative(root, target);
+  let current = root;
+  for (const part of rel.split(sep).filter(Boolean)) {
+    current = join(current, part);
+    const entry = await lstat(current).catch(() => null);
+    if (entry?.isSymbolicLink()) {
+      throw new WorkspacePathError(
+        `${shown} contains a link, so it cannot be transferred.`,
+      );
+    }
+    if (entry === null) break;
+  }
 }
 
 export type Workspace = ReturnType<typeof createWorkspace>;

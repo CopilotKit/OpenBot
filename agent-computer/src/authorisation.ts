@@ -69,6 +69,8 @@ const ACTING_PATHS = new Set([
   "/scroll",
   "/exec",
   "/files/write",
+  "/files/attachments/import",
+  "/files/attachments/delete",
 ]);
 
 export function actsOnTheComputer(pathname: string): boolean {
