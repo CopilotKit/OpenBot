@@ -46,7 +46,8 @@ const PREFIX = [...FIRING_FRAME, "", ""].join("\n");
  * that, because the alternative is a message that grows a fresh paragraph of frame every night.
  *
  * Because the frame reaches the transcript, {@link readFiring} exists to take it off again for the
- * one reader it was never addressed to: the person.
+ * readers it was never addressed to: the transcript a person reads, and the titler that names the
+ * channel from what was asked.
  */
 export function frameFiring(instruction: string): string {
   return [...FIRING_FRAME, "", instruction].join("\n");
@@ -55,10 +56,24 @@ export function frameFiring(instruction: string): string {
 /**
  * The instruction back out of a framed message, or null if this was not one.
  *
+ * The return value answers exactly one question for its callers: IS THIS TEXT A ROUTINE FIRING?
+ * `null` means no, and every caller acts on that — the transcript falls through to drawing the text
+ * as a message the person wrote, and the titler falls back to the raw text for the channel's name.
+ * So `null` must mean "not a firing" and NOTHING ELSE. A frame wrapping a blank instruction IS a
+ * firing — the schedule ran, the frame is intact — so it returns the (empty) instruction, never
+ * null. Deciding here that a blank instruction is not "worth showing as one" lies to every caller
+ * about whether a firing happened; that is a presentation choice for whoever draws the text, not
+ * something this function gets to make by returning the same null it uses for "not a firing".
+ *
  * A prefix match on the whole frame rather than on its first sentence: the frame is three fixed
  * lines and a blank one, and a person quoting one of them into a channel — which is exactly what
  * somebody debugging a routine does — must not have their own message redrawn as a firing.
+ *
+ * The instruction is returned UNTRIMMED, exactly as `frameFiring` was given it, so a caller that
+ * compares or round-trips the text never disagrees with another caller over leading or trailing
+ * whitespace.
  */
 export function readFiring(text: string): string | null {
-  return text.startsWith(PREFIX) ? text.slice(PREFIX.length) : null;
+  if (!text.startsWith(PREFIX)) return null;
+  return text.slice(PREFIX.length);
 }

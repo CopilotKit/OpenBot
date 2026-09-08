@@ -39,4 +39,17 @@ describe("readFiring", () => {
       ),
     ).toBeNull();
   });
+
+  test("is a firing even when the wrapped instruction is blank", () => {
+    expect(readFiring(frameFiring(""))).toBe("");
+  });
+
+  test("is a firing even when the wrapped instruction is only whitespace", () => {
+    expect(readFiring(frameFiring("   "))).toBe("   ");
+  });
+
+  test("round-trips an instruction with leading and trailing whitespace exactly, untrimmed", () => {
+    const padded = "  do the thing  ";
+    expect(readFiring(frameFiring(padded))).toBe(padded);
+  });
 });
