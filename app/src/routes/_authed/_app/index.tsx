@@ -4,6 +4,14 @@ import { useState } from "react";
 import { AgentCard } from "@/components/agents/agent-card";
 import { Composer, toAgentOptions } from "@/components/channels/composer";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { agentListQueryOptions } from "@/lib/agents/queries";
 import { routeMessage } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
@@ -14,7 +22,9 @@ export const Route = createFileRoute("/_authed/_app/")({
 });
 
 function RouteComponent() {
-  const { data: agents } = useQuery(agentListQueryOptions());
+  const { data: agents, isPending: loading } = useQuery(
+    agentListQueryOptions(),
+  );
   const explore = agents?.filter((a) => !a.mine && a.visibility === "public");
   const { start, startChosen, pending } = useStartChannel();
   const [error, setError] = useState<string | null>(null);
@@ -88,22 +98,64 @@ function RouteComponent() {
             </p>
           ) : null}
         </div>
+        {/*
+         * A carousel rather than the wrapping grid `/agents` uses, and the difference is on purpose.
+         * This is a one-row teaser under the composer: a grid that wrapped here would push the row
+         * down the page every time somebody shared another Bot. `/agents` is the browse surface and
+         * wraps.
+         *
+         * What it replaces was `flex flex-row` with no wrap over cards that have no `shrink-0`, so
+         * the fifth public Bot squeezed all five — the same failure `/agents` had just been fixed
+         * for, still sitting here.
+         */}
         <div className="mt-10 w-full max-w-2xl">
-          <h2 className="font-bold text-lg">Explore agents</h2>
-          <div className="flex flex-row gap-4 mt-4">
-            {!!explore?.length &&
-              explore.map((agent) => (
-                <Link
-                  key={agent.id}
-                  to="/channel/new"
-                  search={{
-                    agent: agent.id,
-                  }}
-                >
-                  <AgentCard agent={agent} />
-                </Link>
-              ))}
-          </div>
+          {/*
+           * The heading is repeated in each arm rather than hoisted above this conditional:
+           * `CarouselPrevious`/`CarouselNext` read the carousel's own context, so they must stay
+           * inside `<Carousel>`, and the heading shares that row with them once populated. A
+           * heading that only exists in two of three states would still vanish while the query is
+           * in flight, and on this centred column that shifts the composer sitting above it.
+           */}
+          {loading ? (
+            <h2 className="font-bold text-lg">Explore agents</h2>
+          ) : explore?.length ? (
+            <Carousel opts={{ align: "start" }}>
+              <div className="flex flex-row items-center justify-between gap-4">
+                <h2 className="font-bold text-lg">Explore agents</h2>
+                {/*
+                 * `static` undoes the primitive's own absolute placement, which parks these either
+                 * side of the row and off the edge of a prose-width column. They belong on the
+                 * heading's baseline, where the section's other decisions are.
+                 */}
+                <div className="flex items-center gap-2">
+                  <CarouselPrevious className="static translate-x-0 translate-y-0" />
+                  <CarouselNext className="static translate-x-0 translate-y-0" />
+                </div>
+              </div>
+              {/* `-ml-4`/`pl-4` is the primitive's own gap convention; `basis-auto` keeps each
+                  slide the card's own 144px instead of a full-width slide. */}
+              <CarouselContent className="-ml-4 mt-4">
+                {explore.map((agent) => (
+                  <CarouselItem className="basis-auto pl-4" key={agent.id}>
+                    <Link search={{ agent: agent.id }} to="/channel/new">
+                      <AgentCard agent={agent} />
+                    </Link>
+                  </CarouselItem>
+                ))}
+              </CarouselContent>
+            </Carousel>
+          ) : (
+            <>
+              <h2 className="font-bold text-lg">Explore agents</h2>
+              <Empty className="mt-4 h-[180px] border border-dashed">
+                <EmptyHeader>
+                  <EmptyTitle className="text-muted-foreground">
+                    Nobody has shared an agent with you yet.
+                  </EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            </>
+          )}
         </div>
       </div>
     </>
