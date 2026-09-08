@@ -12,6 +12,7 @@
     "src",
     "vite.config.ts",
     "../shared/handoff-markers.ts",
-    "../shared/listen-port.ts"
+    "../shared/listen-port.ts",
+    "../shared/routine-firing.ts"
   ]
 }
