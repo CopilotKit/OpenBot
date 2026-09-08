@@ -57,6 +57,7 @@ function channel(overrides: Partial<AgentChannel> = {}): AgentChannel {
     agentIds: ["agent-1", "agent-2"],
     threadId: "thread-1",
     active: true,
+    lastMessageAt: null,
     ...overrides,
   };
 }
@@ -221,10 +222,37 @@ describe("channel routes", () => {
         agentIds: ["agent-1"],
         threadId: "thread-1",
         active: true,
+        lastMessageAt: null,
       },
     });
     expect(fetched.status).toBe(200);
     expect(await json(fetched)).toEqual({ channel: channel() });
+  });
+
+  /**
+   * The date leaves as a string, and it has to leave at all.
+   *
+   * This is what lets the conversation screen tell an empty NEW conversation from one whose history
+   * this deployment cannot reach: null means nothing was ever said, a timestamp means something
+   * was. Dropping it from the DTO would put the screen back to rendering a blank window with no
+   * explanation for a conversation that plainly has a past.
+   */
+  test("carries when the channel was last spoken in, as a string", async () => {
+    const spokenAt = new Date("2026-09-07T20:25:48.391Z");
+    const store = fakeStore({
+      async get() {
+        return channel({ lastMessageAt: spokenAt });
+      },
+    });
+
+    const fetched = await appFor(store).request(
+      "http://openbot.test/channel-1",
+    );
+
+    expect(fetched.status).toBe(200);
+    expect(await json(fetched)).toEqual({
+      channel: { ...channel(), lastMessageAt: spokenAt.toISOString() },
+    });
   });
 
   test.each([
@@ -980,6 +1008,7 @@ describe("channel store integration", () => {
       agentIds: canonicalAgentIds,
       threadId: created.threadId,
       active: true,
+      lastMessageAt: null,
     });
     const persisted = await persistedChannel(created.id);
     expect(persisted.channelRow?.name).toBe("Zulu, Alpha");

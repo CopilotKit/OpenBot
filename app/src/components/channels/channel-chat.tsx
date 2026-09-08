@@ -502,6 +502,32 @@ export function ChannelChat({
            * it — and they are independent, so neither is an `else` for the other.
            */
           <>
+            {/*
+             * A conversation whose history this deployment cannot reach at all.
+             *
+             * MEASURED, AND IT LOOKED LIKE A BROKEN APP. The rail is drawn from OpenBot's own
+             * database, so a channel is listed whatever the history store says; the messages live in
+             * the Intelligence project, and pointing a deployment at a different project leaves the
+             * platform answering `THREAD_NOT_FOUND`. That 404 is deliberately read as "no history"
+             * because a thread id is minted before the thread exists, so a brand-new conversation
+             * 404s as its normal opening move — see `isMissingThread` in `server/src/copilot.ts` and
+             * the note there about not widening it.
+             *
+             * The two cases are told apart by a fact this app already has: `lastMessageAt` is set
+             * only once something has been said. A new conversation has none and is silent, as it
+             * should be. One that has been spoken in and comes back with nothing is a conversation
+             * whose history is somewhere this deployment cannot see, and saying nothing there is
+             * what made a list of conversations open onto a blank window.
+             */}
+            {!restoring &&
+            agent.messages.length === 0 &&
+            channel.lastMessageAt !== null ? (
+              <p className="pb-2 text-sm text-muted-foreground" role="status">
+                This conversation was kept with a different CopilotKit project,
+                so its earlier messages cannot be read here. Anything you send
+                now starts a fresh history.
+              </p>
+            ) : null}
             {unreadable > 0 ? (
               <p className="pb-2 text-sm text-muted-foreground" role="status">
                 {unreadable === 1
