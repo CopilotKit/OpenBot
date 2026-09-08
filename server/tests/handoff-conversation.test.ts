@@ -23,6 +23,7 @@ const profile: AgentProfile = {
 test.each([
   "enabled",
   "disabled",
+  "disabled-with-attachments",
   "remote",
   "missing-actor",
   "missing-profile",
@@ -40,7 +41,9 @@ test.each([
           ? null
           : {
               ...profile,
-              computerAccess: mode === "disabled" ? "disabled" : "enabled",
+              computerAccess: mode.startsWith("disabled")
+                ? "disabled"
+                : "enabled",
               endpoint: mode === "remote" ? "https://agent.example" : null,
             };
       },
@@ -59,13 +62,21 @@ test.each([
       },
     },
   });
-  const result = resolve({ actorId: actor.id, botId: "collector" });
+  const result = resolve({
+    actorId: actor.id,
+    botId: "collector",
+    hasAttachments: mode === "disabled-with-attachments",
+  });
   if (mode.startsWith("missing")) {
     await expect(result).rejects.toThrow("could not be confirmed");
   } else {
     expect(await result).toEqual(
-      mode === "enabled" ? { channelId: "channel", threadId: "thread" } : null,
+      mode === "enabled" || mode === "disabled-with-attachments"
+        ? { channelId: "channel", threadId: "thread" }
+        : null,
     );
   }
-  expect(directCalls).toBe(mode === "enabled" ? 1 : 0);
+  expect(directCalls).toBe(
+    mode === "enabled" || mode === "disabled-with-attachments" ? 1 : 0,
+  );
 });

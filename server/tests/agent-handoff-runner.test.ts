@@ -192,7 +192,9 @@ describe("delivering a hop", () => {
     await built.runner.sweep();
 
     expect(built.delivered[0]?.message).toContain("Invoice-0016.pdf");
-    expect(built.delivered[0]?.message).toContain("sha256 aaaa…ef90");
+    expect(built.delivered[0]?.message).toContain(
+      `sha256 ${"a".repeat(60)}ef90`,
+    );
     expect(built.delivered[0]?.message).toContain(
       "inbox/handoff/attachment-1/Invoice-0016.pdf",
     );

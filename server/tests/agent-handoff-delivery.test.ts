@@ -35,6 +35,7 @@ describe("interactive handoff continuation", () => {
       denied?: boolean;
       relay?: boolean;
       optIn?: boolean;
+      attachments?: boolean;
     } = {},
   ) {
     const requests: Array<
@@ -44,6 +45,11 @@ describe("interactive handoff continuation", () => {
     > = [];
     const released: string[] = [];
     const announced: string[] = [];
+    const resolvedWith: Array<{
+      actorId: string;
+      botId: string;
+      hasAttachments?: boolean;
+    }> = [];
     let modelRuns = 0;
     let resolved = 0;
     const agent = new (class extends AbstractAgent {
@@ -57,8 +63,9 @@ describe("interactive handoff continuation", () => {
       history: async () => PRIOR,
       mintThreadId: () => "scratch-thread",
       newRunId: () => "new-run",
-      interactiveConversationFor: async () => {
+      interactiveConversationFor: async (input) => {
         resolved++;
+        resolvedWith.push(input);
         return options.optIn === false
           ? null
           : { threadId: "collector-thread", channelId: "collector-channel" };
@@ -93,13 +100,35 @@ describe("interactive handoff continuation", () => {
         task: "List September invoices",
         constraints: "Metadata only",
         expecting: "A selection table",
+        ...(options.attachments
+          ? {
+              attachments: [
+                {
+                  id: "76dd3167-fa24-4962-8bba-354302ce0928",
+                  filename: "Invoice-0016.pdf",
+                  mediaType: "application/pdf",
+                  sizeBytes: 195234,
+                  sha256: `${"a".repeat(60)}ef90`,
+                  path: "inbox/handoff/attachment/Invoice-0016.pdf",
+                },
+              ],
+            }
+          : {}),
         ...(options.relay ? { answerIn: "thread-1" } : {}),
       },
       message: "the ask",
       shown: "Jefe asked for September invoices",
       assertion: "signed",
     });
-    return { requests, released, announced, modelRuns, resolved, result };
+    return {
+      requests,
+      released,
+      announced,
+      modelRuns,
+      resolved,
+      resolvedWith,
+      result,
+    };
   }
 
   test("records a collector-owned request and truthful receipt without running its model", async () => {
@@ -125,6 +154,21 @@ describe("interactive handoff continuation", () => {
     });
     expect(released).toEqual(["collector-thread"]);
     expect(announced).toEqual(["collector-thread"]);
+  });
+
+  test("a visible attachment continuation preserves the verified file metadata", async () => {
+    const { requests, resolvedWith } = await attempt({ attachments: true });
+    const kept = JSON.stringify(requests[0]?.persistedInputMessages);
+    expect(kept).toContain("Invoice-0016.pdf");
+    expect(kept).toContain(`sha256 ${"a".repeat(60)}ef90`);
+    expect(kept).toContain("inbox/handoff/attachment/Invoice-0016.pdf");
+    expect(resolvedWith).toEqual([
+      {
+        actorId: "user-1",
+        botId: "recolector-documentos",
+        hasAttachments: true,
+      },
+    ]);
   });
 
   test("a busy collector conversation remains retryable", async () => {

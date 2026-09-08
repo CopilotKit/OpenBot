@@ -530,6 +530,19 @@ function forThePerson(reason: string): string {
 }
 
 /**
+ * One verified attachment as the receiving Bot must see it.
+ *
+ * The complete digest is part of the transfer contract, not display decoration: the ERP reserves
+ * an upload against this exact value. Abbreviating it makes the copied file impossible to act on
+ * even though the bytes and metadata arrived intact.
+ */
+export function describeHandoffAttachment(
+  attachment: HandoffAttachment,
+): string {
+  return `- ${attachment.filename} — ${attachment.mediaType} — ${attachment.sizeBytes} bytes — sha256 ${attachment.sha256} — ${attachment.path}`;
+}
+
+/**
  * What the addressed Bot is shown.
  *
  * WHO IS ASKING IS STAMPED HERE, from the row this deployment wrote, and never taken from anything a
@@ -563,9 +576,7 @@ function attribute(work: HandoffWork): string {
   if (work.attachments?.length) {
     lines.push("", `Files attached by ${work.fromName ?? work.fromBotId}:`);
     for (const attachment of work.attachments) {
-      lines.push(
-        `- ${attachment.filename} — ${attachment.mediaType} — ${attachment.sizeBytes} bytes — sha256 ${attachment.sha256.slice(0, 4)}…${attachment.sha256.slice(-4)} — ${attachment.path}`,
-      );
+      lines.push(describeHandoffAttachment(attachment));
     }
   }
   lines.push(

@@ -19,25 +19,42 @@ import {
 } from "@ag-ui/client";
 import { Observable } from "rxjs";
 import type { ChannelStore } from "../channels/routes";
-import type { HandoffDelivery } from "./handoff-runner";
+import {
+  describeHandoffAttachment,
+  type HandoffDelivery,
+} from "./handoff-runner";
 import { textOf } from "./message-text";
 import type { AgentProfileStore } from "./profile-store";
 import type { AgentActor } from "./profile-types";
 
-/** Only local agents explicitly granted computer access need a browser continuation. */
+/**
+ * Resolve work that needs a visible browser conversation.
+ *
+ * Computer work is interactive by definition. Received files are interactive too: the recipient
+ * must retain their verified metadata in its own conversation and may need to render a human
+ * approval component before moving their bytes into another system.
+ */
 export function createInteractiveHandoffResolver(options: {
   actorFor: (id: string) => Promise<AgentActor | null>;
   profiles: Pick<AgentProfileStore, "get">;
   channels: Pick<ChannelStore, "direct">;
 }) {
-  return async ({ actorId, botId }: { actorId: string; botId: string }) => {
+  return async ({
+    actorId,
+    botId,
+    hasAttachments = false,
+  }: {
+    actorId: string;
+    botId: string;
+    hasAttachments?: boolean;
+  }) => {
     const actor = await options.actorFor(actorId);
     if (!actor) throw new Error("The handoff actor could not be confirmed");
     const profile = await options.profiles.get(actor, botId);
     if (!profile)
       throw new Error("The handoff recipient could not be confirmed");
-    if (profile.computerAccess !== "enabled" || profile.endpoint !== null)
-      return null;
+    if (profile.endpoint !== null) return null;
+    if (profile.computerAccess !== "enabled" && !hasAttachments) return null;
     const channel = await options.channels.direct(actor, botId);
     return { channelId: channel.id, threadId: channel.threadId };
   };
@@ -138,6 +155,7 @@ export function createHandoffDelivery(options: {
   interactiveConversationFor?: (input: {
     actorId: string;
     botId: string;
+    hasAttachments?: boolean;
   }) => Promise<{ threadId: string; channelId: string } | null>;
   /**
    * Tell the roster a conversation moved, when a turn put words in it.
@@ -213,6 +231,7 @@ export function createHandoffDelivery(options: {
         ? await interactiveConversationFor?.({
             actorId: work.actorId,
             botId: work.toBotId,
+            hasAttachments: Boolean(work.attachments?.length),
           })
         : undefined;
       if (continuation) {
@@ -220,7 +239,9 @@ export function createHandoffDelivery(options: {
         const receipt =
           `The request has been recorded for ${name}. Please continue in ` +
           `[the conversation with ${name}](/channel/${encodeURIComponent(continuation.channelId)}) ` +
-          "before browser work or document selection/approval. Those steps and any saving remain pending.";
+          (work.attachments?.length
+            ? "to review the attached files and request any required approval. No upload or ingestion has happened yet."
+            : "before browser work or document selection/approval. Those steps and any saving remain pending.");
         // A platform-recorded receipt under the addressed agent's identity, with
         // no model or tool execution. The next human turn builds the real agent.
         agent = new HandoffReceiptAgent(work.toBotId, receipt);
@@ -228,6 +249,12 @@ export function createHandoffDelivery(options: {
           `${work.fromName ?? work.fromBotId} asked ${name} for this on your behalf: ${work.task}`,
           ...(work.constraints ? [`Constraints: ${work.constraints}`] : []),
           ...(work.expecting ? [`Expected result: ${work.expecting}`] : []),
+          ...(work.attachments?.length
+            ? [
+                `Files attached by ${work.fromName ?? work.fromBotId}:`,
+                ...work.attachments.map(describeHandoffAttachment),
+              ]
+            : []),
         ].join("\n\n");
         message = shown;
       }
