@@ -9,7 +9,8 @@ import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StaggerItem } from "@/components/layout/stagger";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { Skeleton } from "@/components/ui/skeleton";
+import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
 
 /**
  * Creating and inspecting a coworker are search-parameter states so the roster remains mounted and
@@ -59,11 +60,13 @@ function AgentsScreen() {
    * error — two headings over nothing, which is the exact shape this task exists to remove.
    * `isPending` goes false either way, so a failure falls through to the empty state.
    */
-  const { data: agents, isPending: loading } = useQuery(
-    agentListQueryOptions(),
-  );
+  const {
+    data: agents,
+    isPending: loading,
+    isError: failed,
+  } = useQuery(agentListQueryOptions());
   const mine = agents?.filter((a) => a.mine);
-  const explore = agents?.filter((a) => !a.mine && a.visibility === "public");
+  const explore = agents?.filter(isSharedWithYou);
 
   // Creating wins if both are somehow set: it is the more recent intent.
   const showCreate = isCreating === true;
@@ -88,7 +91,16 @@ function AgentsScreen() {
               New agent
             </Button>
           </div>
-          {loading ? null : mine?.length ? (
+          {loading ? (
+            // Reserves the same 180px the settled arms below occupy, so this section holds its
+            // own height and the page beneath it does not jump when the query settles.
+            <Skeleton className="mt-4 h-[180px]" />
+          ) : mine?.length ? (
+            // Wins over `failed`: TanStack Query keeps the last good `data` across a failed
+            // background refetch (see query-core's error action — it spreads `...state` and
+            // never clears `data`), so `isError` and a still-populated roster are an ordinary
+            // combination, not a contradiction. A stale roster beats an error card claiming
+            // there is nothing, which would be false here.
             <div className="mt-4 grid grid-cols-[repeat(auto-fill,144px)] gap-4">
               {mine.map((agent, index) => {
                 return (
@@ -100,7 +112,27 @@ function AgentsScreen() {
                 );
               })}
             </div>
+          ) : failed && agents === undefined ? (
+            // `agents === undefined` narrows this to "the query has never once returned
+            // successfully" — not merely "the last request errored". `?.length` alone can't
+            // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
+            // never clears `data` on a failed background refetch, so once the query has
+            // resolved even one response, `agents` stays defined and `mine`'s emptiness is a
+            // fact about that response, not a symptom of the failure. Rendering the destructive
+            // card there would say the opposite of what "Explore agents" beside it (or this
+            // section itself, on a different roster) proves by rendering real cards from the
+            // same query.
+            <Empty className="mt-4 h-[180px] border border-dashed border-destructive">
+              <EmptyHeader>
+                <EmptyTitle className="text-destructive">
+                  Your agents couldn't be loaded.
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : (
+            // Reached both when the query never failed and `mine` is genuinely empty, and when
+            // it failed but `agents` is defined — a loaded, empty slice either way. Same plain
+            // copy for both: an empty roster is a fact, not an error.
             <Empty className="mt-4 h-[180px] border border-dashed">
               <EmptyHeader>
                 <EmptyTitle className="text-muted-foreground">
@@ -112,7 +144,13 @@ function AgentsScreen() {
         </div>
         <div className="mt-8 w-full max-w-2xl">
           <h2 className="font-bold text-lg">Explore agents</h2>
-          {loading ? null : explore?.length ? (
+          {loading ? (
+            // Reserves the same 180px the settled arms below occupy, so this section holds its
+            // own height and the page beneath it does not jump when the query settles.
+            <Skeleton className="mt-4 h-[180px]" />
+          ) : explore?.length ? (
+            // Wins over `failed` for the same reason the "Your agents" section above does: a
+            // failed background refetch does not clear TanStack Query's cached `data`.
             <div className="mt-4 grid grid-cols-[repeat(auto-fill,144px)] gap-4">
               {explore.map((agent, index) => {
                 return (
@@ -124,7 +162,27 @@ function AgentsScreen() {
                 );
               })}
             </div>
+          ) : failed && agents === undefined ? (
+            // `agents === undefined` narrows this to "the query has never once returned
+            // successfully" — not merely "the last request errored". `?.length` alone can't
+            // tell that apart from a slice that loaded and is genuinely empty: TanStack Query
+            // never clears `data` on a failed background refetch, so once the query has
+            // resolved even one response, `agents` stays defined and `explore`'s emptiness is a
+            // fact about that response, not a symptom of the failure. Rendering the destructive
+            // card there would say the opposite of what "Your agents" beside it (or this
+            // section itself, on a different roster) proves by rendering real cards from the
+            // same query.
+            <Empty className="mt-4 h-[180px] border border-dashed border-destructive">
+              <EmptyHeader>
+                <EmptyTitle className="text-destructive">
+                  Agents shared with you couldn't be loaded.
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : (
+            // Reached both when the query never failed and `explore` is genuinely empty, and
+            // when it failed but `agents` is defined — a loaded, empty slice either way. Same
+            // plain copy for both: an empty roster is a fact, not an error.
             <Empty className="mt-4 h-[180px] border border-dashed">
               <EmptyHeader>
                 <EmptyTitle className="text-muted-foreground">
