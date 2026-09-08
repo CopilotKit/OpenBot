@@ -26,3 +26,20 @@ test("shows attachment names and the number of files without exposing paths", ()
   expect(view.container.textContent).not.toContain("downloads/");
   expect(view.container.textContent).not.toContain("private/export/");
 });
+
+test("keeps drawing while an attachment path is still streaming", () => {
+  const view = render(
+    <HandoffDetails
+      given={{
+        task: "Upload these invoices",
+        attachments: [
+          { path: "downloads/Invoice-0016.pdf" },
+          {} as { path: string },
+        ],
+      }}
+    />,
+  );
+
+  expect(view.getByText("1 file attached")).toBeTruthy();
+  expect(view.getByText("Invoice-0016.pdf")).toBeTruthy();
+});

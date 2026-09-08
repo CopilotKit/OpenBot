@@ -161,6 +161,9 @@ describe("interactive handoff continuation", () => {
     const kept = JSON.stringify(requests[0]?.persistedInputMessages);
     expect(kept).toContain("Invoice-0016.pdf");
     expect(kept).toContain(`sha256 ${"a".repeat(60)}ef90`);
+    expect(kept).toContain(
+      "OpenBot verified the transfer metadata while copying these files",
+    );
     expect(kept).toContain("inbox/handoff/attachment/Invoice-0016.pdf");
     expect(resolvedWith).toEqual([
       {

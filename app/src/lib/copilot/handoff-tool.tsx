@@ -36,7 +36,16 @@ export function HandoffDetails({
   given?: HandoffParameters;
   result?: unknown;
 }) {
-  const attachments = given?.attachments ?? [];
+  /*
+   * Tool arguments arrive while their JSON is still being streamed. An attachment object may
+   * therefore exist before its `path` has arrived; treating the schema as already complete throws
+   * here and the transcript's error boundary quite correctly leaves the card failed forever.
+   * Draw only complete paths until the next chunk supplies the rest.
+   */
+  const attachments = (given?.attachments ?? []).filter(
+    (attachment): attachment is { path: string } =>
+      typeof attachment?.path === "string" && attachment.path.length > 0,
+  );
   return (
     <div className="space-y-1 text-sm">
       {given?.task ? <p>{given.task}</p> : null}

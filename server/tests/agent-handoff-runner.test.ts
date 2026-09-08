@@ -196,6 +196,9 @@ describe("delivering a hop", () => {
       `sha256 ${"a".repeat(60)}ef90`,
     );
     expect(built.delivered[0]?.message).toContain(
+      "attachmentId attachment-1",
+    );
+    expect(built.delivered[0]?.message).toContain(
       "inbox/handoff/attachment-1/Invoice-0016.pdf",
     );
     expect(built.delivered[0]?.message).not.toContain("downloads/");

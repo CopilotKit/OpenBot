@@ -539,8 +539,12 @@ function forThePerson(reason: string): string {
 export function describeHandoffAttachment(
   attachment: HandoffAttachment,
 ): string {
-  return `- ${attachment.filename} — ${attachment.mediaType} — ${attachment.sizeBytes} bytes — sha256 ${attachment.sha256} — ${attachment.path}`;
+  return `- ${attachment.filename} — attachmentId ${attachment.id} — ${attachment.mediaType} — ${attachment.sizeBytes} bytes — sha256 ${attachment.sha256} — ${attachment.path}`;
 }
+
+/** What transfer verification proves, without overstating that the document itself was understood. */
+export const VERIFIED_ATTACHMENT_NOTICE =
+  "OpenBot verified the transfer metadata while copying these files: attachment id, filename, MIME type, byte size, and SHA-256. This verifies the copied bytes, not the business contents of a document.";
 
 /**
  * What the addressed Bot is shown.
@@ -574,7 +578,11 @@ function attribute(work: HandoffWork): string {
   if (work.expecting)
     lines.push(`What a good answer looks like: ${work.expecting}`);
   if (work.attachments?.length) {
-    lines.push("", `Files attached by ${work.fromName ?? work.fromBotId}:`);
+    lines.push(
+      "",
+      VERIFIED_ATTACHMENT_NOTICE,
+      `Files attached by ${work.fromName ?? work.fromBotId}:`,
+    );
     for (const attachment of work.attachments) {
       lines.push(describeHandoffAttachment(attachment));
     }

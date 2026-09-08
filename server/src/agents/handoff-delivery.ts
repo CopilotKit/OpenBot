@@ -22,6 +22,7 @@ import type { ChannelStore } from "../channels/routes";
 import {
   describeHandoffAttachment,
   type HandoffDelivery,
+  VERIFIED_ATTACHMENT_NOTICE,
 } from "./handoff-runner";
 import { textOf } from "./message-text";
 import type { AgentProfileStore } from "./profile-store";
@@ -251,6 +252,7 @@ export function createHandoffDelivery(options: {
           ...(work.expecting ? [`Expected result: ${work.expecting}`] : []),
           ...(work.attachments?.length
             ? [
+                VERIFIED_ATTACHMENT_NOTICE,
                 `Files attached by ${work.fromName ?? work.fromBotId}:`,
                 ...work.attachments.map(describeHandoffAttachment),
               ]
