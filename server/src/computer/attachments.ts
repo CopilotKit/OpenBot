@@ -16,6 +16,10 @@ export type HandoffAttachment = {
   path: string;
 };
 
+export type ExportedAttachment = Omit<HandoffAttachment, "id" | "path"> & {
+  bytes: Buffer;
+};
+
 export type ComputerAttachmentBroker = {
   copy(input: {
     handoffId: string;
@@ -23,6 +27,7 @@ export type ComputerAttachmentBroker = {
     toBotId: string;
     paths: string[];
   }): Promise<HandoffAttachment[]>;
+  read(input: { botId: string; path: string }): Promise<ExportedAttachment>;
   remove(input: {
     botId: string;
     handoffId: string;
@@ -96,6 +101,32 @@ export function createComputerAttachmentBroker(options: {
     return { deleted: result.deleted === true };
   }
 
+  async function read(input: {
+    botId: string;
+    path: string;
+  }): Promise<ExportedAttachment> {
+    const exported = await request(input.botId, "/files/attachments/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: input.path }),
+    });
+    const sizeBytes = parseSize(exported.headers.get("content-length"));
+    const filename = decodeFilename(
+      exported.headers.get("x-openbot-attachment-filename"),
+    );
+    const mediaType = exported.headers.get("content-type") ?? "";
+    const sha256 = exported.headers.get("x-openbot-attachment-sha256") ?? "";
+    if (!SHA256.test(sha256)) throw new Error("Invalid attachment hash.");
+    const bytes = Buffer.from(await exported.arrayBuffer());
+    if (
+      bytes.length !== sizeBytes ||
+      createHash("sha256").update(bytes).digest("hex") !== sha256
+    ) {
+      throw new Error("The attachment changed during transfer.");
+    }
+    return { bytes, filename, mediaType, sizeBytes, sha256 };
+  }
+
   return {
     async copy(input) {
       if (input.paths.length < 1 || input.paths.length > MAX_FILES) {
@@ -110,37 +141,14 @@ export function createComputerAttachmentBroker(options: {
       try {
         for (const path of input.paths) {
           const attachmentId = nextId();
-          const exported = await request(
-            input.fromBotId,
-            "/files/attachments/export",
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ path }),
-            },
-          );
-          const sizeBytes = parseSize(exported.headers.get("content-length"));
+          const exported = await read({ botId: input.fromBotId, path });
+          const { sizeBytes, filename, mediaType, sha256, bytes } = exported;
           totalBytes += sizeBytes;
           if (totalBytes > MAX_HANDOFF_BYTES) {
             throw new Error(
               "The attached files exceed the handoff byte limit.",
             );
           }
-          const filename = decodeFilename(
-            exported.headers.get("x-openbot-attachment-filename"),
-          );
-          const mediaType = exported.headers.get("content-type") ?? "";
-          const sha256 =
-            exported.headers.get("x-openbot-attachment-sha256") ?? "";
-          if (!SHA256.test(sha256)) throw new Error("Invalid attachment hash.");
-          const bytes = Buffer.from(await exported.arrayBuffer());
-          if (
-            bytes.length !== sizeBytes ||
-            createHash("sha256").update(bytes).digest("hex") !== sha256
-          ) {
-            throw new Error("The attachment changed during transfer.");
-          }
-
           const imported = await request(
             input.toBotId,
             "/files/attachments/import",
@@ -194,6 +202,7 @@ export function createComputerAttachmentBroker(options: {
         throw error;
       }
     },
+    read,
     remove,
   };
 }

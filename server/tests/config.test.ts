@@ -51,6 +51,25 @@ const {
 } = baseEnvironment;
 
 describe("deployment configuration", () => {
+  test("configures the governed ERP file bridge only as a complete pair", () => {
+    const config = loadConfig({
+      ...baseEnvironment,
+      WORKSPACE_TRANSFER_NETSFERA_ERP_ORIGIN: "https://erp.netsfera.es",
+      WORKSPACE_TRANSFER_NETSFERA_ERP_TOKEN_FILE:
+        "/run/secrets/netsfera-erp-agent-token",
+    });
+    expect(config.workspaceTransfer).toEqual({
+      netsferaErpOrigin: "https://erp.netsfera.es",
+      netsferaErpTokenFile: "/run/secrets/netsfera-erp-agent-token",
+    });
+    expect(() =>
+      loadConfig({
+        ...baseEnvironment,
+        WORKSPACE_TRANSFER_NETSFERA_ERP_ORIGIN: "https://erp.netsfera.es",
+      }),
+    ).toThrow("must be set together");
+  });
+
   test("resolves the Intelligence runtime, which is the only runtime", () => {
     const config = loadConfig(baseEnvironment);
 

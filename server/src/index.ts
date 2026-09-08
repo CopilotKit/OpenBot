@@ -6,6 +6,7 @@ import {
 import { serve } from "bun";
 import { eq } from "drizzle-orm";
 import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import { createAttachmentTransferTool } from "./agents/attachment-transfer-tool";
 import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
@@ -58,6 +59,7 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { locateComputerStream } from "./computer/stream-access";
+import { loadWorkspaceUploadTarget } from "./computer/upload-target";
 import { loadConfig } from "./config";
 import {
   type IdentifyActor,
@@ -248,6 +250,12 @@ const computerAttachmentBroker = computerProvider
   ? createComputerAttachmentBroker({
       provider: computerProvider,
       token: config.computer?.token,
+    })
+  : undefined;
+const workspaceUploadTarget = config.workspaceTransfer
+  ? await loadWorkspaceUploadTarget({
+      origin: config.workspaceTransfer.netsferaErpOrigin,
+      tokenFile: config.workspaceTransfer.netsferaErpTokenFile,
     })
   : undefined;
 
@@ -852,7 +860,19 @@ const copilotRuntime = mountCopilotRuntime(
       route: askTheirOwnPerson,
       auditStore: bootAuditStore,
     });
-    return passing ? [passing, asking] : [asking];
+    const transferring =
+      computerAttachmentBroker && workspaceUploadTarget
+        ? createAttachmentTransferTool({
+            from: run,
+            store: handoffAttachmentStore,
+            broker: computerAttachmentBroker,
+            target: workspaceUploadTarget,
+            auditStore: bootAuditStore,
+          })
+        : null;
+    return [passing, asking, transferring].filter(
+      (tool): tool is NonNullable<typeof tool> => tool !== null,
+    );
   },
   // A run started or ended on a thread; light the channel it belongs to. Fire-and-forget, keyed by
   // thread, and a scratch thread maps to no channel and signals nowhere.

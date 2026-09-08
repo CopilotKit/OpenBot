@@ -268,6 +268,11 @@ export type DeploymentConfig = {
   computer?: ComputerConfig;
   /** How far one Bot handing work to another may go. */
   handoff: HandoffCaps;
+  /** Fixed, server-only destination for uploading a recipient Bot's attached workspace file. */
+  workspaceTransfer?: {
+    netsferaErpOrigin: string;
+    netsferaErpTokenFile: string;
+  };
   /**
    * The secret a Bot presents when it calls a tool back through this server.
    *
@@ -947,6 +952,22 @@ export function loadConfig(
   const auth = authConfig(environment, google);
   const managedAgent = managedAgentConfig(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
+  const netsferaErpOrigin = optional(
+    environment,
+    "WORKSPACE_TRANSFER_NETSFERA_ERP_ORIGIN",
+  );
+  const netsferaErpTokenFile = optional(
+    environment,
+    "WORKSPACE_TRANSFER_NETSFERA_ERP_TOKEN_FILE",
+  );
+  if (
+    (netsferaErpOrigin === undefined) !==
+    (netsferaErpTokenFile === undefined)
+  ) {
+    throw new Error(
+      "WORKSPACE_TRANSFER_NETSFERA_ERP_ORIGIN and WORKSPACE_TRANSFER_NETSFERA_ERP_TOKEN_FILE must be set together",
+    );
+  }
 
   return {
     port: serverPort(environment),
@@ -982,6 +1003,14 @@ export function loadConfig(
       : {}),
     computer: computerConfig(environment),
     handoff: handoffCaps(environment),
+    ...(netsferaErpOrigin && netsferaErpTokenFile
+      ? {
+          workspaceTransfer: {
+            netsferaErpOrigin,
+            netsferaErpTokenFile,
+          },
+        }
+      : {}),
     ...(optional(environment, "AGENT_TOOL_TOKEN")
       ? { agentToolToken: optional(environment, "AGENT_TOOL_TOKEN") as string }
       : {}),
