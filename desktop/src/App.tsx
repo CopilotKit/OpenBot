@@ -480,7 +480,20 @@ export function App() {
           <>
             <button
               type="button"
-              onClick={() => invoke("show_openbot").catch(() => undefined)}
+              /*
+               * The refusal is shown, not swallowed.
+               *
+               * `show_openbot` answers with "OpenBot is not answering on port 3010 yet, so there
+               * is nothing to show" when the app host process is not up, and this button dropped
+               * it on the floor. Clicking it then did nothing at all, on a screen headed "OpenBot
+               * is running", which is the worst of both: a true sentence was available and the
+               * window threw it away. The Ask screen's copy of this call always showed it.
+               */
+              onClick={() =>
+                invoke("show_openbot").catch((error) =>
+                  setFailure(asProblem(error)),
+                )
+              }
             >
               Show OpenBot
             </button>

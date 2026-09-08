@@ -7,7 +7,7 @@
   "scripts": {
     "build": "bun --bun node_modules/vite/bin/vite.js build",
     "dev": "bun --bun node_modules/vite/bin/vite.js",
-    "serve": "bun run build && bun --bun node_modules/vite/bin/vite.js preview",
+    "serve": "bun run build && bun serve.ts",
     "prebuild": "bun run --cwd .. generate:app-config",
     "predev": "bun run --cwd .. generate:app-config",
     "pretypecheck": "bun run --cwd .. generate:app-config",
