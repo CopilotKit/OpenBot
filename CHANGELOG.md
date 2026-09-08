@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A deployment directory pasted with a stray space goes where it says
+
+The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank
+after trimming, and then sent the untrimmed string — the same trap the API URL, the gateway URL, the
+intelligence key and the model key were taken out of, and this is the one of the five that is a
+place on disk rather than a credential. A path copied with the space the selection picked up, or
+with the newline a copied line carries, was used whole. A trailing space made a second directory
+beside the one everything else means: the tray's Stop and the next launch both ask for the default
+path, which has no space in it, so a person was left with a deployment nothing on screen could
+reach. A leading space was worse, because a path starting with a space does not start with a
+separator — it stopped being absolute, and the deployment was laid out relative to wherever the
+window happened to be running from. The path is trimmed at both ends now. Spaces inside it are part
+of a directory's name and are left alone.
+
 ### One command to stop what `start.sh` started
 
 Stopping the local stack meant four commands read off the end of a successful start, and the one

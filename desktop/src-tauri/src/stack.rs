@@ -563,6 +563,24 @@ pub fn default_root() -> PathBuf {
     dirs_home().join("OpenBot")
 }
 
+/// The deployment directory somebody typed, as a path.
+///
+/// Trimmed, the way the four settings entered beside it on the same screen already are. That screen
+/// enables Start on `root.trim() !== ""` and then sends the untrimmed string, so a path pasted with
+/// the space the selection picked up, or with the newline a copied line carries, arrives here whole
+/// -- and this is the one of the five values that is not a credential but a place on disk.
+///
+/// A trailing space makes a second directory beside the one everything else means: the tray's Stop
+/// and the next launch both ask `default_root`, which has no space in it, so a person is left with
+/// a deployment nothing on screen can reach. A leading one is worse, because a path that begins
+/// with a space does not begin with a separator: it stops being absolute, and the whole deployment
+/// is laid out relative to wherever the window happens to be running from.
+///
+/// Only the ends. A space inside a path is part of a directory's name and stays where it is.
+pub fn root_from(typed: &str) -> PathBuf {
+    PathBuf::from(typed.trim())
+}
+
 fn dirs_home() -> PathBuf {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -632,6 +650,50 @@ mod tests {
         .unwrap();
         assert!(deployment_problem(&dir).is_none());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_deployment_directory_pasted_with_a_stray_space_is_the_one_it_names() {
+        // The fifth value on the setup screen that trimming missed. The screen enables Start on
+        // `root.trim() !== ""` and then sends the untrimmed string, which is exactly what the API
+        // URL, the gateway URL, the intelligence key and the model key were rescued from.
+        //
+        // A trailing space is a second directory beside the one everything else means: the tray's
+        // Stop and the next launch both ask `default_root`, which has no space in it. A leading one
+        // is worse, because a path that begins with a space does not begin with a separator: the
+        // whole deployment stops being absolute and lands under wherever the window is running
+        // from.
+        assert_eq!(
+            root_from("  /home/me/OpenBot  "),
+            PathBuf::from("/home/me/OpenBot")
+        );
+        assert_eq!(
+            root_from("/home/me/OpenBot\n"),
+            PathBuf::from("/home/me/OpenBot")
+        );
+        assert!(
+            root_from(" /home/me/OpenBot").has_root(),
+            "a leading space turned an absolute path into a relative one"
+        );
+    }
+
+    #[test]
+    fn a_space_inside_the_path_is_part_of_the_path() {
+        // Only the ends. "Documents and Settings" is a directory, and a person whose home has a
+        // space in it must still be able to say where OpenBot lives.
+        assert_eq!(
+            root_from("/home/me/My Files/OpenBot"),
+            PathBuf::from("/home/me/My Files/OpenBot")
+        );
+        assert_eq!(
+            root_from(r"C:\Users\me\Open Bot"),
+            PathBuf::from(r"C:\Users\me\Open Bot")
+        );
+        // And an ordinary path is handed back exactly as it was.
+        assert_eq!(
+            root_from("/home/me/OpenBot"),
+            PathBuf::from("/home/me/OpenBot")
+        );
     }
 
     #[test]

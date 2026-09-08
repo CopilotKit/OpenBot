@@ -120,7 +120,7 @@ async fn start_stack(
     api_key: String,
     openai_api_key: String,
 ) -> Result<(), String> {
-    let root = PathBuf::from(root);
+    let root = stack::root_from(&root);
 
     // The installer does not carry the deployment; it fetches one. Skipped when the recorded
     // version already matches, so a restart is not a download.
@@ -285,7 +285,7 @@ async fn start_stack(
 /// of everything their Bot had logged into.
 #[tauri::command]
 fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
-    stop_everything(&app, &PathBuf::from(&root))
+    stop_everything(&app, &stack::root_from(&root))
 }
 
 /// Take the whole stack down: the host processes, anything left over, and the containers.
@@ -395,7 +395,7 @@ fn show_setup(app: tauri::AppHandle) -> Result<(), String> {
 /// an answer on the port says one is running now.
 #[tauri::command]
 fn already_running(root: String) -> bool {
-    let root = PathBuf::from(&root);
+    let root = stack::root_from(&root);
     if deployment::installed(&root).is_none() {
         return false;
     }
