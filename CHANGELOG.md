@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### `COMPUTER_BROWSER_IDLE_MS=0` now keeps browsers resident, as it says it does
+
+Zero is the documented way to switch off the sweep that closes a Bot's browser after it has sat
+untouched, and the sweep itself reads a timeout of zero as being switched off. The value never got
+that far. It was read the way the cap on running browsers is, where zero would close every browser
+the moment it opened and so has to be refused, and an operator who typed zero got the thirty-minute
+default handed back instead. Their browsers went on being closed, which is a Bot signed out of a site
+that only issues session cookies and a cold Chromium on its next turn. Zero is now kept for this one
+setting. A blank variable, which is what an unset variable declared in a compose file arrives as, is
+still not zero: it means "not set" and takes the default, as do a negative and anything that is not a
+number.
+
 ### One command to stop what `start.sh` started
 
 Stopping the local stack meant four commands read off the end of a successful start, and the one
