@@ -35,8 +35,15 @@ function announceServerPort(port: number): Plugin {
       const indexPath = path.resolve(__dirname, "dist", "index.html");
       server.middlewares.use((request, response, next) => {
         const requestPath = (request.url ?? "/").split("?")[0];
-        // Only the SPA entry: a navigation, not an asset with a file extension.
-        if (request.method !== "GET" || /\.[^/]+$/.test(requestPath)) {
+        // Only the SPA entry, and this middleware runs before Vite's own — so everything Vite must
+        // still handle has to fall through: a non-GET, an `/api` call the proxy carries to the
+        // server (extension-less GETs like `/api/bots` included), and an asset with a file
+        // extension. What is left is a navigation, which gets the app shell with the port announced.
+        if (
+          request.method !== "GET" ||
+          requestPath.startsWith("/api") ||
+          /\.[^/]+$/.test(requestPath)
+        ) {
           return next();
         }
         let html: string;
