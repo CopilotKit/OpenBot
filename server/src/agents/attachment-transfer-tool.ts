@@ -15,6 +15,18 @@ const parameters = z.object({
   ),
   attachmentId: uuid.describe("The id shown beside the attached file"),
 });
+const completionParameters = z.object({
+  attachmentId: uuid,
+  transferId: uuid,
+  outcome: z.enum([
+    "ingested",
+    "exact_duplicate",
+    "rejected",
+    "failed",
+    "stale",
+  ]),
+  erpReference: z.string().min(1).max(200).optional(),
+});
 
 export function createAttachmentTransferTool(options: {
   from: RunAssertion;
@@ -111,6 +123,96 @@ export function createAttachmentTransferTool(options: {
             ? error.message
             : "the governed upload failed";
         return `The workspace file could not be transferred: ${reason}.`;
+      }
+    },
+  };
+}
+
+export function createAttachmentCompletionTool(options: {
+  from: RunAssertion;
+  store: HandoffAttachmentStore;
+  broker: ComputerAttachmentBroker;
+  auditStore: AuditStore;
+}): GrantedTool {
+  return {
+    name: "complete_workspace_file_transfer",
+    ref: "bot/complete_workspace_file_transfer",
+    description:
+      "Finish a governed ERP file transfer after checking its durable ERP result. Use ingested or exact_duplicate only with the ERP invoice/document reference; retryable failed or stale outcomes retain the file.",
+    parameters: completionParameters,
+    execute: async (args) => {
+      const parsed = completionParameters.safeParse(args);
+      if (!parsed.success)
+        return "The workspace transfer was not completed: invalid arguments.";
+      const { attachmentId, transferId, outcome, erpReference } = parsed.data;
+      if (
+        (outcome === "ingested" || outcome === "exact_duplicate") &&
+        !erpReference
+      ) {
+        return "The workspace transfer was not completed: the durable ERP reference is required.";
+      }
+      const row = await options.store.ownedByRecipient(
+        attachmentId,
+        options.from.botId,
+      );
+      if (!row) return "That attachment is not available to this Bot.";
+      if (row.externalTransferId !== transferId) {
+        return "That ERP transfer id does not belong to this attachment.";
+      }
+      if (row.state === "deleted") {
+        return JSON.stringify({
+          attachmentId,
+          transferId,
+          outcome,
+          deleted: true,
+        });
+      }
+      if (row.state !== "transferred") {
+        return `That attachment cannot be completed while it is ${row.state}.`;
+      }
+      if (outcome === "failed" || outcome === "stale") {
+        return JSON.stringify({
+          attachmentId,
+          transferId,
+          outcome,
+          retained: true,
+        });
+      }
+
+      try {
+        await options.broker.remove({
+          botId: options.from.botId,
+          handoffId: row.handoffId,
+          attachment: row,
+        });
+        await options.store.markDeleted(
+          attachmentId,
+          `${outcome}${erpReference ? `:${erpReference}` : ""}`,
+        );
+        await recordAuditEvent(options.auditStore, {
+          eventType: "agent.attachment_completed",
+          targetType: "attachment",
+          targetId: attachmentId,
+          ...(options.from.actorId
+            ? { actorUserId: options.from.actorId }
+            : {}),
+          payload: {
+            bot: options.from.botId,
+            attachmentId,
+            transferId,
+            outcome,
+            ...(erpReference ? { erpReference } : {}),
+            deleted: true,
+          },
+        });
+        return JSON.stringify({
+          attachmentId,
+          transferId,
+          outcome,
+          deleted: true,
+        });
+      } catch {
+        return "The ERP result was recorded, but the recipient file could not be deleted safely. It will be retried by cleanup.";
       }
     },
   };

@@ -15,6 +15,14 @@ agents:
       A handoff receipt means the request was recorded, not that a portal was visited. When it
       supplies a continuation link, ask the person to continue in the collector conversation;
       browsing and document selection or approval remain pending until then.
+      When the collector sends verified attachments back, inspect their metadata and re-read the
+      matching ERP movements. Reserve an ERP upload using exactly the attachment filename, MIME,
+      size, and SHA-256. Show the person the selected files, movements, hashes, upload, and proposed
+      associations, and request their approval before transferring or ingesting anything. After
+      approval, transfer each file with transfer_workspace_file, verify it with
+      erp_documents_transfer_status, ingest it with erp_expenses_ingest, and call
+      complete_workspace_file_transfer only after the ERP returns a durable invoice/document or
+      exact-duplicate reference. Fiscal confirmation and posting remain separate approvals.
   - id: recolector-documentos
     name: Recolector de documentos
     title: Documentos externos
@@ -33,6 +41,9 @@ agents:
       Continue a handed-over request only in this interactive conversation with the person.
       Request takeover for Enter, Space, and submit-on-type activation; ordinary typing without
       submit and non-activating keys may still be used when the policy allows them.
+      After downloading the person's approved set, send the files back to Jefe ERP with message_bot
+      attachments using their relative downloads paths and include the movement criteria and
+      verified invoice metadata. Never embed file bytes or credentials in a message.
     skills:
       - skill-creator
       - crear-proveedor-documental

@@ -6,7 +6,11 @@ import {
 import { serve } from "bun";
 import { eq } from "drizzle-orm";
 import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
-import { createAttachmentTransferTool } from "./agents/attachment-transfer-tool";
+import { createAttachmentCleanup } from "./agents/attachment-cleanup";
+import {
+  createAttachmentCompletionTool,
+  createAttachmentTransferTool,
+} from "./agents/attachment-transfer-tool";
 import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
@@ -870,7 +874,16 @@ const copilotRuntime = mountCopilotRuntime(
             auditStore: bootAuditStore,
           })
         : null;
-    return [passing, asking, transferring].filter(
+    const completing =
+      computerAttachmentBroker && workspaceUploadTarget
+        ? createAttachmentCompletionTool({
+            from: run,
+            store: handoffAttachmentStore,
+            broker: computerAttachmentBroker,
+            auditStore: bootAuditStore,
+          })
+        : null;
+    return [passing, asking, transferring, completing].filter(
       (tool): tool is NonNullable<typeof tool> => tool !== null,
     );
   },
@@ -1090,6 +1103,29 @@ repeatAfterEach(
   },
   60 * 60 * 1_000,
 );
+
+if (computerAttachmentBroker) {
+  const attachmentCleanup = createAttachmentCleanup({
+    store: handoffAttachmentStore,
+    broker: computerAttachmentBroker,
+    dryRun: config.workspaceTransfer?.cleanupDryRun ?? true,
+  });
+  repeatAfterEach(
+    async () => {
+      const report = await attachmentCleanup.sweep();
+      if (report.found > 0) {
+        console.info(
+          JSON.stringify({
+            type: "handoff-attachment-cleanup",
+            dryRun: config.workspaceTransfer?.cleanupDryRun ?? true,
+            ...report,
+          }),
+        );
+      }
+    },
+    60 * 60 * 1_000,
+  );
+}
 
 /*
  * Naming conversations, in the API process rather than `worker/`, which the single-image container

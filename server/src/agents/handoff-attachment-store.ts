@@ -137,10 +137,17 @@ export function createHandoffAttachmentStore(
         .from(handoffAttachments)
         .where(
           and(
-            eq(handoffAttachments.state, "copied"),
+            inArray(handoffAttachments.state, [
+              "copied",
+              "transferred",
+              "failed",
+              "rejected",
+              "expired",
+            ]),
             lte(handoffAttachments.expiresAt, now),
           ),
-        );
+        )
+        .limit(100);
     },
   };
 }

@@ -272,6 +272,7 @@ export type DeploymentConfig = {
   workspaceTransfer?: {
     netsferaErpOrigin: string;
     netsferaErpTokenFile: string;
+    cleanupDryRun: boolean;
   };
   /**
    * The secret a Bot presents when it calls a tool back through this server.
@@ -1008,6 +1009,9 @@ export function loadConfig(
           workspaceTransfer: {
             netsferaErpOrigin,
             netsferaErpTokenFile,
+            cleanupDryRun:
+              optional(environment, "WORKSPACE_TRANSFER_CLEANUP_DRY_RUN") !==
+              "false",
           },
         }
       : {}),

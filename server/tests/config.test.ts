@@ -61,6 +61,7 @@ describe("deployment configuration", () => {
     expect(config.workspaceTransfer).toEqual({
       netsferaErpOrigin: "https://erp.netsfera.es",
       netsferaErpTokenFile: "/run/secrets/netsfera-erp-agent-token",
+      cleanupDryRun: true,
     });
     expect(() =>
       loadConfig({
