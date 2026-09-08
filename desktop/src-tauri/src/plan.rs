@@ -22,12 +22,16 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
-/// The image whose bundled CLI runs the sign-in.
+/// The published name of the image whose bundled CLI runs the sign-in.
 ///
 /// The Claude Agent SDK harness, used here as a tool rather than as a Bot: it is simply the image
-/// that carries Anthropic's own CLI, so nothing has to be installed on the person's machine. Pinned
-/// by the release like every other image; the tag here is what a development tree builds.
-pub const SIGN_IN_IMAGE: &str = "openbot-harness-claude-sdk:test";
+/// that carries Anthropic's own CLI, so nothing has to be installed on the person's machine.
+///
+/// A NAME, NOT A REFERENCE. This was `openbot-harness-claude-sdk:test`, which is what a development
+/// tree builds: it resolved locally on the machine it was written on and, on a machine that had
+/// never built anything, sent Podman to `docker.io/library/openbot-harness-claude-sdk`. Resolved
+/// through the release's manifest by `crate::deployment::reference`, like every other image.
+pub const SIGN_IN_IMAGE: &str = "agent-claude-sdk";
 
 /// Where the SDK keeps the binary it bundles.
 ///
@@ -429,12 +433,14 @@ impl SigningIn {
     }
 }
 
-/// The image whose `langchain-openai` runs the ChatGPT sign-in.
+/// The published name of the image whose `langchain-openai` runs the ChatGPT sign-in.
 ///
 /// The LangGraph harness, used as a tool rather than as a Bot for the same reason the Claude one is:
 /// it is the image that already carries the vendor's own login. It is also the default harness, so
 /// on the common path this image is being pulled anyway.
-pub const CHATGPT_SIGN_IN_IMAGE: &str = "openbot-agent-langgraph-agui:v0.0.8";
+///
+/// A name, not a reference: see `SIGN_IN_IMAGE`.
+pub const CHATGPT_SIGN_IN_IMAGE: &str = "agent-langgraph-agui";
 
 /// Where the vendor's login persists what it gets.
 const CHATGPT_STORE: &str = "/root/.langchain/chatgpt-auth.json";

@@ -79,7 +79,8 @@ pub struct Harness {
     pub id: String,
     pub name: String,
     pub summary: String,
-    /// The image that speaks AG-UI, pinned by the release like every other image.
+    /// The published name of the image that speaks AG-UI. Resolved to a digest-pinned reference
+    /// through the release's manifest; see `crate::deployment::reference`.
     ///
     /// `None` only for the row where the person supplies the address.
     pub image: Option<String>,
@@ -142,7 +143,9 @@ pub fn catalogue() -> Vec<Harness> {
         id: id.into(),
         name: name.into(),
         summary: summary.into(),
-        image: Some(format!("openbot-{directory}")),
+        // The manifest's own key, which is the directory the image is built from. `openbot-` is
+        // the published repository's prefix and belongs to the reference, not to this name.
+        image: Some(directory.to_string()),
         port: Some(port),
         health_path: Some("/health".into()),
         credential: Credential::AnyProvider,
@@ -211,7 +214,7 @@ pub fn catalogue() -> Vec<Harness> {
             id: "claude-agent-sdk".into(),
             name: "Claude Agent SDK".into(),
             summary: "Anthropic's own. The one that takes a Claude plan instead of a key.".into(),
-            image: Some("openbot-agent-claude-sdk".into()),
+            image: Some("agent-claude-sdk".into()),
             port: Some(4212),
             health_path: Some("/health".into()),
             credential: Credential::Anthropic,
@@ -278,10 +281,11 @@ at a container nobody started — which looks like a broken Bot rather than a ba
 */
 pub fn picked(
     id: Option<&str>,
-    // The release whose images these are. Tagged rather than bare: an untagged name means
-    // `:latest` to every engine, which is not a tag any release publishes, so the pull is refused
-    // and the person is shown a registry error about a repository that does exist.
-    version: &str,
+    // Where the deployment is, because the image reference is read from the manifest laid down
+    // beside it. A name built from a version was what this took before, and an unqualified name
+    // sends every engine to Docker Hub: the pull was refused there and the person was shown a
+    // registry permissions error for a repository that had never been pushed.
+    root: &std::path::Path,
 ) -> Result<Option<crate::env::PickedHarness>, String> {
     let Some(id) = id.map(str::trim).filter(|id| !id.is_empty()) else {
         return Ok(None);
@@ -299,7 +303,7 @@ pub fn picked(
     };
     let mastra = row.id == "mastra";
     Ok(Some(crate::env::PickedHarness {
-        image: format!("{image}:{version}"),
+        image: crate::deployment::reference(root, &image)?,
         port,
         name: row.name,
         mastra,
@@ -409,11 +413,8 @@ mod tests {
         // carry one, and the file is a flat list of quoted names.
         for harness in catalogue() {
             let Some(image) = harness.image else { continue };
-            let component = image
-                .strip_prefix("openbot-")
-                .expect("a harness image is named openbot-<component>");
             assert!(
-                listed.contains(&format!("\"{component}\"")),
+                listed.contains(&format!("\"{image}\"")),
                 "{} names image {image}, which no release publishes",
                 harness.id
             );
@@ -454,69 +455,146 @@ mod tests {
     /// Bot rather than a pick that could not be honoured.
     #[test]
     fn an_unknown_id_is_refused_by_name() {
-        let refusal = picked(Some("not-a-real-harness"), "v0.0.0").expect_err("it was accepted");
+        let refusal =
+            picked(Some("not-a-real-harness"), &std::env::temp_dir()).expect_err("it was accepted");
         assert!(refusal.contains("not-a-real-harness"), "{refusal}");
+    }
+
+    /// A deployment whose manifest names every image in the catalogue, the way a release does.
+    ///
+    /// Written to a real directory because resolution reads the manifest from disk, which is the
+    /// behaviour under test: a fixture built in memory would not catch a path that is looked for in
+    /// the wrong place.
+    fn deployment_naming_everything(label: &str) -> std::path::PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("openbot-harness-{label}-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let named: Vec<String> = catalogue()
+            .into_iter()
+            .filter_map(|row| row.image)
+            .map(|image| {
+                format!(
+                    "\"{image}\": {{ \"repository\": \"ghcr.io/copilotkit/openbot-{image}\", \
+                     \"digest\": \"sha256:abc\", \
+                     \"reference\": \"ghcr.io/copilotkit/openbot-{image}@sha256:abc\" }}"
+                )
+            })
+            .collect();
+        std::fs::write(
+            crate::deployment::images_path(&root),
+            format!(
+                "{{ \"version\": \"v1.2.3\", \"images\": {{ {} }} }}",
+                named.join(", ")
+            ),
+        )
+        .unwrap();
+        root
     }
 
     /// Bringing your own address installs nothing, and that is not a failure.
     #[test]
     fn the_byo_row_resolves_to_nothing_without_complaint() {
+        let root = std::env::temp_dir();
         assert_eq!(
-            picked(Some("byo-url"), "v0.0.0").expect("it was refused"),
+            picked(Some("byo-url"), &root).expect("it was refused"),
             None
         );
-        assert_eq!(picked(None, "v0.0.0").expect("it was refused"), None);
-        assert_eq!(picked(Some("   "), "v0.0.0").expect("it was refused"), None);
+        assert_eq!(picked(None, &root).expect("it was refused"), None);
+        assert_eq!(picked(Some("   "), &root).expect("it was refused"), None);
     }
 
     /// A real row resolves to the image the release publishes and the port that image listens on.
     #[test]
     fn a_real_row_resolves_to_its_image_and_port() {
-        let crewai = picked(Some("crewai"), "v1.2.3")
+        let root = deployment_naming_everything("crewai");
+        let crewai = picked(Some("crewai"), &root)
             .expect("refused")
             .expect("nothing");
-        assert_eq!(crewai.image, "openbot-agent-crewai:v1.2.3");
+        assert_eq!(
+            crewai.image,
+            "ghcr.io/copilotkit/openbot-agent-crewai@sha256:abc"
+        );
         assert_eq!(crewai.port, 4202);
         assert!(!crewai.mastra);
         assert!(crewai.remote_agent_id.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Mastra is dialled as Mastra and names the agent our image serves, because that endpoint is a
     /// roster and a Bot that names none gets the only one there or a refusal.
     #[test]
     fn mastra_resolves_as_mastra_and_names_its_agent() {
-        let mastra = picked(Some("mastra"), "v0.0.0")
+        let root = deployment_naming_everything("mastra");
+        let mastra = picked(Some("mastra"), &root)
             .expect("refused")
             .expect("nothing");
         assert!(mastra.mastra);
         assert_eq!(mastra.remote_agent_id, "openbot");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An image this release does not publish is named as that, rather than left to the engine.
+    ///
+    /// The failure it replaces: an unqualified name is looked up on Docker Hub, so a Bot whose
+    /// image was never pushed came back as "requested access to the resource is denied", which
+    /// reads as a credentials problem and sends somebody to fix permissions on a repository that
+    /// does not exist.
+    #[test]
+    fn a_bot_this_release_does_not_publish_is_named_rather_than_pulled() {
+        let root = std::env::temp_dir().join(format!("openbot-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            crate::deployment::images_path(&root),
+            "{ \"version\": \"v1.2.3\", \"images\": {} }",
+        )
+        .unwrap();
+
+        let refused = picked(Some("crewai"), &root).expect_err("it should be refused");
+        assert!(refused.contains("agent-crewai"), "{refused}");
+        assert!(refused.contains("v1.2.3"), "{refused}");
+        assert!(!refused.contains("denied"), "{refused}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /**
-    Every resolved image carries a tag, and this is the guard that was missing.
+    Every resolved image names the registry it comes from, and this is the guard that was missing.
 
-    Extracting this resolution out of `start_stack` dropped the version it used to append, so the
-    name reached `.env` bare. An engine reads a bare name as `:latest`, which no release publishes,
-    so `compose up` failed with a registry error about a repository that does exist — after the
-    deployment was laid down and the settings were written, at the last step before the stack came
-    up. Nothing caught it, because a name without a tag is a perfectly good string.
+    THE SAME BUG THREE TIMES. First the names were built from the ids and matched nothing a release
+    publishes. Then the version stopped being appended, so an engine read the bare name as
+    `:latest`. Then the name was correct and tagged and still unqualified, so Podman resolved
+    `openbot-agent-langgraph-agui:v0.0.8` to `docker.io/library/...` and the person was told access
+    was denied. Each one is a perfectly good string, each one failed at the pull on a first run, and
+    the fix is that no reference is built here at all: they are read from the release's manifest.
     */
     #[test]
-    fn every_resolved_image_carries_its_tag() {
+    fn every_resolved_image_names_the_registry_it_comes_from() {
+        let root = deployment_naming_everything("registry");
         for row in catalogue() {
             if row.image.is_none() {
                 continue;
             }
-            let resolved = picked(Some(&row.id), "v9.9.9")
+            let resolved = picked(Some(&row.id), &root)
                 .expect("refused")
                 .expect("nothing");
+            let host = resolved
+                .image
+                .split('/')
+                .next()
+                .expect("a reference has at least one segment");
             assert!(
-                resolved.image.ends_with(":v9.9.9"),
+                host.contains('.'),
+                "{} resolved to {}, which every engine looks up on Docker Hub",
+                row.id,
+                resolved.image
+            );
+            assert!(
+                resolved.image.contains("@sha256:") || resolved.image.contains(':'),
                 "{} resolved to {}, which an engine reads as :latest",
                 row.id,
                 resolved.image
             );
         }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A named mark has to be a file that is actually there. The failure this catches is silent at

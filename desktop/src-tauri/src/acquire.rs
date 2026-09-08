@@ -7,9 +7,10 @@
 //! **Windows cannot do this from a service.** `podman machine init` shells out to `wsl.exe`, and WSL
 //! refuses to run as LocalSystem: `Wsl/WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED`. Meanwhile `wsl --install`
 //! needs elevation. So the two halves run in different contexts, and the elevated half is the only
-//! part that may be handed to a helper. See `windows.rs`.
+//! part that may be handed to a helper. See `windows.rs`. Fetching and installing Podman itself is
+//! `install.rs`.
 
-use crate::quiet::{command, said as command_said};
+use crate::quiet::said as command_said;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -20,21 +21,54 @@ use crate::engine::{Address, Engine};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Step {
-    /// Not used. Installing an engine is designed and not built: nothing here downloads Podman,
-    /// and the screens no longer say it does. Kept so the sequence a person is shown reads the
-    /// same when it is.
-    InstallEngine,
     CreateMachine,
     StartMachine,
     HealthGate,
 }
 
+/// How a step went, in both registers when it went badly.
+///
+/// Two fields and not one for the reason `problem.rs` gives: `podman machine init` failing is
+/// exactly the case where the engine's own output was put in front of somebody as the headline.
+/// The row shows `said`; `detail` is the output, kept.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StepOutcome {
     pub step: Step,
     pub ok: bool,
-    /// What to do about it, where there is something to do.
-    pub detail: String,
+    /// The sentence for the step row, and for the failure when there is one.
+    pub said: String,
+    /// What the command actually said, where a command said anything.
+    pub detail: Option<String>,
+}
+
+impl StepOutcome {
+    fn went(step: Step, said: impl Into<String>) -> Self {
+        Self {
+            step,
+            ok: true,
+            said: said.into(),
+            detail: None,
+        }
+    }
+
+    /// A failed step, with the engine's own words kept behind the sentence.
+    fn stopped(step: Step, output: &str) -> Self {
+        let problem = crate::problem::Problem::with(explain_machine_error(output), output);
+        Self {
+            step,
+            ok: false,
+            said: problem.said,
+            detail: problem.detail,
+        }
+    }
+
+    /// This step's failure, for a caller that has to return one.
+    pub fn problem(&self) -> crate::problem::Problem {
+        crate::problem::Problem {
+            said: self.said.clone(),
+            detail: self.detail.clone(),
+        }
+    }
 }
 
 /// The name of the machine this app owns.
@@ -45,7 +79,9 @@ pub struct StepOutcome {
 pub const MACHINE: &str = "openbot";
 
 fn podman(args: &[&str]) -> Result<String, String> {
-    let output = command("podman")
+    // Resolved, not named: right after OpenBot installs it, `podman` is not yet on this process's
+    // PATH. See the PATH rule in `engine.rs`.
+    let output = crate::engine::tool(Engine::Podman)
         .args(args)
         .output()
         .map_err(|error| format!("could not run podman: {error}"))?;
@@ -67,11 +103,7 @@ pub fn machine_exists() -> bool {
 /// belonged to 5.7, where libkrun was the default.
 pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome {
     if machine_exists() {
-        return StepOutcome {
-            step: Step::CreateMachine,
-            ok: true,
-            detail: format!("{MACHINE} already exists."),
-        };
+        return StepOutcome::went(Step::CreateMachine, format!("{MACHINE} already exists."));
     }
     match podman(&[
         "machine",
@@ -84,36 +116,19 @@ pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome 
         "--disk-size",
         &disk_gib.to_string(),
     ]) {
-        Ok(_) => StepOutcome {
-            step: Step::CreateMachine,
-            ok: true,
-            detail: format!("{MACHINE} created."),
-        },
-        Err(error) => StepOutcome {
-            step: Step::CreateMachine,
-            ok: false,
-            detail: explain_machine_error(&error),
-        },
+        Ok(_) => StepOutcome::went(Step::CreateMachine, format!("{MACHINE} created.")),
+        Err(error) => StepOutcome::stopped(Step::CreateMachine, &error),
     }
 }
 
 pub fn start_machine() -> StepOutcome {
     match podman(&["machine", "start", MACHINE]) {
-        Ok(_) => StepOutcome {
-            step: Step::StartMachine,
-            ok: true,
-            detail: format!("{MACHINE} started."),
-        },
-        Err(error) if error.contains("already running") => StepOutcome {
-            step: Step::StartMachine,
-            ok: true,
-            detail: format!("{MACHINE} was already running."),
-        },
-        Err(error) => StepOutcome {
-            step: Step::StartMachine,
-            ok: false,
-            detail: explain_machine_error(&error),
-        },
+        Ok(_) => StepOutcome::went(Step::StartMachine, format!("{MACHINE} started.")),
+        Err(error) if error.contains("already running") => StepOutcome::went(
+            Step::StartMachine,
+            format!("{MACHINE} was already running."),
+        ),
+        Err(error) => StepOutcome::stopped(Step::StartMachine, &error),
     }
 }
 
@@ -165,29 +180,33 @@ pub fn health_gate(address: &Address) -> StepOutcome {
                 return StepOutcome {
                     step: Step::HealthGate,
                     ok: false,
-                    detail: missing_compose(binary),
+                    said: missing_compose(binary),
+                    detail: None,
                 };
             }
-            StepOutcome {
-                step: Step::HealthGate,
-                ok: true,
-                detail: format!("engine API {}", String::from_utf8_lossy(&out.stdout).trim()),
-            }
+            StepOutcome::went(
+                Step::HealthGate,
+                format!("engine API {}", String::from_utf8_lossy(&out.stdout).trim()),
+            )
         }
-        Ok(out) => StepOutcome {
-            step: Step::HealthGate,
-            ok: false,
-            detail: format!("{binary} did not answer: {}", command_said(&out.stderr)),
-        },
-        Err(error) => StepOutcome {
-            step: Step::HealthGate,
-            ok: false,
-            detail: format!("{binary} could not be run: {error}"),
-        },
+        // The engine ran and refused. Its words are the evidence, and the sentence in front of
+        // them is chosen from what they say.
+        Ok(out) => StepOutcome::stopped(
+            Step::HealthGate,
+            &format!("{binary} did not answer: {}", command_said(&out.stderr)),
+        ),
+        Err(error) => StepOutcome::stopped(
+            Step::HealthGate,
+            &format!("{binary} could not be run: {error}"),
+        ),
     }
 }
 
 /// What to install, named, rather than seven errors about a file that is not there.
+///
+/// A last resort, not the plan: OpenBot installs a Compose provider itself, so somebody only reads
+/// this when that copy is missing or is not being found. The restart comes first for that reason,
+/// and the platform's own instruction is behind it.
 ///
 /// Compose v2 rather than `podman-compose`: v2 is what the stack was tested against, and it is what
 /// reads the healthchecks and `depends_on` conditions in `docker-compose.yml`. `podman-compose` is
@@ -207,7 +226,11 @@ pub fn missing_compose(binary: &str) -> String {
         "Install Compose v2: `brew install docker-compose`, or install Docker Desktop, and make \
          sure `docker-compose` is on PATH."
     };
-    format!("{binary} is answering, but it has no Compose to run the stack with. {install}")
+    format!(
+        "{binary} is answering, but it has no Compose to run the stack with, and OpenBot's own \
+         copy of one is not being found. Restart OpenBot and try again. If this comes back: \
+         {install}"
+    )
 }
 
 /// Where a downloaded installer is kept, so a failed run can be retried without downloading again.
@@ -280,6 +303,25 @@ mod tests {
             explained.contains("restart"),
             "did not mention the restart: {explained}"
         );
+    }
+
+    /// A step that stopped keeps the engine's words, and does not make them the headline. This is
+    /// the case that put "exit status 0xffffffff" in front of somebody as the whole message.
+    #[test]
+    fn a_step_that_stopped_carries_both_registers() {
+        let stopped = StepOutcome::stopped(Step::CreateMachine, "exit status 0xffffffff");
+        assert!(!stopped.ok);
+        assert_eq!(stopped.detail.as_deref(), Some("exit status 0xffffffff"));
+        assert_eq!(stopped.problem().detail, stopped.detail);
+        assert_eq!(stopped.problem().said, stopped.said);
+    }
+
+    /// A step that worked has nothing behind it, because there is no failure to explain.
+    #[test]
+    fn a_step_that_worked_has_no_output_hidden_behind_it() {
+        let went = StepOutcome::went(Step::StartMachine, "openbot started.");
+        assert!(went.ok);
+        assert_eq!(went.detail, None);
     }
 
     #[test]

@@ -84,6 +84,29 @@ pub fn image_variables(root: &Path) -> Result<Vec<(String, String)>, String> {
     pin(&manifest)
 }
 
+/// One published image's reference, digest-pinned, from the manifest beside the deployment.
+///
+/// Every image reference comes from here, whether Compose reads it or the shell runs it directly.
+/// The alternative was a name built from a version, and an engine given an unqualified name looks
+/// it up on Docker Hub: `openbot-agent-langgraph-agui:v0.0.8` became
+/// `docker.io/library/openbot-agent-langgraph-agui`, and the person was shown "requested access to
+/// the resource is denied", which reads as a credentials problem and is not one.
+///
+/// An image this release does not publish is named as that. It is the honest answer and the
+/// actionable one: the alternative is somebody debugging registry permissions for an image that
+/// was never pushed.
+pub fn reference(root: &Path, published: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(images_path(root))
+        .map_err(|error| format!("could not read {}: {error}", images_path(root).display()))?;
+    let manifest: Images = serde_json::from_str(&text)
+        .map_err(|error| format!("{IMAGES} is not readable: {error}"))?;
+    manifest
+        .images
+        .get(published)
+        .map(|image| image.reference.clone())
+        .ok_or_else(|| format!("OpenBot {} does not include {published}.", manifest.version))
+}
+
 /// Every image the stack runs, or a failure that names the one that is missing.
 ///
 /// Refusing a partial manifest rather than filling the gaps from Compose's defaults: a stack that
@@ -247,7 +270,11 @@ fn fetch_images(root: &Path, version: &str) -> Result<(), String> {
         .map_err(|error| format!("could not write {IMAGES}: {error}"))
 }
 
-fn get(url: &str) -> Result<Vec<u8>, String> {
+/// Fetch a URL into memory.
+///
+/// Shared with `install.rs`, which fetches the engine's installers through it and then checks their
+/// digests. One client, one user agent, one set of TLS defaults.
+pub fn get(url: &str) -> Result<Vec<u8>, String> {
     let response = reqwest::blocking::Client::builder()
         .user_agent("openbot-desktop")
         .build()

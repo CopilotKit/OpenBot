@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use openbot_desktop_lib::{
-    acquire, deployment, engine, env as openbot_env, harness, provider, quiet, stack, supervise,
-    windows as win,
+    acquire, deployment, engine, env as openbot_env, harness, install, problem::Problem, provider,
+    quiet, stack, supervise, windows as win,
 };
 
 /// The deployment this app installs.
@@ -99,32 +99,147 @@ fn windows_blocker_instruction(blocker: win::Blocker) -> String {
 /// Reported step by step rather than as one result, because these take minutes and a window with
 /// nothing moving in it reads as a hang.
 #[tauri::command]
-async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, String> {
+async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, Problem> {
+    engine_ready(&app).await?;
+    Ok(engine::detect())
+}
+
+/// An engine that can run a container: installed, its machine up, and answering.
+///
+/// ONE function, because three screens need it and they used to disagree. Start installed and
+/// created; both plan sign-ins only looked, and answered "No container engine is answering, so the
+/// sign-in cannot run" on a machine whose whole setup exists to put one there. That sentence named
+/// an obstacle and no way past it, on a screen where the way past it is ours to take.
+///
+/// Reported step by step rather than as one result, because these take minutes and a window with
+/// nothing moving in it reads as a hang.
+async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem> {
     let found = engine::detect();
-    if found.responding {
-        report(&app, "engine", true, found.detail.clone());
-        return Ok(found);
+    if let Some(address) = found.address.clone().filter(|_| found.responding) {
+        report(app, "engine", true, found.detail.clone());
+        return Ok(address);
     }
 
+    // Fetch and install an engine when there is none, and the Compose provider Podman ships
+    // without either way. Nobody is sent to a download page: see `install.rs`.
+    //
+    // On a blocking thread for the reason the deployment fetch is: a blocking HTTP client dropped
+    // inside an async context panics the worker instead of returning an error, and the window
+    // survives that with a step that never ends.
+    report(
+        app,
+        "install-engine",
+        true,
+        "Looking for the software OpenBot runs on.",
+    );
+    let installed =
+        tauri::async_runtime::spawn_blocking(|| install::install_engine(&stack::default_root()))
+            .await
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot could not install the software it needs. Try again.",
+                    format!("the install task did not run: {error}"),
+                )
+            })?;
+    match installed {
+        Ok(said) => report(app, "install-engine", true, said),
+        Err(problem) => {
+            report(app, "install-engine", false, problem.said.clone());
+            return Err(problem);
+        }
+    }
+
+    // One at a time, and each only if the last one worked. Written as a loop over an array once,
+    // which ran all three before the first was checked: a failed `machine init` was still followed
+    // by `machine start`.
     let created = acquire::create_machine(4, 6144, 60);
-    report(&app, "create-machine", created.ok, created.detail.clone());
+    report(app, "create-machine", created.ok, created.said.clone());
     if !created.ok {
-        return Err(created.detail);
+        return Err(created.problem());
     }
 
     let started = acquire::start_machine();
-    report(&app, "start-machine", started.ok, started.detail.clone());
+    report(app, "start-machine", started.ok, started.said.clone());
     if !started.ok {
-        return Err(started.detail);
+        return Err(started.problem());
     }
 
     let gate = acquire::health_gate(&acquire::address());
-    report(&app, "health-gate", gate.ok, gate.detail.clone());
+    report(app, "health-gate", gate.ok, gate.said.clone());
     if !gate.ok {
-        return Err(gate.detail);
+        return Err(gate.problem());
     }
 
-    Ok(engine::detect())
+    let ready = engine::detect();
+    ready
+        .address
+        .clone()
+        .filter(|_| ready.responding)
+        .ok_or_else(|| {
+            Problem::with(
+                "OpenBot set up the software it runs on, but it is still not answering. Try again.",
+                ready.detail,
+            )
+        })
+}
+
+/// The deployment on disk, fetched if it is not there or is the wrong version.
+///
+/// Extracted from `start_stack` because Start is no longer the only thing that needs it: a plan
+/// sign-in runs a published image, and the reference for that image is read from the manifest this
+/// lays down. Skipped when the recorded version already matches, so a restart is not a download.
+async fn deployment_ready(app: &tauri::AppHandle, root: &Path) -> Result<(), Problem> {
+    if deployment::needs_fetch(root, DEPLOYMENT_VERSION) {
+        report(
+            app,
+            "deployment",
+            true,
+            format!("fetching {DEPLOYMENT_VERSION}"),
+        );
+        // On a blocking thread, not this one. A blocking HTTP client builds its own runtime, and
+        // dropping one inside an async context panics the worker rather than returning an error:
+        // "Cannot drop a runtime in a context where blocking is not allowed". The window survives
+        // that, which is worse than a crash, because the only symptom is a step that never ends.
+        let target = root.to_path_buf();
+        tauri::async_runtime::spawn_blocking(move || {
+            deployment::fetch(&target, DEPLOYMENT_VERSION)
+        })
+        .await
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not download what it needs to run. Check the internet \
+                     connection and try again.",
+                format!("the download did not run: {error}"),
+            )
+        })?
+        .inspect_err(|error| {
+            report(app, "deployment", false, error.clone());
+        })?;
+    }
+    report(
+        app,
+        "deployment",
+        true,
+        format!("{DEPLOYMENT_VERSION} in {}", root.display()),
+    );
+    Ok(())
+}
+
+/// The reference for an image the shell runs directly, rather than through Compose.
+///
+/// The deployment first, because the manifest that names the image is part of it. A sign-in on a
+/// machine that has never started the stack has no manifest yet, and building a name instead is
+/// what sent Podman to Docker Hub.
+async fn sign_in_image(app: &tauri::AppHandle, published: &str) -> Result<String, Problem> {
+    let root = stack::default_root();
+    deployment_ready(app, &root).await?;
+    deployment::reference(&root, published).map_err(|error| {
+        Problem::with(
+            "This version of OpenBot cannot sign in to that plan. Use an API key instead, or \
+             update OpenBot.",
+            error,
+        )
+    })
 }
 
 /// What the model screen chose, as the window sends it.
@@ -245,37 +360,18 @@ async fn start_stack(
     // Resolved from the catalogue rather than taken from the window: the image, the port and how
     // it is dialled are facts about the harness, and the window knowing them would be a second
     // list to keep in step. See `harness::picked` for what each refusal is for.
-    let picked = harness::picked(harness.as_deref(), DEPLOYMENT_VERSION)?;
+    // Two registers, because one of these refusals is about a release and the other is about a
+    // pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the evidence, not the
+    // sentence: it names a published image, which is not a thing the person chose or can change.
+    let picked = harness::picked(harness.as_deref(), &root).map_err(|error| {
+        Problem::with(
+            "This version of OpenBot does not include the Bot you picked. Go back and choose \
+             another, or update OpenBot.",
+            error,
+        )
+    })?;
 
-    // The installer does not carry the deployment; it fetches one. Skipped when the recorded
-    // version already matches, so a restart is not a download.
-    if deployment::needs_fetch(&root, DEPLOYMENT_VERSION) {
-        report(
-            &app,
-            "deployment",
-            true,
-            format!("fetching {DEPLOYMENT_VERSION}"),
-        );
-        // On a blocking thread, not this one. A blocking HTTP client builds its own runtime, and
-        // dropping one inside an async context panics the worker rather than returning an error:
-        // "Cannot drop a runtime in a context where blocking is not allowed". The window survives
-        // that, which is worse than a crash, because the only symptom is a step that never ends.
-        let target = root.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            deployment::fetch(&target, DEPLOYMENT_VERSION)
-        })
-        .await
-        .map_err(|error| format!("the download did not run: {error}"))?
-        .inspect_err(|error| {
-            report(&app, "deployment", false, error.clone());
-        })?;
-    }
-    report(
-        &app,
-        "deployment",
-        true,
-        format!("{DEPLOYMENT_VERSION} in {}", root.display()),
-    );
+    deployment_ready(&app, &root).await?;
 
     // Belt and braces: a fetch that reported success and left something out is still not a
     // deployment, and Compose's own error would not say which part was missing.
@@ -773,22 +869,28 @@ fn harnesses() -> Vec<harness::Harness> {
 /// Blocking work on a blocking thread: it starts a container and waits on its output, and doing
 /// that on the UI thread is a window that stops repainting mid-setup.
 #[tauri::command]
-async fn begin_claude_sign_in(app: tauri::AppHandle) -> Result<String, String> {
+async fn begin_claude_sign_in(app: tauri::AppHandle) -> Result<String, Problem> {
     /*
      * The image is decided here, not by the window, and it is the Claude Agent SDK harness whatever
      * harness the person picked. It is not being used as a Bot: it is the container that happens to
      * carry Anthropic's bundled CLI, which is what does the OAuth. Letting the screen name an image
      * would make the sign-in depend on a choice that has nothing to do with it.
      */
-    let image = openbot_desktop_lib::plan::SIGN_IN_IMAGE.to_string();
-    let address = engine::detect().address.ok_or_else(|| {
-        "No container engine is answering, so the sign-in cannot run.".to_string()
-    })?;
+    // Set up rather than refused. The sign-in runs in a container, so it needs the same engine
+    // Start needs and the same deployment Start needs, and on a first run nothing has fetched or
+    // installed either yet.
+    let address = engine_ready(&app).await?;
+    let image = sign_in_image(&app, openbot_desktop_lib::plan::SIGN_IN_IMAGE).await?;
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::plan::SigningIn::begin(&address, &image)
     })
     .await
-    .map_err(|error| format!("The sign-in did not run: {error}"))??;
+    .map_err(|error| {
+        Problem::with(
+            "The sign-in did not start. Try again.",
+            format!("the sign-in task did not run: {error}"),
+        )
+    })??;
     *app.state::<Shell>().signing_in.lock().unwrap() = Some(signing);
 
     /*
@@ -829,18 +931,18 @@ async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<St
 async fn begin_chatgpt_sign_in(
     app: tauri::AppHandle,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
-    let address = engine::detect().address.ok_or_else(|| {
-        openbot_desktop_lib::problem::Problem::plain(
-            "No container engine is answering, so the sign-in cannot run.",
-        )
-    })?;
-    let image = openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE.to_string();
+    // Set up rather than refused: see `engine_ready`.
+    let address = engine_ready(&app).await?;
+    let image = sign_in_image(&app, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE).await?;
     let (signing, url) = tauri::async_runtime::spawn_blocking(move || {
         openbot_desktop_lib::plan::SigningInToChatGpt::begin(&address, &image)
     })
     .await
     .map_err(|error| {
-        openbot_desktop_lib::problem::Problem::plain(format!("The sign-in did not run: {error}"))
+        Problem::with(
+            "The sign-in did not start. Try again.",
+            format!("the sign-in task did not run: {error}"),
+        )
     })??;
     *app.state::<Shell>().signing_in_to_chatgpt.lock().unwrap() = Some(signing);
     let _ = tauri_plugin_opener::OpenerExt::opener(&app).open_url(&url, None::<&str>);
@@ -1197,6 +1299,12 @@ fn main() {
             }
         })
         .setup(|app| {
+            // Where the Compose provider OpenBot installs itself lives, told once so every engine
+            // command can put it on the child's PATH. Before anything asks for an engine.
+            engine::tools_live_in(engine::tools_dir_under(&acquire::download_dir(
+                &stack::default_root(),
+            )));
+
             if let Some(window) = app.get_webview_window("main") {
                 // Asked before anything navigates away from it.
                 *app.state::<Shell>().setup_url.lock().unwrap() = Some(window.url()?.to_string());

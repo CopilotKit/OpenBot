@@ -336,17 +336,18 @@ export function App() {
           ? "The stack is up. OpenBot is in this window; the menu bar has it too, and stops it."
           : engine?.responding
             ? `Using ${engine.engine === "docker" ? "Docker" : "Podman"}. It is answering, so nothing needs installing.`
-            : /* The backend already worked out which of these it is, and says so: "podman is
-                 installed but not answering" when the binary is there, "no container engine
-                 found" when it is not. Repeating a fixed sentence here threw that away and told
-                 somebody with Podman 6.1.1 on their PATH to go and install Podman, which is the
-                 one thing they had already done. Its sentence, not ours.
+            : /* Two states, and only one of them is somebody's to act on.
 
-                 Not "OpenBot will install Podman" either: nothing here installs an engine. The
-                 step exists in the enum and no function fills it. It creates the machine, which
-                 is the part that is built. */
-              (engine?.detail ??
-              "No container engine is answering yet. Install Podman Desktop or Docker Desktop, then start OpenBot again.")}
+                 An engine that is there but not running is theirs: the backend says "podman is
+                 installed but not answering", and that is the sentence to show. Repeating a fixed
+                 one here threw that away and told somebody with Podman 6.1.1 on their PATH to go
+                 and install Podman, which was the one thing they had already done.
+
+                 No engine at all is ours. Start installs one, so this says so rather than sending
+                 somebody to a download page they were never going to read. */
+              engine?.engine
+              ? engine.detail
+              : "OpenBot needs one more piece of software to run, and installs it for you. Press Start."}
       </p>
 
       {!running && (
@@ -525,6 +526,8 @@ function titleFor(blocker: Blocker): string {
 
 function label(step: string): string {
   switch (step) {
+    case "install-engine":
+      return "Container engine";
     case "create-machine":
       return "Engine machine";
     case "start-machine":
