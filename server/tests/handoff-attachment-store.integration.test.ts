@@ -283,15 +283,19 @@ describe("handoff attachment metadata", () => {
     expect((await store.expired()).map(({ id: found }) => found)).not.toContain(
       id,
     );
-    await expect(store.markDeleted(id, "cleanup")).rejects.toThrow(
-      "stale attachment transition",
-    );
+    await expect(
+      store.completeDeletion(id, "cleanup", "missing"),
+    ).rejects.toThrow("stale attachment transition");
 
     expect(await store.releaseTransferLease(id, ids.erp, transfer, lease)).toBe(
       true,
     );
     expect((await store.expired()).map(({ id: found }) => found)).toContain(id);
-    expect(await store.markDeleted(id, "cleanup")).toMatchObject({
+    const cleanupLease = crypto.randomUUID();
+    await store.claimDeletion(id, cleanupLease);
+    expect(
+      await store.completeDeletion(id, "cleanup", cleanupLease),
+    ).toMatchObject({
       state: "deleted",
     });
   });

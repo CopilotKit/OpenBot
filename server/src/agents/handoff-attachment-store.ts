@@ -50,6 +50,16 @@ export type HandoffAttachmentStore = {
     externalTransferId: string,
     transferLeaseId: string,
   ): Promise<boolean>;
+  claimDeletion(
+    id: string,
+    transferLeaseId: string,
+  ): Promise<StoredHandoffAttachment>;
+  releaseDeletionLease(id: string, transferLeaseId: string): Promise<boolean>;
+  completeDeletion(
+    id: string,
+    resultReference: string,
+    transferLeaseId: string,
+  ): Promise<StoredHandoffAttachment>;
   markTransferred(
     id: string,
     externalTransferId: string,
@@ -230,7 +240,48 @@ export function createHandoffAttachmentStore(
           .returning(),
       );
     },
-    async markDeleted(id, resultReference) {
+    async claimDeletion(id, transferLeaseId) {
+      const now = new Date();
+      return oneOrStale(
+        await database
+          .update(handoffAttachments)
+          .set({
+            transferLeaseId,
+            transferLeaseExpiresAt: new Date(now.getTime() + transferLeaseMs),
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(handoffAttachments.id, id),
+              inArray(handoffAttachments.state, [...transitionable]),
+              lte(handoffAttachments.expiresAt, now),
+              or(
+                isNull(handoffAttachments.transferLeaseId),
+                lte(handoffAttachments.transferLeaseExpiresAt, now),
+              ),
+            ),
+          )
+          .returning(),
+      );
+    },
+    async releaseDeletionLease(id, transferLeaseId) {
+      const rows = await database
+        .update(handoffAttachments)
+        .set({
+          transferLeaseId: null,
+          transferLeaseExpiresAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(handoffAttachments.id, id),
+            eq(handoffAttachments.transferLeaseId, transferLeaseId),
+          ),
+        )
+        .returning({ id: handoffAttachments.id });
+      return rows.length === 1;
+    },
+    async completeDeletion(id, resultReference, transferLeaseId) {
       const now = new Date();
       return oneOrStale(
         await database
@@ -238,6 +289,8 @@ export function createHandoffAttachmentStore(
           .set({
             state: "deleted",
             deletedAt: new Date(),
+            transferLeaseId: null,
+            transferLeaseExpiresAt: null,
             ...(resultReference ? { resultReference } : {}),
             updatedAt: now,
           })
@@ -245,10 +298,29 @@ export function createHandoffAttachmentStore(
             and(
               eq(handoffAttachments.id, id),
               inArray(handoffAttachments.state, [...transitionable]),
-              or(
-                isNull(handoffAttachments.transferLeaseId),
-                lte(handoffAttachments.transferLeaseExpiresAt, now),
-              ),
+              eq(handoffAttachments.transferLeaseId, transferLeaseId),
+            ),
+          )
+          .returning(),
+      );
+    },
+    async markDeleted(id, resultReference) {
+      return oneOrStale(
+        await database
+          .update(handoffAttachments)
+          .set({
+            state: "deleted",
+            deletedAt: new Date(),
+            transferLeaseId: null,
+            transferLeaseExpiresAt: null,
+            ...(resultReference ? { resultReference } : {}),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(handoffAttachments.id, id),
+              inArray(handoffAttachments.state, [...transitionable]),
+              isNull(handoffAttachments.transferLeaseId),
             ),
           )
           .returning(),

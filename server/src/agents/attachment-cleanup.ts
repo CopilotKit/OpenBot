@@ -1,5 +1,6 @@
-import type { ComputerAttachmentBroker } from "../computer/attachments";
+import { randomUUID } from "node:crypto";
 import { type AuditStore, recordAuditEvent } from "../audit";
+import type { ComputerAttachmentBroker } from "../computer/attachments";
 import type { HandoffAttachmentStore } from "./handoff-attachment-store";
 
 export type AttachmentCleanup = {
@@ -18,29 +19,39 @@ export function createAttachmentCleanup(options: {
       if (options.dryRun) return { found: expired.length, deleted: 0 };
       let deleted = 0;
       for (const attachment of expired) {
+        const leaseId = randomUUID();
+        let claimed: typeof attachment;
+        try {
+          claimed = await options.store.claimDeletion(attachment.id, leaseId);
+        } catch {
+          continue;
+        }
         try {
           await options.broker.remove({
-            botId: attachment.recipientBotId,
-            handoffId: attachment.handoffId,
-            attachment,
+            botId: claimed.recipientBotId,
+            handoffId: claimed.handoffId,
+            attachment: claimed,
           });
+          await options.store.completeDeletion(claimed.id, "expired", leaseId);
+          deleted += 1;
           await recordAuditEvent(options.auditStore, {
             eventType: "agent.attachment_expired",
             targetType: "handoff_attachment",
-            targetId: attachment.id,
+            targetId: claimed.id,
             payload: {
-              handoffId: attachment.handoffId,
-              recipientBotId: attachment.recipientBotId,
-              sha256: attachment.sha256,
-              sizeBytes: attachment.sizeBytes,
+              handoffId: claimed.handoffId,
+              recipientBotId: claimed.recipientBotId,
+              sha256: claimed.sha256,
+              sizeBytes: claimed.sizeBytes,
               reason: "expired",
             },
           });
-          await options.store.markDeleted(attachment.id, "expired");
-          deleted += 1;
         } catch (error) {
+          await options.store
+            .releaseDeletionLease(claimed.id, leaseId)
+            .catch(() => false);
           console.warn(
-            `[attachments] could not delete expired attachment ${attachment.id}:`,
+            `[attachments] could not delete expired attachment ${claimed.id}:`,
             error instanceof Error ? error.message : error,
           );
         }
