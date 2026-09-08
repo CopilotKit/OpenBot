@@ -217,9 +217,13 @@ export function createComputerAttachmentBroker(options: {
         );
         const orphaned = attempted.filter((_, index) => {
           const result = rollback[index];
-          // A fulfilled false is positive evidence that no final file existed. Only a failed delete
-          // leaves the outcome unknown and therefore needs durable cleanup metadata.
-          return result?.status === "rejected";
+          // The import response may have been lost while an atomic rename was still in flight. An
+          // immediate `deleted:false` therefore proves only that the final path did not exist at
+          // that instant. Only `deleted:true` closes the uncertainty; every other outcome stays in
+          // durable metadata so a later expiry sweep can remove a file that appears afterward.
+          return !(
+            result?.status === "fulfilled" && result.value.deleted === true
+          );
         });
         throw new AttachmentCopyError(
           error instanceof Error ? error.message : "The file copy failed.",

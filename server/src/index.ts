@@ -246,13 +246,14 @@ const computerProvider = config.computer
   ? createComputerProvider(config.computer)
   : undefined;
 const handoffAttachmentStore = createHandoffAttachmentStore(database);
-const computerAttachmentBroker =
-  computerProvider && config.handoffAttachments.enabled
-    ? createComputerAttachmentBroker({
-        provider: computerProvider,
-        token: config.computer?.token,
-      })
-    : undefined;
+// The broker remains available when new handoffs are switched off: disabling attachment creation
+// must not disable removal of copies that were already persisted and are now due to expire.
+const computerAttachmentBroker = computerProvider
+  ? createComputerAttachmentBroker({
+      provider: computerProvider,
+      token: config.computer?.token,
+    })
+  : undefined;
 
 if (computerProvider?.warm) {
   void computerProvider.warm();
@@ -1102,6 +1103,7 @@ if (computerAttachmentBroker) {
   const attachmentCleanup = createAttachmentCleanup({
     store: handoffAttachmentStore,
     broker: computerAttachmentBroker,
+    auditStore: bootAuditStore,
     dryRun: config.workspaceTransfer?.cleanupDryRun ?? true,
   });
   repeatAfterEach(

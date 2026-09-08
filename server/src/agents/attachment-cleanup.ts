@@ -1,4 +1,5 @@
 import type { ComputerAttachmentBroker } from "../computer/attachments";
+import { type AuditStore, recordAuditEvent } from "../audit";
 import type { HandoffAttachmentStore } from "./handoff-attachment-store";
 
 export type AttachmentCleanup = {
@@ -8,6 +9,7 @@ export type AttachmentCleanup = {
 export function createAttachmentCleanup(options: {
   store: HandoffAttachmentStore;
   broker: ComputerAttachmentBroker;
+  auditStore: AuditStore;
   dryRun: boolean;
 }): AttachmentCleanup {
   return {
@@ -21,6 +23,18 @@ export function createAttachmentCleanup(options: {
             botId: attachment.recipientBotId,
             handoffId: attachment.handoffId,
             attachment,
+          });
+          await recordAuditEvent(options.auditStore, {
+            eventType: "agent.attachment_expired",
+            targetType: "handoff_attachment",
+            targetId: attachment.id,
+            payload: {
+              handoffId: attachment.handoffId,
+              recipientBotId: attachment.recipientBotId,
+              sha256: attachment.sha256,
+              sizeBytes: attachment.sizeBytes,
+              reason: "expired",
+            },
           });
           await options.store.markDeleted(attachment.id, "expired");
           deleted += 1;

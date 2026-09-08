@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createAttachmentCleanup } from "../src/agents/attachment-cleanup";
+import type { AuditStore } from "../src/audit";
 import type { HandoffAttachmentStore } from "../src/agents/handoff-attachment-store";
 import type { ComputerAttachmentBroker } from "../src/computer/attachments";
 
@@ -25,6 +26,7 @@ const row = {
 function setup(dryRun: boolean) {
   const removed: unknown[] = [];
   const marked: unknown[] = [];
+  const audited: unknown[] = [];
   const cleanup = createAttachmentCleanup({
     store: {
       expired: async () => [row],
@@ -39,9 +41,14 @@ function setup(dryRun: boolean) {
         return { deleted: true };
       },
     } as ComputerAttachmentBroker,
+    auditStore: {
+      insert: async (event: unknown) => {
+        audited.push(event);
+      },
+    } as AuditStore,
     dryRun,
   });
-  return { cleanup, removed, marked };
+  return { cleanup, removed, marked, audited };
 }
 
 describe("expired handoff attachment cleanup", () => {
@@ -50,6 +57,20 @@ describe("expired handoff attachment cleanup", () => {
     expect(await built.cleanup.sweep()).toEqual({ found: 1, deleted: 1 });
     expect(built.removed).toHaveLength(1);
     expect(built.marked).toEqual([[row.id, "expired"]]);
+    expect(built.audited).toEqual([
+      {
+        eventType: "agent.attachment_expired",
+        targetType: "handoff_attachment",
+        targetId: row.id,
+        payload: {
+          handoffId: row.handoffId,
+          recipientBotId: row.recipientBotId,
+          sha256: row.sha256,
+          sizeBytes: row.sizeBytes,
+          reason: "expired",
+        },
+      },
+    ]);
   });
 
   test("dry-run reports without deleting", async () => {
@@ -57,5 +78,6 @@ describe("expired handoff attachment cleanup", () => {
     expect(await built.cleanup.sweep()).toEqual({ found: 1, deleted: 0 });
     expect(built.removed).toHaveLength(0);
     expect(built.marked).toHaveLength(0);
+    expect(built.audited).toHaveLength(0);
   });
 });

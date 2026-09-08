@@ -367,6 +367,7 @@ export const auditEventTypes = [
   "agent.handoff_retried",
   "agent.attachment_transferred",
   "agent.attachment_completed",
+  "agent.attachment_expired",
   /*
    * A Bot asking a person instead.
    *

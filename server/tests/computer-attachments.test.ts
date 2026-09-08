@@ -233,4 +233,38 @@ describe("copying attachments between Bot computers", () => {
       },
     ]);
   });
+
+  test("keeps an uncertain import tracked when immediate rollback finds no file", async () => {
+    const broker = createComputerAttachmentBroker({
+      provider: provider(),
+      id: () => "11111111-1111-4111-8111-111111111111",
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/export")) return exported();
+        if (url.endsWith("/import")) {
+          // A lost receipt cannot prove whether the target will finish its atomic import later.
+          return Response.json({ accepted: true });
+        }
+        if (url.endsWith("/delete")) return Response.json({ deleted: false });
+        throw new Error(`Unexpected request ${url}`);
+      },
+    });
+
+    const error = await broker
+      .copy({
+        handoffId: "e".repeat(64),
+        fromBotId: "collector",
+        toBotId: "erp",
+        paths: ["downloads/invoice.pdf"],
+      })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(AttachmentCopyError);
+    expect((error as AttachmentCopyError).orphaned).toMatchObject([
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        sha256,
+      },
+    ]);
+  });
 });
