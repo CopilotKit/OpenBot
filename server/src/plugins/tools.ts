@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AuditInitiator } from "../audit";
 import type { SelectableSkill } from "./selection";
 import { PluginRefusedError, type PluginStore } from "./store";
 
@@ -158,8 +159,9 @@ export async function grantedTools(options: {
   store: PluginStore;
   botId: string;
   actorId: string;
+  initiator?: AuditInitiator;
 }): Promise<GrantedTool[]> {
-  const { store, botId, actorId } = options;
+  const { store, botId, actorId, initiator } = options;
   const granted = await store.listForAgent(botId);
 
   return granted.tools.map((tool) => ({
@@ -179,6 +181,7 @@ export async function grantedTools(options: {
               : {},
           botId,
           actorId,
+          ...(initiator ? { initiator } : {}),
         });
         /*
          * A vendor's error is named as one, not handed over as content.

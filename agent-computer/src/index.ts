@@ -19,6 +19,7 @@ import {
 } from "./control";
 import { identity } from "./identity";
 import { createProfiles, numberFromEnv, VIEWPORT } from "./profiles";
+import { parseExecTimeout, parseNavigateUrl } from "./request-validation";
 import { type InputMessage, startScreencast } from "./screencast";
 import { createShell } from "./shell";
 import { createViewerSlot, type ViewerSlot } from "./viewer";
@@ -807,14 +808,15 @@ serve<StreamData>({
       const body = (await request.json().catch(() => null)) as {
         url?: unknown;
       } | null;
-      if (typeof body?.url !== "string") {
-        return json({ error: "A url is required." }, 400);
+      const parsed = parseNavigateUrl(body?.url);
+      if (!parsed.ok) {
+        return json({ error: parsed.error }, 400);
       }
 
       const startedAt = Date.now();
       try {
         const target = await currentPage(botId);
-        await target.goto(body.url, {
+        await target.goto(parsed.url, {
           waitUntil: "domcontentloaded",
           timeout: NAVIGATION_TIMEOUT_MS,
         });
@@ -919,12 +921,16 @@ serve<StreamData>({
       if (typeof body?.command !== "string" || !body.command.trim()) {
         return json({ error: "A command is required." }, 400);
       }
+      const timeout = parseExecTimeout(body.timeoutMs);
+      if (!timeout.ok) {
+        return json({ error: timeout.error }, 400);
+      }
       try {
         return json(
           await shell.run({
             command: body.command,
-            ...(typeof body.timeoutMs === "number"
-              ? { timeoutMs: body.timeoutMs }
+            ...(timeout.timeoutMs !== undefined
+              ? { timeoutMs: timeout.timeoutMs }
               : {}),
             signal: request.signal,
           }),

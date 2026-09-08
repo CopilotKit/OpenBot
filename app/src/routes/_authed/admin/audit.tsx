@@ -29,6 +29,9 @@ export const Route = createFileRoute("/_authed/admin/audit")({
 type AuditEvent = {
   id: string;
   actorUserId: string | null;
+  /** Absent on a deployment that has not migrated yet. */
+  initiatorKind?: string;
+  initiatorId?: string | null;
   eventType: string;
   targetType: string;
   targetId: string | null;
@@ -52,6 +55,8 @@ const FILTERS = [
     label: "Did not happen",
     search: eventTypeFilter(DID_NOT_HAPPEN_EVENT_TYPES),
   },
+  // Both unattended kinds: the question is whether anybody was watching, not which of the two.
+  { label: "Nobody watching", search: "?initiatorKind=routine,handoff" },
 ] as const;
 
 function AuditPage() {
@@ -109,6 +114,7 @@ function AuditPage() {
                   <th className="px-4 py-2 font-medium">What</th>
                   <th className="px-4 py-2 font-medium">On</th>
                   <th className="px-4 py-2 font-medium">Bot</th>
+                  <th className="px-4 py-2 font-medium">Started by</th>
                   <th className="px-4 py-2 font-medium">Decision</th>
                 </tr>
               </thead>
@@ -123,6 +129,41 @@ function AuditPage() {
       </PageSection>
     </PageShell>
   );
+}
+
+function StartedBy({
+  event,
+  nameFor,
+}: {
+  event: AuditEvent;
+  nameFor: (botId: string) => string;
+}) {
+  if (event.initiatorKind === "routine") {
+    return (
+      <span
+        className="font-medium text-amber-600 dark:text-amber-500"
+        title={event.initiatorId ?? undefined}
+      >
+        A routine
+      </span>
+    );
+  }
+  if (event.initiatorKind === "handoff") {
+    return (
+      <span
+        className="font-medium text-amber-600 dark:text-amber-500"
+        title={event.initiatorId ?? undefined}
+      >
+        {event.initiatorId
+          ? `Handed on by ${nameFor(event.initiatorId)}`
+          : "Handed on"}
+      </span>
+    );
+  }
+  if (event.initiatorKind === "deployment") {
+    return <span className="text-muted-foreground">This deployment</span>;
+  }
+  return <span className="text-muted-foreground">A person</span>;
 }
 
 function Row({
@@ -246,6 +287,9 @@ function Row({
         ) : (
           "-"
         )}
+      </td>
+      <td className="px-4 py-2">
+        <StartedBy event={event} nameFor={nameFor} />
       </td>
       <td className="px-4 py-2">
         <span

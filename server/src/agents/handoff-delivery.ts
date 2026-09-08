@@ -70,6 +70,8 @@ export function createHandoffDelivery(options: {
   agentFor: (input: {
     actorId: string;
     botId: string;
+    /** The Bot that handed the work on, so the trail says a hop ran this and not the person. */
+    fromBotId: string;
   }) => Promise<AbstractAgent | null>;
   /**
    * The conversation so far, so the addressed Bot is not answering out of context.
@@ -161,6 +163,7 @@ export function createHandoffDelivery(options: {
       const agent = await agentFor({
         actorId: work.actorId,
         botId: work.toBotId,
+        fromBotId: work.fromBotId,
       });
       if (!agent) {
         /*

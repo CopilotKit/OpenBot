@@ -105,6 +105,8 @@ A Bot is any endpoint speaking [AG-UI](https://github.com/ag-ui-protocol/ag-ui),
 
 `scripts/start.sh` starts Docker services, applies migrations, starts the API server on port 3001, starts the app on port 3010, and checks that the services answer their own health routes before printing next steps.
 
+`scripts/stop.sh` takes the same things down, including each Bot's computer, which compose does not own. Nothing is deleted: the database, the Bots' files and their browser profiles are volumes.
+
 ## Deploy it
 
 One image carries the app, the API, the browser the Bots drive, and optionally PostgreSQL. Same
@@ -334,7 +336,7 @@ bun run --filter server db:generate
 bun run --filter server db:migrate
 ```
 
-Use `bash scripts/start.sh` for the whole stack. Use `bun run dev` only when you want the app and server without the Docker Bots and computers.
+Use `bash scripts/start.sh` for the whole stack and `bash scripts/stop.sh` to take it down. Use `bun run dev` only when you want the app and server without the Docker Bots and computers.
 
 ## Documentation
 

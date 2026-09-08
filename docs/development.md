@@ -29,6 +29,8 @@ bash scripts/start.sh
 
 Use `bash scripts/start.sh` for the full local stack. It starts Docker services, applies migrations, starts the API server and app, and verifies health routes.
 
+Use `bash scripts/stop.sh` to take it down: the app, the routine worker, the API server, the Docker services, and each Bot's computer, which the supervisor makes rather than compose and which therefore outlives `docker compose down`. Pass `--keep-computers` to leave those browsers signed in. Nothing is deleted either way.
+
 Use `bun run dev` only when you want the app and API server without starting the Docker Bots and computers.
 
 | Service           | Port                       |

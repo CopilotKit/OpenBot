@@ -419,6 +419,10 @@ export const auditEvents = pgTable(
      * user who had done anything could never be deleted.
      */
     actorUserId: text("actor_user_id"),
+    /** Defaulted rather than nullable, because every row written before this was a person's. */
+    initiatorKind: text("initiator_kind").notNull().default("person"),
+    /** Which routine, or which Bot handed the work on. Null when a person started it. */
+    initiatorId: text("initiator_id"),
     eventType: text("event_type").notNull(),
     targetType: text("target_type").notNull(),
     targetId: text("target_id"),
@@ -453,6 +457,11 @@ export const auditEvents = pgTable(
     index("audit_events_target_time_idx").on(
       table.targetType,
       table.targetId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
+    index("audit_events_initiator_time_idx").on(
+      table.initiatorKind,
       table.createdAt.desc(),
       table.id.desc(),
     ),

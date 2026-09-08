@@ -126,6 +126,8 @@ async function auditRowsFor(targetId: string) {
     .select({
       eventType: auditEvents.eventType,
       payload: auditEvents.payload,
+      initiatorKind: auditEvents.initiatorKind,
+      initiatorId: auditEvents.initiatorId,
     })
     .from(auditEvents)
     .where(
@@ -265,6 +267,49 @@ describe("a grant is the permission", () => {
     expect((rejected[0].payload as { refusal?: string }).refusal).toBe(
       "not_granted",
     );
+  });
+
+  test("a refusal names the routine that asked, not only the person it ran as", async () => {
+    await expect(
+      store.callTool({
+        ref,
+        args: {},
+        botId: strangerId,
+        actorId: "someone@openbot.local",
+        initiator: { kind: "routine", id: "routine_standup" },
+      }),
+    ).rejects.toBeInstanceOf(PluginRefusedError);
+
+    const rows = await auditRowsFor(ref);
+    const rejected = rows.filter(
+      (row) =>
+        row.eventType === "mcp.call_rejected" &&
+        (row.payload as { bot?: string }).bot === strangerId &&
+        row.initiatorKind === "routine",
+    );
+    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected[0].initiatorId).toBe("routine_standup");
+  });
+
+  test("a call nobody said anything about is still filed as a person's", async () => {
+    await expect(
+      store.callTool({
+        ref,
+        args: {},
+        botId: strangerId,
+        actorId: "someone@openbot.local",
+      }),
+    ).rejects.toBeInstanceOf(PluginRefusedError);
+
+    const rows = await auditRowsFor(ref);
+    expect(
+      rows.some(
+        (row) =>
+          row.eventType === "mcp.call_rejected" &&
+          row.initiatorKind === "person" &&
+          row.initiatorId === null,
+      ),
+    ).toBe(true);
   });
 
   test("granting lets the same Bot past the grant check", async () => {

@@ -102,9 +102,11 @@ separate, because as far as the channel is concerned, that is exactly what it is
 
 This ships the core: creating, listing, changing and deleting routines from chat; the schedule, the
 cap and the fatigue rule; the worker that fires them. Four follow-ups are tracked in
-[#193](https://github.com/CopilotKit/OpenBot/issues/193) and deliberately not in this pass: audit rows
-are not yet marked as unattended, so telling a routine's action apart from the same person's own is a
-manual correlation against `routine_runs` timestamps rather than a flag; there is no admin view of
+[#193](https://github.com/CopilotKit/OpenBot/issues/193) and deliberately not in this pass; the first
+of them has since been closed. Audit rows now say what started the run they came out of, so a
+routine's action is told apart from the same person's own by reading the row rather than by
+correlating timestamps against `routine_runs`. See [Architecture](architecture.md#what-started-a-run). Still open:
+there is no admin view of
 other people's routines, only the owner-scoped page each person sees for their own; there is no
 per-deployment or per-Bot cap on how many routines may be running at once beyond the sweep's own claim
 limit; and a tenant package cannot yet ship routines the way it ships agents, channels or skills.
