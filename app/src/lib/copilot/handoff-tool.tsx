@@ -21,7 +21,52 @@ const parameters = z.object({
   task: z.string().optional(),
   constraints: z.string().optional(),
   expecting: z.string().optional(),
+  attachments: z
+    .array(z.object({ path: z.string() }))
+    .max(10)
+    .optional(),
 });
+
+type HandoffParameters = z.infer<typeof parameters>;
+
+export function HandoffDetails({
+  given,
+  result,
+}: {
+  given?: HandoffParameters;
+  result?: unknown;
+}) {
+  const attachments = given?.attachments ?? [];
+  return (
+    <div className="space-y-1 text-sm">
+      {given?.task ? <p>{given.task}</p> : null}
+      {given?.constraints ? (
+        <p className="text-muted-foreground">
+          Constraints: {given.constraints}
+        </p>
+      ) : null}
+      {given?.expecting ? (
+        <p className="text-muted-foreground">Wanted back: {given.expecting}</p>
+      ) : null}
+      {attachments.length > 0 ? (
+        <div className="text-muted-foreground">
+          <p>
+            {attachments.length} {attachments.length === 1 ? "file" : "files"}{" "}
+            attached
+          </p>
+          <ul className="list-disc pl-5">
+            {attachments.map(({ path }) => (
+              <li key={path}>{path.split(/[\\/]/).at(-1)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {typeof result === "string" ? (
+        <p className="text-muted-foreground">{result}</p>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Whether the deployment refused the hop.
@@ -54,22 +99,7 @@ export function HandoffTool() {
            * need not infer them, and a person reading the conversation gets the same benefit: what
            * was asked, what bounded it, and what was wanted back.
            */}
-          <div className="space-y-1 text-sm">
-            {given?.task ? <p>{given.task}</p> : null}
-            {given?.constraints ? (
-              <p className="text-muted-foreground">
-                Constraints: {given.constraints}
-              </p>
-            ) : null}
-            {given?.expecting ? (
-              <p className="text-muted-foreground">
-                Wanted back: {given.expecting}
-              </p>
-            ) : null}
-            {typeof result === "string" ? (
-              <p className="text-muted-foreground">{result}</p>
-            ) : null}
-          </div>
+          <HandoffDetails given={given} result={result} />
         </ToolLine>
       );
     },
