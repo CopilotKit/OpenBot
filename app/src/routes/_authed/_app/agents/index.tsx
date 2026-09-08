@@ -38,6 +38,13 @@ export const Route = createFileRoute("/_authed/_app/agents/")({
  * the container while the card inside it stays 144px, and the difference reads as a gap: at prose
  * width that was three 190px columns holding 144px cards, so the 15px gutter looked like 61px. The
  * home screen's Explore row is the reference — fixed cards, `gap-4`, nothing stretching.
+ *
+ * Both grids are block children of their section, and they have to be. `auto-fill` needs a definite
+ * width to divide into tracks; a grid placed inside a `flex flex-row` is a flex item sized
+ * shrink-to-fit, so `auto-fill` has nothing to fill and resolves to a single column. That is what
+ * put "Your agents" in a one-card column while "Explore agents", whose grid was never wrapped,
+ * flowed correctly three across on the very same page. Do not reintroduce a flex wrapper here to
+ * position the roster.
  */
 function AgentsScreen() {
   const { new: isCreating, agent: selectedAgentId } = Route.useSearch();
@@ -69,30 +76,28 @@ function AgentsScreen() {
               New agent
             </Button>
           </div>
-          <div className="flex flex-row mt-4">
-            {!!mine?.length && (
-              <div className="grid grid-cols-[repeat(auto-fill,144px)] gap-4">
-                {mine.map((agent, index) => {
-                  return (
-                    <StaggerItem index={index} key={agent.id}>
-                      <Link to="/agents" search={{ agent: agent.id }}>
-                        <AgentCard agent={agent} />
-                      </Link>
-                    </StaggerItem>
-                  );
-                })}
-              </div>
-            )}
-            {!mine?.length && (
-              <Empty className="border border-dashed h-[180px]">
-                <EmptyHeader>
-                  <EmptyTitle className="text-muted-foreground">
-                    You don't have any agents created.
-                  </EmptyTitle>
-                </EmptyHeader>
-              </Empty>
-            )}
-          </div>
+          {!!mine?.length && (
+            <div className="mt-4 grid grid-cols-[repeat(auto-fill,144px)] gap-4">
+              {mine.map((agent, index) => {
+                return (
+                  <StaggerItem index={index} key={agent.id}>
+                    <Link to="/agents" search={{ agent: agent.id }}>
+                      <AgentCard agent={agent} />
+                    </Link>
+                  </StaggerItem>
+                );
+              })}
+            </div>
+          )}
+          {!mine?.length && (
+            <Empty className="mt-4 border border-dashed h-[180px]">
+              <EmptyHeader>
+                <EmptyTitle className="text-muted-foreground">
+                  You don't have any agents created.
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
+          )}
         </div>
         <div className="mt-8 w-full max-w-2xl">
           <h2 className="font-bold text-lg">Explore agents</h2>
