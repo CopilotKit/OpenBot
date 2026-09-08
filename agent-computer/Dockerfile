@@ -22,6 +22,11 @@ COPY agent-computer/src ./src
 RUN mkdir -p /workspace
 ENV WORKSPACE_DIR=/workspace
 
+# Keep upstream behavior headless while allowing a deployment image to make headed mode its default
+# without relying on a supervisor version that already forwards COMPUTER_BROWSER_MODE.
+ARG COMPUTER_BROWSER_MODE=headless
+ENV COMPUTER_BROWSER_MODE=${COMPUTER_BROWSER_MODE}
+
 ENV PORT=4100
 EXPOSE 4100
 # Readiness is exposed through Docker health so the supervisor need not know the network route.
