@@ -46,6 +46,7 @@ describe("audit payload redaction", () => {
         "agent.invoked",
         "mcp.call_succeeded",
         "mcp.call_rejected",
+        "mcp.content_flagged",
       ]),
     );
   });

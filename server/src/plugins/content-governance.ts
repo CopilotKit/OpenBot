@@ -11,15 +11,19 @@ export type SensitiveArgumentCategory =
   | "credential_field"
   | "private_key"
   | "provider_token"
-  | "authorization_header";
+  | "authorization_header"
+  | "payment_card"
+  | "us_social_security_number"
+  | "prompt_injection";
 
 export type SensitiveArgumentFinding = {
   category: SensitiveArgumentCategory;
   path: string;
+  action: "block" | "review";
 };
 
 export type ToolArgumentInspection =
-  | { safe: true }
+  | { safe: true; findings: SensitiveArgumentFinding[] }
   | {
       safe: false;
       reason: "sensitive_content" | "inspection_limit" | "inspection_failed";
@@ -51,7 +55,7 @@ const providerTokenPatterns: RegExp[] = [
   /\bsk-[A-Za-z0-9_-]{20,}\b/,
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
-  /\bAKIA[A-Z0-9]{16}\b/,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,
   /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,
 ];
 
@@ -64,7 +68,9 @@ function normalizedFieldName(value: string): string {
   return value.toLowerCase().replace(/[-.\s]/g, "_");
 }
 
-function categoryForValue(value: string): SensitiveArgumentCategory | null {
+function credentialCategoryForValue(
+  value: string,
+): SensitiveArgumentCategory | null {
   if (/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/.test(value)) {
     return "private_key";
   }
@@ -75,6 +81,48 @@ function categoryForValue(value: string): SensitiveArgumentCategory | null {
     return "provider_token";
   }
   return null;
+}
+
+function hasValidPaymentCard(value: string): boolean {
+  const candidates = value.match(/(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)/g) ?? [];
+  return candidates.some((candidate) => {
+    const digits = candidate.replace(/\D/g, "");
+    if (digits.length < 13 || digits.length > 19) return false;
+    let sum = 0;
+    let double = false;
+    for (let index = digits.length - 1; index >= 0; index -= 1) {
+      let digit = Number(digits[index]);
+      if (double) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      sum += digit;
+      double = !double;
+    }
+    return sum % 10 === 0;
+  });
+}
+
+function reviewCategoriesForValue(value: string): SensitiveArgumentCategory[] {
+  const categories: SensitiveArgumentCategory[] = [];
+  if (
+    /\b(?!000|666|9\d\d)\d{3}[- ](?!00)\d{2}[- ](?!0000)\d{4}\b/.test(value)
+  ) {
+    categories.push("us_social_security_number");
+  }
+  if (hasValidPaymentCard(value)) categories.push("payment_card");
+  if (
+    /\b(?:ignore|disregard|override)\s+(?:all\s+)?(?:previous|prior|above|system|developer)\s+instructions?\b/i.test(
+      value,
+    ) ||
+    /\b(?:reveal|print|repeat|expose)\s+(?:the\s+)?(?:system|developer)\s+prompt\b/i.test(
+      value,
+    ) ||
+    /<\|(?:system|developer)\|>/i.test(value)
+  ) {
+    categories.push("prompt_injection");
+  }
+  return categories;
 }
 
 /**
@@ -103,6 +151,7 @@ export function inspectToolArguments(
     const findings: SensitiveArgumentFinding[] = [];
     const seen = new WeakSet<object>();
     let nodes = 0;
+    let mustBlock = false;
 
     const visit = (value: unknown, path: string, depth: number): boolean => {
       nodes += 1;
@@ -110,9 +159,19 @@ export function inspectToolArguments(
 
       if (typeof value === "string") {
         if (value.length > MAX_STRING_LENGTH) return false;
-        const category = categoryForValue(value);
+        const category = credentialCategoryForValue(value);
+        if (category) mustBlock = true;
         if (category && findings.length < MAX_FINDINGS) {
-          findings.push({ category, path });
+          findings.push({ category, path, action: "block" });
+        }
+        for (const reviewCategory of reviewCategoriesForValue(value)) {
+          if (findings.length < MAX_FINDINGS) {
+            findings.push({
+              category: reviewCategory,
+              path,
+              action: "review",
+            });
+          }
         }
         return true;
       }
@@ -128,18 +187,37 @@ export function inspectToolArguments(
 
       for (const [key, child] of Object.entries(value)) {
         if (key.length > MAX_STRING_LENGTH) return false;
-        const keyCategory = categoryForValue(key);
+        const keyCategory = credentialCategoryForValue(key);
+        if (keyCategory) mustBlock = true;
         const childPath = pathForKey(path, keyCategory ? "[credential]" : key);
         if (keyCategory && findings.length < MAX_FINDINGS) {
-          findings.push({ category: keyCategory, path: childPath });
+          findings.push({
+            category: keyCategory,
+            path: childPath,
+            action: "block",
+          });
+        }
+        for (const reviewCategory of reviewCategoriesForValue(key)) {
+          if (findings.length < MAX_FINDINGS) {
+            findings.push({
+              category: reviewCategory,
+              path: childPath,
+              action: "review",
+            });
+          }
         }
         if (
           sensitiveFieldNames.has(normalizedFieldName(key)) &&
           child !== null &&
           child !== ""
         ) {
+          mustBlock = true;
           if (findings.length < MAX_FINDINGS) {
-            findings.push({ category: "credential_field", path: childPath });
+            findings.push({
+              category: "credential_field",
+              path: childPath,
+              action: "block",
+            });
           }
           continue;
         }
@@ -151,9 +229,9 @@ export function inspectToolArguments(
     if (!visit(args, "$", 0)) {
       return { safe: false, reason: "inspection_limit", findings: [] };
     }
-    return findings.length === 0
-      ? { safe: true }
-      : { safe: false, reason: "sensitive_content", findings };
+    return mustBlock
+      ? { safe: false, reason: "sensitive_content", findings }
+      : { safe: true, findings };
   } catch {
     return { safe: false, reason: "inspection_failed", findings: [] };
   }

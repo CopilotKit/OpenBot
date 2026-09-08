@@ -2950,6 +2950,18 @@ export function createPluginStore(options: PluginStoreOptions) {
        * categories only: never the values it refused.
        */
       const contentDecision = inspectToolArguments(args);
+      if (contentDecision.safe && contentDecision.findings.length > 0) {
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.content_flagged",
+          targetType: "mcp_tool",
+          targetId: input.ref,
+          ...(input.initiator ? { initiator: input.initiator } : {}),
+          payload: {
+            ...decided,
+            contentInspection: { findings: contentDecision.findings },
+          },
+        });
+      }
       if (!contentDecision.safe) {
         await recordAuditEvent(auditStore, {
           eventType: "mcp.call_rejected",

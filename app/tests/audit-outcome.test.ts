@@ -81,6 +81,7 @@ describe("what the trail says a row was", () => {
     for (const eventType of [
       "computer.action_allowed",
       "mcp.call_succeeded",
+      "mcp.content_flagged",
       "agent.handoff_delivered",
       "agent.escalated",
       "credential.created",

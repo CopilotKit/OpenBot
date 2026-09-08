@@ -119,6 +119,12 @@ export const auditEventTypes = [
   "mcp.tools_discovered",
   "mcp.call_succeeded",
   "mcp.call_rejected",
+  /**
+   * High-confidence content signals that require review but do not by themselves justify breaking
+   * a legitimate research or document workflow. Values are never recorded, only categories and
+   * audit-safe structural paths. Credential findings use `mcp.call_rejected` and do not reach here.
+   */
+  "mcp.content_flagged",
   /*
    * A call this deployment permitted and the vendor did not complete.
    *

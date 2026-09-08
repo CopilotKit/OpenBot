@@ -449,6 +449,7 @@ const DECISIONS: Record<string, string> = {
   "mcp.tools_discovered": "Tools offered for one run",
   "mcp.call_succeeded": "Called on this Bot's behalf",
   "mcp.call_rejected": "Blocked",
+  "mcp.content_flagged": "Content needs review",
   "mcp.call_failed": "The server did not answer",
   // Not "Blocked": nothing about the Bot was judged, because nothing proved which Bot it was.
   "mcp.callback_refused": "Could not prove which Bot it was",
