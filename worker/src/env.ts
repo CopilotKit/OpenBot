@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { workOwner } from "../../shared/work-owner";
 
 /**
  * What the worker needs from its environment, parsed and ready to use.
@@ -6,9 +6,8 @@ import { randomUUID } from "node:crypto";
  * `serverInternalUrl` never carries a trailing slash, so `routineRunUrl` cannot
  * produce the double-slash `//internal/routines/run` that a `SERVER_INTERNAL_URL`
  * with a trailing slash used to build — a 404 the sweep only reported as "the server
- * answered 404 rather than 202". `owner` falls back to a random suffix whenever
- * `HOSTNAME` is absent, empty or whitespace-only, so two workers never share a lease
- * name the way `routines/` alone would.
+ * answered 404 rather than 202". `owner` always carries a random suffix, so two
+ * workers on one host never share a lease name; see `shared/work-owner.ts`.
  */
 export type WorkerEnv = {
   workerSharedSecret: string;
@@ -27,7 +26,6 @@ export type WorkerEnv = {
  */
 export function loadWorkerEnv(
   environment: Record<string, string | undefined> = process.env,
-  generateId: () => string = () => randomUUID().slice(0, 8),
 ): WorkerEnv {
   const workerSharedSecret = environment.WORKER_SHARED_SECRET?.trim();
   if (!workerSharedSecret) {
@@ -66,8 +64,7 @@ export function loadWorkerEnv(
     );
   }
 
-  const host = environment.HOSTNAME?.trim();
-  const owner = `routines/${host || generateId()}`;
+  const owner = workOwner("routines", environment);
 
   return { workerSharedSecret, serverInternalUrl, databaseUrl, owner };
 }
