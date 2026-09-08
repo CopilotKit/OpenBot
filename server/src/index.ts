@@ -341,7 +341,9 @@ const pluginStore = createPluginStore({
   redirectUri: config.publicUrl ? redirectUriFor(config.publicUrl) : undefined,
 });
 const workspaceFileTransfer =
-  computerAttachmentBroker && config.workspaceTransfer
+  computerAttachmentBroker &&
+  config.handoffAttachments.enabled &&
+  config.workspaceTransfer
     ? createWorkspaceFileTransferService({
         store: handoffAttachmentStore,
         broker: computerAttachmentBroker,
