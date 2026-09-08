@@ -10,6 +10,7 @@ import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
 import { createHandoffDesk, HANDOFF_KIND } from "./agents/handoff";
+import { createHandoffAttachmentStore } from "./agents/handoff-attachment-store";
 import {
   createHandoffDelivery,
   createInteractiveHandoffResolver,
@@ -43,6 +44,7 @@ import { createThreadIdentity } from "./channels/thread-identity";
 import { createChannelTitler } from "./channels/titler";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
+import { createComputerAttachmentBroker } from "./computer/attachments";
 import { createComputerGateway } from "./computer/gateway";
 import { createPageFrameStore } from "./computer/page-frames";
 import { startPolicyListener } from "./computer/policy-listener";
@@ -241,6 +243,13 @@ const auth = config.auth
 const computerProvider = config.computer
   ? createComputerProvider(config.computer)
   : undefined;
+const handoffAttachmentStore = createHandoffAttachmentStore(database);
+const computerAttachmentBroker = computerProvider
+  ? createComputerAttachmentBroker({
+      provider: computerProvider,
+      token: config.computer?.token,
+    })
+  : undefined;
 
 if (computerProvider?.warm) {
   void computerProvider.warm();
@@ -373,6 +382,10 @@ const handoffDesk = createHandoffDesk({
     actorFor(userId).catch(() => null),
   auditStore: bootAuditStore,
   caps: config.handoff,
+  attachmentBroker: computerAttachmentBroker,
+  attachmentStore: computerAttachmentBroker
+    ? handoffAttachmentStore
+    : undefined,
 });
 
 void recordAuditEvent(bootAuditStore, {

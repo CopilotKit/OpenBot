@@ -11,6 +11,7 @@
  * hands the same hop to a second replica and bills for it twice.
  */
 import { type AuditStore, recordAuditEvent } from "../audit";
+import type { HandoffAttachment } from "../computer/attachments";
 import { DEFAULT_MAX_ATTEMPTS, type WorkQueue } from "../work/queue";
 import { HANDOFF_KIND } from "./handoff";
 
@@ -25,6 +26,7 @@ export type HandoffWork = {
   task: string;
   constraints?: string;
   expecting?: string;
+  attachments?: HandoffAttachment[];
   /** The asking Bot's display name, for the line a person reads. Absent falls back to its id. */
   fromName?: string;
   /** The addressed Bot's display name, for the same reason. */
@@ -558,6 +560,14 @@ function attribute(work: HandoffWork): string {
   if (work.constraints) lines.push(`Constraints: ${work.constraints}`);
   if (work.expecting)
     lines.push(`What a good answer looks like: ${work.expecting}`);
+  if (work.attachments?.length) {
+    lines.push("", `Files attached by ${work.fromName ?? work.fromBotId}:`);
+    for (const attachment of work.attachments) {
+      lines.push(
+        `- ${attachment.filename} — ${attachment.mediaType} — ${attachment.sizeBytes} bytes — sha256 ${attachment.sha256.slice(0, 4)}…${attachment.sha256.slice(-4)} — ${attachment.path}`,
+      );
+    }
+  }
   lines.push(
     "",
     "Answer in this conversation as yourself. The person can see it, so write it for them rather than for the Bot that asked.",
@@ -580,5 +590,8 @@ function summarise(work: HandoffWork): string | null {
    * appears as something the person typed and then had read back to them.
    */
   if (work.answerIn) return null;
-  return `${work.fromName ?? work.fromBotId} asked ${work.toName ?? work.toBotId} for this on your behalf: ${work.task}`;
+  const attachmentSummary = work.attachments?.length
+    ? ` (${work.attachments.length} ${work.attachments.length === 1 ? "file" : "files"} attached)`
+    : "";
+  return `${work.fromName ?? work.fromBotId} asked ${work.toName ?? work.toBotId} for this on your behalf${attachmentSummary}: ${work.task}`;
 }

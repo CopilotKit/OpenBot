@@ -4,11 +4,16 @@ import {
   HANDOFF_KIND,
   type HandoffCaps,
 } from "../src/agents/handoff";
+import type { HandoffAttachmentStore } from "../src/agents/handoff-attachment-store";
 import type {
   AgentProfile,
   AgentProfileStore,
 } from "../src/agents/profile-store";
 import type { AuditStore } from "../src/audit";
+import type {
+  ComputerAttachmentBroker,
+  HandoffAttachment,
+} from "../src/computer/attachments";
 import type { WorkQueue } from "../src/work/queue";
 
 /**
@@ -49,6 +54,8 @@ function desk(options?: {
   offered?: number;
   caps?: HandoffCaps;
   role?: "admin" | "user";
+  attachmentBroker?: ComputerAttachmentBroker;
+  attachmentStore?: HandoffAttachmentStore;
 }) {
   const rows: Array<{ kind: string; key: string; payload: unknown }> = [];
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> =
@@ -101,6 +108,8 @@ function desk(options?: {
       }),
       auditStore,
       caps: options?.caps ?? CAPS,
+      attachmentBroker: options?.attachmentBroker,
+      attachmentStore: options?.attachmentStore,
     }),
   };
 }
@@ -114,6 +123,87 @@ const FROM = {
 };
 
 describe("handing work to another Bot", () => {
+  test("checks the grant before copying attached files", async () => {
+    let copied = false;
+    const built = desk({
+      granted: false,
+      attachmentBroker: {
+        copy: async () => {
+          copied = true;
+          return [];
+        },
+        remove: async () => ({ deleted: true }),
+      },
+      attachmentStore: {} as HandoffAttachmentStore,
+    });
+
+    await built.desk.send({
+      from: FROM,
+      target: "Researcher",
+      envelope: {
+        task: "process invoices",
+        attachments: [{ path: "downloads/invoice.pdf" }],
+      },
+    });
+
+    expect(copied).toBe(false);
+    expect(built.rows).toHaveLength(0);
+  });
+
+  test("copies and records verified manifests before queueing them", async () => {
+    const copied: HandoffAttachment[] = [
+      {
+        id: "attachment-1",
+        filename: "invoice.pdf",
+        mediaType: "application/pdf",
+        sizeBytes: 42,
+        sha256: "a".repeat(64),
+        path: "inbox/handoff/attachment-1/invoice.pdf",
+      },
+    ];
+    const calls: string[] = [];
+    const built = desk({
+      attachmentBroker: {
+        copy: async () => {
+          calls.push("copy");
+          return copied;
+        },
+        remove: async () => ({ deleted: true }),
+      },
+      attachmentStore: {
+        forHandoff: async () => [],
+        recordBatch: async (input) => {
+          calls.push("record");
+          return input.attachments.map((attachment) => ({
+            ...attachment,
+            handoffId: "handoff",
+            fromBotId: FROM.botId,
+            recipientBotId: "researcher",
+            state: "copied" as const,
+            externalTransferId: null,
+            resultReference: null,
+            expiresAt: new Date(),
+            deletedAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }));
+        },
+      } as HandoffAttachmentStore,
+    });
+
+    await built.desk.send({
+      from: FROM,
+      target: "Researcher",
+      envelope: {
+        task: "process invoices",
+        attachments: [{ path: "downloads/invoice.pdf" }],
+      },
+    });
+
+    expect(calls).toEqual(["copy", "record"]);
+    expect(built.rows[0]?.payload).toMatchObject({ attachments: copied });
+  });
+
   test("an allowed hop becomes one durable row", async () => {
     const { desk: handoff, rows } = desk();
 

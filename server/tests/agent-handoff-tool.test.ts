@@ -33,6 +33,41 @@ const ALLOWED: HandoffOutcome = {
 };
 
 describe("the handoff tool", () => {
+  test("accepts up to ten relative attachment paths and forwards them", async () => {
+    let received: unknown;
+    const tool = handoffTool({
+      desk: {
+        send: async (input) => {
+          received = input.envelope;
+          return ALLOWED;
+        },
+      },
+      from: FROM,
+      hasSomebodyToAsk: true,
+      maxDepth: 1,
+      maxPerRun: 3,
+    });
+
+    await tool?.execute({
+      bot: "Researcher",
+      task: "process invoices",
+      attachments: [{ path: "downloads/invoice.pdf" }],
+    });
+    expect(received).toMatchObject({
+      attachments: [{ path: "downloads/invoice.pdf" }],
+    });
+
+    await expect(
+      tool?.execute({
+        bot: "Researcher",
+        task: "too many",
+        attachments: Array.from({ length: 11 }, (_, index) => ({
+          path: `downloads/${index}.pdf`,
+        })),
+      }),
+    ).resolves.toContain("not sent");
+  });
+
   test("is offered to a Bot that has somebody to ask", () => {
     const tool = handoffTool({
       desk: deskReturning(ALLOWED),

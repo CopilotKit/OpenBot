@@ -42,6 +42,22 @@ const parameters = z.object({
     .describe(
       "What a good answer looks like coming back: a list, a number, a recommendation with reasons",
     ),
+  attachments: z
+    .array(
+      z.object({
+        path: z
+          .string()
+          .min(1)
+          .max(512)
+          .describe(
+            "A relative path in this Bot's workspace, such as downloads/invoice.pdf",
+          ),
+      }),
+    )
+    .min(1)
+    .max(10)
+    .optional()
+    .describe("Files from this Bot's workspace to send with the task"),
 });
 
 /**
@@ -107,6 +123,9 @@ export function handoffTool(options: {
             : {}),
           ...(parsed.data.expecting
             ? { expecting: parsed.data.expecting }
+            : {}),
+          ...(parsed.data.attachments
+            ? { attachments: parsed.data.attachments }
             : {}),
         },
       });

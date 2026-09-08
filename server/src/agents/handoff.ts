@@ -16,9 +16,15 @@
  * reads to the person as the Bot ignoring them.
  */
 import { createHash } from "node:crypto";
+import { posix } from "node:path";
 import { type AuditStore, recordAuditEvent } from "../audit";
+import type {
+  ComputerAttachmentBroker,
+  HandoffAttachment,
+} from "../computer/attachments";
 import type { WorkQueue } from "../work/queue";
 import type { RunAssertion } from "./callback-token";
+import type { HandoffAttachmentStore } from "./handoff-attachment-store";
 import type { AgentProfileStore } from "./profile-store";
 import type { AgentActor } from "./profile-types";
 
@@ -45,6 +51,8 @@ export type HandoffEnvelope = {
   constraints?: string;
   /** What good looks like coming back: a list, a number, a recommendation with reasons. */
   expecting?: string;
+  /** Relative paths in the asking Bot's own workspace. Never persisted or shown to the receiver. */
+  attachments?: { path: string }[];
 };
 
 /** How far this may go, in numbers a deployment chooses rather than constants. */
@@ -94,8 +102,19 @@ export function createHandoffDesk(options: {
   actorFor: (userId: string) => Promise<AgentActor | null>;
   auditStore: AuditStore;
   caps: HandoffCaps;
+  attachmentBroker?: ComputerAttachmentBroker;
+  attachmentStore?: HandoffAttachmentStore;
 }): HandoffDesk {
-  const { queue, profiles, mayAddress, actorFor, auditStore, caps } = options;
+  const {
+    queue,
+    profiles,
+    mayAddress,
+    actorFor,
+    auditStore,
+    caps,
+    attachmentBroker,
+    attachmentStore,
+  } = options;
 
   /** Said once, so the trail carries the same words the Bot was given. */
   async function refuse(
@@ -273,6 +292,42 @@ export function createHandoffDesk(options: {
         );
       }
 
+      let attachmentPaths: string[] = [];
+      if (envelope.attachments?.length) {
+        if (!attachmentBroker || !attachmentStore) {
+          return refuse(
+            from,
+            target,
+            "attachments_unavailable",
+            "This deployment cannot send files between Bots yet.",
+          );
+        }
+        try {
+          attachmentPaths = envelope.attachments.map(({ path }) => {
+            const normalized = posix.normalize(
+              path.trim().replaceAll("\\", "/"),
+            );
+            if (
+              !normalized ||
+              normalized === "." ||
+              posix.isAbsolute(normalized) ||
+              normalized === ".." ||
+              normalized.startsWith("../")
+            ) {
+              throw new Error("invalid attachment path");
+            }
+            return normalized;
+          });
+        } catch {
+          return refuse(
+            from,
+            target,
+            "invalid_attachment_path",
+            "The files were not sent: every attachment must be a relative path in this Bot's workspace.",
+          );
+        }
+      }
+
       /*
        * The key is what stops this happening twice.
        *
@@ -293,62 +348,130 @@ export function createHandoffDesk(options: {
         .update(`${from.actorId}\u0000${from.runId}`)
         .digest("hex")
         .slice(0, 32)}:`;
-      const key = `${runPrefix}${createHash("sha256")
+      const handoffId = createHash("sha256")
         .update(
           JSON.stringify([
             found.id,
             task,
             envelope.constraints ?? "",
             envelope.expecting ?? "",
+            attachmentPaths,
           ]),
         )
-        .digest("hex")
-        .slice(0, 32)}`;
+        .digest("hex");
+      const key = `${runPrefix}${handoffId.slice(0, 32)}`;
 
-      const offered = await queue.offer({
-        kind: HANDOFF_KIND,
-        key,
-        /*
-         * Counted from the rows rather than from a variable, because a run whose hops land on
-         * several pods is exactly what this exists to bound: every hop this run has offered is a row
-         * under its own prefix, so the rows are the count.
-         */
-        atMost: { keyPrefix: runPrefix, max: caps.maxPerRun },
-        payload: {
-          fromBotId: from.botId,
-          toBotId: found.id,
-          actorId: from.actorId,
-          threadId: from.threadId,
-          runId: from.runId,
+      let attachments: HandoffAttachment[] = [];
+      let copiedThisAttempt = false;
+      if (attachmentPaths.length > 0 && attachmentBroker && attachmentStore) {
+        const existing = await attachmentStore.forHandoff(handoffId, found.id);
+        if (existing.length > 0) {
+          attachments = existing.map(asManifest);
+        } else {
+          attachments = await attachmentBroker.copy({
+            handoffId,
+            fromBotId: from.botId,
+            toBotId: found.id,
+            paths: attachmentPaths,
+          });
+          copiedThisAttempt = true;
+          const recorded = await attachmentStore.recordBatch({
+            handoffId,
+            fromBotId: from.botId,
+            toBotId: found.id,
+            attachments,
+          });
+          if (recorded.length === 0) {
+            await Promise.allSettled(
+              attachments.map((attachment) =>
+                attachmentBroker.remove({
+                  botId: found.id,
+                  handoffId,
+                  attachment,
+                }),
+              ),
+            );
+            copiedThisAttempt = false;
+            attachments = (
+              await attachmentStore.forHandoff(handoffId, found.id)
+            ).map(asManifest);
+            if (attachments.length === 0) {
+              throw new Error("Attachment metadata could not be recorded.");
+            }
+          }
+        }
+      }
+
+      let offered: Awaited<ReturnType<WorkQueue["offer"]>>;
+      try {
+        offered = await queue.offer({
+          kind: HANDOFF_KIND,
+          key,
           /*
-           * One deeper than the run that asked. The receiving Bot's own assertion is minted from
-           * this, so the cap keeps counting across every pod the chain touches.
+           * Counted from the rows rather than from a variable, because a run whose hops land on
+           * several pods is exactly what this exists to bound: every hop this run has offered is a row
+           * under its own prefix, so the rows are the count.
            */
-          depth: depth + 1,
-          /*
-           * The asking Bot's display name, resolved here against the same roster the target was.
-           *
-           * The delivery writes one line of this into the addressed Bot's conversation, and a person
-           * reading it should see "General Assistant" rather than `general-assistant`. Resolved on
-           * this side because this is the side holding the roster; the delivery runs minutes later
-           * on another replica and would have to fetch it again.
-           */
-          ...(roster.find((profile) => profile.id === from.botId)?.name
-            ? {
-                fromName: roster.find((profile) => profile.id === from.botId)
-                  ?.name,
-              }
-            : {}),
-          toName: found.name,
-          task,
-          ...(envelope.constraints
-            ? { constraints: envelope.constraints }
-            : {}),
-          ...(envelope.expecting ? { expecting: envelope.expecting } : {}),
-        },
-      });
+          atMost: { keyPrefix: runPrefix, max: caps.maxPerRun },
+          payload: {
+            fromBotId: from.botId,
+            toBotId: found.id,
+            actorId: from.actorId,
+            threadId: from.threadId,
+            runId: from.runId,
+            /*
+             * One deeper than the run that asked. The receiving Bot's own assertion is minted from
+             * this, so the cap keeps counting across every pod the chain touches.
+             */
+            depth: depth + 1,
+            /*
+             * The asking Bot's display name, resolved here against the same roster the target was.
+             *
+             * The delivery writes one line of this into the addressed Bot's conversation, and a person
+             * reading it should see "General Assistant" rather than `general-assistant`. Resolved on
+             * this side because this is the side holding the roster; the delivery runs minutes later
+             * on another replica and would have to fetch it again.
+             */
+            ...(roster.find((profile) => profile.id === from.botId)?.name
+              ? {
+                  fromName: roster.find((profile) => profile.id === from.botId)
+                    ?.name,
+                }
+              : {}),
+            toName: found.name,
+            task,
+            ...(envelope.constraints
+              ? { constraints: envelope.constraints }
+              : {}),
+            ...(envelope.expecting ? { expecting: envelope.expecting } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
+          },
+        });
+      } catch (error) {
+        if (copiedThisAttempt && attachmentBroker && attachmentStore) {
+          await removeCopiedAttachments(
+            attachmentBroker,
+            attachmentStore,
+            found.id,
+            handoffId,
+            attachments,
+            "queue_failed",
+          );
+        }
+        throw error;
+      }
 
       if (offered === "refused") {
+        if (copiedThisAttempt && attachmentBroker && attachmentStore) {
+          await removeCopiedAttachments(
+            attachmentBroker,
+            attachmentStore,
+            found.id,
+            handoffId,
+            attachments,
+            "fanout_refused",
+          );
+        }
         return refuse(
           from,
           target,
@@ -401,10 +524,50 @@ export function createHandoffDesk(options: {
           // What was asked, so the trail says what one Bot sent another rather than merely that it
           // did. The task is the Bot's own words about the work, not a person's private content.
           task: task.slice(0, 500),
+          ...(attachments.length > 0
+            ? {
+                attachmentIds: attachments.map(({ id }) => id),
+                attachmentCount: attachments.length,
+              }
+            : {}),
         },
       });
 
       return { ok: true, to: found.id, toName: found.name };
     },
   };
+}
+
+function asManifest(row: {
+  id: string;
+  filename: string;
+  mediaType: string;
+  sizeBytes: number;
+  sha256: string;
+  path: string;
+}): HandoffAttachment {
+  return {
+    id: row.id,
+    filename: row.filename,
+    mediaType: row.mediaType,
+    sizeBytes: row.sizeBytes,
+    sha256: row.sha256,
+    path: row.path,
+  };
+}
+
+async function removeCopiedAttachments(
+  broker: ComputerAttachmentBroker,
+  store: HandoffAttachmentStore,
+  botId: string,
+  handoffId: string,
+  attachments: HandoffAttachment[],
+  reason: string,
+): Promise<void> {
+  await Promise.allSettled(
+    attachments.map(async (attachment) => {
+      await broker.remove({ botId, handoffId, attachment });
+      await store.markDeleted(attachment.id, reason);
+    }),
+  );
 }

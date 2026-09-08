@@ -41,7 +41,11 @@ function runner(options?: {
     eventType: string;
     payload: Record<string, unknown>;
   }> = [];
-  const delivered: Array<{ message: string; assertion: string }> = [];
+  const delivered: Array<{
+    message: string;
+    assertion: string;
+    shown?: string;
+  }> = [];
   const offered: HandoffWork[] = [];
 
   const queue = {
@@ -93,7 +97,7 @@ function runner(options?: {
       auditStore,
       delivery: {
         deliver: async ({ work, message, shown, assertion }) => {
-          delivered.push({ message, assertion });
+          delivered.push({ message, assertion, shown });
           await options?.deliver?.({ work, message, shown });
           return {
             answer: options?.answer ?? null,
@@ -158,6 +162,42 @@ describe("delivering a hop", () => {
     expect(message).toContain("Task: find the outage window");
     // The parts stay parts: the asking model was made to name them so this one need not infer them.
     expect(message).toContain("What a good answer looks like: a date range");
+  });
+
+  test("the addressed Bot receives verified attachment metadata, never source paths", async () => {
+    const attached: HandoffWork = {
+      ...WORK,
+      attachments: [
+        {
+          id: "attachment-1",
+          filename: "Invoice-0016.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 195234,
+          sha256: `${"a".repeat(60)}ef90`,
+          path: "inbox/handoff/attachment-1/Invoice-0016.pdf",
+        },
+      ],
+    };
+    const built = runner({
+      claimed: [
+        {
+          kind: "bot.message",
+          key: "run-1:files",
+          payload: attached,
+          attempts: 1,
+        },
+      ],
+    });
+
+    await built.runner.sweep();
+
+    expect(built.delivered[0]?.message).toContain("Invoice-0016.pdf");
+    expect(built.delivered[0]?.message).toContain("sha256 aaaa…ef90");
+    expect(built.delivered[0]?.message).toContain(
+      "inbox/handoff/attachment-1/Invoice-0016.pdf",
+    );
+    expect(built.delivered[0]?.message).not.toContain("downloads/");
+    expect(built.delivered[0]?.shown).toContain("1 file attached");
   });
 
   test("the run it starts carries the depth this hop reached", async () => {
