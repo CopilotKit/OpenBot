@@ -6,7 +6,7 @@ import { loadConfig } from "../src/config";
 import { testEnvironment } from "./support/environment";
 
 const attachmentId = "22222222-2222-4222-8222-222222222222";
-const transferId = "11111111-1111-4111-8111-111111111111";
+const crossedTransferId = "11111111-1111-4111-8111-111111111111";
 
 function appWith(service?: WorkspaceFileTransferService) {
   const config = loadConfig(
@@ -68,7 +68,6 @@ describe("human-approved workspace transfer routes", () => {
         calls.push(["preview", input]);
         return {
           attachmentId,
-          transferId,
           filename: "invoice.pdf",
           mediaType: "application/pdf",
           sizeBytes: 42,
@@ -80,7 +79,7 @@ describe("human-approved workspace transfer routes", () => {
         calls.push(["approve", input]);
         return {
           attachmentId,
-          transferId,
+          transferId: crossedTransferId,
           filename: "invoice.pdf",
           sizeBytes: 42,
           sha256: "a".repeat(64),
@@ -89,7 +88,12 @@ describe("human-approved workspace transfer routes", () => {
       },
     } as WorkspaceFileTransferService;
     const app = appWith(service);
-    const body = { botId: "jefe-erp", attachmentId, transferId };
+    const body = {
+      botId: "jefe-erp",
+      attachmentId,
+      transferId: crossedTransferId,
+    };
+    const trustedInput = { botId: "jefe-erp", attachmentId };
 
     expect(
       (
@@ -116,8 +120,8 @@ describe("human-approved workspace transfer routes", () => {
       ).status,
     ).toBe(200);
     expect(calls).toEqual([
-      ["preview", body],
-      ["approve", { ...body, actorId: "dev-local-user" }],
+      ["preview", trustedInput],
+      ["approve", { ...trustedInput, actorId: "dev-local-user" }],
     ]);
   });
 
@@ -138,7 +142,7 @@ describe("human-approved workspace transfer routes", () => {
       body: JSON.stringify({
         botId: "recolector-documentos",
         attachmentId,
-        transferId,
+        transferId: crossedTransferId,
       }),
     });
     expect(response.status).toBe(403);

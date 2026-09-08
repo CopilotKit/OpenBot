@@ -358,6 +358,20 @@ const workspaceFileTransfer =
               "erp_expenses_ingest",
             ],
           }),
+        reserve: async ({ botId, actorId, ...args }) => {
+          const result = await pluginStore.callTool({
+            ref: `${config.workspaceTransfer?.netsferaErpServerId ?? ""}/erp_documents_reserve_upload`,
+            args,
+            botId,
+            actorId,
+          });
+          if (result.isError) throw new Error(result.text);
+          const parsed = JSON.parse(result.text) as { transferId?: unknown };
+          if (typeof parsed.transferId !== "string") {
+            throw new Error("The ERP reservation returned no transfer id.");
+          }
+          return { transferId: parsed.transferId };
+        },
         auditStore: bootAuditStore,
       })
     : undefined;

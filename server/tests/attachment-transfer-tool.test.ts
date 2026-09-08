@@ -14,6 +14,7 @@ function setup(
   behavior: { readFails?: boolean; uploadStatus?: number } = {},
 ) {
   const calls: {
+    reserved?: unknown;
     url?: string;
     init?: RequestInit;
     claimed?: unknown[];
@@ -72,6 +73,10 @@ function setup(
       url: "https://erp.test/api/mcp",
       token: "encrypted-store-token",
     }),
+    reserve: async (input) => {
+      calls.reserved = input;
+      return { transferId };
+    },
     auditStore: { insert: async () => {} } as AuditStore,
     fetchImpl: async (url, init) => {
       calls.url = String(url);
@@ -87,9 +92,9 @@ function setup(
 describe("approved workspace file transfer", () => {
   test("previews immutable server metadata without moving bytes", async () => {
     const { service, calls } = setup();
-    expect(
-      await service.preview({ botId: "erp", attachmentId, transferId }),
-    ).toMatchObject({ filename: "invoice.pdf", sha256, status: "READY" });
+    expect(await service.preview({ botId: "erp", attachmentId })).toMatchObject(
+      { filename: "invoice.pdf", sha256, status: "READY" },
+    );
     expect(calls.url).toBeUndefined();
   });
 
@@ -98,10 +103,18 @@ describe("approved workspace file transfer", () => {
     const result = await service.approve({
       botId: "erp",
       actorId: "user-1",
-      transferId,
       attachmentId,
     });
 
+    expect(calls.reserved).toEqual({
+      botId: "erp",
+      actorId: "user-1",
+      filename: "invoice.pdf",
+      contentType: "application/pdf",
+      expectedBytes: bytes.length,
+      sha256,
+      idempotencyKey: `openbot-workspace-transfer:${attachmentId}`,
+    });
     expect(calls.claimed).toEqual([attachmentId, "erp", transferId]);
     expect(calls.url).toBe(
       `https://erp.test/api/agent-transfers/${transferId}`,
@@ -121,24 +134,24 @@ describe("approved workspace file transfer", () => {
       service.approve({
         botId: "erp",
         actorId: "user-1",
-        transferId,
         attachmentId,
       }),
     ).rejects.toThrow("not available");
     expect(calls.url).toBeUndefined();
   });
 
-  test("releases a claim when failure is definitely before upload", async () => {
+  test("does not reserve or claim when the verified bytes cannot be read", async () => {
     const { service, calls } = setup("erp", { readFails: true });
     await expect(
       service.approve({
         botId: "erp",
         actorId: "user-1",
-        transferId,
         attachmentId,
       }),
     ).rejects.toThrow("could not be read");
-    expect(calls.released).toEqual([attachmentId, "erp", transferId]);
+    expect(calls.reserved).toBeUndefined();
+    expect(calls.claimed).toBeUndefined();
+    expect(calls.released).toBeUndefined();
   });
 
   test("releases a definitively rejected reservation but keeps uncertain failures bound", async () => {
@@ -147,7 +160,6 @@ describe("approved workspace file transfer", () => {
       rejected.service.approve({
         botId: "erp",
         actorId: "user-1",
-        transferId,
         attachmentId,
       }),
     ).rejects.toThrow("410");
@@ -158,7 +170,6 @@ describe("approved workspace file transfer", () => {
       uncertain.service.approve({
         botId: "erp",
         actorId: "user-1",
-        transferId,
         attachmentId,
       }),
     ).rejects.toThrow("500");

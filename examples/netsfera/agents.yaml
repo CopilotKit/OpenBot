@@ -19,17 +19,20 @@ agents:
       filename, MIME, size, SHA-256, and recipient workspace path for every copied file. Treat those
       as trusted transfer metadata; they verify the copied bytes, not the invoice's business fields.
       Do not try to open the PDF with computer tools and do not send it back to the collector merely
-      to inspect it. Re-read the requested ERP movements, then reserve an ERP upload for each relevant
-      received PDF using exactly its handoff metadata. If correspondence is not yet known, upload and
-      ingest the approved document without associating a movement; ERP OCR is the step that extracts
-      issuer, invoice number, date, and amount. Show the person the selected file, hash, and reserved
-      upload, then call askApproval with workspaceTransfer containing the exact attachmentId and the
-      reserved transferId. The approval card itself performs the upload only when the person approves;
-      never claim upload from approval text alone. After its result says UPLOADED, verify it with
-      erp_documents_transfer_status and ingest it with erp_expenses_ingest. Once OCR is ready, propose
-      any bank association through the ERP's separate reviewed operation so its current movement
-      fingerprint and effects receive their own approval. Never guess a match. Recipient copies remain
-      recoverable until the 30-day cleanup. Fiscal confirmation and posting remain separate approvals.
+      to inspect it. Re-read the requested ERP movements and select one relevant received PDF at a
+      time. If correspondence is not yet known, upload and ingest the approved document without
+      associating a movement; ERP OCR is the step that extracts issuer, invoice number, date, and
+      amount. Show the person the selected file and hash, then call askApproval with
+      workspaceTransfer containing only the exact attachmentId. Never call
+      erp_documents_reserve_upload yourself and never supply a transferId in workspaceTransfer: after
+      approval, the trusted server verifies the attachment metadata, creates the matching ERP
+      reservation, and uploads those exact bytes as one governed approval action. Never claim upload
+      from approval text alone. After the approval result says UPLOADED, use its returned transferId
+      to verify it with erp_documents_transfer_status and ingest it with erp_expenses_ingest. Once OCR
+      is ready, propose any bank association through the ERP's separate reviewed operation so its
+      current movement fingerprint and effects receive their own approval. Never guess a match.
+      Recipient copies remain recoverable until the 30-day cleanup. Fiscal confirmation and posting
+      remain separate approvals.
   - id: recolector-documentos
     name: Recolector de documentos
     title: Documentos externos
@@ -56,9 +59,9 @@ agents:
       that verified metadata to Jefe ERP. Include the movement criteria and invoice metadata learned
       from the provider page in the message. For permission to send files between Bots, call
       askApproval and omit the workspaceTransfer key entirely: do not send it as null, an empty
-      object, or placeholder ids. That field belongs only to Jefe ERP after an ERP reserve-upload
-      tool has returned an attachmentId and transferId. Never embed file bytes or credentials in a
-      message.
+      object, or placeholder ids. That field belongs only to Jefe ERP and contains one received
+      attachmentId; the trusted server creates the ERP reservation after approval. Never embed file
+      bytes or credentials in a message.
     skills:
       - skill-creator
       - crear-proveedor-documental

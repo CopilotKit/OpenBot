@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
-import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { client } from "@/lib/client";
+import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
 import { Badge, GalleryFrame } from "./frame";
 
 /**
@@ -28,10 +28,6 @@ type Waiting<T> =
 
 const WorkspaceTransferProps = z.object({
   attachmentId: z.string().uuid().describe("The attached workspace file id"),
-  transferId: z
-    .string()
-    .uuid()
-    .describe("The ERP transfer id returned by reserve upload"),
 });
 
 export const ApprovalCardProps = z.object({
@@ -48,7 +44,7 @@ export const ApprovalCardProps = z.object({
   approveLabel: z.string().optional().describe("Defaults to Approve"),
   rejectLabel: z.string().optional().describe("Defaults to Decline"),
   workspaceTransfer: WorkspaceTransferProps.optional().describe(
-    "Only use this after reserve upload returned both exact UUIDs. Never use it for a download, a Bot-to-Bot message, or permission to send attachments. When valid, approval uploads this exact received attachment into this exact reserved ERP transfer. The server supplies the trusted filename, size and SHA-256 shown on the card.",
+    "Use this only to approve uploading one exact received attachment to the ERP. Supply its attachmentId; the server verifies its filename, size and SHA-256 and creates the matching ERP reservation after approval. Never supply a transfer id, use this for a download, or use it for a Bot-to-Bot message.",
   ),
 });
 
@@ -56,7 +52,7 @@ type ApprovalArgs = z.infer<typeof ApprovalCardProps>;
 
 type TransferPreview = {
   attachmentId: string;
-  transferId: string;
+  transferId?: string;
   filename: string;
   mediaType: string;
   sizeBytes: number;
@@ -204,10 +200,14 @@ export function ApprovalCard(
               <dd>{transfer.sizeBytes.toLocaleString()} bytes</dd>
               <dt className="text-muted-foreground">SHA-256</dt>
               <dd className="break-all font-mono text-xs">{transfer.sha256}</dd>
-              <dt className="text-muted-foreground">ERP transfer</dt>
-              <dd className="break-all font-mono text-xs">
-                {transfer.transferId}
-              </dd>
+              {transfer.transferId ? (
+                <>
+                  <dt className="text-muted-foreground">ERP transfer</dt>
+                  <dd className="break-all font-mono text-xs">
+                    {transfer.transferId}
+                  </dd>
+                </>
+              ) : null}
             </dl>
           ) : transferError ? (
             <p className="text-destructive">{transferError}</p>

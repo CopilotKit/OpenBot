@@ -17,7 +17,6 @@ import type {
 const uuid = z.string().uuid();
 export const workspaceTransferInput = z.object({
   botId: z.string().min(1).max(120),
-  transferId: uuid,
   attachmentId: uuid,
 });
 export type WorkspaceTransferInput = z.infer<typeof workspaceTransferInput>;
@@ -25,7 +24,6 @@ export type WorkspaceTransferInput = z.infer<typeof workspaceTransferInput>;
 export type WorkspaceFileTransferService = {
   preview(input: WorkspaceTransferInput): Promise<{
     attachmentId: string;
-    transferId: string;
     filename: string;
     mediaType: string;
     sizeBytes: number;
@@ -51,6 +49,15 @@ export function createWorkspaceFileTransferService(options: {
     botId: string;
     actorId: string;
   }) => Promise<{ url: string; token?: string }>;
+  reserve: (input: {
+    botId: string;
+    actorId: string;
+    filename: string;
+    contentType: string;
+    expectedBytes: number;
+    sha256: string;
+    idempotencyKey: string;
+  }) => Promise<{ transferId: string }>;
   auditStore: AuditStore;
   fetchImpl?: typeof fetch;
 }): WorkspaceFileTransferService {
@@ -67,10 +74,10 @@ export function createWorkspaceFileTransferService(options: {
     }
     if (
       row.externalTransferId &&
-      row.externalTransferId !== parsed.transferId
+      !uuid.safeParse(row.externalTransferId).success
     ) {
       throw new WorkspaceTransferRefusedError(
-        "That attachment is already bound to another ERP transfer.",
+        "That attachment has an invalid ERP transfer binding.",
       );
     }
     if (row.state !== "copied" && row.state !== "transferred") {
@@ -83,10 +90,9 @@ export function createWorkspaceFileTransferService(options: {
 
   return {
     async preview(input) {
-      const { parsed, row } = await owned(input);
+      const { row } = await owned(input);
       return {
         attachmentId: row.id,
-        transferId: parsed.transferId,
         filename: row.filename,
         mediaType: row.mediaType,
         sizeBytes: row.sizeBytes,
@@ -96,7 +102,49 @@ export function createWorkspaceFileTransferService(options: {
     },
     async approve(input) {
       const { parsed, row } = await owned(input);
-      if (row.state === "transferred") return success(row, parsed.transferId);
+      if (row.state === "transferred" && row.externalTransferId) {
+        return success(row, row.externalTransferId);
+      }
+
+      let exported: ExportedAttachment;
+      try {
+        exported = await options.broker.read({
+          botId: parsed.botId,
+          path: row.path,
+        });
+      } catch {
+        throw new WorkspaceTransferRefusedError(
+          "The verified attachment could not be read from this Bot's inbox.",
+        );
+      }
+      if (
+        exported.filename !== row.filename ||
+        exported.mediaType !== row.mediaType ||
+        exported.sizeBytes !== row.sizeBytes ||
+        exported.sha256 !== row.sha256
+      ) {
+        throw new WorkspaceTransferRefusedError(
+          "The attachment no longer matches its verified handoff metadata.",
+        );
+      }
+
+      let transferId: string;
+      try {
+        const reserved = await options.reserve({
+          botId: parsed.botId,
+          actorId: input.actorId,
+          filename: row.filename,
+          contentType: row.mediaType,
+          expectedBytes: row.sizeBytes,
+          sha256: row.sha256,
+          idempotencyKey: `openbot-workspace-transfer:${row.id}`,
+        });
+        transferId = uuid.parse(reserved.transferId);
+      } catch {
+        throw new WorkspaceTransferRefusedError(
+          "The ERP could not reserve an upload for this verified attachment.",
+        );
+      }
 
       let claimed: StoredHandoffAttachment;
       try {
@@ -105,7 +153,7 @@ export function createWorkspaceFileTransferService(options: {
         claimed = await options.store.claimTransfer(
           row.id,
           parsed.botId,
-          parsed.transferId,
+          transferId,
         );
       } catch {
         throw new WorkspaceTransferRefusedError(
@@ -115,32 +163,9 @@ export function createWorkspaceFileTransferService(options: {
 
       const release = async () => {
         await options.store
-          .releaseTransfer(claimed.id, parsed.botId, parsed.transferId)
+          .releaseTransfer(claimed.id, parsed.botId, transferId)
           .catch(() => false);
       };
-      let exported: ExportedAttachment;
-      try {
-        exported = await options.broker.read({
-          botId: parsed.botId,
-          path: claimed.path,
-        });
-      } catch {
-        await release();
-        throw new WorkspaceTransferRefusedError(
-          "The verified attachment could not be read from this Bot's inbox.",
-        );
-      }
-      if (
-        exported.filename !== claimed.filename ||
-        exported.mediaType !== claimed.mediaType ||
-        exported.sizeBytes !== claimed.sizeBytes ||
-        exported.sha256 !== claimed.sha256
-      ) {
-        await release();
-        throw new WorkspaceTransferRefusedError(
-          "The attachment no longer matches its verified handoff metadata.",
-        );
-      }
 
       let target: WorkspaceUploadTarget;
       try {
@@ -157,7 +182,7 @@ export function createWorkspaceFileTransferService(options: {
       }
 
       const response = await (options.fetchImpl ?? fetch)(
-        `${target.origin}${target.pathFor(parsed.transferId)}`,
+        `${target.origin}${target.pathFor(transferId)}`,
         {
           method: "PUT",
           redirect: "manual",
@@ -184,7 +209,7 @@ export function createWorkspaceFileTransferService(options: {
 
       const transferred = await options.store.markTransferred(
         claimed.id,
-        parsed.transferId,
+        transferId,
       );
       await recordAuditEvent(options.auditStore, {
         eventType: "agent.attachment_transferred",
@@ -194,7 +219,7 @@ export function createWorkspaceFileTransferService(options: {
         payload: {
           bot: parsed.botId,
           attachmentId: claimed.id,
-          transferId: parsed.transferId,
+          transferId,
           destination: target.id,
           sha256: claimed.sha256,
           sizeBytes: claimed.sizeBytes,
@@ -202,7 +227,7 @@ export function createWorkspaceFileTransferService(options: {
           approvedBy: input.actorId,
         },
       });
-      return success(transferred, parsed.transferId);
+      return success(transferred, transferId);
     },
   };
 }
