@@ -39,6 +39,7 @@ import {
   resolveServerUrl,
   serverCredentialKind,
 } from "./catalogue";
+import { inspectToolArguments } from "./content-governance";
 import { McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
 import { transportFor } from "./transport";
@@ -2940,6 +2941,36 @@ export function createPluginStore(options: PluginStoreOptions) {
       }
       if (!verdict.forward) {
         throw new PluginRefusedError(verdict.reason, verdict.matched);
+      }
+
+      /**
+       * Structural policy answers whether this Bot may call this tool. Content inspection answers
+       * whether the arguments would carry a credential out of the deployment. It runs after policy
+       * and before credentials are read or a vendor is contacted, and its result contains paths and
+       * categories only: never the values it refused.
+       */
+      const contentDecision = inspectToolArguments(args);
+      if (!contentDecision.safe) {
+        await recordAuditEvent(auditStore, {
+          eventType: "mcp.call_rejected",
+          targetType: "mcp_tool",
+          targetId: input.ref,
+          ...(input.initiator ? { initiator: input.initiator } : {}),
+          payload: {
+            ...decided,
+            refusal: "sensitive_tool_arguments",
+            contentInspection: {
+              reason: contentDecision.reason,
+              findings: contentDecision.findings,
+            },
+          },
+        });
+        throw new PluginRefusedError(
+          contentDecision.reason === "sensitive_content"
+            ? "The tool call was refused because its arguments contain credential material."
+            : "The tool call was refused because its arguments could not be inspected safely.",
+          null,
+        );
       }
 
       /*
