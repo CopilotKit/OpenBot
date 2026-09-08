@@ -20,6 +20,7 @@ import {
   channels,
   intelligenceChannelMappings,
   routineRuns,
+  routineSweeps,
   routines,
   users,
   workItems,
@@ -1262,5 +1263,31 @@ describe("consuming a claimed firing", () => {
         leaseMs: 30_000,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("saying that a sweep happened at all", () => {
+  test("records the pass, so a deployment with no worker is not silence", async () => {
+    await database.delete(routineSweeps);
+
+    const before = await store.lastSweptAt();
+    expect(before).toBeNull();
+
+    await offerDueRoutines(sweepOptions());
+
+    const after = await store.lastSweptAt();
+    expect(after).not.toBeNull();
+    expect(Date.now() - (after as Date).getTime()).toBeLessThan(60_000);
+  });
+
+  test("keeps one row however many passes run, and names the last sweeper", async () => {
+    await database.delete(routineSweeps);
+
+    await offerDueRoutines(sweepOptions({ owner: "sweeper-one" }));
+    await offerDueRoutines(sweepOptions({ owner: "sweeper-two" }));
+
+    const rows = await database.select().from(routineSweeps);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.owner).toBe("sweeper-two");
   });
 });

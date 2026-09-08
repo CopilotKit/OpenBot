@@ -137,6 +137,18 @@ export async function offerDueRoutines(
 ): Promise<{ offered: string[] }> {
   const now = options.now?.() ?? new Date();
   const graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
+
+  try {
+    await options.routineStore.recordSweep(options.owner);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        type: "routine-sweep-heartbeat-failed",
+        reason: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+
   const due = await options.routineStore.dueRoutines(
     options.limit ?? DEFAULT_LIMIT,
   );

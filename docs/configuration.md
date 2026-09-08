@@ -114,8 +114,8 @@ Bot containers on a run that mints one.
 **`WORKER_SHARED_SECRET`** is the same shape of secret for a different pair: it is what the routines
 worker presents to `/internal/routines/run` to prove a routine's dispatch actually came from it. The
 API server refuses a handoff without one configured, and the worker refuses to start without one at
-all. See [routines.md](routines.md) for what a deployment with no worker at all looks like — it is
-not obvious from the screen.
+all. See [routines.md](routines.md) for what a deployment with no worker at all looks like — the
+Routines page says so when nothing has swept.
 
 Unlike `AGENT_TOOL_TOKEN`, `start.sh` does not generate and persist this one. It supplies a fixed
 local default, `openbot-dev-worker-secret`, the same value every clone of this repository gets. That

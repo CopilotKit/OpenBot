@@ -31,6 +31,23 @@ export type RoutineRecord = {
   } | null;
 };
 
+export type SweepRecord = {
+  lastSweptAt: string | null;
+  working: boolean;
+};
+
+export type RoutinesPage = {
+  routines: RoutineRecord[];
+  sweep: SweepRecord;
+};
+
+export function nothingIsFiring(
+  sweep: SweepRecord | undefined,
+  routineCount: number,
+): boolean {
+  return sweep !== undefined && !sweep.working && routineCount > 0;
+}
+
 export const routineKeys = {
   all: ["routines"] as const,
   list: () => ["routines", "list"] as const,
@@ -45,9 +62,15 @@ export const routineKeys = {
 export function routinesQueryOptions() {
   return queryOptions({
     queryKey: routineKeys.list(),
-    queryFn: (): Promise<RoutineRecord[]> =>
-      client("/api/routines", "routines", {
+    queryFn: async (): Promise<RoutinesPage> => {
+      const response = await client("/api/routines", {
         fallback: "Your routines could not be loaded.",
-      }),
+      });
+      const body = (await response.json()) as Partial<RoutinesPage>;
+      return {
+        routines: body.routines ?? [],
+        sweep: body.sweep ?? { lastSweptAt: null, working: false },
+      };
+    },
   });
 }
