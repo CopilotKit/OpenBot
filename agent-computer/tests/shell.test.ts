@@ -329,4 +329,24 @@ describe("what a command cannot do to the computer", () => {
     expect(result.timedOut).toBe(false);
     expect(result.stdout.trim()).toBe("ran");
   }, 15_000);
+
+  test.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+  ])(
+    "a timeout of %s falls back to the default instead of killing the command at once",
+    async (_name, timeoutMs) => {
+      // Math.max(NaN, 1000) is NaN, and setTimeout(NaN) fires immediately: the command was reported
+      // as timed out before it did anything. The HTTP layer rejects these with a 400; the shell
+      // itself falls back to the default so a direct caller gets a run, not a lie.
+      const result = await createShell(root, source()).run({
+        command: 'echo "ran"',
+        timeoutMs,
+      });
+
+      expect(result.timedOut).toBe(false);
+      expect(result.stdout.trim()).toBe("ran");
+    },
+    15_000,
+  );
 });

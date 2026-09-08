@@ -501,6 +501,13 @@ function encodeCursor(cursor: AuditCursor) {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
+export class AuditQueryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuditQueryError";
+  }
+}
+
 function decodeCursor(cursor: string): AuditCursor {
   try {
     const parsed = JSON.parse(
@@ -508,11 +515,12 @@ function decodeCursor(cursor: string): AuditCursor {
     ) as AuditCursor;
 
     if (!parsed.id || Number.isNaN(Date.parse(parsed.createdAt))) {
-      throw new Error("invalid cursor");
+      throw new AuditQueryError("cursor must be a valid audit page cursor");
     }
     return parsed;
-  } catch {
-    throw new Error("cursor must be a valid audit page cursor");
+  } catch (error) {
+    if (error instanceof AuditQueryError) throw error;
+    throw new AuditQueryError("cursor must be a valid audit page cursor");
   }
 }
 
@@ -583,13 +591,6 @@ export function createAuditReader(database: Database): AuditReader {
   };
 }
 
-export class AuditQueryError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AuditQueryError";
-  }
-}
-
 export function auditQueryFromUrl(url: URL): AuditEventQuery {
   const rawLimit = url.searchParams.get("limit") ?? "50";
   const trimmedLimit = rawLimit.trim();
@@ -610,8 +611,19 @@ export function auditQueryFromUrl(url: URL): AuditEventQuery {
     throw new AuditQueryError('Query parameter "to" must be a valid date.');
   }
 
+  /*
+   * Fail fast on a stale or hand-edited bookmark. Without this the raw string travels into
+   * `createAuditReader.list`, where `decodeCursor` threw a generic `Error` that escaped the
+   * route's `AuditQueryError` catch as a 500. A corrupt cursor is a caller error, not a server
+   * failure, and answers 400 like a bad `from`/`to` already does.
+   */
+  const cursor = optional("cursor");
+  if (cursor !== undefined) {
+    decodeCursor(cursor);
+  }
+
   return {
-    cursor: optional("cursor"),
+    cursor,
     limit,
     eventType: optional("eventType"),
     actorUserId: optional("actorUserId"),

@@ -80,12 +80,23 @@ pub fn compose(
         );
     }
 
-    env.insert("INTELLIGENCE_API_URL".into(), intelligence.api_url.clone());
+    // Trimmed, the way the model key beside it already is. All four values come from the same
+    // setup screen, which enables its button on `value.trim() !== ""` and then sends the untrimmed
+    // string, so a key copied from a provider's dashboard with the trailing space the selection
+    // picked up arrives here intact. Compose keeps it, the provider rejects the key, and the Bot
+    // reports that it cannot answer without ever naming the space.
+    env.insert(
+        "INTELLIGENCE_API_URL".into(),
+        intelligence.api_url.trim().to_string(),
+    );
     env.insert(
         "INTELLIGENCE_GATEWAY_WS_URL".into(),
-        intelligence.gateway_ws_url.clone(),
+        intelligence.gateway_ws_url.trim().to_string(),
     );
-    env.insert("INTELLIGENCE_API_KEY".into(), intelligence.api_key.clone());
+    env.insert(
+        "INTELLIGENCE_API_KEY".into(),
+        intelligence.api_key.trim().to_string(),
+    );
 
     env.insert("KEY_ENCRYPTION_KEY".into(), secret());
     env.insert("SUPERVISOR_TOKEN".into(), secret());
@@ -268,6 +279,49 @@ mod tests {
             engine_socket: socket.map(str::to_string),
             detail: String::new(),
         }
+    }
+
+    #[test]
+    fn a_pasted_value_is_trimmed_the_way_the_model_key_beside_it_is() {
+        // The setup screen enables its button on `value.trim() !== ""` and sends the untrimmed
+        // string. The model key was rescued here; the three values entered on the same screen were
+        // not, so a copied credential kept whatever whitespace the selection picked up.
+        let env = compose(
+            &Intelligence {
+                api_url: "  https://api.example  ".into(),
+                gateway_ws_url: "	wss://realtime.example
+"
+                .into(),
+                api_key: " key-with-a-trailing-space ".into(),
+            },
+            &Model {
+                openai_api_key: " sk-model ".into(),
+            },
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+        );
+
+        assert_eq!(env["INTELLIGENCE_API_URL"], "https://api.example");
+        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "wss://realtime.example");
+        assert_eq!(env["INTELLIGENCE_API_KEY"], "key-with-a-trailing-space");
+        // Unchanged, and the reason the other three now match it.
+        assert_eq!(env["OPENAI_API_KEY"], "sk-model");
+    }
+
+    #[test]
+    fn a_value_with_nothing_around_it_is_untouched() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                openai_api_key: "sk-model".into(),
+            },
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+        );
+        assert_eq!(env["INTELLIGENCE_API_URL"], "https://api.example");
+        assert_eq!(env["INTELLIGENCE_API_KEY"], "key");
     }
 
     #[test]
