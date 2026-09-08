@@ -231,6 +231,7 @@ export function createHandoffAttachmentStore(
       );
     },
     async markDeleted(id, resultReference) {
+      const now = new Date();
       return oneOrStale(
         await database
           .update(handoffAttachments)
@@ -238,12 +239,16 @@ export function createHandoffAttachmentStore(
             state: "deleted",
             deletedAt: new Date(),
             ...(resultReference ? { resultReference } : {}),
-            updatedAt: new Date(),
+            updatedAt: now,
           })
           .where(
             and(
               eq(handoffAttachments.id, id),
               inArray(handoffAttachments.state, [...transitionable]),
+              or(
+                isNull(handoffAttachments.transferLeaseId),
+                lte(handoffAttachments.transferLeaseExpiresAt, now),
+              ),
             ),
           )
           .returning(),
@@ -263,6 +268,10 @@ export function createHandoffAttachmentStore(
               "expired",
             ]),
             lte(handoffAttachments.expiresAt, now),
+            or(
+              isNull(handoffAttachments.transferLeaseId),
+              lte(handoffAttachments.transferLeaseExpiresAt, now),
+            ),
           ),
         )
         .limit(100);

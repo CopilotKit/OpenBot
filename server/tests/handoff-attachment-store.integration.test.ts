@@ -256,4 +256,43 @@ describe("handoff attachment metadata", () => {
       transferLeaseId: currentLease,
     });
   });
+
+  test("cleanup cannot select or delete an attachment while its upload lease is active", async () => {
+    const ids = await bots();
+    const id = crypto.randomUUID();
+    await store.recordBatch({
+      handoffId: "9".repeat(64),
+      fromBotId: ids.collector,
+      toBotId: ids.erp,
+      expiresAt: new Date(0),
+      attachments: [
+        {
+          id,
+          filename: "invoice.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 42,
+          sha256: "9".repeat(64),
+          path: `inbox/${"9".repeat(64)}/${id}/invoice.pdf`,
+        },
+      ],
+    });
+    const transfer = crypto.randomUUID();
+    const lease = crypto.randomUUID();
+    await store.claimTransfer(id, ids.erp, transfer, lease);
+
+    expect((await store.expired()).map(({ id: found }) => found)).not.toContain(
+      id,
+    );
+    await expect(store.markDeleted(id, "cleanup")).rejects.toThrow(
+      "stale attachment transition",
+    );
+
+    expect(await store.releaseTransferLease(id, ids.erp, transfer, lease)).toBe(
+      true,
+    );
+    expect((await store.expired()).map(({ id: found }) => found)).toContain(id);
+    expect(await store.markDeleted(id, "cleanup")).toMatchObject({
+      state: "deleted",
+    });
+  });
 });
