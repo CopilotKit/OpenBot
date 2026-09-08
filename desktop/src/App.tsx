@@ -63,12 +63,22 @@ export function App() {
     { id: string; name: string }[] | null
   >(null);
   const [signingIn, setSigningIn] = useState(false);
+  /*
+   * The address the browser was sent to, kept so the screen can show it.
+   *
+   * Both plan sign-ins already do this, for the reason written next to them: an open that silently
+   * did nothing, or a machine with no registered browser, leaves somebody watching a spinner with
+   * no idea where they are meant to go. This one threw the address away, so that case had no way
+   * out at all.
+   */
+  const [signInUrl, setSignInUrl] = useState<string | null>(null);
 
   async function signInToCopilotKit() {
     setSigningIn(true);
     setFailure(null);
+    setSignInUrl(null);
     try {
-      await invoke<string>("begin_intelligence_sign_in");
+      setSignInUrl(await invoke<string>("begin_intelligence_sign_in"));
       setProjects(
         await invoke<{ id: string; name: string }[]>(
           "finish_intelligence_sign_in",
@@ -78,6 +88,7 @@ export function App() {
       setFailure(asProblem(error));
     } finally {
       setSigningIn(false);
+      setSignInUrl(null);
     }
   }
 
@@ -363,6 +374,19 @@ export function App() {
           */}
           {apiKey ? (
             <p className="lede">Connected to CopilotKit.</p>
+          ) : signInUrl ? (
+            <>
+              <p className="lede">
+                Finish signing in to CopilotKit in your browser. If it did not
+                open, this is the address:
+              </p>
+              {/* Selectable text, not a link: the browser has already been asked to open it, and
+                  what is needed here is something a person can copy. */}
+              <p className="footnote" style={{ userSelect: "text" }}>
+                {signInUrl}
+              </p>
+              <p className="footnote">Waiting for you to approve it…</p>
+            </>
           ) : projects ? (
             <>
               <p className="lede">Which project should OpenBot use?</p>
