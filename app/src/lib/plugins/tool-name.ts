@@ -26,11 +26,32 @@ export function readToolName(name: string): ToolName {
 
   /*
    * The server is dropped when the action already says it. Vendors name a tool after the thing it
-   * searches, so `mcp__notes__search_notes` would otherwise read "Search notes notes", which looks
-   * like a bug rather than a label.
+   * acts on, so `mcp__notes__search_notes` would otherwise read "Search notes notes" and
+   * `mcp__routines__create_routine` "Create routine routines", both of which look like a bug rather
+   * than a label. Compared a word at a time and singularised, so the plural spelling of the server
+   * still matches the singular in the label.
    */
-  const named = label.toLowerCase().includes((server ?? "").toLowerCase());
+  const named = label
+    .toLowerCase()
+    .split(" ")
+    .map(singular)
+    .includes(singular((server ?? "").toLowerCase()));
   return named ? { label } : { label, detail: server };
+}
+
+/**
+ * `routines` and `routine` are the same word for this purpose.
+ *
+ * A vendor names the server for the collection and the tool for the one item —
+ * `mcp__routines__create_routine` — so the exact-substring test that stops "Search notes notes" lets
+ * "Create routine routines" straight through, and it reads as a typo rather than as a label.
+ *
+ * Dropping one trailing `s` from each side before comparing is the whole of the difference between
+ * those two cases. This is not a stemmer and must not grow into one: the only thing it has to catch
+ * is one vendor writing the same noun twice, once plural and once not.
+ */
+function singular(word: string): string {
+  return word.endsWith("s") ? word.slice(0, -1) : word;
 }
 
 /**
