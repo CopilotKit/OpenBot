@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### One command to stop what `start.sh` started
+
+Stopping the local stack meant four commands read off the end of a successful start, and the one
+easiest to miss was the one that mattered: a Bot's computer is made by the supervisor rather than by
+compose, so `docker compose down` left a Chromium running per Bot. `bash scripts/stop.sh` stops the
+app, the routine worker, the API server, the compose services and every Bot computer, in that order,
+and is safe to rerun. It kills a port holder only once that process has identified itself as
+OpenBot, so an unrelated process on 3010 is named and left alone rather than killed. Nothing is
+deleted: the database, the Bots' files and their browser profiles are volumes. `--keep-computers`
+leaves the browsers signed in.
 ### The desktop app writes its `.env` readable only by its owner
 
 The desktop `.env` holds `KEY_ENCRYPTION_KEY` and every minted token, and those are now long-lived:
