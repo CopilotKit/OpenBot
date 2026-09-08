@@ -430,7 +430,7 @@ async fn start_stack(
      * had given. Anything the writer owns and did not produce this time is taken out.
      */
     let mut purge = secrets.clone();
-    for key in ["BOT_MODEL"] {
+    for key in ["BOT_MODEL", "AGENT_BOT_MODEL"] {
         if !settings.contains_key(key) {
             purge.insert(key.into(), String::new());
         }

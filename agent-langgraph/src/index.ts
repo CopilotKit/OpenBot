@@ -15,6 +15,7 @@ import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { listenPort } from "../../shared/listen-port";
 import { toLangChainMessages } from "./history";
 import { readReasoningEffort } from "./model-options";
+import { apiKeyOrPlaceholder, KEY_VARIABLE, keyIsRequired } from "./model-key";
 import { streamRun } from "./stream";
 
 /**
@@ -152,12 +153,6 @@ function defaultModelFor(provider: string): string {
  * a missing key should fail in front of whoever is deploying, not as a conversation that errors in
  * front of somebody trying to use it.
  */
-const KEY_VARIABLE: Record<string, string> = {
-  openai: "OPENAI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  google: "GOOGLE_API_KEY",
-};
-
 const keyVariable = KEY_VARIABLE[PROVIDER];
 if (!keyVariable) {
   console.error(
@@ -166,7 +161,8 @@ if (!keyVariable) {
   process.exit(1);
 }
 const API_KEY = process.env[keyVariable]?.trim();
-if (!API_KEY) {
+// Unless an endpoint was named to answer instead: see `keyIsRequired`.
+if (!API_KEY && keyIsRequired(PROVIDER, OPENAI_BASE_URL)) {
   console.error(
     `${keyVariable} is not set, and BOT_PROVIDER=${PROVIDER} needs it. This Bot cannot answer without a model.`,
   );
@@ -200,7 +196,7 @@ function buildModel() {
   if (PROVIDER === "anthropic") {
     return new ChatAnthropic({
       model: MODEL,
-      apiKey: API_KEY,
+      apiKey: apiKeyOrPlaceholder(API_KEY),
       streaming: true,
       ...(ANTHROPIC_BASE_URL ? { anthropicApiUrl: ANTHROPIC_BASE_URL } : {}),
     });
@@ -208,14 +204,14 @@ function buildModel() {
   if (PROVIDER === "google") {
     return new ChatGoogleGenerativeAI({
       model: MODEL,
-      apiKey: API_KEY,
+      apiKey: apiKeyOrPlaceholder(API_KEY),
       streaming: true,
       ...(GOOGLE_BASE_URL ? { baseUrl: GOOGLE_BASE_URL } : {}),
     });
   }
   return new ChatOpenAI({
     model: MODEL,
-    apiKey: API_KEY,
+    apiKey: apiKeyOrPlaceholder(API_KEY),
     streaming: true,
     ...(OPENAI_BASE_URL ? { configuration: { baseURL: OPENAI_BASE_URL } } : {}),
     ...(USE_RESPONSES_API ? { useResponsesApi: true } : {}),

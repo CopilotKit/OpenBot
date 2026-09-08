@@ -164,7 +164,9 @@ pub fn compose(
          * be passed through as a model named "", which is a worse question to ask a provider.
          */
         if !matches!(model.credential, ModelCredential::Compatible { .. }) {
-            env.remove("BOT_MODEL");
+            for key in ["BOT_MODEL", "AGENT_BOT_MODEL"] {
+                env.remove(key);
+            }
         }
     }
     match &model.credential {
@@ -207,6 +209,18 @@ pub fn compose(
             insert_if_given(&mut env, "OPENAI_API_KEY", api_key);
             insert_if_given(&mut env, "OPENAI_BASE_URL", base_url);
             insert_if_given(&mut env, "BOT_MODEL", name);
+            /*
+             * The bundled Bot's own model variable, set to the same name.
+             *
+             * It has one because it hand-writes `/v1/chat/completions`, where `gpt-5.6-*` rejects
+             * function tools, so `docker-compose.yml` pins it to `gpt-5.5` rather than letting the
+             * framework Bot's choice take its tools away. That reasoning is about OpenAI's own
+             * models and does not survive a custom endpoint: `gpt-5.5` is not in the catalogue of
+             * an Ollama or a vLLM, so the pin asked somebody's own server for a model it has never
+             * heard of. The person named exactly one model on that screen and meant it for
+             * whichever Bot answers.
+             */
+            insert_if_given(&mut env, "AGENT_BOT_MODEL", name);
         }
     }
 
@@ -1220,6 +1234,18 @@ mod model_tests {
             compatible.get("BOT_MODEL"),
             Some(&"local-model".to_string())
         );
+        /*
+         * And the bundled Bot's own variable, which is the one that was missed.
+         *
+         * `docker-compose.yml` reads `AGENT_BOT_MODEL` for `agent-bot` rather than `BOT_MODEL`, so
+         * that a model chosen for the framework Bot cannot take its tools away. On a custom
+         * endpoint that pin asked somebody's own server for `gpt-5.5`, which an Ollama or a vLLM
+         * has never heard of.
+         */
+        assert_eq!(
+            compatible.get("AGENT_BOT_MODEL"),
+            Some(&"local-model".to_string())
+        );
 
         let with_a_key = compose(
             &intelligence(),
@@ -1234,10 +1260,12 @@ mod model_tests {
             None,
             &BTreeMap::new(),
         );
-        assert!(
-            !with_a_key.contains_key("BOT_MODEL"),
-            "a key path carried a model name it never chose"
-        );
+        for key in ["BOT_MODEL", "AGENT_BOT_MODEL"] {
+            assert!(
+                !with_a_key.contains_key(key),
+                "a key path carried a model name it never chose: {key}"
+            );
+        }
     }
 
     /// Switching provider does not leave the last one's key behind.

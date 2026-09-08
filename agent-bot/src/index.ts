@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { hasManagedAgentToken } from "../../shared/agent-authorisation";
 import { listenPort } from "../../shared/listen-port";
 import { toProviderMessages } from "./history";
+import { apiKeyOrPlaceholder, keyIsRequired } from "./model-key";
 
 /**
  * The built-in Bot is an AG-UI HTTP service registered the same way as any customer-provided Bot.
@@ -80,15 +81,26 @@ const BASE_URL = process.env.OPENAI_BASE_URL?.trim() || undefined;
  * should fail in front of whoever is deploying, not in front of whoever is asking.
  */
 const API_KEY = process.env.OPENAI_API_KEY?.trim();
-if (!API_KEY) {
+/*
+ * UNLESS AN ENDPOINT WAS NAMED, in which case the endpoint is the model and the key belongs to it.
+ *
+ * Ollama, vLLM, LM Studio and llama.cpp all serve this API with no key at all, and the setup window
+ * offers exactly those by name. Requiring one here refused the whole keyless half of that feature:
+ * the person filled in an address, the app raised this Bot, and it exited on startup with
+ * "OPENAI_API_KEY is not set" about a key their endpoint does not have. The two ends of one feature
+ * disagreeing.
+ *
+ * The check still holds for plain OpenAI, which is the case it was written for.
+ */
+if (!API_KEY && keyIsRequired(BASE_URL)) {
   console.error(
-    "OPENAI_API_KEY is not set. This Bot cannot answer without a model.",
+    "OPENAI_API_KEY is not set, and no OPENAI_BASE_URL names an endpoint that needs no key. This Bot cannot answer without a model.",
   );
   process.exit(1);
 }
 
 const openai = new OpenAI({
-  apiKey: API_KEY,
+  apiKey: apiKeyOrPlaceholder(API_KEY),
   baseURL: BASE_URL,
 });
 
