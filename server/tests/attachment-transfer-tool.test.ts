@@ -6,21 +6,23 @@ import type { ComputerAttachmentBroker } from "../src/computer/attachments";
 
 const attachmentId = "22222222-2222-4222-8222-222222222222";
 const transferId = "11111111-1111-4111-8111-111111111111";
+const renewedTransferId = "33333333-3333-4333-8333-333333333333";
 const sha256 = "a".repeat(64);
 const bytes = Buffer.from("%PDF-1.7 invoice");
 
 function setup(
   owner = "erp",
-  behavior: { readFails?: boolean; uploadStatus?: number } = {},
+  behavior: { readFails?: boolean; uploadStatuses?: number[] } = {},
 ) {
   const calls: {
-    reserved?: unknown;
-    url?: string;
+    reserved: unknown[];
+    urls: string[];
     init?: RequestInit;
     claimed?: unknown[];
     released?: unknown[];
-  } = {};
-  const row = {
+  } = { reserved: [], urls: [] };
+  const reservationIds = new Map<string, string>();
+  let row = {
     id: attachmentId,
     handoffId: "b".repeat(64),
     fromBotId: "collector",
@@ -43,17 +45,30 @@ function setup(
       id === attachmentId && botId === owner ? row : null,
     claimTransfer: async (...args: unknown[]) => {
       calls.claimed = args;
-      return { ...row, externalTransferId: String(args[2]) };
+      row = {
+        ...row,
+        externalTransferId: String(args[2]),
+        updatedAt: new Date(row.updatedAt.getTime() + 1_000),
+      };
+      return row;
     },
     releaseTransfer: async (...args: unknown[]) => {
       calls.released = args;
+      row = {
+        ...row,
+        externalTransferId: null,
+        updatedAt: new Date(row.updatedAt.getTime() + 1_000),
+      };
       return true;
     },
-    markTransferred: async () => ({
-      ...row,
-      state: "transferred" as const,
-      externalTransferId: transferId,
-    }),
+    markTransferred: async (_id: string, externalTransferId: string) => {
+      row = {
+        ...row,
+        state: "transferred" as const,
+        externalTransferId,
+      };
+      return row;
+    },
   } as HandoffAttachmentStore;
   const service = createWorkspaceFileTransferService({
     store,
@@ -74,15 +89,20 @@ function setup(
       token: "encrypted-store-token",
     }),
     reserve: async (input) => {
-      calls.reserved = input;
-      return { transferId };
+      calls.reserved.push(input);
+      let reservedId = reservationIds.get(input.idempotencyKey);
+      if (!reservedId) {
+        reservedId = reservationIds.size === 0 ? transferId : renewedTransferId;
+        reservationIds.set(input.idempotencyKey, reservedId);
+      }
+      return { transferId: reservedId };
     },
     auditStore: { insert: async () => {} } as AuditStore,
     fetchImpl: async (url, init) => {
-      calls.url = String(url);
+      calls.urls.push(String(url));
       calls.init = init;
       return new Response('{"secret":"must not escape"}', {
-        status: behavior.uploadStatus ?? 200,
+        status: behavior.uploadStatuses?.shift() ?? 200,
       });
     },
   });
@@ -95,7 +115,7 @@ describe("approved workspace file transfer", () => {
     expect(await service.preview({ botId: "erp", attachmentId })).toMatchObject(
       { filename: "invoice.pdf", sha256, status: "READY" },
     );
-    expect(calls.url).toBeUndefined();
+    expect(calls.urls).toEqual([]);
   });
 
   test("claims then uploads through the MCP connector principal", async () => {
@@ -106,19 +126,23 @@ describe("approved workspace file transfer", () => {
       attachmentId,
     });
 
-    expect(calls.reserved).toEqual({
-      botId: "erp",
-      actorId: "user-1",
-      filename: "invoice.pdf",
-      contentType: "application/pdf",
-      expectedBytes: bytes.length,
-      sha256,
-      idempotencyKey: `openbot-workspace-transfer:${attachmentId}`,
-    });
+    expect(calls.reserved).toEqual([
+      {
+        botId: "erp",
+        actorId: "user-1",
+        filename: "invoice.pdf",
+        contentType: "application/pdf",
+        expectedBytes: bytes.length,
+        sha256,
+        idempotencyKey: expect.stringContaining(
+          `openbot-workspace-transfer:${attachmentId}:`,
+        ),
+      },
+    ]);
     expect(calls.claimed).toEqual([attachmentId, "erp", transferId]);
-    expect(calls.url).toBe(
+    expect(calls.urls).toEqual([
       `https://erp.test/api/agent-transfers/${transferId}`,
-    );
+    ]);
     expect(calls.init?.headers).toMatchObject({
       authorization: "Bearer encrypted-store-token",
       "content-type": "application/pdf",
@@ -137,7 +161,7 @@ describe("approved workspace file transfer", () => {
         attachmentId,
       }),
     ).rejects.toThrow("not available");
-    expect(calls.url).toBeUndefined();
+    expect(calls.urls).toEqual([]);
   });
 
   test("does not reserve or claim when the verified bytes cannot be read", async () => {
@@ -149,13 +173,13 @@ describe("approved workspace file transfer", () => {
         attachmentId,
       }),
     ).rejects.toThrow("could not be read");
-    expect(calls.reserved).toBeUndefined();
+    expect(calls.reserved).toEqual([]);
     expect(calls.claimed).toBeUndefined();
     expect(calls.released).toBeUndefined();
   });
 
   test("releases a definitively rejected reservation but keeps uncertain failures bound", async () => {
-    const rejected = setup("erp", { uploadStatus: 410 });
+    const rejected = setup("erp", { uploadStatuses: [410] });
     await expect(
       rejected.service.approve({
         botId: "erp",
@@ -165,7 +189,7 @@ describe("approved workspace file transfer", () => {
     ).rejects.toThrow("410");
     expect(rejected.calls.released).toEqual([attachmentId, "erp", transferId]);
 
-    const uncertain = setup("erp", { uploadStatus: 500 });
+    const uncertain = setup("erp", { uploadStatuses: [500] });
     await expect(
       uncertain.service.approve({
         botId: "erp",
@@ -174,5 +198,46 @@ describe("approved workspace file transfer", () => {
       }),
     ).rejects.toThrow("500");
     expect(uncertain.calls.released).toBeUndefined();
+  });
+
+  test("retries an uncertain upload on its bound reservation without reserving again", async () => {
+    const { service, calls } = setup("erp", { uploadStatuses: [500, 200] });
+    await expect(
+      service.approve({ botId: "erp", actorId: "user-1", attachmentId }),
+    ).rejects.toThrow("500");
+
+    const result = await service.approve({
+      botId: "erp",
+      actorId: "user-1",
+      attachmentId,
+    });
+
+    expect(result.transferId).toBe(transferId);
+    expect(calls.reserved).toHaveLength(1);
+    expect(calls.urls).toEqual([
+      `https://erp.test/api/agent-transfers/${transferId}`,
+      `https://erp.test/api/agent-transfers/${transferId}`,
+    ]);
+  });
+
+  test("uses a fresh idempotency key after a terminal reservation rejection", async () => {
+    const { service, calls } = setup("erp", { uploadStatuses: [410, 200] });
+    await expect(
+      service.approve({ botId: "erp", actorId: "user-1", attachmentId }),
+    ).rejects.toThrow("410");
+
+    const result = await service.approve({
+      botId: "erp",
+      actorId: "user-1",
+      attachmentId,
+    });
+
+    expect(result.transferId).toBe(renewedTransferId);
+    expect(calls.reserved).toHaveLength(2);
+    expect(
+      (calls.reserved[0] as { idempotencyKey: string }).idempotencyKey,
+    ).not.toBe(
+      (calls.reserved[1] as { idempotencyKey: string }).idempotencyKey,
+    );
   });
 });

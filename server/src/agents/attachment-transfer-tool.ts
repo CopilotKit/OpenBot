@@ -129,36 +129,45 @@ export function createWorkspaceFileTransferService(options: {
       }
 
       let transferId: string;
-      try {
-        const reserved = await options.reserve({
-          botId: parsed.botId,
-          actorId: input.actorId,
-          filename: row.filename,
-          contentType: row.mediaType,
-          expectedBytes: row.sizeBytes,
-          sha256: row.sha256,
-          idempotencyKey: `openbot-workspace-transfer:${row.id}`,
-        });
-        transferId = uuid.parse(reserved.transferId);
-      } catch {
-        throw new WorkspaceTransferRefusedError(
-          "The ERP could not reserve an upload for this verified attachment.",
-        );
-      }
-
       let claimed: StoredHandoffAttachment;
-      try {
-        // Bind before the external side effect. A concurrent approval carrying another transfer id
-        // loses this conditional update and therefore cannot upload the same bytes elsewhere.
-        claimed = await options.store.claimTransfer(
-          row.id,
-          parsed.botId,
-          transferId,
-        );
-      } catch {
-        throw new WorkspaceTransferRefusedError(
-          "That attachment was claimed by another ERP transfer.",
-        );
+      if (row.externalTransferId) {
+        // A timeout or 5xx leaves the external outcome unknown. Keep using the durable binding: the
+        // ERP accepts an identical replay whether the first PUT stopped before or after committing.
+        transferId = uuid.parse(row.externalTransferId);
+        claimed = row;
+      } else {
+        try {
+          const reserved = await options.reserve({
+            botId: parsed.botId,
+            actorId: input.actorId,
+            filename: row.filename,
+            contentType: row.mediaType,
+            expectedBytes: row.sizeBytes,
+            sha256: row.sha256,
+            // `updatedAt` changes when a definitive rejection releases a binding. That gives the
+            // next attempt a fresh ERP reservation while retries of the same attempt stay idempotent.
+            idempotencyKey: `openbot-workspace-transfer:${row.id}:${row.updatedAt.getTime()}`,
+          });
+          transferId = uuid.parse(reserved.transferId);
+        } catch {
+          throw new WorkspaceTransferRefusedError(
+            "The ERP could not reserve an upload for this verified attachment.",
+          );
+        }
+
+        try {
+          // Bind before the external side effect. A concurrent approval carrying another transfer id
+          // loses this conditional update and therefore cannot upload the same bytes elsewhere.
+          claimed = await options.store.claimTransfer(
+            row.id,
+            parsed.botId,
+            transferId,
+          );
+        } catch {
+          throw new WorkspaceTransferRefusedError(
+            "That attachment was claimed by another ERP transfer.",
+          );
+        }
       }
 
       const release = async () => {
@@ -199,7 +208,7 @@ export function createWorkspaceFileTransferService(options: {
         // These responses are definitive refusals: no successful upload is hidden behind them, so
         // a fresh ERP reservation may safely be bound. Timeouts, conflicts and server errors stay
         // bound because their external outcome may be unknown.
-        if ([400, 401, 403, 404, 410, 422].includes(response.status)) {
+        if ([400, 401, 403, 404, 409, 410, 422].includes(response.status)) {
           await release();
         }
         throw new WorkspaceTransferRefusedError(
