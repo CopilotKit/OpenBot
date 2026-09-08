@@ -387,6 +387,15 @@ export async function exchangeRefreshTokenOverHttp(input: {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: params,
+    /*
+     * A redirect is a refusal, not a detour to be followed.
+     *
+     * `tokenUrl` is pinned in the catalogue because this request carries the deployment's client
+     * secret and somebody's refresh token, and following a 302 would hand both to whatever address
+     * the answer named. Manual leaves the 3xx as the response, which is not `ok`, so it falls into
+     * the refusal below. The same guard the authorization-code redemption in `oauth.ts` uses.
+     */
+    redirect: "manual",
     signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
   });
 

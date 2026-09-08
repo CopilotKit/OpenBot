@@ -16,6 +16,14 @@ model key was trimmed on the way into `.env`; the API URL, the gateway URL and t
 entered on the same screen were not, so Compose passed the space through, the provider rejected the
 credential, and the failure the person saw named neither the space nor the field. All four are now
 trimmed the same way.
+### Example LangGraph and Mastra Bots no longer bind an ephemeral port on empty `PORT=`
+
+An empty `PORT=` in compose or `.env` used to become `NaN` for those two example processes, so they listened on a random port while docs still named 4300/4400. They now use the same `listenPort` helper as `agent-bot`: empty is the documented default, and a prefix typo refuses to start.
+### An empty app port is the default, not a random one
+
+`APP_PORT=` and `SERVER_PORT=` in a compose file or leftover `.env` used to become `NaN` for the Vite
+dev and preview servers, so the UI bound an ephemeral port while the proxy target was `http://localhost:`.
+Both empty values now mean the documented defaults (3010 and 3001), and a non-numeric value refuses to start.
 
 ## 0.0.8
 
