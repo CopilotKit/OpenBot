@@ -58,6 +58,7 @@ const providerTokenPatterns: RegExp[] = [
 const MAX_NODES = 2_000;
 const MAX_DEPTH = 20;
 const MAX_FINDINGS = 20;
+const MAX_STRING_LENGTH = 64 * 1024;
 
 function normalizedFieldName(value: string): string {
   return value.toLowerCase().replace(/[-.\s]/g, "_");
@@ -74,6 +75,18 @@ function categoryForValue(value: string): SensitiveArgumentCategory | null {
     return "provider_token";
   }
   return null;
+}
+
+/**
+ * A path is audit metadata, so it cannot repeat arbitrary argument keys. Keep ordinary schema-like
+ * names useful and replace everything else with a structural marker. In particular, a credential
+ * smuggled in a property name is detected but never copied into the finding that records it.
+ */
+function pathForKey(parent: string, key: string): string {
+  const segment = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(key)
+    ? key
+    : "[property]";
+  return `${parent}.${segment}`;
 }
 
 /**
@@ -96,6 +109,7 @@ export function inspectToolArguments(
       if (nodes > MAX_NODES || depth > MAX_DEPTH) return false;
 
       if (typeof value === "string") {
+        if (value.length > MAX_STRING_LENGTH) return false;
         const category = categoryForValue(value);
         if (category && findings.length < MAX_FINDINGS) {
           findings.push({ category, path });
@@ -113,7 +127,12 @@ export function inspectToolArguments(
       }
 
       for (const [key, child] of Object.entries(value)) {
-        const childPath = path ? `${path}.${key}` : key;
+        if (key.length > MAX_STRING_LENGTH) return false;
+        const keyCategory = categoryForValue(key);
+        const childPath = pathForKey(path, keyCategory ? "[credential]" : key);
+        if (keyCategory && findings.length < MAX_FINDINGS) {
+          findings.push({ category: keyCategory, path: childPath });
+        }
         if (
           sensitiveFieldNames.has(normalizedFieldName(key)) &&
           child !== null &&
