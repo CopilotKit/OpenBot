@@ -286,3 +286,82 @@ describe("an unanswered request to take the wheel", () => {
     expect(control.get().holder).toBe("human");
   });
 });
+
+/**
+ * The other half of the same request, which did not expire at all.
+ *
+ * A request for a secret is an ask like the one above and outlived its run the same way: the label
+ * the Bot wrote is rendered to whoever looks next, and the surface makes no distinction between the
+ * two — `useNeedsYou` lights the same "needs you" on `requested` and on `secretWanted` — so timing
+ * one out and not the other left the Bot flagged for a conversation that ended anyway, now asking
+ * for a password rather than for a hand.
+ *
+ * It is also the prompt where being stale matters more. Answering it types a value into a field
+ * named by a ref from a snapshot the browser has long since moved past, so the person is being asked
+ * for their password by a request nothing is waiting for.
+ */
+describe("an unanswered request for a secret", () => {
+  test("is still shown, and still answerable, inside the window", () => {
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.requestSecret({ ref: "e12", label: "the six-digit code" });
+
+    clock = "2026-08-22T03:05:00.000Z";
+    expect(control.get().secretWanted).toBe("the six-digit code");
+    expect(control.pendingSecret()).toEqual({
+      ref: "e12",
+      snapshotId: undefined,
+    });
+  });
+
+  test("stops being shown once it is stale, and takes the field it named with it", () => {
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.requestSecret({
+      ref: "e12",
+      label: "the six-digit code",
+      snapshotId: 4,
+    });
+
+    clock = "2026-08-22T03:20:00.000Z";
+    const state = control.get();
+    // The label is the part that was being rendered to whoever looked, so it goes, and the field it
+    // named goes with it: half a request is not a thing anything downstream knows how to read.
+    expect(state.secretWanted).toBeUndefined();
+    expect(state.secretRef).toBeUndefined();
+    expect(state.secretSnapshotId).toBeUndefined();
+  });
+
+  test("stops being answerable at the same moment it stops being shown", () => {
+    /*
+     * Asked through `pendingSecret` alone, without a `get` first. That is the call `/human/secret`
+     * makes before it types, and it is the one that decides whether a value supplied now reaches the
+     * page: expiring only on the path the surface polls would leave a prompt that is no longer
+     * displayed still able to accept a password.
+     */
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.requestSecret({ ref: "e12", label: "the six-digit code" });
+
+    clock = "2026-08-22T03:20:00.000Z";
+    expect(control.pendingSecret()).toBeNull();
+  });
+
+  test("a fresh request after a stale one is shown, not swallowed by it", () => {
+    // The expiry must clear its own bookkeeping, or the next request inherits the old timestamp and
+    // is stale on arrival: a Bot that asked twice would be answerable neither time.
+    let clock = "2026-08-22T03:00:00.000Z";
+    const control = createControl(() => clock);
+    control.requestSecret({ ref: "e12", label: "the six-digit code" });
+
+    clock = "2026-08-22T03:20:00.000Z";
+    expect(control.pendingSecret()).toBeNull();
+
+    control.requestSecret({ ref: "e40", label: "the code, again" });
+    expect(control.get().secretWanted).toBe("the code, again");
+    expect(control.pendingSecret()).toEqual({
+      ref: "e40",
+      snapshotId: undefined,
+    });
+  });
+});

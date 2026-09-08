@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A request for a secret no longer follows a Bot into tomorrow's conversations
+
+An unanswered ask to take the wheel stops being shown after ten minutes, because control belongs to a
+Bot's computer rather than to a conversation. The other prompt on that computer, the masked box a Bot
+opens when it needs one value it must not be told, was never given the same treatment: it sat there
+indefinitely, so every later conversation with that Bot was flagged as needing a person and showed a
+request for a password, captioned with a label written for whoever asked half a day earlier. It now
+expires on the same ten-minute window, and stops being answerable at the moment it stops being shown,
+so a value typed into a box left open in an old tab is refused rather than sent to a page whose run
+has ended. A request inside the window is unchanged, and a person actually holding the wheel is still
+never timed out.
+
 ### One command to stop what `start.sh` started
 
 Stopping the local stack meant four commands read off the end of a successful start, and the one

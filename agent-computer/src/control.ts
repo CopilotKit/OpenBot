@@ -76,6 +76,16 @@ export const NO_SECRET_PENDING = "Nothing is waiting for a secret.";
  */
 export const HELP_REQUEST_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * How long an unanswered request for a secret is shown for.
+ *
+ * The same window as the ask above, for the same reason, and named separately because they are two
+ * different prompts and shortening one should not silently shorten the other. A secret request is
+ * the narrower of the two — it names a field on a page — so nothing about it survives the run that
+ * made it any better than a request to take the wheel does.
+ */
+export const SECRET_REQUEST_TTL_MS = HELP_REQUEST_TTL_MS;
+
 export const HUMAN_HAS_CONTROL =
   "A person has control of the computer right now. Wait for them to hand it back before acting.";
 export const TAKE_CONTROL_FIRST =
@@ -97,6 +107,48 @@ export function createControl(
     requested: false,
   };
 
+  /**
+   * When the Bot asked for a secret, so an unanswered request can stop being shown.
+   *
+   * Held here rather than on the state because nothing outside needs it: the surface renders the
+   * label and the field, and a timestamp added to the published state would be one more thing on a
+   * screen that is asking somebody for a password.
+   */
+  let secretRequestedAt: string | undefined;
+
+  /**
+   * Drop a secret request the run that made it has outlived.
+   *
+   * The same argument as the ask above, missed for the other half of it. Control belongs to the
+   * computer rather than to a conversation, so a request nobody answered sat on it for ever: the run
+   * that asked had ended, and every later conversation with that Bot still showed a masked box
+   * wanting "the six-digit code from your authenticator", written for whoever asked and rendered to
+   * whoever looked. The surface makes no distinction — `useNeedsYou` lights the same "needs you" on
+   * `requested` and on `secretWanted` — so expiring one and not the other left the Bot flagged
+   * anyway.
+   *
+   * Expired on read for the same reason the ask is: there is nothing to wake, and the only thing
+   * that cares is whoever looks next. Read by `pendingSecret` too, because that is what decides
+   * whether a value typed now is accepted, and a prompt that has stopped being shown must not still
+   * be answerable.
+   */
+  function dropStaleSecret(): void {
+    if (!state.secretWanted || !secretRequestedAt) return;
+    if (
+      Date.parse(now()) - Date.parse(secretRequestedAt) <=
+      SECRET_REQUEST_TTL_MS
+    ) {
+      return;
+    }
+    secretRequestedAt = undefined;
+    state = {
+      ...state,
+      secretWanted: undefined,
+      secretRef: undefined,
+      secretSnapshotId: undefined,
+    };
+  }
+
   return {
     /**
      * The current state, as the surface polls it. A copy, so a caller cannot mutate the machine.
@@ -105,7 +157,7 @@ export function createControl(
      * expired on read rather than on a timer because there is nothing to wake: the run that asked
      * has ended, and the only thing that cares is whoever looks next.
      *
-     * Only ever the ASK. A person actually holding the wheel is never timed out from under them:
+     * Only ever an ASK. A person actually holding the wheel is never timed out from under them:
      * they may be halfway through typing a code, and taking the browser back mid-sign-in is worse
      * than any stale prompt.
      */
@@ -119,6 +171,7 @@ export function createControl(
         const { reason: _reason, requestedAt: _at, ...rest } = state;
         state = { ...rest, requested: false };
       }
+      dropStaleSecret();
       return { ...state };
     },
 
@@ -152,6 +205,7 @@ export function createControl(
           "Say which field the value goes in, using a ref from your snapshot.",
         );
       }
+      secretRequestedAt = now();
       state = {
         ...state,
         secretWanted:
@@ -170,8 +224,13 @@ export function createControl(
      *
      * Read before typing so the caller can refuse when nothing asked for one: this is what keeps the
      * masked box from being a general-purpose way to type into the page.
+     *
+     * Which is also why the staleness check is here and not only on `get`: a request that has stopped
+     * being shown must stop being answerable at the same moment, or a value typed into a box left
+     * open in an old tab still goes to a page whose run ended.
      */
     pendingSecret(): { ref: string; snapshotId?: number } | null {
+      dropStaleSecret();
       if (!state.secretWanted || !state.secretRef) return null;
       return { ref: state.secretRef, snapshotId: state.secretSnapshotId };
     },
@@ -183,6 +242,7 @@ export function createControl(
      * can try again.
      */
     secretSupplied(): void {
+      secretRequestedAt = undefined;
       state = {
         ...state,
         secretWanted: undefined,
@@ -199,6 +259,9 @@ export function createControl(
      * box left open behind them no longer corresponds to an active request.
      */
     take(): ControlState {
+      // With the pending secret, since the state below drops it: the timestamp is what says one is
+      // outstanding, and leaving it behind a request that is gone is how a stale one comes back.
+      secretRequestedAt = undefined;
       state = {
         holder: "human",
         since: now(),
@@ -217,6 +280,8 @@ export function createControl(
      * secret box left open afterwards is asking for a password nothing is waiting for.
      */
     release(): ControlState {
+      // As above: the request the state below drops takes its timestamp with it.
+      secretRequestedAt = undefined;
       state = {
         holder: "bot",
         since: now(),
