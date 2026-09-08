@@ -121,6 +121,62 @@ pub fn already_given(env_file: &std::path::Path, keys: &[&str]) -> BTreeMap<Stri
     found
 }
 
+/*
+ * ONE READ PER SECRET PER RUN, and this is not a performance note.
+ *
+ * macOS asks the person to authorize every single read of a stored password unless the application
+ * is signed with a stable identity that the item's ACL already trusts. A development build is
+ * re-signed on every compile, so its ACL never matches and every read is a dialog. Reading four
+ * secrets meant four dialogs, and the wizard reads them whenever its screen mounts, so navigating
+ * between the setup screen and OpenBot asked four more times. David: "openbot keeps popping up this
+ * stupid keychain dialog over and over, i have to click deny 4 times each time".
+ *
+ * So the store is read once per name per process and the answer is kept in memory. Absence is
+ * cached too, or a machine with no stored credential would be asked on every mount for a value
+ * that was never there. Writing through keeps the two in step, and forgetting drops the entry.
+ *
+ * This does not remove the first run's prompts: nothing in this process can, because the decision
+ * belongs to the operating system and the signature. A signed and notarised build gets "Always
+ * Allow" once and is never asked again, which is the actual fix and belongs to the release.
+ */
+static REMEMBERED: std::sync::OnceLock<std::sync::Mutex<BTreeMap<String, Option<String>>>> =
+    std::sync::OnceLock::new();
+
+fn cache() -> &'static std::sync::Mutex<BTreeMap<String, Option<String>>> {
+    REMEMBERED.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
+}
+
+/// Read a stored secret, asking the store at most once per name per run.
+pub fn recall(name: &str) -> Option<String> {
+    if let Ok(held) = cache().lock() {
+        if let Some(known) = held.get(name) {
+            return known.clone();
+        }
+    }
+    let found = recall_from_store(name);
+    if let Ok(mut held) = cache().lock() {
+        held.insert(name.to_string(), found.clone());
+    }
+    found
+}
+
+/// Store a secret, and keep the cache in step so the next read does not ask again.
+pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
+    remember_in_store(name, value)?;
+    if let Ok(mut held) = cache().lock() {
+        held.insert(name.to_string(), Some(value.to_string()));
+    }
+    Ok(())
+}
+
+/// Drop a secret from the store and from the cache.
+pub fn forget(name: &str) {
+    forget_in_store(name);
+    if let Ok(mut held) = cache().lock() {
+        held.insert(name.to_string(), None);
+    }
+}
+
 /// Read back what was stored, for the settings named.
 pub fn recall_all(keys: &[&str]) -> BTreeMap<String, String> {
     let mut found = BTreeMap::new();
@@ -147,20 +203,20 @@ pub fn recall_all(keys: &[&str]) -> BTreeMap<String, String> {
  * path has neither a length limit nor an argv.
  */
 #[cfg(target_os = "macos")]
-pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
+fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
     // Set, not add: a second run updates the item rather than colliding with the first.
     security_framework::passwords::set_generic_password(SERVICE, name, value.as_bytes())
         .map_err(|error| keychain_problem(error.to_string()))
 }
 
 #[cfg(target_os = "macos")]
-pub fn recall(name: &str) -> Option<String> {
+fn recall_from_store(name: &str) -> Option<String> {
     let raw = security_framework::passwords::get_generic_password(SERVICE, name).ok()?;
     String::from_utf8(raw).ok()
 }
 
 #[cfg(target_os = "macos")]
-pub fn forget(name: &str) {
+fn forget_in_store(name: &str) {
     let _ = security_framework::passwords::delete_generic_password(SERVICE, name);
 }
 
@@ -180,7 +236,7 @@ fn keychain_problem(detail: String) -> Problem {
  * and the ciphertext leaves on stdout, so neither is ever an argument.
  */
 #[cfg(target_os = "windows")]
-pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
+fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
     const PROTECT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $plain = [Console]::In.ReadToEnd()
@@ -196,7 +252,7 @@ $sealed = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, 'Current
 }
 
 #[cfg(target_os = "windows")]
-pub fn recall(name: &str) -> Option<String> {
+fn recall_from_store(name: &str) -> Option<String> {
     const UNPROTECT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $sealed = [Convert]::FromBase64String([Console]::In.ReadToEnd().Trim())
@@ -211,7 +267,7 @@ $bytes = [Security.Cryptography.ProtectedData]::Unprotect($sealed, $null, 'Curre
 }
 
 #[cfg(target_os = "windows")]
-pub fn forget(name: &str) {
+fn forget_in_store(name: &str) {
     if let Ok(dir) = vault_dir() {
         let _ = std::fs::remove_file(dir.join(format!("{name}.dpapi")));
     }
@@ -257,7 +313,7 @@ fn dpapi_problem(detail: String) -> Problem {
  * daemon is missing would fail more people than the file protects.
  */
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
+fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
     let path = vault_dir()?.join(format!("{name}.secret"));
     std::fs::write(&path, value).map_err(|error| {
         Problem::with(
@@ -270,14 +326,14 @@ pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-pub fn recall(name: &str) -> Option<String> {
+fn recall_from_store(name: &str) -> Option<String> {
     std::fs::read_to_string(vault_dir().ok()?.join(format!("{name}.secret")))
         .ok()
         .map(|value| value.trim().to_string())
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-pub fn forget(name: &str) {
+fn forget_in_store(name: &str) {
     if let Ok(dir) = vault_dir() {
         let _ = std::fs::remove_file(dir.join(format!("{name}.secret")));
     }
@@ -309,6 +365,31 @@ fn owner_only(path: &std::path::Path) {
 
 #[cfg(all(not(unix), not(target_os = "macos")))]
 fn owner_only(_path: &std::path::Path) {}
+
+#[cfg(test)]
+mod cache_tests {
+    /// The store is asked once per name, then not again.
+    ///
+    /// The failure this pins is not a slow read, it is a person clicking Deny four times every
+    /// time a screen mounts: macOS authorizes each read of a stored password separately unless the
+    /// build's signature is one the item already trusts, and a development build's never is.
+    #[test]
+    fn a_secret_is_read_from_the_store_once_per_run() {
+        let name = format!("OPENBOT_TEST_CACHE_{}", std::process::id());
+        // Absent to begin with, and the absence is remembered rather than asked again.
+        assert_eq!(super::recall(&name), None);
+        assert_eq!(super::recall(&name), None);
+
+        // A write goes through and updates what a read sees, without asking the store.
+        super::remember(&name, "a-value").expect("the store should accept a write");
+        assert_eq!(super::recall(&name).as_deref(), Some("a-value"));
+        assert_eq!(super::recall(&name).as_deref(), Some("a-value"));
+
+        // And forgetting is reflected in both.
+        super::forget(&name);
+        assert_eq!(super::recall(&name), None);
+    }
+}
 
 #[cfg(test)]
 mod tests {
