@@ -10,7 +10,7 @@ import {
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
-import { listenPort } from "../../shared/listen-port";
+import { listenPort } from "../../../shared/listen-port";
 
 /**
  * A Bot written in LangGraph.

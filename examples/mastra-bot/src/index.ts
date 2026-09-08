@@ -3,7 +3,7 @@ import { EventEncoder } from "@ag-ui/encoder";
 import { openai } from "@ai-sdk/openai";
 import { Agent } from "@mastra/core/agent";
 import { serve } from "bun";
-import { listenPort } from "../../shared/listen-port";
+import { listenPort } from "../../../shared/listen-port";
 
 /**
  * A Bot written in Mastra.
