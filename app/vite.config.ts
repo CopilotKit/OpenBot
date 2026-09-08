@@ -1,9 +1,63 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { listenPort } from "../shared/listen-port";
+
+/*
+ * Announce the server's port to the two runtimes that serve the app through Vite, and to no other.
+ *
+ * The dev server and the desktop's `vite preview` serve the app on APP_PORT and proxy `/api` to the
+ * server, but under bun that proxy cannot carry a WebSocket (oven-sh/bun#24127), so the app's
+ * sockets address the server directly on this port. `socketUrl` reads it off `window`.
+ *
+ * It is deliberately kept OUT of the built HTML. In production the server serves that same HTML on
+ * its own origin and answers the upgrade there, so the socket is same-origin; a baked port would
+ * point it at a container port an ingress terminating TLS on 443 does not expose, which is how a
+ * build-time constant broke the fleet. The dev injection is gated on `ctx.server` so it never runs
+ * during `vite build`; `vite preview` serves the static build unchanged and so is handled by its
+ * own middleware below.
+ */
+function announceServerPort(port: number): Plugin {
+  const tag = `<script>window.__OPENBOT_WS_PORT__=${JSON.stringify(String(port))};</script>`;
+  const inject = (html: string) =>
+    html.includes("__OPENBOT_WS_PORT__")
+      ? html
+      : html.replace("</head>", `    ${tag}\n  </head>`);
+  return {
+    name: "openbot-announce-server-port",
+    transformIndexHtml(html, ctx) {
+      return ctx.server ? inject(html) : html;
+    },
+    configurePreviewServer(server) {
+      const indexPath = path.resolve(__dirname, "dist", "index.html");
+      server.middlewares.use((request, response, next) => {
+        const requestPath = (request.url ?? "/").split("?")[0];
+        // Only the SPA entry, and this middleware runs before Vite's own — so everything Vite must
+        // still handle has to fall through: a non-GET, an `/api` call the proxy carries to the
+        // server (extension-less GETs like `/api/bots` included), and an asset with a file
+        // extension. What is left is a navigation, which gets the app shell with the port announced.
+        if (
+          request.method !== "GET" ||
+          requestPath.startsWith("/api") ||
+          /\.[^/]+$/.test(requestPath)
+        ) {
+          return next();
+        }
+        let html: string;
+        try {
+          html = readFileSync(indexPath, "utf8");
+        } catch {
+          return next();
+        }
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(inject(html));
+      });
+    },
+  };
+}
 
 /*
  * The same address and the same proxy whether this is the dev server or the preview of a build.
@@ -31,17 +85,19 @@ const serving = {
   port: appPort.port,
   strictPort: true,
   proxy: {
-    // `ws: true` is required for the live screen. Without it Vite answers the upgrade request with
-    // the app's HTML and the socket fails with an opaque error that looks like a server problem.
     "/api": {
       target: `http://localhost:${apiPort.port}`,
-      ws: true,
     },
   },
 };
 
 export default defineConfig({
-  plugins: [tanstackRouter(), react(), tailwindcss()],
+  plugins: [
+    announceServerPort(apiPort.port),
+    tanstackRouter(),
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
