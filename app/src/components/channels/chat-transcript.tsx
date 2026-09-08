@@ -3,7 +3,7 @@ import {
   useRenderActivityMessage,
   useRenderToolCall,
 } from "@copilotkit/react-core/v2";
-import { IconBox } from "@tabler/icons-react";
+import { IconBox, IconClock } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Streamdown } from "streamdown";
@@ -23,6 +23,7 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
+import { readFiring } from "@/lib/channels/routine-firing";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { readToolName } from "@/lib/plugins/tool-name";
@@ -381,6 +382,32 @@ function Arriving({
 }
 
 /**
+ * A turn a schedule asked for, drawn as the event it is.
+ *
+ * The frame around a firing is addressed to the model — see `shared/routine-firing.ts` — and it
+ * reached the transcript wearing `role: "user"`, which drew it as a muted bubble on the right, in
+ * the exact style of something the person typed. Somebody reading back through a channel found
+ * three sentences of instructions to a model in their own voice, telling their Bot what it may not
+ * do. For a product whose whole claim is that a Bot is a coworker you can hold to account, a record
+ * that misattributes who said what is the one thing it cannot afford.
+ *
+ * So: start-aligned and muted, because this is not the person speaking; the clock, because that is
+ * what a routine already is everywhere else in the app; and the instruction ALONE, because that is
+ * the part a person wrote and the only part addressed to them.
+ */
+function RoutineFiring({ instruction }: { instruction: string }) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-2 text-muted-foreground text-sm">
+      <IconClock aria-hidden className="size-4 shrink-0 translate-y-0.5" />
+      <span className="min-w-0">
+        <span className="font-medium">Routine ran.</span>{" "}
+        <span className="whitespace-pre-wrap">{instruction}</span>
+      </span>
+    </div>
+  );
+}
+
+/**
  * One drawn message, and it is memoised on PRIMITIVES ON PURPOSE.
  *
  * A streamed answer changes `messages` on every chunk, and `toVisibleChatItems` builds fresh objects
@@ -405,6 +432,23 @@ const TranscriptMessage = memo(function TranscriptMessage({
   text: string;
 }) {
   const isUser = role === "user";
+  /*
+   * Checked before anything else a person's message gets. A firing is not a person's message: the
+   * chip split, the end alignment and the bubble are all wrong for it, and each one of them would
+   * have to learn about firings separately if this branched any later.
+   */
+  const firing = isUser ? readFiring(text) : null;
+  if (firing !== null) {
+    return (
+      <MessageRow align="start">
+        <MessageContent>
+          <Arriving delay={delay}>
+            <RoutineFiring instruction={firing} />
+          </Arriving>
+        </MessageContent>
+      </MessageRow>
+    );
+  }
   const align = isUser ? "end" : "start";
   const invoked = isUser ? splitSkillChip(text, commandNames) : null;
 
