@@ -121,6 +121,68 @@ function isAgentInputObject(input: unknown): input is AgentInputObject {
 }
 
 /**
+ * Parse and validate the headers a person attaches to a connection test.
+ *
+ * Unvalidated, the route cast any object straight into the probe `fetch`, so an array value, a
+ * nested object, or a `__proto__` key travelled into the network call and threw a TypeError 500 —
+ * or probed header handling the deployment never meant to exercise. Names follow the same rule as
+ * the stored agent auth header; values must be strings; the whole map is capped so a pasted dump
+ * cannot balloon the probe.
+ */
+export function parseConnectionHeaders(
+  input: unknown,
+):
+  | { ok: true; value: Record<string, string> | undefined }
+  | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: undefined };
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return { ok: false, error: "Headers must be an object of name to value." };
+  }
+  /*
+   * A JSON body carrying `__proto__` does not arrive as an own property: `JSON.parse` sets the
+   * object's prototype instead, so `Object.entries` never sees it and a name block-list below
+   * would pass it straight through into the probe fetch. Refuse any headers object whose prototype
+   * is not a plain one before reading entries.
+   */
+  if (Object.getPrototypeOf(input) !== Object.prototype) {
+    return { ok: false, error: "Headers must be an object of name to value." };
+  }
+  const entries = Object.entries(input);
+  if (entries.length > 32) {
+    return { ok: false, error: "Headers must have at most 32 entries." };
+  }
+  const headers: Record<string, string> = {};
+  for (const [name, value] of entries) {
+    if (
+      name === "__proto__" ||
+      name === "constructor" ||
+      name === "prototype" ||
+      !/^[A-Za-z0-9-]+$/.test(name) ||
+      name.length > 64
+    ) {
+      return {
+        ok: false,
+        error: `That is not a valid header name: ${name.slice(0, 64)}.`,
+      };
+    }
+    if (typeof value !== "string") {
+      return {
+        ok: false,
+        error: `Header "${name}" must be a string value.`,
+      };
+    }
+    if (value.length > 4096) {
+      return {
+        ok: false,
+        error: `Header "${name}" must be at most 4096 characters.`,
+      };
+    }
+    headers[name] = value;
+  }
+  return { ok: true, value: entries.length === 0 ? undefined : headers };
+}
+
+/**
  * The local development actor, which is not a row in `users`.
  *
  * The audit table has a foreign key to that table, so writing this id would fail the constraint and
@@ -306,10 +368,11 @@ export function createAgentRoutes(
       endpoint?: unknown;
       headers?: unknown;
     } | null;
-    const headers =
-      body?.headers && typeof body.headers === "object"
-        ? (body.headers as Record<string, string>)
-        : undefined;
+    const parsed = parseConnectionHeaders(body?.headers);
+    if (!parsed.ok) {
+      return context.json({ error: parsed.error }, 400);
+    }
+    const headers = parsed.value;
     const result = await testAgentConnection(body?.endpoint, {
       headers,
       allowPrivateHosts,

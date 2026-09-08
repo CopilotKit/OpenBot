@@ -10,6 +10,7 @@ import {
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 import { serve } from "bun";
+import { listenPort } from "../../../shared/listen-port";
 
 /**
  * A Bot written in LangGraph.
@@ -26,7 +27,12 @@ import { serve } from "bun";
  * `computer_navigate` and still drives a governed browser.
  */
 
-const PORT = Number.parseInt(process.env.PORT ?? "4300", 10);
+const resolvedPort = listenPort(process.env.PORT, 4300);
+if (!resolvedPort.ok) {
+  console.error(resolvedPort.reason);
+  process.exit(1);
+}
+const PORT = resolvedPort.port;
 const MODEL = process.env.BOT_MODEL ?? "gpt-5.5";
 /**
  * `gpt-5.6-*` rejects function tools on `/v1/chat/completions` and needs the Responses API, which
