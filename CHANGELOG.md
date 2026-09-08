@@ -18,6 +18,18 @@ and is safe to rerun. It kills a port holder only once that process has identifi
 OpenBot, so an unrelated process on 3010 is named and left alone rather than killed. Nothing is
 deleted: the database, the Bots' files and their browser profiles are volumes. `--keep-computers`
 leaves the browsers signed in.
+### Two workers on one machine can no longer fire the same routine twice
+
+Every process that claims work from the shared queue named itself after its hostname, and the queue
+tells two claimants apart by that name alone. Two processes on one machine therefore had the same
+name, so the lease meant nothing between them: one whose lease had lapsed was still told the item was
+its own, and both went on to dispatch it. A routine fired that way opens two runs and sends the same
+scheduled message twice. Nothing stops two workers running on one machine — the worker binds no port,
+and `scripts/start.sh` looks for a process it does not start the way `bun run dev` does. The name now
+always carries a random suffix, so a second process is a different claimant. It also keeps the
+hostname, so a stuck claim still traces back to the machine holding it, and a blank `HOSTNAME` is no
+longer read as a name — which had made every replica in a deployment share one.
+
 ### The desktop app writes its `.env` readable only by its owner
 
 The desktop `.env` holds `KEY_ENCRYPTION_KEY` and every minted token, and those are now long-lived:

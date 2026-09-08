@@ -97,6 +97,7 @@ import {
   startWorkOfferedListener,
   type WorkOfferedListener,
 } from "./work/queue";
+import { workOwner } from "../../shared/work-owner";
 
 /**
  * Who is asking, for a CopilotKit request.
@@ -893,7 +894,7 @@ let workOfferedListener: WorkOfferedListener | undefined;
 if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
   const runner = createHandoffRunner({
     queue: createWorkQueue(database),
-    owner: `handoff/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
+    owner: workOwner("handoff"),
     auditStore: bootAuditStore,
     /*
      * The signed statement of the run the addressed Bot is about to start, carrying how deep the
@@ -1044,7 +1045,7 @@ if (config.handoff.maxDepth > 0 && config.handoff.maxPerRun > 0) {
  */
 const reaper = createHandoffRunner({
   queue: createWorkQueue(database),
-  owner: `reaper/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
+  owner: workOwner("reaper"),
   sign: () => "",
   auditStore: bootAuditStore,
   // Never called: `reap` deletes rows by age and claims nothing.
@@ -1083,7 +1084,7 @@ const channelSummaries = {
     model: tenantPackage.model.defaultModel,
     resolveApiKey: resolveRuntimeModelApiKey,
   }),
-  owner: `summariser/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`,
+  owner: workOwner("summariser"),
 };
 repeatAfterEach(async () => {
   try {

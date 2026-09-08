@@ -10,7 +10,6 @@
  * reported and left for the next sweep, because a computer still running costs money rather than
  * losing anything, and a failing CronJob that pages somebody at 3am should mean something worse.
  */
-import { randomUUID } from "node:crypto";
 import { createComputerProvider } from "../src/computer/provider";
 import { loadConfig } from "../src/config";
 import { createDatabase } from "../src/db/client";
@@ -20,6 +19,7 @@ import {
   suspendClaimedComputers,
 } from "../src/work/culler";
 import { createWorkQueue } from "../src/work/queue";
+import { workOwner } from "../../shared/work-owner";
 
 const config = loadConfig(process.env);
 if (!config.computer) {
@@ -38,7 +38,7 @@ const queue = createWorkQueue(database);
 const provider = createComputerProvider(config.computer);
 
 // A name for the lease, so a stuck claim can be traced back to the pod that took it.
-const owner = `culler/${process.env.HOSTNAME ?? randomUUID().slice(0, 8)}`;
+const owner = workOwner("culler");
 
 try {
   const options = {
