@@ -130,6 +130,12 @@ export const routines = pgTable(
   ],
 );
 
+export const routineSweeps = pgTable("routine_sweeps", {
+  id: text("id").primaryKey(),
+  sweptAt: timestamp("swept_at", { withTimezone: true }).notNull().defaultNow(),
+  owner: text("owner"),
+});
+
 /** One row per firing, which is what the page's "last ran" and the fatigue rule read. */
 export const routineRuns = pgTable(
   "routine_runs",

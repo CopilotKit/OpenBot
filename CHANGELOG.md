@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The Routines page says when nothing is there to run them
+
+A routine needs a second process to fire it, and a deployment that never started one looked exactly
+like a deployment that had: the routine was stored, its schedule was computed, and the page showed it
+waiting with a next run time, right up until nobody's standup notes arrived. Every sweep now records
+that it happened, and the page reads that record. Somebody with standing routines and nothing
+sweeping is told so — that no worker has ever checked in, or when the last one did — instead of
+being shown a page that looks correct. The window is the fifteen minutes a routine's own schedule
+already has as its floor, so a gap longer than that is one no routine could have wanted.
+
 ### A boundary rule can ask what started a run, not only whose authority it carries
 
 A routine's turn goes through exactly the path a person's chat turn does, as the routine's owner:
