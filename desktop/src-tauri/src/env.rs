@@ -306,7 +306,20 @@ pub fn write(path: &Path, owned: &BTreeMap<String, String>) -> std::io::Result<(
         out.push_str(&format!("{key}={value}\n"));
     }
 
-    std::fs::write(path, out)
+    std::fs::write(path, &out)?;
+
+    // The file holds `KEY_ENCRYPTION_KEY` and every minted token, and those are now long-lived: the
+    // first start writes them and every later start reads them back. `fs::write` creates the file at
+    // the process umask, which is `0644` by default, so on a shared macOS or Linux box another local
+    // user could read the vault key. Narrow it to the owner. Windows has no equivalent mode, and its
+    // single-user desktop profile is already the boundary, so this is Unix-only.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -395,6 +408,26 @@ HTTPS_PROXY=http://proxy:8080
         assert!(text.contains("HTTPS_PROXY=http://proxy:8080"));
         assert_eq!(text.matches("# our proxy needs this").count(), 1);
         assert_eq!(text.matches(BANNER).count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_written_file_is_readable_only_by_its_owner() {
+        // It holds KEY_ENCRYPTION_KEY and every minted token, so another local user must not be able
+        // to read it off a shared machine.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("openbot-env-perms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+
+        let mut owned = BTreeMap::new();
+        owned.insert("KEY_ENCRYPTION_KEY".to_string(), "abc=".to_string());
+        write(&path, &owned).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The desktop app writes its `.env` readable only by its owner
+
+The desktop `.env` holds `KEY_ENCRYPTION_KEY` and every minted token, and those are now long-lived:
+the first start writes them and every later start reads them back. It was created at the default
+umask (`0644`), so on a shared macOS or Linux machine another local user could read the vault key off
+disk. The file is now narrowed to `0600` after it is written. Windows has no equivalent mode and its
+single-user desktop profile is already the boundary, so the change is Unix-only.
+
 ### The desktop app stops adding a banner to `.env` on every start
 
 `env::write` keeps the lines it did not write, and its own header comment is one of them, so each
