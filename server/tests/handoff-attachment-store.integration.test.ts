@@ -131,5 +131,15 @@ describe("handoff attachment metadata", () => {
     );
     const row = await store.ownedByRecipient(id, ids.erp);
     expect([first, second]).toContain(row?.externalTransferId);
+    expect(
+      await store.releaseTransfer(
+        id,
+        ids.erp,
+        row?.externalTransferId ?? "missing",
+      ),
+    ).toBe(true);
+    expect(
+      (await store.ownedByRecipient(id, ids.erp))?.externalTransferId,
+    ).toBeNull();
   });
 });

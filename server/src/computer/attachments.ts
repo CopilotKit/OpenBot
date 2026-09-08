@@ -149,6 +149,7 @@ export function createComputerAttachmentBroker(options: {
       }
 
       const copied: HandoffAttachment[] = [];
+      const attempted: HandoffAttachment[] = [];
       let totalBytes = 0;
       try {
         for (const path of input.paths) {
@@ -161,6 +162,17 @@ export function createComputerAttachmentBroker(options: {
               "The attached files exceed the handoff byte limit.",
             );
           }
+          const attachment: HandoffAttachment = {
+            id: attachmentId,
+            filename,
+            mediaType,
+            sizeBytes,
+            sha256,
+            path: expectedPath(input.handoffId, attachmentId, filename),
+          };
+          // From this point the import may have happened even if its response never reaches us.
+          // Put it in the rollback set before making the request so uncertainty stays trackable.
+          attempted.push(attachment);
           const imported = await request(
             input.toBotId,
             "/files/attachments/import",
@@ -178,14 +190,6 @@ export function createComputerAttachmentBroker(options: {
             },
           );
           const received = (await imported.json()) as Record<string, unknown>;
-          const attachment: HandoffAttachment = {
-            id: attachmentId,
-            filename,
-            mediaType,
-            sizeBytes,
-            sha256,
-            path: expectedPath(input.handoffId, attachmentId, filename),
-          };
           if (
             received.attachmentId !== attachment.id ||
             received.filename !== attachment.filename ||
@@ -203,7 +207,7 @@ export function createComputerAttachmentBroker(options: {
         return copied;
       } catch (error) {
         const rollback = await Promise.allSettled(
-          copied.map((attachment) =>
+          attempted.map((attachment) =>
             remove({
               botId: input.toBotId,
               handoffId: input.handoffId,
@@ -211,12 +215,11 @@ export function createComputerAttachmentBroker(options: {
             }),
           ),
         );
-        const orphaned = copied.filter((_, index) => {
+        const orphaned = attempted.filter((_, index) => {
           const result = rollback[index];
-          return (
-            result?.status === "rejected" ||
-            (result?.status === "fulfilled" && result.value.deleted !== true)
-          );
+          // A fulfilled false is positive evidence that no final file existed. Only a failed delete
+          // leaves the outcome unknown and therefore needs durable cleanup metadata.
+          return result?.status === "rejected";
         });
         throw new AttachmentCopyError(
           error instanceof Error ? error.message : "The file copy failed.",

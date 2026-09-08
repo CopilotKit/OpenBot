@@ -201,7 +201,11 @@ describe("the rendered Netsfera production overlay", () => {
     expect(changedPaths(base, overlay)).toEqual([
       "build.args.TENANT_PACKAGE_DIR",
       "environment.AGENT_COMPUTER_POLICY",
+      "environment.HANDOFF_ATTACHMENTS_ENABLED",
+      "environment.HANDOFF_ATTACHMENT_PAIRS",
       "environment.TENANT_PACKAGE_DIR",
+      "environment.WORKSPACE_TRANSFER_CLEANUP_DRY_RUN",
+      "environment.WORKSPACE_TRANSFER_NETSFERA_ERP_SERVER_ID",
     ]);
   });
 

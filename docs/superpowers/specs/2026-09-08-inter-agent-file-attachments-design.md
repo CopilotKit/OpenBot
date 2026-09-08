@@ -140,11 +140,12 @@ stores the bounded bytes. Jefe ERP then uses the existing `erp_documents_transfe
 `erp_expenses_ingest` tools. Ingestion reuses exact-duplicate detection and durable OCR scheduling;
 the existing OCR worker remains asynchronous.
 
-Jefe ERP re-reads the affected movement before approval and displays invoice metadata, movement,
-attachment hash, upload, and proposed association. One `askApproval` authorizes that exact upload
-and association. If association must wait for OCR, it remains authorized only while document hash,
-amount, currency, movement, and proposed effects remain unchanged. Otherwise it becomes stale and
-requires a fresh approval. Fiscal confirmation and posting remain separate.
+Jefe ERP displays the trusted attachment hash and reserved transfer before approval. One
+`askApproval` authorizes exactly that binary upload; it does not authorize a bank
+association. After OCR, reconciliation uses the ERP's existing reviewed-operation contract, which
+re-reads the affected movement and binds document hash, amount, currency, movement, fingerprint and
+proposed effects to its own approval. A changed fingerprint becomes stale and requires fresh
+approval. Fiscal confirmation and posting remain separate approvals as well.
 
 OpenBot retains the recipient copy after upload so a model-authored completion claim can never delete
 the only recoverable bytes. A durable cleanup sweep deletes inbox attachments after 30 days while
@@ -214,7 +215,7 @@ deleted bytes.
 - Jefe ERP receives a verified local inbox path while all other Bot workspaces remain isolated.
 - A retry cannot duplicate or silently replace an attachment.
 - Neither model sees file bytes, connector credentials, arbitrary upload URLs, or absolute paths.
-- One authenticated approval covers the exact upload and proposed association for selected files.
+- One authenticated approval covers the exact upload; association remains a separate ERP-reviewed operation.
 - The ERP verifies and ingests the same SHA-256 that OpenBot copied.
 - Uploaded and retryable files remain recoverable until the bounded cleanup window.
 - Unresolved files expire after 30 days and their metadata-only audit remains.

@@ -9,8 +9,16 @@ const transferId = "11111111-1111-4111-8111-111111111111";
 const sha256 = "a".repeat(64);
 const bytes = Buffer.from("%PDF-1.7 invoice");
 
-function setup(owner = "erp") {
-  const calls: { url?: string; init?: RequestInit; claimed?: unknown[] } = {};
+function setup(
+  owner = "erp",
+  behavior: { readFails?: boolean; uploadStatus?: number } = {},
+) {
+  const calls: {
+    url?: string;
+    init?: RequestInit;
+    claimed?: unknown[];
+    released?: unknown[];
+  } = {};
   const row = {
     id: attachmentId,
     handoffId: "b".repeat(64),
@@ -36,6 +44,10 @@ function setup(owner = "erp") {
       calls.claimed = args;
       return { ...row, externalTransferId: String(args[2]) };
     },
+    releaseTransfer: async (...args: unknown[]) => {
+      calls.released = args;
+      return true;
+    },
     markTransferred: async () => ({
       ...row,
       state: "transferred" as const,
@@ -45,13 +57,16 @@ function setup(owner = "erp") {
   const service = createWorkspaceFileTransferService({
     store,
     broker: {
-      read: async () => ({
-        bytes,
-        filename: row.filename,
-        mediaType: row.mediaType,
-        sizeBytes: row.sizeBytes,
-        sha256: row.sha256,
-      }),
+      read: async () => {
+        if (behavior.readFails) throw new Error("computer unavailable");
+        return {
+          bytes,
+          filename: row.filename,
+          mediaType: row.mediaType,
+          sizeBytes: row.sizeBytes,
+          sha256: row.sha256,
+        };
+      },
     } as unknown as ComputerAttachmentBroker,
     connection: async () => ({
       url: "https://erp.test/api/mcp",
@@ -61,7 +76,9 @@ function setup(owner = "erp") {
     fetchImpl: async (url, init) => {
       calls.url = String(url);
       calls.init = init;
-      return new Response('{"secret":"must not escape"}', { status: 200 });
+      return new Response('{"secret":"must not escape"}', {
+        status: behavior.uploadStatus ?? 200,
+      });
     },
   });
   return { service, calls };
@@ -109,5 +126,42 @@ describe("approved workspace file transfer", () => {
       }),
     ).rejects.toThrow("not available");
     expect(calls.url).toBeUndefined();
+  });
+
+  test("releases a claim when failure is definitely before upload", async () => {
+    const { service, calls } = setup("erp", { readFails: true });
+    await expect(
+      service.approve({
+        botId: "erp",
+        actorId: "user-1",
+        transferId,
+        attachmentId,
+      }),
+    ).rejects.toThrow("could not be read");
+    expect(calls.released).toEqual([attachmentId, "erp", transferId]);
+  });
+
+  test("releases a definitively rejected reservation but keeps uncertain failures bound", async () => {
+    const rejected = setup("erp", { uploadStatus: 410 });
+    await expect(
+      rejected.service.approve({
+        botId: "erp",
+        actorId: "user-1",
+        transferId,
+        attachmentId,
+      }),
+    ).rejects.toThrow("410");
+    expect(rejected.calls.released).toEqual([attachmentId, "erp", transferId]);
+
+    const uncertain = setup("erp", { uploadStatus: 500 });
+    await expect(
+      uncertain.service.approve({
+        botId: "erp",
+        actorId: "user-1",
+        transferId,
+        attachmentId,
+      }),
+    ).rejects.toThrow("500");
+    expect(uncertain.calls.released).toBeUndefined();
   });
 });

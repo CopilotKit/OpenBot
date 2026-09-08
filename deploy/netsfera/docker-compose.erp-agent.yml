@@ -8,6 +8,10 @@ services:
         TENANT_PACKAGE_DIR: ../examples/netsfera
     environment:
       TENANT_PACKAGE_DIR: ../examples/netsfera
+      HANDOFF_ATTACHMENTS_ENABLED: ${HANDOFF_ATTACHMENTS_ENABLED:-false}
+      HANDOFF_ATTACHMENT_PAIRS: ${HANDOFF_ATTACHMENT_PAIRS:-}
+      WORKSPACE_TRANSFER_NETSFERA_ERP_SERVER_ID: ${WORKSPACE_TRANSFER_NETSFERA_ERP_SERVER_ID:-}
+      WORKSPACE_TRANSFER_CLEANUP_DRY_RUN: ${WORKSPACE_TRANSFER_CLEANUP_DRY_RUN:-true}
       # The current loader accepts AGENT_COMPUTER_POLICY as JSON, not a file path. The rendered
       # overlay is structurally compared with agent-computer-policy.json by netsfera-overlay.test.ts.
       AGENT_COMPUTER_POLICY: >-

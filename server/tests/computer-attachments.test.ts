@@ -198,4 +198,39 @@ describe("copying attachments between Bot computers", () => {
     expect((error as AttachmentCopyError).orphaned).toHaveLength(1);
     expect((error as AttachmentCopyError).orphaned[0]?.sha256).toBe(sha256);
   });
+
+  test("tracks the current import when its receipt is lost and cleanup is uncertain", async () => {
+    const broker = createComputerAttachmentBroker({
+      provider: provider(),
+      id: () => "11111111-1111-4111-8111-111111111111",
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/export")) return exported();
+        if (url.endsWith("/import")) {
+          // The target may have committed the bytes before this malformed response arrived.
+          return Response.json({ accepted: true });
+        }
+        if (url.endsWith("/delete")) throw new Error("connection lost");
+        throw new Error(`Unexpected request ${url}`);
+      },
+    });
+
+    const error = await broker
+      .copy({
+        handoffId: "d".repeat(64),
+        fromBotId: "collector",
+        toBotId: "erp",
+        paths: ["downloads/invoice.pdf"],
+      })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(AttachmentCopyError);
+    expect((error as AttachmentCopyError).orphaned).toMatchObject([
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        sha256,
+        path: `inbox/${"d".repeat(64)}/11111111-1111-4111-8111-111111111111/invoice.pdf`,
+      },
+    ]);
+  });
 });

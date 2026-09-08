@@ -20,6 +20,10 @@ if ! jq -e --arg expected_policy "$expected_policy" '
   .services.openbot as $openbot
   | ($openbot.build.args.TENANT_PACKAGE_DIR == "../examples/netsfera")
   and ($openbot.environment.TENANT_PACKAGE_DIR == "../examples/netsfera")
+  and ($openbot.environment.HANDOFF_ATTACHMENTS_ENABLED != null)
+  and ($openbot.environment.HANDOFF_ATTACHMENT_PAIRS != null)
+  and ($openbot.environment.WORKSPACE_TRANSFER_NETSFERA_ERP_SERVER_ID != null)
+  and ($openbot.environment.WORKSPACE_TRANSFER_CLEANUP_DRY_RUN != null)
   and (($openbot.environment.AGENT_COMPUTER_POLICY | gsub("\\$\\$"; "$") | fromjson) == ($expected_policy | fromjson))
 ' "$candidate_render" >/dev/null; then
   printf '%s\n' "G0 rendered-stack verification failed." >&2

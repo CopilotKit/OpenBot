@@ -1,7 +1,10 @@
 import { z } from "zod";
 import type { AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
-import type { ComputerAttachmentBroker } from "../computer/attachments";
+import type {
+  ComputerAttachmentBroker,
+  ExportedAttachment,
+} from "../computer/attachments";
 import {
   type WorkspaceUploadTarget,
   workspaceUploadTargetFromMcp,
@@ -110,29 +113,44 @@ export function createWorkspaceFileTransferService(options: {
         );
       }
 
-      const exported = await options.broker.read({
-        botId: parsed.botId,
-        path: claimed.path,
-      });
+      const release = async () => {
+        await options.store
+          .releaseTransfer(claimed.id, parsed.botId, parsed.transferId)
+          .catch(() => false);
+      };
+      let exported: ExportedAttachment;
+      try {
+        exported = await options.broker.read({
+          botId: parsed.botId,
+          path: claimed.path,
+        });
+      } catch {
+        await release();
+        throw new WorkspaceTransferRefusedError(
+          "The verified attachment could not be read from this Bot's inbox.",
+        );
+      }
       if (
         exported.filename !== claimed.filename ||
         exported.mediaType !== claimed.mediaType ||
         exported.sizeBytes !== claimed.sizeBytes ||
         exported.sha256 !== claimed.sha256
       ) {
+        await release();
         throw new WorkspaceTransferRefusedError(
           "The attachment no longer matches its verified handoff metadata.",
         );
       }
 
-      const connection = await options.connection({
-        botId: parsed.botId,
-        actorId: input.actorId,
-      });
       let target: WorkspaceUploadTarget;
       try {
+        const connection = await options.connection({
+          botId: parsed.botId,
+          actorId: input.actorId,
+        });
         target = workspaceUploadTargetFromMcp(connection.url, connection.token);
       } catch {
+        await release();
         throw new WorkspaceTransferRefusedError(
           "The ERP connector is not configured for governed binary uploads.",
         );
@@ -153,6 +171,12 @@ export function createWorkspaceFileTransferService(options: {
         },
       );
       if (!response.ok) {
+        // These responses are definitive refusals: no successful upload is hidden behind them, so
+        // a fresh ERP reservation may safely be bound. Timeouts, conflicts and server errors stay
+        // bound because their external outcome may be unknown.
+        if ([400, 401, 403, 404, 410, 422].includes(response.status)) {
+          await release();
+        }
         throw new WorkspaceTransferRefusedError(
           `The ERP upload returned ${response.status}.`,
         );

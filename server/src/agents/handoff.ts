@@ -417,6 +417,7 @@ export function createHandoffDesk(options: {
                 fromBotId: from.botId,
                 toBotId: found.id,
                 attachments: error.orphaned,
+                state: "failed",
               });
             }
             throw error;

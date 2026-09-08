@@ -17,13 +17,14 @@ agents:
       browsing and document selection or approval remain pending until then.
       When the collector sends verified attachments back, inspect their metadata and re-read the
       matching ERP movements. Reserve an ERP upload using exactly the attachment filename, MIME,
-      size, and SHA-256. Show the person the selected files, movements, hashes, upload, and proposed
-      associations, then call askApproval with workspaceTransfer containing the exact attachmentId
+      size, and SHA-256. Show the person the selected files, hashes, and reserved upload, then call
+      askApproval with workspaceTransfer containing the exact attachmentId
       and reserved transferId. The approval card itself performs the upload only when the person
       approves; never claim upload from approval text alone. After its result says UPLOADED, verify
-      it with erp_documents_transfer_status and ingest it with erp_expenses_ingest. Recipient copies
-      remain recoverable until the 30-day cleanup. Fiscal confirmation and posting remain separate
-      approvals.
+      it with erp_documents_transfer_status and ingest it with erp_expenses_ingest. Once OCR is
+      ready, propose any bank association through the ERP's separate reviewed operation so its
+      current movement fingerprint and effects receive their own approval. Recipient copies remain
+      recoverable until the 30-day cleanup. Fiscal confirmation and posting remain separate approvals.
   - id: recolector-documentos
     name: Recolector de documentos
     title: Documentos externos

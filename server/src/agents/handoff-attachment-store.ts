@@ -20,6 +20,7 @@ export type HandoffAttachmentStore = {
     fromBotId: string;
     toBotId: string;
     attachments: HandoffAttachment[];
+    state?: "copied" | "failed";
     expiresAt?: Date;
   }): Promise<StoredHandoffAttachment[]>;
   forHandoff(
@@ -36,6 +37,11 @@ export type HandoffAttachmentStore = {
     recipientBotId: string,
     externalTransferId: string,
   ): Promise<StoredHandoffAttachment>;
+  releaseTransfer(
+    id: string,
+    recipientBotId: string,
+    externalTransferId: string,
+  ): Promise<boolean>;
   markTransferred(
     id: string,
     externalTransferId: string,
@@ -70,6 +76,7 @@ export function createHandoffAttachmentStore(
             fromBotId: input.fromBotId,
             recipientBotId: input.toBotId,
             expiresAt,
+            state: input.state ?? "copied",
           })),
         )
         .onConflictDoNothing()
@@ -118,6 +125,21 @@ export function createHandoffAttachmentStore(
           )
           .returning(),
       );
+    },
+    async releaseTransfer(id, recipientBotId, externalTransferId) {
+      const rows = await database
+        .update(handoffAttachments)
+        .set({ externalTransferId: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(handoffAttachments.id, id),
+            eq(handoffAttachments.recipientBotId, recipientBotId),
+            eq(handoffAttachments.state, "copied"),
+            eq(handoffAttachments.externalTransferId, externalTransferId),
+          ),
+        )
+        .returning({ id: handoffAttachments.id });
+      return rows.length === 1;
     },
     async markTransferred(id, externalTransferId, resultReference) {
       return oneOrStale(
