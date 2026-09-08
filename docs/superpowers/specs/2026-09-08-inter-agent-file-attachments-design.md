@@ -23,11 +23,11 @@ This design includes:
 - an inbox path chosen by OpenBot, never by either model;
 - visible attachment rows in the handoff UI;
 - recipient-only listing, reading, and deletion through governed computer tools;
-- a generic server-side workspace-file transfer tool for connector-managed upload sessions;
+- an authenticated approval-card action for connector-managed upload sessions;
 - the existing Netsfera ERP transfer reservation and upload endpoint, which already provide
   principal authentication, ingestion, duplicate detection, OCR scheduling, and transfer status;
 - one authenticated approval before the selected ERP upload and proposed association;
-- deletion after confirmed ingestion, proven exact duplicate, explicit rejection, or 30-day expiry.
+- bounded retention followed by audited 30-day expiry cleanup.
 
 This design does not include:
 
@@ -117,23 +117,22 @@ bound to the authenticated ERP principal, expected filename, media type, size, S
 idempotency key. Its MCP result contains that id and a relative upload path, never an origin or
 bearer token. No new ERP binary protocol is introduced.
 
-OpenBot exposes a governed `transfer_workspace_file` tool with this model-visible input:
+The existing `askApproval` card accepts an optional model-visible transfer binding:
 
 ```ts
-type TransferWorkspaceFileInput = {
-  destination: string;
+type WorkspaceTransferApproval = {
   transferId: string;
   attachmentId: string;
 };
 ```
 
-The tool resolves the attachment only from the current recipient Bot's inbox. It resolves the named
-destination, fixed HTTPS origin, path template, and credential from server-side configuration,
-exports the file from the current Bot's computer, and streams it to the destination path derived
-from the validated UUID transfer id. The model cannot provide a URL, filesystem destination,
-authorization header, or expected hash. The Netsfera target derives
-`/api/agent-transfers/<transferId>` and authenticates with the same principal configured on its MCP
-connector.
+Before enabling approval, the card asks the authenticated server for the attachment's real filename,
+size and SHA-256 and displays those trusted values. Only the person's Approve click calls the acting
+endpoint; there is no model-executable transfer tool. The endpoint rechecks the signed-in person,
+active recipient Bot, attachment ownership and fixed connector grants. It derives the HTTPS origin,
+path template and credential from the existing `erp-jefe` MCP connection, exports the file from the
+recipient computer, and streams it to `/api/agent-transfers/<transferId>`. The model cannot provide a
+URL, filesystem destination, authorization header, or expected hash.
 
 The existing ERP upload endpoint authenticates the same principal that reserved the transfer. It
 locks the transfer, rejects expiry/replay, verifies media type, size, magic bytes, and SHA-256, and
@@ -147,9 +146,10 @@ and association. If association must wait for OCR, it remains authorized only wh
 amount, currency, movement, and proposed effects remain unchanged. Otherwise it becomes stale and
 requires a fresh approval. Fiscal confirmation and posting remain separate.
 
-On `ingested` or proven `exact_duplicate`, OpenBot deletes the recipient copy. On retryable failure,
-conflict, or stale ERP state, it retains the file. Explicit rejection deletes it. A durable cleanup
-sweep deletes unresolved inbox attachments after 30 days while retaining metadata-only audit.
+OpenBot retains the recipient copy after upload so a model-authored completion claim can never delete
+the only recoverable bytes. A durable cleanup sweep deletes inbox attachments after 30 days while
+retaining metadata-only audit. Earlier deletion can be added only when ERP exposes a server-verifiable
+durable result bound to the transfer id and document hash.
 
 ## Persistence and audit
 
@@ -162,7 +162,8 @@ attachment count and ids, hashes, state transitions, transfer outcome, rejection
 deletion. It never records source paths, destination absolute paths, content, connector credentials,
 or binary endpoint responses.
 
-Only the sender may attach its files, only the exact recipient may consume the resulting attachment,
+Only explicitly configured directional Bot pairs may attach files. Only the sender may attach its
+files, only the exact recipient may consume the resulting attachment,
 and only the recipient's current signed run may initiate an ERP transfer. Existing Bot-to-Bot grants
 still decide whether `message_bot` is offered and whether the handoff is allowed.
 
@@ -215,5 +216,5 @@ deleted bytes.
 - Neither model sees file bytes, connector credentials, arbitrary upload URLs, or absolute paths.
 - One authenticated approval covers the exact upload and proposed association for selected files.
 - The ERP verifies and ingests the same SHA-256 that OpenBot copied.
-- Success and exact duplicates delete the recipient copy; retryable failures remain recoverable.
+- Uploaded and retryable files remain recoverable until the bounded cleanup window.
 - Unresolved files expire after 30 days and their metadata-only audit remains.

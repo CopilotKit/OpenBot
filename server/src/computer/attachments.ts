@@ -35,6 +35,18 @@ export type ComputerAttachmentBroker = {
   }): Promise<{ deleted: boolean }>;
 };
 
+/** A failed batch whose rollback left exact recipient files behind for durable cleanup. */
+export class AttachmentCopyError extends Error {
+  constructor(
+    message: string,
+    readonly orphaned: HandoffAttachment[],
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = "AttachmentCopyError";
+  }
+}
+
 export function createComputerAttachmentBroker(options: {
   provider: ComputerProvider;
   token?: string;
@@ -190,7 +202,7 @@ export function createComputerAttachmentBroker(options: {
         }
         return copied;
       } catch (error) {
-        await Promise.allSettled(
+        const rollback = await Promise.allSettled(
           copied.map((attachment) =>
             remove({
               botId: input.toBotId,
@@ -199,7 +211,18 @@ export function createComputerAttachmentBroker(options: {
             }),
           ),
         );
-        throw error;
+        const orphaned = copied.filter((_, index) => {
+          const result = rollback[index];
+          return (
+            result?.status === "rejected" ||
+            (result?.status === "fulfilled" && result.value.deleted !== true)
+          );
+        });
+        throw new AttachmentCopyError(
+          error instanceof Error ? error.message : "The file copy failed.",
+          orphaned,
+          { cause: error },
+        );
       }
     },
     read,

@@ -231,6 +231,10 @@ where `<provider>` is `google`, `microsoft` or `okta`.
 | -------------------------- | ------------------------------------------------------------------------------------------- |
 | `BOT_HANDOFF_MAX_DEPTH`    | How many Bots deep a chain may go. `0` switches the capability off entirely. Default `1`.    |
 | `BOT_HANDOFF_MAX_PER_RUN`  | How many other Bots one run may address. Default `3`.                                        |
+| `HANDOFF_ATTACHMENTS_ENABLED` | Enables governed file attachments on `message_bot`. Off by default.                      |
+| `HANDOFF_ATTACHMENT_PAIRS` | Comma-separated directional `sender-bot:recipient-bot` pairs allowed to attach files.        |
+| `WORKSPACE_TRANSFER_NETSFERA_ERP_SERVER_ID` | Existing MCP connector whose encrypted principal is reused for ERP binary uploads. |
+| `WORKSPACE_TRANSFER_CLEANUP_DRY_RUN` | Keeps the 30-day inbox cleanup observational while `true` (the default).          |
 
 Both refuse rather than truncate, and both are refused at start-up if they are not whole numbers of
 zero or more: a deployment that typed `two` and silently got the default would believe it had set a

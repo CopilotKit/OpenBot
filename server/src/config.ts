@@ -268,10 +268,14 @@ export type DeploymentConfig = {
   computer?: ComputerConfig;
   /** How far one Bot handing work to another may go. */
   handoff: HandoffCaps;
-  /** Fixed, server-only destination for uploading a recipient Bot's attached workspace file. */
+  /** Binary handoffs are separately opt-in and constrained to explicit directional Bot pairs. */
+  handoffAttachments: {
+    enabled: boolean;
+    allowedPairs: ReadonlySet<string>;
+  };
+  /** Existing MCP server whose authenticated principal also owns ERP binary upload sessions. */
   workspaceTransfer?: {
-    netsferaErpOrigin: string;
-    netsferaErpTokenFile: string;
+    netsferaErpServerId: string;
     cleanupDryRun: boolean;
   };
   /**
@@ -320,6 +324,30 @@ function handoffCaps(environment: Environment): HandoffCaps {
     maxDepth: read("BOT_HANDOFF_MAX_DEPTH", 1),
     maxPerRun: read("BOT_HANDOFF_MAX_PER_RUN", 3),
   };
+}
+
+function handoffAttachmentConfig(environment: Environment): {
+  enabled: boolean;
+  allowedPairs: ReadonlySet<string>;
+} {
+  const on = optional(environment, "HANDOFF_ATTACHMENTS_ENABLED");
+  const enabled = on === "true" || on === "1";
+  const pairs = new Set(
+    commaSeparated(environment, "HANDOFF_ATTACHMENT_PAIRS"),
+  );
+  for (const pair of pairs) {
+    if (!/^[a-z0-9][a-z0-9-]{0,119}:[a-z0-9][a-z0-9-]{0,119}$/.test(pair)) {
+      throw new Error(
+        "HANDOFF_ATTACHMENT_PAIRS must contain comma-separated from-bot:to-bot ids",
+      );
+    }
+  }
+  if (enabled && pairs.size === 0) {
+    throw new Error(
+      "HANDOFF_ATTACHMENT_PAIRS must name at least one directional pair when attachments are enabled",
+    );
+  }
+  return { enabled, allowedPairs: pairs };
 }
 
 function required(environment: Environment, name: string): string {
@@ -953,22 +981,10 @@ export function loadConfig(
   const auth = authConfig(environment, google);
   const managedAgent = managedAgentConfig(environment);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
-  const netsferaErpOrigin = optional(
+  const netsferaErpServerId = optional(
     environment,
-    "WORKSPACE_TRANSFER_NETSFERA_ERP_ORIGIN",
+    "WORKSPACE_TRANSFER_NETSFERA_ERP_SERVER_ID",
   );
-  const netsferaErpTokenFile = optional(
-    environment,
-    "WORKSPACE_TRANSFER_NETSFERA_ERP_TOKEN_FILE",
-  );
-  if (
-    (netsferaErpOrigin === undefined) !==
-    (netsferaErpTokenFile === undefined)
-  ) {
-    throw new Error(
-      "WORKSPACE_TRANSFER_NETSFERA_ERP_ORIGIN and WORKSPACE_TRANSFER_NETSFERA_ERP_TOKEN_FILE must be set together",
-    );
-  }
 
   return {
     port: serverPort(environment),
@@ -1004,11 +1020,11 @@ export function loadConfig(
       : {}),
     computer: computerConfig(environment),
     handoff: handoffCaps(environment),
-    ...(netsferaErpOrigin && netsferaErpTokenFile
+    handoffAttachments: handoffAttachmentConfig(environment),
+    ...(netsferaErpServerId
       ? {
           workspaceTransfer: {
-            netsferaErpOrigin,
-            netsferaErpTokenFile,
+            netsferaErpServerId,
             cleanupDryRun:
               optional(environment, "WORKSPACE_TRANSFER_CLEANUP_DRY_RUN") !==
               "false",

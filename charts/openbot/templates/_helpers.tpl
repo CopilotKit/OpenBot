@@ -202,6 +202,21 @@ and in whatever holds the release, which is not where `KEY_ENCRYPTION_KEY` belon
   value: {{ $maxDepth | quote }}
 - name: BOT_HANDOFF_MAX_PER_RUN
   value: {{ $maxPerRun | quote }}
+{{- $attachments := $handoff.attachments | default dict }}
+{{- $attachmentsEnabled := false -}}
+{{- if not (kindIs "invalid" $attachments.enabled) -}}{{- $attachmentsEnabled = $attachments.enabled -}}{{- end }}
+{{- $cleanupDryRun := true -}}
+{{- if not (kindIs "invalid" $attachments.cleanupDryRun) -}}{{- $cleanupDryRun = $attachments.cleanupDryRun -}}{{- end }}
+- name: HANDOFF_ATTACHMENTS_ENABLED
+  value: {{ $attachmentsEnabled | quote }}
+- name: HANDOFF_ATTACHMENT_PAIRS
+  value: {{ ($attachments.pairs | default "") | quote }}
+{{- if $attachments.netsferaErpServerId }}
+- name: WORKSPACE_TRANSFER_NETSFERA_ERP_SERVER_ID
+  value: {{ $attachments.netsferaErpServerId | quote }}
+{{- end }}
+- name: WORKSPACE_TRANSFER_CLEANUP_DRY_RUN
+  value: {{ $cleanupDryRun | quote }}
 - name: INTELLIGENCE_API_URL
   value: {{ .Values.config.intelligence.apiUrl | quote }}
 - name: INTELLIGENCE_GATEWAY_WS_URL
@@ -434,4 +449,3 @@ than anything that names the cause.
 {{- define "openbot.automountToken" -}}
 {{- or .Values.serviceAccount.automountServiceAccountToken (eq .Values.computers.mode "sandbox") -}}
 {{- end -}}
-

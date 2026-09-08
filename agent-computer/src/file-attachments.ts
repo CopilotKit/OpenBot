@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
+  link,
   lstat,
   mkdir,
   readFile,
-  rename,
   rm,
   stat,
   writeFile,
@@ -89,16 +89,53 @@ export async function importAttachment(
 
   const path = `inbox/${metadata.handoffId}/${metadata.attachmentId}/${filename}`;
   const destination = await workspace.resolvePath(path, true);
-  const partial = `${destination}.partial`;
+  const partial = `${destination}.${randomUUID()}.partial`;
   await mkdir(dirname(destination), { recursive: true });
   try {
     await writeFile(partial, bytes, { flag: "wx" });
-    await rename(partial, destination);
+    try {
+      // Hard-linking a completed temporary file is an atomic create-if-absent. `rename` would
+      // replace an existing destination on POSIX, allowing a retry to overwrite the immutable
+      // attachment another process is already using.
+      await link(partial, destination);
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw error;
+      await assertSameExistingAttachment(destination, metadata, bytes);
+    }
   } catch (error) {
     await rm(partial, { force: true }).catch(() => undefined);
     throw error;
   }
+  await rm(partial, { force: true });
   return { ...metadata, filename, path };
+}
+
+async function assertSameExistingAttachment(
+  destination: string,
+  metadata: AttachmentMetadata,
+  expected: Buffer,
+): Promise<void> {
+  const details = await lstat(destination);
+  if (!details.isFile() || details.isSymbolicLink()) {
+    throw new Error("The attachment destination is not a regular file.");
+  }
+  const existing = await readFile(destination);
+  if (
+    existing.length !== metadata.sizeBytes ||
+    createHash("sha256").update(existing).digest("hex") !== metadata.sha256 ||
+    !existing.equals(expected)
+  ) {
+    throw new Error("The destination already contains a different attachment.");
+  }
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "EEXIST"
+  );
 }
 
 export async function deleteInboxAttachment(

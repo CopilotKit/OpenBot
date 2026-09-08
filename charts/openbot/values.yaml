@@ -161,6 +161,13 @@ config:
   handoff:
     maxDepth: 1
     maxPerRun: 3
+    attachments:
+      enabled: false
+      # Directional sender:recipient Bot ids, joined by commas in the server environment.
+      pairs: ""
+      # Existing MCP server id; its encrypted URL and bearer are reused for the binary endpoint.
+      netsferaErpServerId: ""
+      cleanupDryRun: true
   # Your own Bot, over AG-UI.
   #
   # OpenBot is a shell for somebody else's agent, so this is the seam that matters: point it at a

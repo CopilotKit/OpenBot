@@ -4,6 +4,11 @@ import { serveStatic } from "hono/bun";
 import { authoriseAgentCall, sameToken } from "./agents/callback-token";
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
+import {
+  type WorkspaceFileTransferService,
+  WorkspaceTransferRefusedError,
+  workspaceTransferInput,
+} from "./agents/attachment-transfer-tool";
 import { createAgentRoutes } from "./agents/routes";
 import {
   type AuditReader,
@@ -218,6 +223,8 @@ export function createApp(
    * shown an empty box, and the obvious thing to do with an empty box is fill it in again.
    */
   userInstructions?: UserInstructionsStore,
+  /** Authenticated human-approved bridge from one Bot inbox to a fixed connector. */
+  workspaceFileTransfer?: WorkspaceFileTransferService,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -906,6 +913,63 @@ export function createApp(
         (await agentProfileStore.get(actor, botId))?.computerAccess ===
         "enabled"
     : async () => false;
+
+  if (workspaceFileTransfer) {
+    const refused = (error: unknown) =>
+      error instanceof WorkspaceTransferRefusedError
+        ? error.message
+        : "The workspace transfer could not be completed.";
+
+    app.post(
+      "/api/workspace-transfers/preview",
+      requireUser,
+      async (context) => {
+        const parsed = workspaceTransferInput.safeParse(
+          await context.req.json().catch(() => null),
+        );
+        if (!parsed.success)
+          return context.json({ error: "Invalid workspace transfer." }, 400);
+        if (!(await canUseBot(context.var.actor, parsed.data.botId)))
+          return context.json(
+            { error: "That Bot is not available to you." },
+            403,
+          );
+        try {
+          return context.json({
+            transfer: await workspaceFileTransfer.preview(parsed.data),
+          });
+        } catch (error) {
+          return context.json({ error: refused(error) }, 409);
+        }
+      },
+    );
+    app.post(
+      "/api/workspace-transfers/approve",
+      requireUser,
+      async (context) => {
+        const parsed = workspaceTransferInput.safeParse(
+          await context.req.json().catch(() => null),
+        );
+        if (!parsed.success)
+          return context.json({ error: "Invalid workspace transfer." }, 400);
+        if (!(await canUseBot(context.var.actor, parsed.data.botId)))
+          return context.json(
+            { error: "That Bot is not available to you." },
+            403,
+          );
+        try {
+          return context.json({
+            transfer: await workspaceFileTransfer.approve({
+              ...parsed.data,
+              actorId: context.var.actor.id,
+            }),
+          });
+        } catch (error) {
+          return context.json({ error: refused(error) }, 409);
+        }
+      },
+    );
+  }
 
   // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so both arrive
   // together or the routes are not mounted. An ungoverned computer is not a reduced feature. It is

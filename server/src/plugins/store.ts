@@ -2513,6 +2513,44 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     /**
+     * Resolve the same authenticated connection an explicitly granted Bot uses for MCP.
+     *
+     * This narrow seam exists for a connector's non-MCP companion endpoint (the ERP binary PUT).
+     * It never accepts a URL or credential from the caller, and it verifies every required MCP
+     * grant before decrypting the connector credential.
+     */
+    async connectionForAgentServer(input: {
+      serverId: string;
+      botId: string;
+      actorId: string;
+      requiredTools: string[];
+    }): Promise<{ url: string; token?: string }> {
+      const requiredRefs = input.requiredTools.map(
+        (tool) => `${input.serverId}/${tool}`,
+      );
+      const held = await database
+        .select({ ref: pluginGrants.ref })
+        .from(pluginGrants)
+        .where(
+          and(
+            eq(pluginGrants.kind, "mcp"),
+            eq(pluginGrants.agentId, input.botId),
+            inArray(pluginGrants.ref, requiredRefs),
+          ),
+        );
+      const granted = new Set(held.map(({ ref }) => ref));
+      if (requiredRefs.some((ref) => !granted.has(ref))) {
+        throw new PluginRefusedError(
+          `${input.botId} does not hold every ERP tool required for a governed file upload.`,
+          null,
+        );
+      }
+      const { row, entry } = await requireServer(input.serverId);
+      const { token } = await connectionTokenFor(row, entry, input.actorId);
+      return { url: effectiveUrl(row, entry), token };
+    },
+
+    /**
      * Register the deployment's OAuth client for a `user-oauth` server.
      *
      * An administrator pasting in what they created at the vendor. The work itself is

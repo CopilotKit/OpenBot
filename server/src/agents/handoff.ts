@@ -22,6 +22,7 @@ import type {
   ComputerAttachmentBroker,
   HandoffAttachment,
 } from "../computer/attachments";
+import { AttachmentCopyError } from "../computer/attachments";
 import type { WorkQueue } from "../work/queue";
 import type { RunAssertion } from "./callback-token";
 import type { HandoffAttachmentStore } from "./handoff-attachment-store";
@@ -102,6 +103,8 @@ export function createHandoffDesk(options: {
   actorFor: (userId: string) => Promise<AgentActor | null>;
   auditStore: AuditStore;
   caps: HandoffCaps;
+  /** Optional file handoffs are narrower than ordinary messaging and directional. */
+  mayAttach?: (fromBotId: string, toBotId: string) => Promise<boolean>;
   attachmentBroker?: ComputerAttachmentBroker;
   attachmentStore?: HandoffAttachmentStore;
 }): HandoffDesk {
@@ -114,6 +117,7 @@ export function createHandoffDesk(options: {
     caps,
     attachmentBroker,
     attachmentStore,
+    mayAttach,
   } = options;
 
   /** Said once, so the trail carries the same words the Bot was given. */
@@ -294,6 +298,14 @@ export function createHandoffDesk(options: {
 
       let attachmentPaths: string[] = [];
       if (envelope.attachments?.length) {
+        if (!(await mayAttach?.(from.botId, found.id))) {
+          return refuse(
+            from,
+            target,
+            "attachment_pair_not_allowed",
+            "This Bot may message that coworker, but this deployment has not allowed it to send files to them.",
+          );
+        }
         if (!attachmentBroker || !attachmentStore) {
           return refuse(
             from,
@@ -351,6 +363,9 @@ export function createHandoffDesk(options: {
       const handoffId = createHash("sha256")
         .update(
           JSON.stringify([
+            from.actorId,
+            from.botId,
+            from.runId,
             found.id,
             task,
             envelope.constraints ?? "",
@@ -364,16 +379,48 @@ export function createHandoffDesk(options: {
       let attachments: HandoffAttachment[] = [];
       let copiedThisAttempt = false;
       if (attachmentPaths.length > 0 && attachmentBroker && attachmentStore) {
-        const existing = await attachmentStore.forHandoff(handoffId, found.id);
+        const existing = await attachmentStore.forHandoff(
+          handoffId,
+          from.botId,
+          found.id,
+        );
         if (existing.length > 0) {
+          if (
+            existing.length !== attachmentPaths.length ||
+            existing.some(
+              ({ state }) => state !== "copied" && state !== "transferred",
+            )
+          ) {
+            return refuse(
+              from,
+              target,
+              "inactive_attachment_handoff",
+              `Those files belonged to an earlier completed attempt in this run and were not sent again. Start a new request if they must be sent again.`,
+            );
+          }
           attachments = existing.map(asManifest);
         } else {
-          attachments = await attachmentBroker.copy({
-            handoffId,
-            fromBotId: from.botId,
-            toBotId: found.id,
-            paths: attachmentPaths,
-          });
+          try {
+            attachments = await attachmentBroker.copy({
+              handoffId,
+              fromBotId: from.botId,
+              toBotId: found.id,
+              paths: attachmentPaths,
+            });
+          } catch (error) {
+            if (error instanceof AttachmentCopyError && error.orphaned.length) {
+              // A failed delete must not turn a real recipient file into an untracked orphan. The
+              // failed handoff is not queued, but its surviving copy is retained as metadata so the
+              // ordinary expiry sweep can remove it later.
+              await attachmentStore.recordBatch({
+                handoffId,
+                fromBotId: from.botId,
+                toBotId: found.id,
+                attachments: error.orphaned,
+              });
+            }
+            throw error;
+          }
           copiedThisAttempt = true;
           const recorded = await attachmentStore.recordBatch({
             handoffId,
@@ -381,23 +428,30 @@ export function createHandoffDesk(options: {
             toBotId: found.id,
             attachments,
           });
-          if (recorded.length === 0) {
-            await Promise.allSettled(
-              attachments.map((attachment) =>
-                attachmentBroker.remove({
-                  botId: found.id,
-                  handoffId,
-                  attachment,
-                }),
-              ),
+          if (recorded.length !== attachments.length) {
+            await removeCopiedAttachments(
+              attachmentBroker,
+              attachmentStore,
+              found.id,
+              handoffId,
+              attachments,
+              "copy_race",
             );
             copiedThisAttempt = false;
-            attachments = (
-              await attachmentStore.forHandoff(handoffId, found.id)
-            ).map(asManifest);
-            if (attachments.length === 0) {
-              throw new Error("Attachment metadata could not be recorded.");
+            const winning = (
+              await attachmentStore.forHandoff(handoffId, from.botId, found.id)
+            ).filter(
+              ({ state }) => state === "copied" || state === "transferred",
+            );
+            if (
+              winning.length !== attachmentPaths.length ||
+              !sameAttachmentSet(winning, attachments)
+            ) {
+              throw new Error(
+                "Concurrent attachment metadata did not match this handoff.",
+              );
             }
+            attachments = winning.map(asManifest);
           }
         }
       }
@@ -536,6 +590,23 @@ export function createHandoffDesk(options: {
       return { ok: true, to: found.id, toName: found.name };
     },
   };
+}
+
+function sameAttachmentSet(
+  stored: Array<{
+    filename: string;
+    mediaType: string;
+    sizeBytes: number;
+    sha256: string;
+  }>,
+  copied: HandoffAttachment[],
+): boolean {
+  const identity = (item: (typeof stored)[number]) =>
+    `${item.sha256}\u0000${item.sizeBytes}\u0000${item.mediaType}\u0000${item.filename}`;
+  return (
+    stored.map(identity).sort().join("\n") ===
+    copied.map(identity).sort().join("\n")
+  );
 }
 
 function asManifest(row: {

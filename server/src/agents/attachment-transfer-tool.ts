@@ -2,233 +2,197 @@ import { z } from "zod";
 import type { AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { ComputerAttachmentBroker } from "../computer/attachments";
-import type { WorkspaceUploadTarget } from "../computer/upload-target";
-import type { GrantedTool } from "../plugins/tools";
-import type { RunAssertion } from "./callback-token";
-import type { HandoffAttachmentStore } from "./handoff-attachment-store";
+import {
+  type WorkspaceUploadTarget,
+  workspaceUploadTargetFromMcp,
+} from "../computer/upload-target";
+import type {
+  HandoffAttachmentStore,
+  StoredHandoffAttachment,
+} from "./handoff-attachment-store";
 
 const uuid = z.string().uuid();
-const parameters = z.object({
-  destination: z.literal("netsfera-erp"),
-  transferId: uuid.describe(
-    "The upload transfer id returned by erp_documents_reserve_upload",
-  ),
-  attachmentId: uuid.describe("The id shown beside the attached file"),
-});
-const completionParameters = z.object({
-  attachmentId: uuid,
+export const workspaceTransferInput = z.object({
+  botId: z.string().min(1).max(120),
   transferId: uuid,
-  outcome: z.enum([
-    "ingested",
-    "exact_duplicate",
-    "rejected",
-    "failed",
-    "stale",
-  ]),
-  erpReference: z.string().min(1).max(200).optional(),
+  attachmentId: uuid,
 });
+export type WorkspaceTransferInput = z.infer<typeof workspaceTransferInput>;
 
-export function createAttachmentTransferTool(options: {
-  from: RunAssertion;
+export type WorkspaceFileTransferService = {
+  preview(input: WorkspaceTransferInput): Promise<{
+    attachmentId: string;
+    transferId: string;
+    filename: string;
+    mediaType: string;
+    sizeBytes: number;
+    sha256: string;
+    status: "READY" | "UPLOADED";
+  }>;
+  approve(input: WorkspaceTransferInput & { actorId: string }): Promise<{
+    attachmentId: string;
+    transferId: string;
+    filename: string;
+    sha256: string;
+    sizeBytes: number;
+    status: "UPLOADED";
+  }>;
+};
+
+export class WorkspaceTransferRefusedError extends Error {}
+
+export function createWorkspaceFileTransferService(options: {
   store: HandoffAttachmentStore;
   broker: ComputerAttachmentBroker;
-  target: WorkspaceUploadTarget;
+  connection: (input: {
+    botId: string;
+    actorId: string;
+  }) => Promise<{ url: string; token?: string }>;
   auditStore: AuditStore;
   fetchImpl?: typeof fetch;
-}): GrantedTool {
-  return {
-    name: "transfer_workspace_file",
-    ref: "bot/transfer_workspace_file",
-    description:
-      "Upload one file attached to you into the fixed Netsfera ERP transfer previously reserved with erp_documents_reserve_upload. The destination and credential are fixed by the deployment; pass only the attachment id and the ERP transfer id.",
-    parameters,
-    execute: async (args) => {
-      const parsed = parameters.safeParse(args);
-      if (!parsed.success) {
-        return "The workspace file was not transferred: destination, attachment id, and transfer id must be valid.";
-      }
-      const { attachmentId, transferId } = parsed.data;
-      const row = await options.store.ownedByRecipient(
-        attachmentId,
-        options.from.botId,
+}): WorkspaceFileTransferService {
+  async function owned(input: WorkspaceTransferInput) {
+    const parsed = workspaceTransferInput.parse(input);
+    const row = await options.store.ownedByRecipient(
+      parsed.attachmentId,
+      parsed.botId,
+    );
+    if (!row || row.state === "deleted") {
+      throw new WorkspaceTransferRefusedError(
+        "That attachment is not available to this Bot.",
       );
-      if (!row || row.state === "deleted") {
-        return "That attachment is not available to this Bot.";
-      }
-      if (row.state === "transferred") {
-        return row.externalTransferId === transferId
-          ? success(row)
-          : "That attachment has already been transferred under another ERP transfer id.";
-      }
-      if (row.state !== "copied") {
-        return `That attachment cannot be transferred while it is ${row.state}.`;
-      }
+    }
+    if (
+      row.externalTransferId &&
+      row.externalTransferId !== parsed.transferId
+    ) {
+      throw new WorkspaceTransferRefusedError(
+        "That attachment is already bound to another ERP transfer.",
+      );
+    }
+    if (row.state !== "copied" && row.state !== "transferred") {
+      throw new WorkspaceTransferRefusedError(
+        `That attachment cannot be transferred while it is ${row.state}.`,
+      );
+    }
+    return { parsed, row };
+  }
 
-      try {
-        const exported = await options.broker.read({
-          botId: options.from.botId,
-          path: row.path,
-        });
-        if (
-          exported.filename !== row.filename ||
-          exported.mediaType !== row.mediaType ||
-          exported.sizeBytes !== row.sizeBytes ||
-          exported.sha256 !== row.sha256
-        ) {
-          throw new Error("attachment metadata changed");
-        }
-        const response = await (options.fetchImpl ?? fetch)(
-          `${options.target.origin}${options.target.pathFor(transferId)}`,
-          {
-            method: "PUT",
-            redirect: "manual",
-            headers: {
-              authorization: `Bearer ${options.target.bearerToken}`,
-              "content-type": row.mediaType,
-              "content-length": String(row.sizeBytes),
-            },
-            body: new Uint8Array(exported.bytes),
-            signal: AbortSignal.timeout(60_000),
-          },
-        );
-        if (!response.ok) {
-          throw new Error(`ERP upload returned ${response.status}`);
-        }
-        const transferred = await options.store.markTransferred(
-          attachmentId,
-          transferId,
-        );
-        await recordAuditEvent(options.auditStore, {
-          eventType: "agent.attachment_transferred",
-          targetType: "attachment",
-          targetId: attachmentId,
-          ...(options.from.actorId
-            ? { actorUserId: options.from.actorId }
-            : {}),
-          payload: {
-            bot: options.from.botId,
-            attachmentId,
-            transferId,
-            destination: options.target.id,
-            sha256: row.sha256,
-            sizeBytes: row.sizeBytes,
-            status: "UPLOADED",
-          },
-        });
-        return success(transferred);
-      } catch (error) {
-        const reason =
-          error instanceof Error &&
-          /^ERP upload returned \d{3}$/.test(error.message)
-            ? error.message
-            : "the governed upload failed";
-        return `The workspace file could not be transferred: ${reason}.`;
-      }
+  return {
+    async preview(input) {
+      const { parsed, row } = await owned(input);
+      return {
+        attachmentId: row.id,
+        transferId: parsed.transferId,
+        filename: row.filename,
+        mediaType: row.mediaType,
+        sizeBytes: row.sizeBytes,
+        sha256: row.sha256,
+        status: row.state === "transferred" ? "UPLOADED" : "READY",
+      };
     },
-  };
-}
+    async approve(input) {
+      const { parsed, row } = await owned(input);
+      if (row.state === "transferred") return success(row, parsed.transferId);
 
-export function createAttachmentCompletionTool(options: {
-  from: RunAssertion;
-  store: HandoffAttachmentStore;
-  broker: ComputerAttachmentBroker;
-  auditStore: AuditStore;
-}): GrantedTool {
-  return {
-    name: "complete_workspace_file_transfer",
-    ref: "bot/complete_workspace_file_transfer",
-    description:
-      "Finish a governed ERP file transfer after checking its durable ERP result. Use ingested or exact_duplicate only with the ERP invoice/document reference; retryable failed or stale outcomes retain the file.",
-    parameters: completionParameters,
-    execute: async (args) => {
-      const parsed = completionParameters.safeParse(args);
-      if (!parsed.success)
-        return "The workspace transfer was not completed: invalid arguments.";
-      const { attachmentId, transferId, outcome, erpReference } = parsed.data;
-      if (
-        (outcome === "ingested" || outcome === "exact_duplicate") &&
-        !erpReference
-      ) {
-        return "The workspace transfer was not completed: the durable ERP reference is required.";
-      }
-      const row = await options.store.ownedByRecipient(
-        attachmentId,
-        options.from.botId,
-      );
-      if (!row) return "That attachment is not available to this Bot.";
-      if (row.externalTransferId !== transferId) {
-        return "That ERP transfer id does not belong to this attachment.";
-      }
-      if (row.state === "deleted") {
-        return JSON.stringify({
-          attachmentId,
-          transferId,
-          outcome,
-          deleted: true,
-        });
-      }
-      if (row.state !== "transferred") {
-        return `That attachment cannot be completed while it is ${row.state}.`;
-      }
-      if (outcome === "failed" || outcome === "stale") {
-        return JSON.stringify({
-          attachmentId,
-          transferId,
-          outcome,
-          retained: true,
-        });
-      }
-
+      let claimed: StoredHandoffAttachment;
       try {
-        await options.broker.remove({
-          botId: options.from.botId,
-          handoffId: row.handoffId,
-          attachment: row,
-        });
-        await options.store.markDeleted(
-          attachmentId,
-          `${outcome}${erpReference ? `:${erpReference}` : ""}`,
+        // Bind before the external side effect. A concurrent approval carrying another transfer id
+        // loses this conditional update and therefore cannot upload the same bytes elsewhere.
+        claimed = await options.store.claimTransfer(
+          row.id,
+          parsed.botId,
+          parsed.transferId,
         );
-        await recordAuditEvent(options.auditStore, {
-          eventType: "agent.attachment_completed",
-          targetType: "attachment",
-          targetId: attachmentId,
-          ...(options.from.actorId
-            ? { actorUserId: options.from.actorId }
-            : {}),
-          payload: {
-            bot: options.from.botId,
-            attachmentId,
-            transferId,
-            outcome,
-            ...(erpReference ? { erpReference } : {}),
-            deleted: true,
-          },
-        });
-        return JSON.stringify({
-          attachmentId,
-          transferId,
-          outcome,
-          deleted: true,
-        });
       } catch {
-        return "The ERP result was recorded, but the recipient file could not be deleted safely. It will be retried by cleanup.";
+        throw new WorkspaceTransferRefusedError(
+          "That attachment was claimed by another ERP transfer.",
+        );
       }
+
+      const exported = await options.broker.read({
+        botId: parsed.botId,
+        path: claimed.path,
+      });
+      if (
+        exported.filename !== claimed.filename ||
+        exported.mediaType !== claimed.mediaType ||
+        exported.sizeBytes !== claimed.sizeBytes ||
+        exported.sha256 !== claimed.sha256
+      ) {
+        throw new WorkspaceTransferRefusedError(
+          "The attachment no longer matches its verified handoff metadata.",
+        );
+      }
+
+      const connection = await options.connection({
+        botId: parsed.botId,
+        actorId: input.actorId,
+      });
+      let target: WorkspaceUploadTarget;
+      try {
+        target = workspaceUploadTargetFromMcp(connection.url, connection.token);
+      } catch {
+        throw new WorkspaceTransferRefusedError(
+          "The ERP connector is not configured for governed binary uploads.",
+        );
+      }
+
+      const response = await (options.fetchImpl ?? fetch)(
+        `${target.origin}${target.pathFor(parsed.transferId)}`,
+        {
+          method: "PUT",
+          redirect: "manual",
+          headers: {
+            authorization: `Bearer ${target.bearerToken}`,
+            "content-type": claimed.mediaType,
+            "content-length": String(claimed.sizeBytes),
+          },
+          body: new Uint8Array(exported.bytes),
+          signal: AbortSignal.timeout(60_000),
+        },
+      );
+      if (!response.ok) {
+        throw new WorkspaceTransferRefusedError(
+          `The ERP upload returned ${response.status}.`,
+        );
+      }
+
+      const transferred = await options.store.markTransferred(
+        claimed.id,
+        parsed.transferId,
+      );
+      await recordAuditEvent(options.auditStore, {
+        eventType: "agent.attachment_transferred",
+        targetType: "attachment",
+        targetId: claimed.id,
+        actorUserId: input.actorId,
+        payload: {
+          bot: parsed.botId,
+          attachmentId: claimed.id,
+          transferId: parsed.transferId,
+          destination: target.id,
+          sha256: claimed.sha256,
+          sizeBytes: claimed.sizeBytes,
+          status: "UPLOADED",
+          approvedBy: input.actorId,
+        },
+      });
+      return success(transferred, parsed.transferId);
     },
   };
 }
 
-function success(row: {
-  id: string;
-  externalTransferId: string | null;
-  sha256: string;
-  sizeBytes: number;
-}): string {
-  return JSON.stringify({
+function success(
+  row: { id: string; filename: string; sha256: string; sizeBytes: number },
+  transferId: string,
+) {
+  return {
     attachmentId: row.id,
-    transferId: row.externalTransferId,
-    status: "UPLOADED",
+    transferId,
+    filename: row.filename,
+    status: "UPLOADED" as const,
     sha256: row.sha256,
     sizeBytes: row.sizeBytes,
-  });
+  };
 }

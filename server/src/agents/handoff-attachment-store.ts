@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import type { HandoffAttachment } from "../computer/attachments";
 import type { Database } from "../db/client";
 import { handoffAttachments } from "../db/schema";
@@ -24,12 +24,18 @@ export type HandoffAttachmentStore = {
   }): Promise<StoredHandoffAttachment[]>;
   forHandoff(
     handoffId: string,
+    senderBotId: string,
     recipientBotId: string,
   ): Promise<StoredHandoffAttachment[]>;
   ownedByRecipient(
     id: string,
     recipientBotId: string,
   ): Promise<StoredHandoffAttachment | null>;
+  claimTransfer(
+    id: string,
+    recipientBotId: string,
+    externalTransferId: string,
+  ): Promise<StoredHandoffAttachment>;
   markTransferred(
     id: string,
     externalTransferId: string,
@@ -69,13 +75,14 @@ export function createHandoffAttachmentStore(
         .onConflictDoNothing()
         .returning();
     },
-    async forHandoff(handoffId, recipientBotId) {
+    async forHandoff(handoffId, senderBotId, recipientBotId) {
       return database
         .select()
         .from(handoffAttachments)
         .where(
           and(
             eq(handoffAttachments.handoffId, handoffId),
+            eq(handoffAttachments.fromBotId, senderBotId),
             eq(handoffAttachments.recipientBotId, recipientBotId),
           ),
         );
@@ -93,6 +100,25 @@ export function createHandoffAttachmentStore(
         .limit(1);
       return row ?? null;
     },
+    async claimTransfer(id, recipientBotId, externalTransferId) {
+      return oneOrStale(
+        await database
+          .update(handoffAttachments)
+          .set({ externalTransferId, updatedAt: new Date() })
+          .where(
+            and(
+              eq(handoffAttachments.id, id),
+              eq(handoffAttachments.recipientBotId, recipientBotId),
+              eq(handoffAttachments.state, "copied"),
+              or(
+                isNull(handoffAttachments.externalTransferId),
+                eq(handoffAttachments.externalTransferId, externalTransferId),
+              ),
+            ),
+          )
+          .returning(),
+      );
+    },
     async markTransferred(id, externalTransferId, resultReference) {
       return oneOrStale(
         await database
@@ -107,6 +133,7 @@ export function createHandoffAttachmentStore(
             and(
               eq(handoffAttachments.id, id),
               eq(handoffAttachments.state, "copied"),
+              eq(handoffAttachments.externalTransferId, externalTransferId),
             ),
           )
           .returning(),

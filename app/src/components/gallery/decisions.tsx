@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
+import { client } from "@/lib/client";
 import { Badge, GalleryFrame } from "./frame";
 
 /**
@@ -38,20 +39,105 @@ export const ApprovalCardProps = z.object({
     ),
   approveLabel: z.string().optional().describe("Defaults to Approve"),
   rejectLabel: z.string().optional().describe("Defaults to Decline"),
+  workspaceTransfer: z
+    .object({
+      attachmentId: z
+        .string()
+        .uuid()
+        .describe("The attached workspace file id"),
+      transferId: z
+        .string()
+        .uuid()
+        .describe("The ERP transfer id returned by reserve upload"),
+    })
+    .optional()
+    .describe(
+      "When present, approval uploads this exact received attachment into this exact reserved ERP transfer. The server supplies the trusted filename, size and SHA-256 shown on the card.",
+    ),
 });
 
 type ApprovalArgs = z.infer<typeof ApprovalCardProps>;
 
-export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
+type TransferPreview = {
+  attachmentId: string;
+  transferId: string;
+  filename: string;
+  mediaType: string;
+  sizeBytes: number;
+  sha256: string;
+  status: "READY" | "UPLOADED";
+};
+
+export function ApprovalCard(
+  props: Waiting<ApprovalArgs> & { name?: string; agentId?: string },
+) {
   const { args, status, respond } = props;
   const [note, setNote] = useState("");
   const [sending, setSending] = useState<"approved" | "declined" | null>(null);
+  const [transfer, setTransfer] = useState<TransferPreview | null>(null);
+  const [transferError, setTransferError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (status !== "executing" || !args.workspaceTransfer || !props.agentId) {
+      return;
+    }
+    let current = true;
+    void client<TransferPreview>(
+      "/api/workspace-transfers/preview",
+      "transfer",
+      {
+        method: "POST",
+        body: { botId: props.agentId, ...args.workspaceTransfer },
+        fallback: "The attached file could not be verified.",
+      },
+    )
+      .then((result) => {
+        if (current) setTransfer(result);
+      })
+      .catch((error) => {
+        if (current)
+          setTransferError(
+            error instanceof Error
+              ? error.message
+              : "The attached file could not be verified.",
+          );
+      });
+    return () => {
+      current = false;
+    };
+  }, [args.workspaceTransfer, props.agentId, status]);
 
   const answer = async (decision: "approved" | "declined") => {
     if (!respond) return;
     setSending(decision);
-    // Include the note in the same tool result that resumes the Bot.
-    await respond({ decision, note: note.trim() || undefined });
+    try {
+      const uploaded =
+        decision === "approved" && args.workspaceTransfer
+          ? await client<TransferPreview>(
+              "/api/workspace-transfers/approve",
+              "transfer",
+              {
+                method: "POST",
+                body: { botId: props.agentId, ...args.workspaceTransfer },
+                fallback: "The approved file could not be uploaded.",
+              },
+            )
+          : undefined;
+      // The server action happens before the decision resumes the model, so the result is evidence
+      // of the approved side effect rather than a model-authored promise to perform it later.
+      await respond({
+        decision,
+        note: note.trim() || undefined,
+        ...(uploaded ? { transfer: uploaded } : {}),
+      });
+    } catch (error) {
+      setTransferError(
+        error instanceof Error
+          ? error.message
+          : "The approved file could not be uploaded.",
+      );
+      setSending(null);
+    }
   };
 
   if (status === "inProgress") {
@@ -91,6 +177,31 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
         </dl>
       ) : null}
 
+      {args.workspaceTransfer ? (
+        <div className="mt-3 rounded-md border border-border p-3 text-sm">
+          {transfer ? (
+            <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1">
+              <dt className="text-muted-foreground">Verified file</dt>
+              <dd className="break-words">{transfer.filename}</dd>
+              <dt className="text-muted-foreground">Size</dt>
+              <dd>{transfer.sizeBytes.toLocaleString()} bytes</dd>
+              <dt className="text-muted-foreground">SHA-256</dt>
+              <dd className="break-all font-mono text-xs">{transfer.sha256}</dd>
+              <dt className="text-muted-foreground">ERP transfer</dt>
+              <dd className="break-all font-mono text-xs">
+                {transfer.transferId}
+              </dd>
+            </dl>
+          ) : transferError ? (
+            <p className="text-destructive">{transferError}</p>
+          ) : (
+            <p className="text-muted-foreground">
+              Verifying the attached file…
+            </p>
+          )}
+        </div>
+      ) : null}
+
       {decided ? null : (
         <div className="mt-4 space-y-2">
           <input
@@ -103,7 +214,9 @@ export function ApprovalCard(props: Waiting<ApprovalArgs> & { name?: string }) {
           />
           <div className="flex gap-2">
             <Button
-              disabled={Boolean(sending)}
+              disabled={
+                Boolean(sending) || Boolean(args.workspaceTransfer && !transfer)
+              }
               onClick={() => void answer("approved")}
               size="sm"
             >

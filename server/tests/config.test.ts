@@ -51,24 +51,31 @@ const {
 } = baseEnvironment;
 
 describe("deployment configuration", () => {
-  test("configures the governed ERP file bridge only as a complete pair", () => {
+  test("keeps attachment handoffs off unless a directional pair is explicit", () => {
+    expect(loadConfig(baseEnvironment).handoffAttachments).toEqual({
+      enabled: false,
+      allowedPairs: new Set(),
+    });
     const config = loadConfig({
       ...baseEnvironment,
-      WORKSPACE_TRANSFER_NETSFERA_ERP_ORIGIN: "https://erp.netsfera.es",
-      WORKSPACE_TRANSFER_NETSFERA_ERP_TOKEN_FILE:
-        "/run/secrets/netsfera-erp-agent-token",
+      HANDOFF_ATTACHMENTS_ENABLED: "true",
+      HANDOFF_ATTACHMENT_PAIRS: "recolector-documentos:jefe-erp",
+      WORKSPACE_TRANSFER_NETSFERA_ERP_SERVER_ID: "erp-jefe",
     });
     expect(config.workspaceTransfer).toEqual({
-      netsferaErpOrigin: "https://erp.netsfera.es",
-      netsferaErpTokenFile: "/run/secrets/netsfera-erp-agent-token",
+      netsferaErpServerId: "erp-jefe",
       cleanupDryRun: true,
+    });
+    expect(config.handoffAttachments).toEqual({
+      enabled: true,
+      allowedPairs: new Set(["recolector-documentos:jefe-erp"]),
     });
     expect(() =>
       loadConfig({
         ...baseEnvironment,
-        WORKSPACE_TRANSFER_NETSFERA_ERP_ORIGIN: "https://erp.netsfera.es",
+        HANDOFF_ATTACHMENTS_ENABLED: "true",
       }),
-    ).toThrow("must be set together");
+    ).toThrow("HANDOFF_ATTACHMENT_PAIRS");
   });
 
   test("resolves the Intelligence runtime, which is the only runtime", () => {

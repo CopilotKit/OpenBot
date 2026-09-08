@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
+  AttachmentCopyError,
   createComputerAttachmentBroker,
   type HandoffAttachment,
 } from "../src/computer/attachments";
@@ -151,5 +152,50 @@ describe("copying attachments between Bot computers", () => {
       }),
     ).rejects.toThrow();
     expect(imported).toEqual([]);
+  });
+
+  test("reports an exact orphan when rollback cannot delete it", async () => {
+    let exportCount = 0;
+    const broker = createComputerAttachmentBroker({
+      provider: provider(),
+      id: () => "11111111-1111-4111-8111-111111111111",
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/export")) {
+          exportCount += 1;
+          return exportCount === 1
+            ? exported()
+            : Response.json({ error: "bad source" }, { status: 400 });
+        }
+        if (url.endsWith("/import")) {
+          return Response.json({
+            handoffId: "c".repeat(64),
+            attachmentId: "11111111-1111-4111-8111-111111111111",
+            filename: "invoice.pdf",
+            mediaType: "application/pdf",
+            sizeBytes: pdf.length,
+            sha256,
+            path: `inbox/${"c".repeat(64)}/11111111-1111-4111-8111-111111111111/invoice.pdf`,
+          });
+        }
+        if (url.endsWith("/delete")) {
+          return Response.json({ error: "busy" }, { status: 500 });
+        }
+        throw new Error(`Unexpected request ${url}`);
+      },
+    });
+
+    const error = await broker
+      .copy({
+        handoffId: "c".repeat(64),
+        fromBotId: "collector",
+        toBotId: "erp",
+        paths: ["downloads/one.pdf", "downloads/two.pdf"],
+      })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(AttachmentCopyError);
+    expect((error as AttachmentCopyError).orphaned).toHaveLength(1);
+    expect((error as AttachmentCopyError).orphaned[0]?.sha256).toBe(sha256);
   });
 });

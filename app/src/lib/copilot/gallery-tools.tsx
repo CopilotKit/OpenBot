@@ -51,7 +51,12 @@ export function GalleryTools() {
     <>
       {GALLERY_COMPONENTS.map((spec) =>
         spec.kind === "decision" ? (
-          <GrantedDecision held={held} key={spec.name} spec={spec} />
+          <GrantedDecision
+            agentId={grantsFor}
+            held={held}
+            key={spec.name}
+            spec={spec}
+          />
         ) : (
           <GrantedTool
             grantsFor={grantsFor}
@@ -144,9 +149,11 @@ function GrantedTool({
 }
 
 function GrantedDecision({
+  agentId,
   spec,
   held,
 }: {
+  agentId: string;
   spec: GalleryComponent;
   held: Map<string, string>;
 }) {
@@ -158,7 +165,7 @@ function GrantedDecision({
   const Render = useMemo(
     () =>
       function DecisionRender(props: Record<string, unknown>) {
-        if (isHeld) return <Component {...props} />;
+        if (isHeld) return <Component {...props} agentId={agentId} />;
         return (
           <RefusedDecision
             respond={
@@ -168,7 +175,7 @@ function GrantedDecision({
           />
         );
       },
-    [Component, isHeld, spec.title],
+    [Component, agentId, isHeld, spec.title],
   );
 
   useHumanInTheLoop({

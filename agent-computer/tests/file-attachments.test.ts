@@ -110,6 +110,53 @@ describe("importing an attachment", () => {
     ).rejects.toThrow();
   });
 
+  test("retries the same immutable attachment without replacing it", async () => {
+    const metadata = {
+      handoffId: "d".repeat(64),
+      attachmentId: randomUUID(),
+      filename: "invoice.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: pdf.length,
+      sha256: createHash("sha256").update(pdf).digest("hex"),
+    };
+    const workspace = createWorkspace(root);
+
+    const first = await importAttachment(workspace, metadata, pdf);
+    const before = await lstat(join(root, first.path));
+    const second = await importAttachment(workspace, metadata, pdf);
+    const after = await lstat(join(root, second.path));
+
+    expect(second).toEqual(first);
+    expect(after.ino).toBe(before.ino);
+  });
+
+  test("refuses a retry whose existing destination has different bytes", async () => {
+    const metadata = {
+      handoffId: "e".repeat(64),
+      attachmentId: randomUUID(),
+      filename: "invoice.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: pdf.length,
+      sha256: createHash("sha256").update(pdf).digest("hex"),
+    };
+    const destination = join(
+      root,
+      "inbox",
+      metadata.handoffId,
+      metadata.attachmentId,
+      metadata.filename,
+    );
+    await mkdir(join(destination, ".."), { recursive: true });
+    const different = Buffer.from(pdf);
+    different[different.length - 1] = 0x21;
+    await writeFile(destination, different);
+
+    await expect(
+      importAttachment(createWorkspace(root), metadata, pdf),
+    ).rejects.toThrow(/different attachment/i);
+    expect(await readFile(destination)).toEqual(different);
+  });
+
   test("a failed import leaves neither a final nor partial file", async () => {
     const handoffId = "b".repeat(64);
     const attachmentId = randomUUID();

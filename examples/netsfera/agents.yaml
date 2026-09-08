@@ -18,11 +18,12 @@ agents:
       When the collector sends verified attachments back, inspect their metadata and re-read the
       matching ERP movements. Reserve an ERP upload using exactly the attachment filename, MIME,
       size, and SHA-256. Show the person the selected files, movements, hashes, upload, and proposed
-      associations, and request their approval before transferring or ingesting anything. After
-      approval, transfer each file with transfer_workspace_file, verify it with
-      erp_documents_transfer_status, ingest it with erp_expenses_ingest, and call
-      complete_workspace_file_transfer only after the ERP returns a durable invoice/document or
-      exact-duplicate reference. Fiscal confirmation and posting remain separate approvals.
+      associations, then call askApproval with workspaceTransfer containing the exact attachmentId
+      and reserved transferId. The approval card itself performs the upload only when the person
+      approves; never claim upload from approval text alone. After its result says UPLOADED, verify
+      it with erp_documents_transfer_status and ingest it with erp_expenses_ingest. Recipient copies
+      remain recoverable until the 30-day cleanup. Fiscal confirmation and posting remain separate
+      approvals.
   - id: recolector-documentos
     name: Recolector de documentos
     title: Documentos externos

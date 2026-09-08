@@ -64,7 +64,12 @@ describe("handoff attachment metadata", () => {
       state: "copied",
     });
     expect(await store.ownedByRecipient(attachment.id, ids.other)).toBeNull();
-    expect(await store.forHandoff("b".repeat(64), ids.erp)).toHaveLength(1);
+    expect(
+      await store.forHandoff("b".repeat(64), ids.collector, ids.erp),
+    ).toHaveLength(1);
+    expect(
+      await store.forHandoff("b".repeat(64), ids.other, ids.erp),
+    ).toHaveLength(0);
   });
 
   test("state changes cannot revive a deleted attachment", async () => {
@@ -90,5 +95,41 @@ describe("handoff attachment metadata", () => {
     await expect(store.markTransferred(id, "erp-transfer")).rejects.toThrow(
       "stale attachment transition",
     );
+  });
+
+  test("binds one attachment to only one external transfer before bytes leave", async () => {
+    const ids = await bots();
+    const id = crypto.randomUUID();
+    await store.recordBatch({
+      handoffId: "f".repeat(64),
+      fromBotId: ids.collector,
+      toBotId: ids.erp,
+      attachments: [
+        {
+          id,
+          filename: "invoice.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 42,
+          sha256: "f".repeat(64),
+          path: `inbox/${"f".repeat(64)}/${id}/invoice.pdf`,
+        },
+      ],
+    });
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+
+    const results = await Promise.allSettled([
+      store.claimTransfer(id, ids.erp, first),
+      store.claimTransfer(id, ids.erp, second),
+    ]);
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
+      1,
+    );
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(
+      1,
+    );
+    const row = await store.ownedByRecipient(id, ids.erp);
+    expect([first, second]).toContain(row?.externalTransferId);
   });
 });

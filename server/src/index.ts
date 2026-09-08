@@ -7,10 +7,7 @@ import { serve } from "bun";
 import { eq } from "drizzle-orm";
 import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
 import { createAttachmentCleanup } from "./agents/attachment-cleanup";
-import {
-  createAttachmentCompletionTool,
-  createAttachmentTransferTool,
-} from "./agents/attachment-transfer-tool";
+import { createWorkspaceFileTransferService } from "./agents/attachment-transfer-tool";
 import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
@@ -63,7 +60,6 @@ import {
 } from "./computer/provider";
 import { createSnapshotStore } from "./computer/snapshot-store";
 import { locateComputerStream } from "./computer/stream-access";
-import { loadWorkspaceUploadTarget } from "./computer/upload-target";
 import { loadConfig } from "./config";
 import {
   type IdentifyActor,
@@ -250,18 +246,13 @@ const computerProvider = config.computer
   ? createComputerProvider(config.computer)
   : undefined;
 const handoffAttachmentStore = createHandoffAttachmentStore(database);
-const computerAttachmentBroker = computerProvider
-  ? createComputerAttachmentBroker({
-      provider: computerProvider,
-      token: config.computer?.token,
-    })
-  : undefined;
-const workspaceUploadTarget = config.workspaceTransfer
-  ? await loadWorkspaceUploadTarget({
-      origin: config.workspaceTransfer.netsferaErpOrigin,
-      tokenFile: config.workspaceTransfer.netsferaErpTokenFile,
-    })
-  : undefined;
+const computerAttachmentBroker =
+  computerProvider && config.handoffAttachments.enabled
+    ? createComputerAttachmentBroker({
+        provider: computerProvider,
+        token: config.computer?.token,
+      })
+    : undefined;
 
 if (computerProvider?.warm) {
   void computerProvider.warm();
@@ -348,6 +339,25 @@ const pluginStore = createPluginStore({
    */
   redirectUri: config.publicUrl ? redirectUriFor(config.publicUrl) : undefined,
 });
+const workspaceFileTransfer =
+  computerAttachmentBroker && config.workspaceTransfer
+    ? createWorkspaceFileTransferService({
+        store: handoffAttachmentStore,
+        broker: computerAttachmentBroker,
+        connection: ({ botId, actorId }) =>
+          pluginStore.connectionForAgentServer({
+            serverId: config.workspaceTransfer?.netsferaErpServerId ?? "",
+            botId,
+            actorId,
+            requiredTools: [
+              "erp_documents_reserve_upload",
+              "erp_documents_transfer_status",
+              "erp_expenses_ingest",
+            ],
+          }),
+        auditStore: bootAuditStore,
+      })
+    : undefined;
 
 /**
  * Routines, and the one moment its tools are told what to act on.
@@ -394,6 +404,9 @@ const handoffDesk = createHandoffDesk({
     actorFor(userId).catch(() => null),
   auditStore: bootAuditStore,
   caps: config.handoff,
+  mayAttach: async (fromBotId, toBotId) =>
+    config.handoffAttachments.enabled &&
+    config.handoffAttachments.allowedPairs.has(`${fromBotId}:${toBotId}`),
   attachmentBroker: computerAttachmentBroker,
   attachmentStore: computerAttachmentBroker
     ? handoffAttachmentStore
@@ -864,26 +877,7 @@ const copilotRuntime = mountCopilotRuntime(
       route: askTheirOwnPerson,
       auditStore: bootAuditStore,
     });
-    const transferring =
-      computerAttachmentBroker && workspaceUploadTarget
-        ? createAttachmentTransferTool({
-            from: run,
-            store: handoffAttachmentStore,
-            broker: computerAttachmentBroker,
-            target: workspaceUploadTarget,
-            auditStore: bootAuditStore,
-          })
-        : null;
-    const completing =
-      computerAttachmentBroker && workspaceUploadTarget
-        ? createAttachmentCompletionTool({
-            from: run,
-            store: handoffAttachmentStore,
-            broker: computerAttachmentBroker,
-            auditStore: bootAuditStore,
-          })
-        : null;
-    return [passing, asking, transferring, completing].filter(
+    return [passing, asking].filter(
       (tool): tool is NonNullable<typeof tool> => tool !== null,
     );
   },
@@ -1212,6 +1206,9 @@ const app = createApp(
   // The same store every run reads through `loadInstructionsForActor`, so the screen a person edits
   // and the prompt their coworker is built from can never be two different pieces of text.
   userInstructionsStore,
+  // The browser invokes this only from the human approval card; it is never a model-executable
+  // server tool. The route rechecks the signed-in person and active Bot before any byte leaves.
+  workspaceFileTransfer,
 );
 
 /**

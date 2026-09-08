@@ -1,12 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import {
-  createAttachmentCompletionTool,
-  createAttachmentTransferTool,
-} from "../src/agents/attachment-transfer-tool";
+import { createWorkspaceFileTransferService } from "../src/agents/attachment-transfer-tool";
 import type { HandoffAttachmentStore } from "../src/agents/handoff-attachment-store";
 import type { AuditStore } from "../src/audit";
 import type { ComputerAttachmentBroker } from "../src/computer/attachments";
-import { parseWorkspaceUploadTarget } from "../src/computer/upload-target";
 
 const attachmentId = "22222222-2222-4222-8222-222222222222";
 const transferId = "11111111-1111-4111-8111-111111111111";
@@ -14,9 +10,7 @@ const sha256 = "a".repeat(64);
 const bytes = Buffer.from("%PDF-1.7 invoice");
 
 function setup(owner = "erp") {
-  const calls: { url?: string; init?: RequestInit; transferred?: unknown[] } = {
-    transferred: [],
-  };
+  const calls: { url?: string; init?: RequestInit; claimed?: unknown[] } = {};
   const row = {
     id: attachmentId,
     handoffId: "b".repeat(64),
@@ -37,178 +31,83 @@ function setup(owner = "erp") {
   };
   const store = {
     ownedByRecipient: async (id: string, botId: string) =>
-      id === attachmentId && botId === "erp" ? row : null,
-    markTransferred: async (...args: unknown[]) => {
-      calls.transferred?.push(args);
-      return {
-        ...row,
-        state: "transferred" as const,
-        externalTransferId: String(args[1]),
-      };
+      id === attachmentId && botId === owner ? row : null,
+    claimTransfer: async (...args: unknown[]) => {
+      calls.claimed = args;
+      return { ...row, externalTransferId: String(args[2]) };
     },
-  } as HandoffAttachmentStore;
-  const broker = {
-    read: async () => ({
-      bytes,
-      filename: row.filename,
-      mediaType: row.mediaType,
-      sizeBytes: row.sizeBytes,
-      sha256: row.sha256,
+    markTransferred: async () => ({
+      ...row,
+      state: "transferred" as const,
+      externalTransferId: transferId,
     }),
-  } as unknown as ComputerAttachmentBroker;
-  const auditStore: AuditStore = { insert: async () => {} };
-  const tool = createAttachmentTransferTool({
-    from: {
-      botId: owner,
-      actorId: "user-1",
-      runId: "run-1",
-      threadId: "thread-1",
-    },
+  } as HandoffAttachmentStore;
+  const service = createWorkspaceFileTransferService({
     store,
-    broker,
-    target: parseWorkspaceUploadTarget("https://erp.test", "server-only-token"),
-    auditStore,
+    broker: {
+      read: async () => ({
+        bytes,
+        filename: row.filename,
+        mediaType: row.mediaType,
+        sizeBytes: row.sizeBytes,
+        sha256: row.sha256,
+      }),
+    } as unknown as ComputerAttachmentBroker,
+    connection: async () => ({
+      url: "https://erp.test/api/mcp",
+      token: "encrypted-store-token",
+    }),
+    auditStore: { insert: async () => {} } as AuditStore,
     fetchImpl: async (url, init) => {
       calls.url = String(url);
       calls.init = init;
       return new Response('{"secret":"must not escape"}', { status: 200 });
     },
   });
-  return { tool, calls };
+  return { service, calls };
 }
 
-describe("transfer_workspace_file", () => {
-  test("uploads an owned attachment to the fixed target and returns sanitized metadata", async () => {
-    const { tool, calls } = setup();
-    const result = await tool.execute({
-      destination: "netsfera-erp",
+describe("approved workspace file transfer", () => {
+  test("previews immutable server metadata without moving bytes", async () => {
+    const { service, calls } = setup();
+    expect(
+      await service.preview({ botId: "erp", attachmentId, transferId }),
+    ).toMatchObject({ filename: "invoice.pdf", sha256, status: "READY" });
+    expect(calls.url).toBeUndefined();
+  });
+
+  test("claims then uploads through the MCP connector principal", async () => {
+    const { service, calls } = setup();
+    const result = await service.approve({
+      botId: "erp",
+      actorId: "user-1",
       transferId,
       attachmentId,
     });
 
+    expect(calls.claimed).toEqual([attachmentId, "erp", transferId]);
     expect(calls.url).toBe(
       `https://erp.test/api/agent-transfers/${transferId}`,
     );
-    expect(calls.init?.redirect).toBe("manual");
     expect(calls.init?.headers).toMatchObject({
-      authorization: "Bearer server-only-token",
+      authorization: "Bearer encrypted-store-token",
       "content-type": "application/pdf",
       "content-length": String(bytes.length),
     });
-    expect(result).toContain('"status":"UPLOADED"');
-    expect(result).not.toContain("secret");
-    expect(calls.transferred).toEqual([[attachmentId, transferId]]);
+    expect(result.status).toBe("UPLOADED");
+    expect(JSON.stringify(result)).not.toContain("secret");
   });
 
-  test("refuses an attachment not owned by the current recipient", async () => {
-    const { tool, calls } = setup("other");
-    const result = await tool.execute({
-      destination: "netsfera-erp",
-      transferId,
-      attachmentId,
-    });
-    expect(result).toContain("not available");
-    expect(calls.url).toBeUndefined();
-  });
-});
-
-describe("complete_workspace_file_transfer", () => {
-  test("deletes an ingested recipient copy only after matching the ERP transfer", async () => {
-    const removed: unknown[] = [];
-    const deleted: unknown[] = [];
-    const transferredRow = {
-      id: attachmentId,
-      handoffId: "b".repeat(64),
-      fromBotId: "collector",
-      recipientBotId: "erp",
-      path: `inbox/${"b".repeat(64)}/${attachmentId}/invoice.pdf`,
-      filename: "invoice.pdf",
-      mediaType: "application/pdf",
-      sizeBytes: bytes.length,
-      sha256,
-      state: "transferred" as const,
-      externalTransferId: transferId,
-      resultReference: null,
-      expiresAt: new Date(),
-      deletedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    const tool = createAttachmentCompletionTool({
-      from: {
+  test("refuses an attachment not owned by the approved Bot", async () => {
+    const { service, calls } = setup("other");
+    await expect(
+      service.approve({
         botId: "erp",
         actorId: "user-1",
-        runId: "run-1",
-        threadId: "thread-1",
-      },
-      store: {
-        ownedByRecipient: async () => transferredRow,
-        markDeleted: async (...args: unknown[]) => {
-          deleted.push(args);
-          return { ...transferredRow, state: "deleted" as const };
-        },
-      } as HandoffAttachmentStore,
-      broker: {
-        remove: async (input: unknown) => {
-          removed.push(input);
-          return { deleted: true };
-        },
-      } as ComputerAttachmentBroker,
-      auditStore: { insert: async () => {} },
-    });
-
-    const result = await tool.execute({
-      attachmentId,
-      transferId,
-      outcome: "ingested",
-      erpReference: "invoice-123",
-    });
-
-    expect(result).toContain('"deleted":true');
-    expect(removed).toHaveLength(1);
-    expect(deleted).toEqual([[attachmentId, "ingested:invoice-123"]]);
-  });
-
-  test("retains bytes on retryable ERP failures", async () => {
-    const removed: unknown[] = [];
-    const { tool: transferTool } = setup();
-    expect(transferTool).toBeTruthy();
-    const row = {
-      id: attachmentId,
-      handoffId: "b".repeat(64),
-      fromBotId: "collector",
-      recipientBotId: "erp",
-      path: "inbox/file.pdf",
-      filename: "file.pdf",
-      mediaType: "application/pdf",
-      sizeBytes: bytes.length,
-      sha256,
-      state: "transferred" as const,
-      externalTransferId: transferId,
-      resultReference: null,
-      expiresAt: new Date(),
-      deletedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    const tool = createAttachmentCompletionTool({
-      from: { botId: "erp", actorId: "user-1", runId: "run-1" },
-      store: { ownedByRecipient: async () => row } as HandoffAttachmentStore,
-      broker: {
-        remove: async (input: unknown) => {
-          removed.push(input);
-          return { deleted: true };
-        },
-      } as ComputerAttachmentBroker,
-      auditStore: { insert: async () => {} },
-    });
-
-    const result = await tool.execute({
-      attachmentId,
-      transferId,
-      outcome: "failed",
-    });
-    expect(result).toContain('"retained":true');
-    expect(removed).toHaveLength(0);
+        transferId,
+        attachmentId,
+      }),
+    ).rejects.toThrow("not available");
+    expect(calls.url).toBeUndefined();
   });
 });
