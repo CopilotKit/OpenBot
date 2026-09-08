@@ -28,7 +28,7 @@ describe("where a socket is opened", () => {
     ).toBe("ws://192.168.1.10:3001/api/channels/events");
   });
 
-  test("stays on the page's own origin when no server port is configured", () => {
+  test("stays on the page's own origin when no server port is announced", () => {
     expect(
       socketUrl(
         "/api/channels/events",
@@ -36,6 +36,20 @@ describe("where a socket is opened", () => {
         "",
       ),
     ).toBe("wss://openbot.example/api/channels/events");
+  });
+
+  test("behind an ingress that only exposes 443, stays on 443, never the container port", () => {
+    // The case that must not break, and the one a baked server port broke: production serves the
+    // app and answers the upgrade same-origin, behind an ingress that terminates TLS on 443 and
+    // never exposes the container's port. No Vite runtime announces a port there, so the socket
+    // stays on the origin the browser loaded rather than being sent to a port nothing routes.
+    expect(
+      socketUrl(
+        "/api/computers/a/stream",
+        at("https:", "openbot.example", "openbot.example"),
+        "",
+      ),
+    ).toBe("wss://openbot.example/api/computers/a/stream");
   });
 
   test("follows the page's scheme, so an https page never opens an insecure socket", () => {
