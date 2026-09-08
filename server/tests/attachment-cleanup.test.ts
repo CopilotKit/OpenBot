@@ -23,9 +23,13 @@ const row = {
   updatedAt: new Date(0),
 };
 
-function setup(dryRun: boolean, behavior: { claimFails?: boolean } = {}) {
+function setup(
+  dryRun: boolean,
+  behavior: { claimFails?: boolean; auditFails?: boolean } = {},
+) {
   const removed: unknown[] = [];
   const claimed: unknown[] = [];
+  const released: unknown[] = [];
   const marked: unknown[] = [];
   const audited: unknown[] = [];
   const cleanup = createAttachmentCleanup({
@@ -36,7 +40,10 @@ function setup(dryRun: boolean, behavior: { claimFails?: boolean } = {}) {
         if (behavior.claimFails) throw new Error("stale attachment transition");
         return row;
       },
-      releaseDeletionLease: async () => true,
+      releaseDeletionLease: async (...args: unknown[]) => {
+        released.push(args);
+        return true;
+      },
       completeDeletion: async (...args: unknown[]) => {
         marked.push(args);
         return { ...row, state: "deleted" as const };
@@ -50,12 +57,13 @@ function setup(dryRun: boolean, behavior: { claimFails?: boolean } = {}) {
     } as ComputerAttachmentBroker,
     auditStore: {
       insert: async (event: unknown) => {
+        if (behavior.auditFails) throw new Error("audit unavailable");
         audited.push(event);
       },
     } as AuditStore,
     dryRun,
   });
-  return { cleanup, removed, claimed, marked, audited };
+  return { cleanup, removed, claimed, released, marked, audited };
 }
 
 describe("expired handoff attachment cleanup", () => {
@@ -98,5 +106,14 @@ describe("expired handoff attachment cleanup", () => {
     expect(built.removed).toHaveLength(0);
     expect(built.marked).toHaveLength(0);
     expect(built.audited).toHaveLength(0);
+  });
+
+  test("does not finalize deletion when its audit event cannot be recorded", async () => {
+    const built = setup(false, { auditFails: true });
+
+    expect(await built.cleanup.sweep()).toEqual({ found: 1, deleted: 0 });
+    expect(built.removed).toHaveLength(1);
+    expect(built.marked).toHaveLength(0);
+    expect(built.released).toHaveLength(1);
   });
 });

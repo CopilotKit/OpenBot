@@ -32,8 +32,6 @@ export function createAttachmentCleanup(options: {
             handoffId: claimed.handoffId,
             attachment: claimed,
           });
-          await options.store.completeDeletion(claimed.id, "expired", leaseId);
-          deleted += 1;
           await recordAuditEvent(options.auditStore, {
             eventType: "agent.attachment_expired",
             targetType: "handoff_attachment",
@@ -46,6 +44,8 @@ export function createAttachmentCleanup(options: {
               reason: "expired",
             },
           });
+          await options.store.completeDeletion(claimed.id, "expired", leaseId);
+          deleted += 1;
         } catch (error) {
           await options.store
             .releaseDeletionLease(claimed.id, leaseId)
