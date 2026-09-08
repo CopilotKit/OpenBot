@@ -537,13 +537,27 @@ export function createComputerRoutes(
    * A command on the Bot's computer.
    *
    * Same shape as every other acting route: the gateway decides and records, this only shapes the
-   * request. `timeoutMs` is passed through and capped by the computer rather than here, so one place
-   * owns the limit.
+   * request. `timeoutMs` is validated here against the shell's own bounds (1s floor, 600s ceiling),
+   * so a NaN, an Infinity, a negative, or a ten-hour value answers 400 instead of travelling to the
+   * computer as a RangeError 500 or a run that outlasts the transport backstop.
    */
   routes.post("/:botId/exec", (context) =>
     act(context, (botId, actor, body, signal) => {
       if (typeof body?.command !== "string" || !body.command.trim()) {
         return { error: "A command is required." };
+      }
+      if (body.timeoutMs !== undefined) {
+        if (
+          typeof body.timeoutMs !== "number" ||
+          !Number.isInteger(body.timeoutMs) ||
+          body.timeoutMs < 1_000 ||
+          body.timeoutMs > 600_000
+        ) {
+          return {
+            error:
+              "timeoutMs must be a whole number of milliseconds between 1000 and 600000.",
+          };
+        }
       }
       // The fourth argument, like every other acting route. Without it the plumbing through
       // gateway.runCommand and into the shell's own abort listener was dead code, and Stop ended the
