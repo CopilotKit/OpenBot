@@ -33,6 +33,33 @@ const ALLOWED: HandoffOutcome = {
 };
 
 describe("the handoff tool", () => {
+  test("treats an empty optional attachment list as a text-only handoff", async () => {
+    let received: unknown;
+    const tool = handoffTool({
+      desk: {
+        send: async (input) => {
+          received = input.envelope;
+          return ALLOWED;
+        },
+      },
+      from: FROM,
+      hasSomebodyToAsk: true,
+      maxDepth: 1,
+      maxPerRun: 3,
+    });
+
+    const result = await tool?.execute({
+      bot: "Researcher",
+      task: "find the invoices that match these movements",
+      attachments: [],
+    });
+
+    expect(result).toStartWith(HANDED_OVER);
+    expect(received).toEqual({
+      task: "find the invoices that match these movements",
+    });
+  });
+
   test("accepts up to ten relative attachment paths and forwards them", async () => {
     let received: unknown;
     const tool = handoffTool({

@@ -54,10 +54,11 @@ const parameters = z.object({
           ),
       }),
     )
-    .min(1)
     .max(10)
     .optional()
-    .describe("Files from this Bot's workspace to send with the task"),
+    .describe(
+      "Optional files from this Bot's workspace to send with the task. Omit this or use an empty list for a text-only handoff.",
+    ),
 });
 
 /**
@@ -124,7 +125,7 @@ export function handoffTool(options: {
           ...(parsed.data.expecting
             ? { expecting: parsed.data.expecting }
             : {}),
-          ...(parsed.data.attachments
+          ...(parsed.data.attachments?.length
             ? { attachments: parsed.data.attachments }
             : {}),
         },
