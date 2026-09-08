@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import type { GalleryComponent } from "@/lib/copilot/gallery-registry";
@@ -26,6 +26,14 @@ type Waiting<T> =
     }
   | { status: "complete"; args: T; respond: undefined; result: string };
 
+const WorkspaceTransferProps = z.object({
+  attachmentId: z.string().uuid().describe("The attached workspace file id"),
+  transferId: z
+    .string()
+    .uuid()
+    .describe("The ERP transfer id returned by reserve upload"),
+});
+
 export const ApprovalCardProps = z.object({
   title: z.string().describe("What is being approved, in a few words"),
   summary: z
@@ -39,21 +47,9 @@ export const ApprovalCardProps = z.object({
     ),
   approveLabel: z.string().optional().describe("Defaults to Approve"),
   rejectLabel: z.string().optional().describe("Defaults to Decline"),
-  workspaceTransfer: z
-    .object({
-      attachmentId: z
-        .string()
-        .uuid()
-        .describe("The attached workspace file id"),
-      transferId: z
-        .string()
-        .uuid()
-        .describe("The ERP transfer id returned by reserve upload"),
-    })
-    .optional()
-    .describe(
-      "When present, approval uploads this exact received attachment into this exact reserved ERP transfer. The server supplies the trusted filename, size and SHA-256 shown on the card.",
-    ),
+  workspaceTransfer: WorkspaceTransferProps.optional().describe(
+    "Only use this after reserve upload returned both exact UUIDs. Never use it for a download, a Bot-to-Bot message, or permission to send attachments. When valid, approval uploads this exact received attachment into this exact reserved ERP transfer. The server supplies the trusted filename, size and SHA-256 shown on the card.",
+  ),
 });
 
 type ApprovalArgs = z.infer<typeof ApprovalCardProps>;
@@ -76,9 +72,20 @@ export function ApprovalCard(
   const [sending, setSending] = useState<"approved" | "declined" | null>(null);
   const [transfer, setTransfer] = useState<TransferPreview | null>(null);
   const [transferError, setTransferError] = useState<string | null>(null);
+  /*
+   * Model-authored tool arguments are untrusted at render time. The schema is offered to the model,
+   * but the runtime may still hand a renderer malformed optional fields. A bogus ERP reference must
+   * not turn an otherwise ordinary decision into a button that can never be pressed.
+   */
+  const workspaceTransfer = useMemo(() => {
+    const parsed = WorkspaceTransferProps.safeParse(args.workspaceTransfer);
+    return parsed.success ? parsed.data : undefined;
+  }, [args.workspaceTransfer]);
+  const invalidWorkspaceTransfer =
+    args.workspaceTransfer !== undefined && workspaceTransfer === undefined;
 
   useEffect(() => {
-    if (status !== "executing" || !args.workspaceTransfer || !props.agentId) {
+    if (status !== "executing" || !workspaceTransfer || !props.agentId) {
       return;
     }
     let current = true;
@@ -87,7 +94,7 @@ export function ApprovalCard(
       "transfer",
       {
         method: "POST",
-        body: { botId: props.agentId, ...args.workspaceTransfer },
+        body: { botId: props.agentId, ...workspaceTransfer },
         fallback: "The attached file could not be verified.",
       },
     )
@@ -105,20 +112,20 @@ export function ApprovalCard(
     return () => {
       current = false;
     };
-  }, [args.workspaceTransfer, props.agentId, status]);
+  }, [props.agentId, status, workspaceTransfer]);
 
   const answer = async (decision: "approved" | "declined") => {
     if (!respond) return;
     setSending(decision);
     try {
       const uploaded =
-        decision === "approved" && args.workspaceTransfer
+        decision === "approved" && workspaceTransfer
           ? await client<TransferPreview>(
               "/api/workspace-transfers/approve",
               "transfer",
               {
                 method: "POST",
-                body: { botId: props.agentId, ...args.workspaceTransfer },
+                body: { botId: props.agentId, ...workspaceTransfer },
                 fallback: "The approved file could not be uploaded.",
               },
             )
@@ -128,7 +135,17 @@ export function ApprovalCard(
       await respond({
         decision,
         note: note.trim() || undefined,
-        ...(uploaded ? { transfer: uploaded } : {}),
+        ...(uploaded
+          ? { transfer: uploaded }
+          : decision === "approved" && invalidWorkspaceTransfer
+            ? {
+                transfer: {
+                  status: "NOT_ATTEMPTED",
+                  reason:
+                    "Invalid ERP transfer reference; no file was uploaded by this approval.",
+                },
+              }
+            : {}),
       });
     } catch (error) {
       setTransferError(
@@ -177,7 +194,7 @@ export function ApprovalCard(
         </dl>
       ) : null}
 
-      {args.workspaceTransfer ? (
+      {workspaceTransfer ? (
         <div className="mt-3 rounded-md border border-border p-3 text-sm">
           {transfer ? (
             <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1">
@@ -200,6 +217,13 @@ export function ApprovalCard(
             </p>
           )}
         </div>
+      ) : invalidWorkspaceTransfer ? (
+        <div className="mt-3 rounded-md border border-border p-3 text-sm">
+          <p className="text-destructive">
+            The invalid ERP transfer reference was ignored. This approval will
+            not upload a file.
+          </p>
+        </div>
       ) : null}
 
       {decided ? null : (
@@ -215,7 +239,7 @@ export function ApprovalCard(
           <div className="flex gap-2">
             <Button
               disabled={
-                Boolean(sending) || Boolean(args.workspaceTransfer && !transfer)
+                Boolean(sending) || Boolean(workspaceTransfer && !transfer)
               }
               onClick={() => void answer("approved")}
               size="sm"
