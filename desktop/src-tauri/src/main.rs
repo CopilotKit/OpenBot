@@ -579,6 +579,15 @@ async fn start_stack(
     .map_err(|error| format!("the wait did not run: {error}"))?;
 
     let shell = app.state::<Shell>();
+    // Recorded before the handles are stashed, so a window that never gets to Stop still leaves
+    // something the next one can stop. See `stack::host_pids_path`.
+    stack::record_host_pids(
+        &root,
+        &started
+            .iter()
+            .map(|(_, child)| child.id())
+            .collect::<Vec<_>>(),
+    );
     shell.children.lock().unwrap().extend(started);
     *shell.root.lock().unwrap() = Some(root.clone());
 

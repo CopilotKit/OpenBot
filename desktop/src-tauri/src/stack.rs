@@ -314,6 +314,35 @@ pub fn install_dependencies(root: &Path, bun: &Path) -> Result<(), String> {
 ///
 /// A window has no console to inherit, so a process whose output is dropped fails invisibly: the
 /// symptom is a port that never answers and a log directory that explains why.
+/// Where the pids of the host processes are written, so a later window can stop them.
+///
+/// The handles a window holds die with the window. Everything else about a running stack survives
+/// it: the containers are Compose's, and the three host processes just keep going. Without this,
+/// Stop from a restarted window had nothing to work with.
+pub fn host_pids_path(root: &Path) -> PathBuf {
+    root.join(".logs").join("host-pids.json")
+}
+
+/// Record the pids of the processes this window started.
+pub fn record_host_pids(root: &Path, pids: &[u32]) {
+    let path = host_pids_path(root);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(
+        &path,
+        serde_json::to_vec(pids).unwrap_or_else(|_| b"[]".to_vec()),
+    );
+}
+
+/// The pids a previous window recorded, if any.
+pub fn recorded_host_pids(root: &Path) -> Vec<u32> {
+    std::fs::read(host_pids_path(root))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Vec<u32>>(&raw).ok())
+        .unwrap_or_default()
+}
+
 pub fn spawn_host_process(
     process: &HostProcess,
     root: &Path,
@@ -411,51 +440,92 @@ pub fn stop_processes_under(_root: &Path) -> usize {
      * already checks for clashes, and each is ended WITH ITS CHILDREN: `bun run serve` starts the
      * real server as a grandchild, so ending only the process holding the port leaves that behind.
      */
+    let mut stopped_recorded = 0;
+    /*
+     * The pids this window or an earlier one recorded, which is the only way to reach the worker.
+     *
+     * It listens on no port, so the sweep below cannot see it, and its command line is identical to
+     * the server's: both are `bun --env-file=../.env src/index.ts`, differing only by working
+     * directory, which Windows will not tell you cheaply. Measured: after the port sweep alone,
+     * 3001 and 3010 were free and the worker was still running.
+     */
+    for pid in recorded_host_pids(_root) {
+        let ended = command("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false);
+        if ended {
+            stopped_recorded += 1;
+        }
+    }
+    let _ = std::fs::remove_file(host_pids_path(_root));
+
     let ports = crate::env::Ports::default();
-    // The three host processes only. The containers are Compose's to stop, and killing whatever
-    // holds a container's published port would reach into the engine's own plumbing.
+    // And a sweep of the two host ports, for a stack whose pidfile is gone. The containers are
+    // Compose's to stop, and killing whatever holds a container's published port would reach into
+    // the engine's own plumbing.
     let ours = [ports.app, ports.server];
     let Ok(listing) = command("netstat").args(["-ano", "-p", "tcp"]).output() else {
-        return 0;
+        return stopped_recorded;
     };
-    let text = String::from_utf8_lossy(&listing.stdout);
 
-    let mut stopped = 0;
-    let mut ended: Vec<u32> = Vec::new();
-    for line in text.lines() {
+    let mut stopped = stopped_recorded;
+    for pid in pids_listening_on(&String::from_utf8_lossy(&listing.stdout), &ours) {
+        // With its children: `bun run serve` starts the real server as a grandchild, so ending
+        // only the process holding the port leaves that one behind.
+        let ended = command("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false);
+        if ended {
+            stopped += 1;
+        }
+    }
+    stopped
+}
+
+/// The processes listening on any of `ports`, from `netstat -ano` output.
+///
+/// Pure and tested, because the column layout is the thing that goes wrong. Read as four columns
+/// rather than five, the foreign address is taken for the state and the state for the pid: nothing
+/// matches, and Stop reports success while leaving everything running. That is exactly what
+/// happened, and this test is why it did not survive.
+#[cfg(not(unix))]
+pub fn pids_listening_on(listing: &str, ports: &[u16]) -> Vec<u32> {
+    let mut found: Vec<u32> = Vec::new();
+    for line in listing.lines() {
+        // Protocol, local address, foreign address, state, pid.
         let mut fields = line.split_whitespace();
-        let (Some(_proto), Some(local), Some(state), Some(pid)) =
-            (fields.next(), fields.next(), fields.next(), fields.next())
-        else {
+        let (Some(_proto), Some(local), Some(_foreign), Some(state), Some(pid)) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+        ) else {
             continue;
         };
         if !state.eq_ignore_ascii_case("LISTENING") {
             continue;
         }
+        // `rsplit` rather than `split`, because an IPv6 local address is `[::1]:3010`.
         let Some(port) = local.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()) else {
             continue;
         };
-        if !ours.contains(&port) {
+        if !ports.contains(&port) {
             continue;
         }
         let Ok(pid) = pid.parse::<u32>() else {
             continue;
         };
-        // A port answers on both loopbacks, so the same process appears twice.
-        if ended.contains(&pid) {
-            continue;
-        }
-        ended.push(pid);
-        let ended_it = command("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false);
-        if ended_it {
-            stopped += 1;
+        // A port answers on both loopbacks, so one process appears on two lines.
+        if !found.contains(&pid) {
+            found.push(pid);
         }
     }
-    stopped
+    found
 }
 
 /**
@@ -841,6 +911,48 @@ fn dirs_home() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Real `netstat -ano` output, because the column layout is what went wrong.
+    ///
+    /// Stop reported success and left the server and the app serving, because this was read as four
+    /// columns: the foreign address was taken for the state, the state for the pid, and nothing
+    /// ever matched.
+    #[test]
+    #[cfg(not(unix))]
+    fn the_processes_holding_our_ports_are_found_in_netstat_output() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1044\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       8748\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       8636\r\n  TCP    127.0.0.1:3010         127.0.0.1:51888        ESTABLISHED     8636\r\n  TCP    [::1]:3010             [::]:0                 LISTENING       8636\r\n  TCP    127.0.0.1:5432         0.0.0.0:0              LISTENING       9999\r\n";
+        let found = super::pids_listening_on(listing, &[3010, 3001]);
+        // Both host processes, each once, and nothing else: not the established connection, not
+        // Postgres on a published container port, not RPC on 135.
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.contains(&8748), "{found:?}");
+        assert!(found.contains(&8636), "{found:?}");
+        assert!(
+            !found.contains(&9999),
+            "a container's port is not ours to kill: {found:?}"
+        );
+        assert!(!found.contains(&1044), "{found:?}");
+    }
+
+    /// The pids survive the window that started them, which is the whole point of writing them.
+    #[test]
+    fn recorded_pids_are_read_back_and_a_missing_file_is_not_an_error() {
+        let dir = std::env::temp_dir().join(format!("openbot-pids-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Nothing recorded is an empty list, not a panic: a deployment somebody started by hand
+        // has no pidfile at all.
+        assert!(recorded_host_pids(&dir).is_empty());
+
+        record_host_pids(&dir, &[4242, 4243, 4244]);
+        assert_eq!(recorded_host_pids(&dir), vec![4242, 4243, 4244]);
+
+        // And rubbish in the file reads as nothing rather than stopping Stop.
+        std::fs::write(host_pids_path(&dir), "not json").unwrap();
+        assert!(recorded_host_pids(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// A manifest with a byte-order mark in front of it is still a manifest.
     ///
