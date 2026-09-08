@@ -77,6 +77,43 @@ A command on the computer inherits PATH, locale and terminal names, and the prox
 
 The supervisor exposes only ensure, stop, reset, and list operations. It holds the Docker socket, so do not expose it outside the deployment network: Docker Compose binds it to `127.0.0.1:4500`, and a deployment running the server inside the compose network reaches it as `supervisor:4300` and needs no published port at all. Set `COMPUTER_RUNTIME=runsc` to run computers under gVisor on hosts that support it.
 
+## What started a run
+
+Every audit row records on whose authority an action was taken. A routine asserts its owner, and a
+hop between Bots asserts the person who began the conversation, so that column alone cannot say
+whether anybody was there when it happened. An interactive run has somebody watching who will notice
+a wrong tool call; an unattended one does not, which is the case worth being able to find.
+
+Each row therefore also names what caused it:
+
+| `initiator_kind` | `initiator_id`         | What it means                                          |
+| ---------------- | ---------------------- | ------------------------------------------------------ |
+| `person`         | none                   | Somebody was in the room. The default.                  |
+| `deployment`     | none                   | The deployment itself, at start-up or refusing a caller it could not identify. |
+| `routine`        | the routine's id       | A schedule fired it, as its owner, with nobody there.   |
+| `handoff`        | the Bot that handed on | Another Bot asked for this, on the person's behalf.     |
+
+The Audit screen filters on it, and **Nobody watching** is `routine` and `handoff` together, which is
+the question of what ran on somebody's authority while they were away. `deployment` is deliberately
+outside that filter: a boundary held at start-up is not work done on anybody's behalf.
+
+`deployment` exists so the column never overclaims. A row that says `person` is a row a person caused,
+and the two places that have no person at all, the start-up rows and the two unauthenticated boundary
+refusals, say so rather than borrowing the default. A deployment that has never run a routine or a hop
+sees `A person` on every row a person made, which is what it was before this existed.
+
+The value travels inside the signed run assertion, beside `depth`, for the reason `depth` does: a hop
+is one run on one pod handing to another run on another, and the process that knows a routine began
+it is the one that claimed the routine, not the one writing the row. Anything holding the assertion
+holds the answer, so a tool call, a hop offered or refused at the desk, a Bot stopping to ask its
+person, and a stream that stalls all say the same thing without each being told separately. A Bot
+cannot relabel its own run, because the assertion is signed by the deployment, and a kind this
+deployment does not write is read as a person rather than kept.
+
+Computer actions are the one family that carries no initiator, and correctly so: the computer tools
+are browser actions, executed by the person's own session, so a headless run has no way to drive the
+computer at all today. A row there is a person's because a person's browser wrote it.
+
 ## Human control and secrets
 
 Handovers are audited as control events:

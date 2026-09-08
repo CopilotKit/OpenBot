@@ -253,6 +253,7 @@ then is a row nothing will read.
 | `COMPUTER_TOKEN`                     | Secret every computer request must present. The computer refuses to start without it.     |
 | `COMPUTER_MAX_BROWSERS`              | How many Bots may hold a running browser at once. `8` by default; the least recently used is closed past it. |
 | `COMPUTER_BROWSER_IDLE_MS`           | How long an untouched browser is kept. 30 minutes by default; `0` keeps them resident.    |
+| `COMPUTER_BROWSER_MODE`              | `headless` by default; set to `headed` to run full Chromium on a private virtual display for human takeover. |
 | `COMPUTER_SUPERVISOR_URL`            | Supervisor URL for per-Bot computers. If absent, Bots share `AGENT_COMPUTER_URL`.         |
 | `SUPERVISOR_TOKEN`                   | Bearer token required by the supervisor.                                                  |
 | `AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS` | Local-only private-host browsing when `true`. A deployment running with `NODE_ENV=production` refuses to start while it is set. Cloud metadata addresses are refused either way. |
@@ -260,6 +261,17 @@ then is a row nothing will read.
 | `AGENT_COMPUTER_POLICY`              | JSON action policy: `{"mode":"enforce","deny":[...],"allow":[...]}`.                      |
 | `COMPUTER_RUNTIME`                   | Set to `runsc` to run supervised computers under gVisor.                                  |
 | `COMPUTER_SANDBOX`                   | Set to `on` to enable Chromium's own sandbox where the host permits user namespaces. Which way it went is printed at start-up. |
+
+Changing `COMPUTER_BROWSER_MODE` affects new supervised computers. A computer that already exists is
+left running until its image changes or its container is recreated. To apply a mode-only change to
+all computers while preserving their browser profiles and workspaces, apply the new supervisor
+environment and remove only the owned containers (do not remove their volumes):
+
+```sh
+docker ps -aq --filter "label=openbot.namespace=openbot" | xargs -r docker rm -f
+```
+
+The supervisor recreates each computer with the same named volumes on its next request.
 
 `agent-computer` also reads:
 

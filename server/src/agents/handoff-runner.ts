@@ -299,6 +299,7 @@ export function createHandoffRunner(options: {
               targetType: "agent",
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              initiator: { kind: "handoff", id: work.fromBotId },
               payload: {
                 // See the same key on `agent.handoff_delivered` below: the Audit screen's Bot
                 // column reads `payload.bot`, so a row without it names no Bot.
@@ -376,6 +377,7 @@ export function createHandoffRunner(options: {
                 targetType: "agent",
                 targetId: work.toBotId,
                 ...(work.actorId ? { actorUserId: work.actorId } : {}),
+                initiator: { kind: "handoff", id: work.fromBotId },
                 payload: {
                   // See the same key on `agent.handoff_delivered` below.
                   bot: work.fromBotId,
@@ -410,6 +412,7 @@ export function createHandoffRunner(options: {
               targetType: "agent",
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              initiator: { kind: "handoff", id: work.fromBotId },
               payload: {
                 // See the same key on `agent.handoff_offered`: the Audit screen's Bot column reads
                 // `payload.bot`, so a row without it names no Bot.
@@ -460,6 +463,7 @@ export function createHandoffRunner(options: {
               targetType: "agent",
               targetId: work.toBotId,
               ...(work.actorId ? { actorUserId: work.actorId } : {}),
+              initiator: { kind: "handoff", id: work.fromBotId },
               payload: {
                 // See the same key on `agent.handoff_delivered` above. This row is the one a
                 // person's unanswered question ends on, so a Bot column showing a dash on it is

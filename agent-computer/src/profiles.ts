@@ -37,6 +37,7 @@ import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type BrowserContext, chromium, type Page } from "playwright";
 import { profileDirectoryFor } from "./bot-id";
+import { browserModeFromEnv } from "./browser-mode";
 import { chooseEvictions, chooseIdle } from "./browser-eviction";
 import { egressFor, egressLabel } from "./egress";
 import { numberFromEnv, settleWithin } from "./env";
@@ -91,6 +92,7 @@ const SINGLETON_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
  * whether the browser rendering the open internet is sandboxed.
  */
 const SANDBOX_ENABLED = process.env.COMPUTER_SANDBOX === "on";
+const BROWSER_MODE = browserModeFromEnv(process.env.COMPUTER_BROWSER_MODE);
 
 const LAUNCH_ARGS = [
   ...(SANDBOX_ENABLED ? [] : ["--no-sandbox"]),
@@ -380,6 +382,7 @@ export function createProfiles(root: string, onClosed: BrowserClosed) {
         await sweepLocks(dir);
         const proxy = egressFor(botId, process.env);
         const context = await chromium.launchPersistentContext(dir, {
+          headless: BROWSER_MODE === "headless",
           args: LAUNCH_ARGS,
           // Playwright launches with `--enable-automation`, which sets `navigator.webdriver` and the
           // "controlled by automated software" banner. Dropped for the same reason as the flag above:

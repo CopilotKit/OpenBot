@@ -43,7 +43,11 @@ describe("the run assertion", () => {
   test("survives a round trip", () => {
     const signed = mintRunAssertion(RUN, KEY);
     // A run that began with a person is depth zero, which is what an unstated depth means.
-    expect(readRunAssertion(signed, KEY)).toEqual({ ...RUN, depth: 0 });
+    expect(readRunAssertion(signed, KEY)).toEqual({
+      ...RUN,
+      depth: 0,
+      initiator: { kind: "person" },
+    });
   });
 
   test("is refused when signed with another key", () => {
@@ -71,6 +75,7 @@ describe("the run assertion", () => {
     expect(readRunAssertion(signed, KEY, 60 * 1000)).toEqual({
       ...RUN,
       depth: 0,
+      initiator: { kind: "person" },
     });
   });
 
@@ -290,6 +295,47 @@ describe("how deep a run is", () => {
         KEY,
       );
       expect(readRunAssertion(signed, KEY)?.depth).toBe(0);
+    }
+  });
+
+  test("what started the run survives a round trip", () => {
+    for (const initiator of [
+      { kind: "person" } as const,
+      { kind: "deployment" } as const,
+      { kind: "routine", id: "routine_7" } as const,
+      { kind: "handoff", id: "research-assistant" } as const,
+    ]) {
+      const signed = mintRunAssertion({ ...RUN, initiator }, KEY);
+      expect(readRunAssertion(signed, KEY)?.initiator).toEqual(initiator);
+    }
+  });
+
+  test("a run that says nothing about what started it reads as a person", () => {
+    expect(
+      readRunAssertion(mintRunAssertion(RUN, KEY), KEY)?.initiator,
+    ).toEqual({ kind: "person" });
+  });
+
+  /*
+   * The point of putting this inside the signature. A Bot cannot relabel its own run, and a kind
+   * this deployment does not write cannot arrive as a string the Audit screen has no branch for.
+   */
+  test("an initiator that is not one reads as a person rather than being kept", () => {
+    for (const nonsense of [
+      { kind: "administrator" },
+      { kind: "routine" },
+      { kind: "handoff", id: "" },
+      { kind: "routine", id: 7 },
+      "routine",
+      null,
+    ]) {
+      const signed = mintRunAssertion(
+        { ...RUN, initiator: nonsense as never },
+        KEY,
+      );
+      expect(readRunAssertion(signed, KEY)?.initiator).toEqual({
+        kind: "person",
+      });
     }
   });
 

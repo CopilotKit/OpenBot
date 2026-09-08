@@ -10,6 +10,7 @@ import {
   type AuditStore,
   AuditQueryError,
   auditQueryFromUrl,
+  DEPLOYMENT_INITIATOR,
   recordAuditEvent,
 } from "./audit";
 import { createDevRequireUser } from "./auth/dev-actor";
@@ -836,6 +837,7 @@ export function createApp(
             await recordAuditEvent(auditStore, {
               eventType: "routines.dispatch_refused",
               targetType: "worker",
+              initiator: DEPLOYMENT_INITIATOR,
               payload: {
                 reason: !expected
                   ? "unconfigured"
@@ -1107,6 +1109,7 @@ export function createApp(
           await recordAuditEvent(auditStore, {
             eventType: "mcp.callback_refused",
             targetType: "mcp_tool",
+            initiator: DEPLOYMENT_INITIATOR,
             targetId:
               typeof body?.name === "string"
                 ? body.name.slice(0, 120)

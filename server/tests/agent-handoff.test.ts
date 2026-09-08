@@ -51,8 +51,11 @@ function desk(options?: {
   role?: "admin" | "user";
 }) {
   const rows: Array<{ kind: string; key: string; payload: unknown }> = [];
-  const events: Array<{ eventType: string; payload: Record<string, unknown> }> =
-    [];
+  const events: Array<{
+    eventType: string;
+    payload: Record<string, unknown>;
+    initiator?: { kind: string; id?: string };
+  }> = [];
 
   const queue = {
     offer: async (item: {
@@ -84,6 +87,7 @@ function desk(options?: {
       recorded.push({
         eventType: event.eventType,
         payload: event.payload ?? {},
+        ...(event.initiator ? { initiator: event.initiator } : {}),
       });
     },
   };
@@ -303,6 +307,51 @@ describe("handing work to another Bot", () => {
    * a hop that was refused is invisible everywhere else, and "why did it not ask the specialist" is
    * the question somebody asks about a thin answer.
    */
+  /*
+   * The row that records a hop beginning. It asserts the person whose authority the run carries, so
+   * without this it reads as an action that person took, which is the whole reason the column exists.
+   */
+  test("the offered row says what started the run, not only whose authority it had", async () => {
+    const started = desk();
+    await started.desk.send({
+      from: { ...FROM, initiator: { kind: "routine", id: "routine_7" } },
+      target: "researcher",
+      envelope: { task: "t" },
+    });
+
+    expect(started.events[0]?.eventType).toBe("agent.handoff_offered");
+    expect(started.events[0]?.initiator).toEqual({
+      kind: "routine",
+      id: "routine_7",
+    });
+  });
+
+  test("a refusal says it too, so a refused hop is not filed as a person's", async () => {
+    const refused = desk({ granted: false });
+    await refused.desk.send({
+      from: { ...FROM, initiator: { kind: "handoff", id: "researcher" } },
+      target: "researcher",
+      envelope: { task: "t" },
+    });
+
+    expect(refused.events[0]?.eventType).toBe("agent.handoff_refused");
+    expect(refused.events[0]?.initiator).toEqual({
+      kind: "handoff",
+      id: "researcher",
+    });
+  });
+
+  test("a run that says nothing leaves the row filed as a person's", async () => {
+    const plain = desk();
+    await plain.desk.send({
+      from: FROM,
+      target: "researcher",
+      envelope: { task: "t" },
+    });
+
+    expect(plain.events[0]?.initiator).toBe(undefined);
+  });
+
   test("both outcomes leave a row naming the run and the reason", async () => {
     const allowed = desk();
     await allowed.desk.send({

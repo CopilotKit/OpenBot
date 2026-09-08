@@ -101,6 +101,9 @@ services:
       # shutdown notes tell you to use -- hands the container an empty string instead. Reaches only
       # a loopback-bound port; a deployment sets a real value in .env.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
+      # `headed` runs full Chromium behind the same streamed screen, so a person taking the wheel
+      # gets a browser sites treat like their ordinary desktop browser. Headless remains the default.
+      COMPUTER_BROWSER_MODE: ${COMPUTER_BROWSER_MODE:-headless}
       # How many Bots may hold a running browser at once, and how long an untouched one is kept.
       # A few hundred MB each, so on a deployment with many Bots these are the difference between
       # a container that holds steady and one that is killed for memory. Defaults are 8 and 30
@@ -197,6 +200,8 @@ services:
       SUPERVISOR_TOKEN: ${SUPERVISOR_TOKEN:-openbot-dev-supervisor-token}
       # Handed to every computer this creates, so the server and the computers share one secret.
       COMPUTER_TOKEN: ${COMPUTER_TOKEN:-openbot-dev-computer-token}
+      # Forwarded into every per-Bot computer the supervisor creates.
+      COMPUTER_BROWSER_MODE: ${COMPUTER_BROWSER_MODE:-headless}
       COMPUTER_IMAGE: ${COMPUTER_IMAGE:-openbot-agent-computer:latest}
       # Which deployment the computers it creates belong to, so two stacks on one Docker host never
       # derive the same container and volume names for the same Bot.
