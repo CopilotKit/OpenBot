@@ -1,5 +1,9 @@
 # ERP document collection and governed artifact ingestion
 
+> **Superseded:** This design was replaced before implementation by
+> `2026-09-08-inter-agent-file-attachments-design.md`. Do not implement the collection-job or shared
+> outbox architecture described below.
+
 ## Goal
 
 Let a person ask `jefe-erp` for missing supplier invoices in one natural request. Jefe ERP identifies
