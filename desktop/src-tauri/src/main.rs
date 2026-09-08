@@ -325,7 +325,21 @@ async fn start_stack(
      * a secret can live without being written down. See `vault` for what each platform gets.
      */
     let (settings, secrets) = openbot_desktop_lib::vault::split(settings);
-    openbot_env::write(&root.join(".env"), &settings, &secrets)
+    /*
+     * The credentials, plus any setting this answer dropped.
+     *
+     * `write` keeps lines it does not own, which is what protects a hand-set value. The cost is
+     * that a key this run deliberately stopped writing would otherwise survive: `BOT_MODEL` did,
+     * leaving an OpenAI key asking OpenAI for the model name a previous compatible-endpoint answer
+     * had given. Anything the writer owns and did not produce this time is taken out.
+     */
+    let mut purge = secrets.clone();
+    for key in ["BOT_MODEL"] {
+        if !settings.contains_key(key) {
+            purge.insert(key.into(), String::new());
+        }
+    }
+    openbot_env::write(&root.join(".env"), &settings, &purge)
         .map_err(|e| format!("could not write .env: {e}"))?;
     openbot_desktop_lib::vault::remember_all(&secrets)?;
     // Beside the `.env` and before the containers, because compose mounts it. See

@@ -151,6 +151,21 @@ pub fn compose(
         ] {
             env.insert(key.into(), String::new());
         }
+        /*
+         * AND THE MODEL NAME, WHICH ONLY ONE ROW IMPLIES.
+         *
+         * Measured: answering the compatible row sets `BOT_MODEL` to whatever the person's own
+         * endpoint calls its model, and switching back to an OpenAI key left it there. The Bot then
+         * asked OpenAI for `local-model` and the last screen said "That account cannot use the
+         * model that was chosen" — about a model this run never chose. Exactly the failure the
+         * clearing above exists for, with one key missed.
+         *
+         * Removed rather than emptied, so `docker-compose.yml`'s own default applies. Blank would
+         * be passed through as a model named "", which is a worse question to ask a provider.
+         */
+        if !matches!(model.credential, ModelCredential::Compatible { .. }) {
+            env.remove("BOT_MODEL");
+        }
     }
     match &model.credential {
         /*
@@ -1174,6 +1189,55 @@ mod model_tests {
             assert_eq!(mode & 0o777, 0o600, "the store was readable by others");
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /**
+    Switching away from the compatible row does not leave its model name behind.
+
+    Measured on a real pass: the compatible row set `BOT_MODEL=local-model`, and answering with an
+    OpenAI key afterwards kept it, so the Bot asked OpenAI for a model only that person's own
+    endpoint has. The last screen said "That account cannot use the model that was chosen" about a
+    model this run never chose.
+    */
+    #[test]
+    fn a_model_name_does_not_survive_a_provider_that_does_not_name_one() {
+        let compatible = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::Compatible {
+                    base_url: "http://127.0.0.1:4310/v1".into(),
+                    api_key: "x".into(),
+                    model: "local-model".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            compatible.get("BOT_MODEL"),
+            Some(&"local-model".to_string())
+        );
+
+        let with_a_key = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::OpenAi {
+                    api_key: "sk-x".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert!(
+            !with_a_key.contains_key("BOT_MODEL"),
+            "a key path carried a model name it never chose"
+        );
     }
 
     /// Switching provider does not leave the last one's key behind.
