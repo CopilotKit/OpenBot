@@ -206,7 +206,24 @@ pub fn compose(
             api_key,
             model: name,
         } => {
-            insert_if_given(&mut env, "OPENAI_API_KEY", api_key);
+            /*
+             * A placeholder when the endpoint needs no key, rather than nothing.
+             *
+             * Ollama, vLLM, LM Studio and llama.cpp ignore the value, but the OpenAI SDK every Bot
+             * is built on refuses to construct a client without a string, so a blank key produced a
+             * Bot that exited on startup asking for a key the person's own server does not have.
+             * The Bots no longer demand one when a base URL names an endpoint, and this is the half
+             * that makes the same choice work against a Bot image published before they learned:
+             * the value is sent to an endpoint that does not read it.
+             *
+             * Not a secret and never treated as one, which is why it is written here in plain sight
+             * rather than put in the credential store.
+             */
+            if api_key.trim().is_empty() {
+                env.insert("OPENAI_API_KEY".into(), NO_KEY_NEEDED.into());
+            } else {
+                insert_if_given(&mut env, "OPENAI_API_KEY", api_key);
+            }
             insert_if_given(&mut env, "OPENAI_BASE_URL", base_url);
             insert_if_given(&mut env, "BOT_MODEL", name);
             /*
@@ -476,6 +493,11 @@ pub enum ModelCredential {
         model: String,
     },
 }
+
+/// What is sent as the key when the endpoint named needs none.
+///
+/// A placeholder, not a credential: see the compatible branch of `compose`.
+pub const NO_KEY_NEEDED: &str = "no-key-needed";
 
 /// Write the file, replacing only what this owns.
 ///
@@ -1266,6 +1288,59 @@ mod model_tests {
                 "a key path carried a model name it never chose: {key}"
             );
         }
+    }
+
+    /**
+    An endpoint that needs no key still gets a client that can be constructed.
+
+    The failure this pins is the whole keyless half of the compatible row: the person fills in an
+    address for their Ollama, leaves the key blank because it has none, and every Bot exits on
+    startup because the OpenAI SDK will not build a client without a string. A placeholder is sent
+    to an endpoint that does not read it.
+    */
+    #[test]
+    fn a_keyless_endpoint_is_given_a_placeholder_rather_than_nothing() {
+        let keyless = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::Compatible {
+                    base_url: "http://127.0.0.1:11434/v1".into(),
+                    api_key: "   ".into(),
+                    model: "qwen2.5:1.5b".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            keyless.get("OPENAI_API_KEY"),
+            Some(&NO_KEY_NEEDED.to_string())
+        );
+        assert_eq!(
+            keyless.get("OPENAI_BASE_URL"),
+            Some(&"http://127.0.0.1:11434/v1".to_string())
+        );
+
+        // And a real key is never replaced by it.
+        let keyed = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::Compatible {
+                    base_url: "https://api.example.test/v1".into(),
+                    api_key: "sk-theirs".into(),
+                    model: "some-model".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(keyed.get("OPENAI_API_KEY"), Some(&"sk-theirs".to_string()));
     }
 
     /// Switching provider does not leave the last one's key behind.
