@@ -7,13 +7,15 @@ import {
   type AssistanceClaim,
   readAssistanceToken,
 } from "../slack/assistance-token";
-import type { ExternalLinkCreationStore } from "./link-store";
+import {
+  ExternalLinkConflictError,
+  type ExternalLinkCreationStore,
+} from "./link-store";
 import { readExternalLinkToken } from "./link-token";
 import type { ExternalProviderIdentity } from "./schema-types";
 import type { ExternalThreadStore } from "./thread-store";
 
 const INVALID_LINK_MESSAGE = "This Slack link has expired or is invalid.";
-const LINK_CONFLICT_MESSAGE = "That Slack identity is already linked.";
 const INVALID_ASSISTANCE_MESSAGE =
   "This assistance link has expired or is invalid.";
 const ASSISTANCE_FORBIDDEN_MESSAGE =
@@ -80,6 +82,20 @@ export function createExternalLinkRoutes({
 }: ExternalLinkRoutesOptions) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
+  /*
+   * Never cached, and these two want it most.
+   *
+   * The request URL carries the link token in `?token=`, and the response body is the identity
+   * claim decoded from it: provider tenant, provider user id and the verified email. A shared cache
+   * or an intermediary keying on that URL would hold a decoded identity claim against the
+   * credential that produced it. The token is signed and expiring, so the window is bounded, but
+   * every sibling route in this file already says this.
+   */
+  routes.use("/slack", async (context, next) => {
+    context.header("Cache-Control", "no-store");
+    await next();
+  });
+
   routes.get("/slack", requireUser, async (context) => {
     try {
       const claim = await readExternalLinkToken(
@@ -124,8 +140,18 @@ export function createExternalLinkRoutes({
         },
       );
     } catch (error) {
-      if (error instanceof Error && error.message === LINK_CONFLICT_MESSAGE) {
-        return context.json({ error: LINK_CONFLICT_MESSAGE }, 409);
+      /*
+       * The conflict travels as a code beside the sentence.
+       *
+       * Both keys refuse with 409, and only one of them is about somebody else's account. The page
+       * that shows this cannot tell them apart from the status, so the discriminator the store
+       * established is carried rather than discarded; see ExternalLinkConflict.
+       */
+      if (error instanceof ExternalLinkConflictError) {
+        return context.json(
+          { error: error.message, conflict: error.conflict },
+          409,
+        );
       }
       throw error;
     }

@@ -22,6 +22,7 @@ function channel(
     agentIds: [`agent-${id}`],
     threadId: `thread-${id}`,
     active: true,
+    summary: null,
     lastMessage: null,
     lastMessageAt: null,
     lastMessageAgentId: null,
@@ -86,6 +87,29 @@ describe("sidebar conversation roster", () => {
       "slack:slack-tie",
       "openbot:unpinned-new",
     ]);
+  });
+
+  /**
+   * Naming a conversation is not activity in it.
+   *
+   * Whatever order the roster was in, it is the same order once titles arrive, or rows would appear
+   * to jump for no reason anybody looking at them could account for. Held by construction — the
+   * sort reads activity and the row key, never the summary — and asserted because that is the kind
+   * of thing a later sort change breaks quietly.
+   */
+  test("a title changes nothing about where a row sits", () => {
+    const ids = (rows: ReturnType<typeof conversationRoster>) =>
+      rows.map((row) => rosterKey(row));
+    const untitled = [channel("a"), channel("b", { pinned: true })];
+    const titled = [
+      channel("a", { summary: "Expense categories" }),
+      channel("b", { pinned: true, summary: "Quarterly revenue" }),
+    ];
+    const threads = [slack("s1")];
+
+    expect(ids(conversationRoster(titled, threads))).toEqual(
+      ids(conversationRoster(untitled, threads)),
+    );
   });
 
   test("matches visible names and last-message text across native and Slack rows", () => {

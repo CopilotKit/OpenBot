@@ -6,9 +6,11 @@ import { createApp } from "../src/app";
 import type { AuditEventInput, TransactionalAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
 import { loadConfig } from "../src/config";
-import type {
-  ExternalLinkCreationStore,
-  ExternalLinkStore,
+import {
+  EXTERNAL_LINK_CONFLICT_MESSAGES,
+  ExternalLinkConflictError,
+  type ExternalLinkCreationStore,
+  type ExternalLinkStore,
 } from "../src/external/link-store";
 import { mintExternalLinkToken } from "../src/external/link-token";
 import { createExternalLinkRoutes } from "../src/external/routes";
@@ -22,7 +24,7 @@ import { testEnvironment } from "./support/environment";
 const KEY = "external-link-routes-test-key";
 const NOW = 1_700_000_000_000;
 const INVALID = "This Slack link has expired or is invalid.";
-const CONFLICT = "That Slack identity is already linked.";
+const CONFLICT = EXTERNAL_LINK_CONFLICT_MESSAGES.provider_identity_linked;
 const identity = {
   provider: "slack" as const,
   providerTenantId: "T1",
@@ -149,7 +151,7 @@ function fakeStore(
     if (found?.openbotUserId === input.openbotUserId) {
       return { link: found, created: false };
     }
-    if (found) throw new Error(CONFLICT);
+    if (found) throw new ExternalLinkConflictError("provider_identity_linked");
     const link = linkFor(input.openbotUserId);
     links.push(link);
     return { link, created: true };
@@ -167,7 +169,7 @@ function fakeStore(
     if (found?.openbotUserId === input.openbotUserId) {
       return { link: found, created: false };
     }
-    if (found) throw new Error(CONFLICT);
+    if (found) throw new ExternalLinkConflictError("provider_identity_linked");
     const link = linkFor(input.openbotUserId);
     await recordAudit();
     links.push(link);
@@ -548,9 +550,55 @@ describe("external Slack link confirmation routes", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ error: CONFLICT });
+    // The code travels with the sentence: only one of the two conflicts is about another account.
+    expect(await response.json()).toEqual({
+      error: CONFLICT,
+      conflict: "provider_identity_linked",
+    });
     expect(store.links).toEqual([linkFor(actor.id)]);
     expect(rows).toHaveLength(1);
+  });
+
+  /**
+   * The link routes are never cached, refusals included.
+   *
+   * These two are the ones that most want it: the request URL carries the link token in `?token=`
+   * and the GET body is the identity claim decoded from it — provider tenant, provider user id and
+   * the verified email. An intermediary keying on that URL would hold a decoded identity claim
+   * against the credential that produced it. Asserted on a refusal as well, because a 401 or a 400
+   * is still a response somebody could cache against that URL.
+   */
+  test("never lets the link routes or their refusals be cached", async () => {
+    const token = await liveToken();
+    const responses = [
+      await appFor()
+        .app.request(
+          `http://openbot.test/api/external-links/slack${requestToken(token)}`,
+        )
+        .then((response) => ({ label: "GET", response })),
+      await appFor()
+        .app.request("http://openbot.test/api/external-links/slack", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token }),
+        })
+        .then((response) => ({ label: "POST", response })),
+      await appFor(fakeStore(), unauthenticated)
+        .app.request(
+          `http://openbot.test/api/external-links/slack${requestToken(token)}`,
+        )
+        .then((response) => ({ label: "unauthenticated GET", response })),
+      await appFor()
+        .app.request("http://openbot.test/api/external-links/slack?token=")
+        .then((response) => ({ label: "refused GET", response })),
+    ];
+
+    for (const { label, response } of responses) {
+      expect({
+        label,
+        cacheControl: response.headers.get("cache-control"),
+      }).toEqual({ label, cacheControl: "no-store" });
+    }
   });
 
   test("GET and POST are both rejected without authentication", async () => {

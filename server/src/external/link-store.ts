@@ -67,6 +67,37 @@ function asLink(row: typeof externalUserLinks.$inferSelect): ExternalUserLink {
   };
 }
 
+/**
+ * Which key an insert lost to. The two mean opposite things about who owns what.
+ *
+ * `provider_identity_linked` is a statement about somebody else's account: this Slack user is
+ * already somebody's. `openbot_user_linked` is a statement about the caller's own: they are already
+ * linked to a different Slack user in the same workspace. Collapsing them into one sentence told a
+ * person re-linking under a new Slack id that their identity belonged to another OpenBot account,
+ * which is a false claim about their own account and one they can do nothing about.
+ */
+export type ExternalLinkConflict =
+  | "provider_identity_linked"
+  | "openbot_user_linked";
+
+export const EXTERNAL_LINK_CONFLICT_MESSAGES = {
+  provider_identity_linked:
+    "That Slack identity is already linked to another OpenBot account.",
+  openbot_user_linked:
+    "Your OpenBot account is already linked to a different Slack user in this workspace.",
+} as const satisfies Record<ExternalLinkConflict, string>;
+
+/** Carries which key it was, so the caller can say something true rather than something safe. */
+export class ExternalLinkConflictError extends Error {
+  readonly conflict: ExternalLinkConflict;
+
+  constructor(conflict: ExternalLinkConflict) {
+    super(EXTERNAL_LINK_CONFLICT_MESSAGES[conflict]);
+    this.name = "ExternalLinkConflictError";
+    this.conflict = conflict;
+  }
+}
+
 export function createExternalLinkStore(
   database: Database,
 ): ExternalLinkCreationStore & ExternalLinkAuthorizationStore {
@@ -172,7 +203,7 @@ export function createExternalLinkStore(
       return { link: existing, created: false };
     }
     if (existing) {
-      throw new Error("That Slack identity is already linked.");
+      throw new ExternalLinkConflictError("provider_identity_linked");
     }
 
     /*
@@ -193,7 +224,7 @@ export function createExternalLinkStore(
       )
       .limit(1);
     if (existingForUser) {
-      throw new Error("That Slack identity is already linked.");
+      throw new ExternalLinkConflictError("openbot_user_linked");
     }
 
     throw new Error("External user link was not found after insertion.");

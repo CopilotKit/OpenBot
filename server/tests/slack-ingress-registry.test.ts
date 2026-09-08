@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ChannelIdentityContext } from "@copilotkit/channels";
+import type { ChannelIdentityContext } from "@copilotkit/channels-core";
 import {
   SlackIngressRegistry,
   type Timer,

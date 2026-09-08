@@ -1,4 +1,4 @@
-import type { ChannelIdentityContext } from "@copilotkit/channels";
+import type { ChannelIdentityContext } from "@copilotkit/channels-core";
 
 export const MANAGED_SLACK_TENANT_ERROR =
   "Managed Slack delivery did not provide the configured canonical tenant.";

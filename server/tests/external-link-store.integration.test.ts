@@ -8,7 +8,12 @@ import {
   userRoles,
   users,
 } from "../src/db/schema";
-import { createExternalLinkStore } from "../src/external/link-store";
+import {
+  createExternalLinkStore,
+  EXTERNAL_LINK_CONFLICT_MESSAGES,
+  type ExternalLinkConflict,
+  ExternalLinkConflictError,
+} from "../src/external/link-store";
 import { TEST_POOL } from "./support/database";
 
 function testDatabaseUrl(): string {
@@ -23,7 +28,6 @@ const store = createExternalLinkStore(database);
 const suite = randomUUID().slice(0, 8);
 const createdUsers: string[] = [];
 const createdRevocations: string[] = [];
-const LINK_CONFLICT_MESSAGE = "That Slack identity is already linked.";
 
 function userId(label: string): string {
   const id = `external_link_${label}_${suite}`;
@@ -47,10 +51,21 @@ async function createUser(input: {
   });
 }
 
-function expectLinkConflict(error: unknown): void {
-  expect(error).toBeInstanceOf(Error);
-  if (error instanceof Error) {
-    expect(error.message).toBe(LINK_CONFLICT_MESSAGE);
+/**
+ * The refusal, and WHICH key it lost to.
+ *
+ * Asserted rather than left to the message, because the two conflicts mean opposite things about
+ * who owns what: one is a statement about somebody else's account and the other about the caller's
+ * own, and the page that shows this has nothing but the code to tell them apart.
+ */
+function expectLinkConflict(
+  error: unknown,
+  conflict: ExternalLinkConflict,
+): void {
+  expect(error).toBeInstanceOf(ExternalLinkConflictError);
+  if (error instanceof ExternalLinkConflictError) {
+    expect(error.conflict).toBe(conflict);
+    expect(error.message).toBe(EXTERNAL_LINK_CONFLICT_MESSAGES[conflict]);
   }
 }
 
@@ -226,7 +241,7 @@ describe("external user links", () => {
         providerEmail: "second@example.com",
       })
       .catch((reason: unknown) => reason);
-    expectLinkConflict(error);
+    expectLinkConflict(error, "provider_identity_linked");
     expect(await store.find("slack", teamId, "U789")).toMatchObject({
       openbotUserId: firstUserId,
       providerEmail: "first@example.com",
@@ -259,7 +274,7 @@ describe("external user links", () => {
       })
       .catch((reason: unknown) => reason);
 
-    expectLinkConflict(error);
+    expectLinkConflict(error, "openbot_user_linked");
     const links = await database
       .select()
       .from(externalUserLinks)
@@ -306,7 +321,7 @@ describe("external user links", () => {
     );
     expect(successes).toHaveLength(1);
     expect(failures).toHaveLength(1);
-    expectLinkConflict(failures[0]?.reason);
+    expectLinkConflict(failures[0]?.reason, "openbot_user_linked");
 
     const links = await database
       .select()
@@ -359,7 +374,7 @@ describe("external user links", () => {
     );
     expect(successes).toHaveLength(1);
     expect(failures).toHaveLength(1);
-    expectLinkConflict(failures[0]?.reason);
+    expectLinkConflict(failures[0]?.reason, "provider_identity_linked");
 
     const links = await database
       .select()

@@ -13,16 +13,33 @@ export function ExternalThreadChat({
 }) {
   const [messages, setMessages] = useState<readonly Message[]>([]);
   const [restoring, setRestoring] = useState(true);
-  const [unreadable, setUnreadable] = useState(0);
+  const [unreadable, setUnreadable] = useState(false);
 
   useEffect(() => {
     let current = true;
-    void readExternalThreadMessages(target.threadId).then((stored) => {
-      if (!current) return;
-      setMessages(stored);
-      setUnreadable(0);
-      setRestoring(false);
-    });
+    setRestoring(true);
+    setUnreadable(false);
+    void readExternalThreadMessages(target.threadId)
+      .then((stored) => {
+        if (!current) return;
+        setMessages(stored);
+        setRestoring(false);
+      })
+      /*
+       * A read that fails has to stop the restoring state and say so.
+       *
+       * Without this the promise rejects with nobody listening and the view sits on its skeleton
+       * for as long as the person leaves it open — which reads as a conversation still loading
+       * rather than one that could not be read, and is the state a failed `/messages` used to leave
+       * behind. The transcript is all-or-nothing: the endpoint either answers with the turns or it
+       * does not, so this is a fact about the read and not a count of messages.
+       */
+      .catch(() => {
+        if (!current) return;
+        setMessages([]);
+        setUnreadable(true);
+        setRestoring(false);
+      });
     return () => {
       current = false;
     };
@@ -38,11 +55,10 @@ export function ExternalThreadChat({
             This is the canonical Slack conversation with {target.agentName}. It
             is read-only here for this demo; continue the conversation in Slack.
           </p>
-          {unreadable > 0 ? (
+          {unreadable ? (
             <p>
-              {unreadable === 1
-                ? "One earlier message could not be read."
-                : `${unreadable} earlier messages could not be read.`}
+              This conversation could not be read. It is still in Slack; reload
+              to try again.
             </p>
           ) : null}
         </div>

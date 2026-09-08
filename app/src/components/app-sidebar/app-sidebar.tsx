@@ -107,20 +107,6 @@ function UserAvatar() {
 const MAX_ANIMATED_ROWS = 60;
 
 /**
- * Pinned channels first, everything else after, newest activity first within each group.
- *
- * The mirror of a server rule, not the rule itself: the roster query orders pinned-first and its
- * cursor carries the pin, so a pinned channel arrives on page one however long ago it was last
- * spoken in. Sorting here as well is for what happens between refetches — the socket patches a pin
- * onto a loaded row without moving it, and re-sorts a page by recency alone — which is the same
- * reason `byRecency` in use-channel-events.ts mirrors the recency rule. A stable partition, so the
- * recency order inside each group is whatever arrived.
- */
-export function pinnedFirst(channels: ChannelSummary[]): ChannelSummary[] {
-  return [...channels].sort((a, b) => Number(b.pinned) - Number(a.pinned));
-}
-
-/**
  * Whether a Bot has said something this member has not had on screen yet.
  *
  * A Bot's message, and only a Bot's: your own message carries a null agent id and reading your own

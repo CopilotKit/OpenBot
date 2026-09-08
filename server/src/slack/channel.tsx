@@ -1,10 +1,10 @@
-/** @jsxImportSource @copilotkit/channels */
+/** @jsxImportSource @copilotkit/channels-core */
 import {
   type Channel,
   type ChannelIdentityContext,
   createChannel,
-} from "@copilotkit/channels";
-import { Actions, Button, Message, Section } from "@copilotkit/channels/ui";
+} from "@copilotkit/channels-core";
+import { Actions, Button, Message, Section } from "@copilotkit/channels-ui";
 import type { ComputerGateway } from "../computer/gateway";
 import type { SlackAssistanceOptions } from "./assistance";
 import {

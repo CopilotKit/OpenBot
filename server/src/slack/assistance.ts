@@ -1,5 +1,5 @@
-import type { ChannelToolContext } from "@copilotkit/channels";
-import { Actions, Button, Message, Section } from "@copilotkit/channels/ui";
+import type { ChannelToolContext } from "@copilotkit/channels-core";
+import { Actions, Button, Message, Section } from "@copilotkit/channels-ui";
 import type { ActionActor, ComputerGateway } from "../computer/gateway";
 import type {
   AssistanceStatus,
@@ -57,23 +57,12 @@ const EXACT_UNKNOWN = {
     "OpenBot no longer knows the exact assistance request outcome. Check the coworker before asking again.",
 } as const;
 
-type WaitOutcome = "answered" | "cancelled" | "expired";
 type SleepOutcome = "elapsed" | "aborted";
 type SettledOperation<T> =
   | { kind: "value"; value: T }
   | { kind: "error"; error: unknown }
   | { kind: "aborted" }
   | { kind: "expired" };
-
-export type WaitForAssistanceOptions = {
-  control: () => Promise<ControlState>;
-  done: (state: ControlState) => boolean;
-  signal?: AbortSignal;
-  timeoutMs?: number;
-  pollMs?: number;
-  now?: () => number;
-  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<SleepOutcome>;
-};
 
 function abortAwareSleep(
   milliseconds: number,
@@ -121,33 +110,6 @@ function settleOperation<T>(
         (error: unknown) => finish({ kind: "error", error }),
       );
   });
-}
-
-/** Poll one already-created assistance request for a finite, abortable window. */
-export async function waitForAssistance({
-  control,
-  done,
-  signal,
-  timeoutMs = ASSISTANCE_TTL_MS,
-  pollMs = ASSISTANCE_POLL_MS,
-  now = Date.now,
-  sleep = abortAwareSleep,
-}: WaitForAssistanceOptions): Promise<WaitOutcome> {
-  const deadline = now() + timeoutMs;
-  while (now() < deadline) {
-    if (signal?.aborted) return "cancelled";
-    const polled = await settleOperation(control, deadline - now(), signal);
-    if (polled.kind === "aborted") return "cancelled";
-    if (polled.kind === "expired") return "expired";
-    if (polled.kind === "error") throw polled.error;
-    if (signal?.aborted) return "cancelled";
-    if (done(polled.value)) return "answered";
-    const remaining = deadline - now();
-    if (remaining <= 0) break;
-    const slept = await sleep(Math.min(pollMs, remaining), signal);
-    if (slept === "aborted" || signal?.aborted) return "cancelled";
-  }
-  return "expired";
 }
 
 export function computerControlUrl(appUrl: string, token: string): string {

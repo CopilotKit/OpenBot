@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { ChannelIdentityContext } from "@copilotkit/channels";
+import type { ChannelIdentityContext } from "@copilotkit/channels-core";
 import type { AgentActor } from "../src/agents/profile-types";
 import type { ExternalLinkAuthorizationStore } from "../src/external/link-store";
 import type {
   ExternalProviderIdentity,
   ExternalUserLink,
 } from "../src/external/schema-types";
+import { ExternalLinkConflictError } from "../src/external/link-store";
 import { SlackIdentityLinker } from "../src/slack/identity-linker";
 
 const KEY = "slack-identity-linker-test-key";
@@ -211,7 +212,7 @@ describe("SlackIdentityLinker", () => {
       ]),
       onLink: () => ({
         link: linked("bob"),
-        error: new Error("That Slack identity is already linked."),
+        error: new ExternalLinkConflictError("provider_identity_linked"),
       }),
     });
     const result = await linker(store).resolve(

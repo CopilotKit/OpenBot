@@ -96,6 +96,28 @@ describe("private Slack execution context", () => {
     expect(value.channelsThreadId).toBeUndefined();
   });
 
+  /**
+   * The reason a Slack computer tool can find the `agentId` the run resolved.
+   *
+   * A turn establishes this context twice — once at ingress, and again when the agent's observable
+   * is subscribed — and the run writes `agentId` onto the object it holds. Two copies would mean
+   * the reader in the other context finds none and refuses every computer tool. Asserted rather
+   * than left to the shape of somebody else's agent loop.
+   */
+  test("re-entering with an established execution keeps one object for the turn", async () => {
+    const value = execution("alice");
+    await runWithSlackExecution(value, async () => {
+      const outer = currentSlackExecution();
+      await runWithSlackExecution(outer, async () => {
+        expect(currentSlackExecution()).toBe(outer);
+        currentSlackExecution().agentId = "risk";
+      });
+      expect(outer.agentId).toBe("risk");
+    });
+    // The caller's own object is still untouched: the first protect copies, as before.
+    expect(value.agentId).toBeUndefined();
+  });
+
   test("requires a private context outside Slack execution", () => {
     expect(() => currentSlackExecution()).toThrow(
       "A Slack agent run requires a private execution context.",

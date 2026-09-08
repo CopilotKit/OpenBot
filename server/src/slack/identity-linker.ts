@@ -1,6 +1,9 @@
-import type { ChannelIdentityContext } from "@copilotkit/channels";
+import type { ChannelIdentityContext } from "@copilotkit/channels-core";
 import type { AgentActor } from "../agents/profile-types";
-import type { ExternalLinkAuthorizationStore } from "../external/link-store";
+import {
+  ExternalLinkConflictError,
+  type ExternalLinkAuthorizationStore,
+} from "../external/link-store";
 import { mintExternalLinkToken } from "../external/link-token";
 import type {
   ExternalProviderIdentity,
@@ -27,7 +30,6 @@ export type SlackIdentityLinkerOptions = {
 };
 
 const APP_URL_ERROR = "Slack link setup requires an absolute OPENBOT_APP_URL.";
-const LINK_CONFLICT_ERROR = "That Slack identity is already linked.";
 const IDENTITY_ERROR = "Slack identity requires a known tenant and actor id.";
 
 type SlackIdentityFailureCode =
@@ -146,8 +148,15 @@ function configuredAppUrl(appUrl: string | undefined): URL {
   }
 }
 
+/**
+ * Either key losing means the same thing here: somebody else got there first.
+ *
+ * Which one it was matters to the person on the confirmation page and not to this, which re-reads
+ * the winner and carries on regardless. Matched on the type rather than the sentence so the two
+ * messages can differ without this quietly starting to treat one of them as a write failure.
+ */
 function isLinkConflict(error: unknown): boolean {
-  return error instanceof Error && error.message === LINK_CONFLICT_ERROR;
+  return error instanceof ExternalLinkConflictError;
 }
 
 export class SlackIdentityLinker {

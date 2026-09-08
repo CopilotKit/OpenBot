@@ -2,7 +2,7 @@ import {
   type ChannelTool,
   type ChannelToolContext,
   defineChannelTool,
-} from "@copilotkit/channels";
+} from "@copilotkit/channels-core";
 import {
   computerClickContract,
   computerKeyContract,

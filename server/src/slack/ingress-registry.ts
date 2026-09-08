@@ -1,4 +1,4 @@
-import type { ChannelIdentityContext } from "@copilotkit/channels";
+import type { ChannelIdentityContext } from "@copilotkit/channels-core";
 import type { SlackIdentityResult } from "./identity-linker";
 
 export type Timer = { cancel(): void };

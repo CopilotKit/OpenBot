@@ -4,7 +4,7 @@ import {
   FakeAdapter,
   FakeAgent,
   MemoryStore,
-} from "@copilotkit/channels";
+} from "@copilotkit/channels-core";
 import { eq, inArray, sql } from "drizzle-orm";
 import { createDatabase } from "../src/db/client";
 import {

@@ -11,7 +11,7 @@ import {
   parseToolArgs,
   Thread,
   type ThreadDeps,
-} from "@copilotkit/channels";
+} from "@copilotkit/channels-core";
 import {
   ActionRefusedError,
   type ComputerGateway,
@@ -203,6 +203,8 @@ class FakeComputerGateway implements ComputerGateway {
   nextError?: unknown;
   afterCall?: () => void;
   afterRequest?: () => void;
+  /** Fires after each assistance status read, so a test can move the clock or abort mid-wait. */
+  afterStatus?: () => void;
   requestError?: unknown;
   requestIdentityMismatch = false;
   releaseError?: unknown;
@@ -401,7 +403,10 @@ class FakeComputerGateway implements ComputerGateway {
     ...args: Parameters<ComputerGateway["assistanceStatus"]>
   ) {
     this.assistanceStatusCalls.push(args);
-    return this.assistanceStatusResults?.shift() ?? this.assistanceStatusResult;
+    const result =
+      this.assistanceStatusResults?.shift() ?? this.assistanceStatusResult;
+    this.afterStatus?.();
+    return result;
   }
   async requestSecret(...args: Parameters<ComputerGateway["requestSecret"]>) {
     this.requestSecretCalls.push(args);
@@ -885,6 +890,82 @@ describe("Slack computer ChannelTools", () => {
       expect(gateway.cancelAssistanceCalls).toEqual([]);
     });
   }
+
+  /**
+   * The bounded wait, ended by the clock rather than by a person.
+   *
+   * The pre-post case above never posts the link; this one does, and then reaches the end of the
+   * window with the request still pending. What the Bot is told matters: the thread gets a sentence
+   * saying nobody took control, and the request is cleared rather than left for somebody to answer
+   * ten minutes late into a turn that has finished.
+   */
+  test("expires at the bound after posting, and clears its own request", async () => {
+    const gateway = new FakeComputerGateway();
+    gateway.assistanceStatusResult = "pending";
+    let now = 0;
+    // The window is spent inside the wait, so the link is posted and then the deadline arrives.
+    gateway.afterStatus = () => {
+      now = 10 * 60_000;
+    };
+    const adapter = new FileAdapter();
+    const tools = new Map(
+      createSlackComputerTools(gateway, {
+        appUrl: "https://openbot.example",
+        encryptionKey: "slack-assistance-key",
+        now: () => now,
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    const result = await inSlack(
+      () =>
+        invoke(
+          tools.get("computer_request_help")!,
+          { reason: "Please sign in." },
+          channelContext(adapter),
+        ),
+      { channelsThreadId: "channels-thread-private" },
+    );
+
+    expect(JSON.stringify(adapter.posted)).toContain("/assist?token=");
+    expect(result).toMatchObject({
+      ok: true,
+      result: expect.stringContaining("Nobody took control"),
+    });
+    expect(gateway.cancelAssistanceCalls).toHaveLength(1);
+  });
+
+  /**
+   * The turn stopped while somebody was still being waited on.
+   *
+   * A cancelled turn must not leave a live request behind: the person would be handed control of a
+   * computer for a conversation that is over. Distinct from expiry, and it has to say `stopped`
+   * rather than a friendly sentence, because nothing is waiting to read one.
+   */
+  test("a turn cancelled mid-wait stops and clears its own request", async () => {
+    const gateway = new FakeComputerGateway();
+    gateway.assistanceStatusResult = "pending";
+    const controller = new AbortController();
+    gateway.afterStatus = () => controller.abort();
+    const tools = new Map(
+      createSlackComputerTools(gateway, {
+        appUrl: "https://openbot.example",
+        encryptionKey: "slack-assistance-key",
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    const result = await inSlack(
+      () =>
+        invoke(
+          tools.get("computer_request_help")!,
+          { reason: "Please sign in." },
+          channelContext(new FileAdapter(), controller.signal),
+        ),
+      { channelsThreadId: "channels-thread-private" },
+    );
+
+    expect(result).toEqual(STOPPED);
+    expect(gateway.cancelAssistanceCalls).toHaveLength(1);
+  });
 
   test("a completed request wins a Slack post failure and cancellation race", async () => {
     const gateway = new FakeComputerGateway();

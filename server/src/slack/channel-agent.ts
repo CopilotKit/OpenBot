@@ -91,6 +91,18 @@ export class OpenBotChannelAgent extends AbstractAgent {
           () => new Error("OpenBot Slack agent is already running."),
         );
       }
+      /*
+       * The canonical thread id, and the property the append-only binding rests on.
+       *
+       * `input.threadId` has to be STABLE across the turns of one Slack thread, because it is the
+       * key `external_thread_bindings` is keyed by: a fresh id per turn would find no binding on
+       * every reply, bind again, and re-route a conversation that was supposed to be pinned once.
+       * Managed delivery gives us that — `channels-intelligence` passes the conversation key
+       * through, so this equals `channelsConversationKey`. The self-hosted `channels-slack`
+       * conversation store does NOT: it mints a random id per turn. So this is a property of the
+       * delivery adapter this deployment is on, not of Channels in general, and moving off managed
+       * delivery means keying the binding by the conversation key explicitly.
+       */
       const channelsThreadId = input.threadId;
       execution.channelsThreadId = channelsThreadId;
       const active: ActiveRun = {

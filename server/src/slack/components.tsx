@@ -1,6 +1,6 @@
-/** @jsxImportSource @copilotkit/channels */
-import { defineChannelComponent } from "@copilotkit/channels";
-import { Actions, Button, Message, Section } from "@copilotkit/channels/ui";
+/** @jsxImportSource @copilotkit/channels-core */
+import { defineChannelComponent } from "@copilotkit/channels-core";
+import { Actions, Button, Message, Section } from "@copilotkit/channels-ui";
 import { z } from "zod";
 import type { SlackApprovalAuthorization } from "./approval-authorizer";
 import type {

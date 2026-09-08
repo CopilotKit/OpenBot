@@ -1,16 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { createChannel, FakeAdapter, FakeAgent } from "@copilotkit/channels";
-import { renderSlackMessage } from "@copilotkit/channels/slack/render";
+import {
+  createChannel,
+  FakeAdapter,
+  FakeAgent,
+} from "@copilotkit/channels-core";
+import { renderSlackMessage } from "@copilotkit/channels-slack/render";
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AgentProfileStore } from "../src/agents/profile-store";
 import type { AgentProfile } from "../src/agents/profile-types";
 import type { TransactionalAuditStore } from "../src/audit";
 import type { AppVariables } from "../src/auth/guards";
-import type { ControlState } from "../src/computer/schema";
 import type { ExternalLinkCreationStore } from "../src/external/link-store";
 import { createExternalLinkRoutes } from "../src/external/routes";
-import { computerControlUrl, waitForAssistance } from "../src/slack/assistance";
+import { computerControlUrl } from "../src/slack/assistance";
 import {
   ASSISTANCE_TTL_MS,
   mintAssistanceToken,
@@ -118,128 +121,6 @@ describe("Slack assistance claims", () => {
         INVALID,
       );
     }
-  });
-});
-
-describe("Slack assistance waiting", () => {
-  const waiting: ControlState = {
-    holder: "human",
-    since: "2026-08-27T00:00:00.000Z",
-    requested: true,
-    reason: "Sign in",
-  };
-
-  test("returns answered once control is back with the bot and the request is clear", async () => {
-    let now = 0;
-    const states: ControlState[] = [
-      waiting,
-      {
-        holder: "bot",
-        since: "2026-08-27T00:00:01.000Z",
-        requested: false,
-      },
-    ];
-    const outcome = await waitForAssistance({
-      control: async () =>
-        states.shift() ?? {
-          holder: "bot",
-          since: "2026-08-27T00:00:01.000Z",
-          requested: false,
-        },
-      done: (state) => state.holder === "bot" && !state.requested,
-      now: () => now,
-      sleep: async (milliseconds) => {
-        now += milliseconds;
-        return "elapsed";
-      },
-    });
-
-    expect(outcome).toBe("answered");
-  });
-
-  test("returns cancelled without polling after an aborted timer", async () => {
-    const controller = new AbortController();
-    let polls = 0;
-    const outcome = await waitForAssistance({
-      control: async () => {
-        polls += 1;
-        return waiting;
-      },
-      done: () => false,
-      signal: controller.signal,
-      now: () => 0,
-      sleep: async () => {
-        controller.abort();
-        return "aborted";
-      },
-    });
-
-    expect(outcome).toBe("cancelled");
-    expect(polls).toBe(1);
-  });
-
-  test("expires at the bound without an extra poll", async () => {
-    let now = 0;
-    let polls = 0;
-    const outcome = await waitForAssistance({
-      control: async () => {
-        polls += 1;
-        return waiting;
-      },
-      done: () => false,
-      timeoutMs: 2_000,
-      pollMs: 1_000,
-      now: () => now,
-      sleep: async (milliseconds) => {
-        now += milliseconds;
-        return "elapsed";
-      },
-    });
-
-    expect(outcome).toBe("expired");
-    expect(polls).toBe(2);
-  });
-
-  test("cancels while a control poll is hung and consumes its later rejection", async () => {
-    const controller = new AbortController();
-    let rejectControl: (error: Error) => void = () => undefined;
-    const waiting = waitForAssistance({
-      control: () =>
-        new Promise<ControlState>((_resolve, reject) => {
-          rejectControl = reject;
-        }),
-      done: () => false,
-      signal: controller.signal,
-      timeoutMs: 1_000,
-    });
-    controller.abort();
-
-    const outcome = await Promise.race([
-      waiting,
-      new Promise<"test-timeout">((resolve) =>
-        setTimeout(() => resolve("test-timeout"), 100),
-      ),
-    ]);
-    expect(outcome).toBe("cancelled");
-    rejectControl(new Error("late transport failure"));
-    await Promise.resolve();
-  });
-
-  test("expires while a control poll never settles", async () => {
-    const started = Date.now();
-    const outcome = await Promise.race([
-      waitForAssistance({
-        control: () => new Promise<ControlState>(() => undefined),
-        done: () => false,
-        timeoutMs: 20,
-      }),
-      new Promise<"test-timeout">((resolve) =>
-        setTimeout(() => resolve("test-timeout"), 100),
-      ),
-    ]);
-
-    expect(outcome).toBe("expired");
-    expect(Date.now() - started).toBeLessThan(100);
   });
 });
 

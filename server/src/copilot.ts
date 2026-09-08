@@ -1,6 +1,6 @@
 import type { BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { AbstractAgent, HttpAgent } from "@ag-ui/client";
-import type { Channel } from "@copilotkit/channels";
+import type { Channel } from "@copilotkit/channels-core";
 import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
 import {
   BuiltInAgent,

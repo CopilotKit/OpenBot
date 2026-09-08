@@ -13,8 +13,8 @@ import type {
   InteractionEvent,
   PlatformAdapter,
   StateStore,
-} from "@copilotkit/channels";
-import { MemoryStore } from "@copilotkit/channels";
+} from "@copilotkit/channels-core";
+import { MemoryStore } from "@copilotkit/channels-core";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { Observable } from "rxjs";
 import { z } from "zod";
@@ -165,7 +165,7 @@ type FakeAdapterConstructor = new (options: {
 
 // Channels 0.9's umbrella testing export accidentally points at the core conformance helper.
 // Resolve the package's own core dependency so this still exercises the SDK's shipped FakeAdapter.
-const channelsEntry = import.meta.resolve("@copilotkit/channels");
+const channelsEntry = import.meta.resolve("@copilotkit/channels-core");
 const fakeAdapterModule = new URL(
   "../../channels-core/dist/testing/fake-adapter.js",
   channelsEntry,

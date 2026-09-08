@@ -41,7 +41,39 @@ export function slackLinkToken(search: Record<string, unknown>): string | null {
   return token === "" ? null : token;
 }
 
-export function slackLinkResult(status: number) {
+/**
+ * Which key the link lost to, as the server reports it.
+ *
+ * Only one of the two is about somebody else's account, and saying the wrong one is worse than
+ * saying nothing: a person re-linking under a new Slack id in the same workspace was told their
+ * identity belonged to another OpenBot account, which is a false claim about their own and one
+ * they cannot act on. An unrecognised or absent code falls back to the safe half of the pair.
+ */
+export type SlackLinkConflict =
+  | "provider_identity_linked"
+  | "openbot_user_linked";
+
+export function slackLinkConflict(value: unknown): SlackLinkConflict {
+  const conflict =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as { conflict?: unknown }).conflict
+      : undefined;
+  return conflict === "openbot_user_linked"
+    ? "openbot_user_linked"
+    : "provider_identity_linked";
+}
+
+const SLACK_LINK_CONFLICT_MESSAGES = {
+  provider_identity_linked:
+    "That Slack identity is already linked to another OpenBot account.",
+  openbot_user_linked:
+    "Your OpenBot account is already linked to a different Slack user in this workspace. Unlink it before linking this one.",
+} as const satisfies Record<SlackLinkConflict, string>;
+
+export function slackLinkResult(
+  status: number,
+  conflict: SlackLinkConflict = "provider_identity_linked",
+) {
   if (status === 200)
     return {
       kind: "linked",
@@ -50,8 +82,7 @@ export function slackLinkResult(status: number) {
   if (status === 409)
     return {
       kind: "conflict",
-      message:
-        "That Slack identity is already linked to another OpenBot account.",
+      message: SLACK_LINK_CONFLICT_MESSAGES[conflict],
     } as const;
   return {
     kind: "invalid",
@@ -68,10 +99,13 @@ export function slackLinkFailure(): SlackLinkFailure {
 }
 
 /** Only documented token refusals are terminal-invalid; unknown responses stay retryable. */
-export function slackLinkResponseOutcome(status?: number): SlackLinkResponse {
+export function slackLinkResponseOutcome(
+  status?: number,
+  conflict?: SlackLinkConflict,
+): SlackLinkResponse {
   if (status === 401) return { kind: "reauth" };
   if (status === 200 || status === 400 || status === 409)
-    return slackLinkResult(status);
+    return slackLinkResult(status, conflict);
   return slackLinkFailure();
 }
 
@@ -126,7 +160,12 @@ async function completeSlackLink(
     body: { token },
     signal,
   });
-  return slackLinkResponseOutcome(response.status);
+  // Read only on the conflict: it is the one status whose body decides what the page may say.
+  const conflict =
+    response.status === 409
+      ? slackLinkConflict(await response.json().catch(() => null))
+      : undefined;
+  return slackLinkResponseOutcome(response.status, conflict);
 }
 
 function SlackLinkPage() {
