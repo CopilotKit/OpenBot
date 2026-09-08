@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The desktop app notices a busy port whichever loopback holds it
+
+The shell refuses to start when something already holds port 3001 or 3010, because otherwise the
+readiness check that follows is answered by a server it never started: everything reads green and
+none of it is yours. That readiness check asks both loopback addresses on purpose, since a process
+binds whichever one its runtime resolved `localhost` to — Node picks `::1`, Bun picks `127.0.0.1` —
+so an answer at either counts. The refusal in front of it asked only `127.0.0.1`, which meant a port
+held on `::1` alone was reported free and the start went ahead into it. Both addresses are asked
+now, so the two agree on what "in use" means and the person is told which port is taken and what
+OpenBot wanted it for.
+
 ### One command to stop what `start.sh` started
 
 Stopping the local stack meant four commands read off the end of a successful start, and the one
