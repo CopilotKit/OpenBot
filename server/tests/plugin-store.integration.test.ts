@@ -355,6 +355,37 @@ describe("a grant is the permission", () => {
 });
 
 describe("the policy is asked as well as the grant", () => {
+  test("credential material is refused and never copied into the audit trail", async () => {
+    await store.grant("mcp", ref, holderId, "admin@openbot.local");
+    const secret = `sk-${"z".repeat(32)}`;
+
+    await expect(
+      store.callTool({
+        ref,
+        args: { query: "quarterly report", nested: { apiKey: secret } },
+        botId: holderId,
+        actorId: "someone@openbot.local",
+      }),
+    ).rejects.toThrow("credential material");
+
+    const rows = await auditRowsFor(ref);
+    const rejected = rows.find(
+      (row) =>
+        row.eventType === "mcp.call_rejected" &&
+        (row.payload as { refusal?: string }).refusal ===
+          "sensitive_tool_arguments",
+    );
+    expect(rejected).toBeDefined();
+    expect(rejected?.payload).toMatchObject({
+      bot: holderId,
+      contentInspection: {
+        reason: "sensitive_content",
+        findings: [{ category: "credential_field", path: "$.nested.apiKey" }],
+      },
+    });
+    expect(JSON.stringify(rejected)).not.toContain(secret);
+  });
+
   test("a granted tool is still refused by a deny rule, and the rule is named", async () => {
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     policy = {
