@@ -176,11 +176,70 @@ pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
     std::fs::create_dir_all(root)
         .map_err(|error| format!("could not make {}: {error}", root.display()))?;
 
-    let decoder = flate2::read::GzDecoder::new(&body[..]);
+    unpack(root, &body)?;
+
+    fetch_images(root, version)?;
+
+    record(root, version).map_err(|error| format!("could not record the version: {error}"))
+}
+
+/// Where an archive entry may be written under `root`, or `None` when it is not
+/// part of a deployment.
+///
+/// The traversal is refused here rather than after the fact. `Path::join`
+/// followed by `starts_with` compares components and does not resolve `..`, so
+/// `root.join("app/../../elsewhere")` starts with `root` and still lands outside
+/// it -- which made the check that was there read as a guard without being one.
+/// Every component of a path inside the tree is an ordinary name, so anything
+/// else (`..`, an absolute path, a Windows drive prefix) is refused outright.
+fn destination_in(root: &Path, path: &Path) -> Result<Option<PathBuf>, String> {
+    // GitHub wraps everything in one directory named for the tag. Strip it, so the deployment
+    // lands at `root` rather than at `root/OpenBot-0.0.7`.
+    let mut parts = path.components();
+    parts.next();
+    let relative: PathBuf = parts.collect();
+    if relative.as_os_str().is_empty() {
+        return Ok(None);
+    }
+
+    // Nothing outside `root`, whatever the archive says. A tarball is somebody else's file.
+    if relative
+        .components()
+        .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(format!(
+            "the download tried to write outside {}: {}",
+            root.display(),
+            path.display()
+        ));
+    }
+
+    // Only what a deployment needs. The rest of the tree is a place to develop, not to run.
+    let wanted = relative
+        .components()
+        .next()
+        .map(|first| {
+            let name = first.as_os_str().to_string_lossy().into_owned();
+            REQUIRED.contains(&name.as_str()) || ALSO_COPIED.contains(&name.as_str())
+        })
+        .unwrap_or(false);
+    if !wanted {
+        return Ok(None);
+    }
+
+    Ok(Some(root.join(&relative)))
+}
+
+/// Lay the tarball's deployment files out under `root`.
+///
+/// Split from [`fetch`] so the part that decides where somebody else's archive
+/// is allowed to write can be exercised without a network.
+pub fn unpack(root: &Path, body: &[u8]) -> Result<(), String> {
+    let decoder = flate2::read::GzDecoder::new(body);
     let mut archive = tar::Archive::new(decoder);
     let entries = archive
         .entries()
-        .map_err(|error| format!("the download of {version} is not readable: {error}"))?;
+        .map_err(|error| format!("the download is not readable: {error}"))?;
 
     for entry in entries {
         let mut entry = entry.map_err(|error| format!("could not read the download: {error}"))?;
@@ -189,36 +248,9 @@ pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
             .map_err(|error| format!("could not read a path in the download: {error}"))?
             .into_owned();
 
-        // GitHub wraps everything in one directory named for the tag. Strip it, so the deployment
-        // lands at `root` rather than at `root/OpenBot-0.0.7`.
-        let mut parts = path.components();
-        parts.next();
-        let relative: PathBuf = parts.collect();
-        if relative.as_os_str().is_empty() {
+        let Some(destination) = destination_in(root, &path)? else {
             continue;
-        }
-
-        // Only what a deployment needs. The rest of the tree is a place to develop, not to run.
-        let wanted = relative
-            .components()
-            .next()
-            .map(|first| {
-                let name = first.as_os_str().to_string_lossy().into_owned();
-                REQUIRED.contains(&name.as_str()) || ALSO_COPIED.contains(&name.as_str())
-            })
-            .unwrap_or(false);
-        if !wanted {
-            continue;
-        }
-
-        // Nothing outside `root`, whatever the archive says. A tarball is somebody else's file.
-        let destination = root.join(&relative);
-        if !destination.starts_with(root) {
-            return Err(format!(
-                "the download tried to write outside {}",
-                root.display()
-            ));
-        }
+        };
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("could not make {}: {error}", parent.display()))?;
@@ -228,9 +260,7 @@ pub fn fetch(root: &Path, version: &str) -> Result<(), String> {
             .map_err(|error| format!("could not write {}: {error}", destination.display()))?;
     }
 
-    fetch_images(root, version)?;
-
-    record(root, version).map_err(|error| format!("could not record the version: {error}"))
+    Ok(())
 }
 
 /// Fetch the image manifest and check it before anything depends on it.
@@ -351,6 +381,124 @@ mod tests {
     fn an_empty_directory_needs_fetching() {
         let dir = std::env::temp_dir().join(format!("openbot-dep-empty-{}", std::process::id()));
         assert!(needs_fetch(&dir, "v0.0.7"));
+    }
+
+    /// One tarball, written as bytes rather than through `tar::Builder`.
+    ///
+    /// The builder refuses a path holding `..` outright ("paths in archives must
+    /// not have `..`"), which is the right thing for it to do and makes it the
+    /// wrong tool for this: an archive that climbs out of its root is not
+    /// produced by a careful writer, it is produced by somebody writing the
+    /// bytes. A ustar header is a name, a size, a checksum and padding.
+    fn tarball(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut tar: Vec<u8> = Vec::new();
+        for (name, body) in entries {
+            let mut header = [0u8; 512];
+            let bytes = name.as_bytes();
+            assert!(bytes.len() < 100, "the test uses short names");
+            header[..bytes.len()].copy_from_slice(bytes);
+            header[100..107].copy_from_slice(b"0000644"); // mode
+            header[108..115].copy_from_slice(b"0000000"); // uid
+            header[116..123].copy_from_slice(b"0000000"); // gid
+            let size = format!("{:011o}", body.len());
+            header[124..135].copy_from_slice(size.as_bytes());
+            header[136..147].copy_from_slice(b"00000000000"); // mtime
+            header[156] = b'0'; // a regular file
+            header[257..263].copy_from_slice(b"ustar ");
+            header[263..265].copy_from_slice(b"00");
+            // The checksum is computed with its own field read as spaces.
+            header[148..156].copy_from_slice(b"        ");
+            let sum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+            let checksum = format!("{sum:06o}  ");
+            header[148..156].copy_from_slice(checksum.as_bytes());
+
+            tar.extend_from_slice(&header);
+            tar.extend_from_slice(body);
+            tar.resize(tar.len().div_ceil(512) * 512, 0); // pad to a block
+        }
+        tar.extend_from_slice(&[0u8; 1024]); // two empty blocks end an archive
+
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        std::io::Write::write_all(&mut encoder, &tar).expect("the test archive is compressed");
+        encoder.finish().expect("the test archive is compressed")
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("openbot-unpack-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("the scratch directory is made");
+        dir
+    }
+
+    #[test]
+    fn the_test_archive_really_carries_the_traversal() {
+        // Guards the guard: if the archive did not hold `..` the next test would
+        // pass for the wrong reason.
+        let archive = tarball(&[("OpenBot-0.0.8/app/../../escaped.txt", b"owned")]);
+        let decoder = flate2::read::GzDecoder::new(&archive[..]);
+        let mut tar = tar::Archive::new(decoder);
+        let paths: Vec<String> = tar
+            .entries()
+            .expect("the test archive is readable")
+            .map(|entry| {
+                entry
+                    .expect("an entry")
+                    .path()
+                    .expect("a path")
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(paths, ["OpenBot-0.0.8/app/../../escaped.txt"]);
+    }
+
+    #[test]
+    fn a_download_that_climbs_out_of_the_root_is_refused() {
+        // `root.join("app/../../x")` starts with `root` -- `Path::starts_with`
+        // compares components and does not resolve `..` -- so asking where the
+        // path landed cannot answer this. The entry sits under `app`, which is a
+        // directory a deployment wants, so the wanted-list does not stop it
+        // either.
+        let dir = scratch("escape");
+        let root = dir.join("deployment");
+        std::fs::create_dir_all(&root).expect("the root is made");
+
+        let archive = tarball(&[("OpenBot-0.0.8/app/../../escaped.txt", b"owned")]);
+        let outcome = unpack(&root, &archive);
+
+        let climbed = dir.join("escaped.txt");
+        let written = climbed.exists();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(!written, "a file was written above the root");
+        assert!(outcome.is_err(), "the traversal was accepted: {outcome:?}");
+        assert!(
+            outcome.unwrap_err().contains("outside"),
+            "the refusal should say what it refused"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_download_still_lands_where_it_should() {
+        let dir = scratch("ordinary");
+
+        let archive = tarball(&[
+            ("OpenBot-0.0.8/app/index.ts", b"export {}"),
+            ("OpenBot-0.0.8/docker-compose.yml", b"services: {}"),
+            // Not part of a deployment: skipped, not refused.
+            ("OpenBot-0.0.8/docs/readme.md", b"# hi"),
+        ]);
+        unpack(&dir, &archive).expect("an ordinary download is laid out");
+
+        let app = std::fs::read_to_string(dir.join("app/index.ts")).ok();
+        let compose = std::fs::read_to_string(dir.join("docker-compose.yml")).ok();
+        let docs = dir.join("docs").exists();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(app.as_deref(), Some("export {}"));
+        assert_eq!(compose.as_deref(), Some("services: {}"));
+        assert!(!docs, "the rest of the tree is not part of a deployment");
     }
 
     #[test]

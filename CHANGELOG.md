@@ -18,6 +18,55 @@ and is safe to rerun. It kills a port holder only once that process has identifi
 OpenBot, so an unrelated process on 3010 is named and left alone rather than killed. Nothing is
 deleted: the database, the Bots' files and their browser profiles are volumes. `--keep-computers`
 leaves the browsers signed in.
+### The desktop app writes its `.env` readable only by its owner
+
+The desktop `.env` holds `KEY_ENCRYPTION_KEY` and every minted token, and those are now long-lived:
+the first start writes them and every later start reads them back. It was created at the default
+umask (`0644`), so on a shared macOS or Linux machine another local user could read the vault key off
+disk. The file is now narrowed to `0600` after it is written. Windows has no equivalent mode and its
+single-user desktop profile is already the boundary, so the change is Unix-only.
+
+### The desktop app stops adding a banner to `.env` on every start
+
+`env::write` keeps the lines it did not write, and its own header comment is one of them, so each
+start preserved the previous banner and appended another. A deployment started fifty times had fifty
+copies of "Written by OpenBot Desktop" and fifty blank lines stacked above its settings. The banner
+is now recognised and replaced rather than kept, and comments somebody else put in the file are left
+alone exactly as before.
+### Starting the desktop app again keeps the secrets the first start generated
+
+The shell generated a fresh set of secrets every time Start was pressed, including the
+`KEY_ENCRYPTION_KEY` that encrypts the credential vault. The database survives a stop, so the second
+session of an installed OpenBot met a vault it could no longer read: every stored credential failed
+to decrypt, with an error that named an operation rather than a cause. It also handed the server a
+`COMPUTER_TOKEN` that no computer created before the restart holds. The secrets an existing `.env`
+already carries are now kept, and only generated when there is nothing usable to keep — a value
+published in this repository does not count, and neither does a `KEY_ENCRYPTION_KEY` the server would
+refuse to start on.
+### The desktop app refuses a deployment download that writes outside its own directory
+
+The shell fetches the release tarball and lays it out under the directory it manages. The check that
+kept an entry inside that directory compared paths lexically -- `root.join(path).starts_with(root)`
+-- and `Path::starts_with` matches components without resolving `..`, so `app/../../elsewhere`
+started with the root and still landed outside it. An entry has to begin with a directory a
+deployment wants, which `app` does, so the file filter did not stop it either. Every component of a
+path inside the tree is now required to be an ordinary name, and the traversal is refused by name.
+### A credential pasted with a stray space into the desktop setup screen now works
+
+The setup screen enables its button on `value.trim() !== ""` and then sends the untrimmed string, so
+a key copied from a provider's dashboard with the space the selection picked up arrived intact. The
+model key was trimmed on the way into `.env`; the API URL, the gateway URL and the intelligence key
+entered on the same screen were not, so Compose passed the space through, the provider rejected the
+credential, and the failure the person saw named neither the space nor the field. All four are now
+trimmed the same way.
+### Example LangGraph and Mastra Bots no longer bind an ephemeral port on empty `PORT=`
+
+An empty `PORT=` in compose or `.env` used to become `NaN` for those two example processes, so they listened on a random port while docs still named 4300/4400. They now use the same `listenPort` helper as `agent-bot`: empty is the documented default, and a prefix typo refuses to start.
+### An empty app port is the default, not a random one
+
+`APP_PORT=` and `SERVER_PORT=` in a compose file or leftover `.env` used to become `NaN` for the Vite
+dev and preview servers, so the UI bound an ephemeral port while the proxy target was `http://localhost:`.
+Both empty values now mean the documented defaults (3010 and 3001), and a non-numeric value refuses to start.
 
 ## 0.0.8
 
