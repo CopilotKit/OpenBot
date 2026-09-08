@@ -397,10 +397,65 @@ pub fn stop_processes_under(root: &Path) -> usize {
 
 #[cfg(not(unix))]
 pub fn stop_processes_under(_root: &Path) -> usize {
-    // Windows has no cheap equivalent of asking by working directory. The children this window
-    // started are stopped by their handles; a stack left by an earlier window is stopped by
-    // Compose, and its host processes end with the session.
-    0
+    /*
+     * Windows cannot be asked which process is in which directory cheaply, so this used to answer
+     * 0 and say the host processes end with the session. They do not, and the case it dismissed is
+     * the common one: the handles this window holds are gone the moment the window is restarted,
+     * so a window Stopping a stack an earlier one started holds nothing at all.
+     *
+     * MEASURED ON WINDOWS SERVER 2022. Stop took the five containers down, reported success, and
+     * left every host process running: the server on 3001, the worker, and both halves of the app
+     * still answering 200 on 3010. Somebody who pressed Stop still had OpenBot serving.
+     *
+     * So they are found by the ports the deployment publishes, which the shell already owns and
+     * already checks for clashes, and each is ended WITH ITS CHILDREN: `bun run serve` starts the
+     * real server as a grandchild, so ending only the process holding the port leaves that behind.
+     */
+    let ports = crate::env::Ports::default();
+    // The three host processes only. The containers are Compose's to stop, and killing whatever
+    // holds a container's published port would reach into the engine's own plumbing.
+    let ours = [ports.app, ports.server];
+    let Ok(listing) = command("netstat").args(["-ano", "-p", "tcp"]).output() else {
+        return 0;
+    };
+    let text = String::from_utf8_lossy(&listing.stdout);
+
+    let mut stopped = 0;
+    let mut ended: Vec<u32> = Vec::new();
+    for line in text.lines() {
+        let mut fields = line.split_whitespace();
+        let (Some(_proto), Some(local), Some(state), Some(pid)) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        if !state.eq_ignore_ascii_case("LISTENING") {
+            continue;
+        }
+        let Some(port) = local.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()) else {
+            continue;
+        };
+        if !ours.contains(&port) {
+            continue;
+        }
+        let Ok(pid) = pid.parse::<u32>() else {
+            continue;
+        };
+        // A port answers on both loopbacks, so the same process appears twice.
+        if ended.contains(&pid) {
+            continue;
+        }
+        ended.push(pid);
+        let ended_it = command("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false);
+        if ended_it {
+            stopped += 1;
+        }
+    }
+    stopped
 }
 
 /**
@@ -735,11 +790,29 @@ fn missing_script(root: &Path) -> Option<String> {
     let Ok(text) = std::fs::read_to_string(&manifest) else {
         return Some(format!("{} cannot be read.", manifest.display()));
     };
-    let has = serde_json::from_str::<serde_json::Value>(&text)
-        .ok()
-        .and_then(|json| json.get("scripts")?.get(APP_SCRIPT).cloned())
-        .is_some();
-    if has {
+    /*
+     * An unreadable manifest and one without the script are different things.
+     *
+     * Read as one, a `package.json` that will not parse was reported as a deployment "older than
+     * this version of OpenBot", which sent somebody looking for a newer installer over a file with
+     * a byte-order mark in front of it. `serde_json` refuses a document that begins with one, and
+     * plenty of Windows tooling writes one: `Set-Content -Encoding UTF8` does.
+     */
+    let manifest_json =
+        match serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) {
+            Ok(json) => json,
+            Err(error) => {
+                return Some(format!(
+                    "{} cannot be read as JSON: {error}. Something has rewritten it.",
+                    manifest.display()
+                ))
+            }
+        };
+    if manifest_json
+        .get("scripts")
+        .and_then(|scripts| scripts.get(APP_SCRIPT))
+        .is_some()
+    {
         return None;
     }
     Some(format!(
@@ -768,6 +841,38 @@ fn dirs_home() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A manifest with a byte-order mark in front of it is still a manifest.
+    ///
+    /// Windows tooling writes one freely (`Set-Content -Encoding UTF8` does), `serde_json` refuses
+    /// a document that begins with one, and the refusal was reported as a deployment older than
+    /// this version of OpenBot. That sent somebody looking for a newer installer over three bytes.
+    #[test]
+    fn a_byte_order_mark_does_not_make_a_deployment_look_old() {
+        let dir = std::env::temp_dir().join(format!("openbot-bom-{}", std::process::id()));
+        let app = dir.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(
+            app.join("package.json"),
+            "\u{feff}{\"scripts\":{\"serve\":\"bun serve.ts\"}}",
+        )
+        .unwrap();
+        assert_eq!(missing_script(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// And a manifest that is genuinely broken says so, rather than blaming the version.
+    #[test]
+    fn an_unreadable_manifest_is_not_reported_as_an_old_deployment() {
+        let dir = std::env::temp_dir().join(format!("openbot-broken-{}", std::process::id()));
+        let app = dir.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("package.json"), "{ this is not json").unwrap();
+        let problem = missing_script(&dir).expect("a broken manifest is a problem");
+        assert!(problem.contains("cannot be read as JSON"), "{problem}");
+        assert!(!problem.contains("older than"), "{problem}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_missing_root_is_named_rather_than_left_to_errno() {
