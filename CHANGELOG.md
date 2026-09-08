@@ -18,6 +18,16 @@ and is safe to rerun. It kills a port holder only once that process has identifi
 OpenBot, so an unrelated process on 3010 is named and left alone rather than killed. Nothing is
 deleted: the database, the Bots' files and their browser profiles are volumes. `--keep-computers`
 leaves the browsers signed in.
+### The trail says when an identity provider was added, not only when one was taken away
+
+Whoever holds an identity provider decides who can sign in at all, and the audit trail recorded only
+half of that. Removing one through the administration screen was written down; registering one was
+not, because registration is the sign-in library's own endpoint and nothing this deployment owns ran
+on the way through. The event type for it had been declared and never written. Removing a provider
+through the library's endpoint rather than the screen was unrecorded for the same reason. Both are
+now written where the deployment already stands in front of those routes to check that the person
+asking is an administrator, so a provider appearing or disappearing names itself and whoever did it.
+
 ### Two workers on one machine can no longer fire the same routine twice
 
 Every process that claims work from the shared queue named itself after its hostname, and the queue

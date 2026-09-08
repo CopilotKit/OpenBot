@@ -6,6 +6,7 @@ import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
 import {
+  type AuditEventType,
   type AuditReader,
   type AuditStore,
   AuditQueryError,
@@ -276,6 +277,11 @@ export function createApp(
     "/api/auth/sso/delete-provider",
   ]);
 
+  const AUTH_ROUTE_EVENTS: Record<string, AuditEventType | undefined> = {
+    "/api/auth/sso/register": "identity_provider.registered",
+    "/api/auth/sso/delete-provider": "identity_provider.removed",
+  };
+
   app.on(["GET", "POST"], "/api/auth/*", async (context) => {
     if (!auth) {
       return context.json(
@@ -301,7 +307,43 @@ export function createApp(
       }
     }
 
-    return auth.handler(context.req.raw);
+    const eventType =
+      AUTH_ROUTE_EVENTS[new URL(context.req.url).pathname] ?? undefined;
+
+    // Read before the handler runs, because it consumes the stream: a clone taken afterwards is of
+    // a request whose body is already gone, and the row would name no provider.
+    const named =
+      auditStore && eventType
+        ? ((await context.req.raw
+            .clone()
+            .json()
+            .catch(() => null)) as { providerId?: unknown } | null)
+        : null;
+
+    const answer = await auth.handler(context.req.raw);
+
+    if (auditStore && eventType && answer.ok) {
+      const session = await auth.api.getSession({
+        headers: context.req.raw.headers,
+        query: { disableCookieCache: true },
+      });
+      await recordAuditEvent(auditStore, {
+        eventType,
+        targetType: "identity_provider",
+        ...(typeof named?.providerId === "string"
+          ? { targetId: named.providerId }
+          : {}),
+        ...(session?.user ? { actorUserId: session.user.id } : {}),
+        payload: {
+          ...(typeof named?.providerId === "string"
+            ? { providerId: named.providerId }
+            : {}),
+          ...(session?.user?.email ? { by: session.user.email } : {}),
+        },
+      });
+    }
+
+    return answer;
   });
 
   const authenticationUnavailable: MiddlewareHandler<{
