@@ -21,10 +21,10 @@ import { oneLine } from "./text";
 export const CHANNEL_SUMMARY_KIND = "channel.summary";
 
 /** A title long enough to truncate says no more than the preview it replaced. */
-const MAX_SUMMARY_CODE_POINTS = 60;
+const MAX_SUMMARY_GRAPHEMES = 60;
 
 /** How much of the opening exchange the model is shown. Enough to see the topic, not the whole run. */
-const MAX_EXCERPT_CODE_POINTS = 600;
+const MAX_EXCERPT_GRAPHEMES = 600;
 
 /** A seam, so a test drives every path with no key and no network. Null means nothing worth writing. */
 export type ChannelTitler = (excerpt: string) => Promise<string | null>;
@@ -223,7 +223,7 @@ async function summariseOne(
   const answer = await options.title(excerpt);
   if (!answer) return "nothing to name it with";
 
-  const title = oneLine(stripWrappingQuotes(answer), MAX_SUMMARY_CODE_POINTS);
+  const title = oneLine(stripWrappingQuotes(answer), MAX_SUMMARY_GRAPHEMES);
   if (!title) return "nothing to name it with";
 
   return await options.database.transaction<Attempt>(
@@ -283,7 +283,7 @@ async function openingOf(
 
   return oneLine(
     replied ? `Asked: ${asked}\nAnswered: ${replied}` : `Asked: ${asked}`,
-    MAX_EXCERPT_CODE_POINTS,
+    MAX_EXCERPT_GRAPHEMES,
   );
 }
 
