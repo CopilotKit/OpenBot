@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lte } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import type { HandoffAttachment } from "../computer/attachments";
 import type { Database } from "../db/client";
 import { handoffAttachments } from "../db/schema";
@@ -36,15 +36,24 @@ export type HandoffAttachmentStore = {
     id: string,
     recipientBotId: string,
     externalTransferId: string,
+    transferLeaseId: string,
   ): Promise<StoredHandoffAttachment>;
   releaseTransfer(
     id: string,
     recipientBotId: string,
     externalTransferId: string,
+    transferLeaseId: string,
+  ): Promise<boolean>;
+  releaseTransferLease(
+    id: string,
+    recipientBotId: string,
+    externalTransferId: string,
+    transferLeaseId: string,
   ): Promise<boolean>;
   markTransferred(
     id: string,
     externalTransferId: string,
+    transferLeaseId: string,
     resultReference?: string,
   ): Promise<StoredHandoffAttachment>;
   markDeleted(
@@ -57,6 +66,7 @@ export type HandoffAttachmentStore = {
 export function createHandoffAttachmentStore(
   database: Database,
 ): HandoffAttachmentStore {
+  const transferLeaseMs = 2 * 60 * 1000;
   async function oneOrStale(rows: StoredHandoffAttachment[]) {
     const row = rows[0];
     if (!row) throw new Error("stale attachment transition");
@@ -107,44 +117,105 @@ export function createHandoffAttachmentStore(
         .limit(1);
       return row ?? null;
     },
-    async claimTransfer(id, recipientBotId, externalTransferId) {
+    async claimTransfer(
+      id,
+      recipientBotId,
+      externalTransferId,
+      transferLeaseId,
+    ) {
+      const now = new Date();
       return oneOrStale(
         await database
           .update(handoffAttachments)
-          .set({ externalTransferId, updatedAt: new Date() })
+          .set({
+            externalTransferId,
+            transferLeaseId,
+            transferLeaseExpiresAt: new Date(now.getTime() + transferLeaseMs),
+            updatedAt: now,
+          })
           .where(
             and(
               eq(handoffAttachments.id, id),
               eq(handoffAttachments.recipientBotId, recipientBotId),
               eq(handoffAttachments.state, "copied"),
-              isNull(handoffAttachments.externalTransferId),
+              or(
+                isNull(handoffAttachments.externalTransferId),
+                eq(handoffAttachments.externalTransferId, externalTransferId),
+              ),
+              or(
+                isNull(handoffAttachments.transferLeaseId),
+                lte(handoffAttachments.transferLeaseExpiresAt, now),
+              ),
             ),
           )
           .returning(),
       );
     },
-    async releaseTransfer(id, recipientBotId, externalTransferId) {
+    async releaseTransfer(
+      id,
+      recipientBotId,
+      externalTransferId,
+      transferLeaseId,
+    ) {
       const rows = await database
         .update(handoffAttachments)
-        .set({ externalTransferId: null, updatedAt: new Date() })
+        .set({
+          externalTransferId: null,
+          transferLeaseId: null,
+          transferLeaseExpiresAt: null,
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(handoffAttachments.id, id),
             eq(handoffAttachments.recipientBotId, recipientBotId),
             eq(handoffAttachments.state, "copied"),
             eq(handoffAttachments.externalTransferId, externalTransferId),
+            eq(handoffAttachments.transferLeaseId, transferLeaseId),
           ),
         )
         .returning({ id: handoffAttachments.id });
       return rows.length === 1;
     },
-    async markTransferred(id, externalTransferId, resultReference) {
+    async releaseTransferLease(
+      id,
+      recipientBotId,
+      externalTransferId,
+      transferLeaseId,
+    ) {
+      const rows = await database
+        .update(handoffAttachments)
+        .set({
+          transferLeaseId: null,
+          transferLeaseExpiresAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(handoffAttachments.id, id),
+            eq(handoffAttachments.recipientBotId, recipientBotId),
+            eq(handoffAttachments.state, "copied"),
+            eq(handoffAttachments.externalTransferId, externalTransferId),
+            eq(handoffAttachments.transferLeaseId, transferLeaseId),
+          ),
+        )
+        .returning({ id: handoffAttachments.id });
+      return rows.length === 1;
+    },
+    async markTransferred(
+      id,
+      externalTransferId,
+      transferLeaseId,
+      resultReference,
+    ) {
       return oneOrStale(
         await database
           .update(handoffAttachments)
           .set({
             state: "transferred",
             externalTransferId,
+            transferLeaseId: null,
+            transferLeaseExpiresAt: null,
             ...(resultReference ? { resultReference } : {}),
             updatedAt: new Date(),
           })
@@ -153,6 +224,7 @@ export function createHandoffAttachmentStore(
               eq(handoffAttachments.id, id),
               eq(handoffAttachments.state, "copied"),
               eq(handoffAttachments.externalTransferId, externalTransferId),
+              eq(handoffAttachments.transferLeaseId, transferLeaseId),
             ),
           )
           .returning(),

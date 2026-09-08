@@ -36,6 +36,10 @@ export const handoffAttachments = pgTable(
     sha256: text("sha256").notNull(),
     state: handoffAttachmentState("state").notNull().default("copied"),
     externalTransferId: text("external_transfer_id"),
+    transferLeaseId: text("transfer_lease_id"),
+    transferLeaseExpiresAt: timestamp("transfer_lease_expires_at", {
+      withTimezone: true,
+    }),
     resultReference: text("result_reference"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),

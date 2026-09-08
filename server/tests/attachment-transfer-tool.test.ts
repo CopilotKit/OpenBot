@@ -18,9 +18,10 @@ function setup(
     reserved: unknown[];
     urls: string[];
     init?: RequestInit;
-    claimed?: unknown[];
+    claimed: unknown[][];
     released?: unknown[];
-  } = { reserved: [], urls: [] };
+    releasedLeases: unknown[][];
+  } = { reserved: [], urls: [], claimed: [], releasedLeases: [] };
   const reservationIds = new Map<string, string>();
   let row = {
     id: attachmentId,
@@ -44,7 +45,7 @@ function setup(
     ownedByRecipient: async (id: string, botId: string) =>
       id === attachmentId && botId === owner ? row : null,
     claimTransfer: async (...args: unknown[]) => {
-      calls.claimed = args;
+      calls.claimed.push(args);
       row = {
         ...row,
         externalTransferId: String(args[2]),
@@ -59,6 +60,10 @@ function setup(
         externalTransferId: null,
         updatedAt: new Date(row.updatedAt.getTime() + 1_000),
       };
+      return true;
+    },
+    releaseTransferLease: async (...args: unknown[]) => {
+      calls.releasedLeases.push(args);
       return true;
     },
     markTransferred: async (_id: string, externalTransferId: string) => {
@@ -139,7 +144,12 @@ describe("approved workspace file transfer", () => {
         ),
       },
     ]);
-    expect(calls.claimed).toEqual([attachmentId, "erp", transferId]);
+    expect(calls.claimed).toHaveLength(1);
+    expect(calls.claimed[0]?.slice(0, 3)).toEqual([
+      attachmentId,
+      "erp",
+      transferId,
+    ]);
     expect(calls.urls).toEqual([
       `https://erp.test/api/agent-transfers/${transferId}`,
     ]);
@@ -174,7 +184,7 @@ describe("approved workspace file transfer", () => {
       }),
     ).rejects.toThrow("could not be read");
     expect(calls.reserved).toEqual([]);
-    expect(calls.claimed).toBeUndefined();
+    expect(calls.claimed).toEqual([]);
     expect(calls.released).toBeUndefined();
   });
 
@@ -187,7 +197,11 @@ describe("approved workspace file transfer", () => {
         attachmentId,
       }),
     ).rejects.toThrow("410");
-    expect(rejected.calls.released).toEqual([attachmentId, "erp", transferId]);
+    expect(rejected.calls.released?.slice(0, 3)).toEqual([
+      attachmentId,
+      "erp",
+      transferId,
+    ]);
 
     const uncertain = setup("erp", { uploadStatuses: [500] });
     await expect(
@@ -198,6 +212,7 @@ describe("approved workspace file transfer", () => {
       }),
     ).rejects.toThrow("500");
     expect(uncertain.calls.released).toBeUndefined();
+    expect(uncertain.calls.releasedLeases).toHaveLength(1);
   });
 
   test("retries an uncertain upload on its bound reservation without reserving again", async () => {
@@ -214,6 +229,8 @@ describe("approved workspace file transfer", () => {
 
     expect(result.transferId).toBe(transferId);
     expect(calls.reserved).toHaveLength(1);
+    expect(calls.claimed).toHaveLength(2);
+    expect(calls.releasedLeases).toHaveLength(1);
     expect(calls.urls).toEqual([
       `https://erp.test/api/agent-transfers/${transferId}`,
       `https://erp.test/api/agent-transfers/${transferId}`,

@@ -92,9 +92,9 @@ describe("handoff attachment metadata", () => {
     });
 
     await store.markDeleted(id, "ingested");
-    await expect(store.markTransferred(id, "erp-transfer")).rejects.toThrow(
-      "stale attachment transition",
-    );
+    await expect(
+      store.markTransferred(id, "erp-transfer", crypto.randomUUID()),
+    ).rejects.toThrow("stale attachment transition");
   });
 
   test("binds one attachment to only one external transfer before bytes leave", async () => {
@@ -117,10 +117,12 @@ describe("handoff attachment metadata", () => {
     });
     const first = crypto.randomUUID();
     const second = crypto.randomUUID();
+    const firstLease = crypto.randomUUID();
+    const secondLease = crypto.randomUUID();
 
     const results = await Promise.allSettled([
-      store.claimTransfer(id, ids.erp, first),
-      store.claimTransfer(id, ids.erp, second),
+      store.claimTransfer(id, ids.erp, first, firstLease),
+      store.claimTransfer(id, ids.erp, second, secondLease),
     ]);
 
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
@@ -136,6 +138,7 @@ describe("handoff attachment metadata", () => {
         id,
         ids.erp,
         row?.externalTransferId ?? "missing",
+        row?.transferLeaseId ?? "missing",
       ),
     ).toBe(true);
     expect(
@@ -164,8 +167,8 @@ describe("handoff attachment metadata", () => {
     const sameTransfer = crypto.randomUUID();
 
     const results = await Promise.allSettled([
-      store.claimTransfer(id, ids.erp, sameTransfer),
-      store.claimTransfer(id, ids.erp, sameTransfer),
+      store.claimTransfer(id, ids.erp, sameTransfer, crypto.randomUUID()),
+      store.claimTransfer(id, ids.erp, sameTransfer, crypto.randomUUID()),
     ]);
 
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
@@ -174,5 +177,83 @@ describe("handoff attachment metadata", () => {
     expect(results.filter(({ status }) => status === "rejected")).toHaveLength(
       1,
     );
+  });
+
+  test("a stale upload lease can be reclaimed without losing its transfer binding", async () => {
+    const ids = await bots();
+    const id = crypto.randomUUID();
+    await store.recordBatch({
+      handoffId: "e".repeat(64),
+      fromBotId: ids.collector,
+      toBotId: ids.erp,
+      attachments: [
+        {
+          id,
+          filename: "invoice.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 42,
+          sha256: "e".repeat(64),
+          path: `inbox/${"e".repeat(64)}/${id}/invoice.pdf`,
+        },
+      ],
+    });
+    const transfer = crypto.randomUUID();
+    await store.claimTransfer(id, ids.erp, transfer, crypto.randomUUID());
+    await database
+      .update(handoffAttachments)
+      .set({ transferLeaseExpiresAt: new Date(0) })
+      .where(inArray(handoffAttachments.id, [id]));
+
+    const reclaimed = await store.claimTransfer(
+      id,
+      ids.erp,
+      transfer,
+      crypto.randomUUID(),
+    );
+
+    expect(reclaimed.externalTransferId).toBe(transfer);
+    expect(reclaimed.transferLeaseExpiresAt?.getTime()).toBeGreaterThan(
+      Date.now(),
+    );
+  });
+
+  test("an old upload attempt cannot release or complete a newer lease", async () => {
+    const ids = await bots();
+    const id = crypto.randomUUID();
+    await store.recordBatch({
+      handoffId: "d".repeat(64),
+      fromBotId: ids.collector,
+      toBotId: ids.erp,
+      attachments: [
+        {
+          id,
+          filename: "invoice.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 42,
+          sha256: "d".repeat(64),
+          path: `inbox/${"d".repeat(64)}/${id}/invoice.pdf`,
+        },
+      ],
+    });
+    const transfer = crypto.randomUUID();
+    const oldLease = crypto.randomUUID();
+    const currentLease = crypto.randomUUID();
+    await store.claimTransfer(id, ids.erp, transfer, oldLease);
+    expect(
+      await store.releaseTransferLease(id, ids.erp, transfer, oldLease),
+    ).toBe(true);
+    await store.claimTransfer(id, ids.erp, transfer, currentLease);
+
+    expect(await store.releaseTransfer(id, ids.erp, transfer, oldLease)).toBe(
+      false,
+    );
+    await expect(store.markTransferred(id, transfer, oldLease)).rejects.toThrow(
+      "stale attachment transition",
+    );
+    expect(await store.ownedByRecipient(id, ids.erp)).toMatchObject({
+      state: "copied",
+      externalTransferId: transfer,
+      transferLeaseId: currentLease,
+    });
   });
 });

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
@@ -129,12 +130,10 @@ export function createWorkspaceFileTransferService(options: {
       }
 
       let transferId: string;
-      let claimed: StoredHandoffAttachment;
       if (row.externalTransferId) {
         // A timeout or 5xx leaves the external outcome unknown. Keep using the durable binding: the
         // ERP accepts an identical replay whether the first PUT stopped before or after committing.
         transferId = uuid.parse(row.externalTransferId);
-        claimed = row;
       } else {
         try {
           const reserved = await options.reserve({
@@ -154,25 +153,43 @@ export function createWorkspaceFileTransferService(options: {
             "The ERP could not reserve an upload for this verified attachment.",
           );
         }
+      }
 
-        try {
-          // Bind before the external side effect. A concurrent approval carrying another transfer id
-          // loses this conditional update and therefore cannot upload the same bytes elsewhere.
-          claimed = await options.store.claimTransfer(
-            row.id,
-            parsed.botId,
-            transferId,
-          );
-        } catch {
-          throw new WorkspaceTransferRefusedError(
-            "That attachment was claimed by another ERP transfer.",
-          );
-        }
+      const transferLeaseId = randomUUID();
+      let claimed: StoredHandoffAttachment;
+      try {
+        // The lease serializes both the first upload and later replays of an uncertain outcome. It
+        // is durable so two replicas cannot race, and expires so a killed process cannot wedge it.
+        claimed = await options.store.claimTransfer(
+          row.id,
+          parsed.botId,
+          transferId,
+          transferLeaseId,
+        );
+      } catch {
+        throw new WorkspaceTransferRefusedError(
+          "That attachment is already being uploaded.",
+        );
       }
 
       const release = async () => {
         await options.store
-          .releaseTransfer(claimed.id, parsed.botId, transferId)
+          .releaseTransfer(
+            claimed.id,
+            parsed.botId,
+            transferId,
+            transferLeaseId,
+          )
+          .catch(() => false);
+      };
+      const releaseLease = async () => {
+        await options.store
+          .releaseTransferLease(
+            claimed.id,
+            parsed.botId,
+            transferId,
+            transferLeaseId,
+          )
           .catch(() => false);
       };
 
@@ -190,26 +207,36 @@ export function createWorkspaceFileTransferService(options: {
         );
       }
 
-      const response = await (options.fetchImpl ?? fetch)(
-        `${target.origin}${target.pathFor(transferId)}`,
-        {
-          method: "PUT",
-          redirect: "manual",
-          headers: {
-            authorization: `Bearer ${target.bearerToken}`,
-            "content-type": claimed.mediaType,
-            "content-length": String(claimed.sizeBytes),
+      let response: Response;
+      try {
+        response = await (options.fetchImpl ?? fetch)(
+          `${target.origin}${target.pathFor(transferId)}`,
+          {
+            method: "PUT",
+            redirect: "manual",
+            headers: {
+              authorization: `Bearer ${target.bearerToken}`,
+              "content-type": claimed.mediaType,
+              "content-length": String(claimed.sizeBytes),
+            },
+            body: new Uint8Array(exported.bytes),
+            signal: AbortSignal.timeout(60_000),
           },
-          body: new Uint8Array(exported.bytes),
-          signal: AbortSignal.timeout(60_000),
-        },
-      );
+        );
+      } catch {
+        await releaseLease();
+        throw new WorkspaceTransferRefusedError(
+          "The ERP upload outcome is unknown. Retry this approval to reconcile it safely.",
+        );
+      }
       if (!response.ok) {
         // These responses are definitive refusals: no successful upload is hidden behind them, so
         // a fresh ERP reservation may safely be bound. Timeouts, conflicts and server errors stay
         // bound because their external outcome may be unknown.
         if ([400, 401, 403, 404, 409, 410, 422].includes(response.status)) {
           await release();
+        } else {
+          await releaseLease();
         }
         throw new WorkspaceTransferRefusedError(
           `The ERP upload returned ${response.status}.`,
@@ -219,6 +246,7 @@ export function createWorkspaceFileTransferService(options: {
       const transferred = await options.store.markTransferred(
         claimed.id,
         transferId,
+        transferLeaseId,
       );
       await recordAuditEvent(options.auditStore, {
         eventType: "agent.attachment_transferred",
