@@ -206,10 +206,25 @@ export function ProviderPicker({
 
           {login === "plan" &&
             (token ? (
-              <p className="lede">
-                Signed in to {row.name}. Your plan will be used, and no key is
-                stored on this machine.
-              </p>
+              <>
+                <p className="lede">
+                  Signed in to {row.name}. Your plan will be used, and no key is
+                  stored on this machine.
+                </p>
+                {/*
+                 * Said here because it changes an answer the person already gave.
+                 *
+                 * A subscription only works through the one Bot that speaks that vendor's
+                 * sign-in, so choosing a plan re-points the Bot. Doing that silently would leave
+                 * somebody looking at a Bot they did not choose with no idea why; see
+                 * `harness::speaking_for` for the failure that came of not saying it at all.
+                 */}
+                <p className="footnote">
+                  Your Bot will be{" "}
+                  {row.id === "anthropic" ? "Claude Agent SDK" : "LangGraph"},
+                  which is the one that can use this plan.
+                </p>
+              </>
             ) : signInUrl ? (
               <>
                 <p className="lede">

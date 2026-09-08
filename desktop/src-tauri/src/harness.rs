@@ -49,6 +49,31 @@ pub enum Credential {
 }
 
 /// One row.
+/**
+Which Bot can use a signed-in subscription, by vendor.
+
+THE CONSTRAINT IS ON THE LOGIN, NOT THE FRAMEWORK, and this is where that bites. Every harness on
+the list takes any model through an API key, so the Bot step and the model step are independent
+there. A subscription is different: it only ever buys that vendor's own models, and only through a
+path that speaks that vendor's subscription auth. Anthropic's is the Claude Agent SDK, which reads
+`CLAUDE_CODE_OAUTH_TOKEN`; OpenAI's is the Codex model, which the LangGraph AG-UI image selects from
+the token store.
+
+MEASURED, on the screen built to catch it: signing in to a Claude plan and keeping the default Bot
+produced a stack that came up clean and a Bot whose own log said "Missing credentials. Please pass
+an `api_key`". The last screen showed the failure, which is what it is for, but the person had done
+nothing wrong and had no way to know which of two correct-looking answers to change.
+
+Nobody is asked to know this. The plan picks the Bot that can use it.
+*/
+pub fn speaking_for(provider: &str) -> Option<&'static str> {
+    match provider {
+        "anthropic" => Some("claude-agent-sdk"),
+        "openai" => Some("langgraph"),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Harness {
     pub id: String,
@@ -290,6 +315,20 @@ pub fn picked(
 
 #[cfg(test)]
 mod tests {
+    /// Both plans name a Bot that exists and can actually use them.
+    #[test]
+    fn each_plan_names_a_bot_that_exists() {
+        for provider in ["anthropic", "openai"] {
+            let id = super::speaking_for(provider).expect("a plan with no Bot to run it");
+            assert!(
+                super::catalogue().iter().any(|row| row.id == id),
+                "{provider} points at {id}, which is not in the catalogue"
+            );
+        }
+        // Anything else is a key path, where the Bot and the model are genuinely independent.
+        assert_eq!(super::speaking_for("openai-compatible"), None);
+    }
+
     use super::*;
 
     /// OpenBot's own `built-in` agent type is a system prompt, not a harness, and the doc is

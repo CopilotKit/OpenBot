@@ -216,6 +216,35 @@ async fn start_stack(
     // Resolved from the catalogue rather than taken from the window: the image, the port and how
     // it is dialled are facts about the harness, and the window knowing them would be a second
     // list to keep in step. See `harness::picked` for what each refusal is for.
+    // Named rather than inlined: the Bot choice below reads it, the store file is written from it,
+    // and reading the model screen twice could not be relied on to give the same answer.
+    let credential = model.into_credential()?;
+
+    /*
+     * A PLAN CHOOSES ITS OWN BOT, because only one Bot can spend it.
+     *
+     * Every harness takes any model through a key, so the Bot step and the model step are
+     * independent there. A subscription is not: it buys that vendor's own models through a path
+     * that speaks that vendor's subscription auth, and nothing else. Signing in to a Claude plan
+     * and keeping the default Bot produced a clean start and a Bot whose log said "Missing
+     * credentials. Please pass an `api_key`" — the person had answered both screens correctly and
+     * had no way to know which answer to change.
+     *
+     * Nobody is asked to know this, which is the audience rule. The plan re-points the Bot, and
+     * the window says which Bot it will be while there is still a screen to say it on.
+     */
+    let harness = match &credential {
+        openbot_env::ModelCredential::ClaudePlan { .. } => {
+            harness::speaking_for("anthropic").map(str::to_string)
+        }
+        openbot_env::ModelCredential::ChatGptPlan { .. } => {
+            harness::speaking_for("openai").map(str::to_string)
+        }
+        _ => harness,
+    };
+    // Resolved from the catalogue rather than taken from the window: the image, the port and how
+    // it is dialled are facts about the harness, and the window knowing them would be a second
+    // list to keep in step. See `harness::picked` for what each refusal is for.
     let picked = harness::picked(harness.as_deref(), DEPLOYMENT_VERSION)?;
 
     // The installer does not carry the deployment; it fetches one. Skipped when the recorded
@@ -269,9 +298,6 @@ async fn start_stack(
         return Err(problem.into());
     }
 
-    // Named rather than inlined: the store file below is written from the same answer, and reading
-    // the model screen twice could not be relied on to give the same one.
-    let credential = model.into_credential()?;
     let settings = openbot_env::compose(
         &openbot_env::Intelligence {
             api_url,
@@ -1186,7 +1212,35 @@ fn main() {
                 true,
                 &[&window_open, &window_stop, &window_quit],
             )?;
-            app.set_menu(Menu::with_items(app, &[&openbot])?)?;
+            /*
+             * AN EDIT MENU, WITHOUT WHICH COMMAND-V DOES NOTHING.
+             *
+             * MEASURED, on the screen that asks for a paste. macOS routes the clipboard shortcuts
+             * through the menu bar, so a window with no Edit menu has no Paste, and a webview text
+             * field silently ignores the keystroke. Typing worked and pasting did not, on the one
+             * screen whose own instruction is "paste the code it shows you". Every person signing
+             * in to a Claude plan would have reached that field, pressed the shortcut everybody
+             * knows, and had nothing happen.
+             *
+             * Predefined items rather than our own: these carry the standard shortcuts and the
+             * standard behaviour, which is the whole point of them being where a person expects.
+             */
+            use tauri::menu::PredefinedMenuItem;
+            let edit = Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?;
+            app.set_menu(Menu::with_items(app, &[&openbot, &edit])?)?;
             app.on_menu_event(|app, event| chose(app, event.id().as_ref()));
             Ok(())
         })
