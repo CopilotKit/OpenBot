@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte } from "drizzle-orm";
 import type { HandoffAttachment } from "../computer/attachments";
 import type { Database } from "../db/client";
 import { handoffAttachments } from "../db/schema";
@@ -117,10 +117,7 @@ export function createHandoffAttachmentStore(
               eq(handoffAttachments.id, id),
               eq(handoffAttachments.recipientBotId, recipientBotId),
               eq(handoffAttachments.state, "copied"),
-              or(
-                isNull(handoffAttachments.externalTransferId),
-                eq(handoffAttachments.externalTransferId, externalTransferId),
-              ),
+              isNull(handoffAttachments.externalTransferId),
             ),
           )
           .returning(),

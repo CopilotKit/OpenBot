@@ -142,4 +142,37 @@ describe("handoff attachment metadata", () => {
       (await store.ownedByRecipient(id, ids.erp))?.externalTransferId,
     ).toBeNull();
   });
+
+  test("only one concurrent approval can claim the same idempotent transfer", async () => {
+    const ids = await bots();
+    const id = crypto.randomUUID();
+    await store.recordBatch({
+      handoffId: "a".repeat(64),
+      fromBotId: ids.collector,
+      toBotId: ids.erp,
+      attachments: [
+        {
+          id,
+          filename: "invoice.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 42,
+          sha256: "a".repeat(64),
+          path: `inbox/${"a".repeat(64)}/${id}/invoice.pdf`,
+        },
+      ],
+    });
+    const sameTransfer = crypto.randomUUID();
+
+    const results = await Promise.allSettled([
+      store.claimTransfer(id, ids.erp, sameTransfer),
+      store.claimTransfer(id, ids.erp, sameTransfer),
+    ]);
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
+      1,
+    );
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(
+      1,
+    );
+  });
 });
