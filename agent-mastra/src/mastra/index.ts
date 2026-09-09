@@ -16,8 +16,11 @@ import { openai } from "@ai-sdk/openai";
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { registerApiRoute } from "@mastra/core/server";
+import { listenPort } from "../../../shared/listen-port";
 
 const model = process.env.BOT_MODEL?.trim() || "gpt-4o-mini";
+const port = listenPort(process.env.PORT, 4213);
+if (!port.ok) throw new Error(port.reason);
 
 export const openbotBaseInstructions =
   "Answer the question you are asked, briefly and correctly.";
@@ -95,7 +98,7 @@ function carriesTheServerToken(request: Request): boolean {
 export const mastra = new Mastra({
   agents: { openbot },
   server: {
-    port: Number(process.env.PORT ?? 4213),
+    port: port.port,
     host: "0.0.0.0",
     middleware: [
       // Everything but `/health`, which Compose polls before any token exists.
