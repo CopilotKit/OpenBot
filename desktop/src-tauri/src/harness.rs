@@ -107,6 +107,14 @@ pub struct Harness {
     pub mark: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessChoice {
+    pub id: String,
+    #[serde(default)]
+    pub agent_url: Option<String>,
+}
+
 /// The list, ranked as the build doc ranks it: stars first, with downloads as the sanity check,
 /// because each misleads alone.
 ///
@@ -300,29 +308,42 @@ An unknown id is refused here rather than written into `.env`, where it would be
 at a container nobody started — which looks like a broken Bot rather than a bad pick.
 */
 pub fn picked(
-    id: Option<&str>,
+    choice: Option<&HarnessChoice>,
     // Where the deployment is, because the image reference is read from the manifest laid down
     // beside it. A name built from a version was what this took before, and an unqualified name
     // sends every engine to Docker Hub: the pull was refused there and the person was shown a
     // registry permissions error for a repository that had never been pushed.
     root: &std::path::Path,
 ) -> Result<Option<crate::env::PickedHarness>, String> {
-    let Some(id) = id.map(str::trim).filter(|id| !id.is_empty()) else {
+    let Some(choice) = choice else {
         return Ok(None);
     };
-    // Nothing is installed for somebody bringing their own address, so there is nothing to resolve.
-    if id == "byo-url" {
+    let id = choice.id.trim();
+    if id.is_empty() {
         return Ok(None);
-    }
+    };
     let row = catalogue()
         .into_iter()
         .find(|row| row.id == id)
         .ok_or_else(|| format!("There is no Bot called \"{id}\" to install."))?;
+    if row.id == "byo-url" {
+        let url = choice
+            .agent_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
+            .ok_or_else(|| "The agent endpoint must start with http:// or https://.".to_string())?;
+        return Ok(Some(crate::env::PickedHarness::RemoteAgUi {
+            url: url.into(),
+            name: row.name,
+            remote_agent_id: String::new(),
+        }));
+    }
     let (Some(image), Some(port)) = (row.image, row.port) else {
         return Err(format!("\"{id}\" is not a Bot this can install."));
     };
     let mastra = row.id == "mastra";
-    Ok(Some(crate::env::PickedHarness {
+    Ok(Some(crate::env::PickedHarness::Installed {
         image: crate::deployment::reference(root, &image)?,
         port,
         name: row.name,
@@ -346,7 +367,7 @@ pub enum PickedAfterDeploymentError<E> {
 
 pub async fn picked_after_deployment_ready<E, Ready, ReadyFuture>(
     root: &std::path::Path,
-    harness: Option<&str>,
+    harness: Option<&HarnessChoice>,
     ready: Ready,
 ) -> Result<Option<crate::env::PickedHarness>, PickedAfterDeploymentError<E>>
 where
@@ -497,8 +518,8 @@ mod tests {
     /// Bot rather than a pick that could not be honoured.
     #[test]
     fn an_unknown_id_is_refused_by_name() {
-        let refusal =
-            picked(Some("not-a-real-harness"), &std::env::temp_dir()).expect_err("it was accepted");
+        let refusal = picked(Some(&choice("not-a-real-harness")), &std::env::temp_dir())
+            .expect_err("it was accepted");
         assert!(refusal.contains("not-a-real-harness"), "{refusal}");
     }
 
@@ -554,6 +575,13 @@ mod tests {
         .expect("manifest is written");
     }
 
+    fn choice(id: &str) -> HarnessChoice {
+        HarnessChoice {
+            id: id.into(),
+            agent_url: None,
+        }
+    }
+
     #[test]
     fn start_fetches_deployment_before_resolving_a_selected_harness_image() {
         let root = scratch("fetch-before-pick");
@@ -564,7 +592,7 @@ mod tests {
 
         let picked = tauri::async_runtime::block_on(picked_after_deployment_ready(
             &root,
-            Some("crewai"),
+            Some(&choice("crewai")),
             || async {
                 write_crewai_manifest(&root);
                 crate::deployment::record(&root, "v9.9.9")
@@ -573,39 +601,58 @@ mod tests {
         ));
 
         let picked = picked.expect("selected harness should resolve after the deployment is ready");
-        assert_eq!(
-            picked.expect("crewai is installable").image,
-            "ghcr.io/copilotkit/openbot-agent-crewai@sha256:abc"
-        );
+        let picked = picked.expect("crewai is installable");
+        let crate::env::PickedHarness::Installed { image, .. } = picked else {
+            panic!("crewai should install a harness image");
+        };
+        assert_eq!(image, "ghcr.io/copilotkit/openbot-agent-crewai@sha256:abc");
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Bringing your own address installs nothing, and that is not a failure.
+    /// Bringing your own address registers that remote AG-UI endpoint, and installs nothing.
     #[test]
-    fn the_byo_row_resolves_to_nothing_without_complaint() {
+    fn the_byo_row_resolves_to_a_remote_ag_ui_endpoint() {
         let root = std::env::temp_dir();
+        let byo = HarnessChoice {
+            id: "byo-url".into(),
+            agent_url: Some("  https://agent.example/ag-ui  ".into()),
+        };
         assert_eq!(
-            picked(Some("byo-url"), &root).expect("it was refused"),
-            None
+            picked(Some(&byo), &root).expect("it was refused"),
+            Some(crate::env::PickedHarness::RemoteAgUi {
+                url: "https://agent.example/ag-ui".into(),
+                name: "An agent you already run".into(),
+                remote_agent_id: String::new(),
+            })
         );
         assert_eq!(picked(None, &root).expect("it was refused"), None);
-        assert_eq!(picked(Some("   "), &root).expect("it was refused"), None);
+        assert_eq!(
+            picked(Some(&choice("   ")), &root).expect("it was refused"),
+            None
+        );
     }
 
     /// A real row resolves to the image the release publishes and the port that image listens on.
     #[test]
     fn a_real_row_resolves_to_its_image_and_port() {
         let root = deployment_naming_everything("crewai");
-        let crewai = picked(Some("crewai"), &root)
+        let crewai = picked(Some(&choice("crewai")), &root)
             .expect("refused")
             .expect("nothing");
-        assert_eq!(
-            crewai.image,
-            "ghcr.io/copilotkit/openbot-agent-crewai@sha256:abc"
-        );
-        assert_eq!(crewai.port, 4202);
-        assert!(!crewai.mastra);
-        assert!(crewai.remote_agent_id.is_empty());
+        let crate::env::PickedHarness::Installed {
+            image,
+            port,
+            mastra,
+            remote_agent_id,
+            ..
+        } = crewai
+        else {
+            panic!("crewai should install a harness image");
+        };
+        assert_eq!(image, "ghcr.io/copilotkit/openbot-agent-crewai@sha256:abc");
+        assert_eq!(port, 4202);
+        assert!(!mastra);
+        assert!(remote_agent_id.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -614,11 +661,19 @@ mod tests {
     #[test]
     fn mastra_resolves_as_mastra_and_names_its_agent() {
         let root = deployment_naming_everything("mastra");
-        let mastra = picked(Some("mastra"), &root)
+        let mastra = picked(Some(&choice("mastra")), &root)
             .expect("refused")
             .expect("nothing");
-        assert!(mastra.mastra);
-        assert_eq!(mastra.remote_agent_id, "openbot");
+        let crate::env::PickedHarness::Installed {
+            mastra,
+            remote_agent_id,
+            ..
+        } = mastra
+        else {
+            panic!("mastra should install a harness image");
+        };
+        assert!(mastra);
+        assert_eq!(remote_agent_id, "openbot");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -634,8 +689,17 @@ mod tests {
                 .expect("catalogue row missing");
             assert_eq!(row.health_path.as_deref(), Some("/health"));
 
-            let picked = picked(Some(id), &root).expect("refused").expect("nothing");
-            assert_eq!(picked.run_path, run_path);
+            let picked = picked(Some(&choice(id)), &root)
+                .expect("refused")
+                .expect("nothing");
+            let crate::env::PickedHarness::Installed {
+                run_path: picked_run_path,
+                ..
+            } = picked
+            else {
+                panic!("{id} should install a harness image");
+            };
+            assert_eq!(picked_run_path, run_path);
         }
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -656,7 +720,7 @@ mod tests {
         )
         .unwrap();
 
-        let refused = picked(Some("crewai"), &root).expect_err("it should be refused");
+        let refused = picked(Some(&choice("crewai")), &root).expect_err("it should be refused");
         assert!(refused.contains("agent-crewai"), "{refused}");
         assert!(refused.contains("v1.2.3"), "{refused}");
         assert!(!refused.contains("denied"), "{refused}");
@@ -680,25 +744,25 @@ mod tests {
             if row.image.is_none() {
                 continue;
             }
-            let resolved = picked(Some(&row.id), &root)
+            let resolved = picked(Some(&choice(&row.id)), &root)
                 .expect("refused")
                 .expect("nothing");
-            let host = resolved
-                .image
+            let crate::env::PickedHarness::Installed { image, .. } = resolved else {
+                panic!("{} should install a harness image", row.id);
+            };
+            let host = image
                 .split('/')
                 .next()
                 .expect("a reference has at least one segment");
             assert!(
                 host.contains('.'),
-                "{} resolved to {}, which every engine looks up on Docker Hub",
-                row.id,
-                resolved.image
+                "{} resolved to {image}, which every engine looks up on Docker Hub",
+                row.id
             );
             assert!(
-                resolved.image.contains("@sha256:") || resolved.image.contains(':'),
-                "{} resolved to {}, which an engine reads as :latest",
-                row.id,
-                resolved.image
+                image.contains("@sha256:") || image.contains(':'),
+                "{} resolved to {image}, which an engine reads as :latest",
+                row.id
             );
         }
         let _ = std::fs::remove_dir_all(&root);

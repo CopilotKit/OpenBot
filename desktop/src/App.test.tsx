@@ -314,6 +314,120 @@ test("saved startup credentials enable Start without raw protected secrets on mo
   ).toHaveLength(1);
 });
 
+test("bring-your-own agent collects a distinct AG-UI endpoint for startup", async () => {
+  invokeHandler = async (command) => {
+    if (command === "detect_engine") {
+      return {
+        engine: "docker",
+        responding: true,
+        engine_socket: null,
+        detail: "Docker is answering.",
+      };
+    }
+    if (command === "default_root") return "/tmp/openbot-app-test";
+    if (command === "already_configured") {
+      return {
+        values: {},
+        saved: {
+          intelligenceApiKey: true,
+          modelApiKeys: { openai: false, anthropic: false },
+          modelSessions: { openai: false, anthropic: false },
+        },
+      };
+    }
+    if (command === "already_running") return false;
+    if (command === "windows_blocker") return null;
+    if (command === "last_failure") return null;
+    if (command === "harnesses") {
+      return [
+        {
+          id: "langgraph",
+          name: "LangGraph",
+          summary: "Default Bot",
+          image: null,
+          health_path: null,
+          credential: "any-provider",
+          maintainer: "first-party",
+          mark: null,
+          port: 8000,
+        },
+        {
+          id: "byo-url",
+          name: "An agent you already run",
+          summary: "Give its address.",
+          image: null,
+          health_path: null,
+          credential: "their-endpoint",
+          maintainer: "community",
+          mark: null,
+          port: null,
+        },
+      ];
+    }
+    if (command === "providers") {
+      return [
+        {
+          id: "openai-compatible",
+          name: "OpenAI-compatible",
+          summary: "Use your own endpoint.",
+          logins: ["endpoint"],
+          mark: null,
+          caution: null,
+        },
+      ];
+    }
+    if (command === "prepare_engine") return null;
+    if (command === "start_stack") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderApp();
+
+  await userEvent.click(
+    await view.findByRole("button", { name: "Set up OpenBot" }),
+  );
+  await userEvent.click(await view.findByText("Choose the agent framework"));
+  await userEvent.click(
+    await view.findByRole("radio", { name: /An agent you already run/ }),
+  );
+
+  const continueFromHarness = view.getByRole("button", { name: "Continue" });
+  expect(continueFromHarness).toHaveProperty("disabled", true);
+  const agentEndpoint = view.getByLabelText("AG-UI endpoint");
+  await userEvent.type(agentEndpoint, "https://agent.example/ag-ui");
+  await waitFor(() =>
+    expect(continueFromHarness).toHaveProperty("disabled", false),
+  );
+  await userEvent.click(continueFromHarness);
+
+  await userEvent.click(
+    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("Base URL"),
+    "https://models.example/v1",
+  );
+  await userEvent.type(view.getByLabelText("Model name"), "local-model");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Start OpenBot" }),
+  );
+
+  expect(
+    invokeCalls.find((call) => call.command === "start_stack")?.args,
+  ).toMatchObject({
+    model: {
+      provider: "openai-compatible",
+      baseUrl: "https://models.example/v1",
+      model: "local-model",
+    },
+    harness: {
+      id: "byo-url",
+      agentUrl: "https://agent.example/ag-ui",
+    },
+  });
+});
+
 for (const provider of [
   { id: "openai", name: "OpenAI" },
   { id: "anthropic", name: "Anthropic" },
@@ -423,7 +537,7 @@ for (const provider of [
         login: "plan",
         saved: true,
       },
-      harness: "langgraph",
+      harness: { id: "langgraph" },
     });
   });
 }

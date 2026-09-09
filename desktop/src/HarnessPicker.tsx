@@ -14,6 +14,11 @@ export type Harness = {
   port: number | null;
 };
 
+export type HarnessChoice = {
+  id: string;
+  agentUrl?: string;
+};
+
 /** What OpenBot sets up unless somebody says otherwise. David's call. */
 export const DEFAULT_HARNESS = "langgraph";
 
@@ -37,8 +42,8 @@ export function HarnessPicker({
   onContinue,
   onBack,
 }: {
-  chosen: string | null;
-  onChoose: (id: string) => void;
+  chosen: HarnessChoice | null;
+  onChoose: (choice: HarnessChoice) => void;
   onContinue: () => void;
   onBack: () => void;
 }) {
@@ -47,7 +52,7 @@ export function HarnessPicker({
   // Open when the person has already chosen something other than the default, so coming back does
   // not hide the choice they made.
   const [open, setOpen] = useState(
-    chosen !== null && chosen !== DEFAULT_HARNESS,
+    chosen !== null && chosen.id !== DEFAULT_HARNESS,
   );
 
   useEffect(() => {
@@ -56,7 +61,12 @@ export function HarnessPicker({
       .catch((error) => setFailure(String(error)));
   }, []);
 
-  const picked = rows.find((row) => row.id === (chosen ?? DEFAULT_HARNESS));
+  const chosenId = chosen?.id ?? DEFAULT_HARNESS;
+  const picked = rows.find((row) => row.id === chosenId);
+  const byoAgentUrl = chosenId === "byo-url" ? (chosen?.agentUrl ?? "") : "";
+  const byoReady =
+    byoAgentUrl.trim().startsWith("http://") ||
+    byoAgentUrl.trim().startsWith("https://");
 
   if (failure) {
     return (
@@ -101,15 +111,21 @@ export function HarnessPicker({
           {rows.map((row) => (
             <label
               key={row.id}
-              className={`tile${(chosen ?? DEFAULT_HARNESS) === row.id ? " chosen" : ""}`}
+              className={`tile${chosenId === row.id ? " chosen" : ""}`}
             >
               <input
                 type="radio"
                 name="harness"
                 className="tile-input"
                 value={row.id}
-                checked={(chosen ?? DEFAULT_HARNESS) === row.id}
-                onChange={() => onChoose(row.id)}
+                checked={chosenId === row.id}
+                onChange={() =>
+                  onChoose(
+                    row.id === "byo-url"
+                      ? { id: row.id, agentUrl: byoAgentUrl }
+                      : { id: row.id },
+                  )
+                }
               />
               <Mark id={row.mark} name={row.name} />
               {/* The name is on every row, mark or no mark, so a person who does not recognise a
@@ -125,13 +141,34 @@ export function HarnessPicker({
             </label>
           ))}
         </fieldset>
+        {chosenId === "byo-url" && (
+          <div className="field" style={{ marginTop: "0.75rem" }}>
+            <label htmlFor="agent-url">AG-UI endpoint</label>
+            <input
+              id="agent-url"
+              value={byoAgentUrl}
+              onChange={(event) =>
+                onChoose({
+                  id: "byo-url",
+                  agentUrl: event.target.value,
+                })
+              }
+              placeholder="https://your-agent.example/ag-ui"
+              spellCheck={false}
+            />
+          </div>
+        )}
       </details>
 
       <div className="row">
         <button type="button" className="quiet" onClick={onBack}>
           Back
         </button>
-        <button type="button" onClick={onContinue}>
+        <button
+          type="button"
+          disabled={chosenId === "byo-url" && !byoReady}
+          onClick={onContinue}
+        >
           Continue
         </button>
       </div>

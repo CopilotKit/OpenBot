@@ -320,37 +320,58 @@ pub fn compose(
      * so a deployment that picked nothing registers nothing.
      */
     if let Some(picked) = harness {
-        env.insert("PICKED_HARNESS_IMAGE".into(), picked.image.clone());
-        env.insert("PICKED_HARNESS_PORT".into(), picked.port.to_string());
-        env.insert("PICKED_HARNESS_NAME".into(), picked.name.clone());
-        let run_path = picked.run_path.trim();
-        env.insert(
-            "PICKED_HARNESS_URL".into(),
-            if run_path.is_empty() {
-                format!("http://127.0.0.1:{}", picked.port)
-            } else if run_path.starts_with('/') {
-                format!("http://127.0.0.1:{}{}", picked.port, run_path)
-            } else {
-                format!("http://127.0.0.1:{}/{}", picked.port, run_path)
-            },
-        );
-        /*
-         * The kind, as the package spells it.
-         *
-         * Interpolated rather than written as a literal row per kind, because the loader refuses an
-         * unknown `agent.type` by refusing the whole file: a package carrying a literal
-         * `remote-mastra` row stops any server predating that kind from starting at all, picked or
-         * not. Measured, not guessed — it is what a v0.0.8 deployment did.
-         */
-        env.insert(
-            "PICKED_HARNESS_KIND".into(),
-            if picked.mastra {
-                "remote-mastra".to_string()
-            } else {
-                "remote-ag-ui".to_string()
-            },
-        );
-        insert_if_given(&mut env, "PICKED_HARNESS_AGENT_ID", &picked.remote_agent_id);
+        match picked {
+            PickedHarness::Installed {
+                image,
+                port,
+                name,
+                mastra,
+                run_path,
+                remote_agent_id,
+            } => {
+                env.insert("PICKED_HARNESS_IMAGE".into(), image.clone());
+                env.insert("PICKED_HARNESS_PORT".into(), port.to_string());
+                env.insert("PICKED_HARNESS_NAME".into(), name.clone());
+                let run_path = run_path.trim();
+                env.insert(
+                    "PICKED_HARNESS_URL".into(),
+                    if run_path.is_empty() {
+                        format!("http://127.0.0.1:{port}")
+                    } else if run_path.starts_with('/') {
+                        format!("http://127.0.0.1:{port}{run_path}")
+                    } else {
+                        format!("http://127.0.0.1:{port}/{run_path}")
+                    },
+                );
+                /*
+                 * The kind, as the package spells it.
+                 *
+                 * Interpolated rather than written as a literal row per kind, because the loader
+                 * refuses an unknown `agent.type` by refusing the whole file: a package carrying a
+                 * literal `remote-mastra` row stops any server predating that kind from starting at
+                 * all, picked or not. Measured, not guessed — it is what a v0.0.8 deployment did.
+                 */
+                env.insert(
+                    "PICKED_HARNESS_KIND".into(),
+                    if *mastra {
+                        "remote-mastra".to_string()
+                    } else {
+                        "remote-ag-ui".to_string()
+                    },
+                );
+                insert_if_given(&mut env, "PICKED_HARNESS_AGENT_ID", remote_agent_id);
+            }
+            PickedHarness::RemoteAgUi {
+                url,
+                name,
+                remote_agent_id,
+            } => {
+                env.insert("PICKED_HARNESS_NAME".into(), name.clone());
+                env.insert("PICKED_HARNESS_URL".into(), url.trim().to_string());
+                env.insert("PICKED_HARNESS_KIND".into(), "remote-ag-ui".into());
+                insert_if_given(&mut env, "PICKED_HARNESS_AGENT_ID", remote_agent_id);
+            }
+        }
     }
 
     // Without this the server gives every Bot the same browser. It is the difference between the
@@ -438,19 +459,38 @@ Nothing new had to be built to make a Bot appear.
 `None` is a deployment that has not picked one, which writes nothing and leaves those rows dropped.
 */
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PickedHarness {
-    /// The published image, e.g. `openbot-agent-crewai`. Named by the release, not derived.
-    pub image: String,
-    /// The port that image listens on, fixed by its own Dockerfile.
-    pub port: u16,
-    /// What the Bot is called on screen.
-    pub name: String,
-    /// How it is dialled. A Mastra server has no AG-UI route of its own.
-    pub mastra: bool,
-    /// The run route on that harness. Empty means the server root.
-    pub run_path: String,
-    /// Which agent on that server, for a Mastra roster. Empty means the only one there.
-    pub remote_agent_id: String,
+pub enum PickedHarness {
+    Installed {
+        /// The published image, e.g. `openbot-agent-crewai`. Named by the release, not derived.
+        image: String,
+        /// The port that image listens on, fixed by its own Dockerfile.
+        port: u16,
+        /// What the Bot is called on screen.
+        name: String,
+        /// How it is dialled. A Mastra server has no AG-UI route of its own.
+        mastra: bool,
+        /// The run route on that harness. Empty means the server root.
+        run_path: String,
+        /// Which agent on that server, for a Mastra roster. Empty means the only one there.
+        remote_agent_id: String,
+    },
+    RemoteAgUi {
+        /// The AG-UI endpoint the person already runs.
+        url: String,
+        /// What the Bot is called on screen.
+        name: String,
+        /// Reserved for a future remote roster field. Empty means the only one there.
+        remote_agent_id: String,
+    },
+}
+
+impl PickedHarness {
+    pub fn installed_port(&self) -> Option<u16> {
+        match self {
+            Self::Installed { port, .. } => Some(*port),
+            Self::RemoteAgUi { .. } => None,
+        }
+    }
 }
 
 /// The model credential, which belongs to the provider and not to the harness.
@@ -1530,7 +1570,7 @@ mod model_tests {
                 &engine(),
                 &Ports::default(),
                 &pinned(),
-                Some(&PickedHarness {
+                Some(&PickedHarness::Installed {
                     image: "openbot-agent-crewai".into(),
                     port,
                     name: "CrewAI".into(),
@@ -1546,6 +1586,39 @@ mod model_tests {
             );
             assert_eq!(env.get("PICKED_HARNESS_URL").map(String::as_str), Some(url));
         }
+    }
+
+    #[test]
+    fn a_byo_harness_writes_only_the_remote_ag_ui_address_and_kind() {
+        let env = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            Some(&PickedHarness::RemoteAgUi {
+                url: "https://agent.example/ag-ui".into(),
+                name: "An agent you already run".into(),
+                remote_agent_id: String::new(),
+            }),
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(
+            env.get("PICKED_HARNESS_URL").map(String::as_str),
+            Some("https://agent.example/ag-ui")
+        );
+        assert_eq!(
+            env.get("PICKED_HARNESS_KIND").map(String::as_str),
+            Some("remote-ag-ui")
+        );
+        assert_eq!(
+            env.get("PICKED_HARNESS_NAME").map(String::as_str),
+            Some("An agent you already run")
+        );
+        assert!(!env.contains_key("PICKED_HARNESS_IMAGE"));
+        assert!(!env.contains_key("PICKED_HARNESS_PORT"));
+        assert!(!env.contains_key("PICKED_HARNESS_AGENT_ID"));
     }
 
     /// Nothing picked writes none of it, so the package's gated rows stay dropped.

@@ -374,8 +374,8 @@ async fn start_stack(
     gateway_ws_url: String,
     api_key: String,
     model: ChosenModel,
-    // The row the person picked, by id. Absent registers no Bot of their own.
-    harness: Option<String>,
+    // The row the person picked, with the address only for the bring-your-own row.
+    harness: Option<harness::HarnessChoice>,
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
@@ -409,16 +409,21 @@ async fn start_stack(
      * Nobody is asked to know this, which is the audience rule. The plan re-points the Bot, and
      * the window says which Bot it will be while there is still a screen to say it on.
      */
-    let harness = match &credential {
-        openbot_env::ModelCredential::ClaudePlan { .. } => {
-            harness::speaking_for("anthropic").map(str::to_string)
-        }
-        openbot_env::ModelCredential::ChatGptPlan { .. } => {
-            harness::speaking_for("openai").map(str::to_string)
-        }
-        _ => harness,
-    };
-    let picked = harness::picked_after_deployment_ready(&root, harness.as_deref(), || async {
+    let harness =
+        match &credential {
+            openbot_env::ModelCredential::ClaudePlan { .. } => harness::speaking_for("anthropic")
+                .map(|id| harness::HarnessChoice {
+                    id: id.into(),
+                    agent_url: None,
+                }),
+            openbot_env::ModelCredential::ChatGptPlan { .. } => harness::speaking_for("openai")
+                .map(|id| harness::HarnessChoice {
+                    id: id.into(),
+                    agent_url: None,
+                }),
+            _ => harness,
+        };
+    let picked = harness::picked_after_deployment_ready(&root, harness.as_ref(), || async {
         deployment_ready(&app, &root).await
     })
     .await
@@ -545,9 +550,8 @@ async fn start_stack(
      * check is for is a stranger on the port.
      */
     let ours = stack::ports_we_already_publish(&found, &root);
-    if let Some(picked) = picked.as_ref() {
-        if let Some(problem) =
-            stack::port_already_taken_except(&[("Bot you picked", picked.port)], &ours)
+    if let Some(port) = picked.as_ref().and_then(|picked| picked.installed_port()) {
+        if let Some(problem) = stack::port_already_taken_except(&[("Bot you picked", port)], &ours)
         {
             report(&app, "ports", false, problem.clone());
             return Err(problem.into());
@@ -1694,6 +1698,49 @@ mod tests {
         assert_eq!(
             body.pointer("/messages/0/content").and_then(|v| v.as_str()),
             Some("What is 17 times 23?")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ask_the_bot_uses_the_picked_byo_ag_ui_endpoint_before_managed_fallback() {
+        let server = TestServer::new(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+             data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"m1\",\"delta\":\"391\"}\n\n\
+             data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n",
+        );
+        let root = temp_root("openbot-byo-ask");
+        let answer = tauri::async_runtime::block_on(ask_the_bot_with_settings(
+            root.clone(),
+            "What is 17 times 23?".to_string(),
+            std::collections::BTreeMap::from([
+                ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
+                (
+                    "PICKED_HARNESS_KIND".to_string(),
+                    "remote-ag-ui".to_string(),
+                ),
+                (
+                    "MANAGED_AGENT_AG_UI_URL".to_string(),
+                    "http://127.0.0.1:9/ag-ui".to_string(),
+                ),
+                (
+                    "MANAGED_AGENT_TOKEN".to_string(),
+                    "managed-token".to_string(),
+                ),
+            ]),
+        ))
+        .expect("answer");
+
+        let request = server.request();
+        assert_eq!(answer, "391");
+        assert_eq!(request.path, "/");
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|line| line == "x-openbot-agent-token: managed-token"),
+            "{:?}",
+            request.headers
         );
         let _ = std::fs::remove_dir_all(root);
     }

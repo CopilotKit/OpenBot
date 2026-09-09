@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-import { DEFAULT_HARNESS, HarnessPicker } from "./HarnessPicker";
+import {
+  DEFAULT_HARNESS,
+  type HarnessChoice,
+  HarnessPicker,
+} from "./HarnessPicker";
 import {
   type HeldConfiguration,
   type ModelChoice,
@@ -57,7 +61,9 @@ export function App() {
    * the flow is resumable at the screen it stopped on, and a wizard that asks twice is one nobody
    * finishes. `null` means not answered yet, which is what decides the screen below.
    */
-  const [harness, setHarness] = useState<string | null>(DEFAULT_HARNESS);
+  const [harness, setHarness] = useState<HarnessChoice | null>({
+    id: DEFAULT_HARNESS,
+  });
   const [model, setModel] = useState<ModelChoice | null>(null);
   /** Model credentials a previous run already wrote, so the provider screen arrives filled in. */
   const [alreadyHeld, setAlreadyHeld] = useState<HeldConfiguration>({});
@@ -314,7 +320,14 @@ export function App() {
         <HarnessPicker
           chosen={harness}
           onChoose={setHarness}
-          onContinue={() => setStep("model")}
+          onContinue={() => {
+            setHarness((choice) =>
+              choice?.id === "byo-url"
+                ? { ...choice, agentUrl: choice.agentUrl?.trim() }
+                : choice,
+            );
+            setStep("model");
+          }}
           onBack={() => setStep("welcome")}
         />
       </main>
