@@ -207,6 +207,93 @@ test("a saved provider-scoped plan session enables continue without exposing a t
   ]);
 });
 
+for (const provider of providers) {
+  test.each(["fresh", "saved"])(
+    `${provider.name} %s plan choice omits a key typed before switching login tabs`,
+    async (session) => {
+      const choices: unknown[] = [];
+      const planToken = `synthetic-${provider.id}-plan-token`;
+      invokeHandler = async (command) => {
+        if (command === "providers") return providers;
+        if (session === "fresh") {
+          const signIn = provider.id === "openai" ? "chatgpt" : "claude";
+          if (command === `begin_${signIn}_sign_in`)
+            return "https://sign-in.example";
+          if (command === `finish_${signIn}_sign_in`) return planToken;
+        }
+        throw new Error(`unexpected command ${command}`);
+      };
+      const view = await renderPickerWithHeld(
+        { saved: { modelSessions: { [provider.id]: session === "saved" } } },
+        (choice) => choices.push(choice),
+      );
+
+      await userEvent.click(
+        await view.findByRole("radio", { name: new RegExp(provider.name) }),
+      );
+      await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+      await userEvent.type(
+        view.getByLabelText(`${provider.name} API key`),
+        `sk-synthetic-${provider.id}-hidden`,
+      );
+      await userEvent.click(
+        view.getByRole("tab", { name: "Sign in with my plan" }),
+      );
+      if (session === "fresh") {
+        await userEvent.click(
+          view.getByRole("button", { name: `Sign in with ${provider.name}` }),
+        );
+        if (provider.id === "anthropic") {
+          await userEvent.type(
+            await view.findByLabelText("Code from your browser"),
+            "synthetic-code",
+          );
+          await userEvent.click(
+            view.getByRole("button", { name: "Finish signing in" }),
+          );
+        }
+      }
+      await view.findByText(new RegExp(`Signed in to ${provider.name}`));
+      expect(view.queryByLabelText(`${provider.name} API key`)).toBeNull();
+      await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+      expect(choices).toHaveLength(1);
+      expect(choices[0]).not.toHaveProperty("apiKey");
+      expect(choices[0]).toEqual({
+        provider: provider.id,
+        login: "plan",
+        ...(session === "saved" ? { saved: true } : { token: planToken }),
+      });
+    },
+  );
+
+  test(`${provider.name} API-key choice submits its intentionally typed key`, async () => {
+    const choices: unknown[] = [];
+    invokeHandler = async (command) => {
+      if (command === "providers") return providers;
+      throw new Error(`unexpected command ${command}`);
+    };
+    const view = await renderPicker((choice) => choices.push(choice));
+    await userEvent.click(
+      await view.findByRole("radio", { name: new RegExp(provider.name) }),
+    );
+    await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+    await userEvent.type(
+      view.getByLabelText(`${provider.name} API key`),
+      `  sk-synthetic-${provider.id}-intentional  `,
+    );
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+    expect(choices).toEqual([
+      {
+        provider: provider.id,
+        login: "api-key",
+        apiKey: `sk-synthetic-${provider.id}-intentional`,
+      },
+    ]);
+  });
+}
+
 test("a compatible endpoint does not inherit a saved OpenAI API key", async () => {
   const choices: unknown[] = [];
   invokeHandler = async (command) => {

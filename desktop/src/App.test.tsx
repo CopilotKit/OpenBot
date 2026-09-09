@@ -944,6 +944,90 @@ for (const provider of [
   { id: "openai", name: "OpenAI" },
   { id: "anthropic", name: "Anthropic" },
 ] as const) {
+  test.each(["fresh", "saved"])(
+    `${provider.name} %s plan startup omits a key typed before switching login tabs`,
+    async (session) => {
+      const planToken = `synthetic-${provider.id}-plan-token`;
+      const hiddenKey = `sk-synthetic-${provider.id}-hidden`;
+      useRootConfigurationSetup("/tmp/openbot-app-test", async () => ({
+        ...emptyConfiguration(),
+        saved: {
+          ...emptyConfiguration().saved,
+          intelligenceApiKey: true,
+          modelSessions: { [provider.id]: session === "saved" },
+        },
+      }));
+      const setupHandler = invokeHandler;
+      invokeHandler = async (command, args) => {
+        if (command === "providers") {
+          return [
+            {
+              ...provider,
+              summary: `Use ${provider.name}.`,
+              logins: ["plan", "api-key"],
+              mark: null,
+              caution: null,
+            },
+          ];
+        }
+        if (session === "fresh") {
+          const signIn = provider.id === "openai" ? "chatgpt" : "claude";
+          if (command === `begin_${signIn}_sign_in`)
+            return "https://sign-in.example";
+          if (command === `finish_${signIn}_sign_in`) return planToken;
+        }
+        return setupHandler(command, args);
+      };
+
+      const view = await renderApp();
+      await userEvent.click(
+        await view.findByRole("button", { name: "Set up OpenBot" }),
+      );
+      await userEvent.click(
+        await view.findByRole("button", { name: "Continue" }),
+      );
+      await userEvent.click(
+        await view.findByRole("radio", { name: new RegExp(provider.name) }),
+      );
+      await userEvent.click(view.getByRole("tab", { name: "Use an API key" }));
+      await userEvent.type(
+        view.getByLabelText(`${provider.name} API key`),
+        hiddenKey,
+      );
+      await userEvent.click(
+        view.getByRole("tab", { name: "Sign in with my plan" }),
+      );
+      if (session === "fresh") {
+        await userEvent.click(
+          view.getByRole("button", { name: `Sign in with ${provider.name}` }),
+        );
+        if (provider.id === "anthropic") {
+          await userEvent.type(
+            await view.findByLabelText("Code from your browser"),
+            "synthetic-code",
+          );
+          await userEvent.click(
+            view.getByRole("button", { name: "Finish signing in" }),
+          );
+        }
+      }
+      await view.findByText(new RegExp(`Signed in to ${provider.name}`));
+      await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      await userEvent.click(
+        await view.findByRole("button", { name: "Start OpenBot" }),
+      );
+
+      const payload = getStartStackPayload();
+      expect(payload.model).not.toHaveProperty("apiKey");
+      expect(payload.model).toEqual({
+        provider: provider.id,
+        login: "plan",
+        ...(session === "saved" ? { saved: true } : { token: planToken }),
+      });
+      expect(JSON.stringify(payload)).not.toContain(hiddenKey);
+    },
+  );
+
   test(`saved ${provider.name} plan session enables Start without raw protected secrets on mount`, async () => {
     invokeHandler = async (command) => {
       if (command === "detect_engine") {

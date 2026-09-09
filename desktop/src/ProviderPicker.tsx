@@ -242,7 +242,9 @@ export function ProviderPicker({
     onChoose({
       provider: row.id,
       login,
-      ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
+      ...((login === "api-key" || login === "endpoint") && trimmedApiKey
+        ? { apiKey: trimmedApiKey }
+        : {}),
       ...(login === "plan" && trimmedToken ? { token: trimmedToken } : {}),
       ...((login === "plan" && !trimmedToken && savedPlan) ||
       (login === "api-key" && !trimmedApiKey && savedApiKey)
