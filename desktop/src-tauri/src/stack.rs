@@ -880,11 +880,15 @@ pub fn wait_for_ports_to_clear(ports: &[u16], patience: std::time::Duration) {
 
 /// Whether anything accepts a connection on a loopback port right now.
 fn something_answers(port: u16) -> bool {
-    std::net::TcpStream::connect_timeout(
-        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
-        std::time::Duration::from_millis(300),
-    )
-    .is_ok()
+    // A listener on either loopback can conflict, just as either can satisfy readiness below.
+    [
+        std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        std::net::SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], port)),
+    ]
+    .iter()
+    .any(|address| {
+        std::net::TcpStream::connect_timeout(address, std::time::Duration::from_millis(300)).is_ok()
+    })
 }
 
 /// Refuse to start if something already holds a port this deployment needs.
@@ -1127,6 +1131,22 @@ fn dirs_home() -> PathBuf {
 mod tests {
     use super::*;
     use crate::test_support::temp_root;
+
+    fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
+        match std::net::TcpListener::bind("[::1]:0") {
+            Ok(listener) => Some(listener),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
+                ) =>
+            {
+                eprintln!("IPv6 loopback unavailable; skipping IPv6 socket regression: {error}");
+                None
+            }
+            Err(error) => panic!("could not bind the IPv6 regression listener: {error}"),
+        }
+    }
 
     fn recorded_process(name: &str, pid: u32, creation_date: &str) -> RecordedHostProcess {
         RecordedHostProcess {
@@ -1421,6 +1441,49 @@ mod tests {
             problem.contains("API server"),
             "must say what it is for: {problem}"
         );
+    }
+
+    #[test]
+    fn an_ipv6_only_port_is_named_unless_this_deployment_already_publishes_it() {
+        let Some(listener) = ipv6_loopback_listener() else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        let ports = [("API server", port)];
+
+        let problem = port_already_taken(&ports).expect("an IPv6-only listener is a conflict");
+        assert!(problem.contains(&port.to_string()), "{problem}");
+        assert!(problem.contains("API server"), "{problem}");
+        assert_eq!(
+            port_already_taken_except(&ports, &std::collections::HashSet::from([port])),
+            None
+        );
+
+        drop(listener);
+        wait_for_ports_to_clear(&[port], std::time::Duration::from_secs(3));
+        assert_eq!(port_already_taken(&ports), None);
+    }
+
+    #[test]
+    fn an_ipv6_only_port_is_not_clear_while_its_listener_is_held() {
+        let Some(listener) = ipv6_loopback_listener() else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        let patience = std::time::Duration::from_millis(250);
+        let started = std::time::Instant::now();
+
+        wait_for_ports_to_clear(&[port], patience);
+
+        assert!(
+            started.elapsed() >= patience,
+            "the wait returned while the IPv6 listener still held the port"
+        );
+        drop(listener);
+        let started = std::time::Instant::now();
+        let patience = std::time::Duration::from_secs(3);
+        wait_for_ports_to_clear(&[port], patience);
+        assert!(started.elapsed() < patience, "a released port kept waiting");
     }
 
     #[test]
