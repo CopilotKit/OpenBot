@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src import main
 
+_LOOPBACK_SOCKET_GUARD_INSTALLED = False
+
 
 def _openai_response(model, content):
     return {
@@ -31,6 +33,46 @@ def _openai_response(model, content):
             }
         ],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+
+def _install_loopback_socket_guard():
+    global _LOOPBACK_SOCKET_GUARD_INSTALLED
+    if _LOOPBACK_SOCKET_GUARD_INSTALLED:
+        return
+
+    def guard(event, args):
+        if event != "socket.connect":
+            return
+        _sock, address = args
+        if not isinstance(address, tuple) or not address:
+            raise RuntimeError(f"Blocked non-IP socket connect: {address!r}")
+        host = address[0]
+        if host not in {"127.0.0.1", "::1", "localhost"}:
+            raise RuntimeError(f"Blocked non-loopback socket connect: {address!r}")
+
+    sys.addaudithook(guard)
+    _LOOPBACK_SOCKET_GUARD_INSTALLED = True
+
+
+def _google_response(content):
+    return {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": content}],
+                    "role": "model",
+                },
+                "finishReason": "STOP",
+                "index": 0,
+            }
+        ],
+        "usageMetadata": {
+            "promptTokenCount": 1,
+            "candidatesTokenCount": 1,
+            "totalTokenCount": 2,
+        },
+        "modelVersion": "gemini-2.5-flash",
     }
 
 
@@ -66,6 +108,43 @@ def compatible_endpoint():
         thread.join()
 
 
+@pytest.fixture
+def google_genai_endpoint():
+    captured = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            captured.append(
+                {
+                    "path": self.path,
+                    "x_goog_api_key_present": bool(
+                        self.headers.get("x-goog-api-key")
+                    ),
+                    "body": body,
+                }
+            )
+            response = json.dumps(_google_response("google loopback proof")).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", captured
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
 @pytest.fixture(autouse=True)
 def provider_environment(monkeypatch):
     for name in list(os.environ):
@@ -78,6 +157,8 @@ def provider_environment(monkeypatch):
         "BOT_MODEL",
         "BOT_PROVIDER",
         "CHATGPT_AUTH_FILE",
+        "GOOGLE_API_KEY",
+        "GOOGLE_GENERATIVE_AI_BASE_URL",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "NO_PROXY",
@@ -217,6 +298,50 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
     assert captured[0]["body"]["model"] == request_model
     assert captured[0]["body"]["messages"] == [
         {"role": "user", "content": "Say hello."}
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("google", "gemini-2.5-flash"),
+        ("openai", "google_genai:gemini-2.5-flash"),
+    ],
+)
+async def test_google_provider_reaches_google_genai_boundary(
+    monkeypatch, google_genai_endpoint, provider, model
+):
+    _install_loopback_socket_guard()
+    base_url, captured = google_genai_endpoint
+    monkeypatch.setenv("GOOGLE_API_KEY", "synthetic-google")
+    monkeypatch.setenv("GOOGLE_GENERATIVE_AI_BASE_URL", f"  {base_url}  ")
+    monkeypatch.setenv("BOT_PROVIDER", provider)
+    monkeypatch.setenv("BOT_MODEL", model)
+
+    result = await main.answer(
+        {"messages": [{"role": "user", "content": "Say hello."}]}
+    )
+
+    assert result["messages"][0].content == "google loopback proof"
+    assert captured == [
+        {
+            "path": "/v1beta/models/gemini-2.5-flash:generateContent",
+            "x_goog_api_key_present": True,
+            "body": {
+                "contents": [
+                    {
+                        "parts": [{"text": "Say hello."}],
+                        "role": "user",
+                    }
+                ],
+                "generationConfig": {
+                    "candidateCount": 1,
+                    "temperature": 0.7,
+                },
+                "safetySettings": [],
+            },
+        }
     ]
 
 

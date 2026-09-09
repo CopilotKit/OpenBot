@@ -50,6 +50,10 @@ MODEL_PROVIDERS = {
     "xai",
 }
 
+OPENBOT_PROVIDER_ALIASES = {
+    "google": "google_genai",
+}
+
 
 def _normalize_openai_base_url():
     base_url = os.environ.get("OPENAI_BASE_URL")
@@ -60,6 +64,19 @@ def _normalize_openai_base_url():
         os.environ["OPENAI_BASE_URL"] = base_url
     else:
         os.environ.pop("OPENAI_BASE_URL", None)
+
+
+def _google_genai_kwargs(provider: str):
+    if provider != "google_genai":
+        return {}
+    base_url = (os.environ.get("GOOGLE_GENERATIVE_AI_BASE_URL") or "").strip()
+    if not base_url:
+        return {}
+    return {"base_url": base_url}
+
+
+def _resolve_provider(provider: str):
+    return OPENBOT_PROVIDER_ALIASES.get(provider, provider)
 
 
 def _chatgpt_auth_file(store: str) -> Path:
@@ -116,10 +133,15 @@ def _model():
 
     _normalize_openai_base_url()
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
+    provider = _resolve_provider(provider)
     prefix, separator, _ = model.partition(":")
     if separator and prefix in MODEL_PROVIDERS:
-        return init_chat_model(model)
-    return init_chat_model(model, model_provider=provider)
+        return init_chat_model(model, **_google_genai_kwargs(prefix))
+    return init_chat_model(
+        model,
+        model_provider=provider,
+        **_google_genai_kwargs(provider),
+    )
 
 
 async def answer(state: MessagesState):
