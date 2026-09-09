@@ -1,4 +1,4 @@
-import { afterAll, expect } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 
 const mode = process.env.SRA009_MODE;
 const targetTest =
@@ -12,6 +12,12 @@ const syntheticKey = "sra009-synthetic-before-key";
 declare global {
   var __SRA009_AFTER_TOOL_SELECTION_RESTORE__:
     | (() => Promise<void> | void)
+    | undefined;
+  var __SRA009_AFTER_TOOL_SELECTION_SETUP_RESTORE__:
+    | ((setup: {
+        llmUrl: string;
+        stopStatuses: PromiseSettledResult<void>[];
+      }) => Promise<void> | void)
     | undefined;
 }
 
@@ -36,7 +42,7 @@ let receivedAuthMatches = false;
 let receivedPathMatches = false;
 
 const probeServer =
-  mode === "present" || mode === "teardown-error"
+  mode === "present" || mode === "teardown-error" || mode === "setup-error"
     ? Bun.serve({
         hostname: "127.0.0.1",
         port: 0,
@@ -54,7 +60,15 @@ const probeServer =
       })
     : null;
 
-if (mode === "present" || mode === "teardown-error") {
+if (mode === undefined) {
+  test("SRA-009 restoration driver is inert without an explicit mode", () => {
+    expect(process.env.SRA009_MODE).toBeUndefined();
+  });
+} else if (
+  mode === "present" ||
+  mode === "teardown-error" ||
+  mode === "setup-error"
+) {
   process.env.OPENAI_BASE_URL = `${probeServer?.url.origin}/sra009-synthetic-before`;
   process.env.OPENAI_API_KEY = syntheticKey;
 } else if (mode === "absent") {
@@ -64,19 +78,14 @@ if (mode === "present" || mode === "teardown-error") {
   throw new Error(`unknown SRA009_MODE ${String(mode)}`);
 }
 
-const modelModule: unknown = await import(modelModulePath);
-if (!hasModelCompleter(modelModule)) {
-  throw new Error(
-    "SRA009_MODEL_MODULE_PATH did not export createModelCompleter",
-  );
-}
-
-let proofEmitted = false;
-
-async function emitRestorationProof() {
+async function emitRestorationProof(modelModule: ModelModule) {
   proofEmitted = true;
   try {
-    if (mode === "present" || mode === "teardown-error") {
+    if (
+      mode === "present" ||
+      mode === "teardown-error" ||
+      mode === "setup-error"
+    ) {
       const restoredBase =
         process.env.OPENAI_BASE_URL ===
         `${probeServer?.url.origin}/sra009-synthetic-before`;
@@ -136,16 +145,68 @@ async function emitRestorationProof() {
   }
 }
 
-globalThis.__SRA009_AFTER_TOOL_SELECTION_RESTORE__ = emitRestorationProof;
+async function fixtureListenerStopped(url: string) {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(1_000) });
+    return false;
+  } catch {
+    return true;
+  }
+}
 
-await import(targetTest);
+let proofEmitted = false;
+
+if (mode !== undefined) {
+  const modelModule: unknown = await import(modelModulePath);
+  if (!hasModelCompleter(modelModule)) {
+    throw new Error(
+      "SRA009_MODEL_MODULE_PATH did not export createModelCompleter",
+    );
+  }
+
+  globalThis.__SRA009_AFTER_TOOL_SELECTION_RESTORE__ = () =>
+    emitRestorationProof(modelModule);
+  globalThis.__SRA009_AFTER_TOOL_SELECTION_SETUP_RESTORE__ = async (setup) => {
+    await emitRestorationProof(modelModule);
+    globalThis.__SRA009_AFTER_TOOL_SELECTION_RESTORE__ = undefined;
+    const result = {
+      mode,
+      llmStopStatus: setup.stopStatuses[0]?.status,
+      remoteStopStatus: setup.stopStatuses[1]?.status,
+      fixtureListenerStopped: await fixtureListenerStopped(setup.llmUrl),
+    };
+    console.log(`SRA009_SETUP_RESTORE ${JSON.stringify(result)}`);
+    expect(result).toEqual({
+      mode: "setup-error",
+      llmStopStatus: "fulfilled",
+      remoteStopStatus: "rejected",
+      fixtureListenerStopped: true,
+    });
+  };
+
+  if (mode === "setup-error") {
+    process.env.SRA009_FAIL_SETUP_AFTER_ENV = "1";
+  }
+
+  await import(targetTest);
+}
 
 afterAll(async () => {
   try {
-    if (!proofEmitted) {
-      await emitRestorationProof();
+    if (mode !== undefined) {
+      const modelModule: unknown = await import(modelModulePath);
+      if (!hasModelCompleter(modelModule)) {
+        throw new Error(
+          "SRA009_MODEL_MODULE_PATH did not export createModelCompleter",
+        );
+      }
+      if (!proofEmitted) {
+        await emitRestorationProof(modelModule);
+      }
     }
   } finally {
     globalThis.__SRA009_AFTER_TOOL_SELECTION_RESTORE__ = undefined;
+    globalThis.__SRA009_AFTER_TOOL_SELECTION_SETUP_RESTORE__ = undefined;
+    delete process.env.SRA009_FAIL_SETUP_AFTER_ENV;
   }
 });

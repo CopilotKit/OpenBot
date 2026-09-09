@@ -27,6 +27,12 @@ declare global {
   var __SRA009_AFTER_TOOL_SELECTION_RESTORE__:
     | (() => Promise<void> | void)
     | undefined;
+  var __SRA009_AFTER_TOOL_SELECTION_SETUP_RESTORE__:
+    | ((setup: {
+        llmUrl: string;
+        stopStatuses: PromiseSettledResult<void>[];
+      }) => Promise<void> | void)
+    | undefined;
 }
 
 /**
@@ -136,35 +142,56 @@ type NativeMastraRequestBody = {
 };
 
 beforeAll(async () => {
+  let llmUrl = "";
   recordLifecycleEvent("tool-selection-beforeAll:start");
   originalModelEnvironment = {
     openAIBaseUrl: process.env.OPENAI_BASE_URL,
     openAIApiKey: process.env.OPENAI_API_KEY,
   };
   recordLifecycleEvent("tool-selection-beforeAll:snapshot");
-  const url = await llm.start();
-  recordLifecycleEvent("tool-selection-beforeAll:llm-started");
-  process.env.OPENAI_BASE_URL = url;
-  process.env.OPENAI_API_KEY = "test-key";
-  recordLifecycleEvent("tool-selection-beforeAll:env-set");
+  try {
+    llmUrl = await llm.start();
+    recordLifecycleEvent("tool-selection-beforeAll:llm-started");
+    process.env.OPENAI_BASE_URL = llmUrl;
+    process.env.OPENAI_API_KEY = "test-key";
+    recordLifecycleEvent("tool-selection-beforeAll:env-set");
+    if (process.env.SRA009_FAIL_SETUP_AFTER_ENV === "1") {
+      recordLifecycleEvent("tool-selection-beforeAll:setup-failure-injected");
+      throw new Error("SRA-009 synthetic setup failure after env mutation");
+    }
 
-  remote.onPredicate(
-    (input) => {
-      sentToRemote.push({
-        tools: ((input.tools ?? []) as { name?: string }[])
-          .map((tool) => tool.name ?? "")
-          .filter(Boolean),
-        messages: (input.messages ?? []) as never,
-        forwardedProps: (input.forwardedProps ?? {}) as Record<string, unknown>,
-      });
-      return true;
-    },
-    // Built rather than hand-written: the events carry the run and thread ids the protocol requires,
-    // and the client verifies them, so a hand-rolled sequence fails validation rather than the test.
-    buildAGUITextResponse("done") as never,
-  );
-  remoteUrl = await remote.start();
-  recordLifecycleEvent("tool-selection-beforeAll:remote-started");
+    remote.onPredicate(
+      (input) => {
+        sentToRemote.push({
+          tools: ((input.tools ?? []) as { name?: string }[])
+            .map((tool) => tool.name ?? "")
+            .filter(Boolean),
+          messages: (input.messages ?? []) as never,
+          forwardedProps: (input.forwardedProps ?? {}) as Record<
+            string,
+            unknown
+          >,
+        });
+        return true;
+      },
+      // Built rather than hand-written: the events carry the run and thread ids the protocol requires,
+      // and the client verifies them, so a hand-rolled sequence fails validation rather than the test.
+      buildAGUITextResponse("done") as never,
+    );
+    remoteUrl = await remote.start();
+    recordLifecycleEvent("tool-selection-beforeAll:remote-started");
+  } catch (error) {
+    recordLifecycleEvent("tool-selection-beforeAll:setup-catch");
+    const stopStatuses = await Promise.allSettled([llm.stop(), remote.stop()]);
+    recordLifecycleEvent("tool-selection-beforeAll:setup-stop-settled");
+    restoreModelEnvironment();
+    recordLifecycleEvent("tool-selection-beforeAll:setup-env-restored");
+    await globalThis.__SRA009_AFTER_TOOL_SELECTION_SETUP_RESTORE__?.({
+      llmUrl,
+      stopStatuses,
+    });
+    throw error;
+  }
 });
 
 afterAll(async () => {
