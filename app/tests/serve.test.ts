@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createServer } from "node:net";
+import { createServer, type Socket } from "node:net";
 import {
   fileFor,
   isApiCall,
@@ -173,13 +173,63 @@ async function waitForProxy(port: number) {
   const deadline = Date.now() + 2_000;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/header-check`);
-      if (response.ok) return;
+      const response = await fetch(
+        `http://127.0.0.1:${port}/assets/proxy-readiness`,
+      );
+      if (response.status === 404) return;
     } catch {
       await Bun.sleep(25);
     }
   }
   throw new Error("proxy did not start");
+}
+
+async function startProxy(upstreamPort: number) {
+  const port = await unusedPort();
+  const child = Bun.spawn({
+    cmd: [process.execPath, "--no-env-file", "serve.ts"],
+    cwd: import.meta.dir.replace(/\/tests$/, ""),
+    env: { APP_PORT: String(port), SERVER_PORT: String(upstreamPort) },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  try {
+    await waitForProxy(port);
+  } catch (error) {
+    child.kill();
+    await child.exited;
+    throw error;
+  }
+  return {
+    port,
+    async stop() {
+      child.kill();
+      await child.exited;
+    },
+  };
+}
+
+async function failedHandshake(url: string, headers: HeadersInit = {}) {
+  const events: string[] = [];
+  const socket = new WebSocket(url, { headers });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error("handshake stayed pending")),
+        7_000,
+      );
+      socket.onopen = () => events.push("open");
+      socket.onerror = () => events.push("error");
+      socket.onclose = () => {
+        events.push("close");
+        clearTimeout(timeout);
+        resolve();
+      };
+    });
+    return events;
+  } finally {
+    socket.terminate();
+  }
 }
 
 async function connectWebSocket(url: string, headers: HeadersInit) {
@@ -261,23 +311,11 @@ describe("api proxy", () => {
 
   test("forwards session headers to authenticated upstream websocket handshakes", async () => {
     const upstreamPort = await unusedPort();
-    const proxyPort = await unusedPort();
     const upstream = startAuthenticatedUpstream(upstreamPort);
-    const proxy = Bun.spawn({
-      cmd: [process.execPath, "serve.ts"],
-      cwd: import.meta.dir.replace(/\/tests$/, ""),
-      env: {
-        ...process.env,
-        APP_PORT: String(proxyPort),
-        SERVER_PORT: String(upstreamPort),
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proxy = await startProxy(upstreamPort);
+    const proxyPort = proxy.port;
 
     try {
-      await waitForProxy(proxyPort);
-
       const sessionHeaders = {
         Authorization: "Bearer app-session",
         Cookie: "openbot_session=valid",
@@ -293,7 +331,7 @@ describe("api proxy", () => {
         origin: "http://openbot.local",
       });
 
-      const unauthorizedSocket = await connectWebSocket(
+      const unauthorizedEvents = await failedHandshake(
         `ws://127.0.0.1:${proxyPort}/api/header-check`,
         {
           Authorization: "Bearer app-session",
@@ -304,7 +342,7 @@ describe("api proxy", () => {
         upstream.webSocketHandshakes,
         1,
       );
-      unauthorizedSocket.close();
+      expect(unauthorizedEvents).toEqual(["error", "close"]);
       expect(unauthorizedHandshake).toEqual({
         authorization: "Bearer app-session",
         cookie: null,
@@ -324,9 +362,118 @@ describe("api proxy", () => {
         origin: "http://openbot.local",
       });
     } finally {
-      proxy.kill();
       upstream.server.stop(true);
-      await proxy.exited;
+      await proxy.stop();
+    }
+  });
+});
+
+describe("upstream websocket handshake", () => {
+  test("an unavailable upstream never opens the downstream", async () => {
+    const proxy = await startProxy(await unusedPort());
+    try {
+      expect(
+        await failedHandshake(`ws://127.0.0.1:${proxy.port}/api/events`),
+      ).toEqual(["error", "close"]);
+    } finally {
+      await proxy.stop();
+    }
+  });
+
+  test("a stalled handshake times out and releases its upstream TCP socket", async () => {
+    const sockets = new Set<Socket>();
+    let requests = 0;
+    const upstream = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("data", () => requests++);
+      socket.on("close", () => sockets.delete(socket));
+    });
+    const port = await unusedPort();
+    await new Promise<void>((resolve) =>
+      upstream.listen(port, "127.0.0.1", resolve),
+    );
+    const proxy = await startProxy(port);
+    try {
+      const started = Date.now();
+      expect(
+        await failedHandshake(`ws://127.0.0.1:${proxy.port}/api/events`),
+      ).toEqual(["error", "close"]);
+      expect(Date.now() - started).toBeLessThan(6_500);
+      expect(requests).toBe(1);
+      const deadline = Date.now() + 500;
+      while (sockets.size && Date.now() < deadline) await Bun.sleep(10);
+      expect(sockets.size).toBe(0);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+      await proxy.stop();
+    }
+  }, 9_000);
+
+  test("a delayed upstream keeps welcome frames and the first downstream inputs in order", async () => {
+    let upstreamOpenedAt = 0;
+    const received: string[] = [];
+    const upstream = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request, server) {
+        await Bun.sleep(150);
+        if (server.upgrade(request)) return;
+        return new Response("bad upgrade", { status: 400 });
+      },
+      websocket: {
+        open(ws) {
+          upstreamOpenedAt = Date.now();
+          ws.send("welcome:one");
+          ws.send("welcome:two");
+        },
+        message(ws, message) {
+          received.push(String(message));
+          ws.send(`echo:${message}`);
+        },
+      },
+    });
+    const proxy = await startProxy(upstream.port!);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${proxy.port}/api/events?mode=delayed`,
+    );
+    try {
+      const messages: string[] = [];
+      let downstreamOpenedAfterUpstream = false;
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("messages did not arrive")),
+          2_000,
+        );
+        socket.onopen = () => {
+          downstreamOpenedAfterUpstream = upstreamOpenedAt > 0;
+          socket.send("one");
+          socket.send("two");
+        };
+        socket.onmessage = (event) => {
+          messages.push(String(event.data));
+          if (messages.length === 4) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+        socket.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error("healthy socket failed"));
+        };
+      });
+      expect(downstreamOpenedAfterUpstream).toBe(true);
+      expect(messages).toEqual([
+        "welcome:one",
+        "welcome:two",
+        "echo:one",
+        "echo:two",
+      ]);
+      expect(received).toEqual(["one", "two"]);
+    } finally {
+      socket.terminate();
+      upstream.stop(true);
+      await proxy.stop();
     }
   });
 });

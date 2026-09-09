@@ -14,7 +14,7 @@
  */
 
 import { join, normalize, sep } from "node:path";
-import { file } from "bun";
+import { file, type ServerWebSocket } from "bun";
 
 const DIST = join(import.meta.dir, "dist");
 const PORT = Number.parseInt(process.env.APP_PORT ?? "3010", 10);
@@ -64,8 +64,105 @@ export function upstreamWebSocketHeaders(requestHeaders: Headers): Headers {
   return headers;
 }
 
+type WebSocketBridge = {
+  upstream: WebSocket;
+  attach: (downstream: ServerWebSocket<WebSocketBridge>) => void;
+  dispose: () => void;
+};
+
+/** Own the upstream before awaiting its handshake, including any immediate welcome frames. */
+function prepareWebSocketBridge(upstream: WebSocket, signal: AbortSignal) {
+  upstream.binaryType = "arraybuffer";
+  let downstream: ServerWebSocket<WebSocketBridge> | undefined;
+  const pending: (string | ArrayBuffer)[] = [];
+  let pendingBytes = 0;
+  let disposed = false;
+  let timedOut = false;
+  const { promise: opened, resolve } = Promise.withResolvers<boolean>();
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    dispose();
+  }, 5_000);
+
+  function finishHandshake(success: boolean) {
+    clearTimeout(timeout);
+    upstream.removeEventListener("open", onOpen);
+    signal.removeEventListener("abort", dispose);
+    resolve(success);
+  }
+
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    finishHandshake(false);
+    upstream.removeEventListener("message", onMessage);
+    upstream.removeEventListener("error", onError);
+    upstream.removeEventListener("close", onClose);
+    pending.length = 0;
+    pendingBytes = 0;
+    // close() can wait for a handshake or a close reply that will never arrive.
+    upstream.terminate();
+  }
+
+  function onOpen() {
+    finishHandshake(true);
+  }
+
+  function onError() {
+    downstream?.close(1011, "Upstream connection failed");
+    dispose();
+  }
+
+  function onClose(event: CloseEvent) {
+    downstream?.close(event.code === 1000 ? 1000 : 1011);
+    dispose();
+  }
+
+  function onMessage(event: MessageEvent<string | ArrayBuffer>) {
+    if (downstream) {
+      downstream.send(event.data);
+      return;
+    }
+    // Only bridge-transition frames are buffered, never input for a peer that has not accepted.
+    // Bound both frame count and bytes so an upstream cannot grow this queue indefinitely.
+    const size =
+      typeof event.data === "string"
+        ? Buffer.byteLength(event.data)
+        : event.data.byteLength;
+    if (pending.length >= 64 || pendingBytes + size > 8 * 1024 * 1024) {
+      onError();
+      return;
+    }
+    pending.push(event.data);
+    pendingBytes += size;
+  }
+
+  upstream.addEventListener("open", onOpen);
+  upstream.addEventListener("message", onMessage);
+  upstream.addEventListener("error", onError);
+  upstream.addEventListener("close", onClose);
+  signal.addEventListener("abort", dispose, { once: true });
+  if (signal.aborted) dispose();
+
+  const data: WebSocketBridge = {
+    upstream,
+    dispose,
+    attach(socket) {
+      downstream = socket;
+      if (disposed) {
+        socket.close(1011, "Upstream connection closed");
+        return;
+      }
+      for (const message of pending) socket.send(message);
+      pending.length = 0;
+      pendingBytes = 0;
+    },
+  };
+  return { data, opened, failureStatus: () => (timedOut ? 504 : 502) };
+}
+
 if (import.meta.main) {
-  Bun.serve({
+  Bun.serve<WebSocketBridge>({
     port: PORT,
     // Both loopbacks, which is what `::` gets you: a dual-stack socket answers on 127.0.0.1 and
     // ::1 alike. Bound to one, whoever is told the URL has no way to know which they were given.
@@ -74,25 +171,19 @@ if (import.meta.main) {
     // rather than answered with the app's HTML, which failed with an opaque socket error.
     websocket: {
       open(ws) {
-        const upstream = ws.data as { upstream: WebSocket; queue: unknown[] };
-        upstream.upstream.addEventListener("message", (event) => {
-          ws.send(event.data as string | Uint8Array);
-        });
-        upstream.upstream.addEventListener("close", () => ws.close());
+        ws.data.attach(ws);
       },
       message(ws, message) {
-        const { upstream } = ws.data as { upstream: WebSocket };
+        const { upstream } = ws.data;
         if (upstream.readyState === WebSocket.OPEN) {
           upstream.send(message);
         } else {
-          upstream.addEventListener("open", () => upstream.send(message), {
-            once: true,
-          });
+          ws.close(1011, "Upstream connection closed");
+          ws.data.dispose();
         }
       },
       close(ws) {
-        const { upstream } = ws.data as { upstream: WebSocket };
-        upstream.close();
+        ws.data.dispose();
       },
     },
     async fetch(request, server) {
@@ -104,8 +195,18 @@ if (import.meta.main) {
           const upstream = new WebSocket(target.replace(/^http/, "ws"), {
             headers: upstreamWebSocketHeaders(request.headers),
           });
-          if (server.upgrade(request, { data: { upstream } })) return undefined;
-          upstream.close();
+          const bridge = prepareWebSocketBridge(upstream, request.signal);
+          if (
+            !(await bridge.opened) ||
+            upstream.readyState !== WebSocket.OPEN
+          ) {
+            bridge.data.dispose();
+            return new Response("Could not connect to the upstream WebSocket", {
+              status: bridge.failureStatus(),
+            });
+          }
+          if (server.upgrade(request, { data: bridge.data })) return undefined;
+          bridge.data.dispose();
           return new Response("expected a websocket upgrade", { status: 400 });
         }
         // The body is streamed rather than buffered, and redirects are left to the caller so a
