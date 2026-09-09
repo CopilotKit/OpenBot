@@ -4,6 +4,7 @@ import {
   beforeEach,
   describe,
   expect,
+  spyOn,
   test,
 } from "bun:test";
 import type { RunAgentInput } from "@ag-ui/client";
@@ -61,7 +62,7 @@ const skills = [
     slug: "drive-audit",
     title: "Drive audit",
     summary: "Read documents out of Google Drive.",
-    tools: ["drive/tool_0", "drive/tool_1"],
+    tools: ["drive/tool_0", "drive/tool_1", "github/tool_0"],
   },
   {
     slug: "slack-digest",
@@ -663,26 +664,41 @@ describe("when selection cannot help", () => {
     expect(toolsOfferedToModel()).toHaveLength(granted.length);
   });
 
-  test("skills that cannot be read leave the Bot with all of its tools", async () => {
+  test("skills that cannot be read are diagnosed and leave the Bot with all of its tools", async () => {
+    const diagnostic = spyOn(console, "error").mockImplementation(() => {});
     llm.onMessage(/.*/, { type: "text", content: "Here is what I found." });
-    const agents = await buildAgents(
-      [builtIn],
-      model,
-      "test-key",
-      undefined,
-      async () => granted,
-      undefined,
-      undefined,
-      undefined,
-      {
-        loadSkills: async () => {
-          throw new Error("database is down");
+    try {
+      const agents = await buildAgents(
+        [builtIn],
+        model,
+        "test-key",
+        undefined,
+        async () => granted,
+        undefined,
+        undefined,
+        undefined,
+        {
+          loadSkills: async () => {
+            throw new Error("postgres://fixture:secret@localhost/private");
+          },
+          choose: async () => JSON.stringify({ skills: ["drive-audit"] }),
         },
-        choose: async () => JSON.stringify({ skills: ["drive-audit"] }),
-      },
-    );
-    await ask(agents.analyst as never, "read the Drive doc");
-    expect(toolsOfferedToModel()).toHaveLength(granted.length);
+      );
+      await ask(agents.analyst as never, "read the Drive doc");
+      const offered = toolsOfferedToModel();
+      expect(offered).toHaveLength(granted.length);
+      expect(offered).not.toContain("mcp__github__tool_0");
+      expect(diagnostic).toHaveBeenCalledTimes(1);
+      expect(diagnostic).toHaveBeenCalledWith({
+        error: "tool_selection_skill_read_failed",
+        context: { operation: "loadSkills", agentId: "analyst" },
+        timestamp: expect.any(String),
+      });
+      expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("secret");
+      expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("private");
+    } finally {
+      diagnostic.mockRestore();
+    }
   });
 });
 

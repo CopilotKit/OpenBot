@@ -492,9 +492,19 @@ async function buildAgent(
    * of this existed: no deferral, no per-run model call, nothing to go wrong. That is most
    * deployments on their first day, and they should not pay for a feature they are not using.
    */
-  const skills = selection
-    ? await selection.loadSkills(agent.id).catch(() => [])
-    : [];
+  let skills: SelectableSkill[] = [];
+  if (selection) {
+    try {
+      skills = await selection.loadSkills(agent.id);
+    } catch {
+      // Never log the thrown value: database errors can contain connection details or row contents.
+      console.error({
+        error: "tool_selection_skill_read_failed",
+        context: { operation: "loadSkills", agentId: agent.id },
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
   const narrowing =
     selection &&
     skills.some((skill) => skill.tools.length > 0) &&
@@ -624,7 +634,7 @@ export type HandoffForRun = (
  * are allowed to throw.
  */
 export type ToolSelection = {
-  /** What this Bot's granted skills declare. Failure is treated as "no skills". */
+  /** What this Bot's granted skills declare. Failure is diagnosed and treated as "no skills". */
   loadSkills: (botId: string) => Promise<SelectableSkill[]>;
   /** Pass one. Returns the model's raw answer; throwing means the narrowing is skipped. */
   choose: (prompt: string) => Promise<string | null>;
