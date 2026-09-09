@@ -357,21 +357,22 @@ async fn start_stack(
         }
         _ => harness,
     };
-    // Resolved from the catalogue rather than taken from the window: the image, the port and how
-    // it is dialled are facts about the harness, and the window knowing them would be a second
-    // list to keep in step. See `harness::picked` for what each refusal is for.
-    // Two registers, because one of these refusals is about a release and the other is about a
-    // pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the evidence, not the
-    // sentence: it names a published image, which is not a thing the person chose or can change.
-    let picked = harness::picked(harness.as_deref(), &root).map_err(|error| {
-        Problem::with(
+    let picked = harness::picked_after_deployment_ready(&root, harness.as_deref(), || async {
+        deployment_ready(&app, &root).await
+    })
+    .await
+    .map_err(|error| match error {
+        harness::PickedAfterDeploymentError::Deployment(problem) => problem,
+        // Two registers, because one of these refusals is about a release and the other is
+        // about a pick. "OpenBot v0.0.8 does not include agent-langgraph-agui" is the
+        // evidence, not the sentence: it names a published image, which is not a thing the
+        // person chose or can change.
+        harness::PickedAfterDeploymentError::Harness(error) => Problem::with(
             "This version of OpenBot does not include the Bot you picked. Go back and choose \
-             another, or update OpenBot.",
+                 another, or update OpenBot.",
             error,
-        )
+        ),
     })?;
-
-    deployment_ready(&app, &root).await?;
 
     // Belt and braces: a fetch that reported success and left something out is still not a
     // deployment, and Compose's own error would not say which part was missing.

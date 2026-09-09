@@ -338,6 +338,27 @@ pub fn picked(
     }))
 }
 
+#[derive(Debug)]
+pub enum PickedAfterDeploymentError<E> {
+    Deployment(E),
+    Harness(String),
+}
+
+pub async fn picked_after_deployment_ready<E, Ready, ReadyFuture>(
+    root: &std::path::Path,
+    harness: Option<&str>,
+    ready: Ready,
+) -> Result<Option<crate::env::PickedHarness>, PickedAfterDeploymentError<E>>
+where
+    Ready: FnOnce() -> ReadyFuture,
+    ReadyFuture: std::future::Future<Output = Result<(), E>>,
+{
+    ready()
+        .await
+        .map_err(PickedAfterDeploymentError::Deployment)?;
+    picked(harness, root).map_err(PickedAfterDeploymentError::Harness)
+}
+
 #[cfg(test)]
 mod tests {
     /// Both plans name a Bot that exists and can actually use them.
@@ -510,6 +531,53 @@ mod tests {
         )
         .unwrap();
         root
+    }
+
+    fn scratch(label: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "openbot-harness-{label}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("scratch root is made");
+        root
+    }
+
+    fn write_crewai_manifest(root: &std::path::Path) {
+        std::fs::write(
+            crate::deployment::images_path(root),
+            "{ \"version\": \"v9.9.9\", \"images\": { \
+             \"agent-crewai\": { \
+             \"reference\": \"ghcr.io/copilotkit/openbot-agent-crewai@sha256:abc\" } } }",
+        )
+        .expect("manifest is written");
+    }
+
+    #[test]
+    fn start_fetches_deployment_before_resolving_a_selected_harness_image() {
+        let root = scratch("fetch-before-pick");
+        assert!(
+            crate::deployment::needs_fetch(&root, "v9.9.9"),
+            "the test must start like a clean install, with no manifest"
+        );
+
+        let picked = tauri::async_runtime::block_on(picked_after_deployment_ready(
+            &root,
+            Some("crewai"),
+            || async {
+                write_crewai_manifest(&root);
+                crate::deployment::record(&root, "v9.9.9")
+                    .map_err(|error| format!("could not record deployment: {error}"))
+            },
+        ));
+
+        let picked = picked.expect("selected harness should resolve after the deployment is ready");
+        assert_eq!(
+            picked.expect("crewai is installable").image,
+            "ghcr.io/copilotkit/openbot-agent-crewai@sha256:abc"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Bringing your own address installs nothing, and that is not a failure.
