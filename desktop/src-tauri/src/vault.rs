@@ -35,7 +35,12 @@ use std::path::PathBuf;
 
 use crate::problem::Problem;
 
-/// What the Keychain and the fallback file file these under.
+/// What the Keychain files these under.
+///
+/// macOS only, because only the Keychain has a service name: Windows keys DPAPI blobs by filename
+/// and the Linux fallback is a file in the config directory. Left unscoped it is dead code
+/// everywhere else, and CI runs clippy with `-D warnings`, so a Linux build failed on it.
+#[cfg(target_os = "macos")]
 const SERVICE: &str = "OpenBot";
 
 /**
