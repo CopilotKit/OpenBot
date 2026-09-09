@@ -8,6 +8,18 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A tenant package's theme may carry a comment
+
+A package's `theme.css` is checked at start-up against what it is allowed to define: the `:root` and
+`.dark` blocks, the approved variables, no imports and no URLs. A CSS comment defines none of those
+and was being read as though it did. One above the blocks — the line a hand-written stylesheet opens
+with, saying whose brand it is and where the colours came from — was left over once the blocks were
+set aside and refused as a second selector; one inside a block was split on the semicolons around it
+and refused as a variable name, with the comment quoted back as the name it was not. Because the
+package is read while the deployment starts, that was not a warning: the deployment did not come up,
+over a comment, saying nothing about comments. Comments are now taken out before the file is read as
+definitions, which also closes a comment wedged into the middle of `url(` as a way past the rule
+above it.
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank
