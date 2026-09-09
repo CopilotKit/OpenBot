@@ -3434,11 +3434,17 @@ async function freshStore() {
   return { store, database, auditStore };
 }
 
-/** A Composio Gmail app, one granted read action, one Bot, and optionally a connected person. */
+/**
+ * A Composio Gmail app, one granted read action, one Bot, and optionally a connected person.
+ *
+ * `version: null` is the action Composio listed without one — a granted, callable row whose version
+ * column is null, which is a state the vendor's own optional field produces rather than a leftover
+ * from before the column existed.
+ */
 async function seedComposioGmail(
   database: Database,
   store: PluginStore,
-  options: { connect?: boolean } = {},
+  options: { connect?: boolean; version?: string | null } = {},
 ) {
   await database.insert(mcpServers).values({
     id: "gmail",
@@ -3452,7 +3458,7 @@ async function seedComposioGmail(
     name: "GMAIL_FETCH_EMAILS",
     description: "Fetch emails.",
     effect: "read",
-    version: "20260903_00",
+    version: options.version === undefined ? "20260903_00" : options.version,
   });
   await database.insert(agents).values({
     id: "bot_helper",
@@ -3708,6 +3714,39 @@ test("a version a model supplied in its own arguments cannot beat the recorded o
   expect(calls).toEqual([
     { slug: "GMAIL_FETCH_EMAILS", version: "20260903_00" },
   ]);
+});
+
+test("a version a model supplied cannot stand in for an action with none recorded", async () => {
+  const { store, database } = await freshStore();
+  const calls: { slug: string; version: string }[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug, _userId, version) => {
+      calls.push({ slug, version });
+      return {};
+    },
+  });
+  // The action with no recorded version, which is the branch the test above does not cover: there is
+  // nothing to merge last, so the merge order guards nothing and the model's key is the only version
+  // in the arguments.
+  await seedComposioGmail(database, store, { version: null });
+
+  const result = await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    args: { __version: "19700101_00" },
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  // The transport's refusal, which is the advertised answer for an action with no recorded version —
+  // and an operator's one-click fix, rather than a call against a revision a model named.
+  expect(result.isError).toBe(true);
+  expect(result.text).toMatch(/Refresh this app's tools on its Plugins page/);
+
+  // Never dialled. Honoured, the model's version runs a granted action at a revision that was never
+  // listed, never classified and never granted, and the audit row carries no version field to say
+  // which revision that was.
+  expect(calls).toEqual([]);
 });
 
 test("a Composio call is recorded as reaching the vendor as the person, not as the deployment", async () => {
