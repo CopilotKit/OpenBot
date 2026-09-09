@@ -543,3 +543,22 @@ describe("which credential a curated server is given", () => {
     ).toBeNull();
   });
 });
+
+test("a curated entry keeps classifying from its write list when nothing was recorded", () => {
+  const notion = catalogueEntry("notion");
+  expect(notion).not.toBeNull();
+  if (!notion) return;
+
+  // The behaviour that shipped before the column existed, unchanged for every existing row.
+  expect(classifyTool(notion, "notion-fetch", true)).toBe("read");
+  expect(classifyTool(notion, "notion-update-page", true)).toBe("write");
+});
+
+test("a recorded write overrides a curated entry that omits the action", () => {
+  const notion = catalogueEntry("notion");
+  if (!notion) return;
+
+  // The write list is known-incomplete. A vendor saying an action writes settles it, and the list
+  // being out of date stops mattering.
+  expect(classifyTool(notion, "notion-fetch", true, "write")).toBe("write");
+});

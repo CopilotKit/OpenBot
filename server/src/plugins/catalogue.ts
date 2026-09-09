@@ -374,11 +374,27 @@ export function classifyTool(
   entry: CatalogueEntry | null,
   toolName: string,
   advertised: boolean,
+  /**
+   * What the vendor said about this action when it was listed, or null when nothing did.
+   *
+   * Consulted BEFORE the entry's write list, because it is the better source and the only one that
+   * can exist for a broker's catalogue: Composio labels every one of Gmail's sixty-three actions, and
+   * no reviewed list here could keep pace with several hundred apps that change weekly.
+   *
+   * Only the exact string `read` produces a read. A recorded write, an unrecognised value, a
+   * different case, an empty string and null are all writes, so a column somebody typed into by hand,
+   * or a label a vendor adds later that this code has never heard of, cannot widen what a Bot may do
+   * unasked.
+   */
+  recorded?: string | null,
 ): "read" | "write" {
+  // A name the server never listed came from a model, and nothing reviewed says it only reads —
+  // checked first, so a recorded effect cannot rescue a name that was never advertised.
+  if (!advertised) return "write";
+  if (recorded) return recorded === "read" ? "read" : "write";
   // A server an administrator added by URL has no reviewed tool catalogue behind it, so nothing here
   // can say a tool of theirs only reads. Everything it offers is a write.
   if (!entry) return "write";
-  if (!advertised) return "write";
   return entry.writeTools.includes(toolName) ? "write" : "read";
 }
 
