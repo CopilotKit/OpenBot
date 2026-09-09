@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
 
 export type Harness = {
@@ -65,8 +66,9 @@ export function HarnessPicker({
   const picked = rows.find((row) => row.id === chosenId);
   const byoAgentUrl = chosenId === "byo-url" ? (chosen?.agentUrl ?? "") : "";
   const byoReady =
-    byoAgentUrl.trim().startsWith("http://") ||
-    byoAgentUrl.trim().startsWith("https://");
+    (byoAgentUrl.trim().startsWith("http://") ||
+      byoAgentUrl.trim().startsWith("https://")) &&
+    isHttpEndpointUrl(byoAgentUrl);
 
   if (failure) {
     return (

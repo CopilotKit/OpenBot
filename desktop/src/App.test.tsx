@@ -795,7 +795,7 @@ test.each([
   },
 );
 
-test("bring-your-own agent collects a distinct AG-UI endpoint for startup", async () => {
+function useBringYourOwnHarnessSetup() {
   invokeHandler = async (command) => {
     if (command === "detect_engine") {
       return {
@@ -861,7 +861,9 @@ test("bring-your-own agent collects a distinct AG-UI endpoint for startup", asyn
     if (command === "start_stack") return null;
     throw new Error(`unexpected command ${command}`);
   };
+}
 
+async function enterBringYourOwnHarnessEndpoint(agentUrl: string) {
   const view = await renderApp();
 
   await userEvent.click(
@@ -875,39 +877,89 @@ test("bring-your-own agent collects a distinct AG-UI endpoint for startup", asyn
   const continueFromHarness = view.getByRole("button", { name: "Continue" });
   expect(continueFromHarness).toHaveProperty("disabled", true);
   const agentEndpoint = view.getByLabelText("AG-UI endpoint");
-  await userEvent.type(agentEndpoint, "https://agent.example/ag-ui");
-  await waitFor(() =>
-    expect(continueFromHarness).toHaveProperty("disabled", false),
-  );
-  await userEvent.click(continueFromHarness);
+  if (agentUrl) {
+    await userEvent.type(agentEndpoint, agentUrl.replaceAll("[", "[["));
+  }
+  expect(agentEndpoint).toHaveProperty("value", agentUrl);
+  return view;
+}
 
-  await userEvent.click(
-    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-  );
-  await userEvent.type(
-    view.getByLabelText("Base URL"),
-    "https://models.example/v1",
-  );
-  await userEvent.type(view.getByLabelText("Model name"), "local-model");
-  await userEvent.click(view.getByRole("button", { name: "Continue" }));
-  await userEvent.click(
-    await view.findByRole("button", { name: "Start OpenBot" }),
-  );
+test.each([
+  "",
+  "http://",
+  "https://",
+  "httpx://models.example/v1",
+  "httpfoo://models.example/v1",
+  "https://exa mple.example/v1",
+  "HTTP://agent.example/ag-ui",
+  "https:agent.example/ag-ui",
+])("bring-your-own agent refuses startup for URL %s", async (agentUrl) => {
+  useBringYourOwnHarnessSetup();
+  const view = await enterBringYourOwnHarnessEndpoint(agentUrl);
 
-  expect(
-    invokeCalls.find((call) => call.command === "start_stack")?.args,
-  ).toMatchObject({
-    model: {
-      provider: "openai-compatible",
-      baseUrl: "https://models.example/v1",
-      model: "local-model",
-    },
-    harness: {
-      id: "byo-url",
-      agentUrl: "https://agent.example/ag-ui",
-    },
-  });
+  const continueButton = view.getByRole("button", { name: "Continue" });
+  expect(continueButton).toHaveProperty("disabled", true);
+  await userEvent.click(continueButton);
+  expect(view.getByRole("heading", { name: "Your first Bot" })).toBeTruthy();
+  expect(view.queryByRole("heading", { name: "Connect your AI" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Start OpenBot" })).toBeNull();
+  expect(invokeCalls.filter((call) => call.command === "start_stack")).toEqual(
+    [],
+  );
 });
+
+test.each([
+  ["https://agent.example/ag-ui", "https://agent.example/ag-ui"],
+  ["http://localhost:11434/v1", "http://localhost:11434/v1"],
+  ["https://models.example/v1", "https://models.example/v1"],
+  ["https://bücher.example/ag-ui", "https://bücher.example/ag-ui"],
+  ["http://[::1]:8000/ag-ui", "http://[::1]:8000/ag-ui"],
+  ["  http://localhost:8000/ag-ui  ", "http://localhost:8000/ag-ui"],
+])(
+  "bring-your-own agent collects a distinct AG-UI endpoint for startup: %s",
+  async (agentUrl, expectedAgentUrl) => {
+    useBringYourOwnHarnessSetup();
+    const view = await enterBringYourOwnHarnessEndpoint(agentUrl);
+
+    const continueFromHarness = view.getByRole("button", { name: "Continue" });
+    expect(continueFromHarness).toHaveProperty("disabled", false);
+    await userEvent.click(continueFromHarness);
+    expect(
+      await view.findByRole("heading", { name: "Connect your AI" }),
+    ).toBeTruthy();
+    await userEvent.click(
+      await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+    );
+    await userEvent.type(
+      view.getByLabelText("Base URL"),
+      "https://provider.example/v1",
+    );
+    await userEvent.type(view.getByLabelText("Model name"), "local-model");
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+    await userEvent.click(
+      await view.findByRole("button", { name: "Start OpenBot" }),
+    );
+
+    const payload = getStartStackPayload();
+    expect(
+      invokeCalls.filter((call) => call.command === "start_stack"),
+    ).toHaveLength(1);
+    expect(payload).toEqual({
+      root: "/tmp/openbot-app-test",
+      apiKey: "",
+      apiUrl: "https://api.intelligence.copilotkit.ai",
+      gatewayWsUrl: "wss://realtime.intelligence.copilotkit.ai",
+      harness: { id: "byo-url", agentUrl: expectedAgentUrl },
+      model: {
+        provider: "openai-compatible",
+        login: "endpoint",
+        baseUrl: "https://provider.example/v1",
+        model: "local-model",
+      },
+    });
+    expect(payload.model).not.toHaveProperty("apiKey");
+  },
+);
 
 test.each([
   "http://",

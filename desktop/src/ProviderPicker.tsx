@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
+import { isHttpEndpointUrl } from "./http-endpoint-url";
 import { Mark } from "./Mark";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
 
@@ -43,20 +44,6 @@ export type HeldConfiguration = {
   OPENAI_BASE_URL?: string;
   saved?: SavedConfiguration;
 };
-
-function isHttpEndpointUrl(value: string) {
-  try {
-    const url = new URL(value.trim());
-    return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      url.host.length > 0 &&
-      // Some browser URL parsers preserve hostname spaces as percent escapes.
-      !/\s/.test(decodeURIComponent(url.hostname))
-    );
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Connect a model.
