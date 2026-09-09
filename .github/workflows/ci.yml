@@ -223,6 +223,39 @@ jobs:
       # files before their tests are registered.
       - run: bun run test:ci
 
+  python-harness:
+    name: python harness regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - name: CrewAI provider-boundary regression
+        run: |
+          set -euo pipefail
+          python -m venv .venv-crewai
+          . .venv-crewai/bin/activate
+          python -m pip install --requirement agent-crewai/requirements.txt --requirement agent-crewai/requirements-test.txt
+          python -m pytest agent-crewai/tests -q
+      - name: LangGraph AG-UI provider-boundary regressions
+        run: |
+          set -euo pipefail
+          python -m venv .venv-langgraph-agui
+          . .venv-langgraph-agui/bin/activate
+          python -m pip install --requirement agent-langgraph-agui/requirements.txt --requirement agent-langgraph-agui/requirements-test.txt
+          python -m pytest agent-langgraph-agui/tests -q
+      - run: bun install --frozen-lockfile
+      - run: bun test tests/compose.test.ts
+      - run: docker compose --env-file /dev/null --profile harness config --format json >/dev/null
+        env:
+          PICKED_HARNESS_IMAGE: openbot-agent-langgraph-agui:test
+
   build:
     name: build
     runs-on: ubuntu-latest
@@ -414,7 +447,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, chart, test, build, migrations, image, component-dockerfiles]
+    needs: [static, deployables, chart, test, python-harness, build, migrations, image, component-dockerfiles]
     steps:
       - name: Require every check
         env:
