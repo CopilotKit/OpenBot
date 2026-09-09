@@ -129,3 +129,95 @@ test("Change the model after an Ask failure stops the stack and reaches the prov
   expect(view.getByRole("radio", { name: /OpenAI/ })).toBeTruthy();
   expect(view.queryByRole("button", { name: "Stop OpenBot" })).toBeNull();
 });
+
+test("empty Intelligence projects keep sign-in recoverable while Start waits for a project key", async () => {
+  let projectLists = 0;
+  invokeHandler = async (command) => {
+    if (command === "detect_engine") {
+      return {
+        engine: "docker",
+        responding: true,
+        engine_socket: null,
+        detail: "Docker is answering.",
+      };
+    }
+    if (command === "default_root") return "/tmp/openbot-app-test";
+    if (command === "already_configured") return { OPENAI_API_KEY: "sk-test" };
+    if (command === "already_running") return false;
+    if (command === "windows_blocker") return null;
+    if (command === "last_failure") return null;
+    if (command === "harnesses") {
+      return [
+        {
+          id: "langgraph",
+          name: "LangGraph",
+          summary: "Default Bot",
+          image: null,
+          health_path: null,
+          credential: "any-provider",
+          maintainer: "first-party",
+          mark: null,
+          port: 8000,
+        },
+      ];
+    }
+    if (command === "providers") {
+      return [
+        {
+          id: "openai",
+          name: "OpenAI",
+          summary: "Use OpenAI.",
+          logins: ["api-key"],
+          mark: null,
+          caution: null,
+        },
+      ];
+    }
+    if (command === "begin_intelligence_sign_in") {
+      return "https://copilotkit.test/sign-in";
+    }
+    if (command === "finish_intelligence_sign_in") {
+      projectLists += 1;
+      if (projectLists === 1) return [];
+      return [{ id: "project-1", name: "Project One" }];
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderApp();
+
+  await userEvent.click(
+    await view.findByRole("button", { name: "Set up OpenBot" }),
+  );
+  await userEvent.click(await view.findByRole("button", { name: "Continue" }));
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Sign in to CopilotKit" }),
+  );
+
+  expect(
+    await view.findByText("That account has no projects yet.", {
+      exact: false,
+    }),
+  ).toBeTruthy();
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+
+  await userEvent.click(view.getByRole("button", { name: "Sign in again" }));
+
+  expect(await view.findByRole("button", { name: "Project One" })).toBeTruthy();
+
+  await userEvent.click(
+    view.getByText("Point at your own Intelligence server"),
+  );
+  await userEvent.type(view.getByLabelText("Project key"), "ck-test");
+  await waitFor(() =>
+    expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+});

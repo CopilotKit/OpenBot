@@ -419,10 +419,20 @@ export function App() {
                 ))}
               </fieldset>
               {projects.length === 0 && (
-                <p className="footnote">
-                  That account has no projects yet. Make one at copilotkit.ai,
-                  then sign in again.
-                </p>
+                <>
+                  <p className="footnote">
+                    That account has no projects yet. Make one at copilotkit.ai,
+                    then sign in again.
+                  </p>
+                  <button
+                    type="button"
+                    className="quiet"
+                    disabled={signingIn}
+                    onClick={signInToCopilotKit}
+                  >
+                    {signingIn ? "Waiting for your browser…" : "Sign in again"}
+                  </button>
+                </>
               )}
             </>
           ) : (
