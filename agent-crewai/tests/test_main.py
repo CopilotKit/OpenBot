@@ -78,9 +78,11 @@ def test_model_normalizes_blank_provider_and_model_before_defaults(
 def test_crewai_endpoint_preserves_leading_bot_role_for_provider(monkeypatch):
     monkeypatch.setenv("MANAGED_AGENT_TOKEN", "test-token")
     provider_messages = []
+    provider_tools = []
 
-    async def record_completion(*, model, messages, stream):
+    async def record_completion(*, model, messages, tools, stream):
         provider_messages.append(deepcopy(messages))
+        provider_tools.append(deepcopy(tools))
         return FakeCompletion()
 
     monkeypatch.setattr(main, "acompletion", record_completion)
@@ -118,6 +120,7 @@ def test_crewai_endpoint_preserves_leading_bot_role_for_provider(monkeypatch):
             },
         ]
     ]
+    assert provider_tools == [None]
     snapshots = [
         event["messages"]
         for event in agui_events(response.text)
@@ -231,6 +234,8 @@ def isolated_environment(directory):
         MANAGED_AGENT_TOKEN="synthetic-openbot-token",
         OPENAI_API_KEY="sk-synthetic-openbot-key",
         OTEL_SDK_DISABLED="true",
+        CREWAI_DISABLE_TELEMETRY="true",
+        CREWAI_DISABLE_TRACKING="true",
         CREWAI_TELEMETRY_DISABLED="true",
         CREWAI_STORAGE_DIR=str(directory / "crewai"),
         LITELLM_LOCAL_MODEL_COST_MAP="True",
@@ -289,6 +294,7 @@ def loopback_openai_receiver(records, strict_messages=False):
             {
                 "model": body.get("model"),
                 "messages": body.get("messages"),
+                "tools": body.get("tools"),
                 "authorization": request.headers.get("authorization"),
             }
         )
@@ -335,6 +341,62 @@ def loopback_openai_receiver(records, strict_messages=False):
                             },
                             status_code=400,
                         )
+        if body.get("tools") == [show_note_provider_tool()] and not any(
+            message.get("role") == "tool" for message in body.get("messages") or []
+        ):
+            return {
+                "id": "chatcmpl-openbot-loopback-tool-call",
+                "object": "chat.completion",
+                "created": 1,
+                "model": body["model"],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_show_note_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "show_note",
+                                        "arguments": "{\"title\":\"Quarterly plan\"}",
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        if any(message.get("role") == "tool" for message in body.get("messages") or []):
+            return {
+                "id": "chatcmpl-openbot-loopback-tool-result",
+                "object": "chat.completion",
+                "created": 1,
+                "model": body["model"],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "Saved note Quarterly plan.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
         return {
             "id": "chatcmpl-openbot-loopback",
             "object": "chat.completion",
@@ -360,6 +422,31 @@ def loopback_openai_receiver(records, strict_messages=False):
     return app
 
 
+def show_note_agui_tool():
+    return {
+        "name": "show_note",
+        "description": "Show a note title to the caller.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Title to show.",
+                }
+            },
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def show_note_provider_tool():
+    return {
+        "type": "function",
+        "function": show_note_agui_tool(),
+    }
+
+
 def agui_events(response_text):
     events = []
     for line in response_text.splitlines():
@@ -374,6 +461,7 @@ def run_litellm_loopback_proof(proof_case, output):
         "blank-provider": ("   ", "gpt-4o", "openai/gpt-4o", "gpt-4o"),
         "blank-model": ("openai", "   ", "openai/gpt-5.5", "gpt-5.5"),
         "strict-projection": ("openai", "gpt-4o", "openai/gpt-4o", "gpt-4o"),
+        "caller-tool": ("openai", "gpt-4o", "openai/gpt-4o", "gpt-4o"),
     }[proof_case]
     os.environ["BOT_PROVIDER"] = provider
     os.environ["BOT_MODEL"] = model
@@ -390,15 +478,73 @@ def run_litellm_loopback_proof(proof_case, output):
             response = client.post(
                 "/",
                 headers={main.TOKEN_HEADER: "synthetic-openbot-token"},
-                json=run_input(strict_projection_messages() if proof_case == "strict-projection" else basic_messages()),
+                json={
+                    **run_input(
+                        strict_projection_messages()
+                        if proof_case == "strict-projection"
+                        else basic_messages()
+                    ),
+                    "tools": [show_note_agui_tool()] if proof_case == "caller-tool" else [],
+                },
             )
+            if proof_case == "caller-tool":
+                first_events = agui_events(response.text)
+                first_snapshot = [
+                    event.get("messages")
+                    for event in first_events
+                    if event.get("type") == "MESSAGES_SNAPSHOT"
+                ][-1]
+                tool_call = first_snapshot[-1]["toolCalls"][0]
+                second_response = client.post(
+                    "/",
+                    headers={main.TOKEN_HEADER: "synthetic-openbot-token"},
+                    json={
+                        **run_input(
+                            [
+                                *basic_messages(),
+                                {
+                                    "id": first_snapshot[-1]["id"],
+                                    "role": "assistant",
+                                    "content": None,
+                                    "tool_calls": [
+                                        {
+                                            "id": tool_call["id"],
+                                            "type": "function",
+                                            "function": {
+                                                "name": tool_call["function"]["name"],
+                                                "arguments": tool_call["function"]["arguments"],
+                                            },
+                                        }
+                                    ],
+                                },
+                                {
+                                    "id": "tool-result-1",
+                                    "role": "tool",
+                                    "content": "{\"ok\":true}",
+                                    "tool_call_id": tool_call["id"],
+                                },
+                            ]
+                        ),
+                        "runId": "run-2",
+                        "tools": [show_note_agui_tool()],
+                    },
+                )
+            else:
+                first_events = []
+                first_snapshot = []
+                tool_call = None
+                second_response = None
         events = agui_events(response.text)
+        second_events = agui_events(second_response.text) if second_response else []
         result = {
             "proofCase": proof_case,
             "statusCode": response.status_code,
+            "secondStatusCode": second_response.status_code if second_response else None,
             "normalizedModel": main._model(),
             "receiverRecords": records,
             "eventTypes": [event.get("type") for event in events],
+            "secondEventTypes": [event.get("type") for event in second_events],
+            "decodedToolCall": tool_call,
             "messagesSnapshots": [
                 event.get("messages")
                 for event in events
@@ -418,13 +564,47 @@ def run_litellm_loopback_proof(proof_case, output):
     assert result["normalizedModel"] == expected_provider_model, result
     assert result["runFinished"], result
     assert not result["runError"], result
-    assert len(records) == 1, result
-    assert records[0]["model"] == expected_receiver_model, result
+    assert len(records) == (2 if proof_case == "caller-tool" else 1), result
+    assert all(record["model"] == expected_receiver_model for record in records), result
     assert records[0]["messages"][0] == {
         "role": "system",
         "content": "You are Ada, a Bot-specific finance analyst.",
     }, result
-    if proof_case == "strict-projection":
+    if proof_case == "caller-tool":
+        assert records[0]["tools"] == [show_note_provider_tool()], result
+        assert result["decodedToolCall"] == {
+            "id": "call_show_note_1",
+            "type": "function",
+            "function": {
+                "name": "show_note",
+                "arguments": "{\"title\":\"Quarterly plan\"}",
+            },
+        }, result
+        assert result["secondStatusCode"] == 200, result
+        assert "RUN_FINISHED" in result["secondEventTypes"], result
+        assert records[1]["tools"] == [show_note_provider_tool()], result
+        assert records[1]["messages"][-2:] == [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_show_note_1",
+                        "type": "function",
+                        "function": {
+                            "name": "show_note",
+                            "arguments": "{\"title\":\"Quarterly plan\"}",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "content": "{\"ok\":true}",
+                "tool_call_id": "call_show_note_1",
+            },
+        ], result
+        assert result["messagesSnapshots"][-1][-1]["toolCalls"][0]["id"] == "call_show_note_1"
+    elif proof_case == "strict-projection":
         assert_provider_messages_are_projected(records[0]["messages"])
         assert records[0]["messages"][1] == {
             "role": "user",
@@ -556,11 +736,33 @@ def test_crewai_endpoint_uses_normalized_model_with_real_litellm_loopback(
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
+def test_crewai_endpoint_forwards_caller_tools_and_accepts_tool_result_continuation(
+    tmp_path,
+):
+    output = tmp_path / "caller-tool.json"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--proof-case",
+            "caller-tool",
+            "--output",
+            str(output),
+        ],
+        cwd=tmp_path,
+        env=isolated_environment(tmp_path),
+        text=True,
+        capture_output=True,
+        timeout=90,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--proof-case",
-        choices=["blank-provider", "blank-model", "strict-projection"],
+        choices=["blank-provider", "blank-model", "strict-projection", "caller-tool"],
         required=True,
     )
     parser.add_argument("--output", type=Path, required=True)

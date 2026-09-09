@@ -152,6 +152,7 @@ class OpenBotFlow(Flow):
         response = await acompletion(
             model=_model(),
             messages=_provider_messages(messages),
+            tools=self.state.get("tools") or None,
             stream=False,
         )
         self.state.setdefault("messages", []).append(
