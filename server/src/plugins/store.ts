@@ -21,6 +21,7 @@ import type { Database } from "../db/client";
 import {
   agentProfiles,
   agents,
+  composioConnections,
   // Aliased: `credentials` is already the injected vault interface in this module, and the table and
   // the interface are two different things to reach for.
   credentials as credentialRows,
@@ -764,11 +765,57 @@ export function createPluginStore(options: PluginStoreOptions) {
    * of revocation being complete by construction rather than by cleanup.
    */
   async function connectionTokenFor(
-    row: { id: string; url: string; credentialId: string | null },
+    row: {
+      id: string;
+      url: string;
+      title: string;
+      credentialId: string | null;
+    },
     entry: CatalogueEntry | null,
     actorId: string,
+    access: ServerAccess,
   ): Promise<{ token?: string }> {
-    if (entry?.auth.kind !== "user-oauth") {
+    /*
+     * A brokered app, where the deployment holds one key and Composio keeps the accounts apart.
+     *
+     * Refused HERE rather than in the transport, for the two reasons the `user-oauth` branch below is:
+     * a person gets a sentence naming the step they can take, and no call is spent at the vendor
+     * finding out. The transport refuses again as a last line, which is the belt to this braces —
+     * deleting either one has to turn a test red.
+     *
+     * There is no token. The key belongs to the transport and never travels through this function, so
+     * nothing here can leak it into a connection object, an error or an audit row.
+     */
+    if (access.credential === "brokered") {
+      if (!actorId) {
+        throw new PluginRefusedError(
+          `${row.title} runs in the account of the person asking, and this run is not attributed to anybody.`,
+          null,
+        );
+      }
+
+      const [connected] = await database
+        .select({ toolkit: composioConnections.toolkit })
+        .from(composioConnections)
+        .where(
+          and(
+            eq(composioConnections.toolkit, row.id),
+            eq(composioConnections.userId, actorId),
+          ),
+        )
+        .limit(1);
+
+      if (!connected) {
+        throw new PluginRefusedError(
+          `You have not connected your ${row.title} account. Connect it in Settings and ask again.`,
+          null,
+        );
+      }
+
+      return {};
+    }
+
+    if (access.credential !== "person-oauth") {
       const token = row.credentialId
         ? await secretFor(
             row.credentialId,
@@ -776,6 +823,24 @@ export function createPluginStore(options: PluginStoreOptions) {
           )
         : undefined;
       return { token };
+    }
+
+    /*
+     * Narrowing, not a second decision.
+     *
+     * `access.credential === "person-oauth"` is derived in `access.ts` from exactly this auth kind,
+     * so the branch above has already established it — but the derivation runs through a lookup
+     * table the compiler cannot follow back to `entry`. Nothing below re-decides whether this is a
+     * per-person server; it only reads the OAuth details that kind carries.
+     *
+     * A throw rather than a fallback. If the descriptor and the entry ever did disagree, answering
+     * out of the deployment's own credential is precisely the failure the comment above this function
+     * says must be impossible.
+     */
+    if (entry?.auth.kind !== "user-oauth") {
+      throw new Error(
+        `${row.id} resolves to a per-person credential with no user-oauth catalogue entry.`,
+      );
     }
 
     /*
@@ -2011,7 +2076,7 @@ export function createPluginStore(options: PluginStoreOptions) {
          * a function that discards it. The gate outlived the reason for it.
          */
         const token = transport.listNeedsCredential
-          ? (await connectionTokenFor(row, entry, actorId)).token
+          ? (await connectionTokenFor(row, entry, actorId, access)).token
           : undefined;
 
         const tools = await transport.listTools({
@@ -3069,7 +3134,12 @@ export function createPluginStore(options: PluginStoreOptions) {
        * it did.
        */
       try {
-        const { token } = await connectionTokenFor(row, entry, input.actorId);
+        const { token } = await connectionTokenFor(
+          row,
+          entry,
+          input.actorId,
+          access,
+        );
         const vendor =
           injectedVendor ?? transportFor(access.transport).callTool;
         const result = await vendor(
