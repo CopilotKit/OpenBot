@@ -142,7 +142,12 @@ fn ready_responding_engine_after_compose_repair(
     }))
 }
 
-fn report(app: &tauri::AppHandle, step: &str, ok: bool, detail: impl Into<String>) {
+fn report<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    step: &str,
+    ok: bool,
+    detail: impl Into<String>,
+) {
     let _ = app.emit(
         "setup:progress",
         Progress {
@@ -288,7 +293,10 @@ async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem
 /// Extracted from `start_stack` because Start is no longer the only thing that needs it: a plan
 /// sign-in runs a published image, and the reference for that image is read from the manifest this
 /// lays down. Skipped when the recorded version already matches, so a restart is not a download.
-async fn deployment_ready(app: &tauri::AppHandle, root: &Path) -> Result<(), Problem> {
+async fn deployment_ready<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    root: &Path,
+) -> Result<(), Problem> {
     if deployment::needs_fetch(root, DEPLOYMENT_VERSION) {
         report(
             app,
@@ -517,8 +525,8 @@ fn require_existing_encryption_key(
 
 /// Write the `.env`, raise the containers, migrate, then start the three host processes.
 #[tauri::command]
-async fn start_stack(
-    app: tauri::AppHandle,
+async fn start_stack<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     root: String,
     api_url: String,
     gateway_ws_url: String,
@@ -727,7 +735,9 @@ async fn start_stack(
     // `compose up` succeeds once it has asked for everything. A service that then exits is not its
     // problem, and both Bots exit immediately without a model key. Reported rather than passed
     // over, or the window shows a healthy stack while nothing can answer a question.
-    for (name, why) in stack::services_that_exited(&found, &root) {
+    for (name, why) in stack::services_that_exited(&found, &root).inspect_err(|problem| {
+        report(&app, "services", false, problem.said.clone());
+    })? {
         report(&app, "services", false, format!("{name} stopped: {why}"));
     }
 
@@ -913,7 +923,7 @@ fn show_openbot(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Put the setup screen back, when there is something to set up again.
 #[tauri::command]
-fn show_setup(app: tauri::AppHandle) -> Result<(), String> {
+fn show_setup<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("the OpenBot window is not there")?;
@@ -1367,8 +1377,8 @@ fn which_bun() -> Option<PathBuf> {
 ///
 /// The policy is in `supervise.rs`; this is the loop that applies it. It ends when the stack is
 /// stopped, which is what clearing the root means, so stopping does not race a restart.
-fn supervise_host_processes(
-    app: tauri::AppHandle,
+fn supervise_host_processes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     root: PathBuf,
     logs: PathBuf,
     bun: PathBuf,

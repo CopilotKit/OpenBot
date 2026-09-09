@@ -771,18 +771,46 @@ pub fn service_log(engine: &Address, root: &Path, service: &str, lines: u16) -> 
 /// `compose up` succeeds once it has asked for everything; a service that then exits is not its
 /// problem. Both Bots exit immediately without a model key, saying exactly that, and without this
 /// the window reports a healthy stack while nothing can answer a question.
-pub fn services_that_exited(engine: &Address, root: &Path) -> Vec<(String, String)> {
-    let Ok(output) = compose_command(engine, root, &Secrets::new())
+pub fn services_that_exited(
+    engine: &Address,
+    root: &Path,
+) -> Result<Vec<(String, String)>, crate::problem::Problem> {
+    let operation = format!("{} compose ps -a", engine.engine.binary());
+    let output = compose_command(engine, root, &Secrets::new())
         .args(["ps", "-a", "--format", "{{.Service}}\t{{.State}}"])
         .output()
-    else {
-        return Vec::new();
-    };
+        .map_err(|error| {
+            crate::problem::Problem::with(
+                "OpenBot could not inspect its Compose services.",
+                format!("could not run {operation}: {error}"),
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = command_said(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let mut detail = format!("{operation} exited with status {}", output.status);
+        if !stderr.is_empty() {
+            detail.push_str("\nstderr:\n");
+            detail.push_str(&stderr);
+        }
+        if !stdout.is_empty() {
+            detail.push_str("\nstdout:\n");
+            detail.push_str(&stdout);
+        }
+        return Err(crate::problem::Problem::with(
+            "OpenBot could not inspect its Compose services.",
+            detail,
+        ));
+    }
 
     let mut dead = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let Some((service, state)) = line.split_once('\t') else {
-            continue;
+            return Err(crate::problem::Problem::with(
+                "OpenBot could not inspect its Compose services.",
+                format!("unusable {operation} row: {line}"),
+            ));
         };
         if !state.trim().eq_ignore_ascii_case("exited") {
             continue;
@@ -805,7 +833,7 @@ pub fn services_that_exited(engine: &Address, root: &Path) -> Vec<(String, Strin
             .to_string();
         dead.push((service.trim().to_string(), why));
     }
-    dead
+    Ok(dead)
 }
 
 /**
@@ -1166,6 +1194,188 @@ mod tests {
             command_line: Some(r#"bun --env-file=../.env src/index.ts"#.to_string()),
             creation_date: Some(creation_date.to_string()),
         }
+    }
+
+    struct PathFixture {
+        previous: Option<std::ffi::OsString>,
+        bin: PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl PathFixture {
+        fn with_docker(script: &str) -> Self {
+            Self::with_docker_and_inherited_path(script, true)
+        }
+
+        fn with_only_docker(script: &str) -> Self {
+            Self::with_docker_and_inherited_path(script, false)
+        }
+
+        fn with_docker_and_inherited_path(script: &str, inherit_path: bool) -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous = std::env::var_os("PATH");
+            let bin = temp_root("openbot-stack-fake-engine-bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let docker = bin.join(if cfg!(windows) {
+                "docker.bat"
+            } else {
+                "docker"
+            });
+            std::fs::write(&docker, script).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut permissions = std::fs::metadata(&docker).unwrap().permissions();
+                permissions.set_mode(0o755);
+                std::fs::set_permissions(&docker, permissions).unwrap();
+            }
+            let mut path = std::ffi::OsString::from(&bin);
+            if inherit_path {
+                if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {
+                    path.push(if cfg!(windows) { ";" } else { ":" });
+                    path.push(previous);
+                }
+            }
+            if !inherit_path && cfg!(windows) {
+                path.push(if cfg!(windows) { ";" } else { ":" });
+                path.push(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()));
+            }
+            std::env::set_var("PATH", path);
+            Self {
+                previous,
+                bin,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for PathFixture {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var("PATH", previous);
+            } else {
+                std::env::remove_var("PATH");
+            }
+            std::fs::remove_dir_all(&self.bin).ok();
+        }
+    }
+
+    #[test]
+    fn service_inspection_spawn_failure_is_a_problem() {
+        let fixture = PathFixture::with_only_docker("not executable");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let docker = fixture.bin.join("docker");
+            let mut permissions = std::fs::metadata(&docker).unwrap().permissions();
+            permissions.set_mode(0o644);
+            std::fs::set_permissions(&docker, permissions).unwrap();
+        }
+        let root = temp_root("openbot-service-inspection-spawn");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let problem =
+            services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+                .expect_err("a failed inspection command must stop startup");
+
+        assert_eq!(
+            problem.said,
+            "OpenBot could not inspect its Compose services."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("could not run docker compose ps -a")),
+            "{problem:?}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn service_inspection_nonzero_status_is_a_problem() {
+        let _fixture = PathFixture::with_docker(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"compose ps\" ]; then printf 'agent-computer\\tUp\\n'; printf 'compose ps refused\\n' >&2; exit 17; fi\nexit 2\n",
+        );
+        let root = temp_root("openbot-service-inspection-status");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let problem =
+            services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+                .expect_err("a nonzero inspection status must stop startup");
+
+        assert_eq!(
+            problem.said,
+            "OpenBot could not inspect its Compose services."
+        );
+        let detail = problem.detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("docker compose ps -a exited with status"),
+            "{detail}"
+        );
+        assert!(detail.contains("compose ps refused"), "{detail}");
+        assert!(detail.contains("agent-computer\tUp"), "{detail}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn service_inspection_empty_success_is_healthy() {
+        let _fixture = PathFixture::with_docker(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"compose ps\" ]; then exit 0; fi\nexit 2\n",
+        );
+        let root = temp_root("openbot-service-inspection-empty");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let dead = services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+            .expect("a successful empty listing is healthy");
+
+        assert!(dead.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_service_inspection_rows_are_a_problem() {
+        let _fixture = PathFixture::with_docker(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"compose ps\" ]; then printf 'agent-computer Up without a separator\\n'; exit 0; fi\nexit 2\n",
+        );
+        let root = temp_root("openbot-service-inspection-malformed");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let problem =
+            services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+                .expect_err("a malformed nonempty row cannot prove health");
+
+        assert_eq!(
+            problem.said,
+            "OpenBot could not inspect its Compose services."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("unusable docker compose ps -a row")),
+            "{problem:?}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn service_inspection_reports_only_unexpected_exited_services() {
+        let _fixture = PathFixture::with_docker(
+            "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = ps ]; then printf 'agent-computer\\tUp\\nmigrate\\tExited\\nserver\\tExited\\n'; exit 0; fi\nif [ \"$1\" = compose ] && [ \"$2\" = logs ] && [ \"$5\" = server ]; then printf 'line one\\nlast reason\\n'; exit 0; fi\nprintf 'unexpected: %s\\n' \"$*\" >&2; exit 2\n",
+        );
+        let root = temp_root("openbot-service-inspection-rows");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let dead = services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+            .expect("service inspection should succeed");
+
+        assert_eq!(
+            dead,
+            vec![("server".to_string(), "last reason".to_string())]
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// Real `netstat -ano` output, because the column layout is what went wrong.
