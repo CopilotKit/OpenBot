@@ -3034,13 +3034,21 @@ export function createPluginStore(options: PluginStoreOptions) {
        * cannot win. Reversing the spread would let a model choose which revision of an action runs —
        * a revision that was never listed, classified or granted.
        *
-       * Absent when the app has not been refreshed since the column existed, which the transport
-       * refuses on rather than guessing — a guessed version is a call against an action's other
+       * Absent when the app has not been refreshed since the column existed, and because the key is
+       * stripped below there is then no version at all for the transport to read, which is what makes
+       * its refusal hold rather than guessing — a guessed version is a call against an action's other
        * behaviour.
        */
+
+      /*
+       * A `__version` in the model's own arguments is not an argument: it is this key, and no vendor
+       * publishes it. Dropped before the recorded one is merged, so the absent-version case refuses at
+       * the transport rather than running at a revision a model chose.
+       */
+      const { [VERSION_ARG]: _dropped, ...modelArgs } = args;
       const vendorArgs = advertised[0]?.version
-        ? { ...args, [VERSION_ARG]: advertised[0].version }
-        : args;
+        ? { ...modelArgs, [VERSION_ARG]: advertised[0].version }
+        : modelArgs;
 
       /**
        * The same policy the computer actions are judged by, asked about a tool call.
