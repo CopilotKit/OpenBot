@@ -41,6 +41,7 @@ import {
   serverCredentialKind,
 } from "./catalogue";
 import { accessFor, type ServerAccess } from "./access";
+import { VERSION_ARG } from "./composio";
 import { inspectToolArguments } from "./content-governance";
 import { McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
@@ -3022,6 +3023,25 @@ export function createPluginStore(options: PluginStoreOptions) {
         advertised[0]?.inputSchema as Record<string, unknown> | undefined,
       );
 
+      /*
+       * The version this action was listed at, handed to the transport that needs one.
+       *
+       * Under a reserved key rather than as a parameter on the shared signature, because that
+       * signature is MCP's and three other transports implement it. The Composio transport strips the
+       * key before anything reaches the vendor, and asserts that it did.
+       *
+       * The recorded version is merged LAST, so a `__version` a model supplied in its own arguments
+       * cannot win. Reversing the spread would let a model choose which revision of an action runs —
+       * a revision that was never listed, classified or granted.
+       *
+       * Absent when the app has not been refreshed since the column existed, which the transport
+       * refuses on rather than guessing — a guessed version is a call against an action's other
+       * behaviour.
+       */
+      const vendorArgs = advertised[0]?.version
+        ? { ...args, [VERSION_ARG]: advertised[0].version }
+        : args;
+
       /**
        * The same policy the computer actions are judged by, asked about a tool call.
        *
@@ -3181,7 +3201,7 @@ export function createPluginStore(options: PluginStoreOptions) {
             botId: input.botId,
           },
           toolName,
-          args,
+          vendorArgs,
         );
         await recordAuditEvent(auditStore, {
           eventType: result.isError ? "mcp.call_failed" : "mcp.call_succeeded",
