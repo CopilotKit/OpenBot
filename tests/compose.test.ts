@@ -228,16 +228,22 @@ test("publishes every service that holds a secret on loopback only", () => {
   const compose = composeFile();
 
   for (const name of [
+    "POSTGRES_PORT",
     "SUPERVISOR_PORT",
     "COMPUTER_PORT",
     "BOT_PORT",
     "LANGGRAPH_PORT",
+    "PICKED_HARNESS_PORT",
   ]) {
-    const published = compose.match(
-      new RegExp(`^\\s*- "(.*)\\$\\{${name}:-\\d+\\}:\\d+"`, "m"),
-    );
-    expect(published).not.toBeNull();
-    expect(published?.[1]).toBe("127.0.0.1:");
+    const published = [
+      ...compose.matchAll(
+        new RegExp(`^\\s*- "([^"\\n]*)\\$\\{${name}:-\\d+\\}:[^"\\n]+"`, "gm"),
+      ),
+    ];
+    expect(published.length).toBeGreaterThan(0);
+    for (const mapping of published) {
+      expect(["127.0.0.1:", "[::1]:"]).toContain(mapping[1]);
+    }
   }
 });
 
