@@ -19,9 +19,63 @@ import { registerApiRoute } from "@mastra/core/server";
 
 const model = (process.env.BOT_MODEL ?? "gpt-4o-mini").trim();
 
+export const openbotBaseInstructions =
+  "Answer the question you are asked, briefly and correctly.";
+
+const OPENBOT_CONTEXT_DESCRIPTIONS = [
+  "OpenBot standing role",
+  "OpenBot granted tools guidance",
+] as const;
+
+type OpenBotInstructionArgs = {
+  requestContext?: {
+    get(key: string): unknown;
+  };
+};
+
+function agUiContextEntries(
+  requestContext?: OpenBotInstructionArgs["requestContext"],
+) {
+  const agUi = requestContext?.get("ag-ui");
+  if (
+    typeof agUi !== "object" ||
+    agUi === null ||
+    !("context" in agUi) ||
+    !Array.isArray(agUi.context)
+  ) {
+    return [];
+  }
+  return agUi.context;
+}
+
+export function buildOpenBotInstructions({
+  requestContext,
+}: OpenBotInstructionArgs = {}) {
+  const contextEntries = agUiContextEntries(requestContext);
+  const openbotInstructions = OPENBOT_CONTEXT_DESCRIPTIONS.flatMap(
+    (description) =>
+      contextEntries
+        .filter(
+          (entry): entry is { description: string; value: string } =>
+            typeof entry === "object" &&
+            entry !== null &&
+            "description" in entry &&
+            entry.description === description &&
+            "value" in entry &&
+            typeof entry.value === "string" &&
+            entry.value.trim().length > 0,
+        )
+        .map((entry) => entry.value.trim()),
+  );
+
+  if (openbotInstructions.length === 0) return openbotBaseInstructions;
+  return [openbotBaseInstructions, ...openbotInstructions].join("\n\n");
+}
+
 const openbot = new Agent({
+  id: "openbot",
   name: "openbot",
-  instructions: "Answer the question you are asked, briefly and correctly.",
+  instructions: buildOpenBotInstructions,
   model: openai(model),
 });
 
