@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { FIRING_FRAME, frameFiring } from "../../shared/routine-firing";
 import { createAgentProfileStore } from "../src/agents/profile-store";
 import type { AgentActor } from "../src/agents/profile-types";
 import { createChannelStore } from "../src/channels/routes";
@@ -263,6 +264,29 @@ describe("naming a claimed conversation", () => {
     const row = await summaryOf(channel.id);
     expect(row?.summary).toBe("Travel receipt rules");
     expect(row?.summaryAt).toBeInstanceOf(Date);
+  });
+
+  test("titles a routine-opened channel from the instruction, not the firing frame", async () => {
+    const owner = await createUser();
+    const channel = await createUsedChannel(owner);
+    await offer(channel.id);
+
+    let excerptSeen = "";
+    await summariseClaimedChannels(
+      options({
+        // A channel a routine opened has its first message framed, not typed by a person: see
+        // `shared/routine-firing.ts`. The title has to come from the instruction inside the frame.
+        transcript: transcriptOf(frameFiring("Post the standup summary.")),
+        title: async (excerpt) => {
+          excerptSeen = excerpt;
+          return "Standup summary";
+        },
+      }),
+    );
+
+    expect(excerptSeen).toContain("Post the standup summary.");
+    expect(excerptSeen).not.toContain(FIRING_FRAME[0]);
+    expect((await summaryOf(channel.id))?.summary).toBe("Standup summary");
   });
 
   test("two replicas racing for the same conversation name it once", async () => {

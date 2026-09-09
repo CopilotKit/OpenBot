@@ -8,6 +8,7 @@
  * event, so a missed sweep costs two seconds where a missed event would cost the name entirely.
  */
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { readFiring } from "../../../shared/routine-firing";
 import type { Database } from "../db/client";
 import {
   channelMemberships,
@@ -277,8 +278,12 @@ async function openingOf(
     (message) => message.role === "assistant",
   );
 
-  const asked = textOf(question.content);
-  if (!asked) return null;
+  const rawAsked = textOf(question.content);
+  if (!rawAsked) return null;
+  // A channel a routine opened has the firing frame wrapped around its first message, not a
+  // person's words. Unwrapped before it can become the title, same as the transcript unwraps it
+  // before it can become what a person reads.
+  const asked = readFiring(rawAsked) ?? rawAsked;
   const replied = answer ? textOf(answer.content) : "";
 
   return oneLine(
