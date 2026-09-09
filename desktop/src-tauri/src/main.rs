@@ -97,6 +97,50 @@ struct AlreadyConfigured {
     saved: SavedConfiguration,
 }
 
+struct ReadyRespondingEngine {
+    address: engine::Address,
+    detail: String,
+    installed: Option<String>,
+}
+
+/// Return a responding engine only after Compose is present too.
+fn ready_responding_engine_after_compose_repair(
+    found: engine::EngineStatus,
+    mut install_engine: impl FnMut() -> Result<String, Problem>,
+    mut detect: impl FnMut() -> engine::EngineStatus,
+    mut composes: impl FnMut(&engine::Address) -> bool,
+) -> Result<Option<ReadyRespondingEngine>, Problem> {
+    let Some(address) = found.address.clone().filter(|_| found.responding) else {
+        return Ok(None);
+    };
+    if composes(&address) {
+        return Ok(Some(ReadyRespondingEngine {
+            address,
+            detail: found.detail,
+            installed: None,
+        }));
+    }
+
+    let installed = install_engine()?;
+    let ready = detect();
+    let Some(address) = ready.address.clone().filter(|_| ready.responding) else {
+        return Err(Problem::with(
+            "OpenBot installed Compose, but the container engine is not answering. Try again.",
+            ready.detail,
+        ));
+    };
+    if !composes(&address) {
+        return Err(Problem::plain(acquire::missing_compose(
+            address.engine.binary(),
+        )));
+    }
+    Ok(Some(ReadyRespondingEngine {
+        address,
+        detail: ready.detail,
+        installed: Some(installed),
+    }))
+}
+
 fn report(app: &tauri::AppHandle, step: &str, ok: bool, detail: impl Into<String>) {
     let _ = app.emit(
         "setup:progress",
@@ -144,9 +188,35 @@ async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, P
 /// nothing moving in it reads as a hang.
 async fn engine_ready(app: &tauri::AppHandle) -> Result<engine::Address, Problem> {
     let found = engine::detect();
-    if let Some(address) = found.address.clone().filter(|_| found.responding) {
-        report(app, "engine", true, found.detail.clone());
-        return Ok(address);
+    let root = stack::default_root();
+    let existing = tauri::async_runtime::spawn_blocking(move || {
+        ready_responding_engine_after_compose_repair(
+            found,
+            || install::install_engine(&root),
+            engine::detect,
+            engine::Address::composes,
+        )
+    })
+    .await
+    .map_err(|error| {
+        Problem::with(
+            "OpenBot could not check the software it runs on. Try again.",
+            format!("the engine check did not run: {error}"),
+        )
+    })?;
+    match existing {
+        Ok(Some(ready)) => {
+            if let Some(installed) = ready.installed {
+                report(app, "install-engine", true, installed);
+            }
+            report(app, "engine", true, ready.detail);
+            return Ok(ready.address);
+        }
+        Ok(None) => {}
+        Err(problem) => {
+            report(app, "install-engine", false, problem.said.clone());
+            return Err(problem);
+        }
     }
 
     // Fetch and install an engine when there is none, and the Compose provider Podman ships
@@ -1783,6 +1853,119 @@ mod tests {
     }
 
     #[test]
+    fn responding_engine_without_compose_installs_then_redetects_before_returning() {
+        let before = engine::EngineStatus {
+            engine: Some(engine::Engine::Podman),
+            address: Some(engine::Address::new(engine::Engine::Podman, None)),
+            responding: true,
+            engine_socket: None,
+            detail: "podman is answering.".into(),
+        };
+        let after = engine::EngineStatus {
+            engine: Some(engine::Engine::Podman),
+            address: Some(engine::Address::new(
+                engine::Engine::Podman,
+                Some("openbot".into()),
+            )),
+            responding: true,
+            engine_socket: None,
+            detail: "podman is answering on openbot.".into(),
+        };
+        let trace = std::cell::RefCell::new(Vec::new());
+        let mut compose_checks = 0;
+
+        let ready = ready_responding_engine_after_compose_repair(
+            before,
+            || {
+                trace.borrow_mut().push("install-engine".to_string());
+                Ok("Compose installed.".into())
+            },
+            || {
+                trace.borrow_mut().push("re-detect".to_string());
+                after.clone()
+            },
+            |_| {
+                compose_checks += 1;
+                compose_checks > 1
+            },
+        )
+        .expect("missing Compose should be repaired")
+        .expect("responding engine should be returned");
+
+        assert_eq!(&*trace.borrow(), &["install-engine", "re-detect"]);
+        assert_eq!(ready.installed.as_deref(), Some("Compose installed."));
+        assert_eq!(ready.address.connection.as_deref(), Some("openbot"));
+    }
+
+    #[test]
+    fn disposable_provider_fixture_repairs_missing_compose_at_process_boundary() {
+        let path = SerializedPath::set_only_with(
+            "podman",
+            "#!/bin/sh\ncase \"$*\" in\n\"version --format {{.Server.APIVersion}}\") printf '1.44\\n' ;;\n\"compose version\") command -v docker-compose >/dev/null 2>&1 && exec docker-compose version; printf 'missing compose\\n' >&2; exit 1 ;;\n*) printf 'unexpected podman args: %s\\n' \"$*\" >&2; exit 2 ;;\nesac\n",
+        );
+        let address = engine::Address::new(engine::Engine::Podman, None);
+        assert!(address.responds(), "fake podman must answer before repair");
+        assert!(
+            !address.composes(),
+            "fake podman must start without a compose provider"
+        );
+        let mut installed = false;
+        let mut detections = 0;
+
+        let ready = ready_responding_engine_after_compose_repair(
+            engine::EngineStatus {
+                engine: Some(engine::Engine::Podman),
+                address: Some(address.clone()),
+                responding: address.responds(),
+                engine_socket: None,
+                detail: "podman is answering.".into(),
+            },
+            || {
+                std::fs::write(
+                    path.bin().join(install::compose_provider_name()),
+                    "#!/bin/sh\nprintf 'Docker Compose version disposable-provider\\n'\n",
+                )
+                .unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let provider = path.bin().join(install::compose_provider_name());
+                    let mut permissions = std::fs::metadata(&provider).unwrap().permissions();
+                    permissions.set_mode(0o755);
+                    std::fs::set_permissions(&provider, permissions).unwrap();
+                }
+                installed = true;
+                Ok("Compose installed into disposable PATH.".into())
+            },
+            || {
+                detections += 1;
+                engine::EngineStatus {
+                    engine: Some(engine::Engine::Podman),
+                    address: Some(address.clone()),
+                    responding: address.responds(),
+                    engine_socket: None,
+                    detail: "podman is answering after disposable provider install.".into(),
+                }
+            },
+            engine::Address::composes,
+        )
+        .expect("disposable provider should repair Compose")
+        .expect("responding fake podman should be ready");
+
+        assert!(installed, "install path must run before readiness returns");
+        assert_eq!(detections, 1, "readiness must re-detect after install");
+        assert_eq!(ready.address.engine, engine::Engine::Podman);
+        assert!(
+            ready.address.composes(),
+            "the later start_stack compose gate should now pass"
+        );
+        println!(
+            "DTA-007 functional proof: installed={installed} detections={detections} composes={}",
+            ready.address.composes()
+        );
+    }
+
+    #[test]
     fn stop_shutdown_uses_the_active_root_at_the_external_command_boundary() {
         let _path = SerializedPath::set();
         let active = temp_root("openbot-active-stop-root");
@@ -2008,41 +2191,60 @@ mod tests {
     struct SerializedPath {
         previous: Option<std::ffi::OsString>,
         previous_record: Option<std::ffi::OsString>,
+        bin: PathBuf,
         _guard: std::sync::MutexGuard<'static, ()>,
     }
 
     impl SerializedPath {
         fn set() -> Self {
+            Self::set_with(
+                "docker",
+                "#!/bin/sh\nprintf '%s\\t%s\\n' \"$PWD\" \"$*\" >> \"$OPENBOT_TEST_ENGINE_RECORD\"\n",
+            )
+        }
+
+        fn set_with(binary: &str, script: &str) -> Self {
+            Self::set_with_path(binary, script, true)
+        }
+
+        fn set_only_with(binary: &str, script: &str) -> Self {
+            Self::set_with_path(binary, script, false)
+        }
+
+        fn set_with_path(binary: &str, script: &str, inherit_path: bool) -> Self {
             static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
             let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             let previous = std::env::var_os("PATH");
             let previous_record = std::env::var_os("OPENBOT_TEST_ENGINE_RECORD");
             let bin = temp_root("openbot-fake-engine-bin");
             std::fs::create_dir_all(&bin).unwrap();
-            let docker = bin.join("docker");
-            std::fs::write(
-                &docker,
-                "#!/bin/sh\nprintf '%s\\t%s\\n' \"$PWD\" \"$*\" >> \"$OPENBOT_TEST_ENGINE_RECORD\"\n",
-            )
-            .unwrap();
+            let command = bin.join(binary);
+            std::fs::write(&command, script).unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mut permissions = std::fs::metadata(&docker).unwrap().permissions();
+                let mut permissions = std::fs::metadata(&command).unwrap().permissions();
                 permissions.set_mode(0o755);
-                std::fs::set_permissions(&docker, permissions).unwrap();
+                std::fs::set_permissions(&command, permissions).unwrap();
             }
-            let mut path = std::ffi::OsString::from(bin);
-            if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {
-                path.push(if cfg!(windows) { ";" } else { ":" });
-                path.push(previous);
+            let mut path = std::ffi::OsString::from(bin.clone());
+            if inherit_path {
+                if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {
+                    path.push(if cfg!(windows) { ";" } else { ":" });
+                    path.push(previous);
+                }
             }
             std::env::set_var("PATH", path);
             Self {
                 previous,
                 previous_record,
+                bin,
                 _guard: guard,
             }
+        }
+
+        fn bin(&self) -> &Path {
+            &self.bin
         }
     }
 
