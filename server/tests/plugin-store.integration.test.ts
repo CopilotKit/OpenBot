@@ -121,7 +121,7 @@ const store = createPluginStore({
   policy: () => policy,
 });
 
-async function auditRowsFor(targetId: string) {
+async function auditRowsFor(targetId: string, botId: string, actorId: string) {
   return database
     .select({
       eventType: auditEvents.eventType,
@@ -134,6 +134,8 @@ async function auditRowsFor(targetId: string) {
       and(
         eq(auditEvents.targetType, "mcp_tool"),
         eq(auditEvents.targetId, targetId),
+        sql`${auditEvents.payload} ->> 'bot' = ${botId}`,
+        sql`${auditEvents.payload} ->> 'actor' = ${actorId}`,
       ),
     );
 }
@@ -248,68 +250,71 @@ afterAll(async () => {
 
 describe("a grant is the permission", () => {
   test("a Bot that was never granted a tool is refused, and the refusal is recorded", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await expect(
       store.callTool({
         ref,
         args: {},
         botId: strangerId,
-        actorId: "someone@openbot.local",
+        actorId,
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, strangerId, actorId);
     const rejected = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { bot?: string }).bot === strangerId,
     );
-    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected.length).toBe(1);
     expect((rejected[0].payload as { refusal?: string }).refusal).toBe(
       "not_granted",
     );
   });
 
   test("a refusal names the routine that asked, not only the person it ran as", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await expect(
       store.callTool({
         ref,
         args: {},
         botId: strangerId,
-        actorId: "someone@openbot.local",
+        actorId,
         initiator: { kind: "routine", id: "routine_standup" },
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, strangerId, actorId);
     const rejected = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { bot?: string }).bot === strangerId &&
         row.initiatorKind === "routine",
     );
-    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected.length).toBe(1);
     expect(rejected[0].initiatorId).toBe("routine_standup");
   });
 
   test("a call nobody said anything about is still filed as a person's", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await expect(
       store.callTool({
         ref,
         args: {},
         botId: strangerId,
-        actorId: "someone@openbot.local",
+        actorId,
       }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, strangerId, actorId);
     expect(
-      rows.some(
+      rows.filter(
         (row) =>
           row.eventType === "mcp.call_rejected" &&
           row.initiatorKind === "person" &&
           row.initiatorId === null,
       ),
-    ).toBe(true);
+    ).toHaveLength(1);
   });
 
   test("granting lets the same Bot past the grant check", async () => {
@@ -356,6 +361,7 @@ describe("a grant is the permission", () => {
 
 describe("the policy is asked as well as the grant", () => {
   test("credential material is refused and never copied into the audit trail", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     const secret = `sk-${"z".repeat(32)}`;
 
@@ -364,20 +370,20 @@ describe("the policy is asked as well as the grant", () => {
         ref,
         args: { query: "quarterly report", nested: { apiKey: secret } },
         botId: holderId,
-        actorId: "someone@openbot.local",
+        actorId,
       }),
     ).rejects.toThrow("credential material");
 
-    const rows = await auditRowsFor(ref);
-    const rejected = rows.find(
+    const rows = await auditRowsFor(ref, holderId, actorId);
+    const rejected = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { bot?: string }).bot === holderId &&
         (row.payload as { refusal?: string }).refusal ===
           "sensitive_tool_arguments",
     );
-    expect(rejected).toBeDefined();
-    expect(rejected?.payload).toMatchObject({
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].payload).toMatchObject({
       bot: holderId,
       contentInspection: {
         reason: "sensitive_content",
@@ -388,6 +394,7 @@ describe("the policy is asked as well as the grant", () => {
   });
 
   test("a granted tool is still refused by a deny rule, and the rule is named", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     policy = {
       mode: "enforce",
@@ -401,7 +408,7 @@ describe("the policy is asked as well as the grant", () => {
         ref,
         args: {},
         botId: holderId,
-        actorId: "someone@openbot.local",
+        actorId,
       });
     } catch (error) {
       thrown = error;
@@ -415,14 +422,14 @@ describe("the policy is asked as well as the grant", () => {
       'mcp.server == "google-drive"',
     );
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, holderId, actorId);
     const refusedByPolicy = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { decision?: { rule?: string } }).decision?.rule ===
           'mcp.server == "google-drive"',
     );
-    expect(refusedByPolicy.length).toBeGreaterThan(0);
+    expect(refusedByPolicy.length).toBe(1);
   });
 
   test("a rule can speak about effect rather than about tool names", async () => {
@@ -462,6 +469,7 @@ describe("the policy is asked as well as the grant", () => {
   });
 
   test("a dry-run refusal is recorded, even though the call is let through", async () => {
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     /*
      * The mode an operator switches on to size a rule before enforcing it, and the only mode in
@@ -477,7 +485,7 @@ describe("the policy is asked as well as the grant", () => {
           ref,
           args: {},
           botId: holderId,
-          actorId: "someone@openbot.local",
+          actorId,
         })
         // Forwarded past the policy, so what happens next is the vendor's business and not this
         // test's: nobody has connected an account, so it fails there. Swallowed deliberately.
@@ -486,14 +494,14 @@ describe("the policy is asked as well as the grant", () => {
       policy = { mode: "enforce", deny: [], allow: ["true"] };
     }
 
-    const rows = await auditRowsFor(ref);
+    const rows = await auditRowsFor(ref, holderId, actorId);
     const recorded = rows.filter(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
         (row.payload as { decision?: { rule?: string } }).decision?.rule ===
           rule,
     );
-    expect(recorded.length).toBeGreaterThan(0);
+    expect(recorded.length).toBe(1);
     /*
      * What tells this row apart from a call this deployment actually stopped. `allowed` is the
      * policy's answer and `carriedOut` is what the mode did with it, so a reader counting what a
@@ -525,15 +533,13 @@ describe("the trail says what happened, not what was permitted", () => {
    */
   test("a call that is permitted and then fails is recorded as failed, not as succeeded", async () => {
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
-    const actorId = `trail_${suite}`;
+    const actorId = `audit-call-${randomUUID()}@openbot.local`;
 
     await expect(
       store.callTool({ ref, args: {}, botId: holderId, actorId }),
     ).rejects.toBeInstanceOf(PluginRefusedError);
 
-    const mine = (await auditRowsFor(ref)).filter(
-      (row) => (row.payload as { actor?: string }).actor === actorId,
-    );
+    const mine = await auditRowsFor(ref, holderId, actorId);
 
     const failed = mine.filter((row) => row.eventType === "mcp.call_failed");
     expect(failed.length).toBe(1);
