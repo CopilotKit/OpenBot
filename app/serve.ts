@@ -31,7 +31,14 @@ const SERVER = `http://127.0.0.1:${process.env.SERVER_PORT ?? "3001"}`;
  * to be inside the directory, so `/../.env` cannot be served.
  */
 export function fileFor(pathname: string): string | null {
-  const wanted = normalize(join(DIST, decodeURIComponent(pathname)));
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch (error) {
+    if (error instanceof URIError) return null;
+    throw error;
+  }
+  const wanted = normalize(join(DIST, decoded));
   if (wanted !== DIST && !wanted.startsWith(`${DIST}${sep}`)) return null;
   if (wanted === DIST || pathname.endsWith("/"))
     return join(DIST, "index.html");

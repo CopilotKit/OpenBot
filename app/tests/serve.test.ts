@@ -57,6 +57,21 @@ describe("which file a path names", () => {
     expect(fileFor("/assets/hello%20world.js")).toEndWith(
       "/dist/assets/hello world.js",
     );
+    expect(fileFor("/assets/caf%C3%A9%25.js")).toEndWith(
+      "/dist/assets/café%.js",
+    );
+  });
+
+  test.each([
+    "/%",
+    "/%E0%A4%A",
+    "/%FF",
+    "/%C0%AF",
+    "/%ED%A0%80",
+    "/%F4%90%80%80",
+    "/assets/bad%.js",
+  ])("a malformed encoded path is refused: %s", (pathname) => {
+    expect(fileFor(pathname)).toBeNull();
   });
 
   test("a client route remains available for the router", () => {
