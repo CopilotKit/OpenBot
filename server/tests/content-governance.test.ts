@@ -110,4 +110,57 @@ describe("MCP tool argument content governance", () => {
       findings: [],
     });
   });
+
+  test("blocks a credential field carrying the conventional non-standard header prefix", () => {
+    const secret = "do-not-copy-this-value";
+    const result = inspectToolArguments({
+      headers: { "x-api-key": secret },
+    });
+
+    expect(result).toEqual({
+      safe: false,
+      reason: "sensitive_content",
+      findings: [{ category: "credential_field", path: "$.headers.x-api-key" }],
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
+  test.each([
+    "X-API-Key",
+    "x-auth-token",
+    "authToken",
+    "auth_token",
+    "api_secret",
+    "bearer_token",
+    "passwd",
+    "pwd",
+    "secret_key",
+    "session_token",
+    "signing_key",
+    "ssh_key",
+  ])("blocks %s as a spelling of a name already listed", (field) => {
+    const result = inspectToolArguments({ [field]: "do-not-copy-this-value" });
+
+    expect(result).toMatchObject({ safe: false, reason: "sensitive_content" });
+    expect(result).toMatchObject({
+      findings: [{ category: "credential_field" }],
+    });
+  });
+
+  test.each([
+    "query",
+    "url",
+    "path",
+    "token_count",
+    "max_tokens",
+    "tokenizer",
+    "x_axis",
+    "x_offset",
+    "xml",
+    "secretary",
+  ])("allows %s, which only resembles a credential name", (field) => {
+    expect(inspectToolArguments({ [field]: "ordinary value" })).toEqual({
+      safe: true,
+    });
+  });
 });

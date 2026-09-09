@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { chooseEvictions, chooseIdle } from "../src/browser-eviction";
+import { numberFromEnv } from "../src/env";
 
 /**
  * How many browsers one computer holds, and for how long.
@@ -125,5 +126,31 @@ describe("reading the limits an operator set", () => {
     expect(chooseEvictions(running(now, now - 1000, now - 2000), 8)).toEqual(
       [],
     );
+  });
+
+  test("a deployment that switched the sweep off keeps the browser it asked to keep", () => {
+    /*
+     * The two halves, read together, because separately both were right and the pair was not.
+     * `COMPUTER_BROWSER_IDLE_MS=0` is the documented way to keep browsers resident and the timeout
+     * of zero above switches this off — but the value never arrived as zero. It was read the way the
+     * cap is, where zero is a mistake, so it took the thirty-minute default and this Bot's browser
+     * was closed under an operator who had said not to.
+     */
+    const previous = process.env.COMPUTER_BROWSER_IDLE_MS;
+    process.env.COMPUTER_BROWSER_IDLE_MS = "0";
+    try {
+      const idleTimeoutMs = numberFromEnv(
+        "COMPUTER_BROWSER_IDLE_MS",
+        30 * 60_000,
+        { zeroSwitchesItOff: true },
+      );
+      const now = Date.now();
+      expect(
+        chooseIdle(running(now - 45 * 60_000), idleTimeoutMs, now),
+      ).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.COMPUTER_BROWSER_IDLE_MS;
+      else process.env.COMPUTER_BROWSER_IDLE_MS = previous;
+    }
   });
 });
