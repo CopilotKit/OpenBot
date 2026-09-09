@@ -2121,6 +2121,16 @@ export function createPluginStore(options: PluginStoreOptions) {
                 name: tool.name,
                 description: tool.description,
                 inputSchema: tool.inputSchema,
+                /*
+                 * What the vendor said, when the vendor said anything.
+                 *
+                 * Only Composio publishes any of this today, so all three stay null or false for
+                 * every other transport — which is what keeps `classifyTool` falling back to the
+                 * curated write list for Notion and Drive exactly as it did before.
+                 */
+                effect: tool.effect ?? null,
+                destructive: tool.destructive ?? false,
+                version: tool.version ?? null,
               })),
             );
           }
