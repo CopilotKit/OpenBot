@@ -75,8 +75,7 @@ pub fn ask(endpoint: &str, token: &str, question: &str) -> Result<String, Proble
             )
         })?;
 
-    let status = response.status();
-    let text = response.text().unwrap_or_default();
+    let (status, text) = read_response(response, "remote-ag-ui", endpoint)?;
     if !status.is_success() {
         // 401 here is this deployment's own token, not the person's model credential, and saying
         // "check your API key" would send them to fix the wrong thing.
@@ -132,6 +131,7 @@ pub fn ask_mastra(
             Problem::plain(format!("This machine cannot make web requests: {error}"))
         })?;
     let url = mastra_stream_url(endpoint, agent_id)?;
+    let stream_endpoint = url.as_str().to_string();
     let body = serde_json::json!({
         "threadId": format!("openbot-setup-{}", moment()),
         "resourceId": "openbot-setup",
@@ -153,8 +153,7 @@ pub fn ask_mastra(
             )
         })?;
 
-    let status = response.status();
-    let text = response.text().unwrap_or_default();
+    let (status, text) = read_response(response, "remote-mastra", &stream_endpoint)?;
     if !status.is_success() {
         return Err(Problem::with(
             if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -167,6 +166,26 @@ pub fn ask_mastra(
     }
 
     mastra_answer_in(&text).ok_or_else(|| Problem::plain(String::new()))
+}
+
+fn read_response(
+    response: reqwest::blocking::Response,
+    kind: &str,
+    endpoint: &str,
+) -> Result<(reqwest::StatusCode, String), Problem> {
+    let status = response.status();
+    response.text().map(|text| (status, text)).map_err(|error| {
+        Problem::with(
+            if status.is_success() {
+                "The Bot started answering and then stopped. Its own record of what happened is below."
+            } else if status == reqwest::StatusCode::UNAUTHORIZED {
+                "The Bot refused OpenBot's own request. Stop OpenBot and start it again."
+            } else {
+                "The Bot could not answer."
+            },
+            format!("kind {kind}\nendpoint {endpoint}\nHTTP {status}\nbody read error: {error}"),
+        )
+    })
 }
 
 /**
@@ -508,6 +527,76 @@ mod tests {
         assert_eq!(answer, "ag-ui ok");
     }
 
+    #[test]
+    fn ag_ui_body_read_errors_keep_the_endpoint_status_and_kind() {
+        let body = "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"part";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len() + 64
+        );
+        let server = TestServer::new(response);
+
+        let problem = ask_harness(
+            &server.url,
+            "managed-token",
+            "hello",
+            Some("remote-ag-ui"),
+            Some("openbot"),
+        )
+        .expect_err("a truncated AG-UI response must not become an empty answer");
+
+        assert!(
+            problem
+                .said
+                .contains("The Bot started answering and then stopped"),
+            "{}",
+            problem.said
+        );
+        let detail = problem.detail.as_deref().expect("body read detail");
+        assert!(detail.contains("kind remote-ag-ui"), "{detail}");
+        assert!(detail.contains(&server.url), "{detail}");
+        assert!(detail.contains("HTTP 200 OK"), "{detail}");
+        assert!(
+            detail.contains("body") || detail.contains("error"),
+            "{detail}"
+        );
+        let _ = server.request();
+    }
+
+    #[test]
+    fn mastra_body_read_errors_keep_the_endpoint_status_and_kind() {
+        let body = "data: {\"type\":\"text-delta\",\"payload\":{\"text\":\"part";
+        let response = format!(
+            "HTTP/1.1 502 Bad Gateway\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len() + 64
+        );
+        let server = TestServer::new(response);
+
+        let problem = ask_harness(
+            &server.url,
+            "managed-token",
+            "hello",
+            Some("remote-mastra"),
+            Some("openbot"),
+        )
+        .expect_err("a truncated Mastra response must keep the transport error");
+
+        assert!(
+            problem.said.contains("The Bot could not answer"),
+            "{}",
+            problem.said
+        );
+        let detail = problem.detail.as_deref().expect("body read detail");
+        assert!(detail.contains("kind remote-mastra"), "{detail}");
+        assert!(detail.contains("/api/agents/openbot/stream"), "{detail}");
+        assert!(detail.contains("HTTP 502 Bad Gateway"), "{detail}");
+        assert!(
+            detail.contains("body") || detail.contains("error"),
+            "{detail}"
+        );
+        let _ = server.request();
+    }
+
     struct TestRequest {
         path: String,
         headers: Vec<String>,
@@ -521,7 +610,8 @@ mod tests {
     }
 
     impl TestServer {
-        fn new(response: &'static str) -> Self {
+        fn new(response: impl Into<String>) -> Self {
+            let response = response.into();
             let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
             let url = format!("http://{}", listener.local_addr().expect("addr"));
             let (sender, received) = std::sync::mpsc::channel();

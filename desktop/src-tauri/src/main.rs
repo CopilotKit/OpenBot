@@ -2095,6 +2095,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn ask_the_bot_keeps_body_read_errors_out_of_the_empty_answer_path() {
+        let body = "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"messageId\":\"m1\",\"delta\":\"391";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len() + 64
+        );
+        let server = TestServer::new(response);
+        let root = temp_root("openbot-body-read-ask");
+
+        let problem = tauri::async_runtime::block_on(ask_the_bot_with_settings(
+            root.clone(),
+            "What is 17 times 23?".to_string(),
+            std::collections::BTreeMap::from([
+                ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
+                (
+                    "PICKED_HARNESS_KIND".to_string(),
+                    "remote-ag-ui".to_string(),
+                ),
+                (
+                    "MANAGED_AGENT_TOKEN".to_string(),
+                    "managed-token".to_string(),
+                ),
+            ]),
+        ))
+        .expect_err("body read errors must propagate as real problems");
+
+        assert!(
+            problem
+                .said
+                .contains("The Bot started answering and then stopped"),
+            "{}",
+            problem.said
+        );
+        let detail = problem.detail.as_deref().expect("body read detail");
+        assert!(detail.contains("kind remote-ag-ui"), "{detail}");
+        assert!(detail.contains(&server.url), "{detail}");
+        assert!(detail.contains("HTTP 200 OK"), "{detail}");
+        assert!(
+            detail.contains("body") || detail.contains("error"),
+            "{detail}"
+        );
+        let _ = server.request();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     struct TestRequest {
         path: String,
         headers: Vec<String>,
@@ -2108,7 +2154,8 @@ mod tests {
     }
 
     impl TestServer {
-        fn new(response: &'static str) -> Self {
+        fn new(response: impl Into<String>) -> Self {
+            let response = response.into();
             let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
             let url = format!("http://{}", listener.local_addr().expect("addr"));
             let (sender, received) = std::sync::mpsc::channel();
