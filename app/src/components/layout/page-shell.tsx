@@ -3,8 +3,7 @@ import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
-import { useOptionalSidebar } from "../ui/sidebar";
-import { SidebarToggle } from "./sidebar-toggle";
+import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
 
 /**
  * The frame every configuration screen sits in.
@@ -59,25 +58,28 @@ export function PageShell({
   };
 }) {
   /*
-   * Whether this screen has a sidebar at all. `/assist` and `/link/slack` draw PageShell directly
-   * under `_authed`, which mounts no provider, so there is nothing for a toggle to act on there.
-   */
-  const hasSidebar = useOptionalSidebar() !== null;
-  /*
    * The bar carries the toggle and the Back link, and is drawn when it has at least one of them.
    * The screens with a Back link already drew exactly this bar, so for them nothing changes; what
    * changed is that a sidebar is now reason enough on its own, because the toggle has to sit at the
    * pane's left edge in both states and the prose column is centred — a control inside it would be
    * 400px from the edge it belongs to on a wide screen. Drawing it with neither would be a 56px
    * band holding nothing, which reads as a layout bug rather than as chrome.
+   *
+   * The question is whether the toggle will DRAW, not whether a sidebar exists: it hides itself on
+   * a desktop-width window while the sidebar is already open, which is most of the time on these
+   * screens. Asking `useSidebarToggleVisible` rather than re-deriving the condition here is what
+   * keeps the two from drifting apart and reintroducing that empty band. It also still answers false
+   * on `/assist` and `/link/slack`, which draw PageShell directly under `_authed` with no sidebar
+   * provider at all, so there is nothing for a toggle to act on there.
    */
-  const bar = hasSidebar || !!backButton;
+  const showToggle = useSidebarToggleVisible();
+  const bar = showToggle || !!backButton;
 
   return (
     <>
       {bar ? (
         <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
-          {hasSidebar ? <SidebarToggle /> : null}
+          {showToggle ? <SidebarToggle /> : null}
           {!!backButton && (
             <Button
               variant="ghost"
