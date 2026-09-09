@@ -72,22 +72,27 @@ test("publishes every service that holds a secret on loopback only", () => {
 });
 
 /**
- * Both Bots are reachable at whatever `OPENAI_BASE_URL` names.
+ * Every Bot is reachable at whatever `OPENAI_BASE_URL` names.
  *
  * The API server reads that variable from `.env` directly, so it moves with the deployment. The
  * Bots run in containers and see only what compose hands them, and a deployment that moved its
  * models to a gateway and found half of itself still calling OpenAI would have no way to tell.
+ *
+ * Three services now, not two: the harness somebody picks in setup is dialled the same way, and
+ * leaving it out would point the Bot they actually chose at OpenAI while the two shipped ones went
+ * to their gateway.
  */
-test("gives both shipped Bots the OpenAI-compatible endpoint", () => {
+test("gives every Bot the OpenAI-compatible endpoint", () => {
   const compose = readFileSync(
     join(import.meta.dir, "..", "docker-compose.yml"),
     "utf8",
   );
 
-  // Both Bots speak OpenAI; only the framework Bot can be pointed at the other two.
+  // The two shipped Bots and the picked harness. All three speak OpenAI; only the framework Bot
+  // can be pointed at the other two providers.
   expect(
     compose.match(/OPENAI_BASE_URL: \$\{OPENAI_BASE_URL:-?\}/g),
-  ).toHaveLength(2);
+  ).toHaveLength(3);
   for (const variable of [
     "ANTHROPIC_BASE_URL",
     "GOOGLE_GENERATIVE_AI_BASE_URL",

@@ -70,15 +70,6 @@ The secrets this shell mints rather than being given.
 Named in one place because two things read the list: `compose` keeps whichever of them a previous
 run already produced, and `vault` puts them in the credential store rather than the file.
 */
-pub const GENERATED: &[&str] = &[
-    "KEY_ENCRYPTION_KEY",
-    "SUPERVISOR_TOKEN",
-    "COMPUTER_TOKEN",
-    "WORKER_SHARED_SECRET",
-    "MANAGED_AGENT_TOKEN",
-    "AGENT_TOOL_TOKEN",
-];
-
 /// 32 random bytes, base64. The shape `KEY_ENCRYPTION_KEY` requires and a fine shape for the rest.
 fn secret() -> String {
     let mut bytes = [0u8; 32];
@@ -241,15 +232,26 @@ pub fn compose(
         }
     }
 
-    env.insert("INTELLIGENCE_API_URL".into(), intelligence.api_url.clone());
+    // Trimmed, the way the model key beside it already is. All four values come from the same
+    // setup screen, which enables its button on `value.trim() !== ""` and then sends the untrimmed
+    // string, so a key copied from a provider's dashboard with the trailing space the selection
+    // picked up arrives here intact. Compose keeps it, the provider rejects the key, and the Bot
+    // reports that it cannot answer without ever naming the space.
+    env.insert(
+        "INTELLIGENCE_API_URL".into(),
+        intelligence.api_url.trim().to_string(),
+    );
     env.insert(
         "INTELLIGENCE_GATEWAY_WS_URL".into(),
-        intelligence.gateway_ws_url.clone(),
+        intelligence.gateway_ws_url.trim().to_string(),
     );
-    env.insert("INTELLIGENCE_API_KEY".into(), intelligence.api_key.clone());
+    env.insert(
+        "INTELLIGENCE_API_KEY".into(),
+        intelligence.api_key.trim().to_string(),
+    );
 
     /*
-     * GENERATED ONCE PER DEPLOYMENT, NOT ONCE PER START.
+     * MINTED ONCE PER DEPLOYMENT, NOT ONCE PER START.
      *
      * `KEY_ENCRYPTION_KEY` is the one that makes this data loss rather than churn: every secret the
      * server keeps goes through it, and `encrypt-sso-config.ts` names the symptom itself, that a
@@ -263,13 +265,16 @@ pub fn compose(
      * Two installs still do not share a key. A machine with nothing stored generates, which is what
      * a first run is.
      */
-    for key in GENERATED {
+    for key in MINTED {
         let value = kept
-            .get(*key)
+            .get(key)
             .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
+            // `usable` and not merely "not empty": an example key copied out of `.env.example` is
+            // present, is published, and must still be replaced. It also holds
+            // `KEY_ENCRYPTION_KEY` to the 32 bytes it has to decode to.
+            .filter(|value| usable(key, value))
             .unwrap_or_else(secret);
-        env.insert((*key).into(), value);
+        env.insert(key.into(), value);
     }
 
     env.insert(
@@ -500,6 +505,58 @@ pub enum ModelCredential {
 pub const NO_KEY_NEEDED: &str = "no-key-needed";
 
 /// Write the file, replacing only what this owns.
+/// The line that separates what the shell owns from what it found.
+///
+/// Named rather than written inline, because `write` has to recognise its own from a previous start
+/// as well as put one down.
+const BANNER: &str = "# Written by OpenBot Desktop. Anything else in this file is left alone.";
+
+/// The secrets this deployment mints for itself, once.
+pub const MINTED: [&str; 6] = [
+    "AGENT_TOOL_TOKEN",
+    "COMPUTER_TOKEN",
+    "KEY_ENCRYPTION_KEY",
+    "MANAGED_AGENT_TOKEN",
+    "SUPERVISOR_TOKEN",
+    "WORKER_SHARED_SECRET",
+];
+
+const PUBLISHED: [&str; 4] = [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "openbot-dev-supervisor-token",
+    "openbot-dev-computer-token",
+    "openbot-dev-worker-secret",
+];
+
+fn usable(key: &str, value: &str) -> bool {
+    if value.is_empty() || PUBLISHED.contains(&value) {
+        return false;
+    }
+    if key == "KEY_ENCRYPTION_KEY" {
+        return matches!(BASE64.decode(value), Ok(bytes) if bytes.len() == 32);
+    }
+    true
+}
+
+fn carried(existing: &str) -> BTreeMap<String, String> {
+    let mut found = BTreeMap::new();
+    for line in existing.lines() {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if MINTED.contains(&key) && usable(key, value) {
+            found.insert(key.to_string(), value.to_string());
+        }
+    }
+    found
+}
+
+/// Write the file, replacing only what this owns and keeping the secrets it has already minted.
 ///
 /// Lines the shell did not write are kept: somebody who added `OPENAI_API_KEY` by hand, or a
 /// setting a later version of this app does not know about, should not lose it because the stack
@@ -578,9 +635,16 @@ pub fn write(
     purge: &BTreeMap<String, String>,
 ) -> std::io::Result<()> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let carried = carried(&existing);
     let mut out = String::new();
 
     for line in existing.lines() {
+        // The shell's own banner is not one of the lines it did not write. Keeping it and then
+        // writing another one added a banner and a blank line to the file on every start, so a
+        // deployment restarted fifty times had fifty of them above its settings.
+        if line.trim() == BANNER {
+            continue;
+        }
         let key = line.split('=').next().unwrap_or("").trim();
         let ours = owned.contains_key(key) || purge.contains_key(key);
         if key.is_empty() || line.trim_start().starts_with('#') || !ours {
@@ -589,15 +653,34 @@ pub fn write(
         }
     }
 
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str("\n# Written by OpenBot Desktop. Anything else in this file is left alone.\n");
+    // The blank lines the removed banners left behind go with them, so the separator below is one
+    // blank line rather than one more on every start.
+    let kept = out.trim_end_matches('\n');
+    let mut out = if kept.is_empty() {
+        String::new()
+    } else {
+        format!("{kept}\n")
+    };
+    out.push_str(&format!("\n{BANNER}\n"));
     for (key, value) in owned {
+        let value = carried.get(key).unwrap_or(value);
         out.push_str(&format!("{key}={value}\n"));
     }
 
-    std::fs::write(path, out)
+    std::fs::write(path, &out)?;
+
+    // The file holds `KEY_ENCRYPTION_KEY` and every minted token, and those are now long-lived: the
+    // first start writes them and every later start reads them back. `fs::write` creates the file at
+    // the process umask, which is `0644` by default, so on a shared macOS or Linux box another local
+    // user could read the vault key. Narrow it to the owner. Windows has no equivalent mode, and its
+    // single-user desktop profile is already the boundary, so this is Unix-only.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -633,6 +716,130 @@ mod tests {
             engine_socket: socket.map(str::to_string),
             detail: String::new(),
         }
+    }
+
+    #[test]
+    fn restarting_does_not_add_a_banner_to_the_file_every_time() {
+        // The banner is a comment, and the preserve pass keeps comments, so the file grew by one
+        // banner and one blank line on every start: fifty restarts, fifty banners.
+        let dir = std::env::temp_dir().join(format!("openbot-env-banner-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+
+        let mut owned = BTreeMap::new();
+        owned.insert("SERVER_PORT".to_string(), "3000".to_string());
+        owned.insert("KEY_ENCRYPTION_KEY".to_string(), "abc=".to_string());
+
+        for _ in 0..5 {
+            write(&path, &owned, &BTreeMap::new()).unwrap();
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(text.matches(BANNER).count(), 1);
+        // And the file is the same size on the fifth start as on the first.
+        assert_eq!(text.lines().count(), 4);
+    }
+
+    #[test]
+    fn a_comment_somebody_else_wrote_is_still_kept() {
+        // Only the shell's own banner is dropped; the rule about leaving other lines alone stands.
+        let dir = std::env::temp_dir().join(format!("openbot-env-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "# our proxy needs this
+HTTPS_PROXY=http://proxy:8080
+",
+        )
+        .unwrap();
+
+        let mut owned = BTreeMap::new();
+        owned.insert("SERVER_PORT".to_string(), "3000".to_string());
+        write(&path, &owned, &BTreeMap::new()).unwrap();
+        write(&path, &owned, &BTreeMap::new()).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(text.contains("# our proxy needs this"));
+        assert!(text.contains("HTTPS_PROXY=http://proxy:8080"));
+        assert_eq!(text.matches("# our proxy needs this").count(), 1);
+        assert_eq!(text.matches(BANNER).count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_written_file_is_readable_only_by_its_owner() {
+        // It holds KEY_ENCRYPTION_KEY and every minted token, so another local user must not be able
+        // to read it off a shared machine.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("openbot-env-perms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+
+        let mut owned = BTreeMap::new();
+        owned.insert("KEY_ENCRYPTION_KEY".to_string(), "abc=".to_string());
+        write(&path, &owned, &BTreeMap::new()).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn a_pasted_value_is_trimmed_the_way_the_model_key_beside_it_is() {
+        // The setup screen enables its button on `value.trim() !== ""` and sends the untrimmed
+        // string. The model key was rescued here; the three values entered on the same screen were
+        // not, so a copied credential kept whatever whitespace the selection picked up.
+        let env = compose(
+            &Intelligence {
+                api_url: "  https://api.example  ".into(),
+                gateway_ws_url: "	wss://realtime.example
+"
+                .into(),
+                api_key: " key-with-a-trailing-space ".into(),
+            },
+            &Model {
+                credential: ModelCredential::OpenAi {
+                    api_key: " sk-model ".into(),
+                },
+            },
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(env["INTELLIGENCE_API_URL"], "https://api.example");
+        assert_eq!(env["INTELLIGENCE_GATEWAY_WS_URL"], "wss://realtime.example");
+        assert_eq!(env["INTELLIGENCE_API_KEY"], "key-with-a-trailing-space");
+        // Unchanged, and the reason the other three now match it.
+        assert_eq!(env["OPENAI_API_KEY"], "sk-model");
+    }
+
+    #[test]
+    fn a_value_with_nothing_around_it_is_untouched() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::OpenAi {
+                    api_key: "sk-model".into(),
+                },
+            },
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(env["INTELLIGENCE_API_URL"], "https://api.example");
+        assert_eq!(env["INTELLIGENCE_API_KEY"], "key");
     }
 
     #[test]
@@ -680,7 +887,7 @@ mod tests {
             None,
             &BTreeMap::new(),
         );
-        let kept: BTreeMap<String, String> = GENERATED
+        let kept: BTreeMap<String, String> = MINTED
             .iter()
             .map(|key| ((*key).to_string(), first[*key].clone()))
             .collect();
@@ -693,8 +900,8 @@ mod tests {
             None,
             &kept,
         );
-        for key in GENERATED {
-            assert_eq!(first.get(*key), second.get(*key), "{key} was minted again");
+        for key in MINTED {
+            assert_eq!(first.get(key), second.get(key), "{key} was minted again");
         }
     }
 
@@ -935,6 +1142,204 @@ mod tests {
             "the key was written twice"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn env_at(dir: &std::path::Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        dir.join(".env")
+    }
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("openbot-env-{name}-{}", std::process::id()))
+    }
+
+    fn fresh() -> BTreeMap<String, String> {
+        compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        )
+    }
+
+    fn value_of(text: &str, key: &str) -> String {
+        text.lines()
+            .find(|line| line.starts_with(&format!("{key}=")))
+            .map(|line| line.split_once('=').unwrap().1.to_string())
+            .unwrap_or_else(|| panic!("{key} is not in the file"))
+    }
+
+    #[test]
+    fn restarting_keeps_every_secret_the_first_start_minted() {
+        let dir = tmp("restart");
+        let path = env_at(&dir);
+
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let after_install = std::fs::read_to_string(&path).unwrap();
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let after_restart = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        for key in MINTED {
+            assert_eq!(
+                value_of(&after_install, key),
+                value_of(&after_restart, key),
+                "{key} was re-minted by a restart"
+            );
+        }
+    }
+
+    #[test]
+    fn a_restart_that_re_mints_the_key_would_leave_the_vault_unreadable() {
+        let dir = tmp("vault");
+        let path = env_at(&dir);
+
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let installed = value_of(
+            &std::fs::read_to_string(&path).unwrap(),
+            "KEY_ENCRYPTION_KEY",
+        );
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let restarted = value_of(
+            &std::fs::read_to_string(&path).unwrap(),
+            "KEY_ENCRYPTION_KEY",
+        );
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(
+            installed, restarted,
+            "every credential encrypted under the first key can no longer be decrypted"
+        );
+    }
+
+    #[test]
+    fn a_first_install_mints_rather_than_finding_nothing_to_carry() {
+        let dir = tmp("first");
+        let path = env_at(&dir);
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        for key in MINTED {
+            let value = value_of(&written, key);
+            assert!(!value.is_empty(), "{key} was written empty");
+            assert!(
+                !PUBLISHED.contains(&value.as_str()),
+                "{key} kept a published value"
+            );
+        }
+    }
+
+    #[test]
+    fn a_published_value_is_replaced_rather_than_carried_forward() {
+        let dir = tmp("published");
+        let path = env_at(&dir);
+        std::fs::write(
+            &path,
+            "KEY_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n\
+             SUPERVISOR_TOKEN=openbot-dev-supervisor-token\n\
+             COMPUTER_TOKEN=openbot-dev-computer-token\n\
+             WORKER_SHARED_SECRET=openbot-dev-worker-secret\n",
+        )
+        .unwrap();
+
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        for published in PUBLISHED {
+            assert!(
+                !written.contains(published),
+                "a .env copied from a developer kept {published}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_key_the_server_would_refuse_is_replaced_rather_than_carried_forward() {
+        for refused in ["", "not base64 at all", "c2hvcnQ="] {
+            let dir = tmp("refused");
+            let path = env_at(&dir);
+            std::fs::write(&path, format!("KEY_ENCRYPTION_KEY={refused}\n")).unwrap();
+
+            write(&path, &fresh(), &BTreeMap::new()).unwrap();
+            let written = std::fs::read_to_string(&path).unwrap();
+            std::fs::remove_dir_all(&dir).ok();
+
+            let value = value_of(&written, "KEY_ENCRYPTION_KEY");
+            assert_ne!(
+                value, refused,
+                "carried a key the server refuses to start on"
+            );
+            assert_eq!(
+                BASE64.decode(&value).map(|bytes| bytes.len()).unwrap_or(0),
+                32,
+                "wrote a key that is not 32 bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn a_commented_out_secret_is_not_read_as_one() {
+        let dir = tmp("commented");
+        let path = env_at(&dir);
+        std::fs::write(&path, "# KEY_ENCRYPTION_KEY=commented-out-and-not-a-key\n").unwrap();
+
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_ne!(
+            value_of(&written, "KEY_ENCRYPTION_KEY"),
+            "commented-out-and-not-a-key"
+        );
+    }
+
+    #[test]
+    fn a_secret_somebody_set_by_hand_is_the_one_that_is_kept() {
+        let dir = tmp("byhand");
+        let path = env_at(&dir);
+        let theirs = BASE64.encode([7u8; 32]);
+        std::fs::write(&path, format!("KEY_ENCRYPTION_KEY={theirs}\n")).unwrap();
+
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(value_of(&written, "KEY_ENCRYPTION_KEY"), theirs);
+    }
+
+    #[test]
+    fn everything_that_is_not_a_secret_still_takes_this_run_s_value() {
+        let dir = tmp("notsecret");
+        let path = env_at(&dir);
+        write(&path, &fresh(), &BTreeMap::new()).unwrap();
+
+        let moved = compose(
+            &intelligence(),
+            &Model::default(),
+            &engine_status(None),
+            &Ports {
+                server: 3999,
+                ..Ports::default()
+            },
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        write(&path, &moved, &BTreeMap::new()).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(value_of(&written, "SERVER_PORT"), "3999");
+        assert_eq!(
+            value_of(&written, "SERVER_INTERNAL_URL"),
+            "http://127.0.0.1:3999",
+            "a setting that is not a secret was carried forward and is now stale"
+        );
     }
 }
 

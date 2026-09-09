@@ -227,9 +227,18 @@ export function createShell(
        * Bounded at both ends. Only `Math.min` was applied, so a zero or negative `timeoutMs` from a
        * caller made `setTimeout` fire immediately: the command was killed before it did anything and
        * the answer said it had timed out, which is true and useless.
+       *
+       * A non-finite value is the same failure one step earlier: `Math.max(NaN, 1000)` is `NaN`,
+       * and `setTimeout(NaN)` fires immediately too. The HTTP layer rejects those with a 400, so
+       * this is defence in depth for a direct caller — fall back to the default rather than run a
+       * command that is already out of time.
        */
+      const requested =
+        typeof input.timeoutMs === "number" && Number.isFinite(input.timeoutMs)
+          ? input.timeoutMs
+          : DEFAULT_TIMEOUT_MS;
       const timeoutMs = Math.min(
-        Math.max(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MIN_TIMEOUT_MS),
+        Math.max(requested, MIN_TIMEOUT_MS),
         MAX_TIMEOUT_MS,
       );
 

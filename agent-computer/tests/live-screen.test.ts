@@ -75,6 +75,13 @@ const TYPING_PAGE =
     "<body>start</body><script>addEventListener('keydown',e=>{document.body.textContent+=e.key})</script>",
   );
 
+/** A focused field whose value becomes page text, so character insertion is observable via /read. */
+const TEXT_FIELD_PAGE =
+  "data:text/html," +
+  encodeURIComponent(
+    "<input autofocus><output>empty</output><script>const input=document.querySelector('input');const output=document.querySelector('output');input.addEventListener('input',()=>output.textContent=input.value||'empty')</script>",
+  );
+
 let root = "";
 let closing: Array<() => void> = [];
 
@@ -205,6 +212,7 @@ afterAll(async () => {
     "reset-viewer",
     "wont-launch",
     "still-starting",
+    "punctuation",
   ]) {
     await api("/computers/stop", botId, { method: "POST" }).catch(
       () => undefined,
@@ -313,6 +321,75 @@ describe.skipIf(!asked)("a superseded socket closing later", () => {
     );
 
     expect(second.errors).toEqual([]);
+  }, 30_000);
+});
+
+describe.skipIf(!asked)("printable punctuation from the live screen", () => {
+  test("inserts a period using the browser key code sent by the surface", async () => {
+    const botId = "punctuation";
+    await api("/navigate", botId, {
+      method: "POST",
+      body: JSON.stringify({ url: TEXT_FIELD_PAGE }),
+    });
+    const viewer = watch(botId);
+    await viewer.casting;
+    await api("/control/take", botId, { method: "POST" });
+
+    viewer.socket.send(
+      JSON.stringify({
+        type: "key",
+        event: "down",
+        key: ".",
+        code: "Period",
+        text: ".",
+        windowsVirtualKeyCode: 190,
+        modifiers: 0,
+      }),
+    );
+    viewer.socket.send(
+      JSON.stringify({
+        type: "key",
+        event: "up",
+        key: ".",
+        code: "Period",
+        windowsVirtualKeyCode: 190,
+        modifiers: 0,
+      }),
+    );
+    // Older OpenBot surfaces did not send the browser keyCode. Keep their punctuation usable while
+    // a deployment rolls the frontend and computer images independently.
+    viewer.socket.send(
+      JSON.stringify({
+        type: "key",
+        event: "down",
+        key: ".",
+        code: "Period",
+        text: ".",
+        modifiers: 0,
+      }),
+    );
+    viewer.socket.send(
+      JSON.stringify({
+        type: "key",
+        event: "up",
+        key: ".",
+        code: "Period",
+        modifiers: 0,
+      }),
+    );
+
+    let landed = "";
+    await until(
+      () => landed.includes(".."),
+      5_000,
+      "periods from current and legacy surfaces to be inserted into the focused field",
+      async () => {
+        const read = await api("/read", botId);
+        landed = ((await read.json()) as { text: string }).text;
+      },
+    );
+
+    expect(viewer.errors).toEqual([]);
   }, 30_000);
 });
 

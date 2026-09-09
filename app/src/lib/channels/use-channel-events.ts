@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { type ChannelPage, type ChannelSummary, channelKeys } from "./queries";
+import { socketUrl as buildSocketUrl } from "@/lib/socket-url";
 
 /**
  * Keep the roster live.
@@ -197,9 +198,7 @@ const FIRST_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;
 
 function socketUrl() {
-  const url = new URL("/api/channels/events", window.location.href);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  return url.toString();
+  return buildSocketUrl("/api/channels/events");
 }
 
 export function useChannelEvents() {

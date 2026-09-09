@@ -39,6 +39,8 @@ export type InputMessage =
       key: string;
       code: string;
       text?: string;
+      /** Legacy browser keyCode, which CDP uses as its Windows virtual key code. */
+      windowsVirtualKeyCode?: number;
       modifiers?: number;
     }
   | { type: "text"; text: string };
@@ -78,6 +80,17 @@ const VIRTUAL_KEY_CODES: Record<string, number> = {
   ArrowRight: 39,
   ArrowDown: 40,
   Delete: 46,
+  ";": 186,
+  "=": 187,
+  ",": 188,
+  "-": 189,
+  ".": 190,
+  "/": 191,
+  "`": 192,
+  "[": 219,
+  "\\": 220,
+  "]": 221,
+  "'": 222,
 };
 
 function virtualKeyCode(key: string): number {
@@ -184,7 +197,13 @@ export async function startScreencast(
       }
 
       if (message.type === "key") {
-        const code = virtualKeyCode(message.key);
+        const offeredCode = message.windowsVirtualKeyCode;
+        const code =
+          Number.isInteger(offeredCode) &&
+          (offeredCode ?? 0) > 0 &&
+          (offeredCode ?? 0) <= 255
+            ? (offeredCode as number)
+            : virtualKeyCode(message.key);
         await client.send("Input.dispatchKeyEvent", {
           // `keyDown` only when there is text to insert; otherwise `rawKeyDown`, which is what Chrome
           // expects for keys that do not produce a character. Sending keyDown with no text makes

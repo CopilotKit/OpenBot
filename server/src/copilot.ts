@@ -15,6 +15,7 @@ import {
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
+import type { AuditInitiator } from "./audit";
 import type { AgentActor } from "./agents/profile-types";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
@@ -388,6 +389,7 @@ export async function buildAgents(
    * carry standing instructions, which is what every deployment did before they existed.
    */
   loadInstructions?: LoadInstructions,
+  initiator?: AuditInitiator,
 ): Promise<Record<string, AbstractAgent>> {
   const vendors = await loadVendors().catch(() => [] as readonly string[]);
   /*
@@ -419,6 +421,7 @@ export async function buildAgents(
           agentFetch,
           handoff,
           instructions ?? null,
+          initiator,
         ),
       ]),
     ),
@@ -448,6 +451,7 @@ async function buildAgent(
   handoff?: HandoffForRun,
   /** Already resolved by {@link buildAgents}, so one roster costs one read. */
   standingInstructions: string | null = null,
+  initiator?: AuditInitiator,
 ): Promise<AbstractAgent> {
   if (agent.type === "unavailable") {
     return new UnavailableAgent(agent);
@@ -516,7 +520,7 @@ async function buildAgent(
      */
     return remoteAgentWithStandingRole(
       agent,
-      await remoteTransport(agent, stallGuard, agentFetch),
+      await remoteTransport(agent, stallGuard, agentFetch, initiator),
       granted,
       signRun,
       connectedVendors,
@@ -640,11 +644,16 @@ async function remoteTransport(
   agent: RegisteredRemoteAgent,
   stallGuard: StallGuard | undefined,
   agentFetch?: AgentFetch,
+  /** Who or what started this run, so a stall is reported against them rather than nobody. */
+  initiator?: AuditInitiator,
 ): Promise<AbstractAgent> {
   // The watch wraps whichever fetch is underneath, so a deployment gets both the stall timeout and
   // the redirect check rather than having to choose.
   const dial = stallGuard
-    ? stallGuard.watch({ id: agent.id, name: agent.name }, agentFetch)
+    ? stallGuard.watch(
+        { id: agent.id, name: agent.name, ...(initiator ? { initiator } : {}) },
+        agentFetch,
+      )
     : agentFetch;
 
   if (agent.type === "remote_ag_ui") {
@@ -1087,6 +1096,8 @@ export async function resolveRuntimeAgents(
    * are positional and moving one shifts every existing call site by one.
    */
   loadInstructions?: LoadInstructions,
+  /** Appended after `loadInstructions`, for the positional reason it gives. */
+  initiator?: AuditInitiator,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1118,6 +1129,7 @@ export async function resolveRuntimeAgents(
     agentFetch,
     handoff,
     loadInstructions,
+    initiator,
   );
 }
 
@@ -1165,9 +1177,12 @@ export function createRequestAgents(
    */
   stallGuard?: StallGuard,
   /** What each Bot may call, resolved for whoever is asking. Absent means no tools. */
-  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
+  loadToolsForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => LoadToolsForBot,
   /** Resolved per request, because what it signs is who this request turned out to be. */
-  signRunForActor?: (actorId: string) => SignRun,
+  signRunForActor?: (actorId: string, initiator?: AuditInitiator) => SignRun,
   /** What every built-in Bot is told about the computer. Absent means this deployment has none. */
   computerGuidance?: string,
   /** Which vendors this deployment connects to, held by a Bot or not. Absent means none. */
@@ -1315,8 +1330,11 @@ export function mountCopilotRuntime(
    * there is no reason for a caller to have to say `undefined` here to reach `basePath`.
    */
   stallGuard: StallGuard,
-  loadToolsForActor?: (actorId: string) => LoadToolsForBot,
-  signRunForActor?: (actorId: string) => SignRun,
+  loadToolsForActor?: (
+    actorId: string,
+    initiator?: AuditInitiator,
+  ) => LoadToolsForBot,
+  signRunForActor?: (actorId: string, initiator?: AuditInitiator) => SignRun,
   basePath = "/api/copilotkit",
   loadVendors?: () => Promise<readonly string[]>,
   selectionForActor?: (actorId: string) => ToolSelection,
@@ -1365,6 +1383,7 @@ export function mountCopilotRuntime(
      */
     actor: AgentActor;
     botId: string;
+    initiator?: AuditInitiator;
   }): Promise<AbstractAgent | null> => {
     const { actor } = input;
     const agents = await resolveRuntimeAgents(
@@ -1372,8 +1391,8 @@ export function mountCopilotRuntime(
       model,
       resolveModelApiKey,
       stallGuard,
-      loadToolsForActor?.(actor.id),
-      signRunForActor?.(actor.id),
+      loadToolsForActor?.(actor.id, input.initiator),
+      signRunForActor?.(actor.id, input.initiator),
       config.computer ? COMPUTER_GUIDANCE : undefined,
       loadVendors,
       selectionForActor?.(actor.id),
@@ -1384,6 +1403,7 @@ export function mountCopilotRuntime(
       // what each of them was granted, on every delivery and again on every retry.
       input.botId,
       loadInstructionsForActor?.(actor.id),
+      input.initiator,
     );
     return agents[input.botId] ?? null;
   };

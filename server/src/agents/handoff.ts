@@ -109,6 +109,7 @@ export function createHandoffDesk(options: {
       targetType: "agent",
       targetId: from.botId,
       ...(from.actorId ? { actorUserId: from.actorId } : {}),
+      ...(from.initiator ? { initiator: from.initiator } : {}),
       payload: {
         // The same key `agent.handoff_offered` sets below, and for the same reason: the Audit
         // screen renders `payload.bot` and nothing else in its Bot column, so a row without it
@@ -388,6 +389,7 @@ export function createHandoffDesk(options: {
         targetType: "agent",
         targetId: found.id,
         ...(from.actorId ? { actorUserId: from.actorId } : {}),
+        ...(from.initiator ? { initiator: from.initiator } : {}),
         payload: {
           // The Bot that did this, under the key the Audit screen reads for its Bot column. `from`
           // below says the same thing and is what the payload is read by, but the screen renders

@@ -409,7 +409,7 @@ async fn start_stack(
         picked.as_ref(),
         // What a previous start of this deployment already minted. Without it every Start writes a
         // new KEY_ENCRYPTION_KEY and orphans everything the server had encrypted under the old one.
-        &openbot_desktop_lib::vault::already_given(&root.join(".env"), openbot_env::GENERATED),
+        &openbot_desktop_lib::vault::already_given(&root.join(".env"), &openbot_env::MINTED[..]),
     );
     /*
      * The credentials come out here and never reach the file.

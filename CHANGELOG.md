@@ -8,6 +8,113 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### One command to stop what `start.sh` started
+
+Stopping the local stack meant four commands read off the end of a successful start, and the one
+easiest to miss was the one that mattered: a Bot's computer is made by the supervisor rather than by
+compose, so `docker compose down` left a Chromium running per Bot. `bash scripts/stop.sh` stops the
+app, the routine worker, the API server, the compose services and every Bot computer, in that order,
+and is safe to rerun. It kills a port holder only once that process has identified itself as
+OpenBot, so an unrelated process on 3010 is named and left alone rather than killed. Nothing is
+deleted: the database, the Bots' files and their browser profiles are volumes. `--keep-computers`
+leaves the browsers signed in.
+### Two workers on one machine can no longer fire the same routine twice
+
+Every process that claims work from the shared queue named itself after its hostname, and the queue
+tells two claimants apart by that name alone. Two processes on one machine therefore had the same
+name, so the lease meant nothing between them: one whose lease had lapsed was still told the item was
+its own, and both went on to dispatch it. A routine fired that way opens two runs and sends the same
+scheduled message twice. Nothing stops two workers running on one machine — the worker binds no port,
+and `scripts/start.sh` looks for a process it does not start the way `bun run dev` does. The name now
+always carries a random suffix, so a second process is a different claimant. It also keeps the
+hostname, so a stuck claim still traces back to the machine holding it, and a blank `HOSTNAME` is no
+longer read as a name — which had made every replica in a deployment share one.
+
+### The desktop app writes its `.env` readable only by its owner
+
+The desktop `.env` holds `KEY_ENCRYPTION_KEY` and every minted token, and those are now long-lived:
+the first start writes them and every later start reads them back. It was created at the default
+umask (`0644`), so on a shared macOS or Linux machine another local user could read the vault key off
+disk. The file is now narrowed to `0600` after it is written. Windows has no equivalent mode and its
+single-user desktop profile is already the boundary, so the change is Unix-only.
+
+### The desktop app stops adding a banner to `.env` on every start
+
+`env::write` keeps the lines it did not write, and its own header comment is one of them, so each
+start preserved the previous banner and appended another. A deployment started fifty times had fifty
+copies of "Written by OpenBot Desktop" and fifty blank lines stacked above its settings. The banner
+is now recognised and replaced rather than kept, and comments somebody else put in the file are left
+alone exactly as before.
+### Starting the desktop app again keeps the secrets the first start generated
+
+The shell generated a fresh set of secrets every time Start was pressed, including the
+`KEY_ENCRYPTION_KEY` that encrypts the credential vault. The database survives a stop, so the second
+session of an installed OpenBot met a vault it could no longer read: every stored credential failed
+to decrypt, with an error that named an operation rather than a cause. It also handed the server a
+`COMPUTER_TOKEN` that no computer created before the restart holds. The secrets an existing `.env`
+already carries are now kept, and only generated when there is nothing usable to keep — a value
+published in this repository does not count, and neither does a `KEY_ENCRYPTION_KEY` the server would
+refuse to start on.
+### The desktop app refuses a deployment download that writes outside its own directory
+
+The shell fetches the release tarball and lays it out under the directory it manages. The check that
+kept an entry inside that directory compared paths lexically -- `root.join(path).starts_with(root)`
+-- and `Path::starts_with` matches components without resolving `..`, so `app/../../elsewhere`
+started with the root and still landed outside it. An entry has to begin with a directory a
+deployment wants, which `app` does, so the file filter did not stop it either. Every component of a
+path inside the tree is now required to be an ordinary name, and the traversal is refused by name.
+### A credential pasted with a stray space into the desktop setup screen now works
+
+The setup screen enables its button on `value.trim() !== ""` and then sends the untrimmed string, so
+a key copied from a provider's dashboard with the space the selection picked up arrived intact. The
+model key was trimmed on the way into `.env`; the API URL, the gateway URL and the intelligence key
+entered on the same screen were not, so Compose passed the space through, the provider rejected the
+credential, and the failure the person saw named neither the space nor the field. All four are now
+trimmed the same way.
+### Example LangGraph and Mastra Bots no longer bind an ephemeral port on empty `PORT=`
+
+An empty `PORT=` in compose or `.env` used to become `NaN` for those two example processes, so they listened on a random port while docs still named 4300/4400. They now use the same `listenPort` helper as `agent-bot`: empty is the documented default, and a prefix typo refuses to start.
+### An empty app port is the default, not a random one
+
+`APP_PORT=` and `SERVER_PORT=` in a compose file or leftover `.env` used to become `NaN` for the Vite
+dev and preview servers, so the UI bound an ephemeral port while the proxy target was `http://localhost:`.
+Both empty values now mean the documented defaults (3010 and 3001), and a non-numeric value refuses to start.
+### The trail says what started a run, not only whose authority it had
+
+A routine runs as the person who set it up, and a Bot handing work to another Bot runs as the person
+who began the conversation. Both are correct, that is whose grants and whose connections are being
+used, and both meant an action taken while somebody slept was written into the audit trail as though
+they had taken it themselves. Telling the two apart meant correlating timestamps against
+`routine_runs` by hand, and there was nothing at all to correlate a hop against.
+
+Every audit row now also names what caused it: a person, a routine, another Bot handing work on, or
+the deployment itself. It travels inside the signed run assertion, so a tool call, a hop, a Bot
+stopping to ask its person and a stalled stream all say it, and a Bot cannot relabel its own run.
+The Audit screen has a **Started by** column and a **Nobody watching** view that answers the
+question directly. An unattended run is the one nobody is there to notice going
+wrong, which is the reason it is worth being able to find.
+
+The fourth of those exists so the column never overclaims. Two rows have no person behind them at
+all: the boundary and isolation rows written at start-up, and the refusal written when a caller
+cannot be identified at all. Those say the deployment, not a person, and they stay out of
+**Nobody watching**, which asks what ran on somebody's authority rather than what the deployment did
+by itself.
+
+Nothing about existing rows changes. Every row already written, and every row a person's own click
+writes from now on, reads as a person, because that is what it was.
+### The live screen and live channel updates work again, and one request can no longer end the app
+
+The app opened its two WebSockets against its own address, so they travelled through Vite's `/api`
+proxy. Vite is run through bun, and under bun that proxy does not carry a WebSocket: neither the
+Bot's screen nor live channel updates ever connected, and the browser retried in a loop. Worse, an
+upgrade the server answered with an ordinary HTTP response — a 503 when a Bot's computer is not
+running, which is exactly when somebody opens the screen — crashed the process that served the app,
+taking the server and the worker with it in development. Where Vite serves the app — the dev server
+and the desktop's `vite preview` — both sockets now address the server directly, so nothing upgrades
+through the proxy and the proxy no longer offers to carry one. In production the server serves the
+app itself and answers the upgrade on the same origin, so the sockets stay on the browser's own
+host, which is what an ingress terminating TLS on 443 requires and a fixed server port would break.
+
 ## 0.0.8
 
 ### A desktop shell that installs OpenBot and then becomes it

@@ -126,6 +126,8 @@ async function auditRowsFor(targetId: string) {
     .select({
       eventType: auditEvents.eventType,
       payload: auditEvents.payload,
+      initiatorKind: auditEvents.initiatorKind,
+      initiatorId: auditEvents.initiatorId,
     })
     .from(auditEvents)
     .where(
@@ -267,6 +269,49 @@ describe("a grant is the permission", () => {
     );
   });
 
+  test("a refusal names the routine that asked, not only the person it ran as", async () => {
+    await expect(
+      store.callTool({
+        ref,
+        args: {},
+        botId: strangerId,
+        actorId: "someone@openbot.local",
+        initiator: { kind: "routine", id: "routine_standup" },
+      }),
+    ).rejects.toBeInstanceOf(PluginRefusedError);
+
+    const rows = await auditRowsFor(ref);
+    const rejected = rows.filter(
+      (row) =>
+        row.eventType === "mcp.call_rejected" &&
+        (row.payload as { bot?: string }).bot === strangerId &&
+        row.initiatorKind === "routine",
+    );
+    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected[0].initiatorId).toBe("routine_standup");
+  });
+
+  test("a call nobody said anything about is still filed as a person's", async () => {
+    await expect(
+      store.callTool({
+        ref,
+        args: {},
+        botId: strangerId,
+        actorId: "someone@openbot.local",
+      }),
+    ).rejects.toBeInstanceOf(PluginRefusedError);
+
+    const rows = await auditRowsFor(ref);
+    expect(
+      rows.some(
+        (row) =>
+          row.eventType === "mcp.call_rejected" &&
+          row.initiatorKind === "person" &&
+          row.initiatorId === null,
+      ),
+    ).toBe(true);
+  });
+
   test("granting lets the same Bot past the grant check", async () => {
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     const decision = await store.decide("mcp", ref, holderId);
@@ -310,6 +355,37 @@ describe("a grant is the permission", () => {
 });
 
 describe("the policy is asked as well as the grant", () => {
+  test("credential material is refused and never copied into the audit trail", async () => {
+    await store.grant("mcp", ref, holderId, "admin@openbot.local");
+    const secret = `sk-${"z".repeat(32)}`;
+
+    await expect(
+      store.callTool({
+        ref,
+        args: { query: "quarterly report", nested: { apiKey: secret } },
+        botId: holderId,
+        actorId: "someone@openbot.local",
+      }),
+    ).rejects.toThrow("credential material");
+
+    const rows = await auditRowsFor(ref);
+    const rejected = rows.find(
+      (row) =>
+        row.eventType === "mcp.call_rejected" &&
+        (row.payload as { refusal?: string }).refusal ===
+          "sensitive_tool_arguments",
+    );
+    expect(rejected).toBeDefined();
+    expect(rejected?.payload).toMatchObject({
+      bot: holderId,
+      contentInspection: {
+        reason: "sensitive_content",
+        findings: [{ category: "credential_field", path: "$.nested.apiKey" }],
+      },
+    });
+    expect(JSON.stringify(rejected)).not.toContain(secret);
+  });
+
   test("a granted tool is still refused by a deny rule, and the rule is named", async () => {
     await store.grant("mcp", ref, holderId, "admin@openbot.local");
     policy = {

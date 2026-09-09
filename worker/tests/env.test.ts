@@ -10,12 +10,13 @@ const base = () => ({
 
 describe("worker env", () => {
   test("parses a complete environment", () => {
-    expect(loadWorkerEnv(base())).toEqual({
+    const { owner, ...rest } = loadWorkerEnv(base());
+    expect(rest).toEqual({
       workerSharedSecret: "secret",
       serverInternalUrl: "http://server:3001",
       databaseUrl: "postgres://localhost:5432/openbot",
-      owner: "routines/laptop",
     });
+    expect(owner).toMatch(/^routines\/laptop-[0-9a-f]{8}$/);
   });
 
   test.each(["WORKER_SHARED_SECRET", "SERVER_INTERNAL_URL", "DATABASE_URL"])(
@@ -61,27 +62,26 @@ describe("worker env", () => {
     ).toThrow("is not set");
   });
 
-  test("falls back to a generated id without a hostname", () => {
+  test("names itself without a hostname, and never as the bare role", () => {
     const without = base();
     delete without.HOSTNAME;
-    expect(loadWorkerEnv(without, () => "abc123").owner).toBe(
-      "routines/abc123",
+    expect(loadWorkerEnv(without).owner).toMatch(/^routines\/[0-9a-f]{8}$/);
+  });
+
+  test.each(["", "   "])("does not read HOSTNAME=%p as a name", (hostname) => {
+    const owner = loadWorkerEnv({ ...base(), HOSTNAME: hostname }).owner;
+    expect(owner).not.toBe("routines/");
+    expect(owner).toMatch(/^routines\/[0-9a-f]{8}$/);
+  });
+
+  test("trims the hostname", () => {
+    expect(loadWorkerEnv({ ...base(), HOSTNAME: "  laptop  " }).owner).toMatch(
+      /^routines\/laptop-[0-9a-f]{8}$/,
     );
   });
 
-  test.each(["", "   "])(
-    "falls back to a generated id for HOSTNAME=%p",
-    (hostname) => {
-      expect(
-        loadWorkerEnv({ ...base(), HOSTNAME: hostname }, () => "abc123").owner,
-      ).toBe("routines/abc123");
-    },
-  );
-
-  test("trims the hostname", () => {
-    expect(loadWorkerEnv({ ...base(), HOSTNAME: "  laptop  " }).owner).toBe(
-      "routines/laptop",
-    );
+  test("two workers on one host never share an owner", () => {
+    expect(loadWorkerEnv(base()).owner).not.toBe(loadWorkerEnv(base()).owner);
   });
 });
 
