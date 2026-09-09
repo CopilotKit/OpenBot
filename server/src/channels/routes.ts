@@ -212,11 +212,11 @@ export type ChannelStore = {
 
 const PRIVATE_AGENT_CHANNEL_DESCRIPTION = "Private agent channel.";
 const MAX_CHANNEL_NAME_CODE_POINTS = 120;
-const MAX_ACTIVITY_CODE_POINTS = 200;
+const MAX_ACTIVITY_GRAPHEMES = 200;
 
 /** Reduce a message to the one line a roster draws. See `oneLine` for why it is shared. */
 function previewOf(text: string) {
-  return oneLine(text, MAX_ACTIVITY_CODE_POINTS);
+  return oneLine(text, MAX_ACTIVITY_GRAPHEMES);
 }
 
 function channelName(names: string[]) {

@@ -48,6 +48,16 @@ export type AgentProfile = {
   mine: boolean;
 };
 
+/**
+ * Whether this is an agent shared with you: made public by somebody else, not your own.
+ *
+ * Written once so the roster (`/`) and the browse screen (`/agents`) can't drift apart on what
+ * "shared with you" means — both filter their list through this, not a copy of the rule.
+ */
+export function isSharedWithYou(agent: AgentProfile): boolean {
+  return !agent.mine && agent.visibility === "public";
+}
+
 export const agentKeys = {
   all: ["agents"] as const,
   list: (hidden = false) => ["agents", "list", { hidden }] as const,
