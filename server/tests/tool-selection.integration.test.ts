@@ -727,30 +727,105 @@ describe("the discovery record", () => {
     expect(entry?.offered).toHaveLength(8);
   });
 
-  test("a record that throws does not cost the run", async () => {
+  test("a record that throws does not cost the run and is diagnosed", async () => {
+    const diagnostic = spyOn(console, "error").mockImplementation(() => {});
     answerWith(["drive-audit"]);
-    const agents = await buildAgents(
-      [builtIn],
-      model,
-      "test-key",
-      undefined,
-      async () => granted,
-      undefined,
-      undefined,
-      undefined,
-      {
-        loadSkills: async () => skills,
-        choose: createModelCompleter({
-          model,
-          resolveApiKey: async () => "test-key",
-        }),
-        record: async () => {
-          throw new Error("audit table is gone");
+    try {
+      const agents = await buildAgents(
+        [builtIn],
+        model,
+        "test-key",
+        undefined,
+        async () => granted,
+        undefined,
+        undefined,
+        undefined,
+        {
+          loadSkills: async () => skills,
+          choose: createModelCompleter({
+            model,
+            resolveApiKey: async () => "test-key",
+          }),
+          record: async () => {
+            throw new Error(
+              "audit table is gone at postgres://fixture:secret@localhost/private",
+            );
+          },
         },
-      },
-    );
-    // The assertion is that this resolves at all. An audit write is not worth a person's answer.
-    await ask(agents.analyst as never, "read the Drive doc");
-    expect(toolsOfferedToModel()).toHaveLength(8);
+      );
+      await ask(agents.analyst as never, "read the Drive doc");
+      expect(toolsOfferedToModel()).toHaveLength(8);
+      expect(diagnostic).toHaveBeenCalledTimes(1);
+      expect(diagnostic).toHaveBeenCalledWith({
+        error: "tool_selection_record_failed",
+        context: {
+          operation: "record",
+          agentId: "analyst",
+          reason: "selected",
+          granted: granted.length,
+          offered: 8,
+          skills: ["drive-audit"],
+        },
+        timestamp: expect.any(String),
+      });
+      expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("secret");
+      expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("private");
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
+  test("a successful record stays quiet", async () => {
+    const diagnostic = spyOn(console, "error").mockImplementation(() => {});
+    recorded.length = 0;
+    answerWith(["drive-audit"]);
+    try {
+      const agents = await buildAgents(
+        [builtIn],
+        model,
+        "test-key",
+        undefined,
+        async () => granted,
+        undefined,
+        undefined,
+        undefined,
+        selection(),
+      );
+      await ask(agents.analyst as never, "read the Drive doc");
+      expect(recorded).toHaveLength(1);
+      expect(toolsOfferedToModel()).toHaveLength(8);
+      expect(diagnostic).not.toHaveBeenCalled();
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
+  test("an absent record stays quiet", async () => {
+    const diagnostic = spyOn(console, "error").mockImplementation(() => {});
+    answerWith(["drive-audit"]);
+    try {
+      const agents = await buildAgents(
+        [builtIn],
+        model,
+        "test-key",
+        undefined,
+        async () => granted,
+        undefined,
+        undefined,
+        undefined,
+        {
+          loadSkills: async () => skills,
+          choose: createModelCompleter({
+            model,
+            resolveApiKey: async () => "test-key",
+          }),
+        },
+      );
+      await ask(agents.analyst as never, "read the Drive doc");
+      expect(toolsOfferedToModel()).toHaveLength(8);
+      expect(diagnostic).not.toHaveBeenCalled();
+    } finally {
+      diagnostic.mockRestore();
+    }
   });
 });

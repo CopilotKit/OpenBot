@@ -512,6 +512,21 @@ async function buildAgent(
       ? selection
       : undefined;
 
+  const diagnoseRecordFailure = (chosen: Selection<GrantedTool>) => {
+    console.error({
+      error: "tool_selection_record_failed",
+      context: {
+        operation: "record",
+        agentId: agent.id,
+        reason: chosen.reason,
+        granted: chosen.granted,
+        offered: chosen.offered.length,
+        skills: chosen.skills,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  };
+
   /** Pass one and pass two, for one run. Shared by both agent kinds; each applies it differently. */
   const offeredFor = async (input: RunAgentInput): Promise<GrantedTool[]> => {
     if (!narrowing) return granted;
@@ -524,7 +539,9 @@ async function buildAgent(
     });
     // Awaited, so the row is on record before the model is handed the tools it names. A discovery
     // written afterwards would sit in the trail after the calls it explains.
-    await narrowing.record?.(agent.id, chosen).catch(() => {});
+    await narrowing.record?.(agent.id, chosen).catch(() => {
+      diagnoseRecordFailure(chosen);
+    });
     return chosen.offered;
   };
 
