@@ -691,6 +691,15 @@ fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
     stop_everything(&app, &PathBuf::from(&root))
 }
 
+fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
+    let mut active = shell.root.lock().unwrap();
+    let root = active
+        .clone()
+        .unwrap_or_else(|| fallback_root.to_path_buf());
+    *active = None;
+    root
+}
+
 /// Take the whole stack down: the host processes, anything left over, and the containers.
 ///
 /// One implementation, because there are three ways to ask for it (the button, the menu bar, and
@@ -703,7 +712,7 @@ fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), S
     shell
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    *shell.root.lock().unwrap() = None;
+    let root = shutdown_root(&shell, fallback_root);
     for (_, mut child) in shell.children.lock().unwrap().drain(..) {
         let _ = child.kill();
         let _ = child.wait();
@@ -712,20 +721,12 @@ fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), S
     // The window may be a second one, holding no handles to a stack that is still up. Stop what is
     // there rather than only what this window started, or Stop is a button that does nothing and
     // reports success.
-    let root = shell
-        .root
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| fallback_root.to_path_buf());
     stack::stop_processes_under(&root);
 
-    let outcome = match engine::detect().address {
+    match engine::detect().address {
         Some(found) => stack::down(&found, &root),
         None => Ok(()),
-    };
-    *shell.root.lock().unwrap() = None;
-    outcome
+    }
 }
 
 /// Show OpenBot itself in this window.
@@ -1539,8 +1540,9 @@ fn main() {
             // nobody is watching.
             if matches!(event, tauri::RunEvent::Exit) {
                 let shell = app.state::<Shell>();
+                let default = PathBuf::from(default_root());
+                let root = shutdown_root(&shell, &default);
                 {
-                    *shell.root.lock().unwrap() = None;
                     let mut children = shell.children.lock().unwrap();
                     for (_, child) in children.iter_mut() {
                         ask_to_stop(child);
@@ -1556,12 +1558,6 @@ fn main() {
                 // The containers too. Leaving five of them running behind an application that is
                 // no longer on screen is the one outcome nobody can act on: there is no window to
                 // stop them from and nothing to say they are there.
-                let root = shell
-                    .root
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from(default_root()));
                 stack::stop_processes_under(&root);
                 if let Some(found) = engine::detect().address {
                     let _ = stack::down(&found, &root);
@@ -1655,6 +1651,48 @@ mod tests {
         assert!(configured.saved.model_sessions.anthropic);
         assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stop_shutdown_uses_the_active_root_at_the_external_command_boundary() {
+        let _path = SerializedPath::set();
+        let active = temp_root("openbot-active-stop-root");
+        let fallback = temp_root("openbot-default-stop-root");
+        std::fs::create_dir_all(&active).unwrap();
+        std::fs::create_dir_all(&fallback).unwrap();
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(active.clone());
+        let selected = shutdown_root(&shell, &fallback);
+
+        let record = temp_root("openbot-stop-record").join("commands.log");
+        let engine = fake_engine(&record);
+        stack::down(&engine, &selected).expect("fake compose down");
+
+        assert_compose_down_ran_under(&record, &active);
+        assert!(shell.root.lock().unwrap().is_none());
+        let _ = std::fs::remove_dir_all(active);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn quit_shutdown_uses_the_active_root_at_the_external_command_boundary() {
+        let _path = SerializedPath::set();
+        let active = temp_root("openbot-active-quit-root");
+        let fallback = temp_root("openbot-default-quit-root");
+        std::fs::create_dir_all(&active).unwrap();
+        std::fs::create_dir_all(&fallback).unwrap();
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(active.clone());
+        let selected = shutdown_root(&shell, &fallback);
+
+        let record = temp_root("openbot-quit-record").join("commands.log");
+        let engine = fake_engine(&record);
+        stack::down(&engine, &selected).expect("fake compose down");
+
+        assert_compose_down_ran_under(&record, &active);
+        assert!(shell.root.lock().unwrap().is_none());
+        let _ = std::fs::remove_dir_all(active);
+        let _ = std::fs::remove_dir_all(fallback);
     }
 
     #[test]
@@ -1836,5 +1874,78 @@ mod tests {
         path.push(format!("{name}-{}-{next}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         path
+    }
+
+    struct SerializedPath {
+        previous: Option<std::ffi::OsString>,
+        previous_record: Option<std::ffi::OsString>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl SerializedPath {
+        fn set() -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous = std::env::var_os("PATH");
+            let previous_record = std::env::var_os("OPENBOT_TEST_ENGINE_RECORD");
+            let bin = temp_root("openbot-fake-engine-bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let docker = bin.join("docker");
+            std::fs::write(
+                &docker,
+                "#!/bin/sh\nprintf '%s\\t%s\\n' \"$PWD\" \"$*\" >> \"$OPENBOT_TEST_ENGINE_RECORD\"\n",
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut permissions = std::fs::metadata(&docker).unwrap().permissions();
+                permissions.set_mode(0o755);
+                std::fs::set_permissions(&docker, permissions).unwrap();
+            }
+            let mut path = std::ffi::OsString::from(bin);
+            if let Some(previous) = previous.as_ref().filter(|previous| !previous.is_empty()) {
+                path.push(if cfg!(windows) { ";" } else { ":" });
+                path.push(previous);
+            }
+            std::env::set_var("PATH", path);
+            Self {
+                previous,
+                previous_record,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for SerializedPath {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var("PATH", previous);
+            } else {
+                std::env::remove_var("PATH");
+            }
+            if let Some(previous) = &self.previous_record {
+                std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", previous);
+            } else {
+                std::env::remove_var("OPENBOT_TEST_ENGINE_RECORD");
+            }
+        }
+    }
+
+    fn fake_engine(record: &Path) -> engine::Address {
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", record);
+        engine::Address::new(engine::Engine::Docker, None)
+    }
+
+    fn assert_compose_down_ran_under(record: &Path, root: &Path) {
+        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let lines = std::fs::read_to_string(record).expect("command record");
+        assert!(
+            lines
+                .lines()
+                .any(|line| line == format!("{}\tcompose --profile harness down", root.display())),
+            "{lines}"
+        );
     }
 }
