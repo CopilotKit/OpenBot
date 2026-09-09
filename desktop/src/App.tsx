@@ -2,7 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { DEFAULT_HARNESS, HarnessPicker } from "./HarnessPicker";
-import { type ModelChoice, ProviderPicker } from "./ProviderPicker";
+import {
+  type HeldConfiguration,
+  type ModelChoice,
+  ProviderPicker,
+} from "./ProviderPicker";
 import { Ask } from "./Ask";
 import { asProblem, Failure, type Problem } from "./Problem";
 import { Welcome } from "./Welcome";
@@ -21,6 +25,11 @@ type Blocker =
   | "not-administrator";
 
 type Progress = { step: string; ok: boolean; detail: string };
+
+type AlreadyConfigured = {
+  values: Record<string, string>;
+  saved: NonNullable<HeldConfiguration["saved"]>;
+};
 
 /**
  * What the last screen offers to ask, mirroring `ask::SUGGESTED`.
@@ -51,7 +60,7 @@ export function App() {
   const [harness, setHarness] = useState<string | null>(DEFAULT_HARNESS);
   const [model, setModel] = useState<ModelChoice | null>(null);
   /** Model credentials a previous run already wrote, so the provider screen arrives filled in. */
-  const [alreadyHeld, setAlreadyHeld] = useState<Record<string, string>>({});
+  const [alreadyHeld, setAlreadyHeld] = useState<HeldConfiguration>({});
   /*
    * Signing in to CopilotKit, which is how a managed deployment gets its key.
    *
@@ -142,13 +151,16 @@ export function App() {
          * a dotfile in a text editor — the exact thing this product exists not to require. Their own
          * file, read back to them on their own machine.
          */
-        invoke<Record<string, string>>("already_configured", { root: found })
-          .then((set) => {
-            if (set.INTELLIGENCE_API_KEY) setApiKey(set.INTELLIGENCE_API_KEY);
-            if (set.INTELLIGENCE_API_URL) setApiUrl(set.INTELLIGENCE_API_URL);
-            if (set.INTELLIGENCE_GATEWAY_WS_URL)
-              setWsUrl(set.INTELLIGENCE_GATEWAY_WS_URL);
-            setAlreadyHeld(set);
+        invoke<AlreadyConfigured>("already_configured", { root: found })
+          .then((configured) => {
+            const { values, saved } = configured;
+            if (values.INTELLIGENCE_API_KEY)
+              setApiKey(values.INTELLIGENCE_API_KEY);
+            if (values.INTELLIGENCE_API_URL)
+              setApiUrl(values.INTELLIGENCE_API_URL);
+            if (values.INTELLIGENCE_GATEWAY_WS_URL)
+              setWsUrl(values.INTELLIGENCE_GATEWAY_WS_URL);
+            setAlreadyHeld({ ...values, saved });
           })
           .catch(() => undefined);
         // A stack this app started may still be up from a previous window. Ask, rather than
@@ -388,6 +400,8 @@ export function App() {
           */}
           {apiKey ? (
             <p className="lede">Connected to CopilotKit.</p>
+          ) : alreadyHeld.saved?.intelligenceApiKey ? (
+            <p className="lede">Connected to CopilotKit.</p>
           ) : signInUrl ? (
             <>
               <p className="lede">
@@ -561,7 +575,11 @@ export function App() {
             // The model is answered by its own screen now, so what is checked here is that it was
             // answered at all, not that some field on this screen is non-empty.
             disabled={
-              busy || apiKey.trim() === "" || !model || root.trim() === ""
+              busy ||
+              (apiKey.trim() === "" &&
+                !alreadyHeld.saved?.intelligenceApiKey) ||
+              !model ||
+              root.trim() === ""
             }
           >
             {busy ? "Working…" : "Start OpenBot"}

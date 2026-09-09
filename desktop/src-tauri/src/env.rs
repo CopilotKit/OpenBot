@@ -641,6 +641,26 @@ pub fn write_plan_store(dir: &Path, credential: &ModelCredential) -> std::io::Re
     Ok(())
 }
 
+pub fn saved_chatgpt_plan_store(dir: &Path) -> bool {
+    read_plan_store(dir)
+        .ok()
+        .flatten()
+        .is_some_and(|store| store.trim() != "{}")
+}
+
+pub fn read_plan_store(dir: &Path) -> std::io::Result<Option<String>> {
+    let path = dir.join(CHATGPT_STORE_FILE);
+    let Ok(store) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    let trimmed = store.trim();
+    if trimmed.is_empty() || trimmed == "{}" {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed.to_string()))
+    }
+}
+
 pub fn write(
     path: &Path,
     owned: &BTreeMap<String, String>,

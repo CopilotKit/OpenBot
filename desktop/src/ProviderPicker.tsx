@@ -22,8 +22,26 @@ export type ModelChoice = {
   apiKey?: string;
   /** Minted by signing in, never typed. Only a plan has one. */
   token?: string;
+  /** A saved value exists and will be read only by the Start action. */
+  saved?: boolean;
   baseUrl?: string;
   model?: string;
+};
+
+export type SavedConfiguration = {
+  intelligenceApiKey?: boolean;
+  modelApiKeys?: Partial<Record<"openai" | "anthropic", boolean>>;
+  modelSessions?: Partial<Record<"openai" | "anthropic", boolean>>;
+};
+
+export type HeldConfiguration = {
+  INTELLIGENCE_API_KEY?: string;
+  INTELLIGENCE_API_URL?: string;
+  INTELLIGENCE_GATEWAY_WS_URL?: string;
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+  saved?: SavedConfiguration;
 };
 
 /**
@@ -50,7 +68,7 @@ export function ProviderPicker({
    * Used to fill the key field for whichever provider is chosen, so somebody who has set this up
    * before is not sent to find a key they already produced. Their own file, on their own machine.
    */
-  held: Record<string, string>;
+  held: HeldConfiguration;
   onChoose: (choice: ModelChoice) => void;
   onBack: () => void;
 }) {
@@ -186,12 +204,20 @@ export function ProviderPicker({
 
   const row = rows.find((r) => r.id === open) ?? null;
   const token = row ? (tokens[row.id] ?? "") : "";
+  const savedPlan =
+    row?.id === "openai" || row?.id === "anthropic"
+      ? held.saved?.modelSessions?.[row.id] === true
+      : false;
+  const savedApiKey =
+    row?.id === "openai" || row?.id === "anthropic"
+      ? held.saved?.modelApiKeys?.[row.id] === true
+      : false;
 
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
   // than after a run fails with something unreadable.
   const ready =
-    (login === "plan" && token.trim().length > 0) ||
-    (login === "api-key" && apiKey.trim().length > 0) ||
+    (login === "plan" && (token.trim().length > 0 || savedPlan)) ||
+    (login === "api-key" && (apiKey.trim().length > 0 || savedApiKey)) ||
     /*
      * An endpoint needs an address and a model name. NOT A KEY: this row's own summary names
      * Ollama and vLLM, and neither has one, so requiring a key refused the two examples the screen
@@ -276,7 +302,7 @@ export function ProviderPicker({
           )}
 
           {login === "plan" &&
-            (token ? (
+            (token || savedPlan ? (
               <>
                 <p className="lede">
                   Signed in to {row.name}. Your plan will be used, and no key is
@@ -356,17 +382,24 @@ export function ProviderPicker({
             ))}
 
           {login === "api-key" && (
-            <div className="field">
-              <label htmlFor="key">{row.name} API key</label>
-              <input
-                id="key"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
+            <>
+              {savedApiKey && !apiKey ? (
+                <p className="lede">
+                  A saved {row.name} API key will be used.
+                </p>
+              ) : null}
+              <div className="field">
+                <label htmlFor="key">{row.name} API key</label>
+                <input
+                  id="key"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+            </>
           )}
 
           {login === "endpoint" && (
@@ -438,6 +471,10 @@ export function ProviderPicker({
               login,
               apiKey: apiKey.trim() || undefined,
               token: login === "plan" ? token.trim() || undefined : undefined,
+              saved:
+                (login === "plan" && !token.trim() && savedPlan) ||
+                (login === "api-key" && !apiKey.trim() && savedApiKey) ||
+                undefined,
               baseUrl: baseUrl.trim() || undefined,
               model: model.trim() || undefined,
             })

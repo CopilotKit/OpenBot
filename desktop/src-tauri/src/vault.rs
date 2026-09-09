@@ -135,24 +135,66 @@ fn remember_all_with(
     Ok(())
 }
 
-/**
-What a previous run left, wherever it left it.
+/// A raw secret read, separated by whether the operating system may ask the person.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadPolicy {
+    /// No protected store at all. This is the startup and React-mount policy.
+    FileOnly,
+    /// Protected store only where the platform can answer without UI.
+    Silent,
+    /// A user-triggered action may ask the operating system for access.
+    Interactive,
+}
 
-The file first and the store on top, which is what makes an upgrade silent. A machine that ran a
-version before the store existed still has its credentials in the `.env`; reading only the store
-would ask that person for a key they already gave, and reading only the file would ignore the one
-they gave since. The store wins because it is the one this version writes.
+/**
+What a previous run left, under the selected interaction policy.
+
+The file path is always read first because legacy `.env` credentials must still migrate. Protected
+storage is layered on top only for explicit policies: silent for metadata that must not show UI,
+interactive for Start and Ask where the action needs the credential now and can show a refusal.
 */
-pub fn already_given(env_file: &std::path::Path, keys: &[&str]) -> BTreeMap<String, String> {
+pub fn already_given_with_policy(
+    env_file: &std::path::Path,
+    keys: &[&str],
+    policy: ReadPolicy,
+) -> Result<BTreeMap<String, String>, Problem> {
     let mut found = crate::env::already_set(env_file, keys);
-    found.extend(recall_all(
-        &keys
-            .iter()
-            .copied()
-            .filter(|k| is_secret(k))
-            .collect::<Vec<_>>(),
-    ));
-    found
+    if policy == ReadPolicy::FileOnly {
+        return Ok(found);
+    }
+
+    for key in keys.iter().copied().filter(|key| is_secret(key)) {
+        let value = match policy {
+            ReadPolicy::FileOnly => None,
+            ReadPolicy::Silent => recall_silent(key),
+            ReadPolicy::Interactive => recall_interactive(key)?,
+        };
+        if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+            found.insert(key.to_string(), value);
+        }
+    }
+    Ok(found)
+}
+
+/// Passive startup hydration. It never asks protected storage for a raw secret.
+pub fn already_given_file_only(
+    env_file: &std::path::Path,
+    keys: &[&str],
+) -> BTreeMap<String, String> {
+    already_given_with_policy(env_file, keys, ReadPolicy::FileOnly).unwrap_or_default()
+}
+
+/// Non-interactive discovery. On macOS this asks Keychain to skip items requiring UI.
+pub fn already_given_silent(env_file: &std::path::Path, keys: &[&str]) -> BTreeMap<String, String> {
+    already_given_with_policy(env_file, keys, ReadPolicy::Silent).unwrap_or_default()
+}
+
+/// Protected retrieval for a user-triggered action.
+pub fn already_given_interactive(
+    env_file: &std::path::Path,
+    keys: &[&str],
+) -> Result<BTreeMap<String, String>, Problem> {
+    already_given_with_policy(env_file, keys, ReadPolicy::Interactive)
 }
 
 /*
@@ -173,23 +215,29 @@ pub fn already_given(env_file: &std::path::Path, keys: &[&str]) -> BTreeMap<Stri
  * belongs to the operating system and the signature. A signed and notarised build gets "Always
  * Allow" once and is never asked again, which is the actual fix and belongs to the release.
  */
-static REMEMBERED: std::sync::OnceLock<std::sync::Mutex<BTreeMap<String, Option<String>>>> =
+type CachedRead = Result<Option<String>, Problem>;
+
+static REMEMBERED: std::sync::OnceLock<std::sync::Mutex<BTreeMap<String, CachedRead>>> =
     std::sync::OnceLock::new();
 
-fn cache() -> &'static std::sync::Mutex<BTreeMap<String, Option<String>>> {
+fn cache() -> &'static std::sync::Mutex<BTreeMap<String, CachedRead>> {
     REMEMBERED.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
 }
 
 /// Read a stored secret, asking the store at most once per name per run.
 pub fn recall(name: &str) -> Option<String> {
-    recall_cached(name, cache(), recall_from_store)
+    recall_interactive(name).ok().flatten()
 }
 
-fn recall_cached(
+fn recall_interactive(name: &str) -> Result<Option<String>, Problem> {
+    recall_interactive_cached(name, cache(), recall_from_store)
+}
+
+fn recall_interactive_cached(
     name: &str,
-    cache: &std::sync::Mutex<BTreeMap<String, Option<String>>>,
-    recall_one: impl FnOnce(&str) -> Option<String>,
-) -> Option<String> {
+    cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
+    recall_one: impl FnOnce(&str) -> Result<Option<String>, Problem>,
+) -> Result<Option<String>, Problem> {
     if let Ok(held) = cache.lock() {
         if let Some(known) = held.get(name) {
             return known.clone();
@@ -210,12 +258,12 @@ pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
 fn remember_cached(
     name: &str,
     value: &str,
-    cache: &std::sync::Mutex<BTreeMap<String, Option<String>>>,
+    cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
     remember_one: impl FnOnce(&str, &str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     remember_one(name, value)?;
     if let Ok(mut held) = cache.lock() {
-        held.insert(name.to_string(), Some(value.to_string()));
+        held.insert(name.to_string(), Ok(Some(value.to_string())));
     }
     Ok(())
 }
@@ -227,12 +275,12 @@ pub fn forget(name: &str) {
 
 fn forget_cached(
     name: &str,
-    cache: &std::sync::Mutex<BTreeMap<String, Option<String>>>,
+    cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
     forget_one: impl FnOnce(&str),
 ) {
     forget_one(name);
     if let Ok(mut held) = cache.lock() {
-        held.insert(name.to_string(), None);
+        held.insert(name.to_string(), Ok(None));
     }
 }
 
@@ -247,6 +295,10 @@ pub fn recall_all(keys: &[&str]) -> BTreeMap<String, String> {
         }
     }
     found
+}
+
+fn recall_silent(name: &str) -> Option<String> {
+    recall_silent_from_store(name)
 }
 
 /*
@@ -269,9 +321,31 @@ fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
 }
 
 #[cfg(target_os = "macos")]
-fn recall_from_store(name: &str) -> Option<String> {
-    let raw = security_framework::passwords::get_generic_password(SERVICE, name).ok()?;
-    String::from_utf8(raw).ok()
+fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+
+    match security_framework::passwords::get_generic_password(SERVICE, name) {
+        Ok(raw) => Ok(String::from_utf8(raw).ok()),
+        Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
+        Err(error) => Err(keychain_read_problem(error.to_string())),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn recall_silent_from_store(name: &str) -> Option<String> {
+    use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
+
+    let mut search = ItemSearchOptions::new();
+    search
+        .class(ItemClass::generic_password())
+        .service(SERVICE)
+        .account(name)
+        .load_data(true)
+        .skip_authenticated_items(true);
+    match search.search().ok()?.into_iter().next()? {
+        SearchResult::Data(raw) => String::from_utf8(raw).ok(),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -283,6 +357,14 @@ fn forget_in_store(name: &str) {
 fn keychain_problem(detail: String) -> Problem {
     Problem::with(
         "OpenBot could not save your sign-in details to this Mac's Keychain.",
+        detail,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_read_problem(detail: String) -> Problem {
+    Problem::with(
+        "OpenBot needs permission to read saved credentials for this action.",
         detail,
     )
 }
@@ -311,7 +393,7 @@ $sealed = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, 'Current
 }
 
 #[cfg(target_os = "windows")]
-fn recall_from_store(name: &str) -> Option<String> {
+fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
     const UNPROTECT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $sealed = [Convert]::FromBase64String([Console]::In.ReadToEnd().Trim())
@@ -319,10 +401,16 @@ Add-Type -AssemblyName System.Security
 $bytes = [Security.Cryptography.ProtectedData]::Unprotect($sealed, $null, 'CurrentUser')
 [Text.Encoding]::UTF8.GetString($bytes)
 "#;
-    let sealed = std::fs::read_to_string(vault_dir().ok()?.join(format!("{name}.dpapi"))).ok()?;
-    powershell(UNPROTECT, Some(&sealed))
-        .ok()
-        .map(|plain| plain.trim().to_string())
+    let path = vault_dir()?.join(format!("{name}.dpapi"));
+    let Ok(sealed) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    powershell(UNPROTECT, Some(&sealed)).map(|plain| Some(plain.trim().to_string()))
+}
+
+#[cfg(target_os = "windows")]
+fn recall_silent_from_store(name: &str) -> Option<String> {
+    recall_from_store(name).ok().flatten()
 }
 
 #[cfg(target_os = "windows")]
@@ -385,10 +473,17 @@ fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn recall_from_store(name: &str) -> Option<String> {
-    std::fs::read_to_string(vault_dir().ok()?.join(format!("{name}.secret")))
-        .ok()
-        .map(|value| value.trim().to_string())
+fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
+    Ok(
+        std::fs::read_to_string(vault_dir()?.join(format!("{name}.secret")))
+            .ok()
+            .map(|value| value.trim().to_string()),
+    )
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn recall_silent_from_store(name: &str) -> Option<String> {
+    recall_from_store(name).ok().flatten()
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -427,6 +522,7 @@ fn owner_only(_path: &std::path::Path) {}
 
 #[cfg(test)]
 mod cache_tests {
+    use crate::problem::Problem;
     use std::collections::BTreeMap;
 
     #[test]
@@ -503,18 +599,18 @@ mod cache_tests {
 
         // Absent to begin with, and the absence is remembered rather than asked again.
         assert_eq!(
-            super::recall_cached(&name, &cache, |key| {
+            super::recall_interactive_cached(&name, &cache, |key| {
                 reads.lock().unwrap().push(key.to_string());
-                store.lock().unwrap().get(key).cloned()
+                Ok(store.lock().unwrap().get(key).cloned())
             }),
-            None
+            Ok(None)
         );
         assert_eq!(
-            super::recall_cached(&name, &cache, |key| {
+            super::recall_interactive_cached(&name, &cache, |key| {
                 reads.lock().unwrap().push(key.to_string());
-                store.lock().unwrap().get(key).cloned()
+                Ok(store.lock().unwrap().get(key).cloned())
             }),
-            None
+            Ok(None)
         );
         assert_eq!(reads.lock().unwrap().as_slice(), [name.clone()]);
 
@@ -528,18 +624,20 @@ mod cache_tests {
         })
         .expect("the store should accept a write");
         assert_eq!(
-            super::recall_cached(&name, &cache, |key| {
+            super::recall_interactive_cached(&name, &cache, |key| {
                 reads.lock().unwrap().push(key.to_string());
-                store.lock().unwrap().get(key).cloned()
+                Ok(store.lock().unwrap().get(key).cloned())
             })
+            .unwrap()
             .as_deref(),
             Some("a-value")
         );
         assert_eq!(
-            super::recall_cached(&name, &cache, |key| {
+            super::recall_interactive_cached(&name, &cache, |key| {
                 reads.lock().unwrap().push(key.to_string());
-                store.lock().unwrap().get(key).cloned()
+                Ok(store.lock().unwrap().get(key).cloned())
             })
+            .unwrap()
             .as_deref(),
             Some("a-value")
         );
@@ -550,13 +648,56 @@ mod cache_tests {
             store.lock().unwrap().remove(key);
         });
         assert_eq!(
-            super::recall_cached(&name, &cache, |key| {
+            super::recall_interactive_cached(&name, &cache, |key| {
                 reads.lock().unwrap().push(key.to_string());
-                store.lock().unwrap().get(key).cloned()
+                Ok(store.lock().unwrap().get(key).cloned())
             }),
-            None
+            Ok(None)
         );
         assert_eq!(reads.lock().unwrap().as_slice(), [name.clone()]);
+    }
+
+    #[test]
+    fn passive_hydration_reads_only_the_file() {
+        let dir = std::env::temp_dir().join(format!("openbot-passive-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "OPENAI_API_KEY=file-key\nINTELLIGENCE_API_URL=https://api.example\n",
+        )
+        .unwrap();
+
+        let found =
+            super::already_given_file_only(&path, &["OPENAI_API_KEY", "INTELLIGENCE_API_URL"]);
+
+        assert_eq!(found.get("OPENAI_API_KEY"), Some(&"file-key".to_string()));
+        assert_eq!(
+            found.get("INTELLIGENCE_API_URL"),
+            Some(&"https://api.example".to_string())
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn interactive_reads_cache_denial_once_per_key() {
+        let cache = std::sync::Mutex::new(BTreeMap::new());
+        let attempts = std::sync::Mutex::new(0);
+        let denied = Problem::with(
+            "OpenBot needs permission to read saved credentials for this action.",
+            "interaction refused",
+        );
+
+        for _ in 0..2 {
+            let result = super::recall_interactive_cached("OPENAI_API_KEY", &cache, |_| {
+                *attempts.lock().unwrap() += 1;
+                Err(denied.clone())
+            });
+            assert_eq!(result, Err(denied.clone()));
+        }
+
+        assert_eq!(*attempts.lock().unwrap(), 1);
     }
 }
 

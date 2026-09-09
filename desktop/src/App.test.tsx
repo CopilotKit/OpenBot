@@ -56,8 +56,15 @@ test("Change the model after an Ask failure stops the stack and reaches the prov
     if (command === "default_root") return "/tmp/openbot-app-test";
     if (command === "already_configured") {
       return {
-        INTELLIGENCE_API_KEY: "ck-test",
-        OPENAI_API_KEY: "sk-test",
+        values: {
+          INTELLIGENCE_API_KEY: "ck-test",
+          OPENAI_API_KEY: "sk-test",
+        },
+        saved: {
+          intelligenceApiKey: true,
+          modelApiKeys: { openai: true, anthropic: false },
+          modelSessions: { openai: false, anthropic: false },
+        },
       };
     }
     if (command === "already_running") return false;
@@ -142,7 +149,18 @@ test("empty Intelligence projects keep sign-in recoverable while Start waits for
       };
     }
     if (command === "default_root") return "/tmp/openbot-app-test";
-    if (command === "already_configured") return { OPENAI_API_KEY: "sk-test" };
+    if (command === "already_configured") {
+      return {
+        values: {
+          OPENAI_API_KEY: "sk-test",
+        },
+        saved: {
+          intelligenceApiKey: false,
+          modelApiKeys: { openai: true, anthropic: false },
+          modelSessions: { openai: false, anthropic: false },
+        },
+      };
+    }
     if (command === "already_running") return false;
     if (command === "windows_blocker") return null;
     if (command === "last_failure") return null;
@@ -220,4 +238,77 @@ test("empty Intelligence projects keep sign-in recoverable while Start waits for
       false,
     ),
   );
+});
+
+test("saved startup credentials enable Start without raw protected secrets on mount", async () => {
+  invokeHandler = async (command) => {
+    if (command === "detect_engine") {
+      return {
+        engine: "docker",
+        responding: true,
+        engine_socket: null,
+        detail: "Docker is answering.",
+      };
+    }
+    if (command === "default_root") return "/tmp/openbot-app-test";
+    if (command === "already_configured") {
+      return {
+        values: {},
+        saved: {
+          intelligenceApiKey: true,
+          modelApiKeys: { openai: true, anthropic: false },
+          modelSessions: { openai: false, anthropic: false },
+        },
+      };
+    }
+    if (command === "already_running") return false;
+    if (command === "windows_blocker") return null;
+    if (command === "last_failure") return null;
+    if (command === "harnesses") {
+      return [
+        {
+          id: "langgraph",
+          name: "LangGraph",
+          summary: "Default Bot",
+          image: null,
+          health_path: null,
+          credential: "any-provider",
+          maintainer: "first-party",
+          mark: null,
+          port: 8000,
+        },
+      ];
+    }
+    if (command === "providers") {
+      return [
+        {
+          id: "openai",
+          name: "OpenAI",
+          summary: "Use OpenAI.",
+          logins: ["api-key"],
+          mark: null,
+          caution: null,
+        },
+      ];
+    }
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderApp();
+
+  await userEvent.click(
+    await view.findByRole("button", { name: "Set up OpenBot" }),
+  );
+  await userEvent.click(await view.findByRole("button", { name: "Continue" }));
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+  await waitFor(() =>
+    expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  expect(invokeCalls.filter((call) => call.command === "already_configured"))
+    .toHaveLength(1);
 });

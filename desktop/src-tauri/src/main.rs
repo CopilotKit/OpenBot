@@ -68,6 +68,35 @@ struct Progress {
     detail: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedModelApiKeys {
+    openai: bool,
+    anthropic: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedModelSessions {
+    openai: bool,
+    anthropic: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedConfiguration {
+    intelligence_api_key: bool,
+    model_api_keys: SavedModelApiKeys,
+    model_sessions: SavedModelSessions,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AlreadyConfigured {
+    values: std::collections::BTreeMap<String, String>,
+    saved: SavedConfiguration,
+}
+
 fn report(app: &tauri::AppHandle, step: &str, ok: bool, detail: impl Into<String>) {
     let _ = app.emit(
         "setup:progress",
@@ -257,20 +286,35 @@ struct ChosenModel {
     model: Option<String>,
     /// Minted by signing in, never typed. Absent for every path but a plan.
     token: Option<String>,
+    /// A saved credential/session indicator chosen in the window. The value is resolved here.
+    saved: Option<bool>,
 }
 
 impl ChosenModel {
-    fn into_credential(self) -> Result<openbot_env::ModelCredential, String> {
+    fn into_credential(self, root: &Path) -> Result<openbot_env::ModelCredential, Problem> {
         let given = |value: Option<String>| value.unwrap_or_default().trim().to_string();
+        let saved = self.saved.unwrap_or(false);
         match (self.provider.as_str(), self.login.as_str()) {
             ("openai", "api-key") => Ok(openbot_env::ModelCredential::OpenAi {
-                api_key: given(self.api_key),
+                api_key: if saved {
+                    saved_secret(root, "OPENAI_API_KEY")?
+                } else {
+                    given(self.api_key)
+                },
             }),
             ("anthropic", "api-key") => Ok(openbot_env::ModelCredential::Anthropic {
-                api_key: given(self.api_key),
+                api_key: if saved {
+                    saved_secret(root, "ANTHROPIC_API_KEY")?
+                } else {
+                    given(self.api_key)
+                },
             }),
             ("anthropic", "plan") => {
-                let token = given(self.token);
+                let token = if saved {
+                    saved_secret(root, "CLAUDE_CODE_OAUTH_TOKEN")?
+                } else {
+                    given(self.token)
+                };
                 if token.is_empty() {
                     // Said rather than written blank. A plan with no token produces a stack that
                     // comes up and a Bot that cannot answer, which reads as a broken product.
@@ -284,7 +328,18 @@ impl ChosenModel {
              * refresh token in there is what keeps the Bot answering past the first hour.
              */
             ("openai", "plan") => {
-                let store = given(self.token);
+                let store = if saved {
+                    openbot_env::read_plan_store(root)
+                        .map_err(|error| {
+                            Problem::with(
+                                "OpenBot could not read the saved ChatGPT sign-in.",
+                                format!("{}: {error}", root.join(openbot_env::CHATGPT_STORE_FILE).display()),
+                            )
+                        })?
+                        .unwrap_or_default()
+                } else {
+                    given(self.token)
+                };
                 if store.is_empty() {
                     return Err("That ChatGPT plan was not signed in to.".into());
                 }
@@ -299,9 +354,15 @@ impl ChosenModel {
             }
             (provider, login) => Err(format!(
                 "{provider} cannot be connected by {login}, which is not a way in that screen offers."
-            )),
+            )
+            .into()),
         }
     }
+}
+
+fn saved_secret(root: &Path, key: &str) -> Result<String, Problem> {
+    openbot_desktop_lib::vault::already_given_interactive(&root.join(".env"), &[key])
+        .map(|found| found.get(key).cloned().unwrap_or_default())
 }
 
 /// Write the `.env`, raise the containers, migrate, then start the three host processes.
@@ -333,7 +394,7 @@ async fn start_stack(
     // list to keep in step. See `harness::picked` for what each refusal is for.
     // Named rather than inlined: the Bot choice below reads it, the store file is written from it,
     // and reading the model screen twice could not be relied on to give the same answer.
-    let credential = model.into_credential()?;
+    let credential = model.into_credential(&root)?;
 
     /*
      * A PLAN CHOOSES ITS OWN BOT, because only one Bot can spend it.
@@ -395,6 +456,12 @@ async fn start_stack(
         return Err(problem.into());
     }
 
+    let api_key = if api_key.trim().is_empty() {
+        saved_secret(&root, "INTELLIGENCE_API_KEY")?
+    } else {
+        api_key
+    };
+
     let settings = openbot_env::compose(
         &openbot_env::Intelligence {
             api_url,
@@ -410,7 +477,10 @@ async fn start_stack(
         picked.as_ref(),
         // What a previous start of this deployment already minted. Without it every Start writes a
         // new KEY_ENCRYPTION_KEY and orphans everything the server had encrypted under the old one.
-        &openbot_desktop_lib::vault::already_given(&root.join(".env"), &openbot_env::MINTED[..]),
+        &openbot_desktop_lib::vault::already_given_interactive(
+            &root.join(".env"),
+            &openbot_env::MINTED[..],
+        )?,
     );
     /*
      * The credentials come out here and never reach the file.
@@ -780,7 +850,7 @@ async fn ask_the_bot(
     let root = PathBuf::from(root);
     // The addresses come from the file and the token from the credential store, which is where
     // this run put it. Asked for together, because one without the other cannot ask anything.
-    let settings = openbot_desktop_lib::vault::already_given(
+    let settings = openbot_desktop_lib::vault::already_given_interactive(
         &root.join(".env"),
         &[
             "PICKED_HARNESS_URL",
@@ -789,7 +859,7 @@ async fn ask_the_bot(
             "MANAGED_AGENT_AG_UI_URL",
             "MANAGED_AGENT_TOKEN",
         ],
-    );
+    )?;
     ask_the_bot_with_settings(root, question, settings).await
 }
 
@@ -867,9 +937,28 @@ same person: reading their own file back to them is not a disclosure. The key is
 anywhere, and only the settings the wizard asks about are read.
 */
 #[tauri::command]
-fn already_configured(root: String) -> std::collections::BTreeMap<String, String> {
-    openbot_desktop_lib::vault::already_given(
-        &PathBuf::from(root).join(".env"),
+fn already_configured(root: String) -> AlreadyConfigured {
+    let root = PathBuf::from(root);
+    let env_file = root.join(".env");
+    let silent = openbot_desktop_lib::vault::already_given_silent(
+        &env_file,
+        &[
+            "INTELLIGENCE_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ],
+    );
+    already_configured_from(root, silent)
+}
+
+fn already_configured_from(
+    root: PathBuf,
+    silent: std::collections::BTreeMap<String, String>,
+) -> AlreadyConfigured {
+    let env_file = root.join(".env");
+    let values = openbot_desktop_lib::vault::already_given_file_only(
+        &env_file,
         &[
             "INTELLIGENCE_API_KEY",
             "INTELLIGENCE_API_URL",
@@ -886,7 +975,26 @@ fn already_configured(root: String) -> std::collections::BTreeMap<String, String
             "ANTHROPIC_API_KEY",
             "OPENAI_BASE_URL",
         ],
-    )
+    );
+
+    AlreadyConfigured {
+        saved: SavedConfiguration {
+            intelligence_api_key: values.contains_key("INTELLIGENCE_API_KEY")
+                || silent.contains_key("INTELLIGENCE_API_KEY"),
+            model_api_keys: SavedModelApiKeys {
+                openai: values.contains_key("OPENAI_API_KEY")
+                    || silent.contains_key("OPENAI_API_KEY"),
+                anthropic: values.contains_key("ANTHROPIC_API_KEY")
+                    || silent.contains_key("ANTHROPIC_API_KEY"),
+            },
+            model_sessions: SavedModelSessions {
+                openai: openbot_env::saved_chatgpt_plan_store(&root),
+                anthropic: values.contains_key("CLAUDE_CODE_OAUTH_TOKEN")
+                    || silent.contains_key("CLAUDE_CODE_OAUTH_TOKEN"),
+            },
+        },
+        values,
+    }
 }
 
 /// The harness picker's rows. Data, so the screen is a list and not twelve branches.
@@ -1492,6 +1600,39 @@ mod tests {
             !test.contains("ask_the_bot("),
             "ID12 must test dispatch with resolved settings instead of loading vault-backed settings"
         );
+    }
+
+    #[test]
+    fn already_configured_returns_file_values_and_saved_indicators() {
+        let root = temp_root("openbot-already-configured");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".env"),
+            "INTELLIGENCE_API_KEY=file-cpk\nOPENAI_API_KEY=file-openai\nOPENAI_BASE_URL=https://models.example/v1\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".langchain")).unwrap();
+        std::fs::write(
+            root.join(openbot_env::CHATGPT_STORE_FILE),
+            "{\"refresh_token\":\"stored\"}\n",
+        )
+        .unwrap();
+
+        let configured = already_configured_from(root.clone(), std::collections::BTreeMap::new());
+
+        assert_eq!(
+            configured.values.get("INTELLIGENCE_API_KEY"),
+            Some(&"file-cpk".to_string())
+        );
+        assert_eq!(
+            configured.values.get("OPENAI_API_KEY"),
+            Some(&"file-openai".to_string())
+        );
+        assert!(configured.saved.intelligence_api_key);
+        assert!(configured.saved.model_api_keys.openai);
+        assert!(configured.saved.model_sessions.openai);
+        assert!(!configured.saved.model_sessions.anthropic);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

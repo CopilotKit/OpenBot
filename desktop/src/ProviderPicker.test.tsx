@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Provider } from "./ProviderPicker";
+import type { HeldConfiguration, Provider } from "./ProviderPicker";
 
 const providers: Provider[] = [
   {
@@ -78,6 +78,27 @@ async function renderPicker(onChoose: (choice: unknown) => void = () => {}) {
   return view;
 }
 
+async function renderPickerWithHeld(
+  held: HeldConfiguration,
+  onChoose: (choice: unknown) => void = () => {},
+) {
+  const { ProviderPicker } = await import("./ProviderPicker");
+  let view!: ReturnType<typeof render>;
+
+  await act(async () => {
+    view = render(
+      <ProviderPicker
+        chosen={null}
+        held={held}
+        onBack={() => {}}
+        onChoose={onChoose}
+      />,
+    );
+  });
+
+  return view;
+}
+
 test("a completed plan sign-in enables and submits only its issuing provider", async () => {
   const choices: unknown[] = [];
   invokeHandler = async (command) => {
@@ -141,4 +162,36 @@ test("a pending plan sign-in completion is ignored after switching provider rows
   );
   expect(view.queryByText(/Signed in to Anthropic/)).toBeNull();
   expect(choices).toEqual([]);
+});
+
+test("a saved provider-scoped plan session enables continue without exposing a token", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderPickerWithHeld(
+    {
+      saved: {
+        modelSessions: {
+          openai: true,
+          anthropic: false,
+        },
+      },
+    },
+    (choice) => choices.push(choice),
+  );
+
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  expect(view.getByText(/Signed in to OpenAI/)).toBeTruthy();
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+  expect(choices).toEqual([
+    {
+      provider: "openai",
+      login: "plan",
+      saved: true,
+    },
+  ]);
 });
