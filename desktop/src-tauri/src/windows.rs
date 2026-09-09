@@ -98,9 +98,12 @@ impl Blocker {
                  Intel VT-x or AMD-V."
             }
             Blocker::NotAdministrator => {
-                "Installing Windows Subsystem for Linux needs administrator rights, and this \
-                 account does not have them. Sign in as an administrator, or ask one to run OpenBot \
-                 once."
+                "Setting up Windows Subsystem for Linux needs administrator rights. Ask an \
+                 administrator to open Windows Terminal or PowerShell as an administrator and run \
+                 `dism.exe /online /enable-feature \
+                 /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart`, \
+                 `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`, \
+                 and `wsl --install`. Restart Windows, then start OpenBot again in your own account."
             }
         }
     }
@@ -908,6 +911,9 @@ mod tests {
             .unwrap();
             assert_eq!(result, expected, "{scenario}");
             assert_eq!(calls.len(), expected_probes, "{scenario}");
+            if let Some(blocker @ Blocker::NotAdministrator) = result {
+                assert_administrator_setup_instruction(blocker.instruction());
+            }
             if expected.is_none() {
                 assert_eq!(*stages.borrow(), [0, 1, 2, 3, 4, 6, 5]);
             }
@@ -994,6 +1000,22 @@ mod tests {
         }
     }
 
+    fn assert_administrator_setup_instruction(instruction: &str) {
+        for command in [
+            "wsl --install",
+            "dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart",
+            "dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart",
+        ] {
+            assert!(instruction.contains(command), "missing admin setup command: {instruction}");
+        }
+        assert!(instruction.contains("Ask an administrator"));
+        assert!(instruction.contains("Windows Terminal or PowerShell as an administrator and run"));
+        assert!(instruction.to_ascii_lowercase().contains("restart"));
+        assert!(instruction.contains("your own account"));
+        assert!(!instruction.contains("run OpenBot once"));
+        assert!(!instruction.contains("account does not have"));
+    }
+
     #[test]
     fn the_two_we_cannot_fix_say_who_has_to() {
         assert!(!Blocker::VirtualizationDisabled.ours_to_fix());
@@ -1001,9 +1023,7 @@ mod tests {
             .instruction()
             .contains("firmware"));
         assert!(!Blocker::NotAdministrator.ours_to_fix());
-        assert!(Blocker::NotAdministrator
-            .instruction()
-            .contains("administrator"));
+        assert_administrator_setup_instruction(Blocker::NotAdministrator.instruction());
     }
 
     #[test]
