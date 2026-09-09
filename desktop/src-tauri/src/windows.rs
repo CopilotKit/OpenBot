@@ -50,6 +50,8 @@ pub enum Blocker {
     WslOne,
     /// The features are on but the WSL2 kernel is not there, so nothing can actually run.
     WslNoKernel,
+    /// WSL is enabled but the Virtual Machine Platform feature needed by WSL2 is off.
+    VirtualMachinePlatformDisabled,
     /// Virtualization is off in firmware. Only the person, in their BIOS, can fix this.
     VirtualizationDisabled,
     /// The account cannot elevate.
@@ -60,6 +62,12 @@ impl Blocker {
     /// What the screen says. Each names the specific fix, and the one we cannot perform says so.
     pub fn instruction(self) -> &'static str {
         match self {
+            Blocker::VirtualMachinePlatformDisabled => {
+                "Virtual Machine Platform is switched off. Open Windows Terminal or PowerShell \
+                 as an administrator, run `dism.exe /online /enable-feature \
+                 /featurename:VirtualMachinePlatform /all /norestart`, restart Windows, and \
+                 start OpenBot again."
+            }
             // Says what to run, because OpenBot does not do it. The screen used to say "OpenBot
             // can install it", and nothing in this application installs anything: there is no
             // button under the sentence and no code behind one. Somebody read that, waited, and
@@ -107,7 +115,10 @@ impl Blocker {
     pub fn ours_to_fix(self) -> bool {
         matches!(
             self,
-            Blocker::WslAbsent | Blocker::WslOne | Blocker::WslNoKernel
+            Blocker::WslAbsent
+                | Blocker::WslOne
+                | Blocker::WslNoKernel
+                | Blocker::VirtualMachinePlatformDisabled
         )
     }
 }
@@ -345,6 +356,22 @@ fn blocker_with(
         }));
     }
 
+    let vmp_feature = "the Virtual Machine Platform feature state (powershell)";
+    let enabled = probe_bool(vmp_feature, &probe_text(vmp_feature, run("powershell", &[
+        "-NoProfile", "-NonInteractive", "-Command",
+        "$ErrorActionPreference = 'Stop'; \
+         $state = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State; \
+         if ($null -eq $state) { throw 'Virtual Machine Platform feature query returned no state' }; \
+         $state -eq 'Enabled'",
+    ]))?)?;
+    if !enabled {
+        return Ok(Some(if elevated {
+            Blocker::VirtualMachinePlatformDisabled
+        } else {
+            Blocker::NotAdministrator
+        }));
+    }
+
     let default_version = probe_text(
         "WSL status (wsl.exe --status)",
         run("wsl.exe", &["--status"]),
@@ -378,13 +405,46 @@ mod tests {
     use super::*;
     use crate::test_support::temp_root;
 
-    const PROBE_OUTPUTS: [&str; 5] = [
+    const PROBE_OUTPUTS: [&str; 6] = [
         "hypervisor=True\nfirmware=False\n",
+        "True\n",
         "True\n",
         "True\n",
         "Default Version: 2\n",
         "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2\n",
     ];
+
+    fn assert_probe_call(probe: usize, program: &str, args: &[&str]) {
+        if probe < 4 {
+            assert_eq!(program, "powershell");
+            assert_eq!(args.len(), 4);
+            assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
+            assert!(args[3].starts_with("$ErrorActionPreference = 'Stop'; "));
+            assert!(args[3].contains(match probe {
+                0 => "Get-CimInstance Win32_ComputerSystem",
+                1 => "WindowsBuiltInRole]::Administrator",
+                2 => "-FeatureName Microsoft-Windows-Subsystem-Linux",
+                3 => "-FeatureName VirtualMachinePlatform",
+                _ => unreachable!(),
+            }));
+            if probe == 3 {
+                assert_eq!(args[3], "$ErrorActionPreference = 'Stop'; \
+                    $state = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State; \
+                    if ($null -eq $state) { throw 'Virtual Machine Platform feature query returned no state' }; \
+                    $state -eq 'Enabled'");
+            }
+        } else {
+            assert_eq!(program, "wsl.exe");
+            assert_eq!(
+                args,
+                [match probe {
+                    4 => "--status",
+                    5 => "--version",
+                    _ => panic!("unexpected extra probe {probe}"),
+                }]
+            );
+        }
+    }
 
     fn probe_output(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
         #[cfg(unix)]
@@ -401,14 +461,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn vmp_disabled_blocks_before_wsl_or_engine_setup() {
+        let mut calls = Vec::new();
+        let result = blocker_with(
+            |program, args| {
+                assert_probe_call(calls.len(), program, args);
+                calls.push((program.to_string(), args.join(" ")));
+                let stdout = if args.iter().any(|arg| arg.contains("Win32_ComputerSystem")) {
+                    "hypervisor=True\nfirmware=False"
+                } else if args
+                    .iter()
+                    .any(|arg| arg.contains("VirtualMachinePlatform"))
+                {
+                    "False"
+                } else if program == "powershell" {
+                    "True"
+                } else if args == ["--status"] {
+                    "Default Version: 2"
+                } else {
+                    "WSL version: 2.7.13.0\nKernel version: 6.18.33.2-2"
+                };
+                Ok(probe_output(0, stdout, ""))
+            },
+            || panic!("disabled VMP must stop before kernel inspection"),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!("virtual-machine-platform-disabled")
+        );
+        assert!(!calls.iter().any(|(program, _)| program == "wsl.exe"));
+    }
+
     fn fail_probe_at(
         failing_probe: usize,
         failure: std::io::Result<std::process::Output>,
     ) -> Result<Option<Blocker>, Problem> {
         let mut failure = Some(failure);
         let mut probe = 0;
-        blocker_with(
-            |_, _| {
+        let result = blocker_with(
+            |program, args| {
+                assert_probe_call(probe, program, args);
                 let current = probe;
                 probe += 1;
                 if current == failing_probe {
@@ -418,7 +512,92 @@ mod tests {
                 }
             },
             || Ok(false),
-        )
+        );
+        assert_eq!(probe, failing_probe + 1, "continued after a failed probe");
+        result
+    }
+
+    #[test]
+    fn vmp_blocker_round_trips_and_names_the_precise_feature_command() {
+        let blocker: Blocker =
+            serde_json::from_str("\"virtual-machine-platform-disabled\"").unwrap();
+        assert_eq!(blocker, Blocker::VirtualMachinePlatformDisabled);
+        assert_eq!(
+            serde_json::to_string(&blocker).unwrap(),
+            "\"virtual-machine-platform-disabled\""
+        );
+        assert_eq!(blocker.instruction(), "Virtual Machine Platform is switched off. \
+            Open Windows Terminal or PowerShell as an administrator, run \
+            `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`, \
+            restart Windows, and start OpenBot again.");
+        assert!(blocker.ours_to_fix());
+    }
+
+    #[test]
+    fn vmp_probe_failures_keep_the_operation_and_diagnostic() {
+        for (failure, diagnostic) in [
+            (
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "synthetic VMP launch denied",
+                )),
+                "synthetic VMP launch denied",
+            ),
+            (
+                Ok(probe_output(17, "True", "VMP query denied")),
+                "VMP query denied",
+            ),
+            (
+                Ok(probe_output(17, "False", "VMP query denied")),
+                "VMP query denied",
+            ),
+            (
+                Ok(probe_output(0, "", "VMP returned no state")),
+                "VMP returned no state",
+            ),
+            (
+                Ok(probe_output(0, "garbled VMP state", "")),
+                "garbled VMP state",
+            ),
+        ] {
+            let error = fail_probe_at(3, failure).unwrap_err();
+            assert!(error
+                .said
+                .contains("the Virtual Machine Platform feature state (powershell)"));
+            assert!(error.detail.unwrap().contains(diagnostic));
+        }
+        let mut output = probe_output(0, "", "");
+        output.stdout = vec![0xff];
+        let error = fail_probe_at(3, Ok(output)).unwrap_err();
+        assert!(error
+            .said
+            .contains("the Virtual Machine Platform feature state (powershell)"));
+        assert!(error
+            .detail
+            .unwrap()
+            .contains("Could not decode probe stdout"));
+    }
+
+    #[test]
+    fn healthy_vmp_utf16_output_continues_to_wsl() {
+        let mut probe = 0;
+        let result = blocker_with(
+            |program, args| {
+                assert_probe_call(probe, program, args);
+                let mut output = probe_output(0, PROBE_OUTPUTS[probe], "");
+                if probe == 3 {
+                    output.stdout = "True\r\n"
+                        .encode_utf16()
+                        .flat_map(u16::to_le_bytes)
+                        .collect();
+                }
+                probe += 1;
+                Ok(output)
+            },
+            || Ok(false),
+        );
+        assert_eq!(result, Ok(None));
+        assert_eq!(probe, 6);
     }
 
     #[test]
@@ -455,7 +634,7 @@ mod tests {
 
     #[test]
     fn malformed_successful_powershell_probes_are_detection_errors() {
-        for probe in 0..3 {
+        for probe in 0..4 {
             let result = fail_probe_at(probe, Ok(probe_output(0, "", "")));
             assert!(
                 result.is_err(),
@@ -468,7 +647,8 @@ mod tests {
     fn failed_kernel_file_inspection_is_a_detection_error() {
         let mut probe = 0;
         let result = blocker_with(
-            |_, _| {
+            |program, args| {
+                assert_probe_call(probe, program, args);
                 let output = probe_output(0, PROBE_OUTPUTS[probe], "");
                 probe += 1;
                 Ok(output)
@@ -494,7 +674,7 @@ mod tests {
             .encode_utf16()
             .flat_map(u16::to_le_bytes)
             .collect();
-        let error = fail_probe_at(4, Ok(output)).unwrap_err();
+        let error = fail_probe_at(5, Ok(output)).unwrap_err();
         assert!(error.detail.unwrap().contains(diagnostic));
     }
 
@@ -504,6 +684,7 @@ mod tests {
             (
                 [
                     "hypervisor=False\nfirmware=False",
+                    "True",
                     "True",
                     "True",
                     "Default Version: 2",
@@ -516,8 +697,9 @@ mod tests {
                     PROBE_OUTPUTS[0],
                     "True",
                     "False",
-                    PROBE_OUTPUTS[3],
+                    "True",
                     PROBE_OUTPUTS[4],
+                    PROBE_OUTPUTS[5],
                 ],
                 Some(Blocker::WslAbsent),
             ),
@@ -526,8 +708,9 @@ mod tests {
                     PROBE_OUTPUTS[0],
                     "False",
                     "False",
-                    PROBE_OUTPUTS[3],
+                    "True",
                     PROBE_OUTPUTS[4],
+                    PROBE_OUTPUTS[5],
                 ],
                 Some(Blocker::NotAdministrator),
             ),
@@ -536,8 +719,9 @@ mod tests {
                     PROBE_OUTPUTS[0],
                     "True",
                     "True",
+                    "True",
                     "Default Version: 1",
-                    PROBE_OUTPUTS[4],
+                    PROBE_OUTPUTS[5],
                 ],
                 Some(Blocker::WslOne),
             ),
@@ -546,7 +730,8 @@ mod tests {
                     PROBE_OUTPUTS[0],
                     "True",
                     "True",
-                    PROBE_OUTPUTS[3],
+                    "True",
+                    PROBE_OUTPUTS[4],
                     "WSL version: 2",
                 ],
                 Some(Blocker::WslNoKernel),
@@ -555,7 +740,8 @@ mod tests {
         ] {
             let mut probe = 0;
             let result = blocker_with(
-                |_, _| {
+                |program, args| {
+                    assert_probe_call(probe, program, args);
                     let output = probe_output(0, outputs[probe], "");
                     probe += 1;
                     Ok(output)
@@ -570,7 +756,8 @@ mod tests {
     fn an_existing_inbox_kernel_does_not_require_the_unsupported_version_command() {
         let mut probe = 0;
         let result = blocker_with(
-            |_, args| {
+            |program, args| {
+                assert_probe_call(probe, program, args);
                 assert_ne!(args, ["--version"]);
                 let output = probe_output(0, PROBE_OUTPUTS[probe], "");
                 probe += 1;
@@ -579,7 +766,42 @@ mod tests {
             || Ok(true),
         );
         assert_eq!(result, Ok(None));
-        assert_eq!(probe, 4);
+        assert_eq!(probe, 5);
+    }
+
+    fn child_probe_output(
+        code: &str,
+        stdout: &str,
+        stderr: &str,
+    ) -> std::io::Result<std::process::Output> {
+        #[cfg(unix)]
+        let output = crate::quiet::command("/bin/sh")
+            .args([
+                "-c",
+                "printf '%s' \"$1\"; printf '%s' \"$2\" >&2; exit \"$3\"",
+                "openbot-probe-fixture",
+                stdout,
+                stderr,
+                code,
+            ])
+            .output();
+        #[cfg(windows)]
+        let output = {
+            let lines = stdout
+                .lines()
+                .map(|line| format!("echo {line}"))
+                .collect::<Vec<_>>()
+                .join(" & ");
+            let diagnostic = if stderr.is_empty() {
+                String::new()
+            } else {
+                format!("echo {stderr} 1>&2 & ")
+            };
+            crate::quiet::command("cmd")
+                .args(["/D", "/C", &format!("{lines} & {diagnostic}exit /b {code}")])
+                .output()
+        };
+        output
     }
 
     /// Actual child processes supply bytes and statuses to the production decision path. No
@@ -588,8 +810,11 @@ mod tests {
     fn detection_errors_cross_the_external_command_boundary() {
         for failing_probe in 0..PROBE_OUTPUTS.len() {
             let mut probe = 0;
+            let mut calls = Vec::new();
             let result = blocker_with(
-                |_, _| {
+                |program, args| {
+                    assert_probe_call(probe, program, args);
+                    calls.push(serde_json::json!({ "program": program, "args": args }));
                     let stdout = PROBE_OUTPUTS[probe];
                     let stderr = if probe == failing_probe {
                         "synthetic external probe denied"
@@ -598,34 +823,7 @@ mod tests {
                     };
                     let code = if probe == failing_probe { "17" } else { "0" };
                     probe += 1;
-                    #[cfg(unix)]
-                    let output = crate::quiet::command("/bin/sh")
-                        .args([
-                            "-c",
-                            "printf '%s' \"$1\"; printf '%s' \"$2\" >&2; exit \"$3\"",
-                            "openbot-probe-fixture",
-                            stdout,
-                            stderr,
-                            code,
-                        ])
-                        .output();
-                    #[cfg(windows)]
-                    let output = {
-                        let lines = stdout
-                            .lines()
-                            .map(|line| format!("echo {line}"))
-                            .collect::<Vec<_>>()
-                            .join(" & ");
-                        let diagnostic = if stderr.is_empty() {
-                            String::new()
-                        } else {
-                            format!("echo {stderr} 1>&2 & ")
-                        };
-                        crate::quiet::command("cmd")
-                            .args(["/D", "/C", &format!("{lines} & {diagnostic}exit /b {code}")])
-                            .output()
-                    };
-                    output
+                    child_probe_output(code, stdout, stderr)
                 },
                 || Ok(false),
             );
@@ -637,6 +835,90 @@ mod tests {
             println!(
                 "windows detection command boundary: {}",
                 serde_json::to_string(&error).unwrap()
+            );
+            println!(
+                "windows blocker command payload: {}",
+                serde_json::json!({
+                    "scenario": format!("failed-probe-{failing_probe}"),
+                    "problem": error,
+                    "calls": calls,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn feature_states_cross_the_external_command_boundary() {
+        for (scenario, elevated, wsl, vmp, expected, expected_probes) in [
+            (
+                "vmp-disabled-admin",
+                "True",
+                "True",
+                "False",
+                Some(Blocker::VirtualMachinePlatformDisabled),
+                4,
+            ),
+            (
+                "vmp-disabled-standard",
+                "False",
+                "True",
+                "False",
+                Some(Blocker::NotAdministrator),
+                4,
+            ),
+            (
+                "wsl-absent-admin",
+                "True",
+                "False",
+                "True",
+                Some(Blocker::WslAbsent),
+                3,
+            ),
+            (
+                "wsl-absent-standard",
+                "False",
+                "False",
+                "True",
+                Some(Blocker::NotAdministrator),
+                3,
+            ),
+            ("healthy-admin", "True", "True", "True", None, 6),
+            ("healthy-standard", "False", "True", "True", None, 6),
+        ] {
+            let mut outputs = PROBE_OUTPUTS;
+            outputs[1] = elevated;
+            outputs[2] = wsl;
+            outputs[3] = vmp;
+            let mut calls = Vec::new();
+            let stages = std::cell::RefCell::new(Vec::new());
+            let result = blocker_with(
+                |program, args| {
+                    let probe = calls.len();
+                    assert_probe_call(probe, program, args);
+                    calls.push(serde_json::json!({ "program": program, "args": args }));
+                    stages.borrow_mut().push(probe);
+                    child_probe_output("0", outputs[probe], "")
+                },
+                || {
+                    assert!(expected.is_none(), "{scenario} reached kernel inspection");
+                    stages.borrow_mut().push(6);
+                    Ok(false)
+                },
+            )
+            .unwrap();
+            assert_eq!(result, expected, "{scenario}");
+            assert_eq!(calls.len(), expected_probes, "{scenario}");
+            if expected.is_none() {
+                assert_eq!(*stages.borrow(), [0, 1, 2, 3, 4, 6, 5]);
+            }
+            println!(
+                "windows blocker command payload: {}",
+                serde_json::json!({
+                    "scenario": scenario,
+                    "blocker": result,
+                    "instruction": result.map(Blocker::instruction),
+                    "calls": calls,
+                })
             );
         }
     }
@@ -673,6 +955,7 @@ mod tests {
         // no button to press. Seen on Windows Server 2022 with WSL genuinely disabled.
         for blocker in [
             Blocker::WslAbsent,
+            Blocker::VirtualMachinePlatformDisabled,
             Blocker::WslOne,
             Blocker::VirtualizationDisabled,
             Blocker::NotAdministrator,
@@ -700,6 +983,7 @@ mod tests {
     fn each_blocker_names_its_own_fix_rather_than_saying_setup_failed() {
         for blocker in [
             Blocker::WslAbsent,
+            Blocker::VirtualMachinePlatformDisabled,
             Blocker::WslOne,
             Blocker::VirtualizationDisabled,
             Blocker::NotAdministrator,

@@ -242,6 +242,39 @@ test("a successfully detected missing WSL feature keeps its setup instruction", 
   expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
 });
 
+test("disabled Virtual Machine Platform displays its feature-specific fix and blocks setup", async () => {
+  useRootConfigurationSetup("/tmp/openbot-vmp-detection-test", async () =>
+    emptyConfiguration(),
+  );
+  const setupHandler = invokeHandler;
+  const instruction =
+    "Virtual Machine Platform is switched off. Open Windows Terminal or PowerShell as an administrator, run `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`, restart Windows, and start OpenBot again.";
+  invokeHandler = async (command, args) => {
+    if (command === "windows_blocker")
+      return "virtual-machine-platform-disabled";
+    if (command === "windows_blocker_instruction") {
+      expect(args).toEqual({ blocker: "virtual-machine-platform-disabled" });
+      return instruction;
+    }
+    return setupHandler(command, args);
+  };
+  const view = await renderApp();
+  expect(await view.findByText(instruction)).toBeTruthy();
+  expect(
+    view.getByRole("heading", {
+      name: "Virtual Machine Platform is switched off",
+    }),
+  ).toBeTruthy();
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Start OpenBot" })).toBeNull();
+  expect(
+    invokeCalls.some((call) =>
+      ["prepare_engine", "start_stack"].includes(call.command),
+    ),
+  ).toBe(false);
+});
+
 type ExistingConfigurationValues = {
   INTELLIGENCE_API_KEY?: string;
   INTELLIGENCE_API_URL?: string;

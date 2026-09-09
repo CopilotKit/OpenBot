@@ -25,6 +25,7 @@ type EngineStatus = {
 type Blocker =
   | "wsl-absent"
   | "wsl-one"
+  | "virtual-machine-platform-disabled"
   | "virtualization-disabled"
   | "not-administrator";
 
@@ -664,6 +665,8 @@ function titleFor(blocker: Blocker): string {
       return "Windows Subsystem for Linux is not installed";
     case "wsl-one":
       return "Windows Subsystem for Linux is at version 1";
+    case "virtual-machine-platform-disabled":
+      return "Virtual Machine Platform is switched off";
     case "virtualization-disabled":
       return "Virtualization is off in this machine's firmware";
     case "not-administrator":
