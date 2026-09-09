@@ -43,9 +43,23 @@ export type StoredThread = {
   messages: Message[];
   /** Zero on every ordinary read. Above zero means the history store holds something unreadable. */
   unreadable: number;
+  /**
+   * `"unavailable"` means the history endpoint failed or could not be read. It is not evidence that
+   * the thread is empty or belongs to another project.
+   */
+  availability: "ready" | "unavailable";
 };
 
-const NOTHING: StoredThread = { messages: [], unreadable: 0 };
+const EMPTY_THREAD: StoredThread = {
+  messages: [],
+  unreadable: 0,
+  availability: "ready",
+};
+const UNAVAILABLE_THREAD: StoredThread = {
+  messages: [],
+  unreadable: 0,
+  availability: "unavailable",
+};
 
 /**
  * The turns that parse, kept in order, and a count of the ones that did not.
@@ -73,7 +87,7 @@ export function readableTurns(stored: readonly unknown[]): StoredThread {
     }
   }
 
-  return { messages, unreadable };
+  return { messages, unreadable, availability: "ready" };
 }
 
 /**
@@ -167,10 +181,10 @@ export async function readThreadMessages(
     const response = await tryClient(
       `/api/copilotkit/threads/${encodeURIComponent(threadId)}/messages?agentId=${encodeURIComponent(agentId)}`,
     );
-    if (!response.ok) return NOTHING;
+    if (!response.ok) return UNAVAILABLE_THREAD;
     const stored = (await response.json())?.messages;
-    return Array.isArray(stored) ? readableTurns(stored) : NOTHING;
+    return Array.isArray(stored) ? readableTurns(stored) : EMPTY_THREAD;
   } catch {
-    return NOTHING;
+    return UNAVAILABLE_THREAD;
   }
 }

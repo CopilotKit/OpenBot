@@ -46,6 +46,38 @@ const JOIN_DEADLINE_MS = 1500;
  */
 const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
 
+export function channelHistoryNotice({
+  restoring,
+  messageCount,
+  lastMessageAt,
+  historyAvailability,
+  unreadable,
+}: {
+  restoring: boolean;
+  messageCount: number;
+  lastMessageAt: string | null;
+  historyAvailability: "ready" | "unavailable";
+  unreadable: number;
+}): string | null {
+  if (restoring) return null;
+
+  if (
+    historyAvailability === "unavailable" &&
+    messageCount === 0 &&
+    lastMessageAt !== null
+  ) {
+    return "Earlier messages are temporarily unavailable. You can keep using this conversation.";
+  }
+
+  if (unreadable > 0) {
+    return unreadable === 1
+      ? "One earlier message could not be read and is not shown. The rest of this conversation is complete."
+      : `${unreadable} earlier messages could not be read and are not shown. The rest of this conversation is complete.`;
+  }
+
+  return null;
+}
+
 /**
  * One channel's conversation with one coworker.
  *
@@ -131,6 +163,9 @@ export function ChannelChat({
    * recoverable from it.
    */
   const [unreadable, setUnreadable] = useState(0);
+  const [historyAvailability, setHistoryAvailability] = useState<
+    "ready" | "unavailable"
+  >("ready");
   useEffect(() => {
     if (isReady) openReadyGate.current();
   }, [isReady]);
@@ -190,6 +225,7 @@ export function ChannelChat({
          * is unreadable is exactly the case where silence would read as "this conversation is empty".
          */
         if (current) setUnreadable(stored.unreadable);
+        if (current) setHistoryAvailability(stored.availability);
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
         // never coming.
@@ -275,6 +311,13 @@ export function ChannelChat({
   useActiveBot(runtimeAgentId);
 
   const skillCommands = useSkillCommands(runtimeAgentId);
+  const historyNotice = channelHistoryNotice({
+    restoring,
+    messageCount: agent.messages.length,
+    lastMessageAt: channel.lastMessageAt,
+    historyAvailability,
+    unreadable,
+  });
 
   // Run failures arrive as events and are reported only for turns started in this mount.
   const [runError, setRunError] = useState<string | null>(null);
@@ -502,38 +545,9 @@ export function ChannelChat({
            * it — and they are independent, so neither is an `else` for the other.
            */
           <>
-            {/*
-             * A conversation whose history this deployment cannot reach at all.
-             *
-             * MEASURED, AND IT LOOKED LIKE A BROKEN APP. The rail is drawn from OpenBot's own
-             * database, so a channel is listed whatever the history store says; the messages live in
-             * the Intelligence project, and pointing a deployment at a different project leaves the
-             * platform answering `THREAD_NOT_FOUND`. That 404 is deliberately read as "no history"
-             * because a thread id is minted before the thread exists, so a brand-new conversation
-             * 404s as its normal opening move — see `isMissingThread` in `server/src/copilot.ts` and
-             * the note there about not widening it.
-             *
-             * The two cases are told apart by a fact this app already has: `lastMessageAt` is set
-             * only once something has been said. A new conversation has none and is silent, as it
-             * should be. One that has been spoken in and comes back with nothing is a conversation
-             * whose history is somewhere this deployment cannot see, and saying nothing there is
-             * what made a list of conversations open onto a blank window.
-             */}
-            {!restoring &&
-            agent.messages.length === 0 &&
-            channel.lastMessageAt !== null ? (
+            {historyNotice ? (
               <p className="pb-2 text-sm text-muted-foreground" role="status">
-                This conversation was kept with a different CopilotKit project,
-                so its earlier messages cannot be read here. Anything you send
-                now starts a fresh history.
-              </p>
-            ) : null}
-            {unreadable > 0 ? (
-              <p className="pb-2 text-sm text-muted-foreground" role="status">
-                {unreadable === 1
-                  ? "One earlier message could not be read and is not shown."
-                  : `${unreadable} earlier messages could not be read and are not shown.`}{" "}
-                The rest of this conversation is complete.
+                {historyNotice}
               </p>
             ) : null}
             {channel.active ? null : (

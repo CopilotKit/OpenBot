@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { readableTurns } from "../src/lib/copilot/thread-messages";
+import {
+  readableTurns,
+  readThreadMessages,
+} from "../src/lib/copilot/thread-messages";
 
 /**
  * Reading back a conversation that used a tool.
@@ -248,5 +251,78 @@ describe("shapes a real thread contains", () => {
     expect(read.map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
     expect(read[0]?.content).toBe("one");
     expect(read[2]?.content).toBe("three");
+  });
+});
+
+describe("thread history retrieval outcomes", () => {
+  const withFetch = async (
+    fetch: typeof globalThis.fetch,
+    run: () => Promise<void>,
+  ) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = fetch;
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = original;
+    }
+  };
+
+  test("HTTP failures are unavailable history, not valid empty history", async () => {
+    await withFetch(
+      async () => new Response("broken", { status: 500 }),
+      async () => {
+        const read = await readThreadMessages("thread-1", "agent-1");
+
+        expect(read).toEqual({
+          messages: [],
+          unreadable: 0,
+          availability: "unavailable",
+        });
+      },
+    );
+  });
+
+  test("network failures are unavailable history, not valid empty history", async () => {
+    await withFetch(
+      async () => {
+        throw new TypeError("network down");
+      },
+      async () => {
+        const read = await readThreadMessages("thread-1", "agent-1");
+
+        expect(read).toEqual({
+          messages: [],
+          unreadable: 0,
+          availability: "unavailable",
+        });
+      },
+    );
+  });
+
+  test("a readable empty response remains a valid empty history", async () => {
+    await withFetch(
+      async () =>
+        Response.json({
+          messages: [],
+        }),
+      async () => {
+        const read = await readThreadMessages("thread-1", "agent-1");
+
+        expect(read).toEqual({
+          messages: [],
+          unreadable: 0,
+          availability: "ready",
+        });
+      },
+    );
+  });
+
+  test("unreadable stored turns are still a ready retrieval with holes", () => {
+    expect(readableTurns([{ id: "m1", role: "user", content: null }])).toEqual({
+      messages: [],
+      unreadable: 1,
+      availability: "ready",
+    });
   });
 });
