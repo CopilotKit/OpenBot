@@ -384,9 +384,7 @@ export function ProviderPicker({
           {login === "api-key" && (
             <>
               {savedApiKey && !apiKey ? (
-                <p className="lede">
-                  A saved {row.name} API key will be used.
-                </p>
+                <p className="lede">A saved {row.name} API key will be used.</p>
               ) : null}
               <div className="field">
                 <label htmlFor="key">{row.name} API key</label>
