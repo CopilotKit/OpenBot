@@ -27,15 +27,15 @@ use crate::engine::EngineStatus;
 /**
 Where a signed-in ChatGPT plan's token store lives, on this machine and inside the harness.
 
-Two paths for one file, joined by a bind mount `docker-compose.yml` declares. It has to be a file
-rather than a setting because the harness's provider WRITES to it: when the access token expires it
-renews and saves, and the mount is what makes that renewal outlast the container.
+Two paths for one file, joined by a directory bind mount `docker-compose.yml` declares. It has to be
+a file rather than a setting because the harness's provider WRITES to it: when the access token
+expires it renews and saves, and the mount is what makes that renewal outlast the container.
 
-The host file is always written, even when nobody signed in to a plan. A bind mount whose source is
-missing does not fail, it silently creates a DIRECTORY at that path, and the next real sign-in then
-cannot write its file. Writing an empty store costs nothing and removes the trap.
+The host file is always written, even when nobody signed in to a plan. That keeps the mounted
+directory in the shape the provider expects and avoids leaving a stale plan token behind after
+somebody switches away from the plan.
 */
-pub const CHATGPT_STORE_FILE: &str = "chatgpt-auth.json";
+pub const CHATGPT_STORE_FILE: &str = ".langchain/chatgpt-auth.json";
 pub const CHATGPT_STORE_INSIDE: &str = "/root/.langchain/chatgpt-auth.json";
 
 /// Ports the stack publishes. Matched to `docker-compose.yml` defaults so a person who later runs
@@ -610,10 +610,10 @@ pub fn already_set(path: &Path, keys: &[&str]) -> BTreeMap<String, String> {
 /**
 Lay down the token store a signed-in ChatGPT plan reads from, beside the `.env`.
 
-Always written, and see `CHATGPT_STORE_FILE` for why: an absent source turns the mount into a
-directory. Answering the model screen with anything else clears it, on the same reasoning as the
-keys the writer empties. A plan that was signed out of should not leave a credential on disk for a
-later run to pick up.
+Always written, and see `CHATGPT_STORE_FILE` for why: a directory bind mount needs the file already
+present inside it before the harness starts. Answering the model screen with anything else clears
+it, on the same reasoning as the keys the writer empties. A plan that was signed out of should not
+leave a credential on disk for a later run to pick up.
 
 Not called when the screen was not answered at all, which is the one case that must not disturb what
 is already there.
@@ -624,6 +624,9 @@ pub fn write_plan_store(dir: &Path, credential: &ModelCredential) -> std::io::Re
         _ => "{}",
     };
     let path = dir.join(CHATGPT_STORE_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::write(&path, format!("{store}\n"))?;
     /*
      * Owner-only, because this IS the credential. `.env` beside it holds keys and gets whatever
@@ -1574,6 +1577,17 @@ mod model_tests {
         );
         assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
         assert_eq!(env.get("OPENAI_BASE_URL"), Some(&String::new()));
+    }
+
+    #[test]
+    fn the_chatgpt_store_host_path_stays_inside_the_mounted_langchain_directory() {
+        let path = Path::new(CHATGPT_STORE_FILE);
+        assert_eq!(path.parent(), Some(Path::new(".langchain")));
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("chatgpt-auth.json")
+        );
+        assert_eq!(CHATGPT_STORE_INSIDE, "/root/.langchain/chatgpt-auth.json");
     }
 
     /// THE CREDENTIAL ITSELF NEVER REACHES THE `.env`, only the path of the file holding it.

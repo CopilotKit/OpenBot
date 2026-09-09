@@ -328,9 +328,9 @@ services:
       # token expires within the hour and the harness renews it, so the renewal has to land back on
       # this machine or every restart would replay a refresh token that had already been spent.
       #
-      # The app writes this file before `compose up` for the reason bind mounts make necessary: a
-      # missing source is not an error, it silently becomes a directory.
-      - ./chatgpt-auth.json:/root/.langchain/chatgpt-auth.json
+      # The provider writes by atomically replacing the file with a sibling temporary file, so the
+      # mount has to be the containing directory rather than the file mount point.
+      - ./.langchain:/root/.langchain
 
   # The same Bot behavior on a framework, exposed as another AG-UI endpoint and registry row.
   agent-langgraph:

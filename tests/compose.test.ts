@@ -19,7 +19,11 @@ function composeFile() {
 
 function runLangGraphAguiModelProbe(
   openaiBaseUrl: string | undefined,
-  options: { botProvider?: string; botModel?: string; openaiApiKey?: string } = {},
+  options: {
+    botProvider?: string;
+    botModel?: string;
+    openaiApiKey?: string;
+  } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), "openbot-langgraph-agui-"));
   try {
@@ -160,7 +164,13 @@ function runComposeConfig(env: Record<string, string>) {
     },
   );
   return JSON.parse(output) as {
-    services: Record<string, { environment: Record<string, string> }>;
+    services: Record<
+      string,
+      {
+        environment: Record<string, string>;
+        volumes?: Array<{ type: string; source: string; target: string }>;
+      }
+    >;
   };
 }
 
@@ -291,6 +301,28 @@ test("passes the selected Anthropic provider and model into the picked harness",
     BOT_MODEL: "gpt-5.5",
     ANTHROPIC_API_KEY: "",
   });
+});
+
+test("mounts the ChatGPT token store directory into the picked harness", () => {
+  const config = runComposeConfig({
+    CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
+  });
+
+  expect(config.services["agent-harness"].environment).toMatchObject({
+    CHATGPT_AUTH_FILE: "/root/.langchain/chatgpt-auth.json",
+  });
+  expect(config.services["agent-harness"].volumes).toContainEqual(
+    expect.objectContaining({
+      type: "bind",
+      target: "/root/.langchain",
+    }),
+  );
+  expect(config.services["agent-harness"].volumes).not.toContainEqual(
+    expect.objectContaining({
+      type: "bind",
+      target: "/root/.langchain/chatgpt-auth.json",
+    }),
+  );
 });
 
 test("enables pgvector before creating vector columns", () => {
