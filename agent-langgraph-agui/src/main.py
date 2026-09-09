@@ -17,6 +17,17 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 TOKEN_HEADER = "x-openbot-agent-token"
 
 
+def _normalize_openai_base_url():
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    if base_url is None:
+        return
+    base_url = base_url.strip()
+    if base_url:
+        os.environ["OPENAI_BASE_URL"] = base_url
+    else:
+        os.environ.pop("OPENAI_BASE_URL", None)
+
+
 def _model():
     """The model this Bot thinks with, chosen by which credential the deployment gave it.
 
@@ -53,6 +64,7 @@ def _model():
             token_provider=_FileChatGPTOAuthTokenProvider(path=Path(store)),
         )
 
+    _normalize_openai_base_url()
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
     return init_chat_model(model if ":" in model else f"{provider}:{model}")
 

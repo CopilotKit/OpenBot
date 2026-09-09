@@ -1,12 +1,135 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-test("provides PostgreSQL with pgvector for local development", () => {
-  const compose = readFileSync(
+function composeFile() {
+  return readFileSync(
     join(import.meta.dir, "..", "docker-compose.yml"),
     "utf8",
   );
+}
+
+function runLangGraphAguiModelProbe(openaiBaseUrl: string | undefined) {
+  const dir = mkdtempSync(join(tmpdir(), "openbot-langgraph-agui-"));
+  try {
+    writeFileSync(
+      join(dir, "ag_ui_langgraph.py"),
+      [
+        "class LangGraphAgent:",
+        "    def __init__(self, **kwargs):",
+        "        pass",
+        "",
+        "def add_langgraph_fastapi_endpoint(**kwargs):",
+        "    pass",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(dir, "probe.py"),
+      [
+        "import json",
+        "import os",
+        "from src import main",
+        "main._model()",
+        "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL')}))",
+        "",
+      ].join("\n"),
+    );
+    mkdirSync(join(dir, "langchain"), { recursive: true });
+    writeFileSync(
+      join(dir, "langchain", "chat_models.py"),
+      ["def init_chat_model(model):", "    return {'model': model}", ""].join(
+        "\n",
+      ),
+    );
+    writeFileSync(join(dir, "langchain", "__init__.py"), "");
+    mkdirSync(join(dir, "fastapi"), { recursive: true });
+    writeFileSync(
+      join(dir, "fastapi", "__init__.py"),
+      [
+        "class FastAPI:",
+        "    def middleware(self, *_args, **_kwargs):",
+        "        def decorator(fn):",
+        "            return fn",
+        "        return decorator",
+        "    def get(self, *_args, **_kwargs):",
+        "        def decorator(fn):",
+        "            return fn",
+        "        return decorator",
+        "",
+        "class Request:",
+        "    pass",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(dir, "fastapi", "responses.py"),
+      [
+        "class JSONResponse:",
+        "    def __init__(self, *args, **kwargs):",
+        "        self.args = args",
+        "        self.kwargs = kwargs",
+        "",
+      ].join("\n"),
+    );
+    mkdirSync(join(dir, "langgraph", "checkpoint"), { recursive: true });
+    writeFileSync(
+      join(dir, "langgraph", "graph.py"),
+      [
+        "START = 'start'",
+        "END = 'end'",
+        "MessagesState = dict",
+        "class StateGraph:",
+        "    def __init__(self, *_args, **_kwargs):",
+        "        pass",
+        "    def add_node(self, *_args, **_kwargs):",
+        "        pass",
+        "    def add_edge(self, *_args, **_kwargs):",
+        "        pass",
+        "    def compile(self, **_kwargs):",
+        "        return object()",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(dir, "langgraph", "__init__.py"), "");
+    writeFileSync(join(dir, "langgraph", "checkpoint", "__init__.py"), "");
+    writeFileSync(
+      join(dir, "langgraph", "checkpoint", "memory.py"),
+      ["class MemorySaver:", "    pass", ""].join("\n"),
+    );
+
+    const env = {
+      ...process.env,
+      BOT_MODEL: "gpt-test",
+      OPENAI_API_KEY: "sk-test",
+      PYTHONPATH: `${dir}:${join(import.meta.dir, "..", "agent-langgraph-agui")}`,
+    };
+    if (openaiBaseUrl === undefined) {
+      delete env.OPENAI_BASE_URL;
+    } else {
+      env.OPENAI_BASE_URL = openaiBaseUrl;
+    }
+    return JSON.parse(
+      execFileSync("python3", [join(dir, "probe.py")], {
+        env,
+        encoding: "utf8",
+      }),
+    ) as { base_url: string | null };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("provides PostgreSQL with pgvector for local development", () => {
+  const compose = composeFile();
 
   expect(compose).toContain("postgres:");
   expect(compose).toContain("pgvector/pgvector:");
@@ -20,10 +143,7 @@ test("provides PostgreSQL with pgvector for local development", () => {
  * `scripts/start.sh` reads these same names to decide where to look for each service.
  */
 test("publishes every service on a settable port with the documented default", () => {
-  const compose = readFileSync(
-    join(import.meta.dir, "..", "docker-compose.yml"),
-    "utf8",
-  );
+  const compose = composeFile();
 
   const published = [
     ["POSTGRES_PORT", "5432", "5432"],
@@ -52,10 +172,7 @@ test("publishes every service on a settable port with the documented default", (
  * answer rather than something this test quietly grants.
  */
 test("publishes every service that holds a secret on loopback only", () => {
-  const compose = readFileSync(
-    join(import.meta.dir, "..", "docker-compose.yml"),
-    "utf8",
-  );
+  const compose = composeFile();
 
   for (const name of [
     "SUPERVISOR_PORT",
@@ -83,10 +200,7 @@ test("publishes every service that holds a secret on loopback only", () => {
  * to their gateway.
  */
 test("gives every Bot the OpenAI-compatible endpoint", () => {
-  const compose = readFileSync(
-    join(import.meta.dir, "..", "docker-compose.yml"),
-    "utf8",
-  );
+  const compose = composeFile();
 
   // The two shipped Bots and the picked harness. All three speak OpenAI; only the framework Bot
   // can be pointed at the other two providers.
@@ -99,6 +213,14 @@ test("gives every Bot the OpenAI-compatible endpoint", () => {
   ]) {
     expect(compose).toContain(`${variable}: \${${variable}:-}`);
   }
+});
+
+test("normalizes the picked LangGraph harness's blank OpenAI endpoint before model construction", () => {
+  expect(runLangGraphAguiModelProbe("").base_url).toBeNull();
+  expect(runLangGraphAguiModelProbe("   ").base_url).toBeNull();
+  expect(runLangGraphAguiModelProbe("http://127.0.0.1:4310/v1").base_url).toBe(
+    "http://127.0.0.1:4310/v1",
+  );
 });
 
 test("enables pgvector before creating vector columns", () => {
@@ -117,10 +239,7 @@ test("enables pgvector before creating vector columns", () => {
 });
 
 test("runs migrations after PostgreSQL becomes healthy", () => {
-  const compose = readFileSync(
-    join(import.meta.dir, "..", "docker-compose.yml"),
-    "utf8",
-  );
+  const compose = composeFile();
 
   expect(compose).toContain("migrate:");
   expect(compose).toContain("condition: service_healthy");
@@ -142,10 +261,7 @@ test("runs migrations after PostgreSQL becomes healthy", () => {
  * the browser container is deliberately not given them.
  */
 test("carries per-Bot egress into the computer and the supervisor", () => {
-  const compose = readFileSync(
-    join(import.meta.dir, "..", "docker-compose.yml"),
-    "utf8",
-  );
+  const compose = composeFile();
 
   // Both halves: the shared computer reads them itself, and the supervisor passes them on.
   const services = compose.split(/^ {2}(?=\S)/m);
