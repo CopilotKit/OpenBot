@@ -356,22 +356,9 @@ pub fn record_host_pids(root: &Path, pids: &[u32]) {
 }
 
 /// Record the host processes this window started.
-pub fn record_host_processes(root: &Path, processes: &[(&str, u32)]) {
+pub fn record_host_processes(root: &Path, processes: &[(&str, u32)]) -> Result<(), Problem> {
     #[cfg(windows)]
-    {
-        let snapshot = windows_processes();
-        let records: Vec<RecordedHostProcess> = processes
-            .iter()
-            .filter_map(|(name, pid)| {
-                let live = snapshot.iter().find(|process| process.process_id == *pid)?;
-                RecordedHostProcess::from_live(name, live)
-            })
-            .collect();
-        write_host_pid_file(
-            root,
-            &serde_json::json!({ "version": 1, "processes": records }),
-        );
-    }
+    record_windows_host_processes_with(root, processes, Path::new("powershell"))?;
     #[cfg(not(windows))]
     {
         record_host_pids(
@@ -379,35 +366,74 @@ pub fn record_host_processes(root: &Path, processes: &[(&str, u32)]) {
             &processes.iter().map(|(_, pid)| *pid).collect::<Vec<_>>(),
         );
     }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn record_windows_host_processes_with(
+    root: &Path,
+    processes: &[(&str, u32)],
+    powershell: &Path,
+) -> Result<(), Problem> {
+    let snapshot = windows_processes_with(powershell)?;
+    let records: Vec<RecordedHostProcess> = processes
+        .iter()
+        .filter_map(|(name, pid)| {
+            let live = snapshot.iter().find(|process| process.process_id == *pid)?;
+            RecordedHostProcess::from_live(name, live)
+        })
+        .collect();
+    write_host_pid_file(
+        root,
+        &serde_json::json!({ "version": 1, "processes": records }),
+    );
+    Ok(())
 }
 
 /// The pids a previous window recorded, if any.
-pub fn recorded_host_pids(root: &Path) -> Vec<u32> {
-    match recorded_host_pid_file(root) {
+pub fn recorded_host_pids(root: &Path) -> Result<Vec<u32>, Problem> {
+    Ok(match recorded_host_pid_file(root)? {
         Some(RecordedHostPidFile::Records {
             version: 1,
             processes,
         }) => processes.into_iter().map(|process| process.pid).collect(),
         Some(RecordedHostPidFile::Pids(pids)) => pids,
         _ => Vec::new(),
-    }
+    })
 }
 
 /// The recorded host processes with enough identity to verify a live Windows process.
-pub fn recorded_host_processes(root: &Path) -> Vec<RecordedHostProcess> {
-    match recorded_host_pid_file(root) {
+pub fn recorded_host_processes(root: &Path) -> Result<Vec<RecordedHostProcess>, Problem> {
+    Ok(match recorded_host_pid_file(root)? {
         Some(RecordedHostPidFile::Records {
             version: 1,
             processes,
         }) => processes,
         _ => Vec::new(),
-    }
+    })
 }
 
-fn recorded_host_pid_file(root: &Path) -> Option<RecordedHostPidFile> {
-    std::fs::read(host_pids_path(root))
-        .ok()
-        .and_then(|raw| serde_json::from_slice::<RecordedHostPidFile>(&raw).ok())
+fn recorded_host_pid_file(root: &Path) -> Result<Option<RecordedHostPidFile>, Problem> {
+    let path = host_pids_path(root);
+    let problem = |detail| {
+        Problem::with(
+            "OpenBot could not read its recorded host processes.",
+            format!("{}: {detail}", path.display()),
+        )
+    };
+    let raw = match std::fs::read(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(problem(format!("could not read pidfile: {error}"))),
+    };
+    let recorded = serde_json::from_slice::<RecordedHostPidFile>(&raw)
+        .map_err(|error| problem(format!("could not decode pidfile JSON: {error}")))?;
+    if let RecordedHostPidFile::Records { version, .. } = &recorded {
+        if *version != 1 {
+            return Err(problem(format!("unsupported pidfile version {version}")));
+        }
+    }
+    Ok(Some(recorded))
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -570,15 +596,24 @@ pub fn stop_processes_under(_root: &Path) -> Result<usize, Problem> {
      * directory, which Windows will not tell you cheaply. Measured: after the port sweep alone,
      * 3001 and 3010 were free and the worker was still running.
      */
-    let recorded = recorded_host_processes(_root);
-    let processes = windows_processes()?;
-    stop_windows_processes_under_with(
+    stop_windows_processes_with_inventory(
         _root,
-        &recorded,
-        &processes,
+        Path::new("powershell"),
         Path::new("netstat"),
         Path::new("taskkill"),
     )
+}
+
+#[cfg(any(not(unix), test))]
+fn stop_windows_processes_with_inventory(
+    root: &Path,
+    powershell: &Path,
+    netstat: &Path,
+    taskkill: &Path,
+) -> Result<usize, Problem> {
+    let recorded = recorded_host_processes(root)?;
+    let processes = windows_processes_with(powershell)?;
+    stop_windows_processes_under_with(root, &recorded, &processes, netstat, taskkill)
 }
 
 #[cfg(any(not(unix), test))]
@@ -796,30 +831,53 @@ impl RecordedHostProcess {
     }
 }
 
-#[cfg(windows)]
-fn windows_processes() -> Result<Vec<WindowsProcess>, Problem> {
-    let operation = "powershell Get-CimInstance Win32_Process";
-    let output = command("powershell")
+#[cfg(any(windows, test))]
+fn windows_processes_with(powershell: &Path) -> Result<Vec<WindowsProcess>, Problem> {
+    let operation = format!("{} Get-CimInstance Win32_Process", powershell.display());
+    let output = command(powershell)
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Compress",
+            "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate)",
         ])
         .output()
-        .map_err(|error| cleanup_spawn_problem(operation, error))?;
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
     if !output.status.success() {
-        return Err(cleanup_status_problem(operation, &output));
+        // The inventory includes other processes' command lines. Never echo a partial snapshot.
+        return Err(Problem::with(
+            "OpenBot could not inspect its Windows host processes.",
+            format!("{operation} exited with status {}", output.status),
+        ));
     }
-    Ok(windows_processes_in(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
+    windows_process_output(&output.stdout)
 }
 
-#[cfg(not(windows))]
-#[allow(dead_code)]
-fn windows_processes() -> Result<Vec<WindowsProcess>, Problem> {
-    Ok(Vec::new())
+#[cfg(any(windows, test))]
+fn windows_process_output(output: &[u8]) -> Result<Vec<WindowsProcess>, Problem> {
+    let invalid_encoding = || {
+        Problem::with(
+            "OpenBot could not inspect its Windows host processes.",
+            "powershell Get-CimInstance Win32_Process returned invalid UTF-8 or UTF-16LE",
+        )
+    };
+    // Windows PowerShell redirection can produce UTF-16LE, even though the script requests UTF-8.
+    if output.starts_with(&[0xff, 0xfe]) || output.get(1) == Some(&0) {
+        let bytes = output.strip_prefix(&[0xff, 0xfe]).unwrap_or(output);
+        if bytes.len() % 2 != 0 {
+            return Err(invalid_encoding());
+        }
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let text = String::from_utf16(&units).map_err(|_| invalid_encoding())?;
+        windows_processes_in(&text)
+    } else {
+        let bytes = output.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(output);
+        let text = std::str::from_utf8(bytes).map_err(|_| invalid_encoding())?;
+        windows_processes_in(text)
+    }
 }
 
 #[derive(Deserialize)]
@@ -829,12 +887,19 @@ enum WindowsProcessListing {
     One(WindowsProcess),
 }
 
-pub fn windows_processes_in(listing: &str) -> Vec<WindowsProcess> {
-    match serde_json::from_str::<WindowsProcessListing>(listing) {
-        Ok(WindowsProcessListing::Many(processes)) => processes,
-        Ok(WindowsProcessListing::One(process)) => vec![process],
-        Err(_) => Vec::new(),
-    }
+pub fn windows_processes_in(listing: &str) -> Result<Vec<WindowsProcess>, Problem> {
+    let listing = serde_json::from_str::<WindowsProcessListing>(listing).map_err(|error| {
+        Problem::with(
+            "OpenBot could not inspect its Windows host processes.",
+            format!(
+                "powershell Get-CimInstance Win32_Process returned invalid process JSON: {error}"
+            ),
+        )
+    })?;
+    Ok(match listing {
+        WindowsProcessListing::Many(processes) => processes,
+        WindowsProcessListing::One(process) => vec![process],
+    })
 }
 
 /// Recorded OpenBot root processes whose live identity still matches the pid file.
@@ -1544,7 +1609,7 @@ fn main() {
                 "cleanup command fixture did not compile: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            for name in ["lsof", "netstat", "taskkill"] {
+            for name in ["lsof", "netstat", "taskkill", "powershell"] {
                 std::fs::copy(
                     &compiled,
                     bin.join(if cfg!(windows) {
@@ -1629,6 +1694,14 @@ fn main() {
     let scenario = std::env::var("DTA028_CLEANUP_SCENARIO").unwrap();
     let root = std::env::var("DTA028_CLEANUP_ROOT").unwrap_or_default();
     match (program.as_str(), scenario.as_str()) {
+        ("powershell", "inventory-fail") => {
+            print!("synthetic partial inventory that must not be trusted");
+            std::process::exit(17);
+        }
+        ("powershell", "inventory-empty") => print!("[]"),
+        ("powershell", "inventory-malformed") => print!("[{{"),
+        ("powershell", "inventory-blank") => {},
+        ("netstat", "inventory-empty") => {},
         ("lsof", "lsof-ok") => {
             println!("p101\nn{root}/server\np202\nn{root}\np303\nn{root}/worker");
         }
@@ -2102,15 +2175,180 @@ fn main() {
 
         // Nothing recorded is an empty list, not a panic: a deployment somebody started by hand
         // has no pidfile at all.
-        assert!(recorded_host_pids(&dir).is_empty());
+        assert!(recorded_host_pids(&dir).unwrap().is_empty());
 
         record_host_pids(&dir, &[4242, 4243, 4244]);
-        assert_eq!(recorded_host_pids(&dir), vec![4242, 4243, 4244]);
+        assert_eq!(recorded_host_pids(&dir).unwrap(), vec![4242, 4243, 4244]);
 
-        // And rubbish in the file reads as nothing rather than stopping Stop.
+        // Corrupt evidence must stop cleanup before any process is selected.
         std::fs::write(host_pids_path(&dir), "not json").unwrap();
-        assert!(recorded_host_pids(&dir).is_empty());
+        assert!(recorded_host_pids(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pidfile_readers_distinguish_missing_legacy_records_and_untrusted_evidence() {
+        let root = temp_root("pidfile-evidence");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let path = host_pids_path(&root);
+        assert!(recorded_host_pids(&root).unwrap().is_empty());
+        assert!(recorded_host_processes(&root).unwrap().is_empty());
+        record_host_pids(&root, &[42]);
+        assert_eq!(recorded_host_pids(&root).unwrap(), [42]);
+        let legacy = recorded_host_processes(&root).unwrap();
+        assert!(verified_openbot_root_pids(&legacy, &[live_process(42, 0, "created")]).is_empty());
+        let recorded = recorded_process("server", 42, "created");
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version": 1, "processes": [recorded]}),
+        );
+        assert_eq!(recorded_host_pids(&root).unwrap(), [42]);
+        assert_eq!(recorded_host_processes(&root).unwrap(), [recorded]);
+        for bytes in [
+            b"not json".as_slice(),
+            b"\xff",
+            br#"{"version":2,"processes":[]}"#,
+            br#"{"version":1,"processes":[{}]}"#,
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            for problem in [
+                recorded_host_pids(&root).unwrap_err(),
+                recorded_host_processes(&root).unwrap_err(),
+            ] {
+                assert!(problem
+                    .detail
+                    .unwrap()
+                    .contains(&path.display().to_string()));
+            }
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(recorded_host_pids(&root)
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains(&path.display().to_string()));
+        assert!(recorded_host_processes(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_inventory_requires_a_complete_typed_json_result() {
+        assert!(windows_processes_in("[]").unwrap().is_empty());
+        let one = r#"{"ProcessId":42,"ParentProcessId":0,"ExecutablePath":"bun.exe","CommandLine":"bun serve","CreationDate":"created"}"#;
+        assert_eq!(windows_processes_in(one).unwrap().len(), 1);
+        assert_eq!(
+            windows_processes_in(&format!("[{one},{one}]"))
+                .unwrap()
+                .len(),
+            2
+        );
+        for text in [
+            "",
+            "  ",
+            "null",
+            "{}",
+            "[{}]",
+            "[",
+            "[42]",
+            r#"{"ProcessId":"42","ParentProcessId":0}"#,
+        ] {
+            assert!(windows_processes_in(text).is_err(), "{text}");
+        }
+        assert!(windows_processes_in(&format!("[{one},{{}}]")).is_err());
+        for text in ["[]", one] {
+            let expected = windows_processes_in(text).unwrap();
+            let utf16: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            assert_eq!(windows_process_output(&utf16).unwrap(), expected);
+            assert_eq!(
+                windows_process_output(&[&[0xff, 0xfe], utf16.as_slice()].concat()).unwrap(),
+                expected
+            );
+            assert_eq!(
+                windows_process_output(&[&[0xef, 0xbb, 0xbf], text.as_bytes()].concat()).unwrap(),
+                expected
+            );
+        }
+        for bytes in [b"\xff".as_slice(), b"\xff\xfe[", b"\xff\xfe\x00\xd8"] {
+            assert!(windows_process_output(bytes).is_err());
+        }
+        let recorded = recorded_process("server", 42, "created");
+        for live in [
+            WindowsProcess {
+                process_id: 43,
+                ..live_process(42, 0, "created")
+            },
+            WindowsProcess {
+                executable_path: Some("other.exe".into()),
+                ..live_process(42, 0, "created")
+            },
+            WindowsProcess {
+                command_line: Some("other args".into()),
+                ..live_process(42, 0, "created")
+            },
+            live_process(42, 0, "reused"),
+        ] {
+            assert!(
+                verified_openbot_root_pids(std::slice::from_ref(&recorded), &[live]).is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn windows_inventory_command_errors_preserve_pidfiles_and_select_no_processes() {
+        let root = temp_root("inventory-command-evidence");
+        std::fs::create_dir_all(root.join(".logs")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        let powershell = fixture.command("powershell");
+        let netstat = fixture.command("netstat");
+        let taskkill = fixture.command("taskkill");
+        let path = host_pids_path(&root);
+        for scenario in ["inventory-fail", "inventory-malformed", "inventory-blank"] {
+            fixture.scenario(scenario);
+            std::fs::write(&path, "[]").unwrap();
+            assert!(windows_processes_with(&powershell).is_err());
+            assert!(
+                stop_windows_processes_with_inventory(&root, &powershell, &netstat, &taskkill)
+                    .is_err()
+            );
+            assert!(
+                record_windows_host_processes_with(&root, &[("server", 42)], &powershell).is_err()
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "[]");
+            let log = fixture.log();
+            assert!(
+                log.contains("powershell\t-NoProfile -NonInteractive -Command"),
+                "{log}"
+            );
+            assert!(log.contains("$ErrorActionPreference = 'Stop'"), "{log}");
+            assert!(log.contains("-InputObject @("), "{log}");
+            assert!(
+                !log.contains("taskkill\t") && !log.contains("netstat\t"),
+                "{log}"
+            );
+        }
+        let missing = root.join("no-powershell");
+        assert!(windows_processes_with(&missing).is_err());
+        assert!(
+            stop_windows_processes_with_inventory(&root, &missing, &netstat, &taskkill).is_err()
+        );
+        assert!(record_windows_host_processes_with(&root, &[("server", 42)], &missing).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[]");
+        fixture.scenario("inventory-empty");
+        std::fs::write(&path, "invalid").unwrap();
+        assert!(
+            stop_windows_processes_with_inventory(&root, &powershell, &netstat, &taskkill).is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "invalid");
+        assert_eq!(fixture.log(), "");
+        std::fs::write(&path, "[]").unwrap();
+        assert_eq!(
+            stop_windows_processes_with_inventory(&root, &powershell, &netstat, &taskkill).unwrap(),
+            0
+        );
+        assert!(!fixture.log().contains("taskkill\t"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A manifest with a byte-order mark in front of it is still a manifest.

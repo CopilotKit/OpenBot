@@ -814,7 +814,7 @@ async fn start_stack<R: tauri::Runtime>(
     let shell = app.state::<Shell>();
     // Recorded before the handles are stashed, so a window that never gets to Stop still leaves
     // something the next one can stop. See `stack::host_pids_path`.
-    stack::record_host_processes(
+    let recorded = stack::record_host_processes(
         &root,
         &started
             .iter()
@@ -823,6 +823,8 @@ async fn start_stack<R: tauri::Runtime>(
     );
     shell.children.lock().unwrap().extend(started);
     *shell.root.lock().unwrap() = Some(root.clone());
+    // Even when inventory cannot be recorded, Stop must still own every child we started.
+    recorded.inspect_err(|problem| report(&app, "processes", false, problem.said.clone()))?;
 
     // From here the shell is the restart policy `worker/src/index.ts` says it does not have.
     let generation = shell
