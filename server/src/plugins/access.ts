@@ -33,10 +33,14 @@ export type ServerAccess = {
   /**
    * Whose account the call reached, as the audit row names it.
    *
-   * `person` is the asking person's id and `deployment` is a shared token. Three of the four
-   * credential sources reach somebody's own account — including `brokered`, where the deployment
-   * holds the key but the call runs in one person's mailbox, which is the whole point of the
-   * connector and therefore the only useful thing the trail can say about it.
+   * `person` is the asking person's id, and it is only correct where the call actually landed
+   * somewhere that person alone can see: their own OAuth grant, their own mailbox behind a broker —
+   * where the deployment holds the key but the call runs in one person's mailbox, which is the whole
+   * point of the connector and therefore the only useful thing the trail can say about it — or this
+   * deployment's own tables read as them. `deployment` means the opposite: not any one person's
+   * account. That covers a shared token, a server an administrator added by URL, and a public
+   * endpoint reached with no credential at all, where every person's call sees the same data and
+   * naming the asker would assert an attribution that does not exist.
    */
   reachedAs: "person" | "deployment";
 };
@@ -49,6 +53,30 @@ const CREDENTIAL_BY_AUTH: Record<
   "deployment-bearer": "deployment-token",
   "user-oauth": "person-oauth",
   builtin: "none",
+};
+
+/**
+ * Whose account each auth kind reaches. Keyed on the auth kind, NOT on the credential source above.
+ *
+ * `none` and `builtin` collapse to the same credential source — there is no credential either way —
+ * and they do not share an answer. A public endpoint touches nobody's account, so the trail says
+ * `deployment`, the same thing it says for a server added by URL. The builtin one runs against this
+ * deployment's own tables as the person whose turn it is, so the trail says `person`. Deriving this
+ * from `CREDENTIAL_BY_AUTH` made the two indistinguishable at exactly the point they differ, and
+ * answered `person` for both.
+ *
+ * A second table rather than a branch, so the compiler forces the question to be answered for any
+ * auth kind added later — which is what this module claims above and could not deliver while this
+ * field was inferred from something coarser than the thing it depends on.
+ */
+const REACHED_AS_BY_AUTH: Record<
+  CatalogueEntry["auth"]["kind"],
+  ServerAccess["reachedAs"]
+> = {
+  none: "deployment",
+  "deployment-bearer": "deployment",
+  "user-oauth": "person",
+  builtin: "person",
 };
 
 /**
@@ -67,11 +95,10 @@ export function accessFor(
   entry: CatalogueEntry | null,
 ): ServerAccess {
   if (entry) {
-    const credential = CREDENTIAL_BY_AUTH[entry.auth.kind];
     return {
       transport: entry.transport ?? "mcp",
-      credential,
-      reachedAs: credential === "deployment-token" ? "deployment" : "person",
+      credential: CREDENTIAL_BY_AUTH[entry.auth.kind],
+      reachedAs: REACHED_AS_BY_AUTH[entry.auth.kind],
     };
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { accessFor } from "../src/plugins/access";
+import type { CatalogueEntry } from "../src/plugins/catalogue";
 import { catalogueEntry } from "../src/plugins/catalogue";
 
 /**
@@ -62,6 +63,28 @@ describe("accessFor", () => {
       transport: "builtin-routines",
       credential: "none",
       reachedAs: "person",
+    });
+  });
+
+  test("an entry that needs no credential reaches nobody's account, so the trail says the deployment", () => {
+    // Constructed here, because no catalogue slug is `auth: { kind: "none" }` yet. Whoever adds the
+    // first one gets this answer, and `none` sharing a credential source with `builtin` must not
+    // drag it to the person: a public endpoint answers everybody identically.
+    const publicEntry: CatalogueEntry = {
+      key: "public-thing",
+      title: "Public Thing",
+      vendor: "Somebody",
+      summary: "A server that answers without being told who is asking.",
+      host: "mcp.example.com",
+      path: "/mcp",
+      auth: { kind: "none" },
+      writeTools: [],
+      docsUrl: "https://example.com/docs",
+    };
+    expect(accessFor({ provenance: "first-party" }, publicEntry)).toEqual({
+      transport: "mcp",
+      credential: "none",
+      reachedAs: "deployment",
     });
   });
 
