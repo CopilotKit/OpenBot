@@ -1988,11 +1988,11 @@ export function createPluginStore(options: PluginStoreOptions) {
       serverId: string,
       actorId = "",
     ): Promise<{ tools: number }> {
-      const { row, entry } = await requireServer(serverId);
+      const { row, entry, access } = await requireServer(serverId);
 
       try {
         // The entry decides the protocol. For a custom server there is no entry, and MCP is right.
-        const transport = transportFor(entry);
+        const transport = transportFor(access.transport);
 
         /*
          * A credential only when listing actually needs one.
@@ -3069,7 +3069,8 @@ export function createPluginStore(options: PluginStoreOptions) {
        */
       try {
         const { token } = await connectionTokenFor(row, entry, input.actorId);
-        const vendor = injectedVendor ?? transportFor(entry).callTool;
+        const vendor =
+          injectedVendor ?? transportFor(access.transport).callTool;
         const result = await vendor(
           {
             url: effectiveUrl(row, entry),

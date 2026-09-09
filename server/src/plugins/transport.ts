@@ -1,5 +1,4 @@
 import * as builtinRoutines from "./builtin-routines";
-import type { CatalogueEntry } from "./catalogue";
 import * as composio from "./composio";
 import * as driveRest from "./google-drive-rest";
 import type { ListedTool, McpCallResult } from "./mcp";
@@ -94,13 +93,14 @@ const TRANSPORTS: Record<TransportKind, VendorTransport> = {
 };
 
 /**
- * Which transport serves this entry.
+ * The transport for a resolved kind.
  *
- * MCP for anything that does not say otherwise, which covers every catalogue entry that omits the
- * field and — importantly — every server an administrator added by URL, where there is no entry at
- * all. A custom server is somebody else's MCP endpoint by definition, so the absent case and the
- * default case are the same answer for the same reason.
+ * A kind rather than a catalogue entry, because deciding the kind is no longer this file's business.
+ * It used to read `entry?.transport ?? "mcp"`, which was complete while every server either had an
+ * entry or was somebody's MCP endpoint — and silently wrong for a Composio app, which has no entry
+ * and would have had `composio://gmail` dialled as an HTTP server. `./access` decides now, once, for
+ * every row shape; this is the lookup that follows.
  */
-export function transportFor(entry: CatalogueEntry | null): VendorTransport {
-  return TRANSPORTS[entry?.transport ?? "mcp"];
+export function transportFor(kind: TransportKind): VendorTransport {
+  return TRANSPORTS[kind];
 }
