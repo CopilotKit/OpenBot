@@ -943,7 +943,7 @@ function remoteAgentWithStandingRole(
       context:
         agent.type === "remote_mastra"
           ? [
-              ...(input.context ?? []),
+              ...callerMastraContext(input.context ?? []),
               ...mastraOpenBotContext({
                 standingMessage: agent.standingMessage,
                 holdingsMessage,
@@ -972,6 +972,17 @@ function remoteAgentWithStandingRole(
       ),
     );
   });
+}
+
+const RESERVED_MASTRA_CONTEXT_DESCRIPTIONS = new Set([
+  "OpenBot standing role",
+  "OpenBot granted tools guidance",
+]);
+
+function callerMastraContext(context: AgentContext[]): AgentContext[] {
+  return context.filter(
+    (entry) => !RESERVED_MASTRA_CONTEXT_DESCRIPTIONS.has(entry.description),
+  );
 }
 
 function mastraOpenBotContext({
