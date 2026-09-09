@@ -290,3 +290,70 @@ test("a compatible endpoint submits the key typed into its endpoint key field", 
     model: "local-model",
   });
 });
+
+test("a compatible endpoint refuses URLs whose scheme only starts with http", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  for (const baseUrl of [
+    "httpx://models.example/v1",
+    "httpfoo://models.example/v1",
+  ]) {
+    const view = await renderPicker((choice) => choices.push(choice));
+    await userEvent.click(
+      await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+    );
+    await userEvent.type(view.getByLabelText("Base URL"), baseUrl);
+    await userEvent.type(view.getByLabelText("Model name"), "local-model");
+
+    const continueButton = view.getByRole("button", { name: "Continue" });
+    expect(continueButton).toHaveProperty("disabled", true);
+    await userEvent.click(continueButton);
+    cleanup();
+  }
+
+  expect(choices).toEqual([]);
+});
+
+test("a compatible endpoint accepts local http and external https URLs", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  for (const baseUrl of [
+    "http://localhost:11434/v1",
+    "https://models.example/v1",
+  ]) {
+    const view = await renderPicker((choice) => choices.push(choice));
+    await userEvent.click(
+      await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+    );
+    await userEvent.type(view.getByLabelText("Base URL"), baseUrl);
+    await userEvent.type(view.getByLabelText("Model name"), "local-model");
+
+    const continueButton = view.getByRole("button", { name: "Continue" });
+    expect(continueButton).toHaveProperty("disabled", false);
+    await userEvent.click(continueButton);
+    cleanup();
+  }
+
+  expect(choices).toEqual([
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "http://localhost:11434/v1",
+      model: "local-model",
+    },
+    {
+      provider: "openai-compatible",
+      login: "endpoint",
+      baseUrl: "https://models.example/v1",
+      model: "local-model",
+    },
+  ]);
+});

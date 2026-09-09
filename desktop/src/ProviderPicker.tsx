@@ -44,6 +44,11 @@ export type HeldConfiguration = {
   saved?: SavedConfiguration;
 };
 
+function isHttpEndpointUrl(value: string) {
+  const trimmed = value.trim();
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://");
+}
+
 /**
  * Connect a model.
  *
@@ -225,11 +230,11 @@ export function ProviderPicker({
      * is given.
      */
     (login === "endpoint" &&
-      baseUrl.trim().startsWith("http") &&
+      isHttpEndpointUrl(baseUrl) &&
       model.trim().length > 0);
 
   function continueWithChoice() {
-    if (!row || !login) return;
+    if (!row || !login || !ready) return;
     const trimmedApiKey = apiKey.trim();
     const trimmedToken = token.trim();
     const trimmedBaseUrl = baseUrl.trim();
