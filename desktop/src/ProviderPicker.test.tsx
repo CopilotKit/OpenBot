@@ -23,6 +23,17 @@ const providers: Provider[] = [
   },
 ];
 
+const endpointProviders: Provider[] = [
+  {
+    id: "openai-compatible",
+    name: "OpenAI-compatible",
+    summary: "Use your own endpoint.",
+    logins: ["endpoint"],
+    mark: null,
+    caution: null,
+  },
+];
+
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
 
 let invokeCalls: Array<{ command: string; args?: unknown }> = [];
@@ -45,6 +56,8 @@ mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
 }));
 
+const { ProviderPicker } = await import("./ProviderPicker");
+
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
   invokeCalls = [];
@@ -61,7 +74,6 @@ function deferred<T>() {
 }
 
 async function renderPicker(onChoose: (choice: unknown) => void = () => {}) {
-  const { ProviderPicker } = await import("./ProviderPicker");
   let view!: ReturnType<typeof render>;
 
   await act(async () => {
@@ -82,7 +94,6 @@ async function renderPickerWithHeld(
   held: HeldConfiguration,
   onChoose: (choice: unknown) => void = () => {},
 ) {
-  const { ProviderPicker } = await import("./ProviderPicker");
   let view!: ReturnType<typeof render>;
 
   await act(async () => {
@@ -194,4 +205,88 @@ test("a saved provider-scoped plan session enables continue without exposing a t
       saved: true,
     },
   ]);
+});
+
+test("a compatible endpoint does not inherit a saved OpenAI API key", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderPickerWithHeld(
+    {
+      OPENAI_API_KEY: "sk-synthetic-openai",
+      saved: {
+        modelApiKeys: {
+          openai: true,
+          anthropic: false,
+        },
+      },
+    },
+    (choice) => choices.push(choice),
+  );
+
+  await userEvent.click(
+    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("Base URL"),
+    "https://models.example/v1",
+  );
+  await userEvent.type(view.getByLabelText("Model name"), "local-model");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+  expect(choices).toHaveLength(1);
+  expect(choices[0]).toMatchObject({
+    provider: "openai-compatible",
+    login: "endpoint",
+    baseUrl: "https://models.example/v1",
+    model: "local-model",
+  });
+  expect(choices[0]).not.toHaveProperty("apiKey");
+});
+
+test("a compatible endpoint submits the key typed into its endpoint key field", async () => {
+  const choices: unknown[] = [];
+  invokeHandler = async (command) => {
+    if (command === "providers") return endpointProviders;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderPickerWithHeld(
+    {
+      OPENAI_API_KEY: "sk-synthetic-openai",
+      saved: {
+        modelApiKeys: {
+          openai: true,
+          anthropic: false,
+        },
+      },
+    },
+    (choice) => choices.push(choice),
+  );
+
+  await userEvent.click(
+    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("Base URL"),
+    "https://models.example/v1",
+  );
+  await userEvent.type(view.getByLabelText("Model name"), "local-model");
+  await userEvent.type(
+    view.getByLabelText("API key, if the endpoint needs one"),
+    "endpoint-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+  expect(choices).toHaveLength(1);
+  expect(choices[0]).toMatchObject({
+    provider: "openai-compatible",
+    login: "endpoint",
+    apiKey: "endpoint-key",
+    baseUrl: "https://models.example/v1",
+    model: "local-model",
+  });
 });

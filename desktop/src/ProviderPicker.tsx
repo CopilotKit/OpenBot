@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { asProblem, InlineFailure, type Problem } from "./Problem";
 import { useEffect, useRef, useState } from "react";
 import { Mark } from "./Mark";
+import { asProblem, InlineFailure, type Problem } from "./Problem";
 
 export type Login = "plan" | "api-key" | "endpoint";
 
@@ -228,6 +228,26 @@ export function ProviderPicker({
       baseUrl.trim().startsWith("http") &&
       model.trim().length > 0);
 
+  function continueWithChoice() {
+    if (!row || !login) return;
+    const trimmedApiKey = apiKey.trim();
+    const trimmedToken = token.trim();
+    const trimmedBaseUrl = baseUrl.trim();
+    const trimmedModel = model.trim();
+    onChoose({
+      provider: row.id,
+      login,
+      ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
+      ...(login === "plan" && trimmedToken ? { token: trimmedToken } : {}),
+      ...((login === "plan" && !trimmedToken && savedPlan) ||
+      (login === "api-key" && !trimmedApiKey && savedApiKey)
+        ? { saved: true }
+        : {}),
+      ...(trimmedBaseUrl ? { baseUrl: trimmedBaseUrl } : {}),
+      ...(trimmedModel ? { model: trimmedModel } : {}),
+    });
+  }
+
   return (
     <div className="sheet">
       <p className="steps-of">Step 2 of 2</p>
@@ -264,9 +284,11 @@ export function ProviderPicker({
                 setLogin(r.logins[0] ?? null);
                 // Fill from what is already on this machine, if anything.
                 const kept =
-                  r.id === "anthropic"
-                    ? held.ANTHROPIC_API_KEY
-                    : held.OPENAI_API_KEY;
+                  r.id === "openai"
+                    ? held.OPENAI_API_KEY
+                    : r.id === "anthropic"
+                      ? held.ANTHROPIC_API_KEY
+                      : undefined;
                 setApiKey(kept ?? "");
                 if (r.id === "openai-compatible" && held.OPENAI_BASE_URL) {
                   setBaseUrl(held.OPENAI_BASE_URL);
@@ -461,22 +483,7 @@ export function ProviderPicker({
         <button
           type="button"
           disabled={!row || !login || !ready}
-          onClick={() =>
-            row &&
-            login &&
-            onChoose({
-              provider: row.id,
-              login,
-              apiKey: apiKey.trim() || undefined,
-              token: login === "plan" ? token.trim() || undefined : undefined,
-              saved:
-                (login === "plan" && !token.trim() && savedPlan) ||
-                (login === "api-key" && !apiKey.trim() && savedApiKey) ||
-                undefined,
-              baseUrl: baseUrl.trim() || undefined,
-              model: model.trim() || undefined,
-            })
-          }
+          onClick={continueWithChoice}
         >
           Continue
         </button>

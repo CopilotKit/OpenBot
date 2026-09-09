@@ -25,6 +25,8 @@ mock.module("./Mark", () => ({
   Mark: ({ name }: { name: string }) => <span>{name}</span>,
 }));
 
+const { App } = await import("./App");
+
 beforeAll(() => GlobalRegistrator.register());
 afterEach(() => {
   invokeCalls = [];
@@ -33,7 +35,6 @@ afterEach(() => {
 afterAll(() => GlobalRegistrator.unregister());
 
 async function renderApp() {
-  const { App } = await import("./App");
   let view!: ReturnType<typeof render>;
 
   await act(async () => {
@@ -41,6 +42,129 @@ async function renderApp() {
   });
 
   return view;
+}
+
+type StartStackPayload = {
+  model: {
+    provider?: unknown;
+    login?: unknown;
+    apiKey?: unknown;
+    baseUrl?: unknown;
+    model?: unknown;
+  };
+};
+
+function isStartStackPayload(value: unknown): value is StartStackPayload {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "model" in value &&
+    typeof value.model === "object" &&
+    value.model !== null
+  );
+}
+
+function getStartStackPayload() {
+  const args = invokeCalls.find((call) => call.command === "start_stack")?.args;
+  if (!isStartStackPayload(args)) {
+    throw new Error("start_stack payload was not captured");
+  }
+  return args;
+}
+
+type ExistingConfigurationValues = {
+  INTELLIGENCE_API_KEY?: string;
+  INTELLIGENCE_API_URL?: string;
+  INTELLIGENCE_GATEWAY_WS_URL?: string;
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+};
+
+function useCompatibleEndpointSetup(
+  existingValues: ExistingConfigurationValues,
+) {
+  invokeHandler = async (command) => {
+    if (command === "detect_engine") {
+      return {
+        engine: "docker",
+        responding: true,
+        engine_socket: null,
+        detail: "Docker is answering.",
+      };
+    }
+    if (command === "default_root") return "/tmp/openbot-app-test";
+    if (command === "already_configured") {
+      return {
+        values: existingValues,
+        saved: {
+          intelligenceApiKey: true,
+          modelApiKeys: { openai: true, anthropic: false },
+          modelSessions: { openai: false, anthropic: false },
+        },
+      };
+    }
+    if (command === "already_running") return false;
+    if (command === "windows_blocker") return null;
+    if (command === "last_failure") return null;
+    if (command === "harnesses") {
+      return [
+        {
+          id: "langgraph",
+          name: "LangGraph",
+          summary: "Default Bot",
+          image: null,
+          health_path: null,
+          credential: "any-provider",
+          maintainer: "first-party",
+          mark: null,
+          port: 8000,
+        },
+      ];
+    }
+    if (command === "providers") {
+      return [
+        {
+          id: "openai-compatible",
+          name: "OpenAI-compatible",
+          summary: "Use your own endpoint.",
+          logins: ["endpoint"],
+          mark: null,
+          caution: null,
+        },
+      ];
+    }
+    if (command === "prepare_engine") return null;
+    if (command === "start_stack") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+}
+
+async function startWithCompatibleEndpoint(endpointKey = "") {
+  const view = await renderApp();
+
+  await userEvent.click(
+    await view.findByRole("button", { name: "Set up OpenBot" }),
+  );
+  await userEvent.click(await view.findByRole("button", { name: "Continue" }));
+  await userEvent.click(
+    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+  );
+  await userEvent.type(
+    view.getByLabelText("Base URL"),
+    "https://models.example/v1",
+  );
+  await userEvent.type(view.getByLabelText("Model name"), "local-model");
+  if (endpointKey) {
+    await userEvent.type(
+      view.getByLabelText("API key, if the endpoint needs one"),
+      endpointKey,
+    );
+  }
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(
+    await view.findByRole("button", { name: "Start OpenBot" }),
+  );
 }
 
 test("Change the model after an Ask failure stops the stack and reaches the provider picker", async () => {
@@ -426,6 +550,42 @@ test("bring-your-own agent collects a distinct AG-UI endpoint for startup", asyn
       agentUrl: "https://agent.example/ag-ui",
     },
   });
+});
+
+test("custom compatible endpoint startup does not submit a saved OpenAI API key", async () => {
+  useCompatibleEndpointSetup({
+    OPENAI_API_KEY: "sk-synthetic-openai",
+  });
+
+  await startWithCompatibleEndpoint();
+
+  const payload = getStartStackPayload();
+  expect(payload.model).toMatchObject({
+    provider: "openai-compatible",
+    login: "endpoint",
+    baseUrl: "https://models.example/v1",
+    model: "local-model",
+  });
+  expect(payload.model).not.toHaveProperty("apiKey");
+  expect(JSON.stringify(payload)).not.toContain("sk-synthetic-openai");
+});
+
+test("custom compatible endpoint startup submits an explicitly typed endpoint key", async () => {
+  useCompatibleEndpointSetup({
+    OPENAI_API_KEY: "sk-synthetic-openai",
+  });
+
+  await startWithCompatibleEndpoint("endpoint-key");
+
+  const payload = getStartStackPayload();
+  expect(payload.model).toMatchObject({
+    provider: "openai-compatible",
+    login: "endpoint",
+    apiKey: "endpoint-key",
+    baseUrl: "https://models.example/v1",
+    model: "local-model",
+  });
+  expect(JSON.stringify(payload)).not.toContain("sk-synthetic-openai");
 });
 
 for (const provider of [
