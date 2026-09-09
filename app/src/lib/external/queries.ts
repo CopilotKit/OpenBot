@@ -122,15 +122,42 @@ export function externalThreadListQueryOptions() {
   });
 }
 
+/**
+ * One stored turn, as the transcript endpoint sends it.
+ *
+ * Validated rather than trusted, for the same reason every other reader in this file validates:
+ * "empty" and "unreadable" are very different statements about a record whose whole claim is that
+ * it is the canonical one. Coercing a bad shape to `[]` used to make the second look like the
+ * first — a transcript that had finished loading, with nothing in it, and a person concluding
+ * their coworker never answered.
+ */
+function externalTranscriptMessage(value: unknown): Message {
+  if (!isRecord(value)) {
+    throw new Error(EXTERNAL_THREAD_ERROR);
+  }
+  const message = value as { id?: unknown; role?: unknown; content?: unknown };
+  if (
+    !isNonEmptyString(message.id) ||
+    (message.role !== "user" && message.role !== "assistant") ||
+    typeof message.content !== "string"
+  ) {
+    throw new Error(EXTERNAL_THREAD_ERROR);
+  }
+  return value as Message;
+}
+
 export async function readExternalThreadMessages(
   threadId: string,
 ): Promise<readonly Message[]> {
   const response = await client(
     `/api/external-links/threads/${encodeURIComponent(threadId)}/messages`,
-    { fallback: "Could not load this Slack conversation" },
+    { fallback: EXTERNAL_THREAD_ERROR },
   );
-  const value = (await response.json()) as { messages?: unknown };
-  return Array.isArray(value.messages) ? (value.messages as Message[]) : [];
+  const value = await response.json();
+  if (!isRecord(value) || !Array.isArray(value.messages)) {
+    throw new Error(EXTERNAL_THREAD_ERROR);
+  }
+  return value.messages.map(externalTranscriptMessage);
 }
 
 export function externalThreadQueryOptions(threadId: string) {

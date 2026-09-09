@@ -100,16 +100,45 @@ describe("sidebar conversation roster", () => {
   test("a title changes nothing about where a row sits", () => {
     const ids = (rows: ReturnType<typeof conversationRoster>) =>
       rows.map((row) => rosterKey(row));
-    const untitled = [channel("a"), channel("b", { pinned: true })];
-    const titled = [
-      channel("a", { summary: "Expense categories" }),
-      channel("b", { pinned: true, summary: "Quarterly revenue" }),
+    const at = (minute: number) =>
+      `2026-08-25T12:${String(minute).padStart(2, "0")}:00.000Z`;
+    /*
+     * Several rows per pin group, each with its own activity, so the comparator actually has to
+     * compare them. One row on each side of the pin partition would be ordered by the partition
+     * alone, and a sort that started reading the summary would still pass.
+     */
+    const rows = (titles: boolean) => [
+      channel("older", {
+        lastMessageAt: at(1),
+        summary: titles ? "Aardvark" : null,
+      }),
+      channel("newer", {
+        lastMessageAt: at(3),
+        summary: titles ? "Zebra" : null,
+      }),
+      channel("pinned-older", {
+        pinned: true,
+        lastMessageAt: at(2),
+        summary: titles ? "Aardvark pinned" : null,
+      }),
+      channel("pinned-newer", {
+        pinned: true,
+        lastMessageAt: at(4),
+        summary: titles ? "Zebra pinned" : null,
+      }),
     ];
-    const threads = [slack("s1")];
+    // Titles run opposite to activity in both groups, so a summary-sensitive sort reorders.
+    const threads = [slack("s1", { lastMessageAt: at(2) })];
 
-    expect(ids(conversationRoster(titled, threads))).toEqual(
-      ids(conversationRoster(untitled, threads)),
-    );
+    const expected = [
+      "openbot:pinned-newer",
+      "openbot:pinned-older",
+      "openbot:newer",
+      "slack:s1",
+      "openbot:older",
+    ];
+    expect(ids(conversationRoster(rows(false), threads))).toEqual(expected);
+    expect(ids(conversationRoster(rows(true), threads))).toEqual(expected);
   });
 
   test("matches visible names and last-message text across native and Slack rows", () => {

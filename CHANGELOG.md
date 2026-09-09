@@ -240,9 +240,13 @@ Intelligence then owns; see `docs/slack.md`.
 
 The Slack side of a conversation was only in Slack. A Slack thread now appears in the conversation
 sidebar beside the channels already listed, labelled, and opens a read-only transcript of the turns
-as they were stored. The account-link confirmation and the secure prompt a Slack turn sends somebody
-to have somewhere to land: both sit behind the existing session guard, and a sign-in on the way
-returns to the confirmation rather than to the roster.
+as they were stored. A transcript that cannot be read says so rather than showing an empty
+conversation, which is a different statement about a record that claims to be the canonical one.
+The account-link confirmation and the secure prompt a Slack turn sends somebody to have somewhere
+to land: both sit behind the existing session guard, and a sign-in on the way returns to the
+confirmation rather than to the roster. Where a Slack account cannot be linked, the refusal names
+which conflict it was and who can resolve it, and claims nothing about either account when the
+deployment did not say.
 
 ## 0.0.8
 

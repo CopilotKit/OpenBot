@@ -4,6 +4,7 @@ import {
   externalThreadListQueryOptions,
   externalThreadPage,
   externalThreadTarget,
+  readExternalThreadMessages,
 } from "../src/lib/external/queries";
 
 describe("external Slack transcript target", () => {
@@ -173,6 +174,63 @@ describe("external Slack transcript list", () => {
       });
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+/**
+ * "Empty" and "unreadable" are different statements about a record that claims to be canonical.
+ *
+ * This read used to coerce anything unexpected to `[]`, so a 200 with a body of the wrong shape
+ * showed a transcript that had finished loading with nothing in it — and the reader concluded the
+ * coworker never answered. Nothing rejected, so the screen's failure notice could not fire. Every
+ * other reader in this module validates and throws; this one now does too.
+ */
+describe("reading a stored Slack transcript", () => {
+  const respondWith = async (body: unknown) => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    try {
+      return await readExternalThreadMessages("channels-thread-1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  };
+
+  test("returns the stored turns", async () => {
+    const messages = [
+      { id: "m1", role: "user", content: "Is the filing clean?" },
+      { id: "m2", role: "assistant", content: "Two rows disagree." },
+    ];
+
+    expect(await respondWith({ messages })).toEqual(messages);
+  });
+
+  test("an empty conversation is empty, and says nothing else", async () => {
+    expect(await respondWith({ messages: [] })).toEqual([]);
+  });
+
+  test("refuses a body of the wrong shape rather than showing it as empty", async () => {
+    for (const body of [
+      {},
+      { messages: null },
+      { messages: "two" },
+      { messages: [null] },
+      { messages: [{ role: "user", content: "no id" }] },
+      { messages: [{ id: "", role: "user", content: "empty id" }] },
+      { messages: [{ id: "m1", role: "system", content: "wrong role" }] },
+      { messages: [{ id: "m1", role: "user" }] },
+      { messages: [{ id: "m1", role: "user", content: 7 }] },
+      [{ id: "m1", role: "user", content: "not an object" }],
+      null,
+    ]) {
+      await expect(respondWith(body)).rejects.toThrow(
+        "Could not load this Slack conversation.",
+      );
     }
   });
 });

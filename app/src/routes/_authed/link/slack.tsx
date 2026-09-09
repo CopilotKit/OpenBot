@@ -46,33 +46,50 @@ export function slackLinkToken(search: Record<string, unknown>): string | null {
  *
  * Only one of the two is about somebody else's account, and saying the wrong one is worse than
  * saying nothing: a person re-linking under a new Slack id in the same workspace was told their
- * identity belonged to another OpenBot account, which is a false claim about their own and one
- * they cannot act on. An unrecognised or absent code falls back to the safe half of the pair.
+ * identity belonged to another OpenBot account, which is a false claim about their own.
+ *
+ * THERE IS NO SAFE DEFAULT, WHICH IS WHY THERE IS A THIRD MEMBER. Both named conflicts make a
+ * definite claim about who owns what, and the case with no code is precisely the case where this
+ * page does not know — a new app against a server that does not send `conflict` yet puts every 409
+ * down that path. `unknown` asserts nothing about either account, so the invariant is that this
+ * page never guesses about account ownership rather than that it guesses conservatively.
  */
 export type SlackLinkConflict =
   | "provider_identity_linked"
-  | "openbot_user_linked";
+  | "openbot_user_linked"
+  | "unknown";
 
 export function slackLinkConflict(value: unknown): SlackLinkConflict {
   const conflict =
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as { conflict?: unknown }).conflict
       : undefined;
-  return conflict === "openbot_user_linked"
-    ? "openbot_user_linked"
-    : "provider_identity_linked";
+  return conflict === "openbot_user_linked" ||
+    conflict === "provider_identity_linked"
+    ? conflict
+    : "unknown";
 }
 
+/*
+ * Each one names somebody who can act, because nobody reading this can.
+ *
+ * There is no unlink route, no unlink screen, and no delete against `external_user_links` anywhere
+ * in the server: a link is made once and never reassigned, by design. So a sentence telling this
+ * person to unlink something would name an action the deployment does not have, which is the same
+ * dead end as telling them something untrue. An administrator is who resolves it.
+ */
 const SLACK_LINK_CONFLICT_MESSAGES = {
   provider_identity_linked:
-    "That Slack identity is already linked to another OpenBot account.",
+    "That Slack identity is already linked to another OpenBot account. Ask an administrator to change it.",
   openbot_user_linked:
-    "Your OpenBot account is already linked to a different Slack user in this workspace. Unlink it before linking this one.",
+    "Your OpenBot account is already linked to a different Slack user in this workspace. Ask an administrator to change it.",
+  unknown:
+    "Slack could not be linked because of a conflict with an existing link. Ask an administrator to look at it.",
 } as const satisfies Record<SlackLinkConflict, string>;
 
 export function slackLinkResult(
   status: number,
-  conflict: SlackLinkConflict = "provider_identity_linked",
+  conflict: SlackLinkConflict = "unknown",
 ) {
   if (status === 200)
     return {

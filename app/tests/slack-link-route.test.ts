@@ -22,19 +22,15 @@ test("requires a token and maps completion responses", () => {
  * The two 409s say opposite things, and only one of them is about somebody else.
  *
  * A person re-linking under a new Slack id in the same workspace used to be told their identity
- * belonged to another OpenBot account: a false claim about their own account, and one with no
- * action attached. The server distinguishes the two keys, so this page has to as well — and an
- * unrecognised or absent code has to fall back to the claim that is safe to make.
+ * belonged to another OpenBot account: a false claim about their own account. The server
+ * distinguishes the two keys, so this page has to as well.
  */
-test("says which of the two conflicts happened, and falls back to the safe one", () => {
+test("says which of the two conflicts happened", () => {
   expect(slackLinkResult(409, "provider_identity_linked").message).toBe(
-    "That Slack identity is already linked to another OpenBot account.",
+    "That Slack identity is already linked to another OpenBot account. Ask an administrator to change it.",
   );
   expect(slackLinkResult(409, "openbot_user_linked").message).toBe(
-    "Your OpenBot account is already linked to a different Slack user in this workspace. Unlink it before linking this one.",
-  );
-  expect(slackLinkResult(409).message).toBe(
-    slackLinkResult(409, "provider_identity_linked").message,
+    "Your OpenBot account is already linked to a different Slack user in this workspace. Ask an administrator to change it.",
   );
 
   expect(slackLinkConflict({ conflict: "openbot_user_linked" })).toBe(
@@ -43,15 +39,61 @@ test("says which of the two conflicts happened, and falls back to the safe one",
   expect(slackLinkConflict({ conflict: "provider_identity_linked" })).toBe(
     "provider_identity_linked",
   );
+});
+
+/**
+ * With no code, this page claims nothing about who owns what.
+ *
+ * Neither named conflict is a safe default: both assert ownership, and the case with no code is
+ * the one case where this page does not know which. Reachable on a partial deploy — a new app
+ * against a server that does not send `conflict` yet sends every 409 down here — so what is
+ * asserted is that no unrecognised body can produce either claim.
+ */
+test("never guesses which conflict it was", () => {
+  const claims = [
+    slackLinkResult(409, "provider_identity_linked").message,
+    slackLinkResult(409, "openbot_user_linked").message,
+  ];
+
   for (const body of [
     null,
     undefined,
     {},
     { conflict: 42 },
     { conflict: "something_else" },
+    { conflict: null },
     ["openbot_user_linked"],
+    "openbot_user_linked",
   ]) {
-    expect(slackLinkConflict(body)).toBe("provider_identity_linked");
+    expect(slackLinkConflict(body)).toBe("unknown");
+    expect(claims).not.toContain(
+      slackLinkResult(409, slackLinkConflict(body)).message,
+    );
+  }
+
+  // And the same when the status is all the page was given.
+  expect(claims).not.toContain(slackLinkResult(409).message);
+  expect(slackLinkResult(409).message).toBe(
+    "Slack could not be linked because of a conflict with an existing link. Ask an administrator to look at it.",
+  );
+});
+
+/**
+ * Nothing here tells somebody to unlink, because nothing can.
+ *
+ * There is no unlink route, no unlink screen and no delete against `external_user_links` in the
+ * server. A sentence naming that action would be a dead end dressed as a next step, which is the
+ * same failure as the false claim this pair replaced.
+ */
+test("names an action the deployment actually has", () => {
+  for (const conflict of [
+    "provider_identity_linked",
+    "openbot_user_linked",
+    "unknown",
+  ] as const) {
+    const { message } = slackLinkResult(409, conflict);
+    expect(message).toContain("administrator");
+    expect(message.toLowerCase()).not.toContain("unlink");
   }
 });
 
@@ -87,6 +129,10 @@ test("classifies documented token, authentication, and transient responses", () 
   expect(
     slackLinkResponseOutcome(409, "openbot_user_linked").message,
   ).toContain("a different Slack user in this workspace");
+  // Status alone claims nothing, the same as an unrecognised body.
+  expect(slackLinkResponseOutcome(409).message).toBe(
+    slackLinkResult(409, "unknown").message,
+  );
   expect(slackLinkResponseOutcome(401).kind).toBe("reauth");
 
   for (const status of [408, 418, 425, 429, 500, 502, 503]) {

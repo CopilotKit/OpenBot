@@ -31,8 +31,12 @@ export function ExternalThreadChat({
        * Without this the promise rejects with nobody listening and the view sits on its skeleton
        * for as long as the person leaves it open — which reads as a conversation still loading
        * rather than one that could not be read, and is the state a failed `/messages` used to leave
-       * behind. The transcript is all-or-nothing: the endpoint either answers with the turns or it
-       * does not, so this is a fact about the read and not a count of messages.
+       * behind.
+       *
+       * A fact about the read rather than a count of turns, because `readExternalThreadMessages`
+       * either yields the stored turns or throws: it validates the body, so a 200 of the wrong
+       * shape lands here instead of arriving as an empty conversation. That is enforced there and
+       * not inferable from this file, which is why it is named.
        */
       .catch(() => {
         if (!current) return;

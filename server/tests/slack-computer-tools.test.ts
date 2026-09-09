@@ -205,6 +205,10 @@ class FakeComputerGateway implements ComputerGateway {
   afterRequest?: () => void;
   /** Fires after each assistance status read, so a test can move the clock or abort mid-wait. */
   afterStatus?: () => void;
+  /** Answers each status read individually, for a test that needs one of them to hang. */
+  assistanceStatusFor?: () => Promise<
+    Awaited<ReturnType<ComputerGateway["assistanceStatus"]>>
+  >;
   requestError?: unknown;
   requestIdentityMismatch = false;
   releaseError?: unknown;
@@ -403,6 +407,11 @@ class FakeComputerGateway implements ComputerGateway {
     ...args: Parameters<ComputerGateway["assistanceStatus"]>
   ) {
     this.assistanceStatusCalls.push(args);
+    if (this.assistanceStatusFor) {
+      const answer = this.assistanceStatusFor();
+      this.afterStatus?.();
+      return answer;
+    }
     const result =
       this.assistanceStatusResults?.shift() ?? this.assistanceStatusResult;
     this.afterStatus?.();
@@ -1020,6 +1029,61 @@ describe("Slack computer ChannelTools", () => {
       result: expect.stringContaining("handed control back"),
     });
     expect(gateway.cancelAssistanceCalls).toHaveLength(1);
+  });
+
+  /**
+   * A status read that never comes back, and the rejection that arrives after nobody is waiting.
+   *
+   * The wait is bounded by the deadline and not by the gateway answering, so a control plane that
+   * accepts the read and never replies has to end the turn rather than hold it open. The second
+   * half is the part with no other witness: `settleOperation` has already resolved by then, so the
+   * hung promise's eventual rejection must be consumed rather than surfacing as an unhandled one
+   * that takes the process down somewhere unrelated.
+   */
+  test("a status read that never settles ends at the deadline and swallows its late rejection", async () => {
+    const gateway = new FakeComputerGateway();
+    const hung = deferred<never>();
+    let now = 0;
+    // Two milliseconds of window left once the request is committed, so the read is given a bound
+    // it will miss rather than a bound it can meet.
+    gateway.afterRequest = () => {
+      now = 10 * 60_000 - 2;
+    };
+    let reads = 0;
+    gateway.assistanceStatusFor = () => {
+      reads += 1;
+      // Only the wait's own read hangs. The compensation read that follows must answer, or this
+      // would be asserting the timeout twice over rather than the branch it is here for.
+      return reads === 1 ? hung.promise : Promise.resolve("pending" as const);
+    };
+    const tools = new Map(
+      createSlackComputerTools(gateway, {
+        appUrl: "https://openbot.example",
+        encryptionKey: "slack-assistance-key",
+        now: () => now,
+      }).map((tool) => [tool.name, tool]),
+    );
+
+    const result = await inSlack(
+      () =>
+        invoke(
+          tools.get("computer_request_help")!,
+          { reason: "Please sign in." },
+          channelContext(new FileAdapter()),
+        ),
+      { channelsThreadId: "channels-thread-private" },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: expect.stringContaining("Nobody took control"),
+    });
+    expect(gateway.cancelAssistanceCalls).toHaveLength(1);
+
+    // The turn is over; now let the abandoned read fail. Nothing is listening, and that has to be
+    // survivable rather than an unhandled rejection.
+    hung.reject(new Error("control plane closed the connection"));
+    await Promise.resolve();
   });
 
   test("a hung Slack post gets only the remainder of the original deadline", async () => {
