@@ -215,6 +215,10 @@ jobs:
       # Bot's own tree and not in the root one.
       - run: bun install --frozen-lockfile
         working-directory: agent-langgraph
+      # Same for the Mastra Bot: root test discovery imports its receiver tests, which load Mastra
+      # from that Bot's own dependency tree.
+      - run: bun install
+        working-directory: agent-mastra
       # Not the db:migrate script: that one loads ../.env, which does not exist in CI. DATABASE_URL
       # comes from the job env instead, which drizzle.config.ts already reads.
       - run: bunx drizzle-kit migrate --config=drizzle.config.ts

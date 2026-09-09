@@ -17,7 +17,7 @@ import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { registerApiRoute } from "@mastra/core/server";
 
-const model = (process.env.BOT_MODEL ?? "gpt-4o-mini").trim();
+const model = process.env.BOT_MODEL?.trim() || "gpt-4o-mini";
 
 export const openbotBaseInstructions =
   "Answer the question you are asked, briefly and correctly.";
