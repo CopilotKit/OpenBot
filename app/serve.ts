@@ -48,6 +48,15 @@ export function isApiCall(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 
+export function upstreamWebSocketHeaders(requestHeaders: Headers): Headers {
+  const headers = new Headers();
+  for (const name of ["authorization", "cookie", "origin"]) {
+    const value = requestHeaders.get(name);
+    if (value) headers.set(name, value);
+  }
+  return headers;
+}
+
 if (import.meta.main) {
   Bun.serve({
     port: PORT,
@@ -85,7 +94,9 @@ if (import.meta.main) {
       if (isApiCall(url.pathname)) {
         const target = SERVER + url.pathname + url.search;
         if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-          const upstream = new WebSocket(target.replace(/^http/, "ws"));
+          const upstream = new WebSocket(target.replace(/^http/, "ws"), {
+            headers: upstreamWebSocketHeaders(request.headers),
+          });
           if (server.upgrade(request, { data: { upstream } })) return undefined;
           upstream.close();
           return new Response("expected a websocket upgrade", { status: 400 });
