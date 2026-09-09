@@ -14,6 +14,7 @@ pub mod quiet;
 pub mod saved_intent;
 pub mod stack;
 pub mod supervise;
+pub mod tray;
 pub mod vault;
 pub mod windows;
 

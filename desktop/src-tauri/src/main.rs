@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use openbot_desktop_lib::{
     acquire, deployment, engine, env as openbot_env, harness, install, problem::Problem, provider,
-    quiet, stack, supervise, windows as win,
+    quiet, stack, supervise, tray, windows as win,
 };
 
 /// The deployment this app installs.
@@ -1610,8 +1610,7 @@ fn main() {
                 *app.state::<Shell>().setup_url.lock().unwrap() = Some(window.url()?.to_string());
             }
 
-            // The menu bar the window's own text refers to. Two items, because there are two things
-            // somebody wants from a status icon: get to it, or stop it.
+            // The status menu lets somebody open the window, stop the stack, or quit the app.
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::TrayIconBuilder;
 
@@ -1621,22 +1620,18 @@ fn main() {
             let menu = Menu::with_items(app, &[&open, &stop, &quit])?;
 
             TrayIconBuilder::with_id("openbot")
-                .icon(app.default_window_icon().unwrap().clone())
-                .icon_as_template(true)
+                .icon(tray::icon())
+                .icon_as_template(false)
                 .tooltip("OpenBot")
                 .menu(&menu)
-                .on_menu_event(|app, event| chose(app, event.id().as_ref()))
                 .build(app)?;
 
             // The same three items on the window itself, because the tray cannot be relied on and
             // Stop lives nowhere else.
             //
-            // Two ways it fails, both measured rather than guessed. A bare Linux window manager has
-            // no StatusNotifierWatcher, so the icon is never drawn at all. On Windows the icon
-            // appears and then does not come back if Explorer restarts, because re-adding it on
-            // `TaskbarCreated` is the application's job and nothing does it. Either way the window
-            // is hidden on close, the stack keeps running, and the only thing that can stop it is
-            // an icon that is not there.
+            // Linux needs a tray host to draw the icon, and Windows can place it in overflow.
+            // The tray library restores the Windows icon after Explorer restarts, but the window
+            // menu still provides access when the tray is unavailable or hard to find.
             // Its own items, not the tray's: a menu item belongs to one menu, and the two menus
             // outlive each other. The ids match so both arrive at the same function.
             use tauri::menu::Submenu;
