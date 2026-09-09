@@ -121,7 +121,8 @@ export function effectOf(tags: readonly string[] | undefined): {
   destructive: boolean;
 } {
   const labels = new Set(tags ?? []);
-  if (labels.has("destructiveHint")) return { effect: "write", destructive: true };
+  if (labels.has("destructiveHint"))
+    return { effect: "write", destructive: true };
   if (labels.has("readOnlyHint")) return { effect: "read", destructive: false };
   return { effect: "write", destructive: false };
 }
@@ -175,9 +176,7 @@ export function vendorSentence(error: unknown): string | null {
   const outer = (cause as { error?: unknown } | null | undefined)?.error;
   const inner = (outer as { error?: unknown } | null | undefined)?.error;
   const message = (inner as { message?: unknown } | null | undefined)?.message;
-  return typeof message === "string" && message.trim() !== ""
-    ? message
-    : null;
+  return typeof message === "string" && message.trim() !== "" ? message : null;
 }
 
 const failure = (message: string): McpCallResult => ({
@@ -200,10 +199,16 @@ function resultOf(data: unknown): McpCallResult {
     typeof data === "string" ? data : JSON.stringify(data ?? null, null, 2);
   const truncated = text.length > MAX_RESULT_CHARS;
   if (!truncated && (text === "" || text === "null")) {
-    return { text: "The action returned nothing.", isError: false, truncated: false };
+    return {
+      text: "The action returned nothing.",
+      isError: false,
+      truncated: false,
+    };
   }
   return {
-    text: truncated ? `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated]` : text,
+    text: truncated
+      ? `${text.slice(0, MAX_RESULT_CHARS)}\n\n[truncated]`
+      : text,
     isError: false,
     truncated,
   };

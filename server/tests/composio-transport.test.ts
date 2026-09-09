@@ -50,7 +50,10 @@ function recording(answers: Partial<ComposioActions> = {}): {
 const GMAIL_READ = {
   slug: "GMAIL_FETCH_EMAILS",
   description: "Fetch emails.",
-  inputParameters: { type: "object", properties: { query: { type: "string" } } },
+  inputParameters: {
+    type: "object",
+    properties: { query: { type: "string" } },
+  },
   tags: ["readOnlyHint", "important"],
   version: "20260903_00",
 };
@@ -105,7 +108,10 @@ describe("what a label means", () => {
     // Measured across five apps and never seen, so this branch guards the future rather than the
     // present: an app that labels nothing, or a label added later, must land on write.
     expect(effectOf([])).toEqual({ effect: "write", destructive: false });
-    expect(effectOf(undefined)).toEqual({ effect: "write", destructive: false });
+    expect(effectOf(undefined)).toEqual({
+      effect: "write",
+      destructive: false,
+    });
     expect(effectOf(["gmail", "inbox"])).toEqual({
       effect: "write",
       destructive: false,
@@ -130,7 +136,8 @@ describe("finding the vendor's own sentence", () => {
         headers: { "x-request-id": "must-not-appear" },
         error: {
           error: {
-            message: "No connected account found for user ID u1 for toolkit gmail",
+            message:
+              "No connected account found for user ID u1 for toolkit gmail",
             code: 1810,
           },
         },
@@ -294,9 +301,13 @@ describe("calling one action", () => {
     const { client, calls } = recording();
     useComposioClient(client);
 
-    const result = await callTool({ url: "composio://gmail" }, "GMAIL_FETCH_EMAILS", {
-      __version: "20260903_00",
-    });
+    const result = await callTool(
+      { url: "composio://gmail" },
+      "GMAIL_FETCH_EMAILS",
+      {
+        __version: "20260903_00",
+      },
+    );
 
     expect(result.isError).toBe(true);
     expect(result.text).toMatch(/not attributed to anybody/i);
@@ -307,17 +318,21 @@ describe("calling one action", () => {
     useComposioClient(
       recording({
         execute: async () => {
-          throw Object.assign(new Error("Error executing the tool GMAIL_FETCH_EMAILS"), {
-            cause: {
-              status: 404,
-              headers: { "x-request-id": "must-not-appear" },
-              error: {
+          throw Object.assign(
+            new Error("Error executing the tool GMAIL_FETCH_EMAILS"),
+            {
+              cause: {
+                status: 404,
+                headers: { "x-request-id": "must-not-appear" },
                 error: {
-                  message: "No connected account found for user ID u1 for toolkit gmail",
+                  error: {
+                    message:
+                      "No connected account found for user ID u1 for toolkit gmail",
+                  },
                 },
               },
             },
-          });
+          );
         },
       }).client,
     );
