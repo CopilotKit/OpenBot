@@ -89,27 +89,48 @@ export function PageShell({
           )}
         </div>
       ) : null}
-      <div
-        className={cn(
-          "mx-auto flex w-full flex-col px-4 pb-12",
-          // Without a bar above it the heading keeps the full original space.
-          bar ? "pt-8" : "pt-12",
-          WIDTHS[width],
-          className,
-        )}
-      >
-        <header className="flex flex-col gap-2">
-          <div className="flex flex-row items-center justify-between gap-4">
-            <h1 className="font-bold text-2xl">{title}</h1>
-            {action}
-          </div>
-          {description ? (
-            <p className="max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
-              {description}
-            </p>
-          ) : null}
-        </header>
-        {children}
+      {/*
+       * The scroller, and it has to live here rather than in either shell, because the two shells
+       * this frame is used under disagree about who scrolls.
+       *
+       * Under `_authed` — admin, settings — the document scrolls, so a page taller than the window
+       * has always just worked. Under `_authed/_app` it does not: that shell is `h-svh
+       * overflow-hidden` on purpose ("one viewport, never scrolls: panes scroll inside it") and its
+       * `main` is `overflow-hidden` too, so a PageShell taller than the window was silently CLIPPED
+       * — 246px of Skills sat below the fold with no way to reach it, by keyboard or otherwise.
+       *
+       * `min-h-0` is the load-bearing half of `min-h-0 flex-1`: a flex item's default `min-height:
+       * auto` refuses to shrink below its content, so `flex-1` alone would grow this past the pane
+       * and clip exactly as before. Under `_authed` both are inert — the parent is not a flex
+       * container — and `overflow-y-auto` on an auto-height element shows no scrollbar, so those
+       * eighteen screens are unaffected.
+       *
+       * Separate from the centred column below so the scrollbar rides the pane's edge instead of
+       * appearing inside a 630px measure with content either side of it.
+       */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "mx-auto flex w-full flex-col px-4 pb-12",
+            // Without a bar above it the heading keeps the full original space.
+            bar ? "pt-8" : "pt-12",
+            WIDTHS[width],
+            className,
+          )}
+        >
+          <header className="flex flex-col gap-2">
+            <div className="flex flex-row items-center justify-between gap-4">
+              <h1 className="font-bold text-2xl">{title}</h1>
+              {action}
+            </div>
+            {description ? (
+              <p className="max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
+                {description}
+              </p>
+            ) : null}
+          </header>
+          {children}
+        </div>
       </div>
     </>
   );
