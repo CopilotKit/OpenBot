@@ -8,6 +8,14 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A routine scheduled for Sunday says Sundays, whichever number it was written with
+
+Crontab has always let Sunday be either 0 or 7, the scheduler here takes both, and a routine written
+with 7 is stored and fires on Sunday like any other. Only the 0 spelling was recognised by the
+sentence the Routines page draws and the Bot reads back, so a working weekend routine appeared on
+that page as `0 9 * * 7` while its neighbour said "Sundays at 09:00" — the same schedule, described
+two ways, with the raw one looking like something had gone wrong. Both spellings now read as Sunday,
+and a list that names the day under both of its numbers says it once.
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank
