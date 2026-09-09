@@ -372,6 +372,7 @@ describe("the policy is asked as well as the grant", () => {
     const rejected = rows.find(
       (row) =>
         row.eventType === "mcp.call_rejected" &&
+        (row.payload as { bot?: string }).bot === holderId &&
         (row.payload as { refusal?: string }).refusal ===
           "sensitive_tool_arguments",
     );
