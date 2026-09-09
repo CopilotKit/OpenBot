@@ -1477,6 +1477,231 @@ describe("refresh token rotation", () => {
   });
 });
 
+/** Borrow a catalogue client's slot, then restore it after removing exactly our own vault rows. */
+function oauthClientFixture(serverId: string) {
+  const realVault = createCredentialStore(database);
+  const owned = new Set<string>();
+  const clientKey = and(
+    eq(credentials.kind, "mcp_oauth_client"),
+    eq(credentials.provider, serverId),
+    eq(credentials.keyId, `oauth-client-${serverId}`),
+  );
+  let before:
+    | {
+        credentialId: string | null;
+        updatedAt: string;
+        clients: { id: string; revokedAt: string | null; updatedAt: string }[];
+      }
+    | undefined;
+
+  return {
+    track: (id: string) => owned.add(id),
+    vault: {
+      ...realVault,
+      // Forward the caller's transaction: the credential and its pointer must commit together.
+      create: async (
+        value: Parameters<typeof realVault.create>[0],
+        executor?: Parameters<typeof realVault.create>[1],
+      ) => {
+        const row = await realVault.create(value, executor);
+        owned.add(row.id);
+        return row;
+      },
+      // rotate inserts directly; wrapping create alone misses every replacement it mints.
+      rotate: async (
+        value: Parameters<typeof realVault.rotate>[0],
+        executor?: Parameters<typeof realVault.rotate>[1],
+      ) => {
+        const row = await realVault.rotate(value, executor);
+        owned.add(row.id);
+        return row;
+      },
+    },
+    start: async () => {
+      before = await database.transaction(async (transaction) => {
+        const [server] = await transaction
+          .select({
+            credentialId: mcpServers.credentialId,
+            updatedAt: sql<string>`${mcpServers.updatedAt}::text`,
+          })
+          .from(mcpServers)
+          .where(eq(mcpServers.id, serverId))
+          .for("update");
+        if (!server) throw new Error("fixture server was not stored");
+        // Dates round PostgreSQL microseconds to milliseconds. Keep the exact stamps as text.
+        const clients = await transaction
+          .select({
+            id: credentials.id,
+            revokedAt: sql<string | null>`${credentials.revokedAt}::text`,
+            updatedAt: sql<string>`${credentials.updatedAt}::text`,
+          })
+          .from(credentials)
+          .where(and(clientKey, sql`${credentials.revokedAt} IS NULL`))
+          .for("update");
+        await transaction
+          .update(mcpServers)
+          .set({ credentialId: null })
+          .where(eq(mcpServers.id, serverId));
+        if (clients.length > 0) {
+          await transaction
+            .update(credentials)
+            .set({ revokedAt: new Date(), updatedAt: new Date() })
+            .where(
+              inArray(
+                credentials.id,
+                clients.map((row) => row.id),
+              ),
+            );
+        }
+        return { ...server, clients };
+      });
+    },
+    retireClients: async () => {
+      if (owned.size === 0) return;
+      await database
+        .update(credentials)
+        .set({ revokedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            clientKey,
+            inArray(credentials.id, [...owned]),
+            sql`${credentials.revokedAt} IS NULL`,
+          ),
+        );
+    },
+    restore: async () => {
+      const snapshot = before;
+      if (!snapshot) return;
+      await database.transaction(async (transaction) => {
+        await transaction
+          .update(mcpServers)
+          .set({ credentialId: null })
+          .where(eq(mcpServers.id, serverId));
+        if (owned.size > 0) {
+          await transaction
+            .delete(credentials)
+            .where(inArray(credentials.id, [...owned]));
+        }
+        // Free the active key before reviving its original row, then restore the pointer atomically.
+        for (const row of snapshot.clients) {
+          await transaction
+            .update(credentials)
+            .set({
+              revokedAt: sql`${row.revokedAt}::timestamptz`,
+              updatedAt: sql`${row.updatedAt}::timestamptz`,
+            })
+            .where(eq(credentials.id, row.id));
+        }
+        await transaction
+          .update(mcpServers)
+          .set({
+            credentialId: snapshot.credentialId,
+            updatedAt: sql`${snapshot.updatedAt}::timestamptz`,
+          })
+          .where(eq(mcpServers.id, serverId));
+      });
+      before = undefined;
+      owned.clear();
+    },
+  };
+}
+
+test.each(["success", "failure"])(
+  "OAuth client fixture restores exact state after %s following create and rotate",
+  async (outcome) => {
+    const fixtureServerId = `oauth-fixture-${suite}-${outcome}`;
+    const originalId = randomUUID();
+    const sentinelId = randomUUID();
+    const fixture = oauthClientFixture(fixtureServerId);
+    const value: CredentialStoreValue = {
+      kind: "mcp_oauth_client",
+      provider: fixtureServerId,
+      keyId: `oauth-client-${fixtureServerId}`,
+      metadata: {},
+      encryptedValue: "synthetic-fixture-value",
+    };
+    const state = async () => ({
+      credentials: await database
+        .select({ row: sql`to_jsonb(${credentials})` })
+        .from(credentials)
+        .where(
+          inArray(credentials.provider, [
+            fixtureServerId,
+            `${fixtureServerId}-unrelated`,
+          ]),
+        )
+        .orderBy(credentials.id),
+      server: await database
+        .select({ row: sql`to_jsonb(${mcpServers})` })
+        .from(mcpServers)
+        .where(eq(mcpServers.id, fixtureServerId)),
+    });
+    try {
+      await database.insert(credentials).values([
+        {
+          ...value,
+          id: originalId,
+          updatedAt: sql`'2020-01-02 03:04:05.123456+00'::timestamptz`,
+        },
+        { ...value, id: sentinelId, provider: `${fixtureServerId}-unrelated` },
+      ]);
+      await database.insert(mcpServers).values({
+        id: fixtureServerId,
+        title: fixtureServerId,
+        vendor: "Synthetic fixture",
+        url: "https://fixture.invalid/mcp",
+        credentialId: originalId,
+      });
+      const before = await state();
+      const exercise = async () => {
+        try {
+          await fixture.start();
+          await fixture.retireClients();
+          const created = await database.transaction((transaction) =>
+            fixture.vault.create(value, transaction),
+          );
+          const rotated = await database.transaction(async (transaction) => {
+            const row = await fixture.vault.rotate(
+              { ...value, previousCredentialId: created.id },
+              transaction,
+            );
+            await transaction
+              .update(mcpServers)
+              .set({ credentialId: row.id })
+              .where(eq(mcpServers.id, fixtureServerId));
+            return row;
+          });
+          expect(await fixture.vault.isLive(created.id)).toBe(false);
+          expect(await fixture.vault.isLive(rotated.id)).toBe(true);
+          if (outcome === "failure") {
+            throw new Error("fixture operation failed after rotation");
+          }
+        } finally {
+          await fixture.restore();
+        }
+      };
+      if (outcome === "failure") {
+        await expect(exercise()).rejects.toThrow(
+          "fixture operation failed after rotation",
+        );
+      } else {
+        await exercise();
+      }
+      // Full PostgreSQL rows catch timestamp rounding, leaked replacements and sentinel damage.
+      expect(await state()).toEqual(before);
+      expect(await fixture.vault.isLive(originalId)).toBe(true);
+    } finally {
+      await fixture.restore();
+      await database
+        .delete(mcpServers)
+        .where(eq(mcpServers.id, fixtureServerId));
+      await database
+        .delete(credentials)
+        .where(inArray(credentials.id, [originalId, sentinelId]));
+    }
+  },
+);
+
 /**
  * A client this deployment registered for itself, which the vendor has since forgotten.
  *
@@ -1518,8 +1743,8 @@ describe("a dynamic client the vendor has evicted", () => {
   })();
   const SCOPE = "";
 
-  /** Every vault row this suite created, so the cleanup can take exactly those. */
-  const vaultRows: string[] = [];
+  const clientFixture = oauthClientFixture(dynamicServerId);
+  const vault = clientFixture.vault;
   /** Which client each exchange was offered, in order. One entry per call, never two. */
   const offered: string[] = [];
   /**
@@ -1540,35 +1765,6 @@ describe("a dynamic client the vendor has evicted", () => {
   /** What the vendor's registration endpoint hands back, installed per test. */
   let issue: () => OAuthClient | null = () => {
     throw new Error("no registration was installed for this test");
-  };
-
-  /*
-   * The real vault, with every row it mints written down.
-   *
-   * Genuine rather than stubbed, because what this suite asserts is that a re-registered client is
-   * KEPT — which is a write and a read back through the encryption, not a call that was made. The
-   * one wrapper is the bookkeeping that lets the cleanup take exactly this suite's rows.
-   */
-  const realVault = createCredentialStore(database);
-  const vault = {
-    ...realVault,
-    /*
-     * The executor is FORWARDED, and dropping it is not a detail.
-     *
-     * The store hands its own transaction to the vault so that a secret and the pointer that names it
-     * commit together. A wrapper that swallows it has the insert run on a second pooled connection
-     * instead — which, with the caller holding the first and a sibling holding the second, is not a
-     * slower write but a deadlock: the insert waits for a connection only a transaction that is
-     * waiting for the insert can release.
-     */
-    create: async (
-      value: Parameters<typeof realVault.create>[0],
-      executor?: Parameters<typeof realVault.create>[1],
-    ) => {
-      const row = await realVault.create(value, executor);
-      vaultRows.push(row.id);
-      return row;
-    },
   };
 
   /**
@@ -1677,17 +1873,7 @@ describe("a dynamic client the vendor has evicted", () => {
      * One live client per key is law (`credentials_active_key_idx`), so planting a client the way a
      * registration would means retiring whatever live row the key still holds from an earlier test.
      */
-    await database
-      .update(credentials)
-      .set({ revokedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(credentials.kind, "mcp_oauth_client"),
-          eq(credentials.provider, dynamicServerId),
-          eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
-          sql`${credentials.revokedAt} IS NULL`,
-        ),
-      );
+    await clientFixture.retireClients();
     const [row] = await database
       .insert(credentials)
       .values({
@@ -1703,7 +1889,7 @@ describe("a dynamic client the vendor has evicted", () => {
       })
       .returning({ id: credentials.id });
     if (!row) throw new Error("client was not stored");
-    vaultRows.push(row.id);
+    clientFixture.track(row.id);
     await database
       .update(mcpServers)
       .set({ credentialId: row.id })
@@ -1778,8 +1964,6 @@ describe("a dynamic client the vendor has evicted", () => {
     });
 
   let notionWasAlreadyConfigured = false;
-  /** This deployment's own client, restored afterwards: the column is live configuration. */
-  let clientBefore: string | null = null;
 
   // The vendor refuses the ordinary way unless a test says otherwise, so a test that varies the
   // refusal cannot leave the next one asserting against somebody else's setup.
@@ -1808,11 +1992,10 @@ describe("a dynamic client the vendor has evicted", () => {
       .onConflictDoNothing();
 
     const [existing] = await database
-      .select({ id: mcpServers.id, credentialId: mcpServers.credentialId })
+      .select({ id: mcpServers.id })
       .from(mcpServers)
       .where(eq(mcpServers.id, dynamicServerId));
     notionWasAlreadyConfigured = existing !== undefined;
-    clientBefore = existing?.credentialId ?? null;
 
     await database
       .insert(mcpServers)
@@ -1824,6 +2007,7 @@ describe("a dynamic client the vendor has evicted", () => {
         provenance: "first-party",
       })
       .onConflictDoNothing();
+    await clientFixture.start();
     await database
       .insert(mcpTools)
       .values({
@@ -1849,14 +2033,7 @@ describe("a dynamic client the vendor has evicted", () => {
           eq(mcpUserCredentials.userId, dynamicUserId),
         ),
       );
-    // Before the deletes, because the column addresses one of the rows they remove.
-    await database
-      .update(mcpServers)
-      .set({ credentialId: clientBefore })
-      .where(eq(mcpServers.id, dynamicServerId));
-    for (const id of vaultRows) {
-      await database.delete(credentials).where(eq(credentials.id, id));
-    }
+    await clientFixture.restore();
     await database
       .delete(pluginGrants)
       .where(
@@ -2230,17 +2407,7 @@ describe("a dynamic client the vendor has evicted", () => {
     await clearClient();
     // No live row for the key either, so this really is a deployment holding nothing: `clearClient`
     // only drops the pointer, and it is the KEY the index constrains.
-    await database
-      .update(credentials)
-      .set({ revokedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(credentials.kind, "mcp_oauth_client"),
-          eq(credentials.provider, dynamicServerId),
-          eq(credentials.keyId, `oauth-client-${dynamicServerId}`),
-          sql`${credentials.revokedAt} IS NULL`,
-        ),
-      );
+    await clientFixture.retireClients();
     registrations.length = 0;
     // A distinct client per registration, so two registrations cannot be mistaken for one.
     let issued = 0;
