@@ -753,11 +753,22 @@ describe("removing an MCP server", () => {
 
 describe("the trail can be read by a second reader", () => {
   test("a refusal names the bot, the server and the tool in queryable JSON", async () => {
-    const [row] = await database
+    const actorId = `audit-payload-${randomUUID()}@openbot.local`;
+    await expect(
+      store.callTool({
+        ref,
+        args: {},
+        botId: strangerId,
+        actorId,
+      }),
+    ).rejects.toBeInstanceOf(PluginRefusedError);
+
+    const rows = await database
       .select({
         bot: sql<string>`payload ->> 'bot'`,
         server: sql<string>`payload ->> 'server'`,
         tool: sql<string>`payload ->> 'tool'`,
+        refusal: sql<string>`payload ->> 'refusal'`,
       })
       .from(auditEvents)
       .where(
@@ -765,15 +776,20 @@ describe("the trail can be read by a second reader", () => {
           eq(auditEvents.targetType, "mcp_tool"),
           eq(auditEvents.eventType, "mcp.call_rejected"),
           eq(auditEvents.targetId, ref),
+          // The catalogue ref is shared; only this call used this actor and suite-owned Bot.
+          eq(sql<string>`payload ->> 'actor'`, actorId),
+          eq(sql<string>`payload ->> 'bot'`, strangerId),
         ),
-      )
-      .limit(1);
+      );
 
     // Asserted in SQL rather than through the application, because the stored payload shape is the
     // property under test.
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
     expect(row?.server).toBe(serverId);
     expect(row?.tool).toBe(toolName);
-    expect(row?.bot).toBeTruthy();
+    expect(row?.bot).toBe(strangerId);
+    expect(row?.refusal).toBe("not_granted");
   });
 });
 
