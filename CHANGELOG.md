@@ -8,6 +8,19 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Pressing Enter works while a person is driving a Bot's browser
+
+Taking the wheel of a Bot's browser is mostly for the sign-in it cannot do itself, and Enter is how a
+sign-in ends. Every keystroke reached the page, and Enter reached it as a key press that produces no
+character — which Chrome delivers to the page's own listeners and then does nothing further with. So
+the form did not submit, a new line in a text box did not start, and a button somebody had tabbed to
+was not pressed, while anything on the page listening for the key saw it arrive. There was nothing on
+screen to explain it: the keystroke was not refused, it simply had no effect, and the way out was to
+click the submit button instead. Enter now carries the carriage return a keyboard sends, which is
+what makes Chrome carry out what the key means. Measured against Chromium 151: every other editing
+key — Backspace, Delete, Tab, Home, End and the arrows — already did what it meant and is unchanged,
+and a single-line field still holds exactly what was typed into it.
+
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank
