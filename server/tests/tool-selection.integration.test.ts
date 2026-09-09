@@ -83,6 +83,36 @@ let sentToRemote: {
   forwardedProps: Record<string, unknown>;
 }[] = [];
 
+type EnvironmentSnapshot = {
+  openAIBaseUrl: string | undefined;
+  openAIApiKey: string | undefined;
+};
+
+let originalModelEnvironment: EnvironmentSnapshot | undefined;
+
+function restoreEnvironmentValue(
+  name: "OPENAI_BASE_URL" | "OPENAI_API_KEY",
+  value: string | undefined,
+) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
+}
+
+function restoreModelEnvironment() {
+  if (!originalModelEnvironment) return;
+  restoreEnvironmentValue(
+    "OPENAI_BASE_URL",
+    originalModelEnvironment.openAIBaseUrl,
+  );
+  restoreEnvironmentValue(
+    "OPENAI_API_KEY",
+    originalModelEnvironment.openAIApiKey,
+  );
+}
+
 type NativeMastraRequestBody = {
   messages?: { role?: string; content?: unknown }[];
   clientTools?: Record<string, unknown>;
@@ -94,6 +124,10 @@ type NativeMastraRequestBody = {
 };
 
 beforeAll(async () => {
+  originalModelEnvironment = {
+    openAIBaseUrl: process.env.OPENAI_BASE_URL,
+    openAIApiKey: process.env.OPENAI_API_KEY,
+  };
   const url = await llm.start();
   process.env.OPENAI_BASE_URL = url;
   process.env.OPENAI_API_KEY = "test-key";
@@ -117,8 +151,17 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await llm.stop();
-  await remote.stop();
+  try {
+    const results = await Promise.allSettled([llm.stop(), remote.stop()]);
+    const failed = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failed) {
+      throw failed.reason;
+    }
+  } finally {
+    restoreModelEnvironment();
+  }
 });
 
 beforeEach(() => {
