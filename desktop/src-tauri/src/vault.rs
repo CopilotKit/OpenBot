@@ -112,7 +112,7 @@ fn write_env_after_remembering_with(
     secrets: &BTreeMap<String, String>,
     purge: &BTreeMap<String, String>,
     mut remember_one: impl FnMut(&str, &str) -> Result<(), Problem>,
-    mut forget_one: impl FnMut(&str),
+    mut forget_one: impl FnMut(&str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     remember_all_with(secrets, &mut remember_one, &mut forget_one)?;
     crate::env::write(path, settings, purge)
@@ -122,11 +122,11 @@ fn write_env_after_remembering_with(
 pub(crate) fn remember_all_with(
     secrets: &BTreeMap<String, String>,
     remember_one: &mut impl FnMut(&str, &str) -> Result<(), Problem>,
-    forget_one: &mut impl FnMut(&str),
+    forget_one: &mut impl FnMut(&str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     for (key, value) in secrets {
         if value.trim().is_empty() {
-            forget_one(key);
+            forget_one(key)?;
             continue;
         }
         remember_one(key, value)?;
@@ -139,32 +139,38 @@ pub(crate) fn remember_all_with(
 pub enum ReadPolicy {
     /// No protected store at all. This is the startup and React-mount policy.
     FileOnly,
-    /// A user-triggered action may ask the operating system for access.
-    Interactive,
+    /// Access protected storage without permitting operating-system authorization UI.
+    NoUi,
 }
 
 /**
 What a previous run left, under the selected interaction policy.
 
 The file path is always read first because legacy `.env` credentials must still migrate. Protected
-storage is layered on top only for interactive Start and Ask, where the action needs the credential
-now and can show a refusal. Passive saved hints come from local nonsecret intent metadata.
+storage is layered on top only for Start and Ask, without authorization UI. Refusal is an error. Passive saved hints come from local nonsecret intent metadata.
 */
 pub fn already_given_with_policy(
     env_file: &std::path::Path,
     keys: &[&str],
     policy: ReadPolicy,
 ) -> Result<BTreeMap<String, String>, Problem> {
+    already_given_with_reader(env_file, keys, policy, recall_no_ui)
+}
+
+fn already_given_with_reader(
+    env_file: &std::path::Path,
+    keys: &[&str],
+    policy: ReadPolicy,
+    mut read: impl FnMut(&str) -> Result<Option<String>, Problem>,
+) -> Result<BTreeMap<String, String>, Problem> {
     let mut found = match policy {
         ReadPolicy::FileOnly => crate::env::already_set(env_file, keys),
-        ReadPolicy::Interactive => {
-            crate::env::read_already_set(env_file, keys).map_err(|error| {
-                Problem::with(
-                    "OpenBot could not read its settings.",
-                    format!("{}: {error}", env_file.display()),
-                )
-            })?
-        }
+        ReadPolicy::NoUi => crate::env::read_already_set(env_file, keys).map_err(|error| {
+            Problem::with(
+                "OpenBot could not read its settings.",
+                format!("{}: {error}", env_file.display()),
+            )
+        })?,
     };
     if policy == ReadPolicy::FileOnly {
         return Ok(found);
@@ -173,7 +179,7 @@ pub fn already_given_with_policy(
     for key in keys.iter().copied().filter(|key| is_secret(key)) {
         let value = match policy {
             ReadPolicy::FileOnly => None,
-            ReadPolicy::Interactive => recall_interactive(key)?,
+            ReadPolicy::NoUi => read(key)?,
         };
         if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
             found.insert(key.to_string(), value);
@@ -191,21 +197,16 @@ pub fn already_given_file_only(
 }
 
 /// Protected retrieval for a user-triggered action.
-pub fn already_given_interactive(
+pub fn already_given_no_ui(
     env_file: &std::path::Path,
     keys: &[&str],
 ) -> Result<BTreeMap<String, String>, Problem> {
-    already_given_with_policy(env_file, keys, ReadPolicy::Interactive)
+    already_given_with_policy(env_file, keys, ReadPolicy::NoUi)
 }
 
-/*
- * ONE READ PER SECRET PER RUN, and this is not a performance note.
- *
- * macOS may authorize protected reads, including after a development build is re-signed.
- * Only explicit Start/Ask actions read the store. Cache success, absence, and refusal once per
- * name per process so one action does not ask again for the same item. Writes and deletions keep
- * the cache in step. Passive startup uses local intent metadata and never reaches this cache.
- */
+// Cache only successfully retrieved credentials. Absence and refusal must be rechecked after
+// deliberate recovery. Hold the cache lock across store access so a late read cannot overwrite
+// a newer write/delete. Passive hydration never enters this cache.
 type CachedRead = Result<Option<String>, Problem>;
 
 static REMEMBERED: std::sync::OnceLock<std::sync::Mutex<BTreeMap<String, CachedRead>>> =
@@ -215,27 +216,29 @@ fn cache() -> &'static std::sync::Mutex<BTreeMap<String, CachedRead>> {
     REMEMBERED.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
 }
 
-/// Read a stored secret, asking the store at most once per name per run.
-pub fn recall(name: &str) -> Option<String> {
-    recall_interactive(name).ok().flatten()
+pub fn recall(name: &str) -> Result<Option<String>, Problem> {
+    recall_no_ui(name)
 }
 
-fn recall_interactive(name: &str) -> Result<Option<String>, Problem> {
-    recall_interactive_cached(name, cache(), recall_from_store)
+fn recall_no_ui(name: &str) -> Result<Option<String>, Problem> {
+    recall_no_ui_cached(name, cache(), recall_from_store)
 }
 
-fn recall_interactive_cached(
+fn cache_problem() -> Problem {
+    Problem::plain("OpenBot could not access its credential cache. Restart OpenBot and try again.")
+}
+
+fn recall_no_ui_cached(
     name: &str,
     cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
     recall_one: impl FnOnce(&str) -> Result<Option<String>, Problem>,
 ) -> Result<Option<String>, Problem> {
-    if let Ok(held) = cache.lock() {
-        if let Some(known) = held.get(name) {
-            return known.clone();
-        }
+    let mut held = cache.lock().map_err(|_| cache_problem())?;
+    if let Some(known) = held.get(name) {
+        return known.clone();
     }
     let found = recall_one(name);
-    if let Ok(mut held) = cache.lock() {
+    if matches!(&found, Ok(Some(_))) {
         held.insert(name.to_string(), found.clone());
     }
     found
@@ -252,40 +255,40 @@ fn remember_cached(
     cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
     remember_one: impl FnOnce(&str, &str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
+    let mut held = cache.lock().map_err(|_| cache_problem())?;
+    // A failed restoration can follow a successful OS write. Discard any stale cache entry.
+    held.remove(name);
     remember_one(name, value)?;
-    if let Ok(mut held) = cache.lock() {
-        held.insert(name.to_string(), Ok(Some(value.to_string())));
-    }
+    held.insert(name.to_string(), Ok(Some(value.to_string())));
     Ok(())
 }
 
-/// Drop a secret from the store and from the cache.
-pub fn forget(name: &str) {
+/// Drop a secret from the store. Refusal must not be published as absence.
+pub fn forget(name: &str) -> Result<(), Problem> {
     forget_cached(name, cache(), forget_in_store)
 }
 
 fn forget_cached(
     name: &str,
     cache: &std::sync::Mutex<BTreeMap<String, CachedRead>>,
-    forget_one: impl FnOnce(&str),
-) {
-    forget_one(name);
-    if let Ok(mut held) = cache.lock() {
-        held.insert(name.to_string(), Ok(None));
-    }
+    forget_one: impl FnOnce(&str) -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    let mut held = cache.lock().map_err(|_| cache_problem())?;
+    held.remove(name);
+    forget_one(name)
 }
 
-/// Read back what was stored, for the settings named.
-pub fn recall_all(keys: &[&str]) -> BTreeMap<String, String> {
+/// Read back what was stored, preserving protected-store failures.
+pub fn recall_all(keys: &[&str]) -> Result<BTreeMap<String, String>, Problem> {
     let mut found = BTreeMap::new();
     for key in keys {
-        if let Some(value) = recall(key) {
+        if let Some(value) = recall(key)? {
             if !value.trim().is_empty() {
                 found.insert((*key).to_string(), value);
             }
         }
     }
-    found
+    Ok(found)
 }
 
 /*
@@ -301,42 +304,47 @@ pub fn recall_all(keys: &[&str]) -> BTreeMap<String, String> {
  * path has neither a length limit nor an argv.
  */
 #[cfg(target_os = "macos")]
+#[path = "vault/keychain.rs"]
+mod keychain;
+
+#[cfg(target_os = "macos")]
 fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
-    // Set, not add: a second run updates the item rather than colliding with the first.
-    security_framework::passwords::set_generic_password(SERVICE, name, value.as_bytes())
-        .map_err(|error| keychain_problem(error.to_string()))
+    keychain::without_ui("save", name, || {
+        // The framework tries Add then Update on duplicate; both stay inside this boundary.
+        security_framework::passwords::set_generic_password(SERVICE, name, value.as_bytes())
+            .map_err(|error| keychain::problem("save", name, "item", Some(error.code())))
+    })
 }
 
 #[cfg(target_os = "macos")]
 fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
-    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
-
-    match security_framework::passwords::get_generic_password(SERVICE, name) {
-        Ok(raw) => Ok(String::from_utf8(raw).ok()),
-        Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
-        Err(error) => Err(keychain_read_problem(error.to_string())),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn forget_in_store(name: &str) {
-    let _ = security_framework::passwords::delete_generic_password(SERVICE, name);
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_problem(detail: String) -> Problem {
-    Problem::with(
-        "OpenBot could not save your sign-in details to this Mac's Keychain.",
-        detail,
+    keychain::without_ui(
+        "read",
+        name,
+        || match security_framework::passwords::get_generic_password(SERVICE, name) {
+            Ok(raw) => String::from_utf8(raw)
+                .map(Some)
+                .map_err(|_| keychain::problem("read", name, "invalid-utf8", None)),
+            Err(error) if error.code() == -25300 => Ok(None),
+            Err(error) => Err(keychain::problem("read", name, "item", Some(error.code()))),
+        },
     )
 }
 
 #[cfg(target_os = "macos")]
-fn keychain_read_problem(detail: String) -> Problem {
-    Problem::with(
-        "OpenBot needs permission to read saved credentials for this action.",
-        detail,
-    )
+fn forget_in_store(name: &str) -> Result<(), Problem> {
+    keychain::without_ui("delete", name, || {
+        match security_framework::passwords::delete_generic_password(SERVICE, name) {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == -25300 => Ok(()),
+            Err(error) => Err(keychain::problem(
+                "delete",
+                name,
+                "item",
+                Some(error.code()),
+            )),
+        }
+    })
 }
 
 /*
@@ -379,16 +387,14 @@ $bytes = [Security.Cryptography.ProtectedData]::Unprotect($sealed, $null, 'Curre
 }
 
 #[cfg(target_os = "windows")]
-fn forget_in_store(name: &str) {
-    if let Ok(dir) = vault_dir() {
-        let _ = std::fs::remove_file(dir.join(format!("{name}.dpapi")));
-    }
+fn forget_in_store(name: &str) -> Result<(), Problem> {
+    remove_secret_file(&vault_dir()?.join(format!("{name}.dpapi")))
 }
 
 #[cfg(target_os = "windows")]
 fn powershell(program: &str, input: Option<&str>) -> Result<String, Problem> {
     let child = crate::quiet::command("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", program])
+        .args(["-NoProfile", "-NonNoUi", "-Command", program])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -644,9 +650,19 @@ fn recall_secret_file(path: &std::path::Path) -> Result<Option<String>, Problem>
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn forget_in_store(name: &str) {
-    if let Ok(dir) = vault_dir() {
-        let _ = std::fs::remove_file(dir.join(format!("{name}.secret")));
+fn forget_in_store(name: &str) -> Result<(), Problem> {
+    remove_secret_file(&vault_dir()?.join(format!("{name}.secret")))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn remove_secret_file(path: &std::path::Path) -> Result<(), Problem> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(Problem::with(
+            "OpenBot could not remove a saved credential on this computer.",
+            format!("{}: {error}", path.display()),
+        )),
     }
 }
 
@@ -871,85 +887,94 @@ mod cache_tests {
         }
     }
 
-    /// The store is asked once per name, then not again.
-    ///
-    /// The failure this pins is not a slow read, it is a person clicking Deny four times every
-    /// time a screen mounts: macOS authorizes each read of a stored password separately unless the
-    /// build's signature is one the item already trusts, and a development build's never is.
     #[test]
-    fn a_secret_is_read_from_the_store_once_per_run() {
-        let name = format!("OPENBOT_TEST_CACHE_{}", std::process::id());
+    fn only_successful_reads_are_cached_and_mutations_keep_them_current() {
+        let name = "OPENAI_API_KEY";
         let cache = std::sync::Mutex::new(BTreeMap::new());
-        let store = std::sync::Mutex::new(BTreeMap::<String, String>::new());
-        let reads = std::sync::Mutex::new(Vec::new());
-
-        // Absent to begin with, and the absence is remembered rather than asked again.
+        for _ in 0..2 {
+            assert_eq!(
+                super::recall_no_ui_cached(name, &cache, |_| Ok(None)),
+                Ok(None)
+            );
+            assert!(cache.lock().unwrap().is_empty());
+        }
+        let found =
+            super::recall_no_ui_cached(name, &cache, |_| Ok(Some("recovered".into()))).unwrap();
+        assert_eq!(found.as_deref(), Some("recovered"));
         assert_eq!(
-            super::recall_interactive_cached(&name, &cache, |key| {
-                reads.lock().unwrap().push(key.to_string());
-                Ok(store.lock().unwrap().get(key).cloned())
-            }),
-            Ok(None)
+            super::recall_no_ui_cached(name, &cache, |_| panic!("success cached")).unwrap(),
+            found
         );
+        super::remember_cached(name, "replacement", &cache, |_, _| Ok(())).unwrap();
         assert_eq!(
-            super::recall_interactive_cached(&name, &cache, |key| {
-                reads.lock().unwrap().push(key.to_string());
-                Ok(store.lock().unwrap().get(key).cloned())
-            }),
-            Ok(None)
-        );
-        assert_eq!(
-            reads.lock().unwrap().as_slice(),
-            std::slice::from_ref(&name)
-        );
-
-        // A write goes through and updates what a read sees, without asking the store.
-        super::remember_cached(&name, "a-value", &cache, |key, value| {
-            store
-                .lock()
+            super::recall_no_ui_cached(name, &cache, |_| panic!("write cached"))
                 .unwrap()
-                .insert(key.to_string(), value.to_string());
-            Ok(())
-        })
-        .expect("the store should accept a write");
-        assert_eq!(
-            super::recall_interactive_cached(&name, &cache, |key| {
-                reads.lock().unwrap().push(key.to_string());
-                Ok(store.lock().unwrap().get(key).cloned())
-            })
-            .unwrap()
-            .as_deref(),
-            Some("a-value")
+                .as_deref(),
+            Some("replacement")
         );
+        super::forget_cached(name, &cache, |_| Ok(())).unwrap();
+        assert!(cache.lock().unwrap().is_empty());
         assert_eq!(
-            super::recall_interactive_cached(&name, &cache, |key| {
-                reads.lock().unwrap().push(key.to_string());
-                Ok(store.lock().unwrap().get(key).cloned())
-            })
-            .unwrap()
-            .as_deref(),
-            Some("a-value")
-        );
-        assert_eq!(
-            reads.lock().unwrap().as_slice(),
-            std::slice::from_ref(&name)
-        );
-
-        // And forgetting is reflected in both.
-        super::forget_cached(&name, &cache, |key| {
-            store.lock().unwrap().remove(key);
-        });
-        assert_eq!(
-            super::recall_interactive_cached(&name, &cache, |key| {
-                reads.lock().unwrap().push(key.to_string());
-                Ok(store.lock().unwrap().get(key).cloned())
-            }),
+            super::recall_no_ui_cached(name, &cache, |_| Ok(None)),
             Ok(None)
         );
+    }
+
+    #[test]
+    fn failed_write_or_delete_cannot_publish_success_or_stale_cache() {
+        for delete in [false, true] {
+            let cache = std::sync::Mutex::new(BTreeMap::new());
+            super::remember_cached("OPENAI_API_KEY", "old", &cache, |_, _| Ok(())).unwrap();
+            let denied =
+                Problem::plain("synthetic refusal, including restoration after OS success");
+            let result = if delete {
+                super::forget_cached("OPENAI_API_KEY", &cache, |_| Err(denied.clone()))
+            } else {
+                super::remember_cached("OPENAI_API_KEY", "new", &cache, |_, _| Err(denied.clone()))
+            };
+            assert_eq!(result, Err(denied));
+            assert!(cache.lock().unwrap().is_empty());
+            assert_eq!(
+                super::recall_no_ui_cached("OPENAI_API_KEY", &cache, |_| Ok(Some(
+                    "authoritative".into()
+                )))
+                .unwrap()
+                .as_deref(),
+                Some("authoritative")
+            );
+        }
+    }
+
+    #[test]
+    fn denied_encryption_key_does_not_use_valid_legacy_fallback() {
+        let root = temp_root("vault-denied-legacy-key");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(".env");
+        let legacy = "KEY_ENCRYPTION_KEY=synthetic-existing-valid-key\n";
+        std::fs::write(&path, legacy).unwrap();
+        let denied = Problem::plain("synthetic read refused");
         assert_eq!(
-            reads.lock().unwrap().as_slice(),
-            std::slice::from_ref(&name)
+            super::already_given_with_reader(
+                &path,
+                &["KEY_ENCRYPTION_KEY"],
+                super::ReadPolicy::NoUi,
+                |_| Err(denied.clone())
+            ),
+            Err(denied)
         );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
+        let missing = super::already_given_with_reader(
+            &path,
+            &["KEY_ENCRYPTION_KEY"],
+            super::ReadPolicy::NoUi,
+            |_| Ok(None),
+        )
+        .unwrap();
+        assert_eq!(
+            missing["KEY_ENCRYPTION_KEY"],
+            "synthetic-existing-valid-key"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -975,7 +1000,7 @@ mod cache_tests {
     }
 
     #[test]
-    fn file_only_hydration_keeps_unreadable_env_unknown_but_interactive_reports_it() {
+    fn file_only_hydration_keeps_unreadable_env_unknown_but_no_ui_reports_it() {
         let dir = temp_root("vault-strict-read");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
@@ -989,25 +1014,25 @@ mod cache_tests {
         .unwrap();
         assert!(file_only.is_empty());
 
-        let interactive = super::already_given_with_policy(
+        let no_ui = super::already_given_with_policy(
             &path,
             &["INTELLIGENCE_API_URL"],
-            super::ReadPolicy::Interactive,
+            super::ReadPolicy::NoUi,
         )
-        .expect_err("interactive Start/Ask must report unreadable .env input");
-        assert_eq!(interactive.said, "OpenBot could not read its settings.");
+        .expect_err("no_ui Start/Ask must report unreadable .env input");
+        assert_eq!(no_ui.said, "OpenBot could not read its settings.");
         assert!(
-            interactive
+            no_ui
                 .detail
                 .as_deref()
                 .is_some_and(|detail| detail.contains(path.to_string_lossy().as_ref())),
-            "{interactive:?}"
+            "{no_ui:?}"
         );
         std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
-    fn interactive_reads_cache_denial_once_per_key() {
+    fn refused_reads_can_succeed_after_deliberate_recovery() {
         let cache = std::sync::Mutex::new(BTreeMap::new());
         let attempts = std::sync::Mutex::new(0);
         let denied = Problem::with(
@@ -1016,14 +1041,21 @@ mod cache_tests {
         );
 
         for _ in 0..2 {
-            let result = super::recall_interactive_cached("OPENAI_API_KEY", &cache, |_| {
+            let result = super::recall_no_ui_cached("OPENAI_API_KEY", &cache, |_| {
                 *attempts.lock().unwrap() += 1;
                 Err(denied.clone())
             });
             assert_eq!(result, Err(denied.clone()));
         }
 
-        assert_eq!(*attempts.lock().unwrap(), 1);
+        assert_eq!(*attempts.lock().unwrap(), 2);
+        assert!(cache.lock().unwrap().is_empty());
+        assert_eq!(
+            super::recall_no_ui_cached("OPENAI_API_KEY", &cache, |_| Ok(Some("recovered".into())))
+                .unwrap()
+                .as_deref(),
+            Some("recovered")
+        );
     }
 }
 
@@ -1139,7 +1171,7 @@ SOMETHING_ELSE=kept\n",
                 remembered.push((key.to_string(), value.to_string()));
                 Ok(())
             },
-            |_| {},
+            |_| Ok(()),
         )
         .unwrap();
 
@@ -1208,7 +1240,7 @@ SOMETHING_ELSE=kept\n",
                 attempted.push(key.to_string());
                 Err(Problem::plain(format!("refused {key}")))
             },
-            |_| {},
+            |_| Ok(()),
         )
         .unwrap_err();
 
@@ -1250,7 +1282,10 @@ SOMETHING_ELSE=kept\n",
             &secrets,
             &secrets,
             |key, _| panic!("empty secret should have been forgotten, not remembered: {key}"),
-            |key| forgotten.push(key.to_string()),
+            |key| {
+                forgotten.push(key.to_string());
+                Ok(())
+            },
         )
         .unwrap();
 
@@ -1275,11 +1310,15 @@ SOMETHING_ELSE=kept\n",
         let name = "OPENBOT_VAULT_SELF_TEST";
         remember(name, "a value with spaces and $ymbols").expect("could not store");
         assert_eq!(
-            recall(name).as_deref(),
+            recall(name).unwrap().as_deref(),
             Some("a value with spaces and $ymbols")
         );
-        forget(name);
-        assert_eq!(recall(name), None, "forget left the credential behind");
+        forget(name).unwrap();
+        assert_eq!(
+            recall(name).unwrap(),
+            None,
+            "forget left the credential behind"
+        );
     }
 
     /**
@@ -1297,7 +1336,7 @@ SOMETHING_ELSE=kept\n",
         for length in [128, 129, 164, 256, 512] {
             let value: String = std::iter::repeat_n('k', length).collect();
             remember(name, &value).expect("could not store");
-            let read = recall(name).unwrap_or_default();
+            let read = recall(name).unwrap().unwrap_or_default();
             assert_eq!(
                 read.len(),
                 length,
@@ -1305,6 +1344,6 @@ SOMETHING_ELSE=kept\n",
             );
             assert_eq!(read, value);
         }
-        forget(name);
+        forget(name).unwrap();
     }
 }

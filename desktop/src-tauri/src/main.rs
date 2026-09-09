@@ -484,7 +484,7 @@ fn start_stack_credential_with(
 }
 
 fn saved_secret(root: &Path, key: &str) -> Result<String, Problem> {
-    openbot_desktop_lib::vault::already_given_interactive(&root.join(".env"), &[key])
+    openbot_desktop_lib::vault::already_given_no_ui(&root.join(".env"), &[key])
         .map(|found| found.get(key).cloned().unwrap_or_default())
 }
 
@@ -620,7 +620,7 @@ async fn start_stack<R: tauri::Runtime>(
     }
 
     let api_key = intelligence_key_for_start(&root, api_key, saved_secret)?;
-    let existing_secrets = openbot_desktop_lib::vault::already_given_interactive(
+    let existing_secrets = openbot_desktop_lib::vault::already_given_no_ui(
         &root.join(".env"),
         &openbot_env::MINTED[..],
     )?;
@@ -1124,7 +1124,7 @@ async fn ask_the_bot(
     let root = PathBuf::from(root);
     // The addresses come from the file and the token from the credential store, which is where
     // this run put it. Asked for together, because one without the other cannot ask anything.
-    let settings = openbot_desktop_lib::vault::already_given_interactive(
+    let settings = openbot_desktop_lib::vault::already_given_no_ui(
         &root.join(".env"),
         &[
             "PICKED_HARNESS_URL",
@@ -1926,12 +1926,22 @@ mod tests {
                 SecItemAdd as *const (),
                 SecItemUpdate as *const (),
                 SecItemDelete as *const (),
+                SecKeychainGetUserInteractionAllowed as *const (),
+                SecKeychainSetUserInteractionAllowed as *const (),
             ]);
         }
 
         fn refused() -> i32 {
             CALLS.fetch_add(1, Ordering::SeqCst);
             -25293
+        }
+        #[no_mangle]
+        extern "C" fn SecKeychainGetUserInteractionAllowed(_: *mut u8) -> i32 {
+            refused()
+        }
+        #[no_mangle]
+        extern "C" fn SecKeychainSetUserInteractionAllowed(_: u8) -> i32 {
+            refused()
         }
         #[no_mangle]
         extern "C" fn SecItemCopyMatching(_: *const c_void, _: *mut *const c_void) -> i32 {

@@ -271,6 +271,59 @@ mod tests {
     }
 
     #[test]
+    fn secure_stage_refusal_preserves_existing_plan_intent_and_legacy_bytes() {
+        for failure in ["first-save", "later-save", "delete", "restore-policy"] {
+            let (root, mut secrets, legacy) = fixture(failure);
+            let credential = ModelCredential::ChatGptPlan {
+                store: "synthetic-new-plan".into(),
+            };
+            let plan = root.join(crate::env::CHATGPT_STORE_FILE);
+            std::fs::create_dir_all(plan.parent().unwrap()).unwrap();
+            std::fs::write(&plan, "synthetic-original-plan").unwrap();
+            std::fs::write(root.join(FILE), "synthetic-original-intent").unwrap();
+            if failure == "delete" {
+                secrets.insert("ANTHROPIC_API_KEY".into(), String::new());
+            }
+            let mut attempts = 0;
+            let result = persist_configuration_with(
+                &root,
+                &BTreeMap::new(),
+                &secrets,
+                &secrets,
+                &credential,
+                |all| {
+                    crate::vault::remember_all_with(
+                        all,
+                        &mut |_, _| {
+                            attempts += 1;
+                            if failure == "first-save"
+                                || failure == "restore-policy"
+                                || (failure == "later-save" && attempts == 2)
+                            {
+                                Err(Problem::plain(format!("synthetic {failure} refusal")))
+                            } else {
+                                Ok(())
+                            }
+                        },
+                        &mut |_| Err(Problem::plain("synthetic delete refusal")),
+                    )
+                },
+            );
+            assert!(result.is_err(), "{failure}");
+            assert_eq!(std::fs::read_to_string(root.join(".env")).unwrap(), legacy);
+            assert_eq!(
+                std::fs::read_to_string(&plan).unwrap(),
+                "synthetic-original-plan"
+            );
+            assert_eq!(
+                std::fs::read_to_string(root.join(FILE)).unwrap(),
+                "synthetic-original-intent"
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn successful_reuse_records_only_categories_and_scoped_model_intent_on_restart() {
         for (credential, key, category, model) in [
             (
