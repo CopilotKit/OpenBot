@@ -132,6 +132,7 @@ pub fn compose(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CHATGPT_AUTH_FILE",
+            "BOT_PROVIDER",
             /*
              * Retired, and cleared for exactly that reason. An earlier version put the ChatGPT
              * plan's access token here; nothing reads it now, and `write` preserves what it does
@@ -176,6 +177,8 @@ pub fn compose(
         }
         ModelCredential::Anthropic { api_key } => {
             insert_if_given(&mut env, "ANTHROPIC_API_KEY", api_key);
+            env.insert("BOT_PROVIDER".into(), "anthropic".into());
+            env.insert("BOT_MODEL".into(), "claude-sonnet-4-5".into());
         }
         ModelCredential::ClaudePlan { token } => {
             insert_if_given(&mut env, "CLAUDE_CODE_OAUTH_TOKEN", token);
@@ -1797,7 +1800,12 @@ mod model_tests {
             env.get("CLAUDE_CODE_OAUTH_TOKEN"),
             Some(&"oauth-token".to_string())
         );
-        for cleared in ["OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY"] {
+        for cleared in [
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "ANTHROPIC_API_KEY",
+            "BOT_PROVIDER",
+        ] {
             assert_eq!(
                 env.get(cleared),
                 Some(&String::new()),
@@ -1827,7 +1835,33 @@ mod model_tests {
             env.get("ANTHROPIC_API_KEY"),
             Some(&"sk-ant-real".to_string())
         );
+        assert_eq!(env.get("BOT_PROVIDER"), Some(&"anthropic".to_string()));
+        assert_eq!(env.get("BOT_MODEL"), Some(&"claude-sonnet-4-5".to_string()));
         assert_eq!(env.get("OPENAI_API_KEY"), Some(&String::new()));
+    }
+
+    #[test]
+    fn an_openai_key_does_not_keep_an_anthropic_provider() {
+        let env = compose(
+            &intelligence(),
+            &Model {
+                credential: ModelCredential::OpenAi {
+                    api_key: "sk-openai-real".into(),
+                },
+            },
+            &engine(),
+            &Ports::default(),
+            &pinned(),
+            None,
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            env.get("OPENAI_API_KEY"),
+            Some(&"sk-openai-real".to_string())
+        );
+        assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&String::new()));
+        assert_eq!(env.get("BOT_PROVIDER"), Some(&String::new()));
+        assert!(!env.contains_key("BOT_MODEL"));
     }
 
     /// The everything-else row writes all three, since an endpoint without a model name is an

@@ -17,7 +17,10 @@ function composeFile() {
   );
 }
 
-function runLangGraphAguiModelProbe(openaiBaseUrl: string | undefined) {
+function runLangGraphAguiModelProbe(
+  openaiBaseUrl: string | undefined,
+  options: { botProvider?: string; botModel?: string; openaiApiKey?: string } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), "openbot-langgraph-agui-"));
   try {
     writeFileSync(
@@ -38,8 +41,8 @@ function runLangGraphAguiModelProbe(openaiBaseUrl: string | undefined) {
         "import json",
         "import os",
         "from src import main",
-        "main._model()",
-        "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL')}))",
+        "chosen = main._model()",
+        "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL'), 'model': chosen['model']}))",
         "",
       ].join("\n"),
     );
@@ -108,10 +111,15 @@ function runLangGraphAguiModelProbe(openaiBaseUrl: string | undefined) {
 
     const env = {
       ...process.env,
-      BOT_MODEL: "gpt-test",
-      OPENAI_API_KEY: "sk-test",
+      BOT_MODEL: options.botModel ?? "gpt-test",
+      OPENAI_API_KEY: options.openaiApiKey ?? "sk-test",
       PYTHONPATH: `${dir}:${join(import.meta.dir, "..", "agent-langgraph-agui")}`,
     };
+    if (options.botProvider !== undefined) {
+      env.BOT_PROVIDER = options.botProvider;
+    } else {
+      delete env.BOT_PROVIDER;
+    }
     if (openaiBaseUrl === undefined) {
       delete env.OPENAI_BASE_URL;
     } else {
@@ -122,10 +130,38 @@ function runLangGraphAguiModelProbe(openaiBaseUrl: string | undefined) {
         env,
         encoding: "utf8",
       }),
-    ) as { base_url: string | null };
+    ) as { base_url: string | null; model: string };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function runComposeConfig(env: Record<string, string>) {
+  const output = execFileSync(
+    "docker",
+    [
+      "compose",
+      "--env-file",
+      "/dev/null",
+      "--profile",
+      "harness",
+      "config",
+      "--format",
+      "json",
+    ],
+    {
+      cwd: join(import.meta.dir, ".."),
+      env: {
+        PATH: process.env.PATH ?? "",
+        PICKED_HARNESS_IMAGE: "openbot-agent-langgraph-agui:test",
+        ...env,
+      },
+      encoding: "utf8",
+    },
+  );
+  return JSON.parse(output) as {
+    services: Record<string, { environment: Record<string, string> }>;
+  };
 }
 
 test("provides PostgreSQL with pgvector for local development", () => {
@@ -221,6 +257,40 @@ test("normalizes the picked LangGraph harness's blank OpenAI endpoint before mod
   expect(runLangGraphAguiModelProbe("http://127.0.0.1:4310/v1").base_url).toBe(
     "http://127.0.0.1:4310/v1",
   );
+});
+
+test("passes the selected Anthropic provider and model into the picked harness", () => {
+  const config = runComposeConfig({
+    ANTHROPIC_API_KEY: "sk-ant-synthetic",
+    BOT_PROVIDER: "anthropic",
+    BOT_MODEL: "claude-sonnet-4-5",
+    OPENAI_API_KEY: "",
+  });
+
+  expect(config.services["agent-harness"].environment).toMatchObject({
+    ANTHROPIC_API_KEY: "sk-ant-synthetic",
+    BOT_PROVIDER: "anthropic",
+    BOT_MODEL: "claude-sonnet-4-5",
+    OPENAI_API_KEY: "",
+  });
+
+  expect(
+    runLangGraphAguiModelProbe(undefined, {
+      botProvider: "anthropic",
+      botModel: "claude-sonnet-4-5",
+      openaiApiKey: "",
+    }).model,
+  ).toBe("anthropic:claude-sonnet-4-5");
+
+  const openaiConfig = runComposeConfig({
+    OPENAI_API_KEY: "sk-openai-synthetic",
+  });
+  expect(openaiConfig.services["agent-harness"].environment).toMatchObject({
+    OPENAI_API_KEY: "sk-openai-synthetic",
+    BOT_PROVIDER: "openai",
+    BOT_MODEL: "gpt-5.5",
+    ANTHROPIC_API_KEY: "",
+  });
 });
 
 test("enables pgvector before creating vector columns", () => {

@@ -317,6 +317,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      BOT_PROVIDER: ${BOT_PROVIDER:-openai}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       # A path into the mount below, set only when a ChatGPT plan was signed in to. The file is
       # there either way; this variable is what tells the harness to read it.

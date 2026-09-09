@@ -451,6 +451,7 @@ mod tests {
             "INTELLIGENCE_API_URL",
             "INTELLIGENCE_GATEWAY_WS_URL",
             "OPENAI_BASE_URL",
+            "BOT_PROVIDER",
             "BOT_MODEL",
             "PICKED_HARNESS_IMAGE",
             "PICKED_HARNESS_URL",
