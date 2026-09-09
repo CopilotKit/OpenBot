@@ -748,29 +748,36 @@ export function createPluginStore(options: PluginStoreOptions) {
   }
 
   /**
-   * The token one call goes out with, and whose it is.
+   * The token one call goes out with, and whose it is — decided from `access.credential`, so that
+   * this function and the audit row cannot disagree about whose account a call ran in.
    *
-   * For a `deployment-bearer` server this is what it always was: the one credential an administrator
-   * gave the server, used for everybody.
+   * For a `deployment-token` server this is what it always was: the one credential an administrator
+   * gave the server, used for everybody. A `none` server reaches the same branch and finds nothing
+   * to decrypt, which is the right answer for an endpoint that takes no credential at all.
    *
-   * For a `user-oauth` server it is the asker's own, and every branch that cannot prove it has the
+   * For a `brokered` server there is no token here AT ALL. The deployment's one key belongs to the
+   * transport and never travels through this function, so nothing here can leak it into a connection
+   * object, an error or an audit row. What this function contributes instead is the two refusals
+   * that have to happen before a call is spent at the broker: a run nobody is attributed for, and an
+   * asker who has not connected the app — so a person is told their own next step rather than shown
+   * the broker's error about an account it cannot find.
+   *
+   * For a `person-oauth` server it is the asker's own, and every branch that cannot prove it has the
    * asker's grant refuses. There is deliberately no fallback. A fallback is the one bug this design
    * exists to make impossible: answering out of whatever the deployment, or the last person to
    * connect, happened to be able to see — which returns a confident answer assembled from documents
    * the person asking cannot open, and looks exactly like a correct answer.
    *
-   * Nothing is cached. The refresh token is exchanged for an access token per call and the access
-   * token is thrown away, so there is no stored copy of anybody's access for a disconnect to have to
-   * find. That costs a round trip to the vendor's token endpoint on every call, which is the price
-   * of revocation being complete by construction rather than by cleanup.
+   * Nothing is cached on any path, and only on the `person-oauth` one is that a decision. There, the
+   * refresh token is exchanged for an access token per call and the access token is thrown away, so
+   * there is no stored copy of anybody's access for a disconnect to have to find. That costs a round
+   * trip to the vendor's token endpoint on every call, which is the price of revocation being
+   * complete by construction rather than by cleanup. The other two paths have nothing to cache: a
+   * `deployment-token` is decrypted out of the vault per call, and a `brokered` key is never held
+   * here at all.
    */
   async function connectionTokenFor(
-    row: {
-      id: string;
-      url: string;
-      title: string;
-      credentialId: string | null;
-    },
+    row: { id: string; title: string; credentialId: string | null },
     entry: CatalogueEntry | null,
     actorId: string,
     access: ServerAccess,

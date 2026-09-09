@@ -3245,8 +3245,8 @@ describe("a vendor reply that is not a token", () => {
  * rather than after is then just so a run that dies halfway leaves the next one nothing to trip over;
  * the `afterAll` below is what stops the last test's fixtures from outliving the run.
  *
- * The fixtures below this one are `export`ed for one reason: they are shared scaffolding, and a
- * fixture whose first caller has not been written yet reads to the linter as dead code.
+ * {@link seedNotionServer} below is `export`ed for one reason: it is shared scaffolding whose first
+ * caller has not been written yet, and a fixture nothing calls reads to the linter as dead code.
  */
 async function freshDatabase(): Promise<Database> {
   /*
@@ -3291,7 +3291,7 @@ async function freshDatabase(): Promise<Database> {
  * properties under test, and both are decided on the way to the vendor — so the real path has to
  * run, and the vendor is stubbed further out at {@link useComposioClient}.
  */
-export async function freshStore() {
+async function freshStore() {
   const database = await freshDatabase();
   const persisting = createAuditStore(database);
   const events: Parameters<typeof persisting.insert>[0][] = [];
@@ -3315,7 +3315,7 @@ export async function freshStore() {
 }
 
 /** A Composio Gmail app, one granted read action, one Bot, and optionally a connected person. */
-export async function seedComposioGmail(
+async function seedComposioGmail(
   database: Database,
   store: PluginStore,
   options: { connect?: boolean } = {},
@@ -3481,6 +3481,59 @@ test("a Composio app is listed through the Composio transport, not dialled as MC
   // this reached the MCP module instead and dialled `composio://gmail` as an HTTP server — which
   // `refreshTools` swallows into `lastError`, so nothing but this reaches the vendor stub.
   expect(asked).toEqual(["gmail"]);
+});
+
+test("a Composio call with nobody attributed is refused before it reaches the vendor", async () => {
+  const { store, database } = await freshStore();
+  const reached: string[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug) => {
+      reached.push(slug);
+      return {};
+    },
+  });
+  await seedComposioGmail(database, store);
+
+  // The empty string is what the actor resolves to when nobody could be identified. Reaching the
+  // vendor with it would run in whatever account Composio has against "", or in nobody's, and either
+  // way the run is unattributable — the state every identity defect in OpenTag started from.
+  await expect(
+    store.callTool({
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      args: {},
+      botId: "bot_helper",
+      actorId: "",
+    }),
+  ).rejects.toThrow(/not attributed to anybody/i);
+
+  expect(reached).toEqual([]);
+});
+
+test("a Composio call by somebody who has not connected the app is refused with a sentence they can act on", async () => {
+  const { store, database } = await freshStore();
+  const reached: string[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug) => {
+      reached.push(slug);
+      return {};
+    },
+  });
+  await seedComposioGmail(database, store, { connect: false });
+
+  await expect(
+    store.callTool({
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      args: {},
+      botId: "bot_helper",
+      actorId: "user_asker",
+    }),
+  ).rejects.toThrow(/connect it in settings/i);
+
+  // Refused here rather than at Composio, so a person is told what to do instead of being shown
+  // somebody else's error, and so no call is spent finding out.
+  expect(reached).toEqual([]);
 });
 
 test("an action's effect, destructive marker and version round-trip", async () => {
