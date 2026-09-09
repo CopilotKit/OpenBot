@@ -2529,6 +2529,7 @@ describe("a custom server may only be pointed at its own kind of credential", ()
         inArray(credentialRows.id, [
           deploymentCredentialId,
           personalCredentialId,
+          upsertCredentialId,
           oauthClientCredentialId,
         ]),
       );
