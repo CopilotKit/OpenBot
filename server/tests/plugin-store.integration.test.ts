@@ -152,6 +152,78 @@ async function auditRowsFor(targetId: string) {
     );
 }
 
+/**
+ * Whether the guard below cleared this run to own the ids the Composio fixtures insert at.
+ *
+ * Read by the `afterAll` that removes those rows. A run the guard refused must not delete the rows
+ * it refused over, and `afterAll` still runs after a `beforeAll` has thrown.
+ */
+let ownsFixtureIds = false;
+
+/*
+ * Refuse to run at all against a database that already holds the ids this suite inserts at.
+ *
+ * The suites above own suite-scoped ids and only ever READ the deployment's own rows, so skipping a
+ * delete is enough for them — that is what `serverWasAlreadyConfigured` and its siblings are for.
+ * The Composio fixtures at the bottom of this file cannot do that: they INSERT at `gmail`, `notion`,
+ * `bot_helper` and `user_asker`, and those ids are not a choice. `seedNotionServer` needs
+ * `catalogueEntry("notion")` to resolve to the real catalogue entry, and `gmail` is the toolkit slug
+ * that gets sent to Composio, so neither can be suffixed. A fixture that inserts at an id cannot
+ * coexist with a real row at that id: skipping the delete would only turn the collision into a
+ * primary-key conflict, and capture-and-restore would be a lot of machinery whose failure mode is
+ * destroying the thing it protects, because the cascade has already run by the time it restores.
+ *
+ * What the cascade takes is why this is a refusal rather than a warning. `mcp_user_credentials`
+ * references `mcp_servers.id`, so removing a real `notion` row takes every person's per-user
+ * credential row with it and leaves their encrypted vault rows referenced by nothing — unreachable
+ * from any screen and invisible to `retireConnectionsFor`, which exists to stop exactly that state.
+ * Removing a real Bot takes six tables: its channel memberships, its agent profile, everyone's
+ * preferences for it, its routines and all of their run history, its component exclusions and its
+ * plugin grants. The fixtures then re-insert byte-identical look-alikes, so nothing on screen would
+ * say it happened.
+ *
+ * So the deletes in {@link freshDatabase} are unconditional and this is what makes them safe.
+ */
+beforeAll(async () => {
+  const [configuredServers, existingBots, existingConnections] =
+    await Promise.all([
+      database
+        .select({ id: mcpServers.id })
+        .from(mcpServers)
+        .where(inArray(mcpServers.id, ["gmail", "notion"])),
+      database
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.id, "bot_helper")),
+      database
+        .select({ userId: composioConnections.userId })
+        .from(composioConnections)
+        .where(
+          inArray(composioConnections.userId, ["user_asker", "user_leaver"]),
+        ),
+    ]);
+
+  const found = [
+    ...configuredServers.map((row) => `the mcp_servers row '${row.id}'`),
+    ...existingBots.map((row) => `the Bot '${row.id}'`),
+    ...existingConnections.map(
+      (row) => `the composio_connections row for '${row.userId}'`,
+    ),
+  ];
+
+  if (found.length > 0) {
+    throw new Error(
+      `This suite owns ${found.join(", ")} outright — it inserts at those exact ids and deletes ` +
+        "them before every test — and refuses to run against a database that already has them, " +
+        "because deleting a real server row takes every person's per-user credentials with it and " +
+        "deleting a real Bot takes the six tables behind it. Point DATABASE_URL at a scratch " +
+        "database.",
+    );
+  }
+
+  ownsFixtureIds = true;
+});
+
 beforeAll(async () => {
   for (const id of [holderId, strangerId]) {
     await database
@@ -3153,9 +3225,15 @@ describe("a vendor reply that is not a token", () => {
  * The suites above each own a suite-scoped id, because they run against a database somebody may be
  * using. These fixtures cannot: a Composio app IS its toolkit slug — `gmail` is both the row's id and
  * the name sent to Composio — so the rows have to be spelled the way production spells them, and
- * `bot_helper` and `user_asker` name them in every assertion. What replaces the suffix is removing
- * exactly these rows before each test rather than after, so a run that dies halfway leaves the next
- * one nothing to trip over.
+ * `bot_helper` and `user_asker` name them in every assertion.
+ *
+ * What replaces the suffix is the guard at the top of this file, not the ordering below. The deletes
+ * here are unconditional and would be indefensible on their own — a real `notion` row cascades into
+ * every person's per-user credentials, a real Bot into the six tables behind it. They are safe only
+ * because nothing gets this far unless the guard has already established that no row at any of these
+ * ids exists, which makes every row they remove one of this file's own. Cleaning before each test
+ * rather than after is then just so a run that dies halfway leaves the next one nothing to trip over;
+ * the `afterAll` below is what stops the last test's fixtures from outliving the run.
  *
  * The fixtures below this one are `export`ed for one reason: they are shared scaffolding, and a
  * fixture whose first caller has not been written yet reads to the linter as dead code.
@@ -3180,11 +3258,13 @@ async function freshDatabase(): Promise<Database> {
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, ["gmail", "notion"]));
-  // Only these two toolkits, and only ever rows these tests write: the table has no foreign key to
-  // `users`, which is the property the first test below is about, so nothing else removes them.
+  // By person, never by toolkit: the table has no foreign key to `users` — which is the property the
+  // first test below is about, so nothing else removes these rows — and a delete by toolkit alone
+  // would take every person's Gmail connection, leaving one orphaned at the broker with no local row
+  // left to find it by. Only the two people this file invents.
   await database
     .delete(composioConnections)
-    .where(inArray(composioConnections.toolkit, ["gmail", "notion"]));
+    .where(inArray(composioConnections.userId, ["user_asker", "user_leaver"]));
   await database.delete(users).where(eq(users.id, "user_leaver"));
   return database;
 }
@@ -3315,6 +3395,33 @@ afterEach(() => useComposioClient(null));
 
 afterEach(async () => {
   while (installed.length > 0) await installed.pop()?.();
+});
+
+/*
+ * The last test's fixtures, which nothing else would remove.
+ *
+ * {@link freshDatabase} cleans BEFORE each test, so without this the final test's rows are
+ * permanent: a `notion` server row and a `notion-fetch` action nobody configured, which makes
+ * whatever database this ran against advertise a connector nobody set up. Worse on the next run —
+ * the rotation and dynamic-registration suites above capture `notionWasAlreadyConfigured` from the
+ * leak, correctly decline to clean what looks like the deployment's own row, and leave the
+ * unconditional delete as the only thing that removes it.
+ *
+ * Exactly what this file created, and only when the guard cleared the run to own these ids.
+ */
+afterAll(async () => {
+  if (!ownsFixtureIds) return;
+  await database
+    .delete(mcpTools)
+    .where(inArray(mcpTools.serverId, ["gmail", "notion"]));
+  await database
+    .delete(mcpServers)
+    .where(inArray(mcpServers.id, ["gmail", "notion"]));
+  await database
+    .delete(composioConnections)
+    .where(inArray(composioConnections.userId, ["user_asker", "user_leaver"]));
+  await database.delete(agents).where(eq(agents.id, "bot_helper"));
+  await database.delete(users).where(eq(users.id, "user_leaver"));
 });
 
 test("a Composio connection row survives the person being deleted", async () => {
