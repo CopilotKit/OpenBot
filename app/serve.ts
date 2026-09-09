@@ -15,10 +15,19 @@
 
 import { join, normalize, sep } from "node:path";
 import { file, type ServerWebSocket } from "bun";
+import { listenPort } from "../shared/listen-port";
 
 const DIST = join(import.meta.dir, "dist");
-const PORT = Number.parseInt(process.env.APP_PORT ?? "3010", 10);
-const SERVER = `http://127.0.0.1:${process.env.SERVER_PORT ?? "3001"}`;
+const appPort = listenPort(process.env.APP_PORT, 3010);
+if (!appPort.ok) {
+  throw new Error(appPort.reason.replace(/^PORT /, "APP_PORT "));
+}
+const serverPort = listenPort(process.env.SERVER_PORT, 3001);
+if (!serverPort.ok) {
+  throw new Error(serverPort.reason.replace(/^PORT /, "SERVER_PORT "));
+}
+const PORT = appPort.port;
+const SERVER = `http://127.0.0.1:${serverPort.port}`;
 
 /**
  * Which file answers a path, or `null` when the app's own router should.

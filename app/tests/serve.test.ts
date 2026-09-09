@@ -1,11 +1,116 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   fileFor,
   isApiCall,
   isClientRoute,
   upstreamWebSocketHeaders,
 } from "../serve";
+
+async function probeServingPorts(env: {
+  APP_PORT?: string;
+  SERVER_PORT?: string;
+}) {
+  const directory = await mkdtemp(join(tmpdir(), "openbot-serve-ports-"));
+  const preload = join(directory, "probe.mjs");
+  try {
+    // Run the real entry and API handler, stopping both boundaries before any network access.
+    // This also exercises privileged/default ports without binding or contacting those services.
+    await writeFile(
+      preload,
+      `globalThis.fetch = async (target) => Response.json({ target });
+Bun.serve = (options) => {
+  Promise.resolve(options.fetch(new Request("http://localhost/api/port-check"), {}))
+    .then((response) => response.json())
+    .then(({ target }) => {
+      console.log("PORT_PROBE:" + JSON.stringify({ port: options.port, target }));
+      process.exit(0);
+    }).catch((error) => { console.error(error); process.exit(1); });
+};
+`,
+    );
+    const child = Bun.spawn({
+      cmd: [
+        process.execPath,
+        "--no-env-file",
+        "--preload",
+        preload,
+        "serve.ts",
+      ],
+      cwd: import.meta.dir.replace(/\/tests$/, ""),
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const timeout = setTimeout(() => child.kill(), 2_000);
+    try {
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      return { exitCode, stdout, stderr };
+    } finally {
+      clearTimeout(timeout);
+      child.kill();
+      await child.exited;
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+describe("serving port configuration", () => {
+  test.each([undefined, "", " \t "])(
+    "absent or blank ports use the app and server defaults: %j",
+    async (raw) => {
+      const result = await probeServingPorts({
+        APP_PORT: raw,
+        SERVER_PORT: raw,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        'PORT_PROBE:{"port":3010,"target":"http://127.0.0.1:3001/api/port-check"}',
+      );
+      expect(result.stdout).toContain("OpenBot app on http://127.0.0.1:3010");
+    },
+  );
+
+  test.each(["1", "65535", " 43123 "])(
+    "accepts whole ports including both bounds and surrounding whitespace: %j",
+    async (raw) => {
+      const result = await probeServingPorts({
+        APP_PORT: raw,
+        SERVER_PORT: raw,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        `PORT_PROBE:${JSON.stringify({
+          port: Number(raw),
+          target: `http://127.0.0.1:${Number(raw)}/api/port-check`,
+        })}`,
+      );
+    },
+  );
+
+  for (const name of ["APP_PORT", "SERVER_PORT"] as const) {
+    test.each(["3010oops", "0", "-1", "65536", "1.5", "1e3"])(
+      `${name} refuses invalid ports before serving: %j`,
+      async (raw) => {
+        const result = await probeServingPorts({ [name]: raw });
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain(
+          `${name} must be a whole number from 1 to 65535`,
+        );
+        expect(result.stdout).not.toContain("PORT_PROBE:");
+        expect(result.stdout).not.toContain("OpenBot app on");
+      },
+    );
+  }
+});
 
 /**
  * Serving the built app, which replaced `vite preview`.
