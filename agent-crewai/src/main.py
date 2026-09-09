@@ -10,6 +10,8 @@ serve AG-UI on a port, answer `/health`, and refuse anybody who does not carry t
 """
 
 import os
+from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 
 import ag_ui_crewai.endpoint as crewai_endpoint
@@ -39,6 +41,71 @@ def _model() -> str:
     provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
     model = (os.environ.get("BOT_MODEL") or "").strip() or "gpt-5.5"
     return model if "/" in model else f"{provider}/{model}"
+
+
+_PROVIDER_MESSAGE_FIELDS = {
+    "developer": {"role", "content", "name"},
+    "system": {"role", "content", "name"},
+    "user": {"role", "content", "name"},
+    "assistant": {
+        "role",
+        "audio",
+        "content",
+        "function_call",
+        "name",
+        "refusal",
+        "tool_calls",
+    },
+    "tool": {"role", "content", "tool_call_id"},
+}
+
+
+def _message_dict(message: Any) -> dict[str, Any]:
+    if isinstance(message, Mapping):
+        return dict(message)
+    return message.model_dump()
+
+
+def _strip_none(message: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in message.items() if value is not None}
+
+
+def _provider_tool_calls(tool_calls: Any) -> Any:
+    if not isinstance(tool_calls, list):
+        return deepcopy(tool_calls)
+    projected = []
+    for tool_call in tool_calls:
+        if not isinstance(tool_call, Mapping):
+            tool_call = tool_call.model_dump()
+        projected.append(
+            _strip_none(
+                {
+                    key: deepcopy(tool_call[key])
+                    for key in ("id", "type", "function")
+                    if key in tool_call
+                }
+            )
+        )
+    return projected
+
+
+def _provider_messages(messages: list[Any]) -> list[dict[str, Any]]:
+    """Project AG-UI state messages to provider chat fields without mutating state."""
+    provider_messages = []
+    for message in messages:
+        message_dict = _message_dict(message)
+        allowed_fields = _PROVIDER_MESSAGE_FIELDS.get(message_dict.get("role"))
+        if allowed_fields is None:
+            continue
+        projected = {
+            key: deepcopy(value)
+            for key, value in message_dict.items()
+            if key in allowed_fields
+        }
+        if "tool_calls" in projected:
+            projected["tool_calls"] = _provider_tool_calls(projected["tool_calls"])
+        provider_messages.append(_strip_none(projected))
+    return provider_messages
 
 
 _prepare_crewai_inputs = crewai_endpoint.crewai_prepare_inputs
@@ -84,7 +151,7 @@ class OpenBotFlow(Flow):
         messages = self.state.get("messages", [])
         response = await acompletion(
             model=_model(),
-            messages=messages,
+            messages=_provider_messages(messages),
             stream=False,
         )
         self.state.setdefault("messages", []).append(
