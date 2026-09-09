@@ -36,8 +36,8 @@ def _model() -> str:
     model as `provider/model`, and it reads that provider's key from the environment itself, which
     is why nothing here touches a key.
     """
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    model = (os.environ.get("BOT_MODEL") or "gpt-5.5").strip()
+    provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
+    model = (os.environ.get("BOT_MODEL") or "").strip() or "gpt-5.5"
     return model if "/" in model else f"{provider}/{model}"
 
 
