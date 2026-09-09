@@ -309,6 +309,121 @@ test("saved startup credentials enable Start without raw protected secrets on mo
       false,
     ),
   );
-  expect(invokeCalls.filter((call) => call.command === "already_configured"))
-    .toHaveLength(1);
+  expect(
+    invokeCalls.filter((call) => call.command === "already_configured"),
+  ).toHaveLength(1);
 });
+
+for (const provider of [
+  { id: "openai", name: "OpenAI" },
+  { id: "anthropic", name: "Anthropic" },
+] as const) {
+  test(`saved ${provider.name} plan session enables Start without raw protected secrets on mount`, async () => {
+    invokeHandler = async (command) => {
+      if (command === "detect_engine") {
+        return {
+          engine: "docker",
+          responding: true,
+          engine_socket: null,
+          detail: "Docker is answering.",
+        };
+      }
+      if (command === "default_root") return "/tmp/openbot-app-test";
+      if (command === "already_configured") {
+        return {
+          values: {},
+          saved: {
+            intelligenceApiKey: true,
+            modelApiKeys: { openai: false, anthropic: false },
+            modelSessions: {
+              openai: provider.id === "openai",
+              anthropic: provider.id === "anthropic",
+            },
+          },
+        };
+      }
+      if (command === "already_running") return false;
+      if (command === "windows_blocker") return null;
+      if (command === "last_failure") return null;
+      if (command === "harnesses") {
+        return [
+          {
+            id: "langgraph",
+            name: "LangGraph",
+            summary: "Default Bot",
+            image: null,
+            health_path: null,
+            credential: "any-provider",
+            maintainer: "first-party",
+            mark: null,
+            port: 8000,
+          },
+        ];
+      }
+      if (command === "providers") {
+        return [
+          {
+            id: provider.id,
+            name: provider.name,
+            summary: `Use ${provider.name}.`,
+            logins: ["plan", "api-key"],
+            mark: null,
+            caution: null,
+          },
+        ];
+      }
+      if (command === "prepare_engine") return null;
+      if (command === "start_stack") return null;
+      throw new Error(`unexpected command ${command}`);
+    };
+
+    const view = await renderApp();
+
+    await userEvent.click(
+      await view.findByRole("button", { name: "Set up OpenBot" }),
+    );
+    await userEvent.click(
+      await view.findByRole("button", { name: "Continue" }),
+    );
+    await userEvent.click(
+      await view.findByRole("radio", { name: new RegExp(provider.name) }),
+    );
+    expect(
+      view.getByText(new RegExp(`Signed in to ${provider.name}`)),
+    ).toBeTruthy();
+    await userEvent.click(view.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() =>
+      expect(
+        view.getByRole("button", { name: "Start OpenBot" }),
+      ).toHaveProperty("disabled", false),
+    );
+    await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+
+    expect(
+      invokeCalls.filter((call) => call.command === "already_configured"),
+    ).toEqual([
+      {
+        command: "already_configured",
+        args: { root: "/tmp/openbot-app-test" },
+      },
+    ]);
+    for (const call of invokeCalls) {
+      const args = JSON.stringify(call.args ?? {});
+      expect(args).not.toContain("OPENAI_API_KEY");
+      expect(args).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
+    }
+    expect(
+      invokeCalls.find((call) => call.command === "start_stack")?.args,
+    ).toMatchObject({
+      root: "/tmp/openbot-app-test",
+      apiKey: "",
+      model: {
+        provider: provider.id,
+        login: "plan",
+        saved: true,
+      },
+      harness: "langgraph",
+    });
+  });
+}

@@ -1636,6 +1636,24 @@ mod tests {
     }
 
     #[test]
+    fn already_configured_reports_saved_anthropic_session_from_silent_map_only() {
+        let root = temp_root("openbot-already-configured-anthropic-session");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let configured = already_configured_from(
+            root.clone(),
+            std::collections::BTreeMap::from([(
+                "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+                "silent".to_string(),
+            )]),
+        );
+
+        assert!(configured.saved.model_sessions.anthropic);
+        assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn ask_the_bot_uses_native_mastra_for_a_picked_mastra_harness() {
         let server = TestServer::new(
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
