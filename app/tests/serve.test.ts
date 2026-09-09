@@ -53,6 +53,33 @@ describe("which file a path names", () => {
     );
   });
 
+  test("an encoded asset remains inside the static directory", () => {
+    expect(fileFor("/assets/hello%20world.js")).toEndWith(
+      "/dist/assets/hello world.js",
+    );
+  });
+
+  test("a client route remains available for the router", () => {
+    expect(fileFor("/channel/channel_1ed78a89")).toEndWith(
+      "/dist/channel/channel_1ed78a89",
+    );
+  });
+
+  test.each(["/../dist2/file", "/../dist-secret", "/../dist-curation/"])(
+    "a prefix sibling is refused: %s",
+    (pathname) => {
+      expect(fileFor(pathname)).toBeNull();
+    },
+  );
+
+  test.each([
+    "/%2e%2e%2fdist-curation/token.txt",
+    "/%2e%2e%2fdist2/file",
+    "/assets/%2e%2e%2f%2e%2e%2fdist-secret",
+  ])("an encoded separator cannot reach a prefix sibling: %s", (pathname) => {
+    expect(fileFor(pathname)).toBeNull();
+  });
+
   /**
    * Nothing outside the directory, whatever the request says. This server has the deployment's
    * `.env` two levels above it, so the traversal guard is not theoretical.

@@ -13,8 +13,8 @@
  * prefix, needs no Node, and has nothing in it that a dev server needs and an install does not.
  */
 
+import { join, normalize, sep } from "node:path";
 import { file } from "bun";
-import { join, normalize } from "node:path";
 
 const DIST = join(import.meta.dir, "dist");
 const PORT = Number.parseInt(process.env.APP_PORT ?? "3010", 10);
@@ -32,7 +32,7 @@ const SERVER = `http://127.0.0.1:${process.env.SERVER_PORT ?? "3001"}`;
  */
 export function fileFor(pathname: string): string | null {
   const wanted = normalize(join(DIST, decodeURIComponent(pathname)));
-  if (!wanted.startsWith(DIST)) return null;
+  if (wanted !== DIST && !wanted.startsWith(`${DIST}${sep}`)) return null;
   if (wanted === DIST || pathname.endsWith("/"))
     return join(DIST, "index.html");
   return wanted;
