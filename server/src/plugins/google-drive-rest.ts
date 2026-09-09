@@ -15,8 +15,9 @@ import { MAX_RESULT_CHARS, type McpCallResult, type McpTool } from "./mcp";
  * WHAT MAKES IT SWAPPABLE. This module implements the interface {@link ./mcp} already had —
  * `listTools` and `callTool`, same shapes — rather than inventing one for itself. MCP is therefore
  * not the default with an exception carved out of it; both are implementations of the same contract,
- * chosen per catalogue entry by {@link ./access} and looked up in {@link ./transport}. Going back to the MCP server when the preview
- * opens is one field on one entry, with nothing else in the system aware it changed.
+ * chosen per catalogue entry by {@link ./access} and looked up in {@link ./transport}. Going back to
+ * the MCP server when the preview opens is one field on one entry, with nothing else in the system
+ * aware it changed.
  *
  * The TOOL NAMES are deliberately the ones Google's MCP server advertises, character for character.
  * A grant is stored as `google-drive/search_files`, so keeping the names identical means every grant
