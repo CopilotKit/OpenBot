@@ -158,6 +158,53 @@ export const mcpTools = pgTable(
 );
 
 /**
+ * One person's Composio connection to one app.
+ *
+ * WHY THIS IS NOT `mcp_user_credentials`. That table's whole guarantee is that a row means real held
+ * access: it points at a vault row, not-null, and the vault is what offboarding scans. Composio holds
+ * the account, so there is no secret to point at and none to scan for — and `retireConnectionsFor`
+ * deliberately reads the VAULT rather than the join table, because the join row is deleted along with
+ * the person while the vault row survives. Putting a Composio connection there would mean removing
+ * somebody deletes the only record of it, leaving their mailbox connected at Composio with nothing
+ * left to revoke it by, while an administrator has been told they removed it.
+ *
+ * So `user_id` is plain text with NO foreign key and no cascade. The row outliving the person is the
+ * point, not an oversight: it is the only thing that lets offboarding say "this person had Gmail
+ * connected, tell Composio to drop it". A scope column would be a lie — Composio returns no scope we
+ * see, and the column on the other table exists precisely to record what the vendor said it granted —
+ * so there is none.
+ *
+ * A CACHE, NOT THE TRUTH. Composio is authoritative about whether a connection is live; this row
+ * exists so the settings page can be drawn without a network call per row, and so offboarding has
+ * something to iterate. A call against an app the person never connected fails at Composio, and that
+ * refusal is the answer rather than this table's absence.
+ */
+export const composioConnections = pgTable(
+  "composio_connections",
+  {
+    /** The Composio app slug, lower case, as their directory spells it: `gmail`, `slack`. */
+    toolkit: text("toolkit").notNull(),
+    /**
+     * The person, as `users.id`.
+     *
+     * The same value sent to Composio as the identity a call runs under, so the two cannot drift:
+     * what this row says somebody connected is what a call will act as.
+     */
+    userId: text("user_id").notNull(),
+    /** When they connected, shown on their own settings page. */
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.toolkit, table.userId] }),
+    // "What has this person connected" is the settings page's only query, and offboarding's.
+    index("composio_connections_user_idx").on(table.userId),
+  ],
+);
+
+/**
  * One person's grant on one MCP server: the row that makes a Bot answer as the asker.
  *
  * A table rather than a column, and this is the whole architectural point of the knowledge lane.
