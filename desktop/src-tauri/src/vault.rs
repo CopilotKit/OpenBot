@@ -542,14 +542,21 @@ fn forget_in_store(name: &str) -> Result<(), Problem> {
 
 #[cfg(target_os = "windows")]
 fn powershell(program: &str, input: Option<&str>) -> Result<String, Problem> {
-    let child = crate::quiet::command("powershell")
-        .args(["-NoProfile", "-NonNoUi", "-Command", program])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+    let child = powershell_command(program)
         .spawn()
         .map_err(|error| dpapi_problem(error.to_string()))?;
     dpapi_output(child, input)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn powershell_command(program: &str) -> std::process::Command {
+    let mut command = crate::quiet::command("powershell");
+    command
+        .args(["-NoProfile", "-NonInteractive", "-Command", program])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -614,6 +621,29 @@ mod dpapi_tests {
     use std::io::{self, Write};
     use std::rc::Rc;
     use std::sync::Mutex;
+
+    #[test]
+    fn powershell_uses_documented_noninteractive_arguments() {
+        let program = "[Console]::Out.Write([Console]::In.ReadToEnd())";
+        let command = super::powershell_command(program);
+        assert_eq!(command.get_program(), "powershell");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["-NoProfile", "-NonInteractive", "-Command", program]
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn powershell_round_trips_stdin_without_accessing_a_store() {
+        let input = "synthetic input with spaces and $symbols";
+        let output = super::powershell(
+            "[Console]::Out.Write([Console]::In.ReadToEnd())",
+            Some(input),
+        )
+        .expect("the production PowerShell invocation should accept a harmless stdin program");
+        assert_eq!(output, input);
+    }
 
     struct StdinWriter {
         bytes: Rc<RefCell<Vec<u8>>>,
