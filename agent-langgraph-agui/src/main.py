@@ -132,7 +132,7 @@ def _model():
         )
 
     _normalize_openai_base_url()
-    provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
+    provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
     provider = _resolve_provider(provider)
     prefix, separator, _ = model.partition(":")
     if separator and prefix in MODEL_PROVIDERS:

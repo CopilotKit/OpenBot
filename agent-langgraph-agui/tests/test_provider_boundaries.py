@@ -260,6 +260,40 @@ async def test_compatible_model_id_reaches_real_http_boundary(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("provider", [None, "", "   "])
+@pytest.mark.parametrize("model", ["claude-compatible:latest", "qwen2.5:1.5b"])
+async def test_blank_provider_keeps_opaque_model_at_compatible_endpoint(
+    monkeypatch, compatible_endpoint, provider, model
+):
+    _install_loopback_socket_guard()
+    base_url, captured = compatible_endpoint
+    if provider is not None:
+        monkeypatch.setenv("BOT_PROVIDER", provider)
+    monkeypatch.setenv("BOT_MODEL", model)
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-compatible-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", base_url)
+    # A Claude-like compatible model must not route through another available provider.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", base_url.removesuffix("/v1"))
+
+    result = await main.answer(
+        {"messages": [{"role": "user", "content": "Say hello."}]}
+    )
+
+    assert result["messages"][0].content == "compatible proof"
+    assert captured == [
+        {
+            "path": "/v1/chat/completions",
+            "body": {
+                "messages": [{"content": "Say hello.", "role": "user"}],
+                "model": model,
+                "stream": False,
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("provider", "model", "request_model"),
     [
