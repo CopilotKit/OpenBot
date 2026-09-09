@@ -1,5 +1,6 @@
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
@@ -8,7 +9,7 @@ import {
 } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { MCPMock } from "@copilotkit/aimock/mcp";
-import { and, eq, inArray, like, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, like, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
@@ -17,10 +18,11 @@ import {
   decryptSecret,
   encryptSecret,
 } from "../src/credentials";
-import { createDatabase } from "../src/db/client";
+import { createDatabase, type Database } from "../src/db/client";
 import {
   agents,
   auditEvents,
+  composioConnections,
   credentials as credentialRows,
   credentials,
   mcpServers,
@@ -30,6 +32,7 @@ import {
   users,
 } from "../src/db/schema";
 import { catalogueEntry } from "../src/plugins/catalogue";
+import { useComposioClient } from "../src/plugins/composio";
 import { redirectUriFor } from "../src/plugins/oauth";
 import {
   type AccessToken,
@@ -39,6 +42,7 @@ import {
   INVALID_CLIENT,
   type OAuthClient,
   PluginRefusedError,
+  type PluginStore,
   TokenRefusedError,
   unlistedAdvertisedTools,
 } from "../src/plugins/store";
@@ -89,34 +93,44 @@ let toolWasAlreadyAdvertised = false;
 
 const revokedCredentialIds: string[] = [];
 const issuedCredentialIds: string[] = [];
+
+/**
+ * The vault, stubbed, shared by every store in this file that does not need a real one.
+ *
+ * Named rather than inlined into the store below so that {@link freshStore} passes the SAME stub:
+ * a second copy would be a second place for "no credential is read here" to stop being true, and the
+ * refusals below are what make that claim worth anything.
+ */
+const credentialsStub = {
+  // No credential is ever read in these tests, because every call is refused before the vault.
+  readSecret: async () => null,
+  // Nor written in place. Loud rather than absent: a call reaching either of these would mean
+  // this file had started exercising something it does not claim to, and a silent no-op would
+  // hide that.
+  create: async () => {
+    throw new Error("this suite does not write credentials");
+  },
+  updateSecret: async () => {
+    throw new Error("this suite does not write credentials");
+  },
+  // `removeServer` does revoke: it retires the token the server was configured with so a re-add
+  // does not collide on `credentials_active_key_idx`. The stamp goes to the real row, because
+  // `removeServer` reads liveness from the table before deciding whether to revoke at all.
+  revoke: async (id: string) => {
+    const revokedAt = new Date();
+    await database
+      .update(credentialRows)
+      .set({ revokedAt, updatedAt: revokedAt })
+      .where(eq(credentialRows.id, id));
+    revokedCredentialIds.push(id);
+    return revokedAt;
+  },
+};
+
 const store = createPluginStore({
   database,
   auditStore: createAuditStore(database),
-  credentials: {
-    // No credential is ever read in these tests, because every call is refused before the vault.
-    readSecret: async () => null,
-    // Nor written in place. Loud rather than absent: a call reaching either of these would mean
-    // this file had started exercising something it does not claim to, and a silent no-op would
-    // hide that.
-    create: async () => {
-      throw new Error("this suite does not write credentials");
-    },
-    updateSecret: async () => {
-      throw new Error("this suite does not write credentials");
-    },
-    // `removeServer` does revoke: it retires the token the server was configured with so a re-add
-    // does not collide on `credentials_active_key_idx`. The stamp goes to the real row, because
-    // `removeServer` reads liveness from the table before deciding whether to revoke at all.
-    revoke: async (id: string) => {
-      const revokedAt = new Date();
-      await database
-        .update(credentialRows)
-        .set({ revokedAt, updatedAt: revokedAt })
-        .where(eq(credentialRows.id, id));
-      revokedCredentialIds.push(id);
-      return revokedAt;
-    },
-  },
+  credentials: credentialsStub,
   encryptionKey: "x".repeat(44),
   policy: () => policy,
 });
@@ -3131,4 +3145,285 @@ describe("a vendor reply that is not a token", () => {
       globalThis.fetch = realFetch;
     }
   });
+});
+
+/**
+ * What a brokered app needs before any of it can be asserted: a clean slate and a fixture.
+ *
+ * The suites above each own a suite-scoped id, because they run against a database somebody may be
+ * using. These fixtures cannot: a Composio app IS its toolkit slug — `gmail` is both the row's id and
+ * the name sent to Composio — so the rows have to be spelled the way production spells them, and
+ * `bot_helper` and `user_asker` name them in every assertion. What replaces the suffix is removing
+ * exactly these rows before each test rather than after, so a run that dies halfway leaves the next
+ * one nothing to trip over.
+ *
+ * The fixtures below this one are `export`ed for one reason: they are shared scaffolding, and a
+ * fixture whose first caller has not been written yet reads to the linter as dead code.
+ */
+async function freshDatabase(): Promise<Database> {
+  /*
+   * The Bot's own grants, never a delete by ref.
+   *
+   * The primary key is (kind, ref, agent_id), and `gmail/GMAIL_FETCH_EMAILS` is a real action of a
+   * real app: a delete by ref alone would take an administrator's grant for a Bot people use. This
+   * file has already done that once — the `afterAll` near the top of it says what that cost.
+   */
+  await database
+    .delete(pluginGrants)
+    .where(eq(pluginGrants.agentId, "bot_helper"));
+  await database.delete(agents).where(eq(agents.id, "bot_helper"));
+  // The actions before the servers. `mcp_tools` cascades on the server row anyway, so this is what
+  // clears actions a previous run left against a server row it is not what created.
+  await database
+    .delete(mcpTools)
+    .where(inArray(mcpTools.serverId, ["gmail", "notion"]));
+  await database
+    .delete(mcpServers)
+    .where(inArray(mcpServers.id, ["gmail", "notion"]));
+  // Only these two toolkits, and only ever rows these tests write: the table has no foreign key to
+  // `users`, which is the property the first test below is about, so nothing else removes them.
+  await database
+    .delete(composioConnections)
+    .where(inArray(composioConnections.toolkit, ["gmail", "notion"]));
+  await database.delete(users).where(eq(users.id, "user_leaver"));
+  return database;
+}
+
+/**
+ * A store over the clean database, recording every event it writes.
+ *
+ * `recorded()` alongside the real insert rather than instead of it: the payload is what these tests
+ * assert about, and reading it back out of `audit_events` would assert what the column round-trips
+ * rather than what the store said. The row is still written, because a store whose audit insert
+ * never touched the database would not be exercising the one it has.
+ *
+ * NO `callVendor`. Whose account a call runs as and which transport a row resolves to are the
+ * properties under test, and both are decided on the way to the vendor — so the real path has to
+ * run, and the vendor is stubbed further out at {@link useComposioClient}.
+ */
+export async function freshStore() {
+  const database = await freshDatabase();
+  const persisting = createAuditStore(database);
+  const events: Parameters<typeof persisting.insert>[0][] = [];
+  const auditStore = {
+    insert: async (event: Parameters<typeof persisting.insert>[0]) => {
+      events.push(event);
+      await persisting.insert(event);
+    },
+    recorded: () => events,
+  };
+
+  const store = createPluginStore({
+    database,
+    auditStore,
+    credentials: credentialsStub,
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
+
+  return { store, database, auditStore };
+}
+
+/** A Composio Gmail app, one granted read action, one Bot, and optionally a connected person. */
+export async function seedComposioGmail(
+  database: Database,
+  store: PluginStore,
+  options: { connect?: boolean } = {},
+) {
+  await database.insert(mcpServers).values({
+    id: "gmail",
+    title: "Gmail",
+    vendor: "Composio",
+    url: "composio://gmail",
+    provenance: "composio",
+  });
+  await database.insert(mcpTools).values({
+    serverId: "gmail",
+    name: "GMAIL_FETCH_EMAILS",
+    description: "Fetch emails.",
+    effect: "read",
+    version: "20260903_00",
+  });
+  await database.insert(agents).values({
+    id: "bot_helper",
+    name: "Helper",
+    type: "built_in",
+    configuration: {},
+  });
+  if (options.connect !== false) {
+    await database
+      .insert(composioConnections)
+      .values({ toolkit: "gmail", userId: "user_asker" });
+  }
+  await store.grant(
+    "mcp",
+    "gmail/GMAIL_FETCH_EMAILS",
+    "bot_helper",
+    "admin@example.com",
+  );
+}
+
+/** Whatever a fixture installed into a global, undone after the test that installed it. */
+const installed: (() => Promise<void>)[] = [];
+
+/**
+ * A first-party MCP server, with a real MCP server on localhost standing in for the vendor.
+ *
+ * The seam is `fetch`, the way the refresh test above does it: the host is pinned and nothing in the
+ * store will take a URL from a caller, so pointing the pinned host at the mock is what lets a real
+ * listing over the real protocol happen. `store` is taken and unused because this vendor needs no
+ * grant to be listed — the callers hand it over so the two seeds read the same way.
+ */
+export async function seedNotionServer(
+  database: Database,
+  _store: PluginStore,
+) {
+  await database.insert(mcpServers).values({
+    id: "notion",
+    title: "Notion",
+    vendor: "Notion",
+    url: "https://mcp.notion.com/mcp",
+    provenance: "first-party",
+  });
+
+  const mock = new MCPMock();
+  mock.addTool({
+    name: "notion-fetch",
+    description: "Fetch a page.",
+    inputSchema: { type: "object", properties: {} },
+  });
+  const mockUrl = await mock.start();
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const target = String(input instanceof Request ? input.url : input);
+    return realFetch(
+      target.startsWith("https://mcp.notion.com") ? mockUrl : input,
+      init,
+    );
+  }) as typeof fetch;
+
+  installed.push(async () => {
+    globalThis.fetch = realFetch;
+    await mock.stop?.();
+  });
+}
+
+// The vendor is a process-wide registry, so a stub outliving its test would be answering somebody
+// else's calls.
+afterEach(() => useComposioClient(null));
+
+afterEach(async () => {
+  while (installed.length > 0) await installed.pop()?.();
+});
+
+test("a Composio connection row survives the person being deleted", async () => {
+  const database = await freshDatabase();
+
+  await database
+    .insert(users)
+    .values({ id: "user_leaver", email: "leaver@example.com", name: "Leaver" });
+  await database
+    .insert(composioConnections)
+    .values({ toolkit: "gmail", userId: "user_leaver" });
+
+  await database.delete(users).where(eq(users.id, "user_leaver"));
+
+  const rows = await database
+    .select({ toolkit: composioConnections.toolkit })
+    .from(composioConnections)
+    .where(eq(composioConnections.userId, "user_leaver"));
+
+  // The whole reason this table exists rather than reusing mcp_user_credentials: offboarding has to
+  // still find the connection and revoke it at Composio after the person is gone, and there is no
+  // vault row to find it by, because Composio holds the account.
+  expect(rows).toEqual([{ toolkit: "gmail" }]);
+});
+
+test("an action's effect, destructive marker and version round-trip", async () => {
+  const database = await freshDatabase();
+
+  await database.insert(mcpServers).values({
+    id: "gmail",
+    title: "Gmail",
+    vendor: "Composio",
+    url: "composio://gmail",
+    provenance: "composio",
+  });
+
+  await database.insert(mcpTools).values([
+    {
+      serverId: "gmail",
+      name: "GMAIL_FETCH_EMAILS",
+      description: "Fetch emails.",
+      effect: "read",
+      destructive: false,
+      version: "20260903_00",
+    },
+    {
+      serverId: "gmail",
+      name: "GMAIL_DELETE_MESSAGE",
+      description: "Delete a message.",
+      effect: "write",
+      destructive: true,
+      version: "20260903_00",
+    },
+  ]);
+
+  const rows = await database
+    .select({
+      name: mcpTools.name,
+      effect: mcpTools.effect,
+      destructive: mcpTools.destructive,
+      version: mcpTools.version,
+    })
+    .from(mcpTools)
+    .where(eq(mcpTools.serverId, "gmail"))
+    .orderBy(asc(mcpTools.name));
+
+  expect(rows).toEqual([
+    {
+      name: "GMAIL_DELETE_MESSAGE",
+      effect: "write",
+      destructive: true,
+      version: "20260903_00",
+    },
+    {
+      name: "GMAIL_FETCH_EMAILS",
+      effect: "read",
+      destructive: false,
+      version: "20260903_00",
+    },
+  ]);
+});
+
+test("an action listed before these columns existed reads as unclassified and unversioned", async () => {
+  const database = await freshDatabase();
+
+  await database.insert(mcpServers).values({
+    id: "notion",
+    title: "Notion",
+    vendor: "Notion",
+    url: "https://mcp.notion.com/mcp",
+    provenance: "first-party",
+  });
+  await database.insert(mcpTools).values({
+    serverId: "notion",
+    name: "notion-fetch",
+    description: "Fetch a page.",
+  });
+
+  const [row] = await database
+    .select({
+      effect: mcpTools.effect,
+      destructive: mcpTools.destructive,
+      version: mcpTools.version,
+    })
+    .from(mcpTools)
+    .where(eq(mcpTools.serverId, "notion"));
+
+  // Null rather than a default: an existing row must keep meaning exactly what it meant, and the
+  // classifier decides what an absent effect implies. A column default of "write" would silently
+  // reclassify every already-listed Notion read as a write the moment the migration ran.
+  expect(row).toEqual({ effect: null, destructive: false, version: null });
 });
