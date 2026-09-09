@@ -7,6 +7,7 @@ import {
   agents,
   channelAgents,
   channelMemberships,
+  channels,
 } from "../db/schema";
 import { agentAuthHeaders, authFromConfiguration } from "./auth-header";
 import type { AgentActor } from "./profile-types";
@@ -130,6 +131,10 @@ function selectTombstoneAgents(database: Database, actor: AgentActor) {
     .from(agents)
     .innerJoin(agentProfiles, eq(agentProfiles.agentId, agents.id))
     .innerJoin(channelAgents, eq(channelAgents.agentId, agents.id))
+    .innerJoin(
+      channels,
+      and(eq(channels.id, channelAgents.channelId), isNull(channels.deletedAt)),
+    )
     .innerJoin(
       channelMemberships,
       and(

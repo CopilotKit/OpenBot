@@ -7,11 +7,13 @@ import { createRuntimeAgentLoader } from "../src/agents/runtime-agents";
 import { createChannelStore } from "../src/channels/routes";
 import { createThreadIdentity } from "../src/channels/thread-identity";
 import { standingRoleMessage } from "../src/copilot";
-import { encryptSecret, type CredentialSecretReader } from "../src/credentials";
+import { type CredentialSecretReader, encryptSecret } from "../src/credentials";
 import { createDatabase } from "../src/db/client";
 import {
   agentProfiles,
   agents,
+  channelAgents,
+  channelMemberships,
   channels,
   intelligenceChannelMappings,
   users,
@@ -267,6 +269,103 @@ describe("runtime agent loading", () => {
     });
     // Somebody with no channel of their own gets no tombstone: history is what authorizes it.
     expect(idsOf(await loadAgents(otherUser))).not.toContain(profile.id);
+  });
+
+  test("authorizes deleted coworker tombstones only through live channels", async () => {
+    const owner = await createUser();
+    const otherUser = await createUser();
+    const deletedOnlyProfile = await createCoworker(owner, {
+      name: "Deleted Only Helper",
+    });
+    const preservedProfile = await createCoworker(owner, {
+      name: "Preserved Helper",
+    });
+    const deletedOnlyChannel = await channelStore.create(owner, [
+      deletedOnlyProfile.id,
+    ]);
+    const deletedPreservedChannel = await channelStore.create(owner, [
+      preservedProfile.id,
+    ]);
+    const livePreservedChannel = await channelStore.create(owner, [
+      preservedProfile.id,
+    ]);
+    createdChannelIds.push(
+      deletedOnlyChannel.id,
+      deletedPreservedChannel.id,
+      livePreservedChannel.id,
+    );
+
+    await profileStore.softDelete(owner, deletedOnlyProfile.id);
+    await profileStore.softDelete(owner, preservedProfile.id);
+    await channelStore.softDelete(owner, deletedOnlyChannel.id);
+    await channelStore.softDelete(owner, deletedPreservedChannel.id);
+
+    const retainedDeletedOnlyRows = await database
+      .select({
+        channelDeletedAt: channels.deletedAt,
+        memberUserId: channelMemberships.userId,
+        agentId: channelAgents.agentId,
+        profileDeletedAt: agentProfiles.deletedAt,
+      })
+      .from(channels)
+      .innerJoin(
+        channelMemberships,
+        eq(channelMemberships.channelId, channels.id),
+      )
+      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
+      .innerJoin(
+        agentProfiles,
+        eq(agentProfiles.agentId, channelAgents.agentId),
+      )
+      .where(eq(channels.id, deletedOnlyChannel.id));
+    expect(retainedDeletedOnlyRows).toHaveLength(1);
+    expect(retainedDeletedOnlyRows[0]).toMatchObject({
+      memberUserId: owner.id,
+      agentId: deletedOnlyProfile.id,
+    });
+    expect(retainedDeletedOnlyRows[0]?.channelDeletedAt).toBeInstanceOf(Date);
+    expect(retainedDeletedOnlyRows[0]?.profileDeletedAt).toBeInstanceOf(Date);
+
+    const retainedLivePreservedRows = await database
+      .select({
+        channelDeletedAt: channels.deletedAt,
+        memberUserId: channelMemberships.userId,
+        agentId: channelAgents.agentId,
+        profileDeletedAt: agentProfiles.deletedAt,
+      })
+      .from(channels)
+      .innerJoin(
+        channelMemberships,
+        eq(channelMemberships.channelId, channels.id),
+      )
+      .innerJoin(channelAgents, eq(channelAgents.channelId, channels.id))
+      .innerJoin(
+        agentProfiles,
+        eq(agentProfiles.agentId, channelAgents.agentId),
+      )
+      .where(eq(channels.id, livePreservedChannel.id));
+    expect(retainedLivePreservedRows).toHaveLength(1);
+    expect(retainedLivePreservedRows[0]).toMatchObject({
+      channelDeletedAt: null,
+      memberUserId: owner.id,
+      agentId: preservedProfile.id,
+    });
+    expect(retainedLivePreservedRows[0]?.profileDeletedAt).toBeInstanceOf(Date);
+
+    const ownerRoster = await loadAgents(owner);
+    expect(ownerRoster).not.toContainEqual(
+      expect.objectContaining({ id: deletedOnlyProfile.id }),
+    );
+    expect(ownerRoster).toContainEqual({
+      id: preservedProfile.id,
+      name: "Preserved Helper",
+      type: "unavailable",
+      reason:
+        "Preserved Helper has been deleted and can no longer run. Its conversations remain readable.",
+    });
+    expect(idsOf(await loadAgents(otherUser))).not.toEqual(
+      expect.arrayContaining([deletedOnlyProfile.id, preservedProfile.id]),
+    );
   });
 
   test("applies an edited role to the next load without a restart", async () => {
