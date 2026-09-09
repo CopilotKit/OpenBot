@@ -46,16 +46,18 @@ function runLangGraphAguiModelProbe(
         "import os",
         "from src import main",
         "chosen = main._model()",
-        "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL'), 'model': chosen['model']}))",
+        "print(json.dumps({'base_url': os.environ.get('OPENAI_BASE_URL'), **chosen}))",
         "",
       ].join("\n"),
     );
     mkdirSync(join(dir, "langchain"), { recursive: true });
     writeFileSync(
       join(dir, "langchain", "chat_models.py"),
-      ["def init_chat_model(model):", "    return {'model': model}", ""].join(
-        "\n",
-      ),
+      [
+        "def init_chat_model(model, *, model_provider=None):",
+        "    return {'model': model, 'model_provider': model_provider}",
+        "",
+      ].join("\n"),
     );
     writeFileSync(join(dir, "langchain", "__init__.py"), "");
     mkdirSync(join(dir, "fastapi"), { recursive: true });
@@ -113,7 +115,7 @@ function runLangGraphAguiModelProbe(
       ["class MemorySaver:", "    pass", ""].join("\n"),
     );
 
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       BOT_MODEL: options.botModel ?? "gpt-test",
       OPENAI_API_KEY: options.openaiApiKey ?? "sk-test",
@@ -129,12 +131,17 @@ function runLangGraphAguiModelProbe(
     } else {
       env.OPENAI_BASE_URL = openaiBaseUrl;
     }
-    return JSON.parse(
+    const result: {
+      base_url: string | null;
+      model: string;
+      model_provider: string | null;
+    } = JSON.parse(
       execFileSync("python3", [join(dir, "probe.py")], {
         env,
         encoding: "utf8",
       }),
-    ) as { base_url: string | null; model: string };
+    );
+    return result;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -289,8 +296,11 @@ test("passes the selected Anthropic provider and model into the picked harness",
       botProvider: "anthropic",
       botModel: "claude-sonnet-4-5",
       openaiApiKey: "",
-    }).model,
-  ).toBe("anthropic:claude-sonnet-4-5");
+    }),
+  ).toMatchObject({
+    model: "claude-sonnet-4-5",
+    model_provider: "anthropic",
+  });
 
   const openaiConfig = runComposeConfig({
     OPENAI_API_KEY: "sk-openai-synthetic",

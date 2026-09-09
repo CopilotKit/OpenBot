@@ -16,6 +16,39 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 
 TOKEN_HEADER = "x-openbot-agent-token"
 
+# Provider names supported by LangChain's public init_chat_model contract. A colon in an opaque
+# compatible model ID (for example qwen2.5:1.5b) is not a provider separator.
+MODEL_PROVIDERS = {
+    "anthropic",
+    "anthropic_bedrock",
+    "azure_ai",
+    "azure_openai",
+    "baseten",
+    "bedrock",
+    "bedrock_converse",
+    "cohere",
+    "deepseek",
+    "fireworks",
+    "google_anthropic_vertex",
+    "google_genai",
+    "google_vertexai",
+    "groq",
+    "huggingface",
+    "ibm",
+    "langsmith",
+    "litellm",
+    "meta",
+    "mistralai",
+    "nvidia",
+    "ollama",
+    "openai",
+    "openrouter",
+    "perplexity",
+    "together",
+    "upstage",
+    "xai",
+}
+
 
 def _normalize_openai_base_url():
     base_url = os.environ.get("OPENAI_BASE_URL")
@@ -38,8 +71,8 @@ def _model():
     supported way in, and it is selected by the presence of the token rather than by another
     setting, so nothing can say "plan" while holding a key.
 
-    Everything else keeps `provider:model`, which is what `init_chat_model` reads, so the provider
-    stays the person's choice.
+    A recognized `provider:model` choice keeps its provider. Otherwise the model is an opaque ID
+    and the selected provider is passed separately, including when that ID contains a colon.
     """
     model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
     store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
@@ -66,7 +99,10 @@ def _model():
 
     _normalize_openai_base_url()
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
-    return init_chat_model(model if ":" in model else f"{provider}:{model}")
+    prefix, separator, _ = model.partition(":")
+    if separator and prefix in MODEL_PROVIDERS:
+        return init_chat_model(model)
+    return init_chat_model(model, model_provider=provider)
 
 
 async def answer(state: MessagesState):

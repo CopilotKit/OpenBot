@@ -4,7 +4,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 import httpx2
 import pytest
@@ -14,8 +16,60 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src import main
 
 
+def _openai_response(model, content):
+    return {
+        "id": "chatcmpl-openbot-ci",
+        "object": "chat.completion",
+        "created": 0,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+
+@pytest.fixture
+def compatible_endpoint():
+    captured = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            captured.append({"path": self.path, "body": body})
+            response = json.dumps(
+                _openai_response(body["model"], "compatible proof")
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+        def log_message(self, *_args):
+            # Requests are asserted through captured, without noisy access logs.
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/v1", captured
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
 @pytest.fixture(autouse=True)
 def provider_environment(monkeypatch):
+    for name in list(os.environ):
+        if name.startswith(("LANGCHAIN_", "LANGSMITH_")):
+            monkeypatch.delenv(name)
     for name in [
         "ALL_PROXY",
         "ANTHROPIC_API_KEY",
@@ -50,7 +104,9 @@ async def _run_answer_with_httpx2_capture(monkeypatch, response_json):
         return httpx2.Response(200, json=response_json, request=request)
 
     monkeypatch.setattr(httpx2.AsyncClient, "send", send)
-    result = await main.answer({"messages": [{"role": "user", "content": "Say hello."}]})
+    result = await main.answer(
+        {"messages": [{"role": "user", "content": "Say hello."}]}
+    )
     return result, captured
 
 
@@ -64,20 +120,7 @@ async def test_openai_key_without_compatible_endpoint_uses_sdk_default_boundary(
 
     result, captured = await _run_answer_with_httpx2_capture(
         monkeypatch,
-        {
-            "id": "chatcmpl-openbot-ci",
-            "object": "chat.completion",
-            "created": 0,
-            "model": "gpt-ci",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "openai proof"},
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        },
+        _openai_response("gpt-ci", "openai proof"),
     )
 
     assert result["messages"][0].content == "openai proof"
@@ -93,42 +136,63 @@ async def test_openai_key_without_compatible_endpoint_uses_sdk_default_boundary(
 
 
 @pytest.mark.asyncio
-async def test_nonblank_openai_compatible_endpoint_stays_supported(monkeypatch):
+@pytest.mark.parametrize(
+    ("provider", "model", "request_model"),
+    [
+        ("openai", "gpt-compatible", "gpt-compatible"),
+        ("openai", "qwen2.5:1.5b", "qwen2.5:1.5b"),
+        (
+            "openai",
+            "namespace/model:variant:revision",
+            "namespace/model:variant:revision",
+        ),
+        ("openai", "claude-compatible:latest", "claude-compatible:latest"),
+        ("anthropic", "openai:qwen2.5:1.5b", "qwen2.5:1.5b"),
+    ],
+)
+async def test_compatible_model_id_reaches_real_http_boundary(
+    monkeypatch, compatible_endpoint, provider, model, request_model
+):
+    base_url, captured = compatible_endpoint
     monkeypatch.setenv("OPENAI_API_KEY", "sk-compatible-ci")
-    monkeypatch.setenv("BOT_MODEL", "gpt-compatible")
-    monkeypatch.setenv("OPENAI_BASE_URL", "  http://127.0.0.1:4310/v1  ")
+    monkeypatch.setenv("BOT_PROVIDER", provider)
+    monkeypatch.setenv("BOT_MODEL", model)
+    monkeypatch.setenv("OPENAI_BASE_URL", f"  {base_url}  ")
 
-    result, captured = await _run_answer_with_httpx2_capture(
-        monkeypatch,
-        {
-            "id": "chatcmpl-compatible-ci",
-            "object": "chat.completion",
-            "created": 0,
-            "model": "gpt-compatible",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "compatible proof"},
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        },
+    result = await main.answer(
+        {"messages": [{"role": "user", "content": "Say hello."}]}
     )
 
     assert result["messages"][0].content == "compatible proof"
-    assert os.environ["OPENAI_BASE_URL"] == "http://127.0.0.1:4310/v1"
-    assert captured[0]["url"] == "http://127.0.0.1:4310/v1/chat/completions"
+    assert os.environ["OPENAI_BASE_URL"] == base_url
+    assert captured == [
+        {
+            "path": "/v1/chat/completions",
+            "body": {
+                "messages": [{"content": "Say hello.", "role": "user"}],
+                "model": request_model,
+                "stream": False,
+            },
+        }
+    ]
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "model", "request_model"),
+    [
+        ("anthropic", "claude-sonnet-4-5", "claude-sonnet-4-5"),
+        ("openai", "anthropic:claude-sonnet-4-5", "claude-sonnet-4-5"),
+        ("anthropic", "claude-compatible:latest", "claude-compatible:latest"),
+    ],
+)
 async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key(
-    monkeypatch,
+    monkeypatch, provider, model, request_model
 ):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-openbot-ci")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:4311")
-    monkeypatch.setenv("BOT_PROVIDER", "anthropic")
-    monkeypatch.setenv("BOT_MODEL", "claude-sonnet-4-5")
+    monkeypatch.setenv("BOT_PROVIDER", provider)
+    monkeypatch.setenv("BOT_MODEL", model)
 
     result, captured = await _run_answer_with_httpx2_capture(
         monkeypatch,
@@ -136,7 +200,7 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
             "id": "msg-openbot-ci",
             "type": "message",
             "role": "assistant",
-            "model": "claude-sonnet-4-5",
+            "model": request_model,
             "content": [{"type": "text", "text": "anthropic proof"}],
             "stop_reason": "end_turn",
             "stop_sequence": None,
@@ -149,7 +213,7 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
     assert captured[0]["url"] == "http://127.0.0.1:4311/v1/messages"
     assert captured[0]["headers"]["x-api-key"] == "sk-ant-openbot-ci"
     assert captured[0]["headers"]["anthropic-version"] == "2023-06-01"
-    assert captured[0]["body"]["model"] == "claude-sonnet-4-5"
+    assert captured[0]["body"]["model"] == request_model
     assert captured[0]["body"]["messages"] == [
         {"role": "user", "content": "Say hello."}
     ]
@@ -200,6 +264,7 @@ print(json.dumps({
             "-lc",
             "python -m pip install --quiet --root-user-action=ignore langchain-openai==1.6.0 && python /tmp/writer.py",
         ],
+        check=False,
         text=True,
         capture_output=True,
         timeout=180,
