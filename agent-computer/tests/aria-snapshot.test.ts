@@ -105,6 +105,39 @@ describe("parseAriaSnapshot, against captured output", () => {
     expect(byName.get("Submit order")).not.toHaveProperty("checked");
   });
 
+  /**
+   * A half-ticked "select all", which is the shape this got wrong.
+   *
+   * `aria-checked="mixed"` is what a box above a partly-ticked list carries, and Playwright writes
+   * it as `[checked=mixed]` -- a value, where an ordinary tick is the bare `[checked]`.
+   */
+  const MIXED = `- generic [ref=e2]:
+  - checkbox "Select all" [checked=mixed] [ref=e3]
+  - checkbox "Bacon" [checked] [ref=e4]
+  - checkbox "Extra Cheese" [ref=e5]`;
+
+  test("the mixed fixture is genuinely valid YAML", () => {
+    expect(() => Bun.YAML.parse(MIXED)).not.toThrow();
+  });
+
+  test("a half-ticked box is not reported as ticked", () => {
+    const byName = new Map(
+      parseAriaSnapshot(MIXED).elements.map((e) => [e.name, e]),
+    );
+    // Not checked, so a Bot asked to tick it clicks it. Told it was already checked, it left the
+    // rows underneath unselected and said they were done.
+    expect(byName.get("Select all")?.checked).toBe(false);
+    // And the two beside it are unchanged, so this is not a swap.
+    expect(byName.get("Bacon")?.checked).toBe(true);
+    expect(byName.get("Extra Cheese")?.checked).toBe(false);
+  });
+
+  test("a half-ticked box is still a control a Bot can act on", () => {
+    const [first] = parseAriaSnapshot(MIXED).elements;
+    // The ref is what a click needs, and it sits after the flag Playwright gave a value to.
+    expect(first).toMatchObject({ ref: "e3", role: "checkbox" });
+  });
+
   test("empty and unparseable input produce no elements rather than throwing", () => {
     expect(parseAriaSnapshot("").elements).toEqual([]);
     expect(parseAriaSnapshot("\t- [[[ not yaml").elements).toEqual([]);

@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A half-ticked box is no longer described to a Bot as ticked
+
+The snapshot a Bot reads before it acts on a page says whether each box is ticked, and Playwright
+writes that as `[checked]` for one that is and `[checked=mixed]` for one that is neither — which is
+what the "select all" above a partly-ticked list carries. The parser treated any value other than
+the string `false` as ticked, and `mixed` is one, so a half-ticked box was reported as done. A Bot
+asked to select everything read it as already selected, clicked nothing, and said the rows were
+chosen when most of them were not. `mixed` is now reported as not ticked, which is both the true
+half of a yes-or-no answer and the one that gets the right action: clicking a half-ticked box ticks
+it. An ordinary tick and an ordinary empty box are unchanged.
+
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank
