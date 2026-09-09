@@ -86,6 +86,11 @@ pub struct Harness {
     pub image: Option<String>,
     /// Where the container says it is ready.
     pub health_path: Option<String>,
+    /// Where AG-UI run requests are served inside the harness.
+    ///
+    /// Empty means the server root. Readiness stays in `health_path` because Compose polls that
+    /// before a run token exists.
+    pub run_path: String,
     /// The port the image listens on, which differs per harness and is fixed by its Dockerfile.
     ///
     /// Carried because the one compose service that runs the picked harness has to be told, and
@@ -137,6 +142,7 @@ pub fn catalogue() -> Vec<Harness> {
     let ours = |id: &str,
                 directory: &str,
                 port: u16,
+                run_path: &str,
                 name: &str,
                 summary: &str,
                 maintainer: Maintainer| Harness {
@@ -148,6 +154,7 @@ pub fn catalogue() -> Vec<Harness> {
         image: Some(directory.to_string()),
         port: Some(port),
         health_path: Some("/health".into()),
+        run_path: run_path.into(),
         credential: Credential::AnyProvider,
         maintainer,
         mark: (!UNMARKED.contains(&id)).then(|| id.to_string()),
@@ -158,6 +165,7 @@ pub fn catalogue() -> Vec<Harness> {
             "crewai",
             "agent-crewai",
             4202,
+            "",
             "CrewAI",
             "Crews of agents with roles and tasks.",
             Maintainer::Partnership,
@@ -166,6 +174,7 @@ pub fn catalogue() -> Vec<Harness> {
             "llamaindex",
             "agent-llamaindex",
             4204,
+            "/run",
             "LlamaIndex",
             "Agents built around your own documents.",
             Maintainer::FirstParty,
@@ -174,6 +183,7 @@ pub fn catalogue() -> Vec<Harness> {
             "agno",
             "agent-agno",
             4203,
+            "/agui",
             "Agno",
             "Fast, small, and multi-modal.",
             Maintainer::FirstParty,
@@ -182,6 +192,7 @@ pub fn catalogue() -> Vec<Harness> {
             "langgraph",
             "agent-langgraph-agui",
             4206,
+            "",
             "LangGraph",
             "Graphs you can change, from LangChain.",
             Maintainer::Partnership,
@@ -190,6 +201,7 @@ pub fn catalogue() -> Vec<Harness> {
             "google-adk",
             "agent-adk",
             4208,
+            "",
             "Google ADK",
             "Google's agent kit. Gemini first, any model after.",
             Maintainer::FirstParty,
@@ -198,6 +210,7 @@ pub fn catalogue() -> Vec<Harness> {
             "pydantic-ai",
             "agent-pydantic-ai",
             4205,
+            "",
             "Pydantic AI",
             "Typed agents, validated in and out.",
             Maintainer::FirstParty,
@@ -206,6 +219,7 @@ pub fn catalogue() -> Vec<Harness> {
             "microsoft-agent-framework",
             "agent-microsoft",
             4211,
+            "",
             "Microsoft Agent Framework",
             "Microsoft's, model-agnostic by design.",
             Maintainer::FirstParty,
@@ -217,6 +231,7 @@ pub fn catalogue() -> Vec<Harness> {
             image: Some("agent-claude-sdk".into()),
             port: Some(4212),
             health_path: Some("/health".into()),
+            run_path: String::new(),
             credential: Credential::Anthropic,
             maintainer: Maintainer::Community,
             mark: Some("claude-agent-sdk".into()),
@@ -225,6 +240,7 @@ pub fn catalogue() -> Vec<Harness> {
             "strands",
             "agent-strands",
             4207,
+            "",
             "AWS Strands",
             "Amazon's. Bedrock first, any model after.",
             Maintainer::FirstParty,
@@ -233,6 +249,7 @@ pub fn catalogue() -> Vec<Harness> {
             "ag2",
             "agent-ag2",
             4210,
+            "",
             "AG2",
             "The AutoGen line, continued.",
             Maintainer::FirstParty,
@@ -241,6 +258,7 @@ pub fn catalogue() -> Vec<Harness> {
             "langroid",
             "agent-langroid",
             4209,
+            "",
             "Langroid",
             "Multi-agent, deliberately small.",
             Maintainer::Community,
@@ -249,6 +267,7 @@ pub fn catalogue() -> Vec<Harness> {
             "mastra",
             "agent-mastra",
             4213,
+            "",
             "Mastra",
             "TypeScript agents, with their own server.",
             Maintainer::Partnership,
@@ -261,6 +280,7 @@ pub fn catalogue() -> Vec<Harness> {
             image: None,
             port: None,
             health_path: None,
+            run_path: String::new(),
             credential: Credential::TheirEndpoint,
             maintainer: Maintainer::Community,
             // Stands for whatever the person already runs, so no vendor's mark is honest here.
@@ -307,6 +327,7 @@ pub fn picked(
         port,
         name: row.name,
         mastra,
+        run_path: row.run_path,
         // Our own Mastra image serves one agent, named for the product. Somebody pointing at their
         // own Mastra server names theirs on the Bot's page.
         remote_agent_id: if mastra {
@@ -530,6 +551,24 @@ mod tests {
             .expect("nothing");
         assert!(mastra.mastra);
         assert_eq!(mastra.remote_agent_id, "openbot");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Health checks stay on their readiness path, but the Bot is registered at the harness's real
+    /// run route. Agno and LlamaIndex do not serve AG-UI runs from the server root.
+    #[test]
+    fn picked_harnesses_keep_run_routes_separate_from_health_routes() {
+        let root = deployment_naming_everything("routes");
+        for (id, run_path) in [("agno", "/agui"), ("llamaindex", "/run")] {
+            let row = catalogue()
+                .into_iter()
+                .find(|row| row.id == id)
+                .expect("catalogue row missing");
+            assert_eq!(row.health_path.as_deref(), Some("/health"));
+
+            let picked = picked(Some(id), &root).expect("refused").expect("nothing");
+            assert_eq!(picked.run_path, run_path);
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

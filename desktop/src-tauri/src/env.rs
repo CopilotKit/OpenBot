@@ -320,9 +320,16 @@ pub fn compose(
         env.insert("PICKED_HARNESS_IMAGE".into(), picked.image.clone());
         env.insert("PICKED_HARNESS_PORT".into(), picked.port.to_string());
         env.insert("PICKED_HARNESS_NAME".into(), picked.name.clone());
+        let run_path = picked.run_path.trim();
         env.insert(
             "PICKED_HARNESS_URL".into(),
-            format!("http://127.0.0.1:{}", picked.port),
+            if run_path.is_empty() {
+                format!("http://127.0.0.1:{}", picked.port)
+            } else if run_path.starts_with('/') {
+                format!("http://127.0.0.1:{}{}", picked.port, run_path)
+            } else {
+                format!("http://127.0.0.1:{}/{}", picked.port, run_path)
+            },
         );
         /*
          * The kind, as the package spells it.
@@ -437,6 +444,8 @@ pub struct PickedHarness {
     pub name: String,
     /// How it is dialled. A Mastra server has no AG-UI route of its own.
     pub mastra: bool,
+    /// The run route on that harness. Empty means the server root.
+    pub run_path: String,
     /// Which agent on that server, for a Mastra roster. Empty means the only one there.
     pub remote_agent_id: String,
 }
@@ -1471,7 +1480,24 @@ mod model_tests {
     /// `agent.type` by refusing the whole file.
     #[test]
     fn a_picked_harness_is_addressed_once_and_named_as_a_kind() {
-        for (mastra, expected) in [(false, "remote-ag-ui"), (true, "remote-mastra")] {
+        for (mastra, expected, port, run_path, url) in [
+            (false, "remote-ag-ui", 4202, "", "http://127.0.0.1:4202"),
+            (
+                false,
+                "remote-ag-ui",
+                4203,
+                "/agui",
+                "http://127.0.0.1:4203/agui",
+            ),
+            (
+                false,
+                "remote-ag-ui",
+                4204,
+                "/run",
+                "http://127.0.0.1:4204/run",
+            ),
+            (true, "remote-mastra", 4202, "", "http://127.0.0.1:4202"),
+        ] {
             let env = compose(
                 &intelligence(),
                 &Model::default(),
@@ -1480,10 +1506,11 @@ mod model_tests {
                 &pinned(),
                 Some(&PickedHarness {
                     image: "openbot-agent-crewai".into(),
-                    port: 4202,
+                    port,
                     name: "CrewAI".into(),
                     mastra,
                     remote_agent_id: String::new(),
+                    run_path: run_path.into(),
                 }),
                 &BTreeMap::new(),
             );
@@ -1491,10 +1518,7 @@ mod model_tests {
                 env.get("PICKED_HARNESS_KIND").map(String::as_str),
                 Some(expected)
             );
-            assert_eq!(
-                env.get("PICKED_HARNESS_URL").map(String::as_str),
-                Some("http://127.0.0.1:4202")
-            );
+            assert_eq!(env.get("PICKED_HARNESS_URL").map(String::as_str), Some(url));
         }
     }
 
