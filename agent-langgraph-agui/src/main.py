@@ -109,7 +109,8 @@ def _model():
     A recognized `provider:model` choice keeps its provider. Otherwise the model is an opaque ID
     and the selected provider is passed separately, including when that ID contains a colon.
     """
-    model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
+    configured_model = os.environ.get("BOT_MODEL")
+    model = (configured_model or "gpt-4o-mini").strip()
     store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
     if store:
         store_path = _chatgpt_auth_file(store)
@@ -134,6 +135,11 @@ def _model():
     _normalize_openai_base_url()
     provider = (os.environ.get("BOT_PROVIDER") or "").strip() or "openai"
     provider = _resolve_provider(provider)
+    if not configured_model:
+        model = {
+            "anthropic": "claude-sonnet-4-5",
+            "google_genai": "gemini-2.5-flash",
+        }.get(provider, model)
     prefix, separator, _ = model.partition(":")
     if separator and prefix in MODEL_PROVIDERS:
         return init_chat_model(model, **_google_genai_kwargs(prefix))

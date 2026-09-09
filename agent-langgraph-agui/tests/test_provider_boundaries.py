@@ -193,16 +193,21 @@ async def _run_answer_with_httpx2_capture(monkeypatch, response_json):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "request_model"),
+    [(None, "gpt-4o-mini"), ("", "gpt-4o-mini"), ("gpt-ci", "gpt-ci")],
+)
 async def test_openai_key_without_compatible_endpoint_uses_sdk_default_boundary(
-    monkeypatch,
+    monkeypatch, model, request_model,
 ):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openbot-ci")
-    monkeypatch.setenv("BOT_MODEL", "gpt-ci")
+    if model is not None:
+        monkeypatch.setenv("BOT_MODEL", model)
     monkeypatch.setenv("OPENAI_BASE_URL", "")
 
     result, captured = await _run_answer_with_httpx2_capture(
         monkeypatch,
-        _openai_response("gpt-ci", "openai proof"),
+        _openai_response(request_model, "openai proof"),
     )
 
     assert result["messages"][0].content == "openai proof"
@@ -212,7 +217,7 @@ async def test_openai_key_without_compatible_endpoint_uses_sdk_default_boundary(
     assert captured[0]["headers"]["authorization"] == "Bearer sk-openbot-ci"
     assert captured[0]["body"] == {
         "messages": [{"content": "Say hello.", "role": "user"}],
-        "model": "gpt-ci",
+        "model": request_model,
         "stream": False,
     }
 
@@ -297,6 +302,8 @@ async def test_blank_provider_keeps_opaque_model_at_compatible_endpoint(
 @pytest.mark.parametrize(
     ("provider", "model", "request_model"),
     [
+        ("anthropic", None, "claude-sonnet-4-5"),
+        ("anthropic", "", "claude-sonnet-4-5"),
         ("anthropic", "claude-sonnet-4-5", "claude-sonnet-4-5"),
         ("openai", "anthropic:claude-sonnet-4-5", "claude-sonnet-4-5"),
         ("anthropic", "claude-compatible:latest", "claude-compatible:latest"),
@@ -308,7 +315,8 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-openbot-ci")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:4311")
     monkeypatch.setenv("BOT_PROVIDER", provider)
-    monkeypatch.setenv("BOT_MODEL", model)
+    if model is not None:
+        monkeypatch.setenv("BOT_MODEL", model)
 
     result, captured = await _run_answer_with_httpx2_capture(
         monkeypatch,
@@ -339,6 +347,10 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
 @pytest.mark.parametrize(
     ("provider", "model"),
     [
+        ("google", None),
+        ("google", ""),
+        ("google_genai", None),
+        ("google_genai", ""),
         ("google", "gemini-2.5-flash"),
         ("openai", "google_genai:gemini-2.5-flash"),
     ],
@@ -351,7 +363,8 @@ async def test_google_provider_reaches_google_genai_boundary(
     monkeypatch.setenv("GOOGLE_API_KEY", "synthetic-google")
     monkeypatch.setenv("GOOGLE_GENERATIVE_AI_BASE_URL", f"  {base_url}  ")
     monkeypatch.setenv("BOT_PROVIDER", provider)
-    monkeypatch.setenv("BOT_MODEL", model)
+    if model is not None:
+        monkeypatch.setenv("BOT_MODEL", model)
 
     result = await main.answer(
         {"messages": [{"role": "user", "content": "Say hello."}]}
@@ -455,13 +468,21 @@ def test_configured_chatgpt_auth_file_unreadable_fails_before_fallback(
         unreadable_file.chmod(0o600)
 
 
-def test_configured_chatgpt_auth_file_selects_codex_model(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("configured_model", "request_model"),
+    [(None, "gpt-4o-mini"), ("", "gpt-4o-mini"), ("gpt-5.5", "gpt-5.5")],
+)
+def test_configured_chatgpt_auth_file_selects_codex_model(
+    monkeypatch, tmp_path, configured_model, request_model
+):
     auth_file = tmp_path / "chatgpt-auth.json"
     _write_synthetic_chatgpt_store(auth_file)
     monkeypatch.setenv("CHATGPT_AUTH_FILE", str(auth_file))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-used")
     monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:9/v1")
-    monkeypatch.setenv("BOT_MODEL", "gpt-5.5")
+    monkeypatch.setenv("BOT_PROVIDER", "anthropic")
+    if configured_model is not None:
+        monkeypatch.setenv("BOT_MODEL", configured_model)
 
     model = main._model()
     token = model.token_provider.get_token()
@@ -470,6 +491,7 @@ def test_configured_chatgpt_auth_file_selects_codex_model(monkeypatch, tmp_path)
         f"{type(model).__module__}.{type(model).__name__}"
         == "langchain_openai.chat_models.codex._ChatOpenAICodex"
     )
+    assert model.model_name == request_model
     assert type(model.token_provider).__name__ == "_FileChatGPTOAuthTokenProvider"
     assert str(model.token_provider.path) == str(auth_file)
     assert token.access_token == "synthetic-access"
