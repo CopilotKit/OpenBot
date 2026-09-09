@@ -4,6 +4,11 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 type Invoke = (command: string, args?: unknown) => Promise<unknown>;
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+};
 
 let invokeCalls: Array<{ command: string; args?: unknown }> = [];
 let invokeHandler: Invoke = async () => {
@@ -70,6 +75,38 @@ function getStartStackPayload() {
     throw new Error("start_stack payload was not captured");
   }
   return args;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function savedOpenAiConfiguration() {
+  return {
+    values: {},
+    saved: {
+      intelligenceApiKey: true,
+      modelApiKeys: { openai: true, anthropic: false },
+      modelSessions: { openai: false, anthropic: false },
+    },
+  };
+}
+
+function emptyConfiguration() {
+  return {
+    values: {},
+    saved: {
+      intelligenceApiKey: false,
+      modelApiKeys: { openai: false, anthropic: false },
+      modelSessions: { openai: false, anthropic: false },
+    },
+  };
 }
 
 type ExistingConfigurationValues = {
@@ -436,6 +473,145 @@ test("saved startup credentials enable Start without raw protected secrets on mo
   expect(
     invokeCalls.filter((call) => call.command === "already_configured"),
   ).toHaveLength(1);
+});
+
+test("root edits reload saved configuration for that root and ignore stale saved responses", async () => {
+  const rootA = "/tmp/openbot-root-a";
+  const rootB = "/tmp/openbot-root-b";
+  const rootC = "/tmp/openbot-root-c";
+  const savedForRootA = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
+  const emptyForRootB = deferred<ReturnType<typeof emptyConfiguration>>();
+  const savedForRootC = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
+
+  invokeHandler = async (command, args) => {
+    if (command === "detect_engine") {
+      return {
+        engine: "docker",
+        responding: true,
+        engine_socket: null,
+        detail: "Docker is answering.",
+      };
+    }
+    if (command === "default_root") return rootA;
+    if (command === "already_configured") {
+      const requestedRoot = (args as { root?: string } | undefined)?.root;
+      if (requestedRoot === rootA) return savedForRootA.promise;
+      if (requestedRoot === rootB) return emptyForRootB.promise;
+      if (requestedRoot === rootC) return savedForRootC.promise;
+      throw new Error(`unexpected already_configured root ${requestedRoot}`);
+    }
+    if (command === "already_running") return false;
+    if (command === "windows_blocker") return null;
+    if (command === "last_failure") return null;
+    if (command === "harnesses") {
+      return [
+        {
+          id: "langgraph",
+          name: "LangGraph",
+          summary: "Default Bot",
+          image: null,
+          health_path: null,
+          credential: "any-provider",
+          maintainer: "first-party",
+          mark: null,
+          port: 8000,
+        },
+      ];
+    }
+    if (command === "providers") {
+      return [
+        {
+          id: "openai",
+          name: "OpenAI",
+          summary: "Use OpenAI.",
+          logins: ["api-key"],
+          mark: null,
+          caution: null,
+        },
+      ];
+    }
+    if (command === "prepare_engine") return null;
+    if (command === "start_stack") return null;
+    throw new Error(`unexpected command ${command}`);
+  };
+
+  const view = await renderApp();
+  await act(async () => {
+    savedForRootA.resolve(savedOpenAiConfiguration());
+  });
+
+  await userEvent.click(
+    await view.findByRole("button", { name: "Set up OpenBot" }),
+  );
+  await userEvent.click(await view.findByRole("button", { name: "Continue" }));
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  expect(view.getByText(/A saved OpenAI API key will be used/)).toBeTruthy();
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await waitFor(() =>
+    expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+
+  const rootField = view.getByLabelText("Where OpenBot lives");
+  const user = userEvent.setup({
+    document: view.container.ownerDocument,
+  });
+  await user.clear(rootField);
+  await user.type(rootField, rootB);
+  await act(async () => {
+    rootField.blur();
+  });
+
+  await waitFor(() =>
+    expect(
+      invokeCalls.filter((call) => call.command === "already_configured"),
+    ).toContainEqual({ command: "already_configured", args: { root: rootB } }),
+  );
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+
+  await user.clear(rootField);
+  await user.type(rootField, rootC);
+  await act(async () => {
+    rootField.blur();
+  });
+
+  await waitFor(() =>
+    expect(
+      invokeCalls.filter((call) => call.command === "already_configured"),
+    ).toContainEqual({ command: "already_configured", args: { root: rootC } }),
+  );
+  await act(async () => {
+    emptyForRootB.resolve(emptyConfiguration());
+  });
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+
+  await act(async () => {
+    savedForRootC.resolve(savedOpenAiConfiguration());
+  });
+  await waitFor(() =>
+    expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+
+  expect(getStartStackPayload()).toMatchObject({
+    root: rootC,
+    model: {
+      provider: "openai",
+      login: "api-key",
+      saved: true,
+    },
+  });
 });
 
 test("bring-your-own agent collects a distinct AG-UI endpoint for startup", async () => {

@@ -1,18 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Ask } from "./Ask";
 import {
   DEFAULT_HARNESS,
   type HarnessChoice,
   HarnessPicker,
 } from "./HarnessPicker";
+import { asProblem, Failure, type Problem } from "./Problem";
 import {
   type HeldConfiguration,
   type ModelChoice,
   ProviderPicker,
 } from "./ProviderPicker";
-import { Ask } from "./Ask";
-import { asProblem, Failure, type Problem } from "./Problem";
 import { Welcome } from "./Welcome";
 
 type EngineStatus = {
@@ -34,6 +34,10 @@ type AlreadyConfigured = {
   values: Record<string, string>;
   saved: NonNullable<HeldConfiguration["saved"]>;
 };
+
+const MANAGED_INTELLIGENCE_API_URL = "https://api.intelligence.copilotkit.ai";
+const MANAGED_INTELLIGENCE_GATEWAY_WS_URL =
+  "wss://realtime.intelligence.copilotkit.ai";
 
 /**
  * What the last screen offers to ask, mirroring `ask::SUGGESTED`.
@@ -124,15 +128,12 @@ export function App() {
   const [step, setStep] = useState<
     "welcome" | "harness" | "model" | "install" | "ask"
   >("welcome");
-  const [apiUrl, setApiUrl] = useState(
-    "https://api.intelligence.copilotkit.ai",
-  );
-  const [wsUrl, setWsUrl] = useState(
-    "wss://realtime.intelligence.copilotkit.ai",
-  );
+  const [apiUrl, setApiUrl] = useState(MANAGED_INTELLIGENCE_API_URL);
+  const [wsUrl, setWsUrl] = useState(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
   const [steps, setSteps] = useState<Progress[]>([]);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+  const configuredRunRef = useRef(0);
   /*
    * A failure, in both registers.
    *
@@ -142,6 +143,40 @@ export function App() {
    * headline on a setup screen. See `problem.rs`.
    */
   const [failure, setFailure] = useState<Problem | null>(null);
+
+  const clearRootScopedSavedState = useCallback(() => {
+    setApiKey("");
+    setApiUrl(MANAGED_INTELLIGENCE_API_URL);
+    setWsUrl(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
+    setAlreadyHeld({});
+  }, []);
+
+  const loadConfiguredRoot = useCallback(
+    async (nextRoot: string) => {
+      const trimmedRoot = nextRoot.trim();
+      const run = configuredRunRef.current + 1;
+      configuredRunRef.current = run;
+      clearRootScopedSavedState();
+      if (!trimmedRoot) return;
+      try {
+        const { values, saved } = await invoke<AlreadyConfigured>(
+          "already_configured",
+          { root: trimmedRoot },
+        );
+        if (configuredRunRef.current !== run) return;
+        if (values.INTELLIGENCE_API_KEY) setApiKey(values.INTELLIGENCE_API_KEY);
+        if (values.INTELLIGENCE_API_URL) setApiUrl(values.INTELLIGENCE_API_URL);
+        if (values.INTELLIGENCE_GATEWAY_WS_URL)
+          setWsUrl(values.INTELLIGENCE_GATEWAY_WS_URL);
+        setAlreadyHeld({ ...values, saved });
+      } catch {
+        if (configuredRunRef.current === run) {
+          setAlreadyHeld({});
+        }
+      }
+    },
+    [clearRootScopedSavedState],
+  );
 
   useEffect(() => {
     invoke<EngineStatus>("detect_engine")
@@ -157,18 +192,7 @@ export function App() {
          * a dotfile in a text editor — the exact thing this product exists not to require. Their own
          * file, read back to them on their own machine.
          */
-        invoke<AlreadyConfigured>("already_configured", { root: found })
-          .then((configured) => {
-            const { values, saved } = configured;
-            if (values.INTELLIGENCE_API_KEY)
-              setApiKey(values.INTELLIGENCE_API_KEY);
-            if (values.INTELLIGENCE_API_URL)
-              setApiUrl(values.INTELLIGENCE_API_URL);
-            if (values.INTELLIGENCE_GATEWAY_WS_URL)
-              setWsUrl(values.INTELLIGENCE_GATEWAY_WS_URL);
-            setAlreadyHeld({ ...values, saved });
-          })
-          .catch(() => undefined);
+        loadConfiguredRoot(found);
         // A stack this app started may still be up from a previous window. Ask, rather than
         // offering to set up something that is already running.
         if (
@@ -218,7 +242,7 @@ export function App() {
     return () => {
       stop.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [loadConfiguredRoot]);
 
   async function start() {
     setBusy(true);
@@ -258,6 +282,21 @@ export function App() {
         .then(setEngine)
         .catch(() => undefined);
     }
+  }
+
+  function modelCanStart() {
+    if (!model) return false;
+    if (!model.saved) return true;
+    if (model.provider !== "openai" && model.provider !== "anthropic") {
+      return false;
+    }
+    if (model.login === "plan") {
+      return alreadyHeld.saved?.modelSessions?.[model.provider] === true;
+    }
+    if (model.login === "api-key") {
+      return alreadyHeld.saved?.modelApiKeys?.[model.provider] === true;
+    }
+    return false;
   }
 
   async function stop() {
@@ -484,7 +523,11 @@ export function App() {
             <input
               id="root"
               value={root}
-              onChange={(event) => setRoot(event.target.value)}
+              onChange={(event) => {
+                setRoot(event.target.value);
+                clearRootScopedSavedState();
+              }}
+              onBlur={(event) => loadConfiguredRoot(event.target.value)}
               spellCheck={false}
             />
           </div>
@@ -591,7 +634,7 @@ export function App() {
               busy ||
               (apiKey.trim() === "" &&
                 !alreadyHeld.saved?.intelligenceApiKey) ||
-              !model ||
+              !modelCanStart() ||
               root.trim() === ""
             }
           >
