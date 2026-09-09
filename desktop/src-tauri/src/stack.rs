@@ -323,6 +323,25 @@ pub fn host_pids_path(root: &Path) -> PathBuf {
     root.join(".logs").join("host-pids.json")
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecordedHostProcess {
+    pub name: String,
+    pub pid: u32,
+    pub executable_path: String,
+    pub command_line: String,
+    pub creation_date: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RecordedHostPidFile {
+    Records {
+        version: u8,
+        processes: Vec<RecordedHostProcess>,
+    },
+    Pids(Vec<u32>),
+}
+
 /// Record the pids of the processes this window started.
 pub fn record_host_pids(root: &Path, pids: &[u32]) {
     let path = host_pids_path(root);
@@ -335,12 +354,67 @@ pub fn record_host_pids(root: &Path, pids: &[u32]) {
     );
 }
 
+/// Record the host processes this window started.
+pub fn record_host_processes(root: &Path, processes: &[(&str, u32)]) {
+    #[cfg(windows)]
+    {
+        let snapshot = windows_processes();
+        let records: Vec<RecordedHostProcess> = processes
+            .iter()
+            .filter_map(|(name, pid)| {
+                let live = snapshot.iter().find(|process| process.process_id == *pid)?;
+                RecordedHostProcess::from_live(name, live)
+            })
+            .collect();
+        write_host_pid_file(
+            root,
+            &serde_json::json!({ "version": 1, "processes": records }),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        record_host_pids(
+            root,
+            &processes.iter().map(|(_, pid)| *pid).collect::<Vec<_>>(),
+        );
+    }
+}
+
 /// The pids a previous window recorded, if any.
 pub fn recorded_host_pids(root: &Path) -> Vec<u32> {
+    match recorded_host_pid_file(root) {
+        Some(RecordedHostPidFile::Records { version, processes }) if version == 1 => {
+            processes.into_iter().map(|process| process.pid).collect()
+        }
+        Some(RecordedHostPidFile::Pids(pids)) => pids,
+        _ => Vec::new(),
+    }
+}
+
+/// The recorded host processes with enough identity to verify a live Windows process.
+pub fn recorded_host_processes(root: &Path) -> Vec<RecordedHostProcess> {
+    match recorded_host_pid_file(root) {
+        Some(RecordedHostPidFile::Records { version, processes }) if version == 1 => processes,
+        _ => Vec::new(),
+    }
+}
+
+fn recorded_host_pid_file(root: &Path) -> Option<RecordedHostPidFile> {
     std::fs::read(host_pids_path(root))
         .ok()
-        .and_then(|raw| serde_json::from_slice::<Vec<u32>>(&raw).ok())
-        .unwrap_or_default()
+        .and_then(|raw| serde_json::from_slice::<RecordedHostPidFile>(&raw).ok())
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn write_host_pid_file<T: Serialize>(root: &Path, value: &T) {
+    let path = host_pids_path(root);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(
+        &path,
+        serde_json::to_vec(value).unwrap_or_else(|_| b"[]".to_vec()),
+    );
 }
 
 pub fn spawn_host_process(
@@ -449,7 +523,10 @@ pub fn stop_processes_under(_root: &Path) -> usize {
      * directory, which Windows will not tell you cheaply. Measured: after the port sweep alone,
      * 3001 and 3010 were free and the worker was still running.
      */
-    for pid in recorded_host_pids(_root) {
+    let recorded = recorded_host_processes(_root);
+    let processes = windows_processes();
+    let roots = verified_openbot_root_pids(&recorded, &processes);
+    for pid in &roots {
         let ended = command("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .output()
@@ -470,8 +547,9 @@ pub fn stop_processes_under(_root: &Path) -> usize {
         return stopped_recorded;
     };
 
+    let listed = String::from_utf8_lossy(&listing.stdout);
     let mut stopped = stopped_recorded;
-    for pid in pids_listening_on(&String::from_utf8_lossy(&listing.stdout), &ours) {
+    for pid in verified_openbot_pids_listening_on(&listed, &ours, &recorded, &processes) {
         // With its children: `bun run serve` starts the real server as a grandchild, so ending
         // only the process holding the port leaves that one behind.
         let ended = command("taskkill")
@@ -492,7 +570,6 @@ pub fn stop_processes_under(_root: &Path) -> usize {
 /// rather than five, the foreign address is taken for the state and the state for the pid: nothing
 /// matches, and Stop reports success while leaving everything running. That is exactly what
 /// happened, and this test is why it did not survive.
-#[cfg(not(unix))]
 pub fn pids_listening_on(listing: &str, ports: &[u16]) -> Vec<u32> {
     let mut found: Vec<u32> = Vec::new();
     for line in listing.lines() {
@@ -526,6 +603,140 @@ pub fn pids_listening_on(listing: &str, ports: &[u16]) -> Vec<u32> {
         }
     }
     found
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+pub struct WindowsProcess {
+    pub process_id: u32,
+    pub parent_process_id: u32,
+    #[serde(default)]
+    pub executable_path: Option<String>,
+    #[serde(default)]
+    pub command_line: Option<String>,
+    #[serde(default)]
+    pub creation_date: Option<String>,
+}
+
+impl RecordedHostProcess {
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn from_live(name: &str, live: &WindowsProcess) -> Option<Self> {
+        Some(Self {
+            name: name.to_string(),
+            pid: live.process_id,
+            executable_path: live.executable_path.clone()?,
+            command_line: live.command_line.clone()?,
+            creation_date: live.creation_date.clone()?,
+        })
+    }
+
+    fn matches(&self, live: &WindowsProcess) -> bool {
+        live.process_id == self.pid
+            && live.executable_path.as_deref() == Some(self.executable_path.as_str())
+            && live.command_line.as_deref() == Some(self.command_line.as_str())
+            && live.creation_date.as_deref() == Some(self.creation_date.as_str())
+    }
+}
+
+#[cfg(windows)]
+fn windows_processes() -> Vec<WindowsProcess> {
+    let Ok(output) = command("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Compress",
+        ])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    windows_processes_in(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(not(windows))]
+#[allow(dead_code)]
+fn windows_processes() -> Vec<WindowsProcess> {
+    Vec::new()
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WindowsProcessListing {
+    Many(Vec<WindowsProcess>),
+    One(WindowsProcess),
+}
+
+pub fn windows_processes_in(listing: &str) -> Vec<WindowsProcess> {
+    match serde_json::from_str::<WindowsProcessListing>(listing) {
+        Ok(WindowsProcessListing::Many(processes)) => processes,
+        Ok(WindowsProcessListing::One(process)) => vec![process],
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Recorded OpenBot root processes whose live identity still matches the pid file.
+pub fn verified_openbot_root_pids(
+    recorded: &[RecordedHostProcess],
+    processes: &[WindowsProcess],
+) -> Vec<u32> {
+    recorded
+        .iter()
+        .filter_map(|record| {
+            let live = processes
+                .iter()
+                .find(|process| process.process_id == record.pid)?;
+            record.matches(live).then_some(record.pid)
+        })
+        .collect()
+}
+
+/// Recorded OpenBot processes, or their live children, listening on one of the host ports.
+///
+/// A pid file entry is not ownership by itself: the live process must still match the recorded
+/// executable, command line and creation time before its tree is eligible for cleanup.
+pub fn verified_openbot_pids_listening_on(
+    listing: &str,
+    ports: &[u16],
+    recorded: &[RecordedHostProcess],
+    processes: &[WindowsProcess],
+) -> Vec<u32> {
+    let roots = verified_openbot_root_pids(recorded, processes);
+    pids_listening_on(listing, ports)
+        .into_iter()
+        .filter(|pid| belongs_to_any_root(*pid, &roots, processes))
+        .collect()
+}
+
+fn belongs_to_any_root(pid: u32, roots: &[u32], processes: &[WindowsProcess]) -> bool {
+    if roots.contains(&pid) {
+        return true;
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut current = pid;
+    loop {
+        if !seen.insert(current) {
+            return false;
+        }
+        let Some(process) = processes
+            .iter()
+            .find(|process| process.process_id == current)
+        else {
+            return false;
+        };
+        let parent = process.parent_process_id;
+        if roots.contains(&parent) {
+            return true;
+        }
+        if parent == 0 || parent == current {
+            return false;
+        }
+        current = parent;
+    }
 }
 
 /**
@@ -912,6 +1123,26 @@ fn dirs_home() -> PathBuf {
 mod tests {
     use super::*;
 
+    fn recorded_process(name: &str, pid: u32, creation_date: &str) -> RecordedHostProcess {
+        RecordedHostProcess {
+            name: name.to_string(),
+            pid,
+            executable_path: r"C:\Users\person\.bun\bin\bun.exe".to_string(),
+            command_line: r#"bun --env-file=../.env src/index.ts"#.to_string(),
+            creation_date: creation_date.to_string(),
+        }
+    }
+
+    fn live_process(pid: u32, parent: u32, creation_date: &str) -> WindowsProcess {
+        WindowsProcess {
+            process_id: pid,
+            parent_process_id: parent,
+            executable_path: Some(r"C:\Users\person\.bun\bin\bun.exe".to_string()),
+            command_line: Some(r#"bun --env-file=../.env src/index.ts"#.to_string()),
+            creation_date: Some(creation_date.to_string()),
+        }
+    }
+
     /// Real `netstat -ano` output, because the column layout is what went wrong.
     ///
     /// Stop reported success and left the server and the app serving, because this was read as four
@@ -932,6 +1163,59 @@ mod tests {
             "a container's port is not ours to kill: {found:?}"
         );
         assert!(!found.contains(&1044), "{found:?}");
+    }
+
+    #[test]
+    fn only_recorded_openbot_pids_are_selected_from_netstat_output() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       424242\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       8636\r\n  TCP    [::1]:3010             [::]:0                 LISTENING       8636\r\n";
+        let recorded = [recorded_process(
+            "server",
+            8636,
+            "20260909010101.000000-420",
+        )];
+        let processes = [live_process(8636, 7000, "20260909010101.000000-420")];
+
+        let found = super::verified_openbot_pids_listening_on(
+            listing,
+            &[3010, 3001],
+            &recorded,
+            &processes,
+        );
+
+        assert_eq!(found, vec![8636]);
+    }
+
+    #[test]
+    fn a_reused_recorded_pid_is_not_selected_without_matching_identity() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       424242\r\n";
+        let recorded = [recorded_process(
+            "server",
+            424242,
+            "20260909010101.000000-420",
+        )];
+        let processes = [live_process(424242, 7000, "20260909020202.000000-420")];
+
+        let found =
+            super::verified_openbot_pids_listening_on(listing, &[3001], &recorded, &processes);
+
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_verified_recorded_host_keeps_its_listening_child_eligible_for_cleanup() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9000\r\n";
+        let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
+        let processes = [
+            live_process(8636, 7000, "20260909010101.000000-420"),
+            live_process(9000, 8636, "20260909010102.000000-420"),
+        ];
+
+        let roots = super::verified_openbot_root_pids(&recorded, &processes);
+        let found =
+            super::verified_openbot_pids_listening_on(listing, &[3010], &recorded, &processes);
+
+        assert_eq!(roots, vec![8636]);
+        assert_eq!(found, vec![9000]);
     }
 
     /// The pids survive the window that started them, which is the whole point of writing them.

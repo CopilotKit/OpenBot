@@ -584,11 +584,11 @@ async fn start_stack(
     let shell = app.state::<Shell>();
     // Recorded before the handles are stashed, so a window that never gets to Stop still leaves
     // something the next one can stop. See `stack::host_pids_path`.
-    stack::record_host_pids(
+    stack::record_host_processes(
         &root,
         &started
             .iter()
-            .map(|(_, child)| child.id())
+            .map(|(name, child)| (*name, child.id()))
             .collect::<Vec<_>>(),
     );
     shell.children.lock().unwrap().extend(started);
