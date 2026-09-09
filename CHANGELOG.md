@@ -8,6 +8,16 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### `bun run dev` no longer starts a routines worker that cannot start
+
+`bun run dev` fanned out across every workspace, and one of them is the routines worker. That worker
+is handed `DATABASE_URL`, `SERVER_INTERNAL_URL` and `WORKER_SHARED_SECRET` by `scripts/start.sh` and
+by nothing else, so the copy this command started read none of them and threw at boot on every run,
+printing a stack trace in between the app's output and the server's. It has never started
+successfully. The command now starts the app and the server, which is what `README.md` and
+`docs/development.md` already say it does. Routines are unaffected: `scripts/start.sh` starts the
+worker exactly as before, and on Kubernetes the CronJob does.
+
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank

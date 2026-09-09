@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "build": "bun run generate:app-config && bun run --filter '*' build",
-    "dev": "bun run generate:app-config && bun run --filter '*' --parallel dev",
+    "dev": "bun run generate:app-config && bun run --filter app --filter server --parallel dev",
     "generate:app-config": "bun --env-file=.env scripts/generate-app-config.ts",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
