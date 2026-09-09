@@ -80,6 +80,34 @@ export function channelHistoryNotice({
 }
 
 /**
+ * Insert missing durable messages before their next shared ID, keeping local content and order.
+ * A shorter read can still contain missing turns after unreadable rows are filtered out. Without a
+ * following shared anchor, append the missing tail: the store cannot place it among local-only rows.
+ * Return the original array when nothing was added so refreshes can wait for the store to catch up.
+ */
+function mergeStoredMessages(local: Message[], stored: Message[]): Message[] {
+  const localIds = new Set(local.map((message) => message.id));
+  const seenStored = new Set<string>();
+  const before = new Map<string, Message[]>();
+  let pending: Message[] = [];
+  for (const message of stored) {
+    if (seenStored.has(message.id)) continue;
+    seenStored.add(message.id);
+    if (localIds.has(message.id)) {
+      if (pending.length > 0) before.set(message.id, pending);
+      pending = [];
+    } else {
+      pending.push(message);
+    }
+  }
+  if (before.size === 0 && pending.length === 0) return local;
+  return [
+    ...local.flatMap((message) => [...(before.get(message.id) ?? []), message]),
+    ...pending,
+  ];
+}
+
+/**
  * One channel's conversation with one coworker.
  *
  * The local agent id is channel-scoped so two channels with the same coworker keep separate
@@ -201,28 +229,12 @@ export function ChannelChat({
           channel.threadId,
           runtimeAgentId,
         );
-        /*
-         * The durable store wins when it is ahead of what the join delivered.
-         *
-         * The join replaces the agent's messages with the realtime gateway's snapshot of the thread,
-         * and that snapshot can lag the store: a turn that finished, was persisted and answered in
-         * full came back from the join without its last exchange, on every reload, with no
-         * unreadable count to explain the gap. Restoring only into an empty agent kept that stale
-         * snapshot for good.
-         *
-         * So the store is applied when it holds more than the agent does AND everything the agent
-         * holds is in the store. The second half is the guard this replaced: a message typed while
-         * history was loading is not in the store yet, so it is never overwritten, and a run still
-         * streaming has messages the store has not seen, so its snapshot is never rolled back.
-         */
-        const local = agent.messages;
-        const storedIds = new Set(stored.messages.map((m) => m.id));
-        const storeIsAhead =
-          stored.messages.length > local.length &&
-          local.every((m) => storedIds.has(m.id));
         const isCurrent = current && version === historyReadVersion.current;
-        if (isCurrent && stored.messages.length > 0 && storeIsAhead) {
-          agent.setMessages(stored.messages);
+        if (isCurrent) {
+          // The gateway snapshot can lag the store. Keep its valid local rows even when the
+          // corresponding stored row is unreadable, while restoring other readable additions.
+          const messages = mergeStoredMessages(agent.messages, stored.messages);
+          if (messages !== agent.messages) agent.setMessages(messages);
         }
         /*
          * Said on screen rather than only counted. A turn the history store holds and this app cannot
@@ -261,14 +273,8 @@ export function ChannelChat({
    * than a second subscription means "the sidebar updated" and "the transcript refreshes" are the
    * one signal, and cannot drift apart.
    *
-   * MISSING IDS ARE PLACED BEFORE THEIR NEXT SHARED ANCHOR. A failed mount read can leave a
-   * local send on screen before its older durable prefix is recovered. Appending that prefix would
-   * reorder both the transcript and the next run's context. Shared ids locate missing runs in the
-   * chronological stored read; local messages keep their current content and relative order.
-   *
-   * The store can be shorter than the screen because it omits tool lines, so length does not decide
-   * whether it has news. Without a following shared anchor, preserve the existing append behavior:
-   * the store cannot establish where truly local-only messages belong relative to that tail.
+   * The same merge as mount places a recovered durable prefix before its shared local anchors,
+   * preserving current content and local-only messages in both the transcript and the next run.
    *
    * Retried briefly, because the roster is patched when the turn is on record with the runner and
    * the platform's read of the thread can be a beat behind it.
@@ -317,29 +323,12 @@ export function ChannelChat({
           setHistoryAvailability("ready");
           setHistoryReadFailed(false);
           const current = agentRef.current;
-          const local = current.messages;
-          const localIds = new Set(local.map((message) => message.id));
-          const seenStored = new Set<string>();
-          const before = new Map<string, Message[]>();
-          let pending: Message[] = [];
-          for (const message of stored.messages) {
-            if (seenStored.has(message.id)) continue;
-            seenStored.add(message.id);
-            if (localIds.has(message.id)) {
-              if (pending.length > 0) before.set(message.id, pending);
-              pending = [];
-            } else {
-              pending.push(message);
-            }
-          }
-          if (before.size === 0 && pending.length === 0) continue;
-          current.setMessages([
-            ...local.flatMap((message) => [
-              ...(before.get(message.id) ?? []),
-              message,
-            ]),
-            ...pending,
-          ]);
+          const messages = mergeStoredMessages(
+            current.messages,
+            stored.messages,
+          );
+          if (messages === current.messages) continue;
+          current.setMessages(messages);
           return;
         }
       })();

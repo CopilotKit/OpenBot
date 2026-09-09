@@ -260,6 +260,93 @@ test("a ready durable mount adds the newer turn beyond the gateway snapshot", as
   ]);
 });
 
+test.each([false, true])(
+  "mount keeps a readable gateway tool result while restoring newer durable replies (longer store: %s)",
+  async (longerStore) => {
+    const toolCall = {
+      id: "tool-call",
+      role: "assistant",
+      toolCalls: [
+        {
+          id: "call",
+          type: "function",
+          function: { name: "inspect", arguments: "{}" },
+        },
+      ],
+    } satisfies Message;
+    const toolResult = {
+      id: "tool-result",
+      role: "tool",
+      toolCallId: "call",
+      content: "Readable gateway tool output",
+    } satisfies Message;
+    const latest = {
+      id: "latest",
+      role: "assistant",
+      content: "Latest durable reply",
+    } satisfies Message;
+    const later = longerStore ? [fresh, latest] : [fresh];
+    const snapshot = [initial, toolCall, toolResult];
+    const view = mounting(
+      async () =>
+        stored([
+          initial,
+          toolCall,
+          { ...toolResult, content: { unsupported: "stored result shape" } },
+          ...later,
+        ]),
+      snapshot,
+    );
+    await view.findByText(fresh.content);
+    if (longerStore) expect(view.getByText(latest.content)).toBeTruthy();
+    expect(view.getByText(oneHole)).toBeTruthy();
+    expect(currentAgent().messages).toEqual([...snapshot, ...later]);
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    await user.type(
+      view.getByRole("textbox", { name: "Message" }),
+      "Continue restored conversation",
+    );
+    await user.click(view.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(runRequests).toHaveLength(1));
+    expect(runRequests[0]?.input.threadId).toBe(channel.threadId);
+    expect(runRequests[0]?.input.messages.slice(0, -1)).toEqual([
+      ...snapshot,
+      ...later,
+    ]);
+  },
+);
+
+test("a UI send waits for mount history before adding its message", async () => {
+  const pending = delayedResponse();
+  const view = mounting(() => pending.promise, [initial]);
+  await waitFor(() => expect(historyReads).toHaveLength(1));
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Send after restore",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  expect(runRequests).toHaveLength(0);
+  expect(currentAgent().messages).toEqual([initial]);
+  await act(async () => pending.resolve(stored([initial, fresh])));
+  await waitFor(() => expect(runRequests).toHaveLength(1));
+  expect(runRequests[0]?.input.messages.slice(0, -1)).toEqual([initial, fresh]);
+  expect(runRequests[0]?.input.messages.at(-1)).toMatchObject({
+    role: "user",
+    content: "Send after restore",
+  });
+});
+
+test("an unmounted history read cannot append messages to its former agent", async () => {
+  const pending = delayedResponse();
+  const view = mounting(() => pending.promise, [initial]);
+  await waitFor(() => expect(historyReads).toHaveLength(1));
+  const formerAgent = currentAgent();
+  view.unmount();
+  await act(async () => pending.resolve(stored([initial, fresh])));
+  expect(formerAgent.messages).toEqual([initial]);
+});
+
 test("explicit valid-empty durable history finishes without a failure notice", async () => {
   const view = mounting(async () => stored([]));
   await waitFor(() => expect(historyReads).toHaveLength(1));
@@ -355,7 +442,7 @@ test("a cancelled channel refresh cannot replace the next channel's notice or me
   expect(view.queryByText("Wrong channel history")).toBeNull();
 });
 
-test.each(["unavailable", "unreadable"])(
+test.each(["unavailable", "unreadable", "readable"])(
   "a delayed %s mount read cannot overwrite the notice from a newer Bot refresh",
   async (outcome) => {
     const old = delayedResponse();
@@ -372,7 +459,12 @@ test.each(["unavailable", "unreadable"])(
       old.resolve(
         outcome === "unavailable"
           ? new NativeResponse("failed", { status: 500 })
-          : stored([broken, { ...broken, id: "old-hole" }]),
+          : outcome === "unreadable"
+            ? stored([broken, { ...broken, id: "old-hole" }])
+            : stored([
+                fresh,
+                { id: "obsolete", role: "assistant", content: "Old reply" },
+              ]),
       ),
     );
     await view.findByText(oneHole);
@@ -424,94 +516,113 @@ test.each([false, true])(
   },
 );
 
-test("missing durable prefix and interior preserve local content and tool messages in a shorter snapshot", async () => {
-  const toolCall = {
-    id: "tool-call",
-    role: "assistant",
-    toolCalls: [
-      {
-        id: "call",
-        type: "function",
-        function: { name: "inspect", arguments: "{}" },
-      },
-    ],
-  } satisfies Message;
-  const toolResult = {
-    id: "tool-result",
-    role: "tool",
-    toolCallId: "call",
-    content: "Local tool output",
-  } satisfies Message;
-  const streaming = {
-    id: "streaming",
-    role: "assistant",
-    content: "Current streamed text",
-  } satisfies Message;
-  const secondAnchor = {
-    id: "second-anchor",
-    role: "user",
-    content: "Current anchor content",
-  } satisfies Message;
-  const prefix = {
-    id: "prefix",
-    role: "assistant",
-    content: "Missing durable prefix",
-  } satisfies Message;
-  const interior = {
-    id: "interior",
-    role: "assistant",
-    content: "Missing durable interior",
-  } satisfies Message;
-  const snapshot = [
-    local,
-    initial,
-    toolCall,
-    toolResult,
-    secondAnchor,
-    streaming,
-  ];
-  const view = mounting(async () => stored([]), snapshot);
-  await view.findByText(streaming.content);
-  history = async () =>
-    stored([
+test.each(["mount", "refresh"])(
+  "%s restores a shorter durable snapshot around local messages without replacing their content",
+  async (phase) => {
+    const toolCall = {
+      id: "tool-call",
+      role: "assistant",
+      toolCalls: [
+        {
+          id: "call",
+          type: "function",
+          function: { name: "inspect", arguments: "{}" },
+        },
+      ],
+    } satisfies Message;
+    const toolResult = {
+      id: "tool-result",
+      role: "tool",
+      toolCallId: "call",
+      content: "Local tool output",
+    } satisfies Message;
+    const streaming = {
+      id: "streaming",
+      role: "assistant",
+      content: "Current streamed text",
+    } satisfies Message;
+    const secondAnchor = {
+      id: "second-anchor",
+      role: "user",
+      content: "Current anchor content",
+    } satisfies Message;
+    const prefix = {
+      id: "prefix",
+      role: "assistant",
+      content: "Missing durable prefix",
+    } satisfies Message;
+    const interior = {
+      id: "interior",
+      role: "assistant",
+      content: "Missing durable interior",
+    } satisfies Message;
+    const snapshot = [
+      local,
+      initial,
+      toolCall,
+      toolResult,
+      secondAnchor,
+      streaming,
+    ];
+    const durable = [
       prefix,
       { ...initial, content: "Stale opening content" },
       interior,
       { ...secondAnchor, content: "Stale anchor content" },
+      fresh,
+    ];
+    const view = mounting(
+      async () => stored(phase === "mount" ? durable : []),
+      snapshot,
+    );
+    if (phase === "refresh") {
+      await view.findByText(streaming.content);
+      history = async () => stored(durable);
+      await announce(1);
+    }
+    await view.findByText(interior.content);
+    expect(currentAgent().messages).toEqual([
+      local,
+      prefix,
+      initial,
+      toolCall,
+      toolResult,
+      interior,
+      secondAnchor,
+      streaming,
+      fresh,
     ]);
-  await announce(1);
-  await view.findByText(interior.content);
-  expect(currentAgent().messages).toEqual([
-    local,
-    prefix,
-    initial,
-    toolCall,
-    toolResult,
-    interior,
-    secondAnchor,
-    streaming,
-  ]);
-  history = async () =>
-    stored([prefix, initial, interior, secondAnchor, interior]);
-  await announce(2);
-  await waitFor(() => expect(historyReads.length).toBeGreaterThanOrEqual(3));
-  expect(currentAgent().messages).toEqual([
-    local,
-    prefix,
-    initial,
-    toolCall,
-    toolResult,
-    interior,
-    secondAnchor,
-    streaming,
-  ]);
-});
+    history = async () =>
+      stored([prefix, initial, interior, secondAnchor, interior]);
+    await announce(2);
+    await waitFor(() => expect(historyReads.length).toBeGreaterThanOrEqual(3));
+    expect(currentAgent().messages).toEqual([
+      local,
+      prefix,
+      initial,
+      toolCall,
+      toolResult,
+      interior,
+      secondAnchor,
+      streaming,
+      fresh,
+    ]);
+  },
+);
 
-test("a snapshot without shared IDs keeps local order and appends unique durable messages", async () => {
-  const view = await mounted();
-  await act(async () => currentAgent().addMessage(local));
-  history = async () => stored([fresh, fresh]);
-  await announce(1);
-  await view.findByText(fresh.content);
-  expect(currentAgent().messages).toEqual([initial, local, fresh]);
-});
+test.each(["mount", "refresh"])(
+  "%s without shared IDs keeps local order and appends unique durable messages",
+  async (phase) => {
+    const view = mounting(
+      async () => stored(phase === "mount" ? [fresh, fresh] : []),
+      [initial, local],
+    );
+    if (phase === "refresh") {
+      await view.findByText(initial.content);
+      history = async () => stored([fresh, fresh]);
+      await announce(1);
+    }
+    await view.findByText(fresh.content);
+    expect(currentAgent().messages).toEqual([initial, local, fresh]);
+  },
+);
