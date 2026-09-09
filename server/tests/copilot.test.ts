@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import type { RunAgentInput } from "@ag-ui/client";
 import { HttpAgent } from "@ag-ui/client";
+import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
 import { EMPTY } from "rxjs";
 import { PROVENANCE_GUIDANCE } from "../../shared/bot-prompt";
@@ -8,6 +9,7 @@ import {
   buildAgents,
   builtInAgentConfiguration,
   createRequestAgents,
+  type LoadInstructions,
   registeredAgentFromRow,
   resolveRuntimeAgents,
   standingRoleMessage,
@@ -1036,26 +1038,156 @@ describe("a person's standing instructions", () => {
     expect(content).not.toContain("standing instructions that apply");
   });
 
-  test("costs a paragraph rather than a run when it cannot be read", async () => {
-    const agents = await buildAgents(
-      [assistant],
-      model,
-      "openai-secret",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      async () => {
-        throw new Error("The database is unreachable.");
-      },
-    );
+  async function runWithInstructions(loadInstructions: LoadInstructions) {
+    const recorder = new LLMock();
+    await using endpoint = fakeAgUiEndpoint();
+    const originalBase = process.env.OPENAI_BASE_URL;
+    try {
+      process.env.OPENAI_BASE_URL = await recorder.start();
+      recorder.onMessage(/.*/, { type: "text", content: "Fixture completed." });
+      const agents = await buildAgents(
+        [
+          assistant,
+          { ...assistant, id: "second-assistant", name: "Second Assistant" },
+          {
+            ...riskRow,
+            endpoint: endpoint.url,
+            standingMessage: standingRoleMessage(riskRow),
+          },
+        ],
+        model,
+        "synthetic-model-key",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        loadInstructions,
+      );
+      const builtIn = agents[assistant.id]?.clone();
+      const remote = agents.risk?.clone();
+      if (!builtIn || !remote) throw new Error("Expected the fixture roster.");
+      builtIn.addMessage({
+        id: "fixture-request",
+        role: "user",
+        content: "Complete the fixture request.",
+      });
+      await builtIn.runAgent();
+      await remote.runAgent();
+      expect(builtIn.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        content: "Fixture completed.",
+      });
+      expect(recorder.getRequests()).toHaveLength(1);
+      expect(endpoint.requests).toHaveLength(1);
+      return {
+        modelRequest: JSON.stringify(recorder.getRequests()[0]?.body),
+        remoteRequest: JSON.stringify(endpoint.requests[0]),
+      };
+    } finally {
+      if (originalBase === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = originalBase;
+      await recorder.stop();
+    }
+  }
 
-    // The Bot is still built and still answers. A preferences row is not worth a conversation.
-    expect(agents["general-assistant"]).toBeInstanceOf(BuiltInAgent);
+  test("reports a failed instruction read once and still completes a built-in run", async () => {
+    const diagnostic = spyOn(console, "error").mockImplementation(() => {});
+    let reads = 0;
+    try {
+      const sent = await runWithInstructions(async () => {
+        reads += 1;
+        throw new Error(
+          "postgres://fixture:synthetic-secret@localhost/fixture private instruction",
+        );
+      });
+      expect(reads).toBe(1);
+      expect(sent.modelRequest).not.toContain("standing instructions");
+      expect(diagnostic).toHaveBeenCalledTimes(1);
+      expect(diagnostic).toHaveBeenCalledWith({
+        error: "standing_instruction_read_failed",
+        context: { operation: "loadInstructions", agentCount: 3 },
+        timestamp: expect.any(String),
+      });
+      const logs = JSON.stringify(diagnostic.mock.calls);
+      for (const sensitive of [
+        "postgres://",
+        "synthetic-secret",
+        "private instruction",
+        "synthetic-model-key",
+      ]) {
+        expect(logs).not.toContain(sensitive);
+        expect(sent.remoteRequest).not.toContain(sensitive);
+      }
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
+  test.each([null, "Write in British English."])(
+    "a successful instruction read stays quiet and private: %j",
+    async (instructions) => {
+      const diagnostic = spyOn(console, "error").mockImplementation(() => {});
+      let reads = 0;
+      try {
+        const sent = await runWithInstructions(async () => {
+          reads += 1;
+          return instructions;
+        });
+        expect(reads).toBe(1);
+        expect(sent.modelRequest.includes("standing instructions")).toBe(
+          instructions !== null,
+        );
+        if (instructions) expect(sent.modelRequest).toContain(instructions);
+        expect(sent.remoteRequest).not.toContain("standing instructions");
+        expect(sent.remoteRequest).not.toContain("Write in British English.");
+        expect(diagnostic).not.toHaveBeenCalled();
+      } finally {
+        diagnostic.mockRestore();
+      }
+    },
+  );
+
+  test("a remote-only roster never reads or diagnoses personal instructions", async () => {
+    await using endpoint = fakeAgUiEndpoint();
+    const diagnostic = spyOn(console, "error").mockImplementation(() => {});
+    let reads = 0;
+    try {
+      const agents = await buildAgents(
+        [
+          {
+            ...riskRow,
+            endpoint: endpoint.url,
+            standingMessage: standingRoleMessage(riskRow),
+          },
+        ],
+        model,
+        null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () => {
+          reads += 1;
+          throw new Error("Private instructions must never be read here.");
+        },
+      );
+      const remote = agents.risk;
+      if (!remote) throw new Error("Expected the fixture remote agent.");
+      await remote.runAgent();
+      expect(endpoint.requests).toHaveLength(1);
+      expect(reads).toBe(0);
+      expect(diagnostic).not.toHaveBeenCalled();
+    } finally {
+      diagnostic.mockRestore();
+    }
   });
 
   test("is resolved for whoever the request turned out to be", async () => {

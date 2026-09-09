@@ -413,12 +413,22 @@ export async function buildAgents(
    * same row fetched once for each of them. Skipped entirely when nothing built-in is being built,
    * because the remote path does not carry this at all.
    *
-   * Failure is silence. A coworker that could not be told loses a paragraph; one that refused to
-   * start would lose the conversation, and a preferences row is not worth a run.
+   * A failed read costs a paragraph, not a conversation. Report it once per build so operators can
+   * distinguish a failed read from a person who has written no instructions.
    */
-  const instructions = agents.some((agent) => agent.type === "built_in")
-    ? await loadInstructions?.().catch(() => null)
-    : null;
+  let instructions: string | null = null;
+  if (agents.some((agent) => agent.type === "built_in")) {
+    try {
+      instructions = (await loadInstructions?.()) ?? null;
+    } catch {
+      // Never log the thrown value: database errors can expose instructions or credentials.
+      console.error({
+        error: "standing_instruction_read_failed",
+        context: { operation: "loadInstructions", agentCount: agents.length },
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
   return Object.fromEntries(
     await Promise.all(
       agents.map(async (agent) => [
