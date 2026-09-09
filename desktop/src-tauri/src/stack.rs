@@ -618,12 +618,35 @@ fn stop_windows_processes_with_inventory(
 
 #[cfg(any(not(unix), test))]
 fn stop_windows_processes_under_with(
-    _root: &Path,
+    root: &Path,
     recorded: &[RecordedHostProcess],
     processes: &[WindowsProcess],
     netstat: &Path,
     taskkill: &Path,
 ) -> Result<usize, Problem> {
+    // A same-PID row without identity metadata is unresolved, not proof that the PID was reused.
+    // Keep the original evidence for a later inventory that can positively verify or reject it.
+    if let Some(record) = recorded.iter().find(|record| {
+        processes.iter().any(|live| {
+            live.process_id == record.pid
+                && [
+                    &live.executable_path,
+                    &live.command_line,
+                    &live.creation_date,
+                ]
+                .iter()
+                .any(|field| matches!(field.as_deref(), None | Some("")))
+        })
+    }) {
+        return Err(Problem::with(
+            "OpenBot could not verify one of its recorded host processes.",
+            format!(
+                "{}: process inventory lacks identity metadata for pid {}; ownership records retained",
+                host_pids_path(root).display(),
+                record.pid
+            ),
+        ));
+    }
     let mut stopped_recorded = 0;
     let roots = verified_openbot_root_pids(recorded, processes);
     let mut failures = Vec::new();
@@ -634,8 +657,6 @@ fn stop_windows_processes_under_with(
             Err(problem) => failures.push(problem),
         }
     }
-    let _ = std::fs::remove_file(host_pids_path(_root));
-
     // And a sweep of the two host ports, for a stack whose pidfile is gone. The containers are
     // Compose's to stop, and killing whatever holds a container's published port would reach into
     // the engine's own plumbing.
@@ -660,7 +681,21 @@ fn stop_windows_processes_under_with(
         0
     };
 
-    cleanup_result(stopped_recorded + stopped_listening, failures)
+    // Keep the complete ownership record until every cleanup phase has succeeded. A retry
+    // re-verifies each identity, so records for processes already stopped are safe to retain.
+    let stopped = cleanup_result(stopped_recorded + stopped_listening, failures)?;
+    let path = host_pids_path(root);
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(Problem::with(
+                "OpenBot could not remove its recorded host processes.",
+                format!("{}: could not remove pidfile: {error}", path.display()),
+            ));
+        }
+    }
+    Ok(stopped)
 }
 
 fn cleanup_result(stopped: usize, failures: Vec<Problem>) -> Result<usize, Problem> {
@@ -1701,7 +1736,16 @@ fn main() {
         ("powershell", "inventory-empty") => print!("[]"),
         ("powershell", "inventory-malformed") => print!("[{{"),
         ("powershell", "inventory-blank") => {},
-        ("netstat", "inventory-empty") => {},
+        ("netstat", "inventory-empty")
+        | ("netstat", "pidfile-mixed")
+        | ("netstat", "pidfile-ok") => {},
+        ("taskkill", "pidfile-mixed") => {
+            if args.iter().any(|arg| arg == "9000") {
+                eprintln!("synthetic taskkill status failure");
+                std::process::exit(17);
+            }
+        }
+        ("taskkill", "pidfile-ok") => {},
         ("lsof", "lsof-ok") => {
             println!("p101\nn{root}/server\np202\nn{root}\np303\nn{root}/worker");
         }
@@ -2069,6 +2113,137 @@ fn main() {
                 .expect("all synthetic Windows cleanup commands should succeed");
         assert_eq!(stopped, 3);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn windows_pidfile_preserves_all_records_on_partial_failure_and_retries() {
+        let root = temp_root("windows-pidfile-retry");
+        let recorded = [
+            recorded_process("server", 9000, "created-server"),
+            recorded_process("worker", 9001, "created-worker"),
+        ];
+        let processes = [
+            live_process(9000, 0, "created-server"),
+            live_process(9001, 0, "created-worker"),
+        ];
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version": 1, "processes": recorded}),
+        );
+        let path = host_pids_path(&root);
+        let before = std::fs::read(&path).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("pidfile-mixed");
+        let problem = stop_windows_processes_under_with(
+            &root,
+            &recorded,
+            &processes,
+            &fixture.command("netstat"),
+            &fixture.command("taskkill"),
+        )
+        .expect_err("a failed root must retain ownership evidence for retry");
+        assert!(problem.detail.unwrap().contains("17"));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let log = fixture.log();
+        assert!(log.contains("taskkill\t/PID 9000 /T /F"), "{log}");
+        assert!(log.contains("taskkill\t/PID 9001 /T /F"), "{log}");
+
+        fixture.scenario("pidfile-ok");
+        let retry_records = recorded_host_processes(&root).unwrap();
+        assert_eq!(
+            stop_windows_processes_under_with(
+                &root,
+                &retry_records,
+                &processes[..1],
+                &fixture.command("netstat"),
+                &fixture.command("taskkill"),
+            )
+            .unwrap(),
+            1
+        );
+        assert!(!path.exists());
+        assert!(!fixture.log().contains("/PID 9001"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_pidfile_unknown_identity_is_preserved_without_killing_any_process() {
+        let root = temp_root("windows-pidfile-unknown-identity");
+        let recorded = [recorded_process("server", 9000, "created-server")];
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version": 1, "processes": recorded}),
+        );
+        let path = host_pids_path(&root);
+        let before = std::fs::read(&path).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        for missing in [None, Some(String::new())] {
+            for field in 0..3 {
+                let mut live = live_process(9000, 0, "created-server");
+                match field {
+                    0 => live.executable_path = missing.clone(),
+                    1 => live.command_line = missing.clone(),
+                    _ => live.creation_date = missing.clone(),
+                }
+                fixture.scenario("pidfile-ok");
+                let problem = stop_windows_processes_under_with(
+                    &root,
+                    &recorded,
+                    &[live],
+                    &fixture.command("netstat"),
+                    &fixture.command("taskkill"),
+                )
+                .expect_err("a missing identity field does not prove PID reuse or exit");
+                let detail = problem.detail.unwrap();
+                assert!(detail.contains("9000"), "{detail}");
+                assert!(detail.contains(&path.display().to_string()), "{detail}");
+                assert_eq!(std::fs::read(&path).unwrap(), before);
+                assert_eq!(fixture.log(), "");
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_pidfile_removal_requires_successful_cleanup_and_reports_remove_errors() {
+        let root = temp_root("windows-pidfile-remove");
+        let recorded = [recorded_process("server", 9000, "created-server")];
+        let fixture = CleanupCommandFixture::new(&root);
+        let path = host_pids_path(&root);
+        for processes in [vec![], vec![live_process(9000, 0, "reused-pid")]] {
+            write_host_pid_file(
+                &root,
+                &serde_json::json!({"version": 1, "processes": recorded}),
+            );
+            fixture.scenario("pidfile-ok");
+            assert_eq!(
+                stop_windows_processes_under_with(
+                    &root,
+                    &recorded,
+                    &processes,
+                    &fixture.command("netstat"),
+                    &fixture.command("taskkill"),
+                )
+                .unwrap(),
+                0
+            );
+            assert!(!path.exists());
+            assert!(!fixture.log().contains("taskkill\t"));
+        }
+        std::fs::create_dir(&path).unwrap();
+        let problem = stop_windows_processes_under_with(
+            &root,
+            &[],
+            &[],
+            &fixture.command("netstat"),
+            &fixture.command("taskkill"),
+        )
+        .expect_err("a required pidfile removal failure must be reported");
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains("could not remove pidfile"), "{detail}");
+        assert!(detail.contains(&path.display().to_string()), "{detail}");
+        assert!(path.is_dir());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(test)]
