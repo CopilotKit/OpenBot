@@ -37,9 +37,11 @@ export function createRuntimeAgentLoader(
     for (const row of active) {
       const agent = registeredAgentFromRow(row);
       if (!agent) continue;
+      const isRemoteAgent =
+        agent.type === "remote_ag_ui" || agent.type === "remote_mastra";
       // The key is resolved per load, rather than being cached on the row: revoking a
       // credential then takes effect on the next run rather than on the next restart.
-      if (agent.type === "remote_ag_ui" && vault) {
+      if (isRemoteAgent && vault) {
         const headers = await agentAuthHeaders({
           reader: vault.reader,
           encryptionKey: vault.encryptionKey,
@@ -55,7 +57,7 @@ export function createRuntimeAgentLoader(
        * this deployment's own, started on a port this deployment chose with this token in its
        * environment, so it is the same relationship the Bot in the box has.
        */
-      if (agent.type === "remote_ag_ui" && managedAgent) {
+      if (isRemoteAgent && managedAgent) {
         /*
          * Compared without a trailing slash, because `URL` adds one and a stored address does not
          * have to. `new URL("http://127.0.0.1:4206").toString()` is `".../4206/"`, and the row for
