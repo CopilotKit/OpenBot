@@ -2278,7 +2278,7 @@ export function createPluginStore(options: PluginStoreOptions) {
                 description: tool.description,
                 inputSchema: tool.inputSchema as Record<string, unknown>,
                 ref,
-                effect: classifyTool(entry, tool.name, true),
+                effect: classifyTool(entry, tool.name, true, tool.effect),
                 grantedTo: grants.get(ref) ?? [],
               };
             }),
@@ -2984,14 +2984,25 @@ export function createPluginStore(options: PluginStoreOptions) {
       const { row, entry, access } = await requireServer(serverId);
 
       const advertised = await database
-        .select({ name: mcpTools.name, inputSchema: mcpTools.inputSchema })
+        .select({
+          name: mcpTools.name,
+          inputSchema: mcpTools.inputSchema,
+          effect: mcpTools.effect,
+          destructive: mcpTools.destructive,
+          version: mcpTools.version,
+        })
         .from(mcpTools)
         .where(
           and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)),
         )
         .limit(1);
 
-      const effect = classifyTool(entry, toolName, advertised.length > 0);
+      const effect = classifyTool(
+        entry,
+        toolName,
+        advertised.length > 0,
+        advertised[0]?.effect,
+      );
 
       const args = withoutEmptyOptionals(
         input.args,
