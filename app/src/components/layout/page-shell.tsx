@@ -3,8 +3,7 @@ import { Link, type LinkProps } from "@tanstack/react-router";
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
-import { useOptionalSidebar } from "../ui/sidebar";
-import { SidebarToggle } from "./sidebar-toggle";
+import { SidebarToggle, useSidebarToggleVisible } from "./sidebar-toggle";
 
 /**
  * The frame every configuration screen sits in.
@@ -59,25 +58,28 @@ export function PageShell({
   };
 }) {
   /*
-   * Whether this screen has a sidebar at all. `/assist` and `/link/slack` draw PageShell directly
-   * under `_authed`, which mounts no provider, so there is nothing for a toggle to act on there.
-   */
-  const hasSidebar = useOptionalSidebar() !== null;
-  /*
    * The bar carries the toggle and the Back link, and is drawn when it has at least one of them.
    * The screens with a Back link already drew exactly this bar, so for them nothing changes; what
    * changed is that a sidebar is now reason enough on its own, because the toggle has to sit at the
    * pane's left edge in both states and the prose column is centred — a control inside it would be
    * 400px from the edge it belongs to on a wide screen. Drawing it with neither would be a 56px
    * band holding nothing, which reads as a layout bug rather than as chrome.
+   *
+   * The question is whether the toggle will DRAW, not whether a sidebar exists: it hides itself on
+   * a desktop-width window while the sidebar is already open, which is most of the time on these
+   * screens. Asking `useSidebarToggleVisible` rather than re-deriving the condition here is what
+   * keeps the two from drifting apart and reintroducing that empty band. It also still answers false
+   * on `/assist` and `/link/slack`, which draw PageShell directly under `_authed` with no sidebar
+   * provider at all, so there is nothing for a toggle to act on there.
    */
-  const bar = hasSidebar || !!backButton;
+  const showToggle = useSidebarToggleVisible();
+  const bar = showToggle || !!backButton;
 
   return (
     <>
       {bar ? (
         <div className="max-w-7xl w-full h-14 flex items-center gap-1 px-3">
-          {hasSidebar ? <SidebarToggle /> : null}
+          {showToggle ? <SidebarToggle /> : null}
           {!!backButton && (
             <Button
               variant="ghost"
@@ -89,27 +91,48 @@ export function PageShell({
           )}
         </div>
       ) : null}
-      <div
-        className={cn(
-          "mx-auto flex w-full flex-col px-4 pb-12",
-          // Without a bar above it the heading keeps the full original space.
-          bar ? "pt-8" : "pt-12",
-          WIDTHS[width],
-          className,
-        )}
-      >
-        <header className="flex flex-col gap-2">
-          <div className="flex flex-row items-center justify-between gap-4">
-            <h1 className="font-bold text-2xl">{title}</h1>
-            {action}
-          </div>
-          {description ? (
-            <p className="max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
-              {description}
-            </p>
-          ) : null}
-        </header>
-        {children}
+      {/*
+       * The scroller, and it has to live here rather than in either shell, because the two shells
+       * this frame is used under disagree about who scrolls.
+       *
+       * Under `_authed` — admin, settings — the document scrolls, so a page taller than the window
+       * has always just worked. Under `_authed/_app` it does not: that shell is `h-svh
+       * overflow-hidden` on purpose ("one viewport, never scrolls: panes scroll inside it") and its
+       * `main` is `overflow-hidden` too, so a PageShell taller than the window was silently CLIPPED
+       * — 246px of Skills sat below the fold with no way to reach it, by keyboard or otherwise.
+       *
+       * `min-h-0` is the load-bearing half of `min-h-0 flex-1`: a flex item's default `min-height:
+       * auto` refuses to shrink below its content, so `flex-1` alone would grow this past the pane
+       * and clip exactly as before. Under `_authed` both are inert — the parent is not a flex
+       * container — and `overflow-y-auto` on an auto-height element shows no scrollbar, so those
+       * eighteen screens are unaffected.
+       *
+       * Separate from the centred column below so the scrollbar rides the pane's edge instead of
+       * appearing inside a 630px measure with content either side of it.
+       */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "mx-auto flex w-full flex-col px-4 pb-12",
+            // Without a bar above it the heading keeps the full original space.
+            bar ? "pt-8" : "pt-12",
+            WIDTHS[width],
+            className,
+          )}
+        >
+          <header className="flex flex-col gap-2">
+            <div className="flex flex-row items-center justify-between gap-4">
+              <h1 className="font-bold text-2xl">{title}</h1>
+              {action}
+            </div>
+            {description ? (
+              <p className="max-w-prose text-pretty text-muted-foreground text-sm leading-relaxed">
+                {description}
+              </p>
+            ) : null}
+          </header>
+          {children}
+        </div>
       </div>
     </>
   );

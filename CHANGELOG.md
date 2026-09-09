@@ -19,6 +19,35 @@ that only issues session cookies and a cold Chromium on its next turn. Zero is n
 setting. A blank variable, which is what an unset variable declared in a compose file arrives as, is
 still not zero: it means "not set" and takes the default, as do a negative and anything that is not a
 number.
+### A flag or a family emoji in a channel preview is no longer cut in half
+
+The one line a roster draws is cut to a cap, and the cut walked code points -- right for a plain
+emoji, wrong for every emoji built out of more than one. A flag is two regional indicators, a family
+is three people joined by zero-width joiners, a thumbs-up with a skin tone is the thumb plus a
+modifier, and a keycap is a digit plus a variation selector plus an enclosing mark. Landing the cut
+inside any of those left a boxed letter, a dangling joiner or a bare digit in the sidebar, in the
+generated channel title, and in the excerpt the titler is shown. The cut is now taken between
+grapheme clusters, so what a person sees as one character is kept or dropped whole. Plain text is
+cut in exactly the same place as before.
+### A scroll with an unusable `deltaY` is refused, rather than scrolling some other distance
+
+`POST /computers/:botId/scroll` and `POST /computers/:botId/human/scroll` accepted any JSON number
+as `deltaY`, and `1e999` is a JSON number: it parses to `Infinity`, passes the `typeof` check, and is
+turned back into `null` by the hop to the Bot's computer, which reads the field as absent and scrolls
+its own default distance. The caller was answered 200 for a scroll it had not asked for. A `deltaY`
+that is not a finite number now answers 400 and the page is not touched, the way the timeout on
+`exec` and the coordinates behind a person's click already did.
+### An MCP call carrying `x-api-key` is stopped the same as one carrying `api-key`
+
+The check that keeps credentials out of MCP tool arguments compared each argument name against a
+list, and `api-key` was on it while `x-api-key` was not -- so the spelling that is more obviously a
+credential header was the one that went out. `x-` is the conventional prefix for a non-standard
+header and says nothing about the value, so it is now dropped before the comparison. The same pass
+adds the spellings of names already on the list that were missing from it: `passwd` and `pwd` for
+`password`, `auth_token` and `bearer_token` and `session_token` for `token`, `api_secret` and
+`secret_key` and `signing_key` for `secret`, and `ssh_key` for `private_key`. Nothing new counts as
+a credential: an argument named `x_axis`, `token_count`, `max_tokens` or `secretary` is passed as
+before.
 
 ### One command to stop what `start.sh` started
 
