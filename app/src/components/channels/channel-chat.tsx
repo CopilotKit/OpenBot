@@ -261,12 +261,14 @@ export function ChannelChat({
    * than a second subscription means "the sidebar updated" and "the transcript refreshes" are the
    * one signal, and cannot drift apart.
    *
-   * APPENDED BY ID, NOT COMPARED BY LENGTH. The stored history is not the local transcript: it
-   * keeps only what `readableTurns` can parse, and the local side keeps tool lines the platform
-   * does not hand back — so after a headless turn the stored read can be shorter than the screen
-   * and still hold the news. What is new is exactly the messages whose ids this transcript has
-   * never seen; appending them leaves everything local intact, and this tab's own turns echo back
-   * with ids already on screen and append nothing.
+   * MISSING IDS ARE PLACED BEFORE THEIR NEXT SHARED ANCHOR. A failed mount read can leave a
+   * local send on screen before its older durable prefix is recovered. Appending that prefix would
+   * reorder both the transcript and the next run's context. Shared ids locate missing runs in the
+   * chronological stored read; local messages keep their current content and relative order.
+   *
+   * The store can be shorter than the screen because it omits tool lines, so length does not decide
+   * whether it has news. Without a following shared anchor, preserve the existing append behavior:
+   * the store cannot establish where truly local-only messages belong relative to that tail.
    *
    * Retried briefly, because the roster is patched when the turn is on record with the runner and
    * the platform's read of the thread can be a beat behind it.
@@ -315,12 +317,29 @@ export function ChannelChat({
           setHistoryAvailability("ready");
           setHistoryReadFailed(false);
           const current = agentRef.current;
-          const seen = new Set(current.messages.map((message) => message.id));
-          const fresh = stored.messages.filter(
-            (message) => !seen.has(message.id),
-          );
-          if (fresh.length === 0) continue;
-          current.setMessages([...current.messages, ...fresh]);
+          const local = current.messages;
+          const localIds = new Set(local.map((message) => message.id));
+          const seenStored = new Set<string>();
+          const before = new Map<string, Message[]>();
+          let pending: Message[] = [];
+          for (const message of stored.messages) {
+            if (seenStored.has(message.id)) continue;
+            seenStored.add(message.id);
+            if (localIds.has(message.id)) {
+              if (pending.length > 0) before.set(message.id, pending);
+              pending = [];
+            } else {
+              pending.push(message);
+            }
+          }
+          if (before.size === 0 && pending.length === 0) continue;
+          current.setMessages([
+            ...local.flatMap((message) => [
+              ...(before.get(message.id) ?? []),
+              message,
+            ]),
+            ...pending,
+          ]);
           return;
         }
       })();

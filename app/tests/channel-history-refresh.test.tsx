@@ -381,3 +381,137 @@ test.each(["unavailable", "unreadable"])(
     ]);
   },
 );
+
+test.each([false, true])(
+  "recovery restores durable order after a UI send (known prefix: %s)",
+  async (prefixPresent) => {
+    const view = mounting(async () =>
+      prefixPresent
+        ? stored([initial])
+        : new NativeResponse("failed", { status: 500 }),
+    );
+    await view.findByText(prefixPresent ? initial.content : unavailable);
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    const editor = view.getByRole("textbox", { name: "Message" });
+    await user.type(editor, "Local turn after mount completed");
+    await user.click(view.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(runRequests).toHaveLength(1));
+    const sent = runRequests[0]?.input.messages.at(-1);
+    if (sent?.role !== "user") throw new Error("Missing UI user message");
+    history = async () => stored([initial, sent, fresh]);
+    await announce(1);
+    await view.findByText(fresh.content);
+    expect(view.queryByText(unavailable)).toBeNull();
+    const transcript = view.container.textContent ?? "";
+    expect(transcript.indexOf(initial.content)).toBeLessThan(
+      transcript.indexOf("Local turn after mount completed"),
+    );
+    expect(transcript.indexOf("Local turn after mount completed")).toBeLessThan(
+      transcript.indexOf(fresh.content),
+    );
+    await user.type(editor, "Capture restored ordering");
+    await user.click(view.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(runRequests).toHaveLength(2));
+    expect(runRequests[1]?.input.threadId).toBe(channel.threadId);
+    expect(runRequests[1]?.input.messages.slice(0, 3)).toEqual([
+      initial,
+      sent,
+      fresh,
+    ]);
+    expect(currentAgent().messages.map((message) => message.id)).toEqual(
+      runRequests[1]?.input.messages.map((message) => message.id),
+    );
+  },
+);
+
+test("missing durable prefix and interior preserve local content and tool messages in a shorter snapshot", async () => {
+  const toolCall = {
+    id: "tool-call",
+    role: "assistant",
+    toolCalls: [
+      {
+        id: "call",
+        type: "function",
+        function: { name: "inspect", arguments: "{}" },
+      },
+    ],
+  } satisfies Message;
+  const toolResult = {
+    id: "tool-result",
+    role: "tool",
+    toolCallId: "call",
+    content: "Local tool output",
+  } satisfies Message;
+  const streaming = {
+    id: "streaming",
+    role: "assistant",
+    content: "Current streamed text",
+  } satisfies Message;
+  const secondAnchor = {
+    id: "second-anchor",
+    role: "user",
+    content: "Current anchor content",
+  } satisfies Message;
+  const prefix = {
+    id: "prefix",
+    role: "assistant",
+    content: "Missing durable prefix",
+  } satisfies Message;
+  const interior = {
+    id: "interior",
+    role: "assistant",
+    content: "Missing durable interior",
+  } satisfies Message;
+  const snapshot = [
+    local,
+    initial,
+    toolCall,
+    toolResult,
+    secondAnchor,
+    streaming,
+  ];
+  const view = mounting(async () => stored([]), snapshot);
+  await view.findByText(streaming.content);
+  history = async () =>
+    stored([
+      prefix,
+      { ...initial, content: "Stale opening content" },
+      interior,
+      { ...secondAnchor, content: "Stale anchor content" },
+    ]);
+  await announce(1);
+  await view.findByText(interior.content);
+  expect(currentAgent().messages).toEqual([
+    local,
+    prefix,
+    initial,
+    toolCall,
+    toolResult,
+    interior,
+    secondAnchor,
+    streaming,
+  ]);
+  history = async () =>
+    stored([prefix, initial, interior, secondAnchor, interior]);
+  await announce(2);
+  await waitFor(() => expect(historyReads.length).toBeGreaterThanOrEqual(3));
+  expect(currentAgent().messages).toEqual([
+    local,
+    prefix,
+    initial,
+    toolCall,
+    toolResult,
+    interior,
+    secondAnchor,
+    streaming,
+  ]);
+});
+
+test("a snapshot without shared IDs keeps local order and appends unique durable messages", async () => {
+  const view = await mounted();
+  await act(async () => currentAgent().addMessage(local));
+  history = async () => stored([fresh, fresh]);
+  await announce(1);
+  await view.findByText(fresh.content);
+  expect(currentAgent().messages).toEqual([initial, local, fresh]);
+});
