@@ -466,23 +466,35 @@ pub fn spawn_host_process(
 /// are running. That is also how this session's own orphans hid twice.
 #[cfg(unix)]
 pub fn stop_processes_under(root: &Path) -> Result<usize, Problem> {
+    stop_processes_under_with_lsof(root, Path::new("/usr/sbin/lsof"), |pid| {
+        terminate_unix_process(pid)
+    })
+}
+
+#[cfg(unix)]
+fn stop_processes_under_with_lsof<F>(
+    root: &Path,
+    lsof: &Path,
+    terminate: F,
+) -> Result<usize, Problem>
+where
+    F: FnMut(i32) -> Result<bool, Problem>,
+{
     // One call, not one per process. Asking lsof about every pid in turn is what makes Stop look
     // like a hang: a busy machine has several hundred processes, each invocation costs a fork and a
     // few hundred milliseconds, and the person watching has been given no reason to think anything
     // is happening. `-d cwd` over all processes is a single pass.
-    let operation = "/usr/sbin/lsof -d cwd -Fpn";
-    let listing = command("/usr/sbin/lsof")
+    let operation = format!("{} -d cwd -Fpn", lsof.display());
+    let listing = command(lsof)
         .args(["-d", "cwd", "-Fpn"])
         .output()
-        .map_err(|error| cleanup_spawn_problem(operation, error))?;
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
 
     if !listing.status.success() {
-        return Err(cleanup_status_problem(operation, &listing));
+        return Err(cleanup_status_problem(&operation, &listing));
     }
 
-    stop_processes_in_lsof(root, &String::from_utf8_lossy(&listing.stdout), |pid| {
-        terminate_unix_process(pid)
-    })
+    stop_processes_in_lsof(root, &String::from_utf8_lossy(&listing.stdout), terminate)
 }
 
 #[cfg(unix)]
@@ -508,6 +520,7 @@ where
     F: FnMut(i32) -> Result<bool, Problem>,
 {
     let mut stopped = 0;
+    let mut failures = Vec::new();
     let mut pid = None;
     // -F output is one field per line: `p<pid>` starts a process, `n<path>` gives its directory.
     for line in listing.lines() {
@@ -524,11 +537,13 @@ where
         if !Path::new(dir).starts_with(root) {
             continue;
         }
-        if terminate(found)? {
-            stopped += 1;
+        match terminate(found) {
+            Ok(true) => stopped += 1,
+            Ok(false) => {}
+            Err(problem) => failures.push(problem),
         }
     }
-    Ok(stopped)
+    cleanup_result(stopped, failures)
 }
 
 #[cfg(not(unix))]
@@ -547,7 +562,6 @@ pub fn stop_processes_under(_root: &Path) -> Result<usize, Problem> {
      * already checks for clashes, and each is ended WITH ITS CHILDREN: `bun run serve` starts the
      * real server as a grandchild, so ending only the process holding the port leaves that behind.
      */
-    let mut stopped_recorded = 0;
     /*
      * The pids this window or an earlier one recorded, which is the only way to reach the worker.
      *
@@ -558,39 +572,78 @@ pub fn stop_processes_under(_root: &Path) -> Result<usize, Problem> {
      */
     let recorded = recorded_host_processes(_root);
     let processes = windows_processes()?;
-    let roots = verified_openbot_root_pids(&recorded, &processes);
+    stop_windows_processes_under_with(
+        _root,
+        &recorded,
+        &processes,
+        Path::new("netstat"),
+        Path::new("taskkill"),
+    )
+}
+
+#[cfg(any(not(unix), test))]
+fn stop_windows_processes_under_with(
+    _root: &Path,
+    recorded: &[RecordedHostProcess],
+    processes: &[WindowsProcess],
+    netstat: &Path,
+    taskkill: &Path,
+) -> Result<usize, Problem> {
+    let mut stopped_recorded = 0;
+    let roots = verified_openbot_root_pids(recorded, processes);
+    let mut failures = Vec::new();
     for pid in &roots {
-        if taskkill_process_tree(*pid)? {
-            stopped_recorded += 1;
+        match taskkill_process_tree_with(taskkill, *pid) {
+            Ok(true) => stopped_recorded += 1,
+            Ok(false) => {}
+            Err(problem) => failures.push(problem),
         }
     }
     let _ = std::fs::remove_file(host_pids_path(_root));
 
-    let ports = crate::env::Ports::default();
     // And a sweep of the two host ports, for a stack whose pidfile is gone. The containers are
     // Compose's to stop, and killing whatever holds a container's published port would reach into
     // the engine's own plumbing.
-    let ours = [ports.app, ports.server];
-    let operation = "netstat -ano -p tcp";
-    let listing = command("netstat")
+    let operation = format!("{} -ano -p tcp", netstat.display());
+    let listing = command(netstat)
         .args(["-ano", "-p", "tcp"])
         .output()
-        .map_err(|error| cleanup_spawn_problem(operation, error))?;
-    if !listing.status.success() {
-        return Err(cleanup_status_problem(operation, &listing));
-    }
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    let stopped_listening = if listing.status.success() {
+        let listed = String::from_utf8_lossy(&listing.stdout);
+        match stop_windows_processes_in(recorded, processes, &listed, |pid| {
+            taskkill_process_tree_with(taskkill, pid)
+        }) {
+            Ok(stopped) => stopped,
+            Err(problem) => {
+                failures.push(problem);
+                0
+            }
+        }
+    } else {
+        failures.push(cleanup_status_problem(&operation, &listing));
+        0
+    };
 
-    let listed = String::from_utf8_lossy(&listing.stdout);
-    stop_windows_processes_in(&recorded, &processes, &listed, |pid| {
-        taskkill_process_tree(pid)
-    })
-    .map(|stopped| stopped_recorded + stopped)
+    cleanup_result(stopped_recorded + stopped_listening, failures)
+}
+
+fn cleanup_result(stopped: usize, failures: Vec<Problem>) -> Result<usize, Problem> {
+    if failures.is_empty() {
+        return Ok(stopped);
+    }
+    Err(combined_cleanup_problem(failures))
 }
 
 #[cfg(not(unix))]
 fn taskkill_process_tree(pid: u32) -> Result<bool, Problem> {
-    let operation = format!("taskkill /PID {pid} /T /F");
-    let output = command("taskkill")
+    taskkill_process_tree_with(Path::new("taskkill"), pid)
+}
+
+#[cfg(any(not(unix), test))]
+fn taskkill_process_tree_with(taskkill: &Path, pid: u32) -> Result<bool, Problem> {
+    let operation = format!("{} /PID {pid} /T /F", taskkill.display());
+    let output = command(taskkill)
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .output()
         .map_err(|error| cleanup_spawn_problem(&operation, error))?;
@@ -613,14 +666,17 @@ where
     let ports = crate::env::Ports::default();
     let ours = [ports.app, ports.server];
     let mut stopped = 0;
+    let mut failures = Vec::new();
     for pid in verified_openbot_pids_listening_on(listing, &ours, recorded, processes) {
         // With its children: `bun run serve` starts the real server as a grandchild, so ending
         // only the process holding the port leaves that one behind.
-        if taskkill(pid)? {
-            stopped += 1;
+        match taskkill(pid) {
+            Ok(true) => stopped += 1,
+            Ok(false) => {}
+            Err(problem) => failures.push(problem),
         }
     }
-    Ok(stopped)
+    cleanup_result(stopped, failures)
 }
 
 fn cleanup_spawn_problem(operation: &str, error: std::io::Error) -> Problem {
@@ -646,6 +702,24 @@ fn cleanup_status_problem(operation: &str, output: &std::process::Output) -> Pro
         "OpenBot could not inspect or stop its host processes.",
         detail,
     )
+}
+
+fn combined_cleanup_problem(failures: Vec<Problem>) -> Problem {
+    Problem::with(
+        "OpenBot could not inspect or stop its host processes.",
+        failures
+            .into_iter()
+            .map(problem_detail)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn problem_detail(problem: Problem) -> String {
+    match problem.detail {
+        Some(detail) => format!("{}\n{}", problem.said, detail),
+        None => problem.said,
+    }
 }
 
 /// The processes listening on any of `ports`, from `netstat -ano` output.
@@ -1432,6 +1506,161 @@ fn main() {
 }
 "#;
 
+    struct CleanupCommandFixture {
+        previous_scenario: Option<std::ffi::OsString>,
+        previous_root: Option<std::ffi::OsString>,
+        previous_log: Option<std::ffi::OsString>,
+        bin: PathBuf,
+        log: PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CleanupCommandFixture {
+        fn new(root: &Path) -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous_scenario = std::env::var_os("DTA028_CLEANUP_SCENARIO");
+            let previous_root = std::env::var_os("DTA028_CLEANUP_ROOT");
+            let previous_log = std::env::var_os("DTA028_CLEANUP_LOG");
+            let bin = temp_root("openbot-cleanup-command-bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let source = bin.join("cleanup_command.rs");
+            std::fs::write(&source, CLEANUP_COMMAND_SOURCE).unwrap();
+            let compiled = bin.join(if cfg!(windows) {
+                "cleanup-command.exe"
+            } else {
+                "cleanup-command"
+            });
+            let rustc = std::env::var_os("RUSTC")
+                .unwrap_or_else(|| "/Users/dmckay/.cargo/bin/rustc".into());
+            let output = Command::new(rustc)
+                .arg(&source)
+                .arg("-o")
+                .arg(&compiled)
+                .output()
+                .expect("rustc should run for cleanup command fixture");
+            assert!(
+                output.status.success(),
+                "cleanup command fixture did not compile: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            for name in ["lsof", "netstat", "taskkill"] {
+                std::fs::copy(
+                    &compiled,
+                    bin.join(if cfg!(windows) {
+                        format!("{name}.exe")
+                    } else {
+                        name.to_string()
+                    }),
+                )
+                .unwrap();
+            }
+            let log = bin.join("commands.log");
+            std::env::set_var("DTA028_CLEANUP_ROOT", root);
+            std::env::set_var("DTA028_CLEANUP_LOG", &log);
+            Self {
+                previous_scenario,
+                previous_root,
+                previous_log,
+                bin,
+                log,
+                _guard: guard,
+            }
+        }
+
+        fn command(&self, name: &str) -> PathBuf {
+            self.bin.join(if cfg!(windows) {
+                format!("{name}.exe")
+            } else {
+                name.to_string()
+            })
+        }
+
+        fn scenario(&self, scenario: &str) {
+            std::env::set_var("DTA028_CLEANUP_SCENARIO", scenario);
+            let _ = std::fs::remove_file(&self.log);
+        }
+
+        fn log(&self) -> String {
+            std::fs::read_to_string(&self.log).unwrap_or_default()
+        }
+    }
+
+    impl Drop for CleanupCommandFixture {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous_scenario {
+                std::env::set_var("DTA028_CLEANUP_SCENARIO", previous);
+            } else {
+                std::env::remove_var("DTA028_CLEANUP_SCENARIO");
+            }
+            if let Some(previous) = &self.previous_root {
+                std::env::set_var("DTA028_CLEANUP_ROOT", previous);
+            } else {
+                std::env::remove_var("DTA028_CLEANUP_ROOT");
+            }
+            if let Some(previous) = &self.previous_log {
+                std::env::set_var("DTA028_CLEANUP_LOG", previous);
+            } else {
+                std::env::remove_var("DTA028_CLEANUP_LOG");
+            }
+            std::fs::remove_dir_all(&self.bin).ok();
+        }
+    }
+
+    const CLEANUP_COMMAND_SOURCE: &str = r#"
+use std::io::Write;
+
+fn log(program: &str, args: &[String]) {
+    if let Ok(path) = std::env::var("DTA028_CLEANUP_LOG") {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        writeln!(file, "{program}\t{}", args.join(" ")).unwrap();
+    }
+}
+
+fn main() {
+    let exe = std::env::current_exe().unwrap();
+    let program = exe.file_stem().unwrap().to_string_lossy().into_owned();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    log(&program, &args);
+    let scenario = std::env::var("DTA028_CLEANUP_SCENARIO").unwrap();
+    let root = std::env::var("DTA028_CLEANUP_ROOT").unwrap_or_default();
+    match (program.as_str(), scenario.as_str()) {
+        ("lsof", "lsof-ok") => {
+            println!("p101\nn{root}/server\np202\nn{root}\np303\nn{root}/worker");
+        }
+        ("lsof", "lsof-empty") => {}
+        ("lsof", "lsof-fail") => {
+            eprintln!("synthetic lsof status failure");
+            std::process::exit(17);
+        }
+        ("netstat", "windows-ok") | ("netstat", "windows-taskkill-fail") => {
+            println!("  Proto  Local Address          Foreign Address        State           PID");
+            println!("  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       9000");
+            println!("  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9001");
+        }
+        ("netstat", "windows-netstat-fail") => {
+            eprintln!("synthetic netstat status failure");
+            std::process::exit(19);
+        }
+        ("taskkill", "windows-ok") => {}
+        ("taskkill", "windows-taskkill-fail") => {
+            if args.iter().any(|arg| arg == "9000") {
+                eprintln!("synthetic taskkill status failure");
+                std::process::exit(5);
+            }
+        }
+        _ => {
+            eprintln!("unexpected cleanup command scenario: {program} {scenario}");
+            std::process::exit(44);
+        }
+    }
+}
+"#;
+
     #[test]
     fn service_inspection_spawn_failure_is_a_problem() {
         let _fixture = PathFixture::with_broken_engine();
@@ -1554,8 +1783,9 @@ fn main() {
         let root = temp_root("openbot-lsof-kill-failure");
         std::fs::create_dir_all(root.join("server")).unwrap();
         let listing = format!(
-            "p101\nn{}\np202\nn{}\n",
+            "p101\nn{}\np202\nn{}\np303\nn{}\n",
             root.join("server").display(),
+            root.display(),
             root.display()
         );
         let mut attempted = Vec::new();
@@ -1573,10 +1803,10 @@ fn main() {
         })
         .expect_err("a failed kill must not be reported as a partial cleanup");
 
-        assert_eq!(attempted, vec![101, 202]);
+        assert_eq!(attempted, vec![101, 202, 303]);
         assert_eq!(
             problem.said,
-            "OpenBot could not stop one of its host processes."
+            "OpenBot could not inspect or stop its host processes."
         );
         assert!(
             problem
@@ -1614,24 +1844,94 @@ fn main() {
         std::fs::remove_dir_all(stranger).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn source_bound_lsof_command_failures_and_controls_use_disposable_commands() {
+        let root = temp_root("openbot-source-bound-lsof");
+        std::fs::create_dir_all(root.join("server")).unwrap();
+        std::fs::create_dir_all(root.join("worker")).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        let lsof = fixture.command("lsof");
+
+        fixture.scenario("lsof-fail");
+        let problem = stop_processes_under_with_lsof(&root, &lsof, |_| Ok(true))
+            .expect_err("lsof status failure must cross the production helper");
+        assert_eq!(
+            problem.said,
+            "OpenBot could not inspect or stop its host processes."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("synthetic lsof status failure")),
+            "{problem:?}"
+        );
+        assert!(fixture.log().contains("lsof\t-d cwd -Fpn"));
+
+        fixture.scenario("lsof-ok");
+        let mut attempted = Vec::new();
+        let problem = stop_processes_under_with_lsof(&root, &lsof, |pid| {
+            attempted.push(pid);
+            if pid == 202 {
+                Err(Problem::with(
+                    "OpenBot could not stop one of its host processes.",
+                    "could not send SIGTERM to pid 202: synthetic refusal",
+                ))
+            } else {
+                Ok(true)
+            }
+        })
+        .expect_err("one kill failure must not prevent later owned target attempts");
+        assert_eq!(attempted, vec![101, 202, 303]);
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("pid 202")),
+            "{problem:?}"
+        );
+
+        fixture.scenario("lsof-empty");
+        let no_match = stop_processes_under_with_lsof(&root, &lsof, |_| {
+            panic!("empty successful lsof output has no targets")
+        })
+        .expect("empty successful lsof output remains a safe no-target cleanup");
+        assert_eq!(no_match, 0);
+
+        fixture.scenario("lsof-ok");
+        let already_gone = stop_processes_under_with_lsof(&root, &lsof, |_| Ok(false))
+            .expect("already-gone targets are benign only through the termination result");
+        assert_eq!(already_gone, 0);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[cfg(test)]
     #[test]
-    fn windows_cleanup_returns_taskkill_failures_instead_of_partial_success() {
-        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9000\r\n";
+    fn windows_cleanup_returns_taskkill_failures_after_attempting_later_targets() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       9000\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9001\r\n";
         let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
         let processes = [
             live_process(8636, 7000, "20260909010101.000000-420"),
             live_process(9000, 8636, "20260909010102.000000-420"),
+            live_process(9001, 8636, "20260909010103.000000-420"),
         ];
+        let mut attempted = Vec::new();
 
         let problem = stop_windows_processes_in(&recorded, &processes, listing, |pid| {
-            Err(Problem::with(
-                "OpenBot could not inspect or stop its host processes.",
-                format!("taskkill /PID {pid} /T /F exited with status 5"),
-            ))
+            attempted.push(pid);
+            if pid == 9000 {
+                Err(Problem::with(
+                    "OpenBot could not inspect or stop its host processes.",
+                    format!("taskkill /PID {pid} /T /F exited with status 5"),
+                ))
+            } else {
+                Ok(true)
+            }
         })
         .expect_err("taskkill failure must be reported");
 
+        assert_eq!(attempted, vec![9000, 9001]);
         assert_eq!(
             problem.said,
             "OpenBot could not inspect or stop its host processes."
@@ -1643,6 +1943,59 @@ fn main() {
                 .is_some_and(|detail| detail.contains("taskkill /PID 9000")),
             "{problem:?}"
         );
+    }
+
+    #[test]
+    fn source_bound_windows_command_failures_use_disposable_commands() {
+        let root = temp_root("openbot-source-bound-windows-cleanup");
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        let netstat = fixture.command("netstat");
+        let taskkill = fixture.command("taskkill");
+        let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
+        let processes = [
+            live_process(8636, 7000, "20260909010101.000000-420"),
+            live_process(9000, 8636, "20260909010102.000000-420"),
+            live_process(9001, 8636, "20260909010103.000000-420"),
+        ];
+
+        fixture.scenario("windows-netstat-fail");
+        let problem =
+            stop_windows_processes_under_with(&root, &recorded, &processes, &netstat, &taskkill)
+                .expect_err("netstat status failure must cross the production helper");
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("synthetic netstat status failure")),
+            "{problem:?}"
+        );
+
+        fixture.scenario("windows-taskkill-fail");
+        let problem =
+            stop_windows_processes_under_with(&root, &recorded, &processes, &netstat, &taskkill)
+                .expect_err("taskkill status failure must cross the production helper");
+        let log = fixture.log();
+        assert!(log.contains("netstat\t-ano -p tcp"), "{log}");
+        assert!(log.contains("taskkill\t/PID 9000 /T /F"), "{log}");
+        assert!(
+            log.contains("taskkill\t/PID 9001 /T /F"),
+            "later owned target was not attempted: {log}"
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("synthetic taskkill status failure")),
+            "{problem:?}"
+        );
+
+        fixture.scenario("windows-ok");
+        let stopped =
+            stop_windows_processes_under_with(&root, &recorded, &processes, &netstat, &taskkill)
+                .expect("all synthetic Windows cleanup commands should succeed");
+        assert_eq!(stopped, 3);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(test)]

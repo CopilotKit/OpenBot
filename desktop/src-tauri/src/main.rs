@@ -749,9 +749,7 @@ async fn start_stack<R: tauri::Runtime>(
      * port 3001 was held. By its own server. These are found by working directory, so anything this
      * stops belongs to this deployment and to no other.
      */
-    let reclaimed = stack::stop_processes_under(&root).inspect_err(|problem| {
-        report(&app, "cleanup", false, problem.said.clone());
-    })?;
+    let reclaimed = cleanup_before_start(&app, &root, stack::stop_processes_under)?;
 
     // Before spawning: if these are still held, whatever answers later is not ours.
     let ports = openbot_env::Ports::default();
@@ -912,6 +910,20 @@ where
     }
 }
 
+fn cleanup_before_start<R, C>(
+    app: &tauri::AppHandle<R>,
+    root: &Path,
+    cleanup: C,
+) -> Result<usize, openbot_desktop_lib::problem::Problem>
+where
+    R: tauri::Runtime,
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+{
+    cleanup(root).inspect_err(|problem| {
+        report(app, "cleanup", false, problem.said.clone());
+    })
+}
+
 fn problem_detail(problem: openbot_desktop_lib::problem::Problem) -> String {
     match problem.detail {
         Some(detail) => format!("{}\n{}", problem.said, detail),
@@ -946,6 +958,15 @@ where
         failures.push(format!("Compose down failed: {problem}"));
     }
     failures
+}
+
+fn report_exit_cleanup_failures<F>(failures: Vec<String>, mut sink: F)
+where
+    F: FnMut(&str),
+{
+    for failure in failures {
+        sink(&format!("[exit] cleanup failed: {failure}"));
+    }
 }
 
 /// Show OpenBot itself in this window.
@@ -1804,16 +1825,15 @@ fn main() {
                     // The containers too. Leaving five of them running behind an application that is
                     // no longer on screen is the one outcome nobody can act on: there is no window to
                     // stop them from and nothing to say they are there.
-                    for failure in
+                    report_exit_cleanup_failures(
                         exit_cleanup_with(&shell, &default, stack::stop_processes_under, |root| {
                             match engine::detect().address {
                                 Some(found) => stack::down(&found, root),
                                 None => Ok(()),
                             }
-                        })
-                    {
-                        eprintln!("[exit] cleanup failed: {failure}");
-                    }
+                        }),
+                        |failure| eprintln!("{failure}"),
+                    );
                 }
                 _ => {}
             }
@@ -1838,7 +1858,6 @@ fn ask_to_stop(child: &std::process::Child) {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
-
     #[test]
     fn ask_transport_regressions_do_not_load_from_the_vault() {
         let source = include_str!("main.rs");
