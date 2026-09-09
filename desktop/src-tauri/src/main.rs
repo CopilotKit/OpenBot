@@ -977,18 +977,30 @@ async fn ask_the_bot_with_settings(
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
     // The picked harness if there is one, and the Bot that ships with OpenBot if there is not.
     // Both speak AG-UI at the same address shape, so this screen does not care which it got.
-    let endpoint = settings
+    let picked_endpoint = settings
         .get("PICKED_HARNESS_URL")
-        .filter(|url| !url.trim().is_empty())
-        .or_else(|| settings.get("MANAGED_AGENT_AG_UI_URL"))
-        .cloned()
-        .unwrap_or_default();
+        .filter(|url| !url.trim().is_empty());
+    let (endpoint, log_service, kind, agent_id) = match picked_endpoint {
+        Some(endpoint) => (
+            endpoint.clone(),
+            "agent-harness",
+            settings.get("PICKED_HARNESS_KIND").cloned(),
+            settings.get("PICKED_HARNESS_AGENT_ID").cloned(),
+        ),
+        None => (
+            settings
+                .get("MANAGED_AGENT_AG_UI_URL")
+                .cloned()
+                .unwrap_or_default(),
+            "agent-langgraph",
+            None,
+            None,
+        ),
+    };
     let token = settings
         .get("MANAGED_AGENT_TOKEN")
         .cloned()
         .unwrap_or_default();
-    let kind = settings.get("PICKED_HARNESS_KIND").cloned();
-    let agent_id = settings.get("PICKED_HARNESS_AGENT_ID").cloned();
     if endpoint.trim().is_empty() || token.trim().is_empty() {
         return Err(openbot_desktop_lib::problem::Problem::plain(
             "OpenBot cannot find the Bot it just set up. Stop OpenBot and start it again.",
@@ -1029,7 +1041,7 @@ async fn ask_the_bot_with_settings(
         Err(None) => {
             let log = engine::detect()
                 .address
-                .map(|found| stack::service_log(&found, &root, "agent-harness", 40))
+                .map(|found| stack::service_log(&found, &root, log_service, 40))
                 .unwrap_or_default();
             Err(openbot_desktop_lib::ask::why_nothing_came_back(&log))
         }
@@ -2140,6 +2152,146 @@ mod tests {
         let _ = server.request();
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn ask_the_bot_uses_managed_log_for_managed_fallback_empty_answer() {
+        let _path = SerializedPath::set_with("docker", EMPTY_ANSWER_LOG_DOCKER);
+        let record = temp_root("openbot-managed-empty-answer-record").join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let server = TestServer::new(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+             data: {\"type\":\"RUN_STARTED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n\
+             data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n",
+        );
+        let root = temp_root("openbot-managed-empty-answer");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let problem = tauri::async_runtime::block_on(ask_the_bot_with_settings(
+            root.clone(),
+            "What is 17 times 23?".to_string(),
+            std::collections::BTreeMap::from([
+                ("MANAGED_AGENT_AG_UI_URL".to_string(), server.url.clone()),
+                (
+                    "MANAGED_AGENT_TOKEN".to_string(),
+                    "managed-token".to_string(),
+                ),
+            ]),
+        ))
+        .expect_err("empty managed answer must be diagnosed from managed Bot logs");
+
+        let request = server.request();
+        assert_eq!(request.path, "/");
+        assert!(
+            problem.said.contains("That key was refused"),
+            "{}",
+            problem.said
+        );
+        let detail = problem.detail.as_deref().expect("managed log detail");
+        assert!(
+            detail.contains("agent-langgraph refused the key"),
+            "{detail}"
+        );
+        let commands = std::fs::read_to_string(&record).expect("command record");
+        assert!(
+            commands
+                .lines()
+                .any(|line| line.ends_with("\tcompose logs --tail 40 agent-langgraph")),
+            "{commands}"
+        );
+        assert!(
+            !commands
+                .lines()
+                .any(|line| line.ends_with("\tcompose logs --tail 40 agent-harness")),
+            "{commands}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    #[test]
+    fn ask_the_bot_keeps_harness_log_for_picked_harness_empty_answer() {
+        let _path = SerializedPath::set_with("docker", EMPTY_ANSWER_LOG_DOCKER);
+        let record = temp_root("openbot-picked-empty-answer-record").join("commands.log");
+        std::fs::create_dir_all(record.parent().expect("record parent")).unwrap();
+        std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", &record);
+        let server = TestServer::new(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+             data: {\"type\":\"RUN_STARTED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n\
+             data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"t1\",\"runId\":\"r1\"}\n\n",
+        );
+        let root = temp_root("openbot-picked-empty-answer");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let problem = tauri::async_runtime::block_on(ask_the_bot_with_settings(
+            root.clone(),
+            "What is 17 times 23?".to_string(),
+            std::collections::BTreeMap::from([
+                ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
+                (
+                    "PICKED_HARNESS_KIND".to_string(),
+                    "remote-ag-ui".to_string(),
+                ),
+                (
+                    "MANAGED_AGENT_AG_UI_URL".to_string(),
+                    "http://127.0.0.1:9/ag-ui".to_string(),
+                ),
+                (
+                    "MANAGED_AGENT_TOKEN".to_string(),
+                    "managed-token".to_string(),
+                ),
+            ]),
+        ))
+        .expect_err("picked harness empty answer must still be diagnosed from harness logs");
+
+        let request = server.request();
+        assert_eq!(request.path, "/");
+        assert!(
+            problem.said.contains("That key was refused"),
+            "{}",
+            problem.said
+        );
+        let detail = problem.detail.as_deref().expect("harness log detail");
+        assert!(detail.contains("agent-harness refused the key"), "{detail}");
+        let commands = std::fs::read_to_string(&record).expect("command record");
+        assert!(
+            commands
+                .lines()
+                .any(|line| line.ends_with("\tcompose logs --tail 40 agent-harness")),
+            "{commands}"
+        );
+        assert!(
+            !commands
+                .lines()
+                .any(|line| line.ends_with("\tcompose logs --tail 40 agent-langgraph")),
+            "{commands}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(record.parent().expect("record parent"));
+    }
+
+    const EMPTY_ANSWER_LOG_DOCKER: &str = "#!/bin/sh\n\
+if [ -n \"$OPENBOT_TEST_ENGINE_RECORD\" ]; then\n\
+  printf '%s\\t%s\\n' \"$PWD\" \"$*\" >> \"$OPENBOT_TEST_ENGINE_RECORD\"\n\
+fi\n\
+if [ \"$1\" = \"version\" ]; then\n\
+  printf '1.0\\n'\n\
+  exit 0\n\
+fi\n\
+last=''\n\
+for arg in \"$@\"; do\n\
+  last=\"$arg\"\n\
+done\n\
+if [ \"$1\" = \"compose\" ] && [ \"$2\" = \"logs\" ]; then\n\
+  case \"$last\" in\n\
+    agent-langgraph)\n\
+      printf 'OpenAIAuthenticationError: agent-langgraph refused the key\\n'\n\
+      ;;\n\
+    agent-harness)\n\
+      printf 'OpenAIAuthenticationError: agent-harness refused the key\\n'\n\
+      ;;\n\
+  esac\n\
+fi\n";
 
     struct TestRequest {
         path: String,
