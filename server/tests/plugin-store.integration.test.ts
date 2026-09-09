@@ -75,21 +75,31 @@ const siblingToolName = `not_granted_${suite}`;
 let policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
 
 /**
- * Whether this deployment already had the server before the test ran.
+ * Whether THIS RUN is what put the server row there, and so is what should take it away.
  *
  * The id is a real catalogue key rather than a suite-scoped one, because what is under test includes
  * the vendor's own read/write classification. On a database somebody is using, that key is their
  * configured server, so it is removed only when the test is what created it.
+ *
+ * Which is why the flag counts creations rather than the absences it used to. `afterAll` runs even
+ * when a `beforeAll` above it has thrown, and every flag is then still sitting at its initialiser —
+ * so a teardown must not be authorised by a setup that never completed. Only a capture that ran and
+ * found the row missing can write the value the delete needs; `false` covers both "the deployment
+ * already had it" and "nobody ever looked", and neither of those is this suite's row to remove.
  */
-let serverWasAlreadyConfigured = false;
+let suiteCreatedServerRow = false;
 /**
- * Whether this deployment already advertised the tool this suite inserts.
+ * Whether THIS RUN is what advertised the tool, and so is what should stop advertising it.
  *
  * The vendor really does advertise `search_files`, so the row may be a refreshed fact about the
  * vendor rather than the suite's fixture. Deleting by name regardless would take a real one; leaving
  * it always would leave a fixture that reads on screen as a tool the vendor offers.
+ *
+ * Set the same way round as {@link suiteCreatedServerRow} and for the same reason: the delete waits
+ * on evidence that this run inserted the row, not on the mere absence of evidence that somebody else
+ * did.
  */
-let toolWasAlreadyAdvertised = false;
+let suiteCreatedToolRow = false;
 
 const revokedCredentialIds: string[] = [];
 const issuedCredentialIds: string[] = [];
@@ -164,7 +174,7 @@ let ownsFixtureIds = false;
  * Refuse to run at all against a database that already holds the ids this suite inserts at.
  *
  * The suites above own suite-scoped ids and only ever READ the deployment's own rows, so skipping a
- * delete is enough for them — that is what `serverWasAlreadyConfigured` and its siblings are for.
+ * delete is enough for them — that is what `suiteCreatedServerRow` and its siblings are for.
  * The Composio fixtures at the bottom of this file cannot do that: they INSERT at `gmail`, `notion`,
  * `bot_helper` and `user_asker`, and those ids are not a choice. `seedNotionServer` needs
  * `catalogueEntry("notion")` to resolve to the real catalogue entry, and `gmail` is the toolkit slug
@@ -237,15 +247,15 @@ beforeAll(async () => {
       .onConflictDoNothing();
   }
 
-  serverWasAlreadyConfigured =
+  suiteCreatedServerRow =
     (
       await database
         .select({ id: mcpServers.id })
         .from(mcpServers)
         .where(eq(mcpServers.id, serverId))
-    ).length > 0;
+    ).length === 0;
 
-  toolWasAlreadyAdvertised =
+  suiteCreatedToolRow =
     (
       await database
         .select({ name: mcpTools.name })
@@ -253,7 +263,7 @@ beforeAll(async () => {
         .where(
           and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)),
         )
-    ).length > 0;
+    ).length === 0;
 
   // The server row is written directly rather than through addServer, so the test needs no vendor
   // to be reachable. What is under test is the decision, not the listing.
@@ -316,12 +326,12 @@ afterAll(async () => {
     );
   // A server row is deployment configuration, so it belongs to the deployment rather than here.
   // The fixture tool goes whether or not this suite owns the server, but only if it put it there.
-  if (!toolWasAlreadyAdvertised) {
+  if (suiteCreatedToolRow) {
     await database
       .delete(mcpTools)
       .where(and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)));
   }
-  if (!serverWasAlreadyConfigured) {
+  if (suiteCreatedServerRow) {
     await database.delete(mcpTools).where(eq(mcpTools.serverId, serverId));
     await database.delete(mcpServers).where(eq(mcpServers.id, serverId));
   }
