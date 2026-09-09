@@ -378,30 +378,29 @@ test("a compatible endpoint submits the key typed into its endpoint key field", 
   });
 });
 
-test("a compatible endpoint refuses URLs whose scheme only starts with http", async () => {
+test.each([
+  "http://",
+  "https://",
+  "httpx://models.example/v1",
+  "httpfoo://models.example/v1",
+  "https://exa mple.example/v1",
+])("a compatible endpoint refuses invalid HTTP(S) URL %s", async (baseUrl) => {
   const choices: unknown[] = [];
   invokeHandler = async (command) => {
     if (command === "providers") return endpointProviders;
     throw new Error(`unexpected command ${command}`);
   };
 
-  for (const baseUrl of [
-    "httpx://models.example/v1",
-    "httpfoo://models.example/v1",
-  ]) {
-    const view = await renderPicker((choice) => choices.push(choice));
-    await userEvent.click(
-      await view.findByRole("radio", { name: /OpenAI-compatible/ }),
-    );
-    await userEvent.type(view.getByLabelText("Base URL"), baseUrl);
-    await userEvent.type(view.getByLabelText("Model name"), "local-model");
+  const view = await renderPicker((choice) => choices.push(choice));
+  await userEvent.click(
+    await view.findByRole("radio", { name: /OpenAI-compatible/ }),
+  );
+  await userEvent.type(view.getByLabelText("Base URL"), baseUrl);
+  await userEvent.type(view.getByLabelText("Model name"), "local-model");
 
-    const continueButton = view.getByRole("button", { name: "Continue" });
-    expect(continueButton).toHaveProperty("disabled", true);
-    await userEvent.click(continueButton);
-    cleanup();
-  }
-
+  const continueButton = view.getByRole("button", { name: "Continue" });
+  expect(continueButton).toHaveProperty("disabled", true);
+  await userEvent.click(continueButton);
   expect(choices).toEqual([]);
 });
 

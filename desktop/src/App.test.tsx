@@ -244,7 +244,7 @@ function useCompatibleEndpointSetup(
   };
 }
 
-async function startWithCompatibleEndpoint(endpointKey = "") {
+async function enterCompatibleEndpoint(baseUrl: string, endpointKey = "") {
   const view = await renderApp();
 
   await userEvent.click(
@@ -254,10 +254,7 @@ async function startWithCompatibleEndpoint(endpointKey = "") {
   await userEvent.click(
     await view.findByRole("radio", { name: /OpenAI-compatible/ }),
   );
-  await userEvent.type(
-    view.getByLabelText("Base URL"),
-    "https://models.example/v1",
-  );
+  await userEvent.type(view.getByLabelText("Base URL"), baseUrl);
   await userEvent.type(view.getByLabelText("Model name"), "local-model");
   if (endpointKey) {
     await userEvent.type(
@@ -265,6 +262,14 @@ async function startWithCompatibleEndpoint(endpointKey = "") {
       endpointKey,
     );
   }
+  return view;
+}
+
+async function startWithCompatibleEndpoint(
+  endpointKey = "",
+  baseUrl = "https://models.example/v1",
+) {
+  const view = await enterCompatibleEndpoint(baseUrl, endpointKey);
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
   await userEvent.click(
     await view.findByRole("button", { name: "Start OpenBot" }),
@@ -904,23 +909,56 @@ test("bring-your-own agent collects a distinct AG-UI endpoint for startup", asyn
   });
 });
 
-test("custom compatible endpoint startup does not submit a saved OpenAI API key", async () => {
-  useCompatibleEndpointSetup({
-    OPENAI_API_KEY: "sk-synthetic-openai",
-  });
+test.each([
+  "http://",
+  "https://",
+  "httpx://models.example/v1",
+  "httpfoo://models.example/v1",
+  "https://exa mple.example/v1",
+])("custom compatible endpoint refuses startup for URL %s", async (baseUrl) => {
+  useCompatibleEndpointSetup({});
+  const view = await enterCompatibleEndpoint(baseUrl);
 
-  await startWithCompatibleEndpoint();
-
-  const payload = getStartStackPayload();
-  expect(payload.model).toMatchObject({
-    provider: "openai-compatible",
-    login: "endpoint",
-    baseUrl: "https://models.example/v1",
-    model: "local-model",
-  });
-  expect(payload.model).not.toHaveProperty("apiKey");
-  expect(JSON.stringify(payload)).not.toContain("sk-synthetic-openai");
+  const continueButton = view.getByRole("button", { name: "Continue" });
+  expect(continueButton).toHaveProperty("disabled", true);
+  await userEvent.click(continueButton);
+  expect(view.getByRole("heading", { name: "Connect your AI" })).toBeTruthy();
+  expect(view.queryByRole("button", { name: "Start OpenBot" })).toBeNull();
+  expect(invokeCalls.filter((call) => call.command === "start_stack")).toEqual(
+    [],
+  );
 });
+
+test.each(["http://localhost:11434/v1", "https://models.example/v1"])(
+  "custom compatible endpoint startup for URL %s does not submit a saved OpenAI API key",
+  async (baseUrl) => {
+    useCompatibleEndpointSetup({
+      OPENAI_API_KEY: "sk-synthetic-openai",
+    });
+
+    await startWithCompatibleEndpoint("", baseUrl);
+
+    const payload = getStartStackPayload();
+    expect(
+      invokeCalls.filter((call) => call.command === "start_stack"),
+    ).toHaveLength(1);
+    expect(payload).toEqual({
+      root: "/tmp/openbot-app-test",
+      apiKey: "",
+      apiUrl: "https://api.intelligence.copilotkit.ai",
+      gatewayWsUrl: "wss://realtime.intelligence.copilotkit.ai",
+      harness: { id: "langgraph" },
+      model: {
+        provider: "openai-compatible",
+        login: "endpoint",
+        baseUrl,
+        model: "local-model",
+      },
+    });
+    expect(payload.model).not.toHaveProperty("apiKey");
+    expect(JSON.stringify(payload)).not.toContain("sk-synthetic-openai");
+  },
+);
 
 test("custom compatible endpoint startup submits an explicitly typed endpoint key", async () => {
   useCompatibleEndpointSetup({
