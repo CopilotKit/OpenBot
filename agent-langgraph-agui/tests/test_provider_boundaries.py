@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -217,6 +218,103 @@ async def test_anthropic_selection_reaches_anthropic_boundary_without_openai_key
     assert captured[0]["body"]["messages"] == [
         {"role": "user", "content": "Say hello."}
     ]
+
+
+def _write_synthetic_chatgpt_store(path: Path):
+    from langchain_openai.chatgpt_oauth import _ChatGPTToken
+    from langchain_openai.chat_models.codex import _FileChatGPTOAuthTokenProvider
+
+    provider = _FileChatGPTOAuthTokenProvider(path=path)
+    provider._write_to_disk(
+        _ChatGPTToken(
+            access_token="synthetic-access",
+            refresh_token="synthetic-refresh",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            account_id="synthetic-account",
+            plan_type="plus",
+            user_id="synthetic-user",
+        )
+    )
+
+
+def test_configured_chatgpt_auth_file_missing_fails_before_fallback(
+    monkeypatch, tmp_path
+):
+    missing_file = tmp_path / "missing-chatgpt-auth.json"
+    monkeypatch.setenv("CHATGPT_AUTH_FILE", str(missing_file))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-used")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:9/v1")
+
+    def fail_if_fallback_is_built(*_args, **_kwargs):
+        raise AssertionError("fallback provider model was constructed")
+
+    monkeypatch.setattr(main, "init_chat_model", fail_if_fallback_is_built)
+
+    with pytest.raises(FileNotFoundError, match="CHATGPT_AUTH_FILE.*missing file"):
+        main._model()
+
+
+def test_configured_chatgpt_auth_file_directory_fails_before_fallback(
+    monkeypatch, tmp_path
+):
+    directory_path = tmp_path / "auth-directory"
+    directory_path.mkdir()
+    monkeypatch.setenv("CHATGPT_AUTH_FILE", str(directory_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-used")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:9/v1")
+
+    def fail_if_fallback_is_built(*_args, **_kwargs):
+        raise AssertionError("fallback provider model was constructed")
+
+    monkeypatch.setattr(main, "init_chat_model", fail_if_fallback_is_built)
+
+    with pytest.raises(IsADirectoryError, match="CHATGPT_AUTH_FILE.*directory"):
+        main._model()
+
+
+def test_configured_chatgpt_auth_file_unreadable_fails_before_fallback(
+    monkeypatch, tmp_path
+):
+    unreadable_file = tmp_path / "unreadable-chatgpt-auth.json"
+    _write_synthetic_chatgpt_store(unreadable_file)
+    unreadable_file.chmod(0)
+    if os.access(unreadable_file, os.R_OK):
+        pytest.skip("platform still reports chmod(0) file as readable")
+    monkeypatch.setenv("CHATGPT_AUTH_FILE", str(unreadable_file))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-used")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:9/v1")
+
+    def fail_if_fallback_is_built(*_args, **_kwargs):
+        raise AssertionError("fallback provider model was constructed")
+
+    monkeypatch.setattr(main, "init_chat_model", fail_if_fallback_is_built)
+
+    try:
+        with pytest.raises(PermissionError, match="CHATGPT_AUTH_FILE.*not readable"):
+            main._model()
+    finally:
+        unreadable_file.chmod(0o600)
+
+
+def test_configured_chatgpt_auth_file_selects_codex_model(monkeypatch, tmp_path):
+    auth_file = tmp_path / "chatgpt-auth.json"
+    _write_synthetic_chatgpt_store(auth_file)
+    monkeypatch.setenv("CHATGPT_AUTH_FILE", str(auth_file))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-used")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:9/v1")
+    monkeypatch.setenv("BOT_MODEL", "gpt-5.5")
+
+    model = main._model()
+    token = model.token_provider.get_token()
+
+    assert (
+        f"{type(model).__module__}.{type(model).__name__}"
+        == "langchain_openai.chat_models.codex._ChatOpenAICodex"
+    )
+    assert type(model.token_provider).__name__ == "_FileChatGPTOAuthTokenProvider"
+    assert str(model.token_provider.path) == str(auth_file)
+    assert token.access_token == "synthetic-access"
+    assert token.refresh_token == "synthetic-refresh"
 
 
 def _run_chatgpt_writer_container(host_source: Path, container_target: str):

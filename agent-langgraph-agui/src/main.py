@@ -6,6 +6,7 @@ package the AG-UI project maintains, so the protocol stops being ours to keep wo
 """
 
 import os
+from pathlib import Path
 
 from ag_ui_langgraph import LangGraphAgent, add_langgraph_fastapi_endpoint
 from fastapi import FastAPI, Request
@@ -61,6 +62,23 @@ def _normalize_openai_base_url():
         os.environ.pop("OPENAI_BASE_URL", None)
 
 
+def _chatgpt_auth_file(store: str) -> Path:
+    path = Path(store)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"CHATGPT_AUTH_FILE points to a missing file: {path}"
+        )
+    if path.is_dir():
+        raise IsADirectoryError(
+            f"CHATGPT_AUTH_FILE must point to a file, not a directory: {path}"
+        )
+    if not os.access(path, os.R_OK):
+        raise PermissionError(f"CHATGPT_AUTH_FILE is not readable: {path}")
+    with path.open("rb"):
+        pass
+    return path
+
+
 def _model():
     """The model this Bot thinks with, chosen by which credential the deployment gave it.
 
@@ -76,9 +94,8 @@ def _model():
     """
     model = (os.environ.get("BOT_MODEL") or "gpt-4o-mini").strip()
     store = (os.environ.get("CHATGPT_AUTH_FILE") or "").strip()
-    if store and os.path.exists(store):
-        from pathlib import Path
-
+    if store:
+        store_path = _chatgpt_auth_file(store)
         # Private and experimental, both deliberately. `langchain-openai` exports no public Codex
         # model and warns in the module that this one is unofficial. That is a maintenance cost we
         # took knowingly rather than a reason to withhold the plan, because a subscription someone
@@ -94,7 +111,7 @@ def _model():
         # explain.
         return _ChatOpenAICodex(
             model=model,
-            token_provider=_FileChatGPTOAuthTokenProvider(path=Path(store)),
+            token_provider=_FileChatGPTOAuthTokenProvider(path=store_path),
         )
 
     _normalize_openai_base_url()
