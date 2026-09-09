@@ -432,10 +432,22 @@ impl ChosenModel {
                 Ok(openbot_env::ModelCredential::ChatGptPlan { store })
             }
             ("openai-compatible", "endpoint") => {
+                let base_url = given(self.base_url);
+                if !reqwest::Url::parse(&base_url)
+                    .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.has_host())
+                {
+                    return Err(
+                        "Enter a valid http:// or https:// address for your model endpoint.".into(),
+                    );
+                }
+                let model = given(self.model);
+                if model.is_empty() {
+                    return Err("Enter the model name your endpoint serves.".into());
+                }
                 Ok(openbot_env::ModelCredential::Compatible {
-                    base_url: given(self.base_url),
+                    base_url,
                     api_key: given(self.api_key),
-                    model: given(self.model),
+                    model,
                 })
             }
             (provider, login) => Err(format!(
@@ -1861,6 +1873,84 @@ mod tests {
             "openai" => "OPENAI_API_KEY",
             "anthropic" => "ANTHROPIC_API_KEY",
             other => panic!("unexpected provider: {other}"),
+        }
+    }
+
+    fn compatible_choice(base_url: Option<&str>, model: Option<&str>) -> ChosenModel {
+        ChosenModel {
+            provider: "openai-compatible".into(),
+            login: "endpoint".into(),
+            api_key: None,
+            base_url: base_url.map(String::from),
+            model: model.map(String::from),
+            token: None,
+            saved: None,
+        }
+    }
+
+    #[test]
+    fn compatible_endpoint_rejects_missing_or_invalid_http_url() {
+        for base_url in [
+            None,
+            Some(""),
+            Some(" \t\n "),
+            Some("ftp://localhost/v1"),
+            Some("file:///tmp/model"),
+            Some("httpx://localhost/v1"),
+            Some("localhost:11434/v1"),
+            Some("http://"),
+            Some("https://?query"),
+            Some("http://[invalid]/v1"),
+        ] {
+            let problem = start_stack_credential(
+                Path::new("synthetic-unused-compatible-root"),
+                compatible_choice(base_url, Some("local-model")),
+            )
+            .expect_err("a missing or invalid endpoint URL must stop setup");
+            assert_eq!(
+                problem.said, "Enter a valid http:// or https:// address for your model endpoint.",
+                "base_url={base_url:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compatible_endpoint_rejects_missing_or_blank_model() {
+        for model in [None, Some(""), Some(" \t\n ")] {
+            let problem = start_stack_credential(
+                Path::new("synthetic-unused-compatible-root"),
+                compatible_choice(Some("http://127.0.0.1:11434/v1"), model),
+            )
+            .expect_err("a missing model name must stop setup");
+            assert_eq!(problem.said, "Enter the model name your endpoint serves.");
+        }
+    }
+
+    #[test]
+    fn compatible_endpoint_accepts_trimmed_http_urls_and_optional_keys() {
+        for base_url in [
+            "http://127.0.0.1:11434/v1",
+            "https://models.example.invalid/v1",
+        ] {
+            for api_key in [None, Some(" \t "), Some(" synthetic-endpoint-key ")] {
+                let mut choice =
+                    compatible_choice(Some(&format!(" {base_url} ")), Some(" local-model "));
+                choice.api_key = api_key.map(String::from);
+                let credential =
+                    start_stack_credential(Path::new("synthetic-unused-compatible-root"), choice)
+                        .expect("a valid endpoint may run without an API key");
+                let openbot_env::ModelCredential::Compatible {
+                    base_url: actual_url,
+                    api_key: actual_key,
+                    model,
+                } = credential
+                else {
+                    panic!("the endpoint must retain its compatible credential");
+                };
+                assert_eq!(actual_url, base_url);
+                assert_eq!(model, "local-model");
+                assert_eq!(actual_key, api_key.unwrap_or_default().trim());
+            }
         }
     }
 
