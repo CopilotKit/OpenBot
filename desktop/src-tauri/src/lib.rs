@@ -15,3 +15,6 @@ pub mod stack;
 pub mod supervise;
 pub mod vault;
 pub mod windows;
+
+#[cfg(test)]
+pub(crate) mod test_support;

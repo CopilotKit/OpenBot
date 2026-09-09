@@ -383,9 +383,10 @@ pub fn record_host_processes(root: &Path, processes: &[(&str, u32)]) {
 /// The pids a previous window recorded, if any.
 pub fn recorded_host_pids(root: &Path) -> Vec<u32> {
     match recorded_host_pid_file(root) {
-        Some(RecordedHostPidFile::Records { version, processes }) if version == 1 => {
-            processes.into_iter().map(|process| process.pid).collect()
-        }
+        Some(RecordedHostPidFile::Records {
+            version: 1,
+            processes,
+        }) => processes.into_iter().map(|process| process.pid).collect(),
         Some(RecordedHostPidFile::Pids(pids)) => pids,
         _ => Vec::new(),
     }
@@ -394,7 +395,10 @@ pub fn recorded_host_pids(root: &Path) -> Vec<u32> {
 /// The recorded host processes with enough identity to verify a live Windows process.
 pub fn recorded_host_processes(root: &Path) -> Vec<RecordedHostProcess> {
     match recorded_host_pid_file(root) {
-        Some(RecordedHostPidFile::Records { version, processes }) if version == 1 => processes,
+        Some(RecordedHostPidFile::Records {
+            version: 1,
+            processes,
+        }) => processes,
         _ => Vec::new(),
     }
 }
@@ -1122,6 +1126,7 @@ fn dirs_home() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::temp_root;
 
     fn recorded_process(name: &str, pid: u32, creation_date: &str) -> RecordedHostProcess {
         RecordedHostProcess {
@@ -1221,8 +1226,7 @@ mod tests {
     /// The pids survive the window that started them, which is the whole point of writing them.
     #[test]
     fn recorded_pids_are_read_back_and_a_missing_file_is_not_an_error() {
-        let dir = std::env::temp_dir().join(format!("openbot-pids-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("pids");
         std::fs::create_dir_all(&dir).unwrap();
 
         // Nothing recorded is an empty list, not a panic: a deployment somebody started by hand
@@ -1245,7 +1249,7 @@ mod tests {
     /// this version of OpenBot. That sent somebody looking for a newer installer over three bytes.
     #[test]
     fn a_byte_order_mark_does_not_make_a_deployment_look_old() {
-        let dir = std::env::temp_dir().join(format!("openbot-bom-{}", std::process::id()));
+        let dir = temp_root("bom");
         let app = dir.join("app");
         std::fs::create_dir_all(&app).unwrap();
         std::fs::write(
@@ -1260,7 +1264,7 @@ mod tests {
     /// And a manifest that is genuinely broken says so, rather than blaming the version.
     #[test]
     fn an_unreadable_manifest_is_not_reported_as_an_old_deployment() {
-        let dir = std::env::temp_dir().join(format!("openbot-broken-{}", std::process::id()));
+        let dir = temp_root("broken");
         let app = dir.join("app");
         std::fs::create_dir_all(&app).unwrap();
         std::fs::write(app.join("package.json"), "{ this is not json").unwrap();
@@ -1280,7 +1284,7 @@ mod tests {
 
     #[test]
     fn a_directory_that_is_not_a_deployment_says_which_part_is_missing() {
-        let dir = std::env::temp_dir().join(format!("openbot-empty-{}", std::process::id()));
+        let dir = temp_root("empty");
         std::fs::create_dir_all(&dir).unwrap();
 
         let problem = deployment_problem(&dir).expect("an empty directory is not a deployment");
@@ -1295,7 +1299,7 @@ mod tests {
 
     #[test]
     fn a_deployment_older_than_this_app_is_named_as_that_rather_than_left_to_fail() {
-        let dir = std::env::temp_dir().join(format!("openbot-old-{}", std::process::id()));
+        let dir = temp_root("old");
         for part in ["server", "app", "worker"] {
             std::fs::create_dir_all(dir.join(part)).unwrap();
         }
@@ -1315,7 +1319,7 @@ mod tests {
 
     #[test]
     fn a_complete_deployment_has_no_problem() {
-        let dir = std::env::temp_dir().join(format!("openbot-complete-{}", std::process::id()));
+        let dir = temp_root("complete");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("docker-compose.yml"), "services: {}\n").unwrap();
         for directory in ["server", "app", "worker"] {

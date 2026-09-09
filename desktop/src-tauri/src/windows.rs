@@ -263,6 +263,7 @@ pub fn blocker() -> Option<Blocker> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::temp_root;
 
     #[test]
     fn a_machine_already_running_a_hypervisor_is_not_told_to_switch_virtualization_on() {
@@ -345,7 +346,7 @@ mod tests {
 
     #[test]
     fn the_step_survives_the_restart_that_ends_the_process() {
-        let dir = std::env::temp_dir().join(format!("openbot-winstate-{}", std::process::id()));
+        let dir = temp_root("winstate");
         assert_eq!(
             read_step(&dir),
             SetupStep::Start,
@@ -366,7 +367,7 @@ mod tests {
 
     #[test]
     fn unreadable_state_starts_over_rather_than_refusing_to_run() {
-        let dir = std::env::temp_dir().join(format!("openbot-winstate-bad-{}", std::process::id()));
+        let dir = temp_root("winstate-bad");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(state_path(&dir), "{ not json").unwrap();
         assert_eq!(read_step(&dir), SetupStep::Start);

@@ -761,6 +761,7 @@ pub fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::temp_root;
 
     fn intelligence() -> Intelligence {
         Intelligence {
@@ -797,8 +798,7 @@ mod tests {
     fn restarting_does_not_add_a_banner_to_the_file_every_time() {
         // The banner is a comment, and the preserve pass keeps comments, so the file grew by one
         // banner and one blank line on every start: fifty restarts, fifty banners.
-        let dir = std::env::temp_dir().join(format!("openbot-env-banner-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("env-banner");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
 
@@ -820,8 +820,7 @@ mod tests {
     #[test]
     fn a_comment_somebody_else_wrote_is_still_kept() {
         // Only the shell's own banner is dropped; the rule about leaving other lines alone stands.
-        let dir = std::env::temp_dir().join(format!("openbot-env-keep-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("env-keep");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(
@@ -852,8 +851,7 @@ HTTPS_PROXY=http://proxy:8080
         // It holds KEY_ENCRYPTION_KEY and every minted token, so another local user must not be able
         // to read it off a shared machine.
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("openbot-env-perms-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("env-perms");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
 
@@ -1157,7 +1155,7 @@ HTTPS_PROXY=http://proxy:8080
 
     #[test]
     fn writing_keeps_settings_the_shell_does_not_own() {
-        let dir = std::env::temp_dir().join(format!("openbot-env-{}", std::process::id()));
+        let dir = temp_root("env");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(&path, "OPENAI_API_KEY=sk-somebodys-own\n# a comment\n").unwrap();
@@ -1185,7 +1183,7 @@ HTTPS_PROXY=http://proxy:8080
 
     #[test]
     fn rewriting_replaces_its_own_settings_rather_than_appending_them_twice() {
-        let dir = std::env::temp_dir().join(format!("openbot-env-twice-{}", std::process::id()));
+        let dir = temp_root("env-twice");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
 
@@ -1225,7 +1223,7 @@ HTTPS_PROXY=http://proxy:8080
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("openbot-env-{name}-{}", std::process::id()))
+        temp_root(&format!("env-{name}"))
     }
 
     fn fresh() -> BTreeMap<String, String> {
@@ -1421,6 +1419,7 @@ HTTPS_PROXY=http://proxy:8080
 #[cfg(test)]
 mod model_tests {
     use super::*;
+    use crate::test_support::temp_root;
 
     fn intelligence() -> Intelligence {
         Intelligence {
@@ -1731,7 +1730,7 @@ mod model_tests {
     /// The file is laid down even with no plan, because a missing mount source becomes a directory.
     #[test]
     fn the_store_file_is_written_whatever_the_choice() {
-        let dir = std::env::temp_dir().join(format!("openbot-store-{}", std::process::id()));
+        let dir = temp_root("store");
         std::fs::create_dir_all(&dir).unwrap();
 
         write_plan_store(
@@ -2031,7 +2030,7 @@ mod model_tests {
     /// The wizard does not ask twice for something already in the file.
     #[test]
     fn what_is_already_set_is_read_back() {
-        let dir = std::env::temp_dir().join(format!("openbot-read-{}", std::process::id()));
+        let dir = temp_root("read");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(
@@ -2061,7 +2060,7 @@ mod model_tests {
     /// Only what the wizard asks about. The rest of that file is somebody else's.
     #[test]
     fn nothing_the_wizard_did_not_ask_for_is_read_back() {
-        let dir = std::env::temp_dir().join(format!("openbot-read2-{}", std::process::id()));
+        let dir = temp_root("read2");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(&path, "PRIVATE_THING=not-yours\nINTELLIGENCE_API_KEY=k\n").unwrap();

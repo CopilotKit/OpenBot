@@ -1830,8 +1830,10 @@ mod tests {
     }
 
     fn temp_root(name: &str) -> PathBuf {
+        static NEXT_TEMP_ROOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let next = NEXT_TEMP_ROOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut path = std::env::temp_dir();
-        path.push(format!("{name}-{}", std::process::id()));
+        path.push(format!("{name}-{}-{next}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         path
     }

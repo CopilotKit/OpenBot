@@ -446,6 +446,7 @@ fn linux_package_manager() -> Option<(&'static str, &'static [&'static str])> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::temp_root;
 
     /// Every platform this app runs on has a Compose build, or the stack cannot be raised there.
     #[test]
@@ -485,8 +486,7 @@ mod tests {
 
     #[test]
     fn a_file_whose_digest_is_wrong_is_never_returned_to_be_run() {
-        let dir = std::env::temp_dir().join(format!("openbot-digest-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("digest");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("already-here"), b"not the pinned bytes").unwrap();
 
@@ -508,8 +508,7 @@ mod tests {
     /// resolve, so a fetch would fail rather than quietly succeed.
     #[test]
     fn a_file_already_here_with_the_right_digest_is_kept() {
-        let dir = std::env::temp_dir().join(format!("openbot-kept-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("kept");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("kept"), b"abc").unwrap();
 

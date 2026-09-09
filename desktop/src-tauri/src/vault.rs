@@ -523,6 +523,7 @@ fn owner_only(_path: &std::path::Path) {}
 #[cfg(test)]
 mod cache_tests {
     use crate::problem::Problem;
+    use crate::test_support::temp_root;
     use std::collections::BTreeMap;
 
     #[test]
@@ -659,8 +660,7 @@ mod cache_tests {
 
     #[test]
     fn passive_hydration_reads_only_the_file() {
-        let dir = std::env::temp_dir().join(format!("openbot-passive-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("passive");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(
@@ -704,6 +704,7 @@ mod cache_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::temp_root;
 
     /// The list is the security boundary, so it is asserted rather than trusted to a reading.
     #[test]
@@ -771,8 +772,7 @@ mod tests {
     */
     #[test]
     fn an_upgrade_leaves_no_credential_behind_in_the_file() {
-        let dir = std::env::temp_dir().join(format!("openbot-purge-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("purge");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(
@@ -850,9 +850,7 @@ SOMETHING_ELSE=kept\n",
 
     #[test]
     fn a_failed_upgrade_keeps_old_credentials_in_the_file() {
-        let dir =
-            std::env::temp_dir().join(format!("openbot-migration-fail-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("migration-fail");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(
@@ -908,9 +906,7 @@ SOMETHING_ELSE=kept\n",
 
     #[test]
     fn an_empty_upgrade_secret_is_forgotten_and_purged() {
-        let dir =
-            std::env::temp_dir().join(format!("openbot-migration-empty-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = temp_root("migration-empty");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(

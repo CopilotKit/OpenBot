@@ -382,6 +382,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::temp_root;
+
     /// Both plans name a Bot that exists and can actually use them.
     #[test]
     fn each_plan_names_a_bot_that_exists() {
@@ -529,8 +531,7 @@ mod tests {
     /// behaviour under test: a fixture built in memory would not catch a path that is looked for in
     /// the wrong place.
     fn deployment_naming_everything(label: &str) -> std::path::PathBuf {
-        let root =
-            std::env::temp_dir().join(format!("openbot-harness-{label}-{}", std::process::id()));
+        let root = temp_root(&format!("harness-{label}"));
         std::fs::create_dir_all(&root).unwrap();
         let named: Vec<String> = catalogue()
             .into_iter()
@@ -555,12 +556,7 @@ mod tests {
     }
 
     fn scratch(label: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "openbot-harness-{label}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
+        let root = temp_root(&format!("harness-{label}"));
         std::fs::create_dir_all(&root).expect("scratch root is made");
         root
     }
@@ -712,7 +708,7 @@ mod tests {
     /// does not exist.
     #[test]
     fn a_bot_this_release_does_not_publish_is_named_rather_than_pulled() {
-        let root = std::env::temp_dir().join(format!("openbot-empty-{}", std::process::id()));
+        let root = temp_root("empty");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             crate::deployment::images_path(&root),
