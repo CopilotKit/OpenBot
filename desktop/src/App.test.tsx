@@ -50,12 +50,18 @@ async function renderApp() {
 }
 
 type StartStackPayload = {
+  root?: unknown;
+  apiKey?: unknown;
+  apiUrl?: unknown;
+  gatewayWsUrl?: unknown;
+  harness?: unknown;
   model: {
     provider?: unknown;
     login?: unknown;
     apiKey?: unknown;
     baseUrl?: unknown;
     model?: unknown;
+    saved?: unknown;
   };
 };
 
@@ -106,6 +112,67 @@ function emptyConfiguration() {
       modelApiKeys: { openai: false, anthropic: false },
       modelSessions: { openai: false, anthropic: false },
     },
+  };
+}
+
+function useRootConfigurationSetup(
+  rootA: string,
+  loadConfiguration: (root: string) => Promise<unknown>,
+) {
+  invokeHandler = async (command, args) => {
+    if (command === "detect_engine") {
+      return {
+        engine: "docker",
+        responding: true,
+        engine_socket: null,
+        detail: "Docker is answering.",
+      };
+    }
+    if (command === "default_root") return rootA;
+    if (command === "already_configured") {
+      if (
+        typeof args !== "object" ||
+        args === null ||
+        !("root" in args) ||
+        typeof args.root !== "string"
+      ) {
+        throw new Error("already_configured requires a root");
+      }
+      return loadConfiguration(args.root);
+    }
+    if (command === "already_running") return false;
+    if (command === "windows_blocker") return null;
+    if (command === "last_failure") return null;
+    if (command === "harnesses") {
+      return [
+        {
+          id: "langgraph",
+          name: "LangGraph",
+          summary: "Default Bot",
+          image: null,
+          health_path: null,
+          credential: "any-provider",
+          maintainer: "first-party",
+          mark: null,
+          port: 8000,
+        },
+      ];
+    }
+    if (command === "providers") {
+      return [
+        {
+          id: "openai",
+          name: "OpenAI",
+          summary: "Use OpenAI.",
+          logins: ["api-key"],
+          mark: null,
+          caution: null,
+        },
+      ];
+    }
+    if (command === "prepare_engine") return null;
+    if (command === "start_stack") return null;
+    throw new Error(`unexpected command ${command}`);
   };
 }
 
@@ -483,57 +550,12 @@ test("root edits reload saved configuration for that root and ignore stale saved
   const emptyForRootB = deferred<ReturnType<typeof emptyConfiguration>>();
   const savedForRootC = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
 
-  invokeHandler = async (command, args) => {
-    if (command === "detect_engine") {
-      return {
-        engine: "docker",
-        responding: true,
-        engine_socket: null,
-        detail: "Docker is answering.",
-      };
-    }
-    if (command === "default_root") return rootA;
-    if (command === "already_configured") {
-      const requestedRoot = (args as { root?: string } | undefined)?.root;
-      if (requestedRoot === rootA) return savedForRootA.promise;
-      if (requestedRoot === rootB) return emptyForRootB.promise;
-      if (requestedRoot === rootC) return savedForRootC.promise;
-      throw new Error(`unexpected already_configured root ${requestedRoot}`);
-    }
-    if (command === "already_running") return false;
-    if (command === "windows_blocker") return null;
-    if (command === "last_failure") return null;
-    if (command === "harnesses") {
-      return [
-        {
-          id: "langgraph",
-          name: "LangGraph",
-          summary: "Default Bot",
-          image: null,
-          health_path: null,
-          credential: "any-provider",
-          maintainer: "first-party",
-          mark: null,
-          port: 8000,
-        },
-      ];
-    }
-    if (command === "providers") {
-      return [
-        {
-          id: "openai",
-          name: "OpenAI",
-          summary: "Use OpenAI.",
-          logins: ["api-key"],
-          mark: null,
-          caution: null,
-        },
-      ];
-    }
-    if (command === "prepare_engine") return null;
-    if (command === "start_stack") return null;
-    throw new Error(`unexpected command ${command}`);
-  };
+  useRootConfigurationSetup(rootA, async (requestedRoot) => {
+    if (requestedRoot === rootA) return savedForRootA.promise;
+    if (requestedRoot === rootB) return emptyForRootB.promise;
+    if (requestedRoot === rootC) return savedForRootC.promise;
+    throw new Error(`unexpected already_configured root ${requestedRoot}`);
+  });
 
   const view = await renderApp();
   await act(async () => {
@@ -613,6 +635,160 @@ test("root edits reload saved configuration for that root and ignore stale saved
     },
   });
 });
+
+test.each([
+  { name: "initial load", pendingRoot: "a", finalRoot: "b", savedModel: false },
+  {
+    name: "blur-started load",
+    pendingRoot: "b",
+    finalRoot: "c",
+    savedModel: true,
+  },
+  {
+    name: "away-and-back edit",
+    pendingRoot: "a",
+    finalRoot: "a",
+    savedModel: false,
+  },
+])(
+  "root edits invalidate the $name before blur",
+  async ({ pendingRoot, finalRoot, savedModel }) => {
+    const rootA = "/tmp/openbot-root-a";
+    const rootB = "/tmp/openbot-root-b";
+    const currentRoot = `/tmp/openbot-root-${finalRoot}`;
+    const requests: Array<{
+      root: string;
+      response: Deferred<ReturnType<typeof savedOpenAiConfiguration>>;
+    }> = [];
+    useRootConfigurationSetup(rootA, async (root) => {
+      const response = deferred<ReturnType<typeof savedOpenAiConfiguration>>();
+      requests.push({ root, response });
+      return response.promise;
+    });
+
+    const view = await renderApp();
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    if (savedModel) {
+      await act(async () =>
+        requests[0].response.resolve(savedOpenAiConfiguration()),
+      );
+    }
+    await user.click(
+      await view.findByRole("button", { name: "Set up OpenBot" }),
+    );
+    await user.click(await view.findByRole("button", { name: "Continue" }));
+    await user.click(await view.findByRole("radio", { name: /OpenAI/ }));
+    expect(
+      Boolean(view.queryByText(/A saved OpenAI API key will be used/)),
+    ).toBe(savedModel);
+    if (!savedModel) {
+      await user.type(
+        view.getByLabelText("OpenAI API key"),
+        "sk-synthetic-current-model",
+      );
+    }
+    await user.click(view.getByRole("button", { name: "Continue" }));
+    await user.click(view.getByText("Point at your own Intelligence server"));
+    const rootField = view.getByLabelText("Where OpenBot lives");
+    const startButton = view.getByRole("button", { name: "Start OpenBot" });
+    expect(startButton).toHaveProperty("disabled", !savedModel);
+
+    await user.clear(rootField);
+    await user.type(rootField, rootB);
+    if (pendingRoot === "b") {
+      // Start a new load on blur, then edit again while that load is pending.
+      await act(async () => rootField.blur());
+    }
+    if (currentRoot !== rootB) {
+      await user.clear(rootField);
+      await user.type(rootField, currentRoot);
+    }
+    const pending = requests[requests.length - 1];
+    expect(pending.root).toBe(`/tmp/openbot-root-${pendingRoot}`);
+    const requestCountBeforeBlur = requests.length;
+
+    function expectClearedState() {
+      expect(rootField).toHaveProperty("value", currentRoot);
+      expect(view.container.ownerDocument.activeElement === rootField).toBe(
+        true,
+      );
+      expect(Boolean(view.queryByText("Connected to CopilotKit."))).toBe(false);
+      expect(view.getByLabelText("Project key")).toHaveProperty("value", "");
+      expect(view.getByLabelText("API URL")).toHaveProperty(
+        "value",
+        "https://api.intelligence.copilotkit.ai",
+      );
+      expect(view.getByLabelText("Gateway WebSocket URL")).toHaveProperty(
+        "value",
+        "wss://realtime.intelligence.copilotkit.ai",
+      );
+      expect(startButton).toHaveProperty("disabled", true);
+      expect(requests).toHaveLength(requestCountBeforeBlur);
+      expect(invokeCalls.some((call) => call.command === "start_stack")).toBe(
+        false,
+      );
+    }
+
+    expectClearedState();
+    await act(async () =>
+      pending.response.resolve({
+        ...savedOpenAiConfiguration(),
+        values: {
+          INTELLIGENCE_API_KEY: "ck-synthetic-stale",
+          INTELLIGENCE_API_URL: "https://stale.example/api",
+          INTELLIGENCE_GATEWAY_WS_URL: "wss://stale.example/ws",
+        },
+      }),
+    );
+    expectClearedState();
+
+    // Intelligence alone cannot restore readiness for a saved model cleared by the edit.
+    if (savedModel) {
+      await act(async () => rootField.blur());
+      await act(async () =>
+        requests[requests.length - 1].response.resolve({
+          ...emptyConfiguration(),
+          saved: { ...emptyConfiguration().saved, intelligenceApiKey: true },
+        }),
+      );
+      expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
+      expect(startButton).toHaveProperty("disabled", true);
+      await user.click(rootField);
+    }
+    await act(async () => rootField.blur());
+    expect(requests[requests.length - 1].root).toBe(currentRoot);
+    expect(startButton).toHaveProperty("disabled", true);
+    await act(async () =>
+      requests[requests.length - 1].response.resolve({
+        ...savedOpenAiConfiguration(),
+        values: {
+          INTELLIGENCE_API_URL: "https://current.example/api",
+          INTELLIGENCE_GATEWAY_WS_URL: "wss://current.example/ws",
+        },
+      }),
+    );
+    expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
+    expect(startButton).toHaveProperty("disabled", false);
+    await user.click(startButton);
+    expect(
+      invokeCalls.filter((call) => call.command === "start_stack"),
+    ).toHaveLength(1);
+    expect(getStartStackPayload()).toEqual({
+      root: currentRoot,
+      apiKey: "",
+      apiUrl: "https://current.example/api",
+      gatewayWsUrl: "wss://current.example/ws",
+      harness: { id: "langgraph" },
+      model: savedModel
+        ? { provider: "openai", login: "api-key", saved: true }
+        : {
+            provider: "openai",
+            login: "api-key",
+            apiKey: "sk-synthetic-current-model",
+          },
+    });
+  },
+);
 
 test("bring-your-own agent collects a distinct AG-UI endpoint for startup", async () => {
   invokeHandler = async (command) => {

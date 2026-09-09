@@ -524,6 +524,8 @@ export function App() {
               id="root"
               value={root}
               onChange={(event) => {
+                // Invalidate pending loads before blur starts one for this edit.
+                configuredRunRef.current += 1;
                 setRoot(event.target.value);
                 clearRootScopedSavedState();
               }}
