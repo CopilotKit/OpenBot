@@ -580,14 +580,17 @@ const PUBLISHED: [&str; 4] = [
     "openbot-dev-worker-secret",
 ];
 
+/// Whether an original installation key can be reused without replacement.
+/// Start checks this before composition so an existing installation cannot silently rotate its key.
+pub fn usable_encryption_key(value: &str) -> bool {
+    !PUBLISHED.contains(&value) && matches!(BASE64.decode(value), Ok(bytes) if bytes.len() == 32)
+}
+
 fn usable(key: &str, value: &str) -> bool {
-    if value.is_empty() || PUBLISHED.contains(&value) {
-        return false;
-    }
     if key == "KEY_ENCRYPTION_KEY" {
-        return matches!(BASE64.decode(value), Ok(bytes) if bytes.len() == 32);
+        return usable_encryption_key(value);
     }
-    true
+    !value.is_empty() && !PUBLISHED.contains(&value)
 }
 
 fn carried(existing: &str) -> BTreeMap<String, String> {

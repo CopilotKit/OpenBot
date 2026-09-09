@@ -516,9 +516,11 @@ fn require_existing_encryption_key(
     if configured
         && !secrets
             .get("KEY_ENCRYPTION_KEY")
-            .is_some_and(|value| !value.trim().is_empty())
+            .is_some_and(|value| openbot_env::usable_encryption_key(value))
     {
-        return Err("OpenBot could not find this installation's saved encryption key. Restore access to its saved credentials before starting again.".into());
+        return Err(Problem::plain(
+            "This installation's saved encryption key is missing, invalid, or public. Restore its original private key from backup, or get help preserving its saved data. OpenBot will not replace the key automatically.",
+        ));
     }
     Ok(())
 }
@@ -2264,22 +2266,66 @@ mod tests {
     }
 
     #[test]
-    fn existing_installation_with_missing_encryption_key_cannot_mint_a_replacement() {
-        let root = temp_root("missing-existing-encryption-key");
+    fn existing_installation_rejects_unusable_original_encryption_keys() {
+        for marker in ["database", "model"] {
+            let root = temp_root(&format!("unusable-existing-encryption-key-{marker}"));
+            std::fs::create_dir_all(&root).unwrap();
+            if marker == "database" {
+                std::fs::write(
+                    root.join(".env"),
+                    "DATABASE_URL=postgres://synthetic-local\n",
+                )
+                .unwrap();
+            } else {
+                std::fs::write(
+                    root.join(openbot_desktop_lib::saved_intent::FILE),
+                    r#"{"version":1,"categories":[],"model":"open-ai-api-key"}"#,
+                )
+                .unwrap();
+                assert!(openbot_desktop_lib::saved_intent::SavedIntent::read(&root)
+                    .model
+                    .is_some());
+            }
+            for original in [
+                None,
+                Some(""),
+                Some("   "),
+                Some("not-base64"),
+                Some("c2hvcnQ="),
+                Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            ] {
+                let secrets = original
+                    .map(|value| {
+                        std::collections::BTreeMap::from([(
+                            "KEY_ENCRYPTION_KEY".into(),
+                            value.into(),
+                        )])
+                    })
+                    .unwrap_or_default();
+                assert!(
+                    require_existing_encryption_key(&root, &secrets).is_err(),
+                    "{marker}: {original:?}"
+                );
+            }
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn valid_existing_encryption_key_and_fresh_installation_are_allowed() {
+        let root = temp_root("valid-existing-encryption-key");
         std::fs::create_dir_all(&root).unwrap();
-        let absent = std::collections::BTreeMap::new();
-        assert!(require_existing_encryption_key(&root, &absent).is_ok());
+        assert!(require_existing_encryption_key(&root, &std::collections::BTreeMap::new()).is_ok());
         std::fs::write(
             root.join(".env"),
             "DATABASE_URL=postgres://synthetic-local\n",
         )
         .unwrap();
-        assert!(require_existing_encryption_key(&root, &absent).is_err());
-        let present = std::collections::BTreeMap::from([(
-            "KEY_ENCRYPTION_KEY".into(),
-            "synthetic-existing-key".into(),
-        )]);
-        assert!(require_existing_encryption_key(&root, &present).is_ok());
+        let original = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let secrets =
+            std::collections::BTreeMap::from([("KEY_ENCRYPTION_KEY".into(), original.into())]);
+        assert!(require_existing_encryption_key(&root, &secrets).is_ok());
+        assert_eq!(secrets["KEY_ENCRYPTION_KEY"], original);
         std::fs::remove_dir_all(root).unwrap();
     }
 
