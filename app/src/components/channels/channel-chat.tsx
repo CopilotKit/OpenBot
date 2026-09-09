@@ -51,21 +51,21 @@ export function channelHistoryNotice({
   messageCount,
   lastMessageAt,
   historyAvailability,
-  historyRefreshFailed = false,
+  historyReadFailed = false,
   unreadable,
 }: {
   restoring: boolean;
   messageCount: number;
   lastMessageAt: string | null;
   historyAvailability: "ready" | "unavailable";
-  historyRefreshFailed?: boolean;
+  historyReadFailed?: boolean;
   unreadable: number;
 }): string | null {
   if (restoring) return null;
 
   if (
     historyAvailability === "unavailable" &&
-    (historyRefreshFailed || (messageCount === 0 && lastMessageAt !== null))
+    (historyReadFailed || (messageCount === 0 && lastMessageAt !== null))
   ) {
     return "Earlier messages are temporarily unavailable. You can keep using this conversation.";
   }
@@ -167,7 +167,7 @@ export function ChannelChat({
   const [historyAvailability, setHistoryAvailability] = useState<
     "ready" | "unavailable"
   >("ready");
-  const [historyRefreshFailed, setHistoryRefreshFailed] = useState(false);
+  const [historyReadFailed, setHistoryReadFailed] = useState(false);
   // Mount reads and Bot refreshes share one ordering: only the newest read owns the notice.
   const historyReadVersion = useRef(0);
   useEffect(() => {
@@ -233,7 +233,8 @@ export function ChannelChat({
         if (isCurrent) {
           setUnreadable(stored.unreadable);
           setHistoryAvailability(stored.availability);
-          setHistoryRefreshFailed(false);
+          // A gateway snapshot may be partial; neither it nor a later send proves this read succeeded.
+          setHistoryReadFailed(stored.availability === "unavailable");
         }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
@@ -305,14 +306,14 @@ export function ChannelChat({
             // Only an exhausted refresh is a failure to announce. Keep the last known hole count.
             if (delayMs === 1500) {
               setHistoryAvailability("unavailable");
-              setHistoryRefreshFailed(true);
+              setHistoryReadFailed(true);
             }
             continue;
           }
           // A ready read owns the notice even when every readable id is already on screen.
           setUnreadable(stored.unreadable);
           setHistoryAvailability("ready");
-          setHistoryRefreshFailed(false);
+          setHistoryReadFailed(false);
           const current = agentRef.current;
           const seen = new Set(current.messages.map((message) => message.id));
           const fresh = stored.messages.filter(
@@ -347,7 +348,7 @@ export function ChannelChat({
     messageCount: agent.messages.length,
     lastMessageAt: channel.lastMessageAt,
     historyAvailability,
-    historyRefreshFailed,
+    historyReadFailed,
     unreadable,
   });
 

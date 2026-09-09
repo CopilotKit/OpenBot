@@ -1,9 +1,14 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import type { Message } from "@ag-ui/core";
+import {
+  type Message,
+  type RunAgentInput,
+  RunAgentInputSchema,
+} from "@ag-ui/core";
 import { CopilotKitProvider, useCopilotKit } from "@copilotkit/react-core/v2";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { type InfiniteData, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import {
   type AgentChannel,
@@ -24,16 +29,16 @@ const channel: AgentChannel = {
   active: true,
   lastMessageAt: "2026-09-09T00:00:00.000Z",
 };
-const initial: Message = {
+const initial = {
   id: "initial",
   role: "assistant",
   content: "Stored opening",
-};
-const fresh: Message = {
+} satisfies Message;
+const fresh = {
   id: "fresh",
   role: "assistant",
   content: "Fresh stored reply",
-};
+} satisfies Message;
 const local: Message = {
   id: "local",
   role: "user",
@@ -47,6 +52,8 @@ const oneHole =
 let originalFetch: typeof fetch;
 let history: (threadId: string) => Promise<Response>;
 let historyReads: string[];
+let gatewaySnapshot: readonly Message[] = [];
+let runRequests: { path: string; input: RunAgentInput }[] = [];
 let core: ReturnType<typeof useCopilotKit>["copilotkit"] | undefined;
 
 function CoreProbe() {
@@ -69,7 +76,7 @@ beforeAll(() => {
   GlobalRegistrator.register();
   originalFetch = globalThis.fetch;
   globalThis.fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0]) => {
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = new URL(
         typeof input === "string"
           ? input
@@ -91,7 +98,24 @@ beforeAll(() => {
           mode: "sse",
           telemetryDisabled: true,
         });
-      if (url.pathname.endsWith("/connect")) return sse([]);
+      if (url.pathname.endsWith("/connect"))
+        return sse([
+          { type: "RUN_STARTED", threadId: channel.threadId, runId: "join" },
+          { type: "MESSAGES_SNAPSHOT", messages: gatewaySnapshot },
+          { type: "RUN_FINISHED", threadId: channel.threadId, runId: "join" },
+        ]);
+      if (url.pathname.endsWith("/run")) {
+        const request =
+          input instanceof Request ? input : new Request(url, init);
+        const body = RunAgentInputSchema.parse(await request.json());
+        runRequests.push({ path: url.pathname, input: body });
+        return sse([
+          { type: "RUN_STARTED", threadId: body.threadId, runId: body.runId },
+          { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId },
+        ]);
+      }
+      if (/\/api\/channels\/[^/]+\/(activity|busy)$/.test(url.pathname))
+        return new NativeResponse(null, { status: 204 });
       const match = url.pathname.match(/\/threads\/([^/]+)\/messages$/);
       if (match) {
         const threadId = match[1];
@@ -143,8 +167,13 @@ function cacheChannel(selected: AgentChannel) {
     pageParams: [""],
   });
 }
-function mounting(read: typeof history = async () => stored([initial])) {
+function mounting(
+  read: typeof history = async () => stored([initial]),
+  snapshot: readonly Message[] = [],
+) {
   historyReads = [];
+  gatewaySnapshot = snapshot;
+  runRequests = [];
   history = read;
   cacheChannel(channel);
   return render(tree(channel));
@@ -186,6 +215,65 @@ function delayedResponse() {
 }
 
 // Real provider, ChannelChat, history reader, and query cache; only the HTTP boundary is synthetic.
+test.each([
+  { name: "partial gateway snapshot", snapshot: [initial] },
+  { name: "empty gateway snapshot", snapshot: [] },
+])(
+  "a failed mount restore warns over $name and after a same-thread send",
+  async ({ snapshot }) => {
+    const view = mounting(
+      async () => new NativeResponse("failed", { status: 500 }),
+      snapshot,
+    );
+    await view.findByText(unavailable);
+    if (snapshot.length > 0)
+      expect(view.getByText(initial.content)).toBeTruthy();
+    const user = userEvent.setup({ document: view.container.ownerDocument });
+    await user.type(
+      view.getByRole("textbox", { name: "Message" }),
+      "Later local turn",
+    );
+    await user.click(view.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(runRequests).toHaveLength(1));
+    expect(runRequests[0]?.path).toBe("/api/copilotkit/agent/refresh-bot/run");
+    expect(runRequests[0]?.input.threadId).toBe(channel.threadId);
+    expect(runRequests[0]?.input.messages.slice(0, snapshot.length)).toEqual([
+      ...snapshot,
+    ]);
+    expect(runRequests[0]?.input.messages.at(-1)).toMatchObject({
+      role: "user",
+      content: "Later local turn",
+    });
+    expect(view.getByText(unavailable)).toBeTruthy();
+    expect(view.queryByText(/different CopilotKit project/)).toBeNull();
+  },
+);
+
+test("a ready durable mount adds the newer turn beyond the gateway snapshot", async () => {
+  const view = mounting(async () => stored([initial, fresh]), [initial]);
+  await view.findByText(fresh.content);
+  expect(view.getByText(initial.content)).toBeTruthy();
+  expect(view.queryByText(unavailable)).toBeNull();
+  expect(currentAgent().messages.map((message) => message.id)).toEqual([
+    "initial",
+    "fresh",
+  ]);
+});
+
+test("explicit valid-empty durable history finishes without a failure notice", async () => {
+  const view = mounting(async () => stored([]));
+  await waitFor(() => expect(historyReads).toHaveLength(1));
+  await waitFor(() =>
+    expect(
+      view
+        .getByRole("textbox", { name: "Message" })
+        .getAttribute("contenteditable"),
+    ).toBe("true"),
+  );
+  expect(view.queryByText(unavailable)).toBeNull();
+  expect(currentAgent().messages).toEqual([]);
+});
+
 test("headless unreadable-only history updates the notice while preserving local messages", async () => {
   const view = await mounted();
   await act(async () => currentAgent().addMessage(local));
@@ -267,22 +355,29 @@ test("a cancelled channel refresh cannot replace the next channel's notice or me
   expect(view.queryByText("Wrong channel history")).toBeNull();
 });
 
-test("a delayed mount read cannot overwrite the notice from a newer Bot refresh", async () => {
-  const old = delayedResponse();
-  const view = mounting(() => old.promise);
-  await waitFor(() => expect(historyReads).toHaveLength(1));
-  history = async () => stored([fresh, broken]);
-  await announce(1);
-  await waitFor(() =>
+test.each(["unavailable", "unreadable"])(
+  "a delayed %s mount read cannot overwrite the notice from a newer Bot refresh",
+  async (outcome) => {
+    const old = delayedResponse();
+    const view = mounting(() => old.promise);
+    await waitFor(() => expect(historyReads).toHaveLength(1));
+    history = async () => stored([fresh, broken]);
+    await announce(1);
+    await waitFor(() =>
+      expect(currentAgent().messages.map((message) => message.id)).toEqual([
+        "fresh",
+      ]),
+    );
+    await act(async () =>
+      old.resolve(
+        outcome === "unavailable"
+          ? new NativeResponse("failed", { status: 500 })
+          : stored([broken, { ...broken, id: "old-hole" }]),
+      ),
+    );
+    await view.findByText(oneHole);
     expect(currentAgent().messages.map((message) => message.id)).toEqual([
       "fresh",
-    ]),
-  );
-  await act(async () =>
-    old.resolve(stored([broken, { ...broken, id: "old-hole" }])),
-  );
-  await view.findByText(oneHole);
-  expect(currentAgent().messages.map((message) => message.id)).toEqual([
-    "fresh",
-  ]);
-});
+    ]);
+  },
+);
