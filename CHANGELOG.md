@@ -8,6 +8,20 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### Quitting the desktop app stops the deployment it was running
+
+Stop and Quit take the containers down by running `compose down` in the deployment's own directory,
+and the shell remembers which directory that is while a stack is up. It also ends the run before it
+takes anything down, so the restart policy watching the three host processes does not start one
+again into a stack that is going away — and ending the run is what clears the remembered path. The
+path was then read back, two lines later, and was always the empty one that had just been written.
+So every stop fell through to the path it had been handed instead, which from the menu bar and on
+quit is the default `~/OpenBot`. A deployment somebody had put anywhere else was left running:
+postgres, the supervisor, the computer and both Bots still up, with the application gone from the
+screen and nothing left to stop them from. The deployment is now named at the moment the run ends,
+in one step, so the two cannot come apart again. A window that raised nothing itself still stops the
+deployment it was told about, which is what makes Stop work in a second window.
+
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank

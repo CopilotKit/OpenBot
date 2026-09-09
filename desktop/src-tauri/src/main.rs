@@ -44,6 +44,29 @@ struct Shell {
     setup_url: Mutex<Option<String>>,
 }
 
+impl Shell {
+    /// Which deployment this run raised, taken rather than read.
+    ///
+    /// Both places that stop a stack do the same two things, and the order they have to happen in
+    /// is what this exists for. The run is ended first, because the watcher must stop before
+    /// anything is killed or it answers a death it caused by starting a process into a stack that
+    /// is going away -- and ending the run is what clears this. Then the deployment has to be
+    /// named, because that is the directory `compose down` runs in.
+    ///
+    /// Read back afterwards it was always the `None` that had just been written, so every stop fell
+    /// through to the path it was handed instead. From the tray and on quit that is `default_root`,
+    /// and a deployment somebody put anywhere else was left running: `compose down` in
+    /// `~/OpenBot`, five containers still up, and no window left to stop them from. `take` is both
+    /// halves in one, in the only order they work in.
+    fn deployment_being_stopped(&self, fallback: &Path) -> PathBuf {
+        self.root
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| fallback.to_path_buf())
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct Progress {
     step: String,
@@ -300,29 +323,22 @@ fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), S
     shell
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    *shell.root.lock().unwrap() = None;
+    // Taken with the run it belongs to, in one step, because the next thing this needs is where
+    // that deployment is. The window may also be a second one, holding no handles to a stack that
+    // is still up: then there is nothing to take, and the deployment it was told about is the one
+    // to stop, or Stop is a button that does nothing and reports success.
+    let root = shell.deployment_being_stopped(fallback_root);
     for (_, mut child) in shell.children.lock().unwrap().drain(..) {
         let _ = child.kill();
         let _ = child.wait();
     }
 
-    // The window may be a second one, holding no handles to a stack that is still up. Stop what is
-    // there rather than only what this window started, or Stop is a button that does nothing and
-    // reports success.
-    let root = shell
-        .root
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| fallback_root.to_path_buf());
     stack::stop_processes_under(&root);
 
-    let outcome = match engine::detect().address {
+    match engine::detect().address {
         Some(found) => stack::down(&found, &root),
         None => Ok(()),
-    };
-    *shell.root.lock().unwrap() = None;
-    outcome
+    }
 }
 
 /// Show OpenBot itself in this window.
@@ -719,8 +735,11 @@ fn main() {
             // nobody is watching.
             if matches!(event, tauri::RunEvent::Exit) {
                 let shell = app.state::<Shell>();
+                // Taken before anything is killed, for the reason `deployment_being_stopped` gives:
+                // this ends the run, and the containers below have to be taken down in the
+                // deployment that run raised rather than in the default path.
+                let root = shell.deployment_being_stopped(&PathBuf::from(default_root()));
                 {
-                    *shell.root.lock().unwrap() = None;
                     let mut children = shell.children.lock().unwrap();
                     for (_, child) in children.iter_mut() {
                         ask_to_stop(child);
@@ -736,12 +755,6 @@ fn main() {
                 // The containers too. Leaving five of them running behind an application that is
                 // no longer on screen is the one outcome nobody can act on: there is no window to
                 // stop them from and nothing to say they are there.
-                let root = shell
-                    .root
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from(default_root()));
                 stack::stop_processes_under(&root);
                 if let Some(found) = engine::detect().address {
                     let _ = stack::down(&found, &root);
@@ -762,4 +775,68 @@ fn ask_to_stop(child: &std::process::Child) {
     }
     #[cfg(not(unix))]
     let _ = child;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_takes_down_the_deployment_this_window_raised() {
+        // The tray's Stop and the exit handler both pass `default_root` as the fallback, because
+        // neither of them is looking at the box the person typed a path into. Reading the root
+        // after the run had been ended handed them that fallback every time, so a deployment
+        // anywhere else was left running with nothing on screen able to stop it.
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(PathBuf::from("/srv/openbot"));
+
+        let stopping = shell.deployment_being_stopped(Path::new("/home/me/OpenBot"));
+
+        assert_eq!(
+            stopping,
+            PathBuf::from("/srv/openbot"),
+            "the containers would have been taken down in the wrong directory"
+        );
+    }
+
+    #[test]
+    fn ending_a_run_is_what_naming_it_does() {
+        // Taken, not read: the watcher stops on an empty root, and leaving one behind would have it
+        // start a process again into a stack that is being taken down.
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(PathBuf::from("/srv/openbot"));
+
+        let _ = shell.deployment_being_stopped(Path::new("/home/me/OpenBot"));
+
+        assert!(
+            shell.root.lock().unwrap().is_none(),
+            "the run has to end with the deployment being named"
+        );
+    }
+
+    #[test]
+    fn a_window_that_raised_nothing_stops_the_deployment_it_was_told_about() {
+        // A second window holds no handles to a stack an earlier one raised, and Stop there must
+        // still be a button that does something.
+        let shell = Shell::default();
+
+        assert_eq!(
+            shell.deployment_being_stopped(Path::new("/home/me/OpenBot")),
+            PathBuf::from("/home/me/OpenBot")
+        );
+    }
+
+    #[test]
+    fn stopping_twice_falls_back_the_second_time_rather_than_repeating_itself() {
+        // Stop, then quit: the second pass has nothing of its own left and must not go looking for
+        // a deployment that has already been taken down.
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(PathBuf::from("/srv/openbot"));
+
+        let first = shell.deployment_being_stopped(Path::new("/home/me/OpenBot"));
+        let second = shell.deployment_being_stopped(Path::new("/home/me/OpenBot"));
+
+        assert_eq!(first, PathBuf::from("/srv/openbot"));
+        assert_eq!(second, PathBuf::from("/home/me/OpenBot"));
+    }
 }
