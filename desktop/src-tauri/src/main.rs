@@ -888,15 +888,21 @@ where
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let root = shutdown_root(shell, fallback_root);
-    for (_, mut child) in shell.children.lock().unwrap().drain(..) {
-        let _ = child.kill();
-        let _ = child.wait();
+    let mut failures = Vec::new();
+    #[cfg(unix)]
+    let held_result = stack::stop_host_children(&root, &mut shell.children.lock().unwrap());
+    #[cfg(unix)]
+    if let Err(problem) = held_result {
+        failures.push(problem_detail(problem));
+    } else {
+        stop_held_children(shell);
     }
+    #[cfg(not(unix))]
+    stop_held_children(shell);
 
     // The window may be a second one, holding no handles to a stack that is still up. Stop what is
     // there rather than only what this window started, or Stop is a button that does nothing and
     // reports success.
-    let mut failures = Vec::new();
     if let Err(problem) = cleanup(&root) {
         failures.push(problem_detail(problem));
     }
@@ -909,6 +915,13 @@ where
         Ok(())
     } else {
         Err(failures.join("\n"))
+    }
+}
+
+fn stop_held_children(shell: &Shell) {
+    for (_, mut child) in shell.children.lock().unwrap().drain(..) {
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
@@ -938,12 +951,27 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    #[cfg(unix)]
+    shell
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let root = shutdown_root(shell, fallback_root);
+    let mut failures = Vec::new();
+    #[cfg(unix)]
+    let held_verified = match stack::stop_host_children(&root, &mut shell.children.lock().unwrap())
     {
-        let mut children = shell.children.lock().unwrap();
-        for (_, child) in children.iter_mut() {
-            ask_to_stop(child);
+        Ok(_) => true,
+        Err(problem) => {
+            failures.push(problem_detail(problem));
+            false
         }
+    };
+    #[cfg(not(unix))]
+    let held_verified = true;
+    if held_verified {
+        let mut children = shell.children.lock().unwrap();
+        // Unix's verified tree cleanup has already requested shutdown. Do not signal raw
+        // held PIDs here: try_wait may have reaped an exited child and its PID can be reused.
         std::thread::sleep(std::time::Duration::from_millis(1500));
         for (_, child) in children.iter_mut() {
             let _ = child.kill();
@@ -952,7 +980,6 @@ where
         children.clear();
     }
 
-    let mut failures = Vec::new();
     if let Err(problem) = cleanup(&root) {
         failures.push(problem_detail(problem));
     }
@@ -1567,12 +1594,34 @@ fn supervise_host_processes<R: tauri::Runtime>(
                 else {
                     continue;
                 };
+                // Serialize Unix restart publication with Stop's held-child cleanup. Recheck
+                // after acquiring the lock so a stopped generation cannot publish a new launch.
+                #[cfg(unix)]
+                let mut children = shell.children.lock().unwrap();
+                #[cfg(unix)]
+                if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+                    || shell.root.lock().unwrap().is_none()
+                {
+                    return;
+                }
                 match stack::spawn_host_process(process, &root, &logs, &bun, &secrets) {
                     Ok(child) => {
+                        #[cfg(not(unix))]
                         let mut children = shell.children.lock().unwrap();
-                        children.retain(|(held, _)| *held != name);
-                        children.push((name, child));
-                        report(&app, name, true, "started again");
+                        #[cfg(not(unix))]
+                        {
+                            children.retain(|(held, _)| *held != name);
+                            children.push((name, child));
+                            report(&app, name, true, "started again");
+                        }
+                        #[cfg(unix)]
+                        match stack::replace_host_process(&root, &mut children, name, child) {
+                            Ok(()) => report(&app, name, true, "started again"),
+                            Err(problem) => {
+                                report(&app, name, false, problem.said.clone());
+                                *shell.last_failure.lock().unwrap() = Some(problem);
+                            }
+                        }
                     }
                     Err(error) => report(
                         &app,
@@ -1840,20 +1889,6 @@ fn main() {
                 _ => {}
             }
         });
-}
-
-/// Ask a child to stop, rather than shooting it.
-///
-/// On Unix that is SIGTERM, which the runtime turns into an ordinary shutdown. Windows has no
-/// equivalent for a process without a console, so there it is the same as being killed; the wait
-/// below is what gives a well-behaved process its moment either way.
-fn ask_to_stop(child: &std::process::Child) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(child.id() as i32, libc::SIGTERM);
-    }
-    #[cfg(not(unix))]
-    let _ = child;
 }
 
 #[cfg(test)]

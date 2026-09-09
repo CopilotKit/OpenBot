@@ -333,9 +333,31 @@ pub struct RecordedHostProcess {
     pub creation_date: String,
 }
 
+/// Unix v2 evidence binds a process instance to the deployment and named launch.
+/// Unlike the legacy PID list, this survives reopening without trusting PID reuse or cwd.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct UnixHostProcess {
+    name: String,
+    deployment: PathBuf,
+    pid: u32,
+    start: String,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UnixProcess {
+    pid: u32,
+    parent: u32,
+    start: String,
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum RecordedHostPidFile {
+    UnixRecords {
+        version: u8,
+        unix_processes: Vec<UnixHostProcess>,
+    },
     Records {
         version: u8,
         processes: Vec<RecordedHostProcess>,
@@ -354,9 +376,10 @@ pub fn record_host_processes(root: &Path, processes: &[(&str, u32)]) -> Result<(
     record_windows_host_processes_with(root, processes, Path::new("powershell"))?;
     #[cfg(not(windows))]
     {
-        record_host_pids(
+        let records = unix_host_records(root, processes)?;
+        write_host_pid_file(
             root,
-            &processes.iter().map(|(_, pid)| *pid).collect::<Vec<_>>(),
+            &serde_json::json!({"version": 2, "unix_processes": records}),
         )?;
     }
     Ok(())
@@ -390,6 +413,13 @@ pub fn recorded_host_pids(root: &Path) -> Result<Vec<u32>, Problem> {
             version: 1,
             processes,
         }) => processes.into_iter().map(|process| process.pid).collect(),
+        Some(RecordedHostPidFile::UnixRecords {
+            version: 2,
+            unix_processes,
+        }) => unix_processes
+            .into_iter()
+            .map(|process| process.pid)
+            .collect(),
         Some(RecordedHostPidFile::Pids(pids)) => pids,
         _ => Vec::new(),
     })
@@ -421,10 +451,13 @@ fn recorded_host_pid_file(root: &Path) -> Result<Option<RecordedHostPidFile>, Pr
     };
     let recorded = serde_json::from_slice::<RecordedHostPidFile>(&raw)
         .map_err(|error| problem(format!("could not decode pidfile JSON: {error}")))?;
-    if let RecordedHostPidFile::Records { version, .. } = &recorded {
-        if *version != 1 {
-            return Err(problem(format!("unsupported pidfile version {version}")));
-        }
+    let (version, supported) = match &recorded {
+        RecordedHostPidFile::Records { version, .. } => (*version, 1),
+        RecordedHostPidFile::UnixRecords { version, .. } => (*version, 2),
+        RecordedHostPidFile::Pids(_) => (0, 0),
+    };
+    if version != supported {
+        return Err(problem(format!("unsupported pidfile version {version}")));
     }
     Ok(Some(recorded))
 }
@@ -516,51 +549,371 @@ pub fn spawn_host_process(
     command.spawn()
 }
 
-/// Stop the host processes belonging to a deployment, whoever started them.
-///
-/// Handles are not enough. A window opened a second time recognises a stack that is still up but
-/// holds nothing to stop it with, so a Stop button that only kills its own children is a button
-/// that does nothing and says it worked.
-///
-/// Found by their working directory, not their command line: all three run as
-/// `bun … src/index.ts`, and the only thing that says which deployment they belong to is where they
-/// are running. That is also how this session's own orphans hid twice.
+/// Keep a replacement handle even if refreshing durable ownership fails. The caller must
+/// report success only after this Result succeeds; Stop still has the handle on failure.
 #[cfg(unix)]
-pub fn stop_processes_under(root: &Path) -> Result<usize, Problem> {
-    stop_processes_under_with_lsof(root, Path::new("/usr/sbin/lsof"), |pid| {
-        terminate_unix_process(pid)
-    })
+pub fn replace_host_process(
+    root: &Path,
+    children: &mut Vec<(&'static str, std::process::Child)>,
+    name: &'static str,
+    child: std::process::Child,
+) -> Result<(), Problem> {
+    children.retain(|(held, _)| *held != name);
+    children.push((name, child));
+    let mut live = Vec::new();
+    for (name, child) in children.iter_mut() {
+        if child
+            .try_wait()
+            .map_err(|error| {
+                unix_ownership_problem(format!("could not inspect held {name}: {error}"))
+            })?
+            .is_none()
+        {
+            live.push((*name, child.id()));
+        }
+    }
+    record_host_processes(root, &live)
 }
 
 #[cfg(unix)]
-fn stop_processes_under_with_lsof<F>(
+fn unix_ownership_problem(detail: impl Into<String>) -> Problem {
+    Problem::with(
+        "OpenBot could not verify its host process ownership.",
+        detail,
+    )
+}
+
+#[cfg(unix)]
+fn safe_unix_pid(pid: u32) -> bool {
+    pid > 1
+        && pid <= i32::MAX as u32
+        && pid != std::process::id()
+        && pid != unsafe { libc::getppid() } as u32
+}
+
+#[cfg(unix)]
+fn unix_host_records(
     root: &Path,
-    lsof: &Path,
-    terminate: F,
-) -> Result<usize, Problem>
-where
-    F: FnMut(i32) -> Result<bool, Problem>,
-{
-    // One call, not one per process. Asking lsof about every pid in turn is what makes Stop look
-    // like a hang: a busy machine has several hundred processes, each invocation costs a fork and a
-    // few hundred milliseconds, and the person watching has been given no reason to think anything
-    // is happening. `-d cwd` over all processes is a single pass.
-    let operation = format!("{} -d cwd -Fpn", lsof.display());
-    let listing = command(lsof)
-        .args(["-d", "cwd", "-Fpn"])
+    processes: &[(&str, u32)],
+) -> Result<Vec<UnixHostProcess>, Problem> {
+    let deployment = std::fs::canonicalize(root).map_err(|error| {
+        unix_ownership_problem(format!(
+            "{}: could not resolve deployment: {error}",
+            root.display()
+        ))
+    })?;
+    processes
+        .iter()
+        .map(|(name, pid)| {
+            if !safe_unix_pid(*pid) || !HOST_PROCESSES.iter().any(|host| host.name == *name) {
+                return Err(unix_ownership_problem(format!(
+                    "invalid host launch {name}, pid {pid}"
+                )));
+            }
+            let live = unix_process(*pid)?.ok_or_else(|| {
+                unix_ownership_problem(format!("host {name}, pid {pid} is no longer running"))
+            })?;
+            if live.parent != std::process::id() {
+                return Err(unix_ownership_problem(format!(
+                    "host {name}, pid {pid} is not a child of this window"
+                )));
+            }
+            Ok(UnixHostProcess {
+                name: name.to_string(),
+                deployment: deployment.clone(),
+                pid: *pid,
+                start: live.start,
+            })
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn unix_process(pid: u32) -> Result<Option<UnixProcess>, Problem> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid as i32,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if read != size {
+        let error = std::io::Error::last_os_error();
+        if read == 0 && error.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(None);
+        }
+        return Err(unix_ownership_problem(format!(
+            "proc_pidinfo({pid}) returned {read}/{size} bytes: {error}"
+        )));
+    }
+    let info = unsafe { info.assume_init() };
+    if info.pbi_status == libc::SZOMB {
+        return Ok(None);
+    }
+    if info.pbi_pid != pid || info.pbi_start_tvsec == 0 {
+        return Err(unix_ownership_problem(format!(
+            "proc_pidinfo({pid}) returned invalid identity"
+        )));
+    }
+    Ok(Some(UnixProcess {
+        pid,
+        parent: info.pbi_ppid,
+        start: format!("macos:{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec),
+    }))
+}
+
+#[cfg(target_os = "linux")]
+fn unix_process(pid: u32) -> Result<Option<UnixProcess>, Problem> {
+    let path = format!("/proc/{pid}/stat");
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(unix_ownership_problem(format!("{path}: {error}"))),
+    };
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|error| {
+        unix_ownership_problem(format!("could not read Linux boot identity: {error}"))
+    })?;
+    parse_linux_process(pid, &raw, boot.trim())
+}
+
+#[cfg(all(unix, any(target_os = "linux", test)))]
+fn parse_linux_process(pid: u32, raw: &str, boot: &str) -> Result<Option<UnixProcess>, Problem> {
+    let invalid =
+        || unix_ownership_problem(format!("invalid Linux process inventory for pid {pid}"));
+    let (head, tail) = raw.rsplit_once(')').ok_or_else(invalid)?;
+    let (listed, _) = head.split_once('(').ok_or_else(invalid)?;
+    if listed.trim().parse::<u32>().ok() != Some(pid) || boot.is_empty() {
+        return Err(invalid());
+    }
+    let fields: Vec<_> = tail.split_whitespace().collect();
+    let parent = fields
+        .get(1)
+        .and_then(|s| s.parse::<u32>().ok())
+        .ok_or_else(invalid)?;
+    let start = fields
+        .get(19)
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .ok_or_else(invalid)?;
+    if fields.first() == Some(&"Z") {
+        return Ok(None);
+    }
+    Ok(Some(UnixProcess {
+        pid,
+        parent,
+        start: format!("linux:{boot}:{start}"),
+    }))
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+fn unix_process(_pid: u32) -> Result<Option<UnixProcess>, Problem> {
+    Err(unix_ownership_problem(
+        "process-instance verification is unsupported on this Unix platform",
+    ))
+}
+
+#[cfg(unix)]
+fn unix_inventory() -> Result<Vec<(u32, u32)>, Problem> {
+    unix_inventory_with(Path::new("/bin/ps"))
+}
+
+#[cfg(unix)]
+fn unix_inventory_with(ps: &Path) -> Result<Vec<(u32, u32)>, Problem> {
+    let operation = format!("{} -axo pid=,ppid=", ps.display());
+    let listing = command(ps)
+        .args(["-axo", "pid=,ppid="])
         .output()
         .map_err(|error| cleanup_spawn_problem(&operation, error))?;
-
     if !listing.status.success() {
         return Err(cleanup_status_problem(&operation, &listing));
     }
+    let raw = std::str::from_utf8(&listing.stdout).map_err(|error| {
+        unix_ownership_problem(format!("invalid process inventory encoding: {error}"))
+    })?;
+    let mut rows = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in raw.lines() {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        let invalid = || unix_ownership_problem("malformed Unix process inventory");
+        if fields.len() != 2 {
+            return Err(invalid());
+        }
+        let pid = fields[0].parse::<u32>().map_err(|_| invalid())?;
+        let parent = fields[1].parse::<u32>().map_err(|_| invalid())?;
+        if pid == 0 || !seen.insert(pid) {
+            return Err(invalid());
+        }
+        rows.push((pid, parent));
+    }
+    if rows.is_empty() {
+        return Err(unix_ownership_problem("empty Unix process inventory"));
+    }
+    Ok(rows)
+}
 
-    stop_processes_in_lsof(root, &String::from_utf8_lossy(&listing.stdout), terminate)
+/// Stop only recorded Unix instances and descendants whose ancestry is verified while the
+/// recorded parent is still alive. Cwd, command names and legacy PIDs never authorize a signal.
+#[cfg(unix)]
+pub fn stop_processes_under(root: &Path) -> Result<usize, Problem> {
+    let records = match recorded_host_pid_file(root)? {
+        None => return Ok(0),
+        Some(RecordedHostPidFile::UnixRecords { version: 2, unix_processes }) => unix_processes,
+        _ => return Err(unix_ownership_problem(format!("{}: legacy ownership evidence has no Unix process-instance identity; cleanup unresolved", host_pids_path(root).display()))),
+    };
+    stop_unix_records(root, &records)
+}
+
+/// Held children also provide ownership when durable recording failed. Call before killing
+/// their parents so descendants remain verifiable. Exited Child handles never authorize a PID.
+#[cfg(unix)]
+pub fn stop_host_children(
+    root: &Path,
+    children: &mut [(&str, std::process::Child)],
+) -> Result<usize, Problem> {
+    let mut live = Vec::new();
+    for (name, child) in children {
+        if child
+            .try_wait()
+            .map_err(|error| {
+                unix_ownership_problem(format!("could not inspect held {name}: {error}"))
+            })?
+            .is_none()
+        {
+            live.push((*name, child.id()));
+        }
+    }
+    if live.is_empty() {
+        return Ok(0);
+    }
+    stop_unix_records(root, &unix_host_records(root, &live)?)
+}
+
+#[cfg(unix)]
+fn stop_unix_records(root: &Path, records: &[UnixHostProcess]) -> Result<usize, Problem> {
+    if records.is_empty() {
+        return Ok(0);
+    }
+    let deployment = std::fs::canonicalize(root).map_err(|error| {
+        unix_ownership_problem(format!(
+            "{}: could not resolve deployment: {error}",
+            root.display()
+        ))
+    })?;
+    let inventory = unix_inventory()?;
+    stop_unix_records_with(
+        &deployment,
+        records,
+        &inventory,
+        unix_process,
+        terminate_unix_process,
+    )
+}
+
+#[cfg(unix)]
+fn stop_unix_records_with<I, T>(
+    deployment: &Path,
+    records: &[UnixHostProcess],
+    inventory: &[(u32, u32)],
+    mut inspect: I,
+    mut terminate: T,
+) -> Result<usize, Problem>
+where
+    I: FnMut(u32) -> Result<Option<UnixProcess>, Problem>,
+    T: FnMut(i32) -> Result<bool, Problem>,
+{
+    let mut stopped = 0;
+    let mut failures = Vec::new();
+    for record in records {
+        let result = (|| {
+            if record.deployment != deployment
+                || record.start.is_empty()
+                || !safe_unix_pid(record.pid)
+                || !HOST_PROCESSES.iter().any(|host| host.name == record.name)
+            {
+                return Err(unix_ownership_problem(format!(
+                    "invalid Unix ownership record for pid {}",
+                    record.pid
+                )));
+            }
+            let Some(live) = inspect(record.pid)? else {
+                return Ok(0);
+            };
+            if live.start != record.start {
+                return Ok(0);
+            }
+            if !inventory.contains(&(live.pid, live.parent)) {
+                return Err(unix_ownership_problem(format!(
+                    "process inventory lost the owned root pid {}",
+                    live.pid
+                )));
+            }
+            let mut tree = vec![(live, None)];
+            let mut seen = std::collections::HashSet::from([record.pid]);
+            let mut index = 0;
+            while index < tree.len() {
+                let parent = tree[index].0.pid;
+                for (pid, ppid) in inventory.iter().filter(|(_, ppid)| *ppid == parent) {
+                    if !safe_unix_pid(*pid) || !seen.insert(*pid) {
+                        return Err(unix_ownership_problem(
+                            "unsafe or cyclic owned process ancestry",
+                        ));
+                    }
+                    if let Some(child) = inspect(*pid)? {
+                        if child.parent != *ppid {
+                            return Err(unix_ownership_problem(format!(
+                                "process ancestry changed for pid {pid}"
+                            )));
+                        }
+                        tree.push((child, Some(index)));
+                    }
+                }
+                index += 1;
+            }
+            let mut count = 0;
+            // Descendants first. Verify the complete live chain immediately before each signal.
+            // On failure leave the parent alive and retain durable evidence for a retry.
+            for index in (0..tree.len()).rev() {
+                let mut ancestor = Some(index);
+                let mut present = true;
+                while let Some(at) = ancestor {
+                    match inspect(tree[at].0.pid)? {
+                        Some(now) if now == tree[at].0 => {}
+                        None if at == index => {
+                            present = false;
+                            break;
+                        }
+                        _ => {
+                            return Err(unix_ownership_problem(format!(
+                                "process identity or ancestry changed for pid {}",
+                                tree[at].0.pid
+                            )))
+                        }
+                    }
+                    ancestor = tree[at].1;
+                }
+                if present && terminate(tree[index].0.pid as i32)? {
+                    count += 1;
+                }
+            }
+            Ok(count)
+        })();
+        match result {
+            Ok(count) => stopped += count,
+            Err(problem) => failures.push(problem),
+        }
+    }
+    cleanup_result(stopped, failures)
 }
 
 #[cfg(unix)]
 fn terminate_unix_process(pid: i32) -> Result<bool, Problem> {
-    // Asked first; the caller waits before it insists.
+    if pid <= 1 || !safe_unix_pid(pid as u32) {
+        return Err(unix_ownership_problem("refused unsafe process target"));
+    }
     let killed = unsafe { libc::kill(pid, libc::SIGTERM) };
     if killed == 0 {
         return Ok(true);
@@ -573,38 +926,6 @@ fn terminate_unix_process(pid: i32) -> Result<bool, Problem> {
         "OpenBot could not stop one of its host processes.",
         format!("could not send SIGTERM to pid {pid}: {error}"),
     ))
-}
-
-#[cfg(unix)]
-fn stop_processes_in_lsof<F>(root: &Path, listing: &str, mut terminate: F) -> Result<usize, Problem>
-where
-    F: FnMut(i32) -> Result<bool, Problem>,
-{
-    let mut stopped = 0;
-    let mut failures = Vec::new();
-    let mut pid = None;
-    // -F output is one field per line: `p<pid>` starts a process, `n<path>` gives its directory.
-    for line in listing.lines() {
-        if let Some(found) = line.strip_prefix('p') {
-            pid = found.parse::<i32>().ok();
-            continue;
-        }
-        let Some(dir) = line.strip_prefix('n') else {
-            continue;
-        };
-        let Some(found) = pid else {
-            continue;
-        };
-        if !Path::new(dir).starts_with(root) {
-            continue;
-        }
-        match terminate(found) {
-            Ok(true) => stopped += 1,
-            Ok(false) => {}
-            Err(problem) => failures.push(problem),
-        }
-    }
-    cleanup_result(stopped, failures)
 }
 
 #[cfg(not(unix))]
@@ -1461,6 +1782,308 @@ mod tests {
     use super::*;
     use crate::test_support::temp_root;
 
+    #[cfg(unix)]
+    fn unix_fixture(pid: u32, parent: u32) -> UnixProcess {
+        UnixProcess {
+            pid,
+            parent,
+            start: format!("instance-{pid}"),
+        }
+    }
+
+    #[cfg(unix)]
+    fn unix_record(pid: u32) -> UnixHostProcess {
+        UnixHostProcess {
+            name: "app".into(),
+            deployment: PathBuf::from("/owned"),
+            pid,
+            start: format!("instance-{pid}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_ownership_selects_only_recorded_instance_and_verified_descendants() {
+        let live = [
+            unix_fixture(101, 100),
+            unix_fixture(102, 101),
+            unix_fixture(103, 102),
+            unix_fixture(201, 100),
+            unix_fixture(202, 201),
+        ];
+        // The other root may have the same cwd/command: neither is an ownership input.
+        let rows: Vec<_> = live.iter().map(|p| (p.pid, p.parent)).collect();
+        let mut attempted = Vec::new();
+        let count = stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &rows,
+            |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+            |pid| {
+                attempted.push(pid);
+                Ok(true)
+            },
+        )
+        .unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(attempted, [103, 102, 101]);
+        for root in ["/other", "/owned-sibling"] {
+            assert!(stop_unix_records_with(
+                Path::new(root),
+                &[unix_record(101)],
+                &rows,
+                |_| panic!("a different deployment is not inspected"),
+                |_| panic!("a different deployment is not signaled")
+            )
+            .is_err());
+        }
+        assert_eq!(
+            stop_unix_records_with(
+                Path::new("/owned"),
+                &[],
+                &rows,
+                |_| panic!("an unrecorded process is not inspected"),
+                |_| panic!("an unrecorded process is not signaled")
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_reused_pids_and_changed_ancestry_never_authorize_a_signal() {
+        let changed = UnixProcess {
+            start: "reused".into(),
+            ..unix_fixture(101, 100)
+        };
+        assert_eq!(
+            stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(101)],
+                &[(101, 100)],
+                |_| Ok(Some(changed.clone())),
+                |_| panic!("reused PID")
+            )
+            .unwrap(),
+            0
+        );
+        let mut reads = 0;
+        assert!(stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &[(101, 100), (102, 101)],
+            |pid| {
+                reads += 1;
+                Ok(Some(if reads > 2 {
+                    UnixProcess {
+                        start: "changed-after-inventory".into(),
+                        ..unix_fixture(pid, 100)
+                    }
+                } else {
+                    unix_fixture(pid, if pid == 102 { 101 } else { 100 })
+                }))
+            },
+            |_| panic!("changed instance must be revalidated")
+        )
+        .is_err());
+        assert!(stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &[(101, 100), (102, 101)],
+            |pid| Ok(Some(unix_fixture(pid, 100))),
+            |_| panic!("changed parent")
+        )
+        .is_err());
+        for pid in [
+            0,
+            1,
+            std::process::id(),
+            unsafe { libc::getppid() } as u32,
+            u32::MAX,
+        ] {
+            assert!(stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(pid)],
+                &[],
+                |_| panic!("unsafe PID"),
+                |_| panic!("unsafe PID")
+            )
+            .is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_cleanup_reports_failure_keeps_parent_and_attempts_other_owned_roots() {
+        let live = [
+            unix_fixture(101, 100),
+            unix_fixture(102, 101),
+            unix_fixture(201, 100),
+        ];
+        let mut attempted = Vec::new();
+        let problem = stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101), unix_record(201)],
+            &[(101, 100), (102, 101), (201, 100)],
+            |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+            |pid| {
+                attempted.push(pid);
+                if pid == 102 {
+                    Err(unix_ownership_problem(
+                        "synthetic signal refusal for pid 102",
+                    ))
+                } else {
+                    Ok(true)
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(attempted, [102, 201]);
+        assert!(problem.detail.unwrap().contains("synthetic signal refusal"));
+        assert_eq!(
+            stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(101)],
+                &[(101, 100)],
+                |_| Ok(Some(unix_fixture(101, 100))),
+                |_| Ok(false)
+            )
+            .unwrap(),
+            0
+        );
+        assert!(stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &[],
+            |_| Err(unix_ownership_problem("inventory denied")),
+            |_| panic!("lost inventory")
+        )
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_inventory_command_failures_and_malformed_output_are_errors() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_root("unix-inventory");
+        std::fs::create_dir_all(&root).unwrap();
+        let ps = root.join("ps");
+        assert!(unix_inventory_with(&ps)
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains("could not run"));
+        for body in [
+            "echo synthetic-ps-failure >&2; exit 9",
+            "echo malformed",
+            "exit 0",
+            "printf '101 100\\n101 100\\n'",
+        ] {
+            std::fs::write(&ps, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(unix_inventory_with(&ps).is_err(), "{body}");
+        }
+        std::fs::write(&ps, "#!/bin/sh\nprintf '101 100\\n102 101\\n'\n").unwrap();
+        assert_eq!(unix_inventory_with(&ps).unwrap(), [(101, 100), (102, 101)]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_missing_legacy_corrupt_and_versioned_records_fail_closed() {
+        let root = temp_root("unix-records");
+        assert_eq!(stop_processes_under(&root).unwrap(), 0);
+        record_host_pids(&root, &[42]).unwrap();
+        assert!(stop_processes_under(&root)
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains("legacy"));
+        assert_eq!(std::fs::read(host_pids_path(&root)).unwrap(), b"[42]");
+        for raw in [
+            "broken",
+            "{\"version\":2,\"unix_processes\":[{\"pid\":42}]}",
+            "{\"version\":3,\"unix_processes\":[]}",
+        ] {
+            std::fs::write(host_pids_path(&root), raw).unwrap();
+            assert!(stop_processes_under(&root).is_err());
+            assert_eq!(std::fs::read_to_string(host_pids_path(&root)).unwrap(), raw);
+        }
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":2,"unix_processes":[unix_record(101)]}),
+        )
+        .unwrap();
+        assert_eq!(recorded_host_pids(&root).unwrap(), [101]);
+        assert!(
+            recorded_host_processes(&root).unwrap().is_empty(),
+            "Windows v1 reader must not treat Unix records as Windows evidence"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_identity_parser_uses_boot_and_start_ticks_and_rejects_malformed_inventory() {
+        let raw = "101 (command with ) spaces) S 100 101 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 999 0";
+        let first = parse_linux_process(101, raw, "boot-one").unwrap().unwrap();
+        assert_eq!(first.parent, 100);
+        assert_eq!(first.start, "linux:boot-one:999");
+        assert_ne!(
+            first.start,
+            parse_linux_process(101, raw, "boot-two")
+                .unwrap()
+                .unwrap()
+                .start
+        );
+        for bad in [
+            "",
+            "101 malformed",
+            "101 (name) S 100",
+            "102 (wrong-pid) S 100",
+        ] {
+            assert!(parse_linux_process(101, bad, "boot-one").is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_restart_refreshes_identity_and_retains_new_handle_on_persistence_failure() {
+        let root = temp_root("unix-restart");
+        std::fs::create_dir_all(&root).unwrap();
+        let first = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let mut children = Vec::new();
+        replace_host_process(&root, &mut children, "app", first).unwrap();
+        let prior = std::fs::read(host_pids_path(&root)).unwrap();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let replacement_pid = replacement.id();
+        replace_host_process(&root, &mut children, "app", replacement).unwrap();
+        assert_eq!(recorded_host_pids(&root).unwrap(), [replacement_pid]);
+        assert_ne!(std::fs::read(host_pids_path(&root)).unwrap(), prior);
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        std::fs::remove_file(host_pids_path(&root)).unwrap();
+        std::fs::create_dir(host_pids_path(&root)).unwrap();
+        let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let replacement_pid = replacement.id();
+        let result = replace_host_process(&root, &mut children, "app", replacement);
+        assert_eq!(children[0].1.id(), replacement_pid);
+        let still_alive = children[0].1.try_wait().unwrap().is_none();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        assert!(still_alive);
+        assert!(result
+            .unwrap_err()
+            .detail
+            .unwrap()
+            .contains("replace pidfile"));
+        assert_eq!(std::fs::read_dir(root.join(".logs")).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
         match std::net::TcpListener::bind("[::1]:0") {
             Ok(listener) => Some(listener),
@@ -1929,135 +2552,6 @@ fn main() {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn lsof_owned_processes_return_kill_failures_instead_of_partial_success() {
-        let root = temp_root("openbot-lsof-kill-failure");
-        std::fs::create_dir_all(root.join("server")).unwrap();
-        let listing = format!(
-            "p101\nn{}\np202\nn{}\np303\nn{}\n",
-            root.join("server").display(),
-            root.display(),
-            root.display()
-        );
-        let mut attempted = Vec::new();
-
-        let problem = stop_processes_in_lsof(&root, &listing, |pid| {
-            attempted.push(pid);
-            if pid == 202 {
-                Err(Problem::with(
-                    "OpenBot could not stop one of its host processes.",
-                    "could not send SIGTERM to pid 202: synthetic refusal",
-                ))
-            } else {
-                Ok(true)
-            }
-        })
-        .expect_err("a failed kill must not be reported as a partial cleanup");
-
-        assert_eq!(attempted, vec![101, 202, 303]);
-        assert_eq!(
-            problem.said,
-            "OpenBot could not inspect or stop its host processes."
-        );
-        assert!(
-            problem
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains("pid 202")),
-            "{problem:?}"
-        );
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn lsof_no_match_and_already_gone_are_successful_controls() {
-        let root = temp_root("openbot-lsof-safe-controls");
-        let stranger = temp_root("openbot-lsof-stranger");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&stranger).unwrap();
-
-        let no_match =
-            stop_processes_in_lsof(&root, &format!("p303\nn{}\n", stranger.display()), |_| {
-                panic!("a process outside the root must not be signaled")
-            })
-            .expect("a successful inventory with no owned process is healthy");
-        assert_eq!(no_match, 0);
-
-        let already_gone =
-            stop_processes_in_lsof(&root, &format!("p404\nn{}\n", root.display()), |_| {
-                Ok(false)
-            })
-            .expect("an already-gone process is a completed cleanup");
-        assert_eq!(already_gone, 0);
-
-        std::fs::remove_dir_all(root).unwrap();
-        std::fs::remove_dir_all(stranger).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn source_bound_lsof_command_failures_and_controls_use_disposable_commands() {
-        let root = temp_root("openbot-source-bound-lsof");
-        std::fs::create_dir_all(root.join("server")).unwrap();
-        std::fs::create_dir_all(root.join("worker")).unwrap();
-        let fixture = CleanupCommandFixture::new(&root);
-        let lsof = fixture.command("lsof");
-
-        fixture.scenario("lsof-fail");
-        let problem = stop_processes_under_with_lsof(&root, &lsof, |_| Ok(true))
-            .expect_err("lsof status failure must cross the production helper");
-        assert_eq!(
-            problem.said,
-            "OpenBot could not inspect or stop its host processes."
-        );
-        assert!(
-            problem
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains("synthetic lsof status failure")),
-            "{problem:?}"
-        );
-        assert!(fixture.log().contains("lsof\t-d cwd -Fpn"));
-
-        fixture.scenario("lsof-ok");
-        let mut attempted = Vec::new();
-        let problem = stop_processes_under_with_lsof(&root, &lsof, |pid| {
-            attempted.push(pid);
-            if pid == 202 {
-                Err(Problem::with(
-                    "OpenBot could not stop one of its host processes.",
-                    "could not send SIGTERM to pid 202: synthetic refusal",
-                ))
-            } else {
-                Ok(true)
-            }
-        })
-        .expect_err("one kill failure must not prevent later owned target attempts");
-        assert_eq!(attempted, vec![101, 202, 303]);
-        assert!(
-            problem
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains("pid 202")),
-            "{problem:?}"
-        );
-
-        fixture.scenario("lsof-empty");
-        let no_match = stop_processes_under_with_lsof(&root, &lsof, |_| {
-            panic!("empty successful lsof output has no targets")
-        })
-        .expect("empty successful lsof output remains a safe no-target cleanup");
-        assert_eq!(no_match, 0);
-
-        fixture.scenario("lsof-ok");
-        let already_gone = stop_processes_under_with_lsof(&root, &lsof, |_| Ok(false))
-            .expect("already-gone targets are benign only through the termination result");
-        assert_eq!(already_gone, 0);
-        let _ = std::fs::remove_dir_all(root);
-    }
-
     #[cfg(test)]
     #[test]
     fn windows_cleanup_returns_taskkill_failures_after_attempting_later_targets() {
@@ -2445,7 +2939,7 @@ fn main() {
             .status()
             .unwrap()
             .success());
-        let result = record_host_processes(&root, &[("server", 43)]);
+        let result = record_host_pids(&root, &[43]);
         // Release the fixture's immutable flag before assertions, including on a writer failure.
         assert!(Command::new("/usr/bin/chflags")
             .arg("nouchg")
