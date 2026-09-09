@@ -10,7 +10,10 @@ serve AG-UI on a port, answer `/health`, and refuse anybody who does not carry t
 """
 
 import os
+from typing import Any
 
+import ag_ui_crewai.endpoint as crewai_endpoint
+from ag_ui.core import Message, Tool
 from ag_ui_crewai import add_crewai_flow_fastapi_endpoint
 from crewai.flow.flow import Flow, listen, start
 from fastapi import FastAPI, Request
@@ -36,6 +39,36 @@ def _model() -> str:
     provider = (os.environ.get("BOT_PROVIDER") or "openai").strip()
     model = (os.environ.get("BOT_MODEL") or "gpt-5.5").strip()
     return model if "/" in model else f"{provider}/{model}"
+
+
+_prepare_crewai_inputs = crewai_endpoint.crewai_prepare_inputs
+
+
+def _openbot_prepare_crewai_inputs(
+    *,
+    state: dict,
+    messages: list[Message],
+    tools: list[Tool],
+    context: list[Any] | None = None,
+    forwarded_props: Any = None,
+):
+    inputs = _prepare_crewai_inputs(
+        state=state,
+        messages=messages,
+        tools=tools,
+        context=context,
+        forwarded_props=forwarded_props,
+    )
+    if messages and getattr(messages[0], "role", None) == "system":
+        prepared_messages = inputs.get("messages")
+        if isinstance(prepared_messages, list):
+            leading_system = messages[0].model_dump()
+            if prepared_messages[:1] != [leading_system]:
+                inputs["messages"] = [leading_system, *prepared_messages]
+    return inputs
+
+
+crewai_endpoint.crewai_prepare_inputs = _openbot_prepare_crewai_inputs
 
 
 class OpenBotFlow(Flow):
