@@ -254,6 +254,20 @@ export function App() {
     }
   }
 
+  async function changeModelAfterAskFailure() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await invoke("stop_stack", { root });
+      setRunning(false);
+      setStep("model");
+    } catch (error) {
+      setFailure(asProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Nothing else on this screen can be done until the machine allows it, so nothing else is shown.
   if (blocker) {
     return (
@@ -313,7 +327,7 @@ export function App() {
               setFailure(asProblem(error)),
             );
           }}
-          onBack={() => setStep("model")}
+          onBack={changeModelAfterAskFailure}
         />
         {failure && <Failure problem={failure} />}
       </main>
