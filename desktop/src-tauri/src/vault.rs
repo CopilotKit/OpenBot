@@ -26,9 +26,8 @@ console to the end has no buffer limit of its own.
 */
 
 use std::collections::BTreeMap;
-// Only the two platforms that hand a value to another program need to write to a pipe, and only
-// the two that keep a file need a path to keep it at.
-#[cfg(target_os = "windows")]
+// Windows hands values to a child over stdin; tests exercise that pipe without a real store.
+#[cfg(any(target_os = "windows", test))]
 use std::io::Write;
 #[cfg(not(target_os = "macos"))]
 use std::path::PathBuf;
@@ -378,15 +377,48 @@ fn forget_in_store(name: &str) {
 
 #[cfg(target_os = "windows")]
 fn powershell(program: &str, input: Option<&str>) -> Result<String, Problem> {
-    let mut child = crate::quiet::command("powershell")
+    let child = crate::quiet::command("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", program])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|error| dpapi_problem(error.to_string()))?;
-    if let (Some(mut stdin), Some(text)) = (child.stdin.take(), input) {
-        let _ = stdin.write_all(text.as_bytes());
+    dpapi_output(child, input)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn write_dpapi_stdin(stdin: Option<impl Write>, input: Option<&str>) -> Result<(), Problem> {
+    if let Some(text) = input {
+        let mut stdin = stdin.ok_or_else(|| {
+            dpapi_problem("DPAPI stdin write failed: piped stdin is missing".into())
+        })?;
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|error| dpapi_problem(format!("DPAPI stdin write failed: {error}")))?;
+    }
+    // Taking ownership closes the pipe before the caller waits, including empty/absent input.
+    Ok(())
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn dpapi_output(mut child: std::process::Child, input: Option<&str>) -> Result<String, Problem> {
+    if let Err(mut problem) = write_dpapi_stdin(child.stdin.take(), input) {
+        // The input pipe is already closed. Do not leave a protector waiting after an early return,
+        // and keep the stdin failure primary even if termination or reaping also fails.
+        if let Err(error) = child.kill() {
+            problem
+                .detail
+                .get_or_insert_with(String::new)
+                .push_str(&format!("; terminating DPAPI child: {error}"));
+        }
+        if let Err(error) = child.wait() {
+            problem
+                .detail
+                .get_or_insert_with(String::new)
+                .push_str(&format!("; reaping DPAPI child: {error}"));
+        }
+        return Err(problem);
     }
     let done = child
         .wait_with_output()
@@ -399,12 +431,145 @@ fn powershell(program: &str, input: Option<&str>) -> Result<String, Problem> {
     Ok(String::from_utf8_lossy(&done.stdout).to_string())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn dpapi_problem(detail: String) -> Problem {
     Problem::with(
         "OpenBot could not save your sign-in details to this computer's protected storage.",
         detail,
     )
+}
+
+#[cfg(test)]
+mod dpapi_tests {
+    #[cfg(unix)]
+    use super::dpapi_output;
+    use super::{remember_cached, write_dpapi_stdin};
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+    use std::io::{self, Write};
+    use std::rc::Rc;
+    use std::sync::Mutex;
+
+    struct StdinWriter {
+        bytes: Rc<RefCell<Vec<u8>>>,
+        closed: Rc<Cell<bool>>,
+        fail_after: Option<usize>,
+    }
+
+    impl Write for StdinWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let mut delivered = self.bytes.borrow_mut();
+            let remaining = self.fail_after.unwrap_or(usize::MAX) - delivered.len();
+            if remaining == 0 {
+                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+            }
+            let count = bytes.len().min(remaining).min(3);
+            delivered.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Drop for StdinWriter {
+        fn drop(&mut self) {
+            self.closed.set(true);
+        }
+    }
+
+    #[test]
+    fn partial_stdin_write_reports_broken_pipe_and_closes_the_writer() {
+        let bytes = Rc::new(RefCell::new(Vec::new()));
+        let closed = Rc::new(Cell::new(false));
+        let problem = write_dpapi_stdin(
+            Some(StdinWriter {
+                bytes: Rc::clone(&bytes),
+                closed: Rc::clone(&closed),
+                fail_after: Some(3),
+            }),
+            Some("synthetic-stdin-value"),
+        )
+        .expect_err("incomplete stdin must not be accepted");
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains("stdin"), "{detail}");
+        assert!(detail.contains(&io::Error::from(io::ErrorKind::BrokenPipe).to_string()));
+        assert!(!detail.contains("synthetic-stdin-value"));
+        assert_eq!(bytes.borrow().as_slice(), b"syn");
+        assert!(closed.get());
+    }
+
+    #[test]
+    fn supplied_input_requires_a_pipe_even_when_empty() {
+        for input in ["synthetic-stdin-value", ""] {
+            let problem = write_dpapi_stdin(None::<StdinWriter>, Some(input))
+                .expect_err("supplied input requires piped stdin");
+            let detail = problem.detail.unwrap();
+            assert!(detail.contains("stdin"), "{detail}");
+            assert!(detail.contains("pipe"), "{detail}");
+        }
+    }
+
+    #[test]
+    fn complete_empty_and_absent_stdin_close_the_writer() {
+        for input in [Some("synthetic-stdin-value"), Some(""), None] {
+            let bytes = Rc::new(RefCell::new(Vec::new()));
+            let closed = Rc::new(Cell::new(false));
+            write_dpapi_stdin(
+                Some(StdinWriter {
+                    bytes: Rc::clone(&bytes),
+                    closed: Rc::clone(&closed),
+                    fail_after: None,
+                }),
+                input,
+            )
+            .unwrap();
+            assert_eq!(
+                bytes.borrow().as_slice(),
+                input.unwrap_or_default().as_bytes()
+            );
+            assert!(closed.get());
+        }
+        assert_eq!(write_dpapi_stdin(None::<StdinWriter>, None), Ok(()));
+    }
+
+    #[test]
+    fn failed_stdin_delivery_does_not_populate_the_success_cache() {
+        let cache = Mutex::new(BTreeMap::new());
+        let result = remember_cached(
+            "SYNTHETIC_TEST",
+            "synthetic-stdin-value",
+            &cache,
+            |_, value| {
+                write_dpapi_stdin(
+                    Some(StdinWriter {
+                        bytes: Rc::new(RefCell::new(Vec::new())),
+                        closed: Rc::new(Cell::new(false)),
+                        fail_after: Some(3),
+                    }),
+                    Some(value),
+                )
+            },
+        );
+        assert!(result.is_err());
+        assert!(cache.lock().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_stdin_reaches_child_eof_and_preserves_output() {
+        for input in [Some("synthetic-stdin-value"), Some(""), None] {
+            let child = crate::quiet::command("sh")
+                .args(["-c", "cat >/dev/null; printf SYNTHETIC_CIPHERTEXT"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            assert_eq!(dpapi_output(child, input).unwrap(), "SYNTHETIC_CIPHERTEXT");
+        }
+    }
 }
 
 /*
