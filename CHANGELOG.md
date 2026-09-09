@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### A Bot cannot end its turn by asking a person nothing
+
+`ask_person` is how a Bot stops and puts something to a person instead of guessing, and a call with
+no question in it was already meant to come back as a sentence telling it to say what it needs. That
+only happened when the field was missing altogether. A question that was present and empty was
+carried out: the Bot was told its question had been put to somebody, its turn ended there, and the
+trail took an escalation row with nothing in its question — the row an administrator counts these by,
+saying a person was asked something that was never said. On a deployment whose escalation route is a
+duty desk rather than the person already in the conversation, it is a page to somebody with no
+question on it. A blank question is now refused with the sentence that was already written for it,
+and a question typed with room around it is recorded as the question rather than as the spacing.
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank

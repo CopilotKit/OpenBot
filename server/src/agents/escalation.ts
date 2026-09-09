@@ -102,12 +102,31 @@ export function escalationTool(options: {
         return "That was not put to anybody: say what you need a person to answer.";
       }
 
+      /*
+       * A question field that is present and empty is a call with nothing in it.
+       *
+       * `z.string()` accepts "" and a run of spaces, so the refusal above — which is the sentence
+       * written for exactly this — only ever fired when the field was missing altogether. Spelled
+       * the other way it went straight through: the Bot was told its question had been put to
+       * somebody, the turn ended on that, and the trail took an `agent.escalated` row with nothing
+       * in its question, which is the row an operator counts escalations by. Where a route is a duty
+       * desk rather than the person already here, it is a page to somebody with no question on it.
+       *
+       * `message_bot`, which this competes with for the same decision, refuses a blank task and says
+       * so. This is the other half of that, and the trimmed text is what travels, for the same
+       * reason a handoff sends the trimmed task: what was recorded should be what was asked.
+       */
+      const question = parsed.data.question.trim();
+      if (!question) {
+        return "That was not put to anybody: say what you need a person to answer.";
+      }
+
       const outcome = await route({
         actorId: from.actorId,
         botId: from.botId,
         ...(from.threadId ? { threadId: from.threadId } : {}),
         runId: from.runId,
-        question: parsed.data.question,
+        question,
         ...(parsed.data.why ? { why: parsed.data.why } : {}),
       });
 
@@ -128,7 +147,7 @@ export function escalationTool(options: {
           payload: {
             bot: from.botId,
             run: from.runId,
-            question: parsed.data.question,
+            question,
             ...(parsed.data.why ? { why: parsed.data.why } : {}),
             ...("reached" in outcome
               ? { reached: outcome.reached }
