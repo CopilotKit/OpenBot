@@ -155,7 +155,17 @@ pub fn already_given_with_policy(
     keys: &[&str],
     policy: ReadPolicy,
 ) -> Result<BTreeMap<String, String>, Problem> {
-    let mut found = crate::env::already_set(env_file, keys);
+    let mut found = match policy {
+        ReadPolicy::FileOnly => crate::env::already_set(env_file, keys),
+        ReadPolicy::Interactive => {
+            crate::env::read_already_set(env_file, keys).map_err(|error| {
+                Problem::with(
+                    "OpenBot could not read its settings.",
+                    format!("{}: {error}", env_file.display()),
+                )
+            })?
+        }
+    };
     if policy == ReadPolicy::FileOnly {
         return Ok(found);
     }
@@ -886,6 +896,38 @@ mod cache_tests {
             Some(&"https://api.example".to_string())
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn file_only_hydration_keeps_unreadable_env_unknown_but_interactive_reports_it() {
+        let dir = temp_root("vault-strict-read");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(&path, b"INTELLIGENCE_API_URL=\xff\n").unwrap();
+
+        let file_only = super::already_given_with_policy(
+            &path,
+            &["INTELLIGENCE_API_URL"],
+            super::ReadPolicy::FileOnly,
+        )
+        .unwrap();
+        assert!(file_only.is_empty());
+
+        let interactive = super::already_given_with_policy(
+            &path,
+            &["INTELLIGENCE_API_URL"],
+            super::ReadPolicy::Interactive,
+        )
+        .expect_err("interactive Start/Ask must report unreadable .env input");
+        assert_eq!(interactive.said, "OpenBot could not read its settings.");
+        assert!(
+            interactive
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(path.to_string_lossy().as_ref())),
+            "{interactive:?}"
+        );
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

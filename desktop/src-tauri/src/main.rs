@@ -1997,6 +1997,76 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn saved_api_key_start_reports_unreadable_env_before_protected_storage() {
+        protected_store_trap::keep_all_operations_linked();
+        let root = temp_root("start-unreadable-env");
+        std::fs::create_dir_all(root.join(".env")).unwrap();
+        let before = protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst);
+
+        let problem = start_stack_credential(
+            &root,
+            ChosenModel {
+                provider: "openai".into(),
+                login: "api-key".into(),
+                api_key: None,
+                base_url: None,
+                model: None,
+                token: None,
+                saved: Some(true),
+            },
+        )
+        .expect_err("unreadable .env must stop saved-key resolution");
+
+        assert_eq!(problem.said, "OpenBot could not read its settings.");
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(root.join(".env").to_string_lossy().as_ref())),
+            "{problem:?}"
+        );
+        assert_eq!(
+            protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst),
+            before,
+            "Start reached protected storage after unreadable .env"
+        );
+        assert!(root.join(".env").is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ask_reports_unreadable_env_before_protected_storage_or_http() {
+        protected_store_trap::keep_all_operations_linked();
+        let root = temp_root("ask-unreadable-env");
+        std::fs::create_dir_all(root.join(".env")).unwrap();
+        let before = protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst);
+
+        let problem = tauri::async_runtime::block_on(ask_the_bot(
+            root.to_string_lossy().into_owned(),
+            "hello".into(),
+        ))
+        .expect_err("unreadable .env must stop Ask before transport");
+
+        assert_eq!(problem.said, "OpenBot could not read its settings.");
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(root.join(".env").to_string_lossy().as_ref())),
+            "{problem:?}"
+        );
+        assert_eq!(
+            protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst),
+            before,
+            "Ask reached protected storage after unreadable .env"
+        );
+        assert!(root.join(".env").is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn existing_installation_with_missing_encryption_key_cannot_mint_a_replacement() {
         let root = temp_root("missing-existing-encryption-key");

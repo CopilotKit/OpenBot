@@ -623,10 +623,7 @@ opening a dotfile in a text editor, which is the exact thing this product exists
 Only the settings the wizard asks about are read back. Everything else in that file is somebody
 else's, and this has no business handing it to a window.
 */
-pub fn already_set(path: &Path, keys: &[&str]) -> BTreeMap<String, String> {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return BTreeMap::new();
-    };
+fn already_set_in(text: &str, keys: &[&str]) -> BTreeMap<String, String> {
     let mut found = BTreeMap::new();
     for line in text.lines() {
         let line = line.trim();
@@ -645,6 +642,19 @@ pub fn already_set(path: &Path, keys: &[&str]) -> BTreeMap<String, String> {
         }
     }
     found
+}
+
+pub fn read_already_set(path: &Path, keys: &[&str]) -> std::io::Result<BTreeMap<String, String>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) => return Err(error),
+    };
+    Ok(already_set_in(&text, keys))
+}
+
+pub fn already_set(path: &Path, keys: &[&str]) -> BTreeMap<String, String> {
+    read_already_set(path, keys).unwrap_or_default()
 }
 
 /**
@@ -730,7 +740,16 @@ pub fn write(
     // copy would sit in the file forever, since `write` otherwise keeps every line it does not own.
     purge: &BTreeMap<String, String>,
 ) -> std::io::Result<()> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(std::io::Error::new(
+                error.kind(),
+                format!("{}: {error}", path.display()),
+            ))
+        }
+    };
     let carried = carried(&existing);
     let mut out = String::new();
 
@@ -2075,6 +2094,48 @@ mod model_tests {
         // Blank is not a value: the writer clears keys a choice does not imply, and handing those
         // back would undo that.
         assert!(!found.contains_key("INTELLIGENCE_API_URL"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn strict_read_reports_unreadable_env_but_missing_file_is_empty() {
+        let dir = temp_root("strict-read");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+
+        let missing = read_already_set(&path, &["INTELLIGENCE_API_KEY"]).unwrap();
+        assert!(missing.is_empty());
+
+        std::fs::create_dir(&path).unwrap();
+        let directory = read_already_set(&path, &["INTELLIGENCE_API_KEY"])
+            .expect_err("a directory .env is not a first-run empty file");
+        assert_ne!(directory.kind(), std::io::ErrorKind::NotFound);
+        std::fs::remove_dir(&path).unwrap();
+
+        std::fs::write(&path, b"INTELLIGENCE_API_KEY=\xff\n").unwrap();
+        let invalid = read_already_set(&path, &["INTELLIGENCE_API_KEY"])
+            .expect_err("invalid UTF-8 must not be treated as absent");
+        assert_eq!(invalid.kind(), std::io::ErrorKind::InvalidData);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_preserves_invalid_utf8_input_byte_for_byte() {
+        let dir = temp_root("invalid-write");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        let original = b"CUSTOM=\xff\nINTELLIGENCE_API_KEY=legacy\n".to_vec();
+        std::fs::write(&path, &original).unwrap();
+
+        let error = write(
+            &path,
+            &BTreeMap::from([("INTELLIGENCE_API_KEY".into(), "replacement".into())]),
+            &BTreeMap::new(),
+        )
+        .expect_err("invalid UTF-8 input must stop replacement writes");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
         std::fs::remove_dir_all(&dir).ok();
     }
 
