@@ -784,6 +784,8 @@ async fn ask_the_bot(
         &root.join(".env"),
         &[
             "PICKED_HARNESS_URL",
+            "PICKED_HARNESS_KIND",
+            "PICKED_HARNESS_AGENT_ID",
             "MANAGED_AGENT_AG_UI_URL",
             "MANAGED_AGENT_TOKEN",
         ],
@@ -800,6 +802,8 @@ async fn ask_the_bot(
         .get("MANAGED_AGENT_TOKEN")
         .cloned()
         .unwrap_or_default();
+    let kind = settings.get("PICKED_HARNESS_KIND").cloned();
+    let agent_id = settings.get("PICKED_HARNESS_AGENT_ID").cloned();
     if endpoint.trim().is_empty() || token.trim().is_empty() {
         return Err(openbot_desktop_lib::problem::Problem::plain(
             "OpenBot cannot find the Bot it just set up. Stop OpenBot and start it again.",
@@ -813,7 +817,13 @@ async fn ask_the_bot(
     };
 
     let asked = tauri::async_runtime::spawn_blocking(move || {
-        match openbot_desktop_lib::ask::ask(&endpoint, &token, &question) {
+        match openbot_desktop_lib::ask::ask_harness(
+            &endpoint,
+            &token,
+            &question,
+            kind.as_deref(),
+            agent_id.as_deref(),
+        ) {
             Ok(answer) => Ok(answer),
             // The empty sentence is `ask` saying it has no reason to give, which is the case the
             // log exists for. Anything else already carries both halves.
@@ -1452,4 +1462,147 @@ fn ask_to_stop(child: &std::process::Child) {
     }
     #[cfg(not(unix))]
     let _ = child;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    #[test]
+    fn ask_the_bot_uses_native_mastra_for_a_picked_mastra_harness() {
+        let server = TestServer::new(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+             data: {\"type\":\"text-delta\",\"payload\":{\"text\":\"391\"}}\n\n\
+             data: {\"type\":\"finish\",\"payload\":{\"stepResult\":{\"reason\":\"stop\"}}}\n\n",
+        );
+        let root = temp_root("openbot-mastra-ask");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::write(
+            root.join(".env"),
+            format!(
+                "PICKED_HARNESS_URL={}\n\
+                 PICKED_HARNESS_KIND=remote-mastra\n\
+                 PICKED_HARNESS_AGENT_ID=openbot\n\
+                 MANAGED_AGENT_TOKEN=managed-token\n",
+                server.url
+            ),
+        )
+        .expect("env");
+
+        let answer = tauri::async_runtime::block_on(ask_the_bot(
+            root.to_string_lossy().into_owned(),
+            "What is 17 times 23?".to_string(),
+        ))
+        .expect("answer");
+
+        let request = server.request();
+        assert_eq!(answer, "391");
+        assert_eq!(request.path, "/api/agents/openbot/stream");
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|line| line == "x-openbot-agent-token: managed-token"),
+            "{:?}",
+            request.headers
+        );
+        let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
+        assert_eq!(
+            body.pointer("/messages/0/content").and_then(|v| v.as_str()),
+            Some("What is 17 times 23?")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    struct TestRequest {
+        path: String,
+        headers: Vec<String>,
+        body: String,
+    }
+
+    struct TestServer {
+        url: String,
+        received: std::sync::mpsc::Receiver<TestRequest>,
+        done: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl TestServer {
+        fn new(response: &'static str) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let url = format!("http://{}", listener.local_addr().expect("addr"));
+            let (sender, received) = std::sync::mpsc::channel();
+            let done = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                loop {
+                    let read = stream.read(&mut buffer).expect("read");
+                    request.extend_from_slice(&buffer[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let header_end = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .expect("headers")
+                    + 4;
+                let headers = String::from_utf8_lossy(&request[..header_end]).to_string();
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().expect("content length"))
+                    })
+                    .unwrap_or(0);
+                while request.len() < header_end + content_length {
+                    let read = stream.read(&mut buffer).expect("read body");
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                let mut lines = headers.lines();
+                let path = lines
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .expect("path")
+                    .to_string();
+                let headers = lines
+                    .filter(|line| !line.trim().is_empty())
+                    .map(|line| line.to_ascii_lowercase())
+                    .collect();
+                let body =
+                    String::from_utf8_lossy(&request[header_end..header_end + content_length])
+                        .to_string();
+                sender
+                    .send(TestRequest {
+                        path,
+                        headers,
+                        body,
+                    })
+                    .expect("send request");
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+            });
+            Self {
+                url,
+                received,
+                done: Some(done),
+            }
+        }
+
+        fn request(mut self) -> TestRequest {
+            let request = self.received.recv().expect("request");
+            self.done.take().expect("thread").join().expect("join");
+            request
+        }
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        path
+    }
 }

@@ -98,6 +98,77 @@ pub fn ask(endpoint: &str, token: &str, question: &str) -> Result<String, Proble
     }
 }
 
+pub fn ask_harness(
+    endpoint: &str,
+    token: &str,
+    question: &str,
+    kind: Option<&str>,
+    agent_id: Option<&str>,
+) -> Result<String, Problem> {
+    if kind.map(str::trim) == Some("remote-mastra") {
+        return ask_mastra(endpoint, token, question, agent_id.unwrap_or_default());
+    }
+    ask(endpoint, token, question)
+}
+
+/// Ask a native Mastra server through its own agent stream endpoint.
+pub fn ask_mastra(
+    endpoint: &str,
+    token: &str,
+    question: &str,
+    agent_id: &str,
+) -> Result<String, Problem> {
+    let agent_id = agent_id.trim();
+    if agent_id.is_empty() {
+        return Err(Problem::plain(
+            "OpenBot cannot find the Mastra Bot it just set up. Stop OpenBot and start it again.",
+        ));
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(PATIENCE)
+        .build()
+        .map_err(|error| {
+            Problem::plain(format!("This machine cannot make web requests: {error}"))
+        })?;
+    let url = mastra_stream_url(endpoint, agent_id)?;
+    let body = serde_json::json!({
+        "threadId": format!("openbot-setup-{}", moment()),
+        "resourceId": "openbot-setup",
+        "messages": [{ "role": "user", "content": question }],
+        "clientTools": {},
+        "requestContext": { "ag-ui": { "context": [] } },
+    });
+
+    let response = client
+        .post(url)
+        .header("content-type", "application/json")
+        .header(AGENT_TOKEN_HEADER, token)
+        .json(&body)
+        .send()
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not reach the Bot it just set up.",
+                error.to_string(),
+            )
+        })?;
+
+    let status = response.status();
+    let text = response.text().unwrap_or_default();
+    if !status.is_success() {
+        return Err(Problem::with(
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                "The Bot refused OpenBot's own request. Stop OpenBot and start it again."
+            } else {
+                "The Bot could not answer."
+            },
+            format!("HTTP {status}\n{text}"),
+        ));
+    }
+
+    mastra_answer_in(&text).ok_or_else(|| Problem::plain(String::new()))
+}
+
 /**
 The answer, out of an AG-UI stream.
 
@@ -119,6 +190,49 @@ pub fn answer_in(body: &str) -> Option<String> {
             continue;
         }
         if let Some(delta) = event.get("delta").and_then(|d| d.as_str()) {
+            answer.push_str(delta);
+        }
+    }
+    let answer = answer.trim().to_string();
+    (!answer.is_empty()).then_some(answer)
+}
+
+fn mastra_stream_url(endpoint: &str, agent_id: &str) -> Result<reqwest::Url, Problem> {
+    let mut url = reqwest::Url::parse(endpoint.trim()).map_err(|error| {
+        Problem::with(
+            "OpenBot cannot find the Bot it just set up. Stop OpenBot and start it again.",
+            error.to_string(),
+        )
+    })?;
+    url.path_segments_mut()
+        .map_err(|_| {
+            Problem::plain(
+                "OpenBot cannot find the Bot it just set up. Stop OpenBot and start it again.",
+            )
+        })?
+        .clear()
+        .extend(["api", "agents", agent_id, "stream"]);
+    Ok(url)
+}
+
+/// The visible answer out of Mastra's native stream.
+pub fn mastra_answer_in(body: &str) -> Option<String> {
+    let mut answer = String::new();
+    for line in body.lines() {
+        let Some(data) = line.trim().strip_prefix("data:") else {
+            continue;
+        };
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(data.trim()) else {
+            continue;
+        };
+        if event.get("type").and_then(|t| t.as_str()) != Some("text-delta") {
+            continue;
+        }
+        if let Some(delta) = event
+            .get("payload")
+            .and_then(|payload| payload.get("text"))
+            .and_then(|text| text.as_str())
+        {
             answer.push_str(delta);
         }
     }
@@ -330,5 +444,152 @@ mod tests {
     #[test]
     fn the_suggested_question_is_checkable() {
         assert!(SUGGESTED.contains("17") && SUGGESTED.contains("23"));
+    }
+
+    #[test]
+    fn mastra_harness_uses_native_agent_stream() {
+        let server = TestServer::new(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+             data: {\"type\":\"text-delta\",\"payload\":{\"text\":\"thirty \"}}\n\n\
+             data: {\"type\":\"text-delta\",\"payload\":{\"text\":\"nine\"}}\n\n\
+             data: {\"type\":\"finish\",\"payload\":{\"stepResult\":{\"reason\":\"stop\"}}}\n\n",
+        );
+
+        let answer = ask_harness(
+            &server.url,
+            "managed-token",
+            "What is 20 plus 19?",
+            Some("remote-mastra"),
+            Some("openbot"),
+        )
+        .expect("native Mastra answer");
+
+        let request = server.request();
+        assert_eq!(request.path, "/api/agents/openbot/stream");
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|line| line == "x-openbot-agent-token: managed-token"),
+            "{:?}",
+            request.headers
+        );
+        let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
+        assert_eq!(
+            body.pointer("/messages/0/content").and_then(|v| v.as_str()),
+            Some("What is 20 plus 19?")
+        );
+        assert_eq!(answer, "thirty nine");
+    }
+
+    #[test]
+    fn ag_ui_harness_still_uses_the_ag_ui_request() {
+        let server = TestServer::new(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+             data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"ag-ui ok\"}\n\n",
+        );
+
+        let answer = ask_harness(
+            &server.url,
+            "managed-token",
+            "hello",
+            Some("remote-ag-ui"),
+            Some("openbot"),
+        )
+        .expect("AG-UI answer");
+
+        let request = server.request();
+        assert_eq!(request.path, "/");
+        let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
+        assert!(
+            body.get("threadId").is_some(),
+            "AG-UI request body was not sent: {body}"
+        );
+        assert_eq!(answer, "ag-ui ok");
+    }
+
+    struct TestRequest {
+        path: String,
+        headers: Vec<String>,
+        body: String,
+    }
+
+    struct TestServer {
+        url: String,
+        received: std::sync::mpsc::Receiver<TestRequest>,
+        done: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl TestServer {
+        fn new(response: &'static str) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            let url = format!("http://{}", listener.local_addr().expect("addr"));
+            let (sender, received) = std::sync::mpsc::channel();
+            let done = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept");
+                use std::io::{Read, Write};
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                loop {
+                    let read = stream.read(&mut buffer).expect("read");
+                    request.extend_from_slice(&buffer[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let header_end = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .expect("headers")
+                    + 4;
+                let headers = String::from_utf8_lossy(&request[..header_end]).to_string();
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().expect("content length"))
+                    })
+                    .unwrap_or(0);
+                while request.len() < header_end + content_length {
+                    let read = stream.read(&mut buffer).expect("read body");
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                let mut lines = headers.lines();
+                let path = lines
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .expect("path")
+                    .to_string();
+                let headers = lines
+                    .filter(|line| !line.trim().is_empty())
+                    .map(|line| line.to_ascii_lowercase())
+                    .collect();
+                let body =
+                    String::from_utf8_lossy(&request[header_end..header_end + content_length])
+                        .to_string();
+                sender
+                    .send(TestRequest {
+                        path,
+                        headers,
+                        body,
+                    })
+                    .expect("send request");
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+            });
+            Self {
+                url,
+                received,
+                done: Some(done),
+            }
+        }
+
+        fn request(mut self) -> TestRequest {
+            let request = self.received.recv().expect("request");
+            self.done.take().expect("thread").join().expect("join");
+            request
+        }
     }
 }
