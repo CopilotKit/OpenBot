@@ -366,12 +366,7 @@ pub fn services_that_exited(engine: &Address, root: &Path) -> Vec<(String, Strin
 /// outside.
 pub fn port_already_taken(ports: &[(&'static str, u16)]) -> Option<String> {
     for (name, port) in ports {
-        if std::net::TcpStream::connect_timeout(
-            &std::net::SocketAddr::from(([127, 0, 0, 1], *port)),
-            std::time::Duration::from_millis(300),
-        )
-        .is_ok()
-        {
+        if held_on_a_loopback(*port) {
             return Some(format!(
                 "Something is already listening on port {port}, which OpenBot uses for the {name}. \
                  Stop it, or change the port, and start again."
@@ -379,6 +374,28 @@ pub fn port_already_taken(ports: &[(&'static str, u16)]) -> Option<String> {
         }
     }
     None
+}
+
+/// Whether anything is listening on `port`, at either address a loopback service can be bound to.
+///
+/// Both, for the reason `LOOPBACKS` below already records: a process binds whichever loopback its
+/// runtime resolved `localhost` to, and binding one and not the other is normal rather than broken.
+/// Asking only `127.0.0.1` therefore called a port free that the readiness check would then accept a
+/// stranger's answer on, which is the exact outcome the check above exists to prevent. A refused
+/// connection comes back at once on both addresses, so the second question costs nothing on a port
+/// nobody holds.
+fn held_on_a_loopback(port: u16) -> bool {
+    const LOOPBACK_ADDRESSES: [std::net::IpAddr; 2] = [
+        std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+    ];
+    LOOPBACK_ADDRESSES.iter().any(|address| {
+        std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::new(*address, port),
+            std::time::Duration::from_millis(300),
+        )
+        .is_ok()
+    })
 }
 
 /// Wait until the API answers, or say why it never did.
@@ -712,6 +729,23 @@ mod tests {
         assert!(problem.contains(&port.to_string()), "{problem}");
         assert!(
             problem.contains("API server"),
+            "must say what it is for: {problem}"
+        );
+    }
+
+    #[test]
+    fn a_port_held_on_the_other_loopback_is_still_held() {
+        // The readiness check accepts an answer at either loopback, for the reason `LOOPBACKS`
+        // gives: a process binds whichever one its runtime resolved `localhost` to. A guard that
+        // asks only 127.0.0.1 therefore calls a port free that `answering_at` would then accept a
+        // stranger's answer on, which is the one outcome this check exists to prevent.
+        let listener = std::net::TcpListener::bind("[::1]:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let problem = port_already_taken(&[("app", port)]).expect("a held port is a problem");
+        assert!(problem.contains(&port.to_string()), "{problem}");
+        assert!(
+            problem.contains("app"),
             "must say what it is for: {problem}"
         );
     }
