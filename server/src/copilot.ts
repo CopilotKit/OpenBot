@@ -99,6 +99,7 @@ export type RegisteredAgent =
 
 type AgentRunInput = Parameters<AbstractAgent["run"]>[0];
 type AgentMessage = AgentRunInput["messages"][number];
+type AgentContext = NonNullable<AgentRunInput["context"]>[number];
 export type StandingRoleMessage = Extract<AgentMessage, { role: "system" }>;
 type AgentHeaders = Record<string, string>;
 type HeaderBearingAgent = AbstractAgent & { headers?: AgentHeaders };
@@ -812,6 +813,41 @@ function remoteAgentWithStandingRole(
     next: AbstractAgent,
   ) => {
     const holdingsMessage = holdingsMessageFor(tools);
+    const runAssertion = signRun
+      ? signRun(agent.id, input.runId, input.threadId)
+      : undefined;
+    const deploymentTools = tools.map((tool) => tool.name);
+    const forwardedProps = {
+      ...(isPlainObject(input.forwardedProps) ? input.forwardedProps : {}),
+      openbotBotId: agent.id,
+      /*
+       * Which of those tools this deployment runs, as opposed to the surface.
+       *
+       * `tools` mixes two kinds that a name cannot tell apart: the Bot's grants, which execute
+       * here through the policy and the audit trail, and the components the browser draws. A Bot
+       * that ran the second kind through this deployment asked it to execute a chart, was told it
+       * could not, and then apologised to the person for not showing the chart that was on screen
+       * in front of them. Only this side knows which is which, so only this side can say.
+       */
+      openbotDeploymentTools: deploymentTools,
+      /*
+       * This deployment's own statement of what this run is.
+       *
+       * Signed, short-lived, and naming the Bot and the person. The agent hands it back when it
+       * calls a tool, and that is where the Bot and the actor come from: its own token says which
+       * agent is calling, and this says who it is calling for. Neither is taken from the request
+       * body any more, which is what used to make the audit trail forgeable by anything holding
+       * one shared secret.
+       */
+      ...(runAssertion
+        ? { openbotRun: runAssertion }
+        : /*
+           * Absent means this deployment cannot sign, so the agent is given nothing to hand back
+           * and its tool calls will be refused. That is the right direction to fail: a Bot that
+           * cannot prove whose run it is should not be spending anybody's grants.
+           */
+          {}),
+    };
     /*
      * The same guard a built-in Bot gets in `BuiltInAgentWithSaneHistory`, applied here because a
      * remote Bot never passes through it: this middleware is the last thing between the browser's
@@ -855,38 +891,21 @@ function remoteAgentWithStandingRole(
           >,
         })),
       ],
+      context:
+        agent.type === "remote_mastra"
+          ? [
+              ...(input.context ?? []),
+              ...mastraOpenBotContext({
+                standingMessage: agent.standingMessage,
+                holdingsMessage,
+                botId: agent.id,
+                deploymentTools,
+                runAssertion,
+              }),
+            ]
+          : input.context,
       // Who the Bot is calling back as, so the audit row names it rather than "an agent".
-      forwardedProps: {
-        ...(input.forwardedProps ?? {}),
-        openbotBotId: agent.id,
-        /*
-         * Which of those tools this deployment runs, as opposed to the surface.
-         *
-         * `tools` mixes two kinds that a name cannot tell apart: the Bot's grants, which execute
-         * here through the policy and the audit trail, and the components the browser draws. A Bot
-         * that ran the second kind through this deployment asked it to execute a chart, was told it
-         * could not, and then apologised to the person for not showing the chart that was on screen
-         * in front of them. Only this side knows which is which, so only this side can say.
-         */
-        openbotDeploymentTools: tools.map((tool) => tool.name),
-        /*
-         * This deployment's own statement of what this run is.
-         *
-         * Signed, short-lived, and naming the Bot and the person. The agent hands it back when it
-         * calls a tool, and that is where the Bot and the actor come from: its own token says which
-         * agent is calling, and this says who it is calling for. Neither is taken from the request
-         * body any more, which is what used to make the audit trail forgeable by anything holding
-         * one shared secret.
-         */
-        ...(signRun
-          ? { openbotRun: signRun(agent.id, input.runId, input.threadId) }
-          : /*
-             * Absent means this deployment cannot sign, so the agent is given nothing to hand back
-             * and its tool calls will be refused. That is the right direction to fail: a Bot that
-             * cannot prove whose run it is should not be spending anybody's grants.
-             */
-            {}),
-      },
+      forwardedProps,
     } as never);
   };
 
@@ -904,6 +923,51 @@ function remoteAgentWithStandingRole(
       ),
     );
   });
+}
+
+function mastraOpenBotContext({
+  standingMessage,
+  holdingsMessage,
+  botId,
+  deploymentTools,
+  runAssertion,
+}: {
+  standingMessage: StandingRoleMessage;
+  holdingsMessage: StandingRoleMessage | null;
+  botId: string;
+  deploymentTools: string[];
+  runAssertion: string | undefined;
+}): AgentContext[] {
+  return [
+    {
+      description: "OpenBot standing role",
+      value: standingMessage.content,
+    },
+    ...(holdingsMessage
+      ? [
+          {
+            description: "OpenBot granted tools guidance",
+            value: holdingsMessage.content,
+          },
+        ]
+      : []),
+    {
+      description: "OpenBot Bot id",
+      value: botId,
+    },
+    {
+      description: "OpenBot deployment tools",
+      value: JSON.stringify(deploymentTools),
+    },
+    ...(runAssertion
+      ? [
+          {
+            description: "OpenBot signed run assertion",
+            value: runAssertion,
+          },
+        ]
+      : []),
+  ];
 }
 
 class CloningRemoteAgent extends AbstractAgent {

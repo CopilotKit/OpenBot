@@ -82,6 +82,16 @@ let sentToRemote: {
   forwardedProps: Record<string, unknown>;
 }[] = [];
 
+type NativeMastraRequestBody = {
+  messages?: { role?: string; content?: unknown }[];
+  clientTools?: Record<string, unknown>;
+  requestContext?: {
+    "ag-ui"?: {
+      context?: { description: string; value: string }[];
+    };
+  };
+};
+
 beforeAll(async () => {
   const url = await llm.start();
   process.env.OPENAI_BASE_URL = url;
@@ -211,6 +221,22 @@ function toolsOfferedToModel(): string[] {
   )
     .map((tool) => tool.function?.name ?? "")
     .filter((name) => name.startsWith("mcp__"));
+}
+
+async function parseNativeMastraBody(
+  body: BodyInit | null | undefined,
+): Promise<NativeMastraRequestBody | null> {
+  if (typeof body === "string") {
+    return JSON.parse(body);
+  }
+  if (body instanceof Blob) {
+    return JSON.parse(await body.text());
+  }
+  return null;
+}
+
+function openBotContextFrom(body: NativeMastraRequestBody) {
+  return body.requestContext?.["ag-ui"]?.context ?? [];
 }
 
 describe("a built-in Bot", () => {
@@ -436,9 +462,10 @@ describe("a remote Bot", () => {
 });
 
 describe("a remote Mastra Bot", () => {
-  test("keeps OpenBot middleware through the runtime's request clone", async () => {
+  test("keeps OpenBot governance through the runtime clone and native Mastra request", async () => {
     answerWith(["slack-digest"]);
     const sentToMastraAgent: RunAgentInput[] = [];
+    const sentToMastra: NativeMastraRequestBody[] = [];
     const originalRun = MastraAgent.prototype.run;
     MastraAgent.prototype.run = function (input: RunAgentInput) {
       sentToMastraAgent.push(input);
@@ -453,8 +480,17 @@ describe("a remote Mastra Bot", () => {
         return Response.json({ openbot: { name: "OpenBot" } });
       }
       if (url.pathname === "/api/agents/openbot/stream") {
+        const body = await parseNativeMastraBody(_init?.body);
+        if (body) {
+          sentToMastra.push(body);
+        }
         return new Response(
           `data: ${JSON.stringify({
+            type: "text-delta",
+            runId: "run-1",
+            from: "AGENT",
+            payload: { text: "done" },
+          })}\n\ndata: ${JSON.stringify({
             type: "finish",
             runId: "run-1",
             from: "AGENT",
@@ -502,9 +538,10 @@ describe("a remote Mastra Bot", () => {
           }),
         }),
       );
-      await response.text();
+      const responseText = await response.text();
 
       expect(response.status).toBe(200);
+      expect(responseText).toContain("done");
       expect(sentToMastraAgent).toHaveLength(1);
       const run = sentToMastraAgent[0];
       expect(run?.messages?.[0]?.id).toBe("standing-role:risk-mastra");
@@ -527,6 +564,38 @@ describe("a remote Mastra Bot", () => {
       expect(run?.forwardedProps?.openbotDeploymentTools).not.toContain(
         "mcp__drive__tool_0",
       );
+      expect(sentToMastra).toHaveLength(1);
+      const body = sentToMastra[0];
+      expect(body?.messages?.map((message) => message.role)).toEqual(["user"]);
+      expect(Object.keys(body?.clientTools ?? {})).toContain(
+        "mcp__slack__tool_0",
+      );
+      expect(Object.keys(body?.clientTools ?? {})).not.toContain(
+        "mcp__drive__tool_0",
+      );
+      const openbotContext = openBotContextFrom(body);
+      expect(openbotContext).toContainEqual({
+        description: "OpenBot Bot id",
+        value: "risk-mastra",
+      });
+      expect(openbotContext).toContainEqual({
+        description: "OpenBot signed run assertion",
+        value: "signed-assertion",
+      });
+      const deploymentToolsContext = openbotContext.find(
+        (entry) => entry.description === "OpenBot deployment tools",
+      );
+      expect(deploymentToolsContext?.value).toContain("mcp__slack__tool_0");
+      expect(deploymentToolsContext?.value).not.toContain("mcp__drive__tool_0");
+      expect(openbotContext).toContainEqual({
+        description: "OpenBot standing role",
+        value: "You are Risk Mastra.",
+      });
+      const holdingsContext = openbotContext.find(
+        (entry) => entry.description === "OpenBot granted tools guidance",
+      );
+      expect(holdingsContext?.value).toContain("slack");
+      expect(holdingsContext?.value).not.toContain("drive: tool_0");
     } finally {
       MastraAgent.prototype.run = originalRun;
     }
