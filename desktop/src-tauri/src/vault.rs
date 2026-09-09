@@ -613,7 +613,10 @@ mod cache_tests {
             }),
             Ok(None)
         );
-        assert_eq!(reads.lock().unwrap().as_slice(), [name.clone()]);
+        assert_eq!(
+            reads.lock().unwrap().as_slice(),
+            std::slice::from_ref(&name)
+        );
 
         // A write goes through and updates what a read sees, without asking the store.
         super::remember_cached(&name, "a-value", &cache, |key, value| {
@@ -642,7 +645,10 @@ mod cache_tests {
             .as_deref(),
             Some("a-value")
         );
-        assert_eq!(reads.lock().unwrap().as_slice(), [name.clone()]);
+        assert_eq!(
+            reads.lock().unwrap().as_slice(),
+            std::slice::from_ref(&name)
+        );
 
         // And forgetting is reflected in both.
         super::forget_cached(&name, &cache, |key| {
@@ -655,7 +661,10 @@ mod cache_tests {
             }),
             Ok(None)
         );
-        assert_eq!(reads.lock().unwrap().as_slice(), [name.clone()]);
+        assert_eq!(
+            reads.lock().unwrap().as_slice(),
+            std::slice::from_ref(&name)
+        );
     }
 
     #[test]
