@@ -23,6 +23,12 @@ import type { Selection } from "../src/plugins/selection";
 import type { GrantedTool } from "../src/plugins/tools";
 import { createModelCompleter } from "../src/routing/model";
 
+declare global {
+  var __SRA009_AFTER_TOOL_SELECTION_RESTORE__:
+    | (() => Promise<void> | void)
+    | undefined;
+}
+
 /**
  * Tool selection, asserted on the bytes that reach the model rather than on the decision.
  *
@@ -90,6 +96,12 @@ type EnvironmentSnapshot = {
 
 let originalModelEnvironment: EnvironmentSnapshot | undefined;
 
+function recordLifecycleEvent(event: string) {
+  if (process.env.SRA009_TRACE_LIFECYCLE === "1") {
+    console.log(`SRA009_LIFECYCLE ${event}`);
+  }
+}
+
 function restoreEnvironmentValue(
   name: "OPENAI_BASE_URL" | "OPENAI_API_KEY",
   value: string | undefined,
@@ -124,13 +136,17 @@ type NativeMastraRequestBody = {
 };
 
 beforeAll(async () => {
+  recordLifecycleEvent("tool-selection-beforeAll:start");
   originalModelEnvironment = {
     openAIBaseUrl: process.env.OPENAI_BASE_URL,
     openAIApiKey: process.env.OPENAI_API_KEY,
   };
+  recordLifecycleEvent("tool-selection-beforeAll:snapshot");
   const url = await llm.start();
+  recordLifecycleEvent("tool-selection-beforeAll:llm-started");
   process.env.OPENAI_BASE_URL = url;
   process.env.OPENAI_API_KEY = "test-key";
+  recordLifecycleEvent("tool-selection-beforeAll:env-set");
 
   remote.onPredicate(
     (input) => {
@@ -148,19 +164,29 @@ beforeAll(async () => {
     buildAGUITextResponse("done") as never,
   );
   remoteUrl = await remote.start();
+  recordLifecycleEvent("tool-selection-beforeAll:remote-started");
 });
 
 afterAll(async () => {
+  let teardownFailure: unknown;
   try {
+    recordLifecycleEvent("tool-selection-afterAll:stop-start");
     const results = await Promise.allSettled([llm.stop(), remote.stop()]);
+    recordLifecycleEvent("tool-selection-afterAll:stop-settled");
     const failed = results.find(
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failed) {
-      throw failed.reason;
+      recordLifecycleEvent("tool-selection-afterAll:stop-rejected");
+      teardownFailure = failed.reason;
     }
   } finally {
     restoreModelEnvironment();
+    recordLifecycleEvent("tool-selection-afterAll:env-restored");
+    await globalThis.__SRA009_AFTER_TOOL_SELECTION_RESTORE__?.();
+  }
+  if (teardownFailure) {
+    throw teardownFailure;
   }
 });
 
@@ -169,6 +195,18 @@ beforeEach(() => {
   llm.clearFixtures();
   sentToRemote = [];
 });
+
+if (process.env.SRA009_STOP_FIXTURE_BEFORE_TEARDOWN === "1") {
+  test("SRA-009 proof stops the real fixture mocks before teardown", async () => {
+    recordLifecycleEvent("tool-selection-test:early-stop-start");
+    const results = await Promise.allSettled([llm.stop(), remote.stop()]);
+    recordLifecycleEvent("tool-selection-test:early-stop-settled");
+    expect(results.map((result) => result.status)).toEqual([
+      "fulfilled",
+      "fulfilled",
+    ]);
+  });
+}
 
 /**
  * Pass one answers with `chosen`, and the run itself answers with prose.
