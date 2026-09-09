@@ -3656,6 +3656,56 @@ test("a Composio call by somebody who has not connected the app is refused with 
   expect(reached).toEqual([]);
 });
 
+test("a Composio call sends the version recorded for that action", async () => {
+  const { store, database } = await freshStore();
+  const calls: { slug: string; version: string }[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug, _userId, version) => {
+      calls.push({ slug, version });
+      return {};
+    },
+  });
+  await seedComposioGmail(database, store);
+
+  await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    args: {},
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  expect(calls).toEqual([
+    { slug: "GMAIL_FETCH_EMAILS", version: "20260903_00" },
+  ]);
+});
+
+test("a Composio call is recorded as reaching the vendor as the person, not as the deployment", async () => {
+  const { store, database, auditStore } = await freshStore();
+  useComposioClient({
+    listActions: async () => [],
+    execute: async () => ({ messages: [] }),
+  });
+  await seedComposioGmail(database, store);
+
+  await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    args: {},
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  const call = auditStore
+    .recorded()
+    .find((event) => event.eventType === "mcp.call_succeeded");
+
+  // The single question a per-person connector raises: whose account did this reach. Recorded as
+  // "deployment", the trail is wrong about exactly the thing this connector exists for — two rows for
+  // the same action and the same Bot can have touched two different mailboxes, and nothing else in
+  // the row says which.
+  expect(call?.payload).toMatchObject({ reachedAs: "user_asker" });
+});
+
 test("an action's effect, destructive marker and version round-trip", async () => {
   const database = await freshDatabase();
 
@@ -3762,15 +3812,14 @@ test("a brokered call is judged by the effect the vendor recorded, not by the ab
     actorId: "user_asker",
   });
 
-  // The call itself does not complete: nothing hands the transport the recorded version yet, so it
-  // refuses rather than guessing one. Irrelevant to what is under test — `effect` is decided before
-  // the vendor is dialled and the failure row carries the decision either way, which is the whole
-  // point of holding `decided` rather than writing it.
-  expect(result.isError).toBe(true);
+  // The call completes: the transport is handed the version this action was listed at. Irrelevant to
+  // what is under test — `effect` is decided before the vendor is dialled and the row carries the
+  // decision on either outcome, which is the whole point of holding `decided` rather than writing it.
+  expect(result.isError).toBe(false);
 
   const call = auditStore
     .recorded()
-    .find((event) => event.eventType === "mcp.call_failed");
+    .find((event) => event.eventType === "mcp.call_succeeded");
   // "read", because Composio labelled the action and the classifier prefers that label. "write" is
   // what an unlisted-in-`writeTools` tool on a server with no entry behind it comes out as, and that
   // is what this row said while the recorded effect was being selected and never passed on: every
