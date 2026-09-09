@@ -435,9 +435,12 @@ async fn start_stack(
             purge.insert(key.into(), String::new());
         }
     }
-    openbot_env::write(&root.join(".env"), &settings, &purge)
-        .map_err(|e| format!("could not write .env: {e}"))?;
-    openbot_desktop_lib::vault::remember_all(&secrets)?;
+    openbot_desktop_lib::vault::write_env_after_remembering(
+        &root.join(".env"),
+        &settings,
+        &secrets,
+        &purge,
+    )?;
     // Beside the `.env` and before the containers, because compose mounts it. See
     // `write_plan_store`: an absent file becomes a directory the sign-in can never write into.
     openbot_env::write_plan_store(&root, &credential)

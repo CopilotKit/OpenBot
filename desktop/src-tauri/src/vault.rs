@@ -95,13 +95,42 @@ Both halves matter. Storing without clearing would leave the old copy behind on 
 has run an earlier version, which is the same credential in the same file for no benefit at all.
 */
 pub fn remember_all(secrets: &BTreeMap<String, String>) -> Result<(), Problem> {
+    remember_all_with(secrets, &mut remember, &mut forget)
+}
+
+pub fn write_env_after_remembering(
+    path: &std::path::Path,
+    settings: &BTreeMap<String, String>,
+    secrets: &BTreeMap<String, String>,
+    purge: &BTreeMap<String, String>,
+) -> Result<(), Problem> {
+    write_env_after_remembering_with(path, settings, secrets, purge, remember, forget)
+}
+
+fn write_env_after_remembering_with(
+    path: &std::path::Path,
+    settings: &BTreeMap<String, String>,
+    secrets: &BTreeMap<String, String>,
+    purge: &BTreeMap<String, String>,
+    mut remember_one: impl FnMut(&str, &str) -> Result<(), Problem>,
+    mut forget_one: impl FnMut(&str),
+) -> Result<(), Problem> {
+    remember_all_with(secrets, &mut remember_one, &mut forget_one)?;
+    crate::env::write(path, settings, purge)
+        .map_err(|e| format!("could not write .env: {e}").into())
+}
+
+fn remember_all_with(
+    secrets: &BTreeMap<String, String>,
+    remember_one: &mut impl FnMut(&str, &str) -> Result<(), Problem>,
+    forget_one: &mut impl FnMut(&str),
+) -> Result<(), Problem> {
     for (key, value) in secrets {
         if value.trim().is_empty() {
-            // An empty value is this run clearing a credential the model choice does not imply.
-            forget(key);
+            forget_one(key);
             continue;
         }
-        remember(key, value)?;
+        remember_one(key, value)?;
     }
     Ok(())
 }
@@ -466,30 +495,173 @@ mod tests {
     #[test]
     fn an_upgrade_leaves_no_credential_behind_in_the_file() {
         let dir = std::env::temp_dir().join(format!("openbot-purge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".env");
         std::fs::write(
             &path,
-            "OPENAI_API_KEY=the-old-copy\nSERVER_PORT=3001\nSOMETHING_ELSE=kept\n",
+            "AGENT_TOOL_TOKEN=old-agent-token\n\
+KEY_ENCRYPTION_KEY=old-key\n\
+OPENAI_API_KEY=old-openai-key\n\
+SERVER_PORT=3001\n\
+BOT_MODEL=old-compatible-model\n\
+SOMETHING_ELSE=kept\n",
         )
         .unwrap();
 
-        let mut all = BTreeMap::new();
-        all.insert("OPENAI_API_KEY".to_string(), "the-new-one".to_string());
-        all.insert("SERVER_PORT".to_string(), "3001".to_string());
-        let (settings, secrets) = split(all);
-        crate::env::write(&path, &settings, &secrets).unwrap();
+        let settings = BTreeMap::from([("SERVER_PORT".to_string(), "3001".to_string())]);
+        let secrets = BTreeMap::from([
+            (
+                "AGENT_TOOL_TOKEN".to_string(),
+                "new-agent-token".to_string(),
+            ),
+            ("KEY_ENCRYPTION_KEY".to_string(), "new-key".to_string()),
+            ("OPENAI_API_KEY".to_string(), "new-openai-key".to_string()),
+        ]);
+        let mut purge = secrets.clone();
+        purge.insert("BOT_MODEL".to_string(), String::new());
+        let mut remembered = Vec::new();
+        write_env_after_remembering_with(
+            &path,
+            &settings,
+            &secrets,
+            &purge,
+            |key, value| {
+                assert!(
+                    std::fs::read_to_string(&path)
+                        .unwrap()
+                        .contains("KEY_ENCRYPTION_KEY=old-key"),
+                    "the file was purged before every credential was remembered"
+                );
+                remembered.push((key.to_string(), value.to_string()));
+                Ok(())
+            },
+            |_| {},
+        )
+        .unwrap();
 
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(
-            !written.contains("the-old-copy") && !written.contains("the-new-one"),
+            !written.contains("old-agent-token")
+                && !written.contains("new-agent-token")
+                && !written.contains("old-key")
+                && !written.contains("new-key")
+                && !written.contains("old-openai-key")
+                && !written.contains("new-openai-key"),
             "a credential is still in the file:\n{written}"
         );
+        assert_eq!(
+            remembered,
+            [
+                (
+                    "AGENT_TOOL_TOKEN".to_string(),
+                    "new-agent-token".to_string()
+                ),
+                ("KEY_ENCRYPTION_KEY".to_string(), "new-key".to_string()),
+                ("OPENAI_API_KEY".to_string(), "new-openai-key".to_string()),
+            ]
+        );
+        assert!(!written.contains("AGENT_TOOL_TOKEN"), "{written}");
+        assert!(!written.contains("KEY_ENCRYPTION_KEY"), "{written}");
         assert!(!written.contains("OPENAI_API_KEY"), "{written}");
+        assert!(!written.contains("BOT_MODEL"), "{written}");
         assert!(written.contains("SERVER_PORT=3001"), "{written}");
         // A line nobody here owns is still nobody's to remove.
         assert!(written.contains("SOMETHING_ELSE=kept"), "{written}");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_failed_upgrade_keeps_old_credentials_in_the_file() {
+        let dir =
+            std::env::temp_dir().join(format!("openbot-migration-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "AGENT_TOOL_TOKEN=old-agent-token\n\
+KEY_ENCRYPTION_KEY=old-key\n\
+OPENAI_API_KEY=old-openai-key\n\
+SERVER_PORT=3001\n\
+SOMETHING_ELSE=kept\n",
+        )
+        .unwrap();
+
+        let settings = BTreeMap::from([("SERVER_PORT".to_string(), "3001".to_string())]);
+        let secrets = BTreeMap::from([
+            (
+                "AGENT_TOOL_TOKEN".to_string(),
+                "new-agent-token".to_string(),
+            ),
+            ("KEY_ENCRYPTION_KEY".to_string(), "new-key".to_string()),
+            ("OPENAI_API_KEY".to_string(), "new-openai-key".to_string()),
+        ]);
+        let mut attempted = Vec::new();
+        let error = write_env_after_remembering_with(
+            &path,
+            &settings,
+            &secrets,
+            &secrets,
+            |key, _| {
+                attempted.push(key.to_string());
+                Err(Problem::plain(format!("refused {key}")))
+            },
+            |_| {},
+        )
+        .unwrap_err();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(error.said, "refused AGENT_TOOL_TOKEN");
+        assert_eq!(attempted, ["AGENT_TOOL_TOKEN"]);
+        assert!(
+            written.contains("AGENT_TOOL_TOKEN=old-agent-token"),
+            "{written}"
+        );
+        assert!(written.contains("KEY_ENCRYPTION_KEY=old-key"), "{written}");
+        assert!(
+            written.contains("OPENAI_API_KEY=old-openai-key"),
+            "{written}"
+        );
+        assert!(written.contains("SERVER_PORT=3001"), "{written}");
+        assert!(written.contains("SOMETHING_ELSE=kept"), "{written}");
+    }
+
+    #[test]
+    fn an_empty_upgrade_secret_is_forgotten_and_purged() {
+        let dir =
+            std::env::temp_dir().join(format!("openbot-migration-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(
+            &path,
+            "OPENAI_API_KEY=old-openai-key\nSERVER_PORT=3001\nSOMETHING_ELSE=kept\n",
+        )
+        .unwrap();
+
+        let settings = BTreeMap::from([("SERVER_PORT".to_string(), "3001".to_string())]);
+        let secrets = BTreeMap::from([("OPENAI_API_KEY".to_string(), String::new())]);
+        let mut forgotten = Vec::new();
+        write_env_after_remembering_with(
+            &path,
+            &settings,
+            &secrets,
+            &secrets,
+            |key, _| panic!("empty secret should have been forgotten, not remembered: {key}"),
+            |key| forgotten.push(key.to_string()),
+        )
+        .unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(forgotten, ["OPENAI_API_KEY"]);
+        assert!(!written.contains("OPENAI_API_KEY"), "{written}");
+        assert!(written.contains("SERVER_PORT=3001"), "{written}");
+        assert!(written.contains("SOMETHING_ELSE=kept"), "{written}");
     }
 
     /**
