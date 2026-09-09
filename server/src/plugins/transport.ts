@@ -1,7 +1,8 @@
 import * as builtinRoutines from "./builtin-routines";
 import type { CatalogueEntry } from "./catalogue";
+import * as composio from "./composio";
 import * as driveRest from "./google-drive-rest";
-import type { McpCallResult, McpTool } from "./mcp";
+import type { ListedTool, McpCallResult } from "./mcp";
 import * as mcp from "./mcp";
 
 /**
@@ -51,7 +52,7 @@ export type VendorTransport = {
     actorId?: string;
     /** The Bot the run belongs to. A routine runs as its Bot, which is never a name a model supplies. */
     botId?: string;
-  }): Promise<McpTool[]>;
+  }): Promise<ListedTool[]>;
   callTool(
     connection: {
       url: string;
@@ -79,12 +80,17 @@ export type VendorTransport = {
  * A closed union rather than a string, so adding one is a change to this file and to the registry
  * below together. An entry naming a transport that does not exist should not typecheck.
  */
-export type TransportKind = "mcp" | "google-drive-rest" | "builtin-routines";
+export type TransportKind =
+  | "mcp"
+  | "google-drive-rest"
+  | "builtin-routines"
+  | "composio";
 
 const TRANSPORTS: Record<TransportKind, VendorTransport> = {
   mcp,
   "google-drive-rest": driveRest,
   "builtin-routines": builtinRoutines,
+  composio,
 };
 
 /**
