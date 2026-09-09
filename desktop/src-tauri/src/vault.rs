@@ -461,15 +461,38 @@ fn dpapi_problem(detail: String) -> Problem {
  */
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
+    use std::io::Write;
+
     let path = vault_dir()?.join(format!("{name}.secret"));
-    std::fs::write(&path, value).map_err(|error| {
+    let mut file = open_secret_file(&path)?;
+    file.set_len(0)
+        .and_then(|()| file.write_all(value.as_bytes()))
+        .map_err(|error| {
+            Problem::with(
+                "OpenBot could not save your sign-in details on this computer.",
+                format!("{}: {error}", path.display()),
+            )
+        })
+}
+
+/// Create privately, and secure existing files before truncating or writing any credential bytes.
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn open_secret_file(path: &std::path::Path) -> Result<std::fs::File, Problem> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path).map_err(|error| {
         Problem::with(
             "OpenBot could not save your sign-in details on this computer.",
             format!("{}: {error}", path.display()),
         )
     })?;
-    owner_only(&path);
-    Ok(())
+    owner_only(path)?;
+    Ok(file)
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -503,7 +526,7 @@ fn vault_dir() -> Result<PathBuf, Problem> {
             format!("{}: {error}", dir.display()),
         )
     })?;
-    owner_only(&dir);
+    owner_only(&dir)?;
     Ok(dir)
 }
 
@@ -511,14 +534,74 @@ fn vault_dir() -> Result<PathBuf, Problem> {
 ///
 /// Only where a file is kept. The Keychain owns its own protection and has no path to set.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn owner_only(path: &std::path::Path) {
+fn owner_only(path: &std::path::Path) -> Result<(), Problem> {
     use std::os::unix::fs::PermissionsExt;
     let mode = if path.is_dir() { 0o700 } else { 0o600 };
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).map_err(|error| {
+        Problem::with(
+            "OpenBot could not make your saved sign-in details private to your account.",
+            format!("{}: {error}", path.display()),
+        )
+    })
 }
 
 #[cfg(all(not(unix), not(target_os = "macos")))]
-fn owner_only(_path: &std::path::Path) {}
+fn owner_only(_path: &std::path::Path) -> Result<(), Problem> {
+    Ok(())
+}
+
+#[cfg(all(test, unix, not(target_os = "macos")))]
+mod file_permissions_tests {
+    use super::{open_secret_file, owner_only};
+    use crate::test_support::temp_root;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_secret_file_is_private_before_writing_any_bytes() {
+        let root = temp_root("vault-file-mode");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("synthetic.secret");
+
+        let file = open_secret_file(&path).unwrap();
+        let metadata = file.metadata().unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        assert_eq!(metadata.len(), 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_existing_file_is_secured_without_truncating_its_value() {
+        let root = temp_root("vault-existing-mode");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("synthetic.secret");
+        std::fs::write(&path, "previous-synthetic-value").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+
+        let file = open_secret_file(&path).unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "previous-synthetic-value"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_permission_failure_keeps_the_path_and_os_error() {
+        let path = temp_root("vault-missing-permissions");
+        let expected =
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap_err();
+
+        let problem = owner_only(&path).unwrap_err();
+
+        assert_eq!(
+            problem.detail,
+            Some(format!("{}: {expected}", path.display()))
+        );
+    }
+}
 
 #[cfg(test)]
 mod cache_tests {
