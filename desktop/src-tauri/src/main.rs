@@ -395,23 +395,10 @@ fn show_setup(app: tauri::AppHandle) -> Result<(), String> {
 /// an answer on the port says one is running now.
 #[tauri::command]
 fn already_running(root: String) -> bool {
-    let root = stack::root_from(&root);
-    if deployment::installed(&root).is_none() {
-        return false;
-    }
-    let port = openbot_env::Ports::default().server;
-    reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .ok()
-        .and_then(|client| {
-            client
-                .get(format!("http://127.0.0.1:{port}/api/capabilities"))
-                .send()
-                .ok()
-        })
-        .map(|response| response.status().is_success())
-        .unwrap_or(false)
+    stack::already_running(
+        &stack::root_from(&root),
+        openbot_env::Ports::default().server,
+    )
 }
 
 /// What stopped the stack, if anything did, and forget it once it has been read.

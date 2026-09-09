@@ -450,6 +450,25 @@ pub fn app_url(port: u16) -> Option<String> {
     answering_at(port, "/")
 }
 
+/// Whether a deployment this app installed is up right now.
+///
+/// Two questions, because either alone answers something else. A stamp says a deployment was laid
+/// down here once; only an answer on the port says one is running, and only a deployment we
+/// installed is ours to recognise.
+///
+/// Asked through [`answering_at`], which is the whole point of this living beside it. The API was
+/// asked at `127.0.0.1` alone, and a bun server is usually there, so this looked right on the
+/// machine it was written on. It is not a fact: `LOOPBACKS` above records why, and everything else
+/// that asks the same question of the same port -- the readiness wait, the window's own navigation,
+/// the guard that refuses a start on a held port -- accepts either address. So a stack answering on
+/// `[::1]` was reported to the window as nothing running: it offered to set up a deployment that
+/// was already up, and Start then refused on a port held by OpenBot itself, naming it as somebody
+/// else's process.
+pub fn already_running(root: &Path, port: u16) -> bool {
+    crate::deployment::installed(root).is_some()
+        && answering_at(port, "/api/capabilities").is_some()
+}
+
 /// Wait until the stack is genuinely usable, or say which part is not.
 ///
 /// Watches the children as well as the ports, because three processes that died leave a port
@@ -776,6 +795,97 @@ mod tests {
             LOOPBACKS.contains(&"[::1]"),
             "an IPv6-only bind still counts as answering"
         );
+    }
+
+    /// A deployment, laid down and stamped, with nothing running from it.
+    fn stamped(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("openbot-running-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::deployment::record(&dir, "v0.0.8").expect("the stamp is written");
+        dir
+    }
+
+    /// A listener that answers every request with 200, on the one address it is given.
+    ///
+    /// The request is read before the answer is written: a socket dropped with unread bytes still
+    /// in it resets the connection instead of delivering anything, so a responder that only writes
+    /// looks like a port nobody holds.
+    fn answering_on(host: &str) -> (std::net::TcpListener, u16) {
+        let listener =
+            std::net::TcpListener::bind((host, 0)).expect("a loopback listener is bound");
+        let port = listener.local_addr().expect("it has an address").port();
+        let accepting = listener.try_clone().expect("the listener is shared");
+        std::thread::spawn(move || {
+            for stream in accepting.incoming() {
+                let Ok(mut stream) = stream else { break };
+                use std::io::{BufRead as _, Write as _};
+                let Ok(peer) = stream.try_clone() else { break };
+                let mut reader = std::io::BufReader::new(peer);
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) => break,
+                        Ok(_) if line == "\r\n" || line == "\n" => break,
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                );
+                let _ = stream.flush();
+            }
+        });
+        (listener, port)
+    }
+
+    #[test]
+    fn a_stack_answering_on_the_other_loopback_is_still_running() {
+        // The question a second window asks before it offers to set anything up, and it was asked
+        // at `127.0.0.1` alone while every other check on the same port accepts either address. A
+        // server on `[::1]` therefore read as nothing running, and the port guard then refused the
+        // start it offered, naming OpenBot's own server as somebody else's process.
+        let root = stamped("v6");
+        let (_listener, port) = answering_on("::1");
+
+        let seen = already_running(&root, port);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            seen,
+            "the API is answering on [::1]:{port} and the window was told nothing is running"
+        );
+    }
+
+    #[test]
+    fn a_stack_answering_on_the_usual_loopback_is_running() {
+        // The case that already worked, kept so the fix above is a widening rather than a swap.
+        let root = stamped("v4");
+        let (_listener, port) = answering_on("127.0.0.1");
+
+        let seen = already_running(&root, port);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(seen, "nothing was reported running on 127.0.0.1:{port}");
+    }
+
+    #[test]
+    fn a_stamped_deployment_that_is_not_answering_is_not_running() {
+        // A stamp says a deployment was installed here, not that one is up. Port 1 needs privilege
+        // to bind, so this asks about a port that cannot quietly be somebody else's server.
+        let root = stamped("quiet");
+        let seen = already_running(&root, 1);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(!seen, "a stamp is not a running deployment");
+    }
+
+    #[test]
+    fn a_directory_this_app_never_installed_into_is_not_running() {
+        // Somebody else's server on the port is not this deployment. Without the stamp check the
+        // window would show OpenBot and navigate to whatever was listening.
+        let (_listener, port) = answering_on("127.0.0.1");
+        let empty = std::env::temp_dir().join(format!("openbot-unstamped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&empty);
+        assert!(!already_running(&empty, port));
     }
 
     #[test]

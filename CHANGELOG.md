@@ -8,6 +8,17 @@ Newest first. `Unreleased` is what is on `main` and not yet tagged.
 
 ## Unreleased
 
+### The desktop app recognises its own running stack whichever loopback it answers on
+
+Opening the window a second time asks whether the deployment it manages is already up, so that
+somebody is shown OpenBot rather than offered a setup screen for a stack that is running. That
+question was asked at `127.0.0.1` alone, while every other check on the same port — the readiness
+wait, the navigation to the app, and the refusal to start on a port something else holds — accepts
+an answer at either loopback, because a process binds whichever one its runtime resolved `localhost`
+to. A server on `::1` therefore read as nothing running: the window offered to set up a deployment
+that was already up, and Start then refused, reporting OpenBot's own server as somebody else's
+process holding port 3001, with nothing on screen able to stop it. Both addresses are asked now.
+
 ### A deployment directory pasted with a stray space goes where it says
 
 The desktop setup screen asks where OpenBot should live, enables Start once that box is not blank
