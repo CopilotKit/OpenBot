@@ -298,7 +298,7 @@ impl ChosenModel {
     fn into_credential_with(
         self,
         root: &Path,
-        saved_secret: impl Fn(&Path, &str) -> Result<String, Problem>,
+        mut saved_secret: impl FnMut(&Path, &str) -> Result<String, Problem>,
     ) -> Result<openbot_env::ModelCredential, Problem> {
         let given = |value: Option<String>| value.unwrap_or_default().trim().to_string();
         let saved = self.saved.unwrap_or(false);
@@ -376,6 +376,22 @@ impl ChosenModel {
     }
 }
 
+fn start_stack_credential(
+    root: &Path,
+    model: ChosenModel,
+) -> Result<openbot_env::ModelCredential, Problem> {
+    model.into_credential(root)
+}
+
+#[cfg(test)]
+fn start_stack_credential_with(
+    root: &Path,
+    model: ChosenModel,
+    saved_secret: impl FnMut(&Path, &str) -> Result<String, Problem>,
+) -> Result<openbot_env::ModelCredential, Problem> {
+    model.into_credential_with(root, saved_secret)
+}
+
 fn saved_secret(root: &Path, key: &str) -> Result<String, Problem> {
     openbot_desktop_lib::vault::already_given_interactive(&root.join(".env"), &[key])
         .map(|found| found.get(key).cloned().unwrap_or_default())
@@ -410,7 +426,7 @@ async fn start_stack(
     // list to keep in step. See `harness::picked` for what each refusal is for.
     // Named rather than inlined: the Bot choice below reads it, the store file is written from it,
     // and reading the model screen twice could not be relied on to give the same answer.
-    let credential = model.into_credential(&root)?;
+    let credential = start_stack_credential(&root, model)?;
 
     /*
      * A PLAN CHOOSES ITS OWN BOT, because only one Bot can spend it.
@@ -1683,21 +1699,86 @@ mod tests {
         ] {
             let root = temp_root(&format!("openbot-missing-saved-{provider}"));
             std::fs::create_dir_all(&root).unwrap();
+            let mut trace = Vec::new();
 
-            let problem = ChosenModel {
-                provider: provider.to_string(),
-                login: "api-key".to_string(),
-                api_key: None,
-                base_url: None,
-                model: None,
-                token: None,
-                saved: Some(true),
+            let result = start_stack_credential_with(
+                &root,
+                ChosenModel {
+                    provider: provider.to_string(),
+                    login: "api-key".to_string(),
+                    api_key: None,
+                    base_url: None,
+                    model: None,
+                    token: None,
+                    saved: Some(true),
+                },
+                |_, key| {
+                    trace.push(format!("saved-secret:{key}"));
+                    Ok(String::new())
+                },
+            );
+            if result.is_ok() {
+                trace.push("external-start-boundary".to_string());
             }
-            .into_credential_with(&root, |_, _| Ok(String::new()))
-            .expect_err("missing saved key should stop before compose");
+            let problem = result.expect_err("missing saved key should stop before compose");
 
+            println!(
+                "DTA-004 missing provider={provider} error={} trace={trace:?}",
+                problem.said
+            );
             assert_eq!(problem.said, expected);
+            assert_eq!(trace, [format!("saved-secret:{}", saved_api_key(provider))]);
             let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn saved_api_key_selection_uses_the_saved_key_when_it_still_exists() {
+        for (provider, expected_key) in [
+            ("openai", "sk-openai-still-saved"),
+            ("anthropic", "sk-ant-still-saved"),
+        ] {
+            let root = temp_root(&format!("openbot-present-saved-{provider}"));
+            std::fs::create_dir_all(&root).unwrap();
+
+            let credential = start_stack_credential_with(
+                &root,
+                ChosenModel {
+                    provider: provider.to_string(),
+                    login: "api-key".to_string(),
+                    api_key: None,
+                    base_url: None,
+                    model: None,
+                    token: None,
+                    saved: Some(true),
+                },
+                |_, key| {
+                    assert_eq!(key, saved_api_key(provider));
+                    Ok(expected_key.to_string())
+                },
+            )
+            .expect("saved key should be accepted");
+
+            match credential {
+                openbot_env::ModelCredential::OpenAi { api_key }
+                | openbot_env::ModelCredential::Anthropic { api_key } => {
+                    assert_eq!(api_key, expected_key);
+                    println!(
+                        "DTA-004 present provider={provider} saved_key_len={}",
+                        api_key.len()
+                    );
+                }
+                other => panic!("unexpected credential: {other:?}"),
+            }
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    fn saved_api_key(provider: &str) -> &'static str {
+        match provider {
+            "openai" => "OPENAI_API_KEY",
+            "anthropic" => "ANTHROPIC_API_KEY",
+            other => panic!("unexpected provider: {other}"),
         }
     }
 
