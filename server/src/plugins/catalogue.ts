@@ -361,14 +361,20 @@ export function resolveServerUrl(
 /**
  * What this tool does, in the only two categories a policy author cares about.
  *
- * Unknown counts as a write. A tool named in {@link CatalogueEntry.writeTools} is a write. A tool
- * the server never advertised at all is a write, because the only thing that produced the name was
- * a model. A server with no catalogue entry behind it is a write throughout, because nothing
- * reviewed says any tool of theirs only reads.
+ * TWO SOURCES, CONSULTED IN ORDER. What the vendor recorded about this action when it was listed
+ * comes first: exactly `read` is a read, and anything else — a recorded write, an unrecognised
+ * value, a different case — is a write. Only where nothing was recorded does the reviewed write list
+ * decide, and there a tool the entry names is a write while one it does not name is a read.
  *
- * Only a tool the server itself listed AND that is absent from the write list is treated as a read.
- * That is the one case where both sources agree, and it is the only one where guessing permissively
- * is recoverable.
+ * Unknown counts as a write throughout. A tool the server never advertised at all is a write,
+ * because the only thing that produced the name was a model. A server with no catalogue entry behind
+ * it is a write unless the vendor recorded a read for that action — there is no reviewed list to
+ * consult, so an unlabelled action of theirs has nothing saying it is safe.
+ *
+ * So there are two ways to earn a read, and both require somebody to have said so. Either the vendor
+ * labelled the action a read, or the server advertised it and a reviewed list declined to call it a
+ * write. Guessing permissively is recoverable only in those two cases; everywhere else the answer is
+ * a write.
  */
 export function classifyTool(
   entry: CatalogueEntry | null,

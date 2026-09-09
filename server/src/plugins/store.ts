@@ -293,8 +293,9 @@ export function refFromToolName(toolName: string): string | null {
  * the vendor. Naming those would be noise in front of the one case that has no second barrier at all
  * — Notion, whose access is per-page on a consent screen and whose `scopes` are therefore empty.
  *
- * A server with no catalogue entry is not reconciled either, and for the opposite reason: nothing
- * reviewed says any tool of theirs only reads, so all of them are already writes.
+ * A server with no catalogue entry is not reconciled either, and for a different reason: a brokered
+ * app's actions are classified from the vendor's own per-action label rather than from a list here,
+ * so there is no hand-written under-inclusion to find.
  *
  * Sorted, so two readings of the same listing produce the same row.
  */
