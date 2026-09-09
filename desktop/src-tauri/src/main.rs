@@ -292,23 +292,39 @@ struct ChosenModel {
 
 impl ChosenModel {
     fn into_credential(self, root: &Path) -> Result<openbot_env::ModelCredential, Problem> {
+        self.into_credential_with(root, saved_secret)
+    }
+
+    fn into_credential_with(
+        self,
+        root: &Path,
+        saved_secret: impl Fn(&Path, &str) -> Result<String, Problem>,
+    ) -> Result<openbot_env::ModelCredential, Problem> {
         let given = |value: Option<String>| value.unwrap_or_default().trim().to_string();
         let saved = self.saved.unwrap_or(false);
         match (self.provider.as_str(), self.login.as_str()) {
-            ("openai", "api-key") => Ok(openbot_env::ModelCredential::OpenAi {
-                api_key: if saved {
+            ("openai", "api-key") => {
+                let api_key = if saved {
                     saved_secret(root, "OPENAI_API_KEY")?
                 } else {
                     given(self.api_key)
-                },
-            }),
-            ("anthropic", "api-key") => Ok(openbot_env::ModelCredential::Anthropic {
-                api_key: if saved {
+                };
+                if saved && api_key.is_empty() {
+                    return Err("That saved OpenAI API key is no longer available.".into());
+                }
+                Ok(openbot_env::ModelCredential::OpenAi { api_key })
+            }
+            ("anthropic", "api-key") => {
+                let api_key = if saved {
                     saved_secret(root, "ANTHROPIC_API_KEY")?
                 } else {
                     given(self.api_key)
-                },
-            }),
+                };
+                if saved && api_key.is_empty() {
+                    return Err("That saved Anthropic API key is no longer available.".into());
+                }
+                Ok(openbot_env::ModelCredential::Anthropic { api_key })
+            }
             ("anthropic", "plan") => {
                 let token = if saved {
                     saved_secret(root, "CLAUDE_CODE_OAUTH_TOKEN")?
@@ -1651,6 +1667,38 @@ mod tests {
         assert!(configured.saved.model_sessions.anthropic);
         assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn saved_api_key_selection_without_a_saved_key_is_rejected_before_starting_services() {
+        for (provider, expected) in [
+            (
+                "openai",
+                "That saved OpenAI API key is no longer available.",
+            ),
+            (
+                "anthropic",
+                "That saved Anthropic API key is no longer available.",
+            ),
+        ] {
+            let root = temp_root(&format!("openbot-missing-saved-{provider}"));
+            std::fs::create_dir_all(&root).unwrap();
+
+            let problem = ChosenModel {
+                provider: provider.to_string(),
+                login: "api-key".to_string(),
+                api_key: None,
+                base_url: None,
+                model: None,
+                token: None,
+                saved: Some(true),
+            }
+            .into_credential_with(&root, |_, _| Ok(String::new()))
+            .expect_err("missing saved key should stop before compose");
+
+            assert_eq!(problem.said, expected);
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     #[test]
