@@ -23,16 +23,23 @@ export type ModelChoice = {
   apiKey?: string;
   /** Minted by signing in, never typed. Only a plan has one. */
   token?: string;
-  /** A saved value exists and will be read only by the Start action. */
+  /** Explicit intent to try a saved value; only Start checks whether it is available. */
   saved?: boolean;
   baseUrl?: string;
   model?: string;
 };
 
 export type SavedConfiguration = {
-  intelligenceApiKey?: boolean;
-  modelApiKeys?: Partial<Record<"openai" | "anthropic", boolean>>;
-  modelSessions?: Partial<Record<"openai" | "anthropic", boolean>>;
+  model?:
+    | "open-ai-api-key"
+    | "anthropic-api-key"
+    | "claude-plan"
+    | "chat-gpt-plan"
+    | "compatible-endpoint"
+    | null;
+  intelligenceApiKey?: boolean | null;
+  modelApiKeys?: Partial<Record<"openai" | "anthropic", boolean | null>>;
+  modelSessions?: Partial<Record<"openai" | "anthropic", boolean | null>>;
 };
 
 export type HeldConfiguration = {
@@ -44,6 +51,25 @@ export type HeldConfiguration = {
   OPENAI_BASE_URL?: string;
   saved?: SavedConfiguration;
 };
+
+function recordedModel(
+  saved: SavedConfiguration | undefined,
+): ModelChoice | null {
+  switch (saved?.model) {
+    case "open-ai-api-key":
+      return { provider: "openai", login: "api-key", saved: true };
+    case "anthropic-api-key":
+      return { provider: "anthropic", login: "api-key", saved: true };
+    case "claude-plan":
+      return { provider: "anthropic", login: "plan", saved: true };
+    case "chat-gpt-plan":
+      return { provider: "openai", login: "plan", saved: true };
+    case "compatible-endpoint":
+      return { provider: "openai-compatible", login: "endpoint" };
+    default:
+      return null;
+  }
+}
 
 /**
  * Connect a model.
@@ -73,12 +99,22 @@ export function ProviderPicker({
   onChoose: (choice: ModelChoice) => void;
   onBack: () => void;
 }) {
+  const initialChoice = chosen ?? recordedModel(held.saved);
+  const [reuse, setReuse] = useState(
+    initialChoice?.saved
+      ? { provider: initialChoice.provider, login: initialChoice.login }
+      : null,
+  );
   const [rows, setRows] = useState<Provider[]>([]);
-  const [open, setOpen] = useState<string | null>(chosen?.provider ?? null);
-  const [login, setLogin] = useState<Login | null>(chosen?.login ?? null);
-  const [apiKey, setApiKey] = useState(chosen?.apiKey ?? "");
-  const [baseUrl, setBaseUrl] = useState(chosen?.baseUrl ?? "");
-  const [model, setModel] = useState(chosen?.model ?? "");
+  const [open, setOpen] = useState<string | null>(
+    initialChoice?.provider ?? null,
+  );
+  const [login, setLogin] = useState<Login | null>(
+    initialChoice?.login ?? null,
+  );
+  const [apiKey, setApiKey] = useState(initialChoice?.apiKey ?? "");
+  const [baseUrl, setBaseUrl] = useState(initialChoice?.baseUrl ?? "");
+  const [model, setModel] = useState(initialChoice?.model ?? "");
   /*
    * The sign-in, mid-flight.
    *
@@ -90,7 +126,9 @@ export function ProviderPicker({
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [tokens, setTokens] = useState<Record<string, string>>(
-    chosen?.provider && chosen.token ? { [chosen.provider]: chosen.token } : {},
+    initialChoice?.provider && initialChoice.token
+      ? { [initialChoice.provider]: initialChoice.token }
+      : {},
   );
   const [busy, setBusy] = useState(false);
   /*
@@ -125,6 +163,7 @@ export function ProviderPicker({
     signInRunRef.current = run;
     const stillCurrent = () =>
       signInRunRef.current === run && openRef.current === providerId;
+    setReuse(null);
     setBusy(true);
     setFailure(null);
     setProgress(null);
@@ -207,11 +246,13 @@ export function ProviderPicker({
   const token = row ? (tokens[row.id] ?? "") : "";
   const savedPlan =
     row?.id === "openai" || row?.id === "anthropic"
-      ? held.saved?.modelSessions?.[row.id] === true
+      ? held.saved?.modelSessions?.[row.id] === true ||
+        (reuse?.provider === row.id && reuse.login === "plan")
       : false;
   const savedApiKey =
     row?.id === "openai" || row?.id === "anthropic"
-      ? held.saved?.modelApiKeys?.[row.id] === true
+      ? held.saved?.modelApiKeys?.[row.id] === true ||
+        (reuse?.provider === row.id && reuse.login === "api-key")
       : false;
 
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
@@ -327,12 +368,19 @@ export function ProviderPicker({
           )}
 
           {login === "plan" &&
-            (token || savedPlan ? (
+            (token || (savedPlan && !signInUrl && !busy) ? (
               <>
                 <p className="lede">
-                  Signed in to {row.name}. Your plan will be used, and no key is
-                  stored on this machine.
+                  {token
+                    ? `Signed in to ${row.name}.`
+                    : `A saved ${row.name} sign-in will be checked when you start.`}{" "}
+                  Your plan will be used.
                 </p>
+                {!token && (
+                  <button type="button" disabled={busy} onClick={beginSignIn}>
+                    Sign in again with {row.name}
+                  </button>
+                )}
                 {/*
                  * Said here because it changes an answer the person already gave.
                  *
@@ -398,6 +446,20 @@ export function ProviderPicker({
                 <button type="button" disabled={busy} onClick={beginSignIn}>
                   {busy ? "Starting…" : `Sign in with ${row.name}`}
                 </button>
+                {!busy &&
+                  (row.id === "openai" || row.id === "anthropic") &&
+                  held.saved?.modelSessions?.[row.id] !== false && (
+                    <button
+                      type="button"
+                      className="quiet"
+                      onClick={() =>
+                        setReuse({ provider: row.id, login: "plan" })
+                      }
+                    >
+                      Use a saved{" "}
+                      {row.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in
+                    </button>
+                  )}
                 {busy && progress && (
                   <p className="footnote" style={{ marginBottom: 0 }}>
                     {progress}
@@ -411,6 +473,20 @@ export function ProviderPicker({
               {savedApiKey && !apiKey ? (
                 <p className="lede">A saved {row.name} API key will be used.</p>
               ) : null}
+              {!savedApiKey &&
+                (row.id === "openai" || row.id === "anthropic") &&
+                held.saved?.modelApiKeys?.[row.id] !== false && (
+                  <button
+                    type="button"
+                    className="quiet"
+                    onClick={() => {
+                      setApiKey("");
+                      setReuse({ provider: row.id, login: "api-key" });
+                    }}
+                  >
+                    Use a saved {row.name} API key
+                  </button>
+                )}
               <div className="field">
                 <label htmlFor="key">{row.name} API key</label>
                 <input

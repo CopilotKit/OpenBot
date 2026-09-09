@@ -59,6 +59,7 @@ export function App() {
   const [blockerFailure, setBlockerFailure] = useState<Problem | null>(null);
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
+  const [reuseIntelligence, setReuseIntelligence] = useState(false);
   const [apiKey, setApiKey] = useState("");
   /*
    * Which Bot and which model, as two separate answers.
@@ -148,6 +149,7 @@ export function App() {
 
   const clearRootScopedSavedState = useCallback(() => {
     setApiKey("");
+    setReuseIntelligence(false);
     setApiUrl(MANAGED_INTELLIGENCE_API_URL);
     setWsUrl(MANAGED_INTELLIGENCE_GATEWAY_WS_URL);
     setAlreadyHeld({});
@@ -292,13 +294,7 @@ export function App() {
     if (model.provider !== "openai" && model.provider !== "anthropic") {
       return false;
     }
-    if (model.login === "plan") {
-      return alreadyHeld.saved?.modelSessions?.[model.provider] === true;
-    }
-    if (model.login === "api-key") {
-      return alreadyHeld.saved?.modelApiKeys?.[model.provider] === true;
-    }
-    return false;
+    return model.login === "plan" || model.login === "api-key";
   }
 
   async function stop() {
@@ -463,8 +459,21 @@ export function App() {
           */}
           {apiKey ? (
             <p className="lede">Connected to CopilotKit.</p>
-          ) : alreadyHeld.saved?.intelligenceApiKey ? (
-            <p className="lede">Connected to CopilotKit.</p>
+          ) : (alreadyHeld.saved?.intelligenceApiKey || reuseIntelligence) &&
+            !signingIn &&
+            !projects ? (
+            <>
+              <p className="lede">
+                A saved CopilotKit connection will be checked when you start.
+              </p>
+              <button
+                type="button"
+                className="quiet"
+                onClick={signInToCopilotKit}
+              >
+                Sign in to CopilotKit again
+              </button>
+            </>
           ) : signInUrl ? (
             <>
               <p className="lede">
@@ -529,6 +538,19 @@ export function App() {
               </button>
             </>
           )}
+          {!apiKey &&
+            !reuseIntelligence &&
+            alreadyHeld.saved?.intelligenceApiKey == null &&
+            !signingIn &&
+            !projects && (
+              <button
+                type="button"
+                className="quiet"
+                onClick={() => setReuseIntelligence(true)}
+              >
+                Use a saved connection
+              </button>
+            )}
           <div className="field">
             <label htmlFor="root">Where OpenBot lives</label>
             <input
@@ -538,6 +560,7 @@ export function App() {
                 // Invalidate pending loads before blur starts one for this edit.
                 configuredRunRef.current += 1;
                 setRoot(event.target.value);
+                setModel(null);
                 clearRootScopedSavedState();
               }}
               onBlur={(event) => loadConfiguredRoot(event.target.value)}
@@ -606,6 +629,16 @@ export function App() {
 
       {failure && <Failure problem={failure} />}
 
+      {!running && (
+        <button
+          type="button"
+          className="quiet"
+          disabled={busy}
+          onClick={() => setStep("model")}
+        >
+          Change AI connection
+        </button>
+      )}
       <div className="row">
         {running ? (
           <>
@@ -646,7 +679,8 @@ export function App() {
             disabled={
               busy ||
               (apiKey.trim() === "" &&
-                !alreadyHeld.saved?.intelligenceApiKey) ||
+                !alreadyHeld.saved?.intelligenceApiKey &&
+                !reuseIntelligence) ||
               !modelCanStart() ||
               root.trim() === ""
             }

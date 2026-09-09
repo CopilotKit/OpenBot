@@ -667,18 +667,37 @@ pub fn write_plan_store(dir: &Path, credential: &ModelCredential) -> std::io::Re
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, format!("{store}\n"))?;
-    /*
-     * Owner-only, because this IS the credential. `.env` beside it holds keys and gets whatever
-     * umask the machine has; this one is not left to that, since a refresh token is a standing
-     * grant rather than a value somebody can rotate from a dashboard they already have open.
-     */
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    write_private_file(&path, format!("{store}\n").as_bytes())
+}
+
+/// Replace a credential or its intent record only after an owner-only temporary file is durable.
+/// A failed write leaves the previous copy available for an explicit retry.
+pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("missing parent directory"))?;
+    let temporary = parent.join(format!(".openbot-write-{:016x}.tmp", rand::random::<u64>()));
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        #[cfg(unix)]
+        std::fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(temporary);
     }
-    Ok(())
+    result
 }
 
 pub fn saved_chatgpt_plan_store(dir: &Path) -> bool {
@@ -690,8 +709,10 @@ pub fn saved_chatgpt_plan_store(dir: &Path) -> bool {
 
 pub fn read_plan_store(dir: &Path) -> std::io::Result<Option<String>> {
     let path = dir.join(CHATGPT_STORE_FILE);
-    let Ok(store) = std::fs::read_to_string(path) else {
-        return Ok(None);
+    let store = match std::fs::read_to_string(path) {
+        Ok(store) => store,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
     };
     let trimmed = store.trim();
     if trimmed.is_empty() || trimmed == "{}" {

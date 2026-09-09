@@ -195,7 +195,7 @@ test("a saved provider-scoped plan session enables continue without exposing a t
   );
 
   await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
-  expect(view.getByText(/Signed in to OpenAI/)).toBeTruthy();
+  expect(view.getByText(/A saved OpenAI sign-in will be checked/)).toBeTruthy();
   await userEvent.click(view.getByRole("button", { name: "Continue" }));
 
   expect(choices).toEqual([
@@ -253,7 +253,13 @@ for (const provider of providers) {
           );
         }
       }
-      await view.findByText(new RegExp(`Signed in to ${provider.name}`));
+      await view.findByText(
+        new RegExp(
+          session === "saved"
+            ? `A saved ${provider.name} sign-in will be checked`
+            : `Signed in to ${provider.name}`,
+        ),
+      );
       expect(view.queryByLabelText(`${provider.name} API key`)).toBeNull();
       await userEvent.click(view.getByRole("button", { name: "Continue" }));
 
@@ -442,4 +448,87 @@ test("a compatible endpoint accepts local http and external https URLs", async (
       model: "local-model",
     },
   ]);
+});
+
+for (const provider of providers) {
+  for (const login of ["plan", "api-key"] as const) {
+    test(`unknown legacy ${provider.id} ${login} reuse is explicit and provider scoped`, async () => {
+      const choices: unknown[] = [];
+      invokeHandler = async (command) => {
+        if (command === "providers") return providers;
+        throw new Error(`unexpected protected command ${command}`);
+      };
+      const view = await renderPicker((choice) => choices.push(choice));
+      await userEvent.click(
+        await view.findByRole("radio", { name: new RegExp(provider.name) }),
+      );
+      if (login === "api-key")
+        await userEvent.click(
+          view.getByRole("tab", { name: "Use an API key" }),
+        );
+      expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+        "disabled",
+        true,
+      );
+      if (login === "api-key")
+        await userEvent.type(
+          view.getByLabelText(`${provider.name} API key`),
+          "synthetic-unselected-new-key",
+        );
+      const label =
+        login === "plan"
+          ? `Use a saved ${provider.id === "anthropic" ? "Claude" : "ChatGPT"} sign-in`
+          : `Use a saved ${provider.name} API key`;
+      await userEvent.click(view.getByRole("button", { name: label }));
+      expect(
+        view.queryByText(new RegExp(`Signed in to ${provider.name}`)),
+      ).toBeNull();
+      await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      expect(choices).toEqual([{ provider: provider.id, login, saved: true }]);
+      const other = providers.find((item) => item.id !== provider.id)!;
+      await userEvent.click(
+        view.getByRole("radio", { name: new RegExp(other.name) }),
+      );
+      expect(view.getByRole("button", { name: "Continue" })).toHaveProperty(
+        "disabled",
+        true,
+      );
+      expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+    });
+  }
+}
+
+test("recorded Claude plan intent survives reopening beside an unrelated saved API key", async () => {
+  invokeHandler = async (command) => {
+    if (command === "providers") return providers;
+    throw new Error(`unexpected protected command ${command}`);
+  };
+  const choices: unknown[] = [];
+  const view = await renderPickerWithHeld(
+    {
+      saved: {
+        model: "claude-plan",
+        modelSessions: { anthropic: true },
+        modelApiKeys: { anthropic: true, openai: true },
+      },
+    },
+    (choice) => choices.push(choice),
+  );
+  expect(await view.findByRole("radio", { name: /Anthropic/ })).toHaveProperty(
+    "checked",
+    true,
+  );
+  expect(
+    view
+      .getByRole("tab", { name: "Sign in with my plan" })
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  expect(choices).toEqual([
+    { provider: "anthropic", login: "plan", saved: true },
+  ]);
+  expect(invokeCalls.map((call) => call.command)).toEqual(["providers"]);
+  expect(
+    view.getByRole("button", { name: "Sign in again with Anthropic" }),
+  ).toBeTruthy();
 });

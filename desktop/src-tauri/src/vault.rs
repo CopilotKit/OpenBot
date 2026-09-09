@@ -120,7 +120,7 @@ fn write_env_after_remembering_with(
         .map_err(|e| format!("could not write .env: {e}").into())
 }
 
-fn remember_all_with(
+pub(crate) fn remember_all_with(
     secrets: &BTreeMap<String, String>,
     remember_one: &mut impl FnMut(&str, &str) -> Result<(), Problem>,
     forget_one: &mut impl FnMut(&str),
@@ -140,8 +140,6 @@ fn remember_all_with(
 pub enum ReadPolicy {
     /// No protected store at all. This is the startup and React-mount policy.
     FileOnly,
-    /// Protected store only where the platform can answer without UI.
-    Silent,
     /// A user-triggered action may ask the operating system for access.
     Interactive,
 }
@@ -150,8 +148,8 @@ pub enum ReadPolicy {
 What a previous run left, under the selected interaction policy.
 
 The file path is always read first because legacy `.env` credentials must still migrate. Protected
-storage is layered on top only for explicit policies: silent for metadata that must not show UI,
-interactive for Start and Ask where the action needs the credential now and can show a refusal.
+storage is layered on top only for interactive Start and Ask, where the action needs the credential
+now and can show a refusal. Passive saved hints come from local nonsecret intent metadata.
 */
 pub fn already_given_with_policy(
     env_file: &std::path::Path,
@@ -166,7 +164,6 @@ pub fn already_given_with_policy(
     for key in keys.iter().copied().filter(|key| is_secret(key)) {
         let value = match policy {
             ReadPolicy::FileOnly => None,
-            ReadPolicy::Silent => recall_silent(key),
             ReadPolicy::Interactive => recall_interactive(key)?,
         };
         if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
@@ -184,11 +181,6 @@ pub fn already_given_file_only(
     already_given_with_policy(env_file, keys, ReadPolicy::FileOnly).unwrap_or_default()
 }
 
-/// Non-interactive discovery. On macOS this asks Keychain to skip items requiring UI.
-pub fn already_given_silent(env_file: &std::path::Path, keys: &[&str]) -> BTreeMap<String, String> {
-    already_given_with_policy(env_file, keys, ReadPolicy::Silent).unwrap_or_default()
-}
-
 /// Protected retrieval for a user-triggered action.
 pub fn already_given_interactive(
     env_file: &std::path::Path,
@@ -200,20 +192,10 @@ pub fn already_given_interactive(
 /*
  * ONE READ PER SECRET PER RUN, and this is not a performance note.
  *
- * macOS asks the person to authorize every single read of a stored password unless the application
- * is signed with a stable identity that the item's ACL already trusts. A development build is
- * re-signed on every compile, so its ACL never matches and every read is a dialog. Reading four
- * secrets meant four dialogs, and the wizard reads them whenever its screen mounts, so navigating
- * between the setup screen and OpenBot asked four more times. David: "openbot keeps popping up this
- * stupid keychain dialog over and over, i have to click deny 4 times each time".
- *
- * So the store is read once per name per process and the answer is kept in memory. Absence is
- * cached too, or a machine with no stored credential would be asked on every mount for a value
- * that was never there. Writing through keeps the two in step, and forgetting drops the entry.
- *
- * This does not remove the first run's prompts: nothing in this process can, because the decision
- * belongs to the operating system and the signature. A signed and notarised build gets "Always
- * Allow" once and is never asked again, which is the actual fix and belongs to the release.
+ * macOS may authorize protected reads, including after a development build is re-signed.
+ * Only explicit Start/Ask actions read the store. Cache success, absence, and refusal once per
+ * name per process so one action does not ask again for the same item. Writes and deletions keep
+ * the cache in step. Passive startup uses local intent metadata and never reaches this cache.
  */
 type CachedRead = Result<Option<String>, Problem>;
 
@@ -297,10 +279,6 @@ pub fn recall_all(keys: &[&str]) -> BTreeMap<String, String> {
     found
 }
 
-fn recall_silent(name: &str) -> Option<String> {
-    recall_silent_from_store(name)
-}
-
 /*
  * The Keychain through the framework, NOT through the `security` command.
  *
@@ -328,23 +306,6 @@ fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
         Ok(raw) => Ok(String::from_utf8(raw).ok()),
         Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
         Err(error) => Err(keychain_read_problem(error.to_string())),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn recall_silent_from_store(name: &str) -> Option<String> {
-    use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
-
-    let mut search = ItemSearchOptions::new();
-    search
-        .class(ItemClass::generic_password())
-        .service(SERVICE)
-        .account(name)
-        .load_data(true)
-        .skip_authenticated_items(true);
-    match search.search().ok()?.into_iter().next()? {
-        SearchResult::Data(raw) => String::from_utf8(raw).ok(),
-        _ => None,
     }
 }
 
@@ -406,11 +367,6 @@ $bytes = [Security.Cryptography.ProtectedData]::Unprotect($sealed, $null, 'Curre
         return Ok(None);
     };
     powershell(UNPROTECT, Some(&sealed)).map(|plain| Some(plain.trim().to_string()))
-}
-
-#[cfg(target_os = "windows")]
-fn recall_silent_from_store(name: &str) -> Option<String> {
-    recall_from_store(name).ok().flatten()
 }
 
 #[cfg(target_os = "windows")]
@@ -502,11 +458,6 @@ fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
             .ok()
             .map(|value| value.trim().to_string()),
     )
-}
-
-#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn recall_silent_from_store(name: &str) -> Option<String> {
-    recall_from_store(name).ok().flatten()
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]

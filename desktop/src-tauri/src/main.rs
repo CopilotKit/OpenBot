@@ -71,23 +71,24 @@ struct Progress {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedModelApiKeys {
-    openai: bool,
-    anthropic: bool,
+    openai: Option<bool>,
+    anthropic: Option<bool>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedModelSessions {
-    openai: bool,
-    anthropic: bool,
+    openai: Option<bool>,
+    anthropic: Option<bool>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedConfiguration {
-    intelligence_api_key: bool,
+    intelligence_api_key: Option<bool>,
     model_api_keys: SavedModelApiKeys,
     model_sessions: SavedModelSessions,
+    model: Option<openbot_desktop_lib::saved_intent::ModelIntent>,
 }
 
 #[derive(Serialize)]
@@ -479,6 +480,41 @@ fn saved_secret(root: &Path, key: &str) -> Result<String, Problem> {
         .map(|found| found.get(key).cloned().unwrap_or_default())
 }
 
+fn intelligence_key_for_start(
+    root: &Path,
+    given: String,
+    mut resolve: impl FnMut(&Path, &str) -> Result<String, Problem>,
+) -> Result<String, Problem> {
+    let key = if given.trim().is_empty() {
+        resolve(root, "INTELLIGENCE_API_KEY")?
+    } else {
+        given
+    };
+    if key.trim().is_empty() {
+        return Err("That saved CopilotKit connection is no longer available. Sign in again or enter a project key.".into());
+    }
+    Ok(key)
+}
+
+fn require_existing_encryption_key(
+    root: &Path,
+    secrets: &std::collections::BTreeMap<String, String>,
+) -> Result<(), Problem> {
+    let configured = openbot_desktop_lib::saved_intent::SavedIntent::read(root)
+        .model
+        .is_some()
+        || openbot_env::already_set(&root.join(".env"), &["DATABASE_URL"])
+            .contains_key("DATABASE_URL");
+    if configured
+        && !secrets
+            .get("KEY_ENCRYPTION_KEY")
+            .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Err("OpenBot could not find this installation's saved encryption key. Restore access to its saved credentials before starting again.".into());
+    }
+    Ok(())
+}
+
 /// Write the `.env`, raise the containers, migrate, then start the three host processes.
 #[tauri::command]
 async fn start_stack(
@@ -575,11 +611,12 @@ async fn start_stack(
         return Err(problem.into());
     }
 
-    let api_key = if api_key.trim().is_empty() {
-        saved_secret(&root, "INTELLIGENCE_API_KEY")?
-    } else {
-        api_key
-    };
+    let api_key = intelligence_key_for_start(&root, api_key, saved_secret)?;
+    let existing_secrets = openbot_desktop_lib::vault::already_given_interactive(
+        &root.join(".env"),
+        &openbot_env::MINTED[..],
+    )?;
+    require_existing_encryption_key(&root, &existing_secrets)?;
 
     let settings = openbot_env::compose(
         &openbot_env::Intelligence {
@@ -596,10 +633,7 @@ async fn start_stack(
         picked.as_ref(),
         // What a previous start of this deployment already minted. Without it every Start writes a
         // new KEY_ENCRYPTION_KEY and orphans everything the server had encrypted under the old one.
-        &openbot_desktop_lib::vault::already_given_interactive(
-            &root.join(".env"),
-            &openbot_env::MINTED[..],
-        )?,
+        &existing_secrets,
     );
     /*
      * The credentials come out here and never reach the file.
@@ -625,16 +659,13 @@ async fn start_stack(
             purge.insert(key.into(), String::new());
         }
     }
-    openbot_desktop_lib::vault::write_env_after_remembering(
-        &root.join(".env"),
+    openbot_desktop_lib::saved_intent::persist_configuration(
+        &root,
         &settings,
         &secrets,
         &purge,
+        &credential,
     )?;
-    // Beside the `.env` and before the containers, because compose mounts it. See
-    // `write_plan_store`: an absent file becomes a directory the sign-in can never write into.
-    openbot_env::write_plan_store(&root, &credential)
-        .map_err(|e| format!("could not write the sign-in file: {e}"))?;
     report(&app, "env", true, "settings written, credentials stored");
 
     // Said before rather than after. On a machine that has never run OpenBot this pulls five
@@ -1071,24 +1102,7 @@ anywhere, and only the settings the wizard asks about are read.
 fn already_configured(root: String) -> AlreadyConfigured {
     let root = PathBuf::from(root);
     let env_file = root.join(".env");
-    let silent = openbot_desktop_lib::vault::already_given_silent(
-        &env_file,
-        &[
-            "INTELLIGENCE_API_KEY",
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "CLAUDE_CODE_OAUTH_TOKEN",
-        ],
-    );
-    already_configured_from(root, silent)
-}
-
-fn already_configured_from(
-    root: PathBuf,
-    silent: std::collections::BTreeMap<String, String>,
-) -> AlreadyConfigured {
-    let env_file = root.join(".env");
-    let values = openbot_desktop_lib::vault::already_given_file_only(
+    let mut values = openbot_desktop_lib::vault::already_given_file_only(
         &env_file,
         &[
             "INTELLIGENCE_API_KEY",
@@ -1105,24 +1119,40 @@ fn already_configured_from(
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "OPENAI_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN",
         ],
     );
 
+    use openbot_desktop_lib::saved_intent::{Category, SavedIntent};
+    let intent = SavedIntent::read(&root);
+    let hint = |category, file_present| {
+        (file_present || intent.categories.contains(&category)).then_some(true)
+    };
+    let claude_plan = values.remove("CLAUDE_CODE_OAUTH_TOKEN").is_some();
     AlreadyConfigured {
         saved: SavedConfiguration {
-            intelligence_api_key: values.contains_key("INTELLIGENCE_API_KEY")
-                || silent.contains_key("INTELLIGENCE_API_KEY"),
+            intelligence_api_key: hint(
+                Category::Intelligence,
+                values.contains_key("INTELLIGENCE_API_KEY"),
+            ),
             model_api_keys: SavedModelApiKeys {
-                openai: values.contains_key("OPENAI_API_KEY")
-                    || silent.contains_key("OPENAI_API_KEY"),
-                anthropic: values.contains_key("ANTHROPIC_API_KEY")
-                    || silent.contains_key("ANTHROPIC_API_KEY"),
+                openai: hint(
+                    Category::OpenAiApiKey,
+                    values.contains_key("OPENAI_API_KEY"),
+                ),
+                anthropic: hint(
+                    Category::AnthropicApiKey,
+                    values.contains_key("ANTHROPIC_API_KEY"),
+                ),
             },
             model_sessions: SavedModelSessions {
-                openai: openbot_env::saved_chatgpt_plan_store(&root),
-                anthropic: values.contains_key("CLAUDE_CODE_OAUTH_TOKEN")
-                    || silent.contains_key("CLAUDE_CODE_OAUTH_TOKEN"),
+                openai: hint(
+                    Category::ChatGptPlan,
+                    openbot_env::saved_chatgpt_plan_store(&root),
+                ),
+                anthropic: hint(Category::ClaudePlan, claude_plan),
             },
+            model: intent.model,
         },
         values,
     }
@@ -1728,6 +1758,81 @@ mod tests {
         );
     }
 
+    // Final native symbols replace every store operation in this test executable. They never
+    // forward to Security.framework, including when the public command regresses.
+    #[cfg(target_os = "macos")]
+    mod protected_store_trap {
+        use std::ffi::c_void;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        pub static CALLS: AtomicUsize = AtomicUsize::new(0);
+        pub fn keep_all_operations_linked() {
+            // Keep even currently unused write/delete traps in the executable for nm inspection.
+            std::hint::black_box([
+                SecItemCopyMatching as *const (),
+                SecItemAdd as *const (),
+                SecItemUpdate as *const (),
+                SecItemDelete as *const (),
+            ]);
+        }
+
+        fn refused() -> i32 {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            -25293
+        }
+        #[no_mangle]
+        extern "C" fn SecItemCopyMatching(_: *const c_void, _: *mut *const c_void) -> i32 {
+            refused()
+        }
+        #[no_mangle]
+        extern "C" fn SecItemAdd(_: *const c_void, _: *mut *const c_void) -> i32 {
+            refused()
+        }
+        #[no_mangle]
+        extern "C" fn SecItemUpdate(_: *const c_void, _: *const c_void) -> i32 {
+            refused()
+        }
+        #[no_mangle]
+        extern "C" fn SecItemDelete(_: *const c_void) -> i32 {
+            refused()
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn public_already_configured_never_calls_protected_storage() {
+        protected_store_trap::keep_all_operations_linked();
+        let root = temp_root("public-passive-boundary");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".env"),
+            "INTELLIGENCE_API_URL=https://synthetic.example\n",
+        )
+        .unwrap();
+        let before = protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst);
+        for metadata in [
+            None,
+            Some("malformed"),
+            Some(r#"{"version":9,"categories":["intelligence"],"model":null}"#),
+            Some(
+                r#"{"version":1,"categories":["intelligence","claude-plan"],"model":"claude-plan"}"#,
+            ),
+        ] {
+            if let Some(metadata) = metadata {
+                std::fs::write(root.join(openbot_desktop_lib::saved_intent::FILE), metadata)
+                    .unwrap();
+            }
+            for legacy in ["", "INTELLIGENCE_API_KEY=synthetic-cpk\nOPENAI_API_KEY=synthetic-openai\nANTHROPIC_API_KEY=synthetic-anthropic\nCLAUDE_CODE_OAUTH_TOKEN=synthetic-claude\n"] {
+                std::fs::write(root.join(".env"), format!("INTELLIGENCE_API_URL=https://synthetic.example\n{legacy}")).unwrap();
+                let configured = already_configured(root.to_string_lossy().into_owned());
+                assert_eq!(configured.values["INTELLIGENCE_API_URL"], "https://synthetic.example");
+                assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+                assert_eq!(protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst), before,
+                    "passive public wrapper attempted protected storage");
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn already_configured_returns_file_values_and_saved_indicators() {
         let root = temp_root("openbot-already-configured");
@@ -1744,7 +1849,7 @@ mod tests {
         )
         .unwrap();
 
-        let configured = already_configured_from(root.clone(), std::collections::BTreeMap::new());
+        let configured = already_configured(root.to_string_lossy().into_owned());
 
         assert_eq!(
             configured.values.get("INTELLIGENCE_API_KEY"),
@@ -1754,29 +1859,160 @@ mod tests {
             configured.values.get("OPENAI_API_KEY"),
             Some(&"file-openai".to_string())
         );
-        assert!(configured.saved.intelligence_api_key);
-        assert!(configured.saved.model_api_keys.openai);
-        assert!(configured.saved.model_sessions.openai);
-        assert!(!configured.saved.model_sessions.anthropic);
+        assert_eq!(configured.saved.intelligence_api_key, Some(true));
+        assert_eq!(configured.saved.model_api_keys.openai, Some(true));
+        assert_eq!(configured.saved.model_sessions.openai, Some(true));
+        assert_eq!(configured.saved.model_sessions.anthropic, None);
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn already_configured_reports_saved_anthropic_session_from_silent_map_only() {
+    fn already_configured_reports_legacy_anthropic_plan_without_returning_token() {
         let root = temp_root("openbot-already-configured-anthropic-session");
         std::fs::create_dir_all(&root).unwrap();
 
-        let configured = already_configured_from(
-            root.clone(),
-            std::collections::BTreeMap::from([(
-                "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
-                "silent".to_string(),
-            )]),
-        );
+        std::fs::write(
+            root.join(".env"),
+            "CLAUDE_CODE_OAUTH_TOKEN=synthetic-legacy-plan\n",
+        )
+        .unwrap();
+        let configured = already_configured(root.to_string_lossy().into_owned());
 
-        assert!(configured.saved.model_sessions.anthropic);
+        assert_eq!(configured.saved.model_sessions.anthropic, Some(true));
         assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn passive_metadata_and_legacy_hints_are_root_and_provider_scoped() {
+        let root = temp_root("public-intent-cases");
+        std::fs::create_dir_all(&root).unwrap();
+        for input in [
+            None,
+            Some("bad json"),
+            Some(r#"{"version":42,"categories":["intelligence"],"model":null}"#),
+        ] {
+            if let Some(input) = input {
+                std::fs::write(root.join(openbot_desktop_lib::saved_intent::FILE), input).unwrap();
+            }
+            let unknown = already_configured(root.to_string_lossy().into_owned());
+            assert_eq!(unknown.saved.intelligence_api_key, None);
+            assert_eq!(unknown.saved.model_sessions.anthropic, None);
+        }
+        std::fs::write(
+            root.join(openbot_desktop_lib::saved_intent::FILE),
+            r#"{"version":1,"categories":["intelligence","claude-plan"],"model":"claude-plan"}"#,
+        )
+        .unwrap();
+        let recorded = already_configured(root.to_string_lossy().into_owned());
+        assert_eq!(recorded.saved.intelligence_api_key, Some(true));
+        assert_eq!(recorded.saved.model_sessions.anthropic, Some(true));
+        assert_eq!(recorded.saved.model_api_keys.anthropic, None);
+        assert_eq!(recorded.saved.model_sessions.openai, None);
+        assert!(recorded.values.is_empty());
+        let fresh = already_configured(
+            temp_root("different-public-root")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        assert_eq!(fresh.saved.model_sessions.anthropic, None);
+        std::fs::write(
+            root.join(".env"),
+            "ANTHROPIC_API_KEY=synthetic-legacy-anthropic\n",
+        )
+        .unwrap();
+        let legacy = already_configured(root.to_string_lossy().into_owned());
+        assert_eq!(legacy.saved.model_api_keys.anthropic, Some(true));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn saved_selection_refusal_never_falls_back_to_a_different_provider_or_billing_mode() {
+        let root = temp_root("explicit-saved-refusal");
+        for (provider, login, expected) in [
+            ("openai", "api-key", "OPENAI_API_KEY"),
+            ("anthropic", "api-key", "ANTHROPIC_API_KEY"),
+            ("anthropic", "plan", "CLAUDE_CODE_OAUTH_TOKEN"),
+        ] {
+            for denied in [false, true] {
+                let mut calls = Vec::new();
+                let choice = ChosenModel {
+                    provider: provider.into(),
+                    login: login.into(),
+                    api_key: Some("synthetic-unselected-billable-key".into()),
+                    base_url: None,
+                    model: None,
+                    token: None,
+                    saved: Some(true),
+                };
+                let result = start_stack_credential_with(&root, choice, |_, key| {
+                    calls.push(key.to_string());
+                    if denied {
+                        Err(Problem::plain("synthetic access denied"))
+                    } else {
+                        Ok(String::new())
+                    }
+                });
+                let problem = result.expect_err("selected credential is unavailable");
+                assert!(!problem.said.is_empty());
+                if denied {
+                    assert_eq!(problem.said, "synthetic access denied");
+                }
+                assert_eq!(calls, [expected]);
+            }
+        }
+        for denied in [false, true] {
+            let result = intelligence_key_for_start(&root, String::new(), |_, key| {
+                assert_eq!(key, "INTELLIGENCE_API_KEY");
+                if denied {
+                    Err(Problem::plain("synthetic access denied"))
+                } else {
+                    Ok(String::new())
+                }
+            });
+            assert!(result.is_err());
+        }
+        // A missing or unreadable ChatGPT file is an action error; no API-key resolver is called.
+        std::fs::create_dir_all(&root).unwrap();
+        for unreadable in [false, true] {
+            if unreadable {
+                std::fs::create_dir_all(root.join(openbot_env::CHATGPT_STORE_FILE)).unwrap();
+            }
+            let choice = ChosenModel {
+                provider: "openai".into(),
+                login: "plan".into(),
+                api_key: Some("synthetic-unselected-key".into()),
+                base_url: None,
+                model: None,
+                token: None,
+                saved: Some(true),
+            };
+            assert!(start_stack_credential_with(&root, choice, |_, _| panic!(
+                "plan must not fall back to an API key"
+            ))
+            .is_err());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn existing_installation_with_missing_encryption_key_cannot_mint_a_replacement() {
+        let root = temp_root("missing-existing-encryption-key");
+        std::fs::create_dir_all(&root).unwrap();
+        let absent = std::collections::BTreeMap::new();
+        assert!(require_existing_encryption_key(&root, &absent).is_ok());
+        std::fs::write(
+            root.join(".env"),
+            "DATABASE_URL=postgres://synthetic-local\n",
+        )
+        .unwrap();
+        assert!(require_existing_encryption_key(&root, &absent).is_err());
+        let present = std::collections::BTreeMap::from([(
+            "KEY_ENCRYPTION_KEY".into(),
+            "synthetic-existing-key".into(),
+        )]);
+        assert!(require_existing_encryption_key(&root, &present).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

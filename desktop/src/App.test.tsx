@@ -646,6 +646,23 @@ test("saved startup credentials enable Start without raw protected secrets on mo
   ).toHaveLength(1);
 });
 
+async function chooseModelAfterRootEdit(
+  view: Awaited<ReturnType<typeof renderApp>>,
+  apiKey?: string,
+) {
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await userEvent.click(
+    view.getByRole("button", { name: "Change AI connection" }),
+  );
+  await userEvent.click(await view.findByRole("radio", { name: /OpenAI/ }));
+  if (apiKey)
+    await userEvent.type(view.getByLabelText("OpenAI API key"), apiKey);
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+}
+
 test("root edits reload saved configuration for that root and ignore stale saved responses", async () => {
   const rootA = "/tmp/openbot-root-a";
   const rootB = "/tmp/openbot-root-b";
@@ -722,6 +739,7 @@ test("root edits reload saved configuration for that root and ignore stale saved
   await act(async () => {
     savedForRootC.resolve(savedOpenAiConfiguration());
   });
+  await chooseModelAfterRootEdit(view);
   await waitFor(() =>
     expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
       "disabled",
@@ -816,7 +834,11 @@ test.each([
       expect(view.container.ownerDocument.activeElement === rootField).toBe(
         true,
       );
-      expect(Boolean(view.queryByText("Connected to CopilotKit."))).toBe(false);
+      expect(
+        view.queryByText(
+          /Connected to CopilotKit|A saved CopilotKit connection/,
+        ),
+      ).toBeNull();
       expect(view.getByLabelText("Project key")).toHaveProperty("value", "");
       expect(view.getByLabelText("API URL")).toHaveProperty(
         "value",
@@ -855,7 +877,11 @@ test.each([
           saved: { ...emptyConfiguration().saved, intelligenceApiKey: true },
         }),
       );
-      expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
+      expect(
+        view.getByText(
+          "A saved CopilotKit connection will be checked when you start.",
+        ),
+      ).toBeTruthy();
       expect(startButton).toHaveProperty("disabled", true);
       await user.click(rootField);
     }
@@ -871,9 +897,18 @@ test.each([
         },
       }),
     );
-    expect(view.getByText("Connected to CopilotKit.")).toBeTruthy();
-    expect(startButton).toHaveProperty("disabled", false);
-    await user.click(startButton);
+    expect(
+      view.getByText(
+        "A saved CopilotKit connection will be checked when you start.",
+      ),
+    ).toBeTruthy();
+    await chooseModelAfterRootEdit(
+      view,
+      savedModel ? undefined : "sk-synthetic-current-model",
+    );
+    const currentStart = view.getByRole("button", { name: "Start OpenBot" });
+    expect(currentStart).toHaveProperty("disabled", false);
+    await user.click(currentStart);
     expect(
       invokeCalls.filter((call) => call.command === "start_stack"),
     ).toHaveLength(1);
@@ -1200,7 +1235,13 @@ for (const provider of [
           );
         }
       }
-      await view.findByText(new RegExp(`Signed in to ${provider.name}`));
+      await view.findByText(
+        new RegExp(
+          session === "saved"
+            ? `A saved ${provider.name} sign-in will be checked`
+            : `Signed in to ${provider.name}`,
+        ),
+      );
       await userEvent.click(view.getByRole("button", { name: "Continue" }));
       await userEvent.click(
         await view.findByRole("button", { name: "Start OpenBot" }),
@@ -1288,7 +1329,9 @@ for (const provider of [
       await view.findByRole("radio", { name: new RegExp(provider.name) }),
     );
     expect(
-      view.getByText(new RegExp(`Signed in to ${provider.name}`)),
+      view.getByText(
+        new RegExp(`A saved ${provider.name} sign-in will be checked`),
+      ),
     ).toBeTruthy();
     await userEvent.click(view.getByRole("button", { name: "Continue" }));
 
@@ -1325,4 +1368,92 @@ for (const provider of [
       harness: { id: "langgraph" },
     });
   });
+}
+
+for (const provider of [
+  { id: "openai", name: "OpenAI", plan: "ChatGPT" },
+  { id: "anthropic", name: "Anthropic", plan: "Claude" },
+]) {
+  for (const login of ["plan", "api-key"] as const) {
+    test(`unknown legacy ${provider.name} ${login} and Intelligence reuse stays passive until Start`, async () => {
+      useRootConfigurationSetup("/tmp/synthetic-legacy-root", async () => ({
+        values: {},
+        saved: {},
+      }));
+      const setupHandler = invokeHandler;
+      invokeHandler = async (command, args) => {
+        if (command === "providers")
+          return [
+            {
+              ...provider,
+              summary: "Synthetic provider",
+              logins: ["plan", "api-key"],
+              mark: null,
+              caution: null,
+            },
+          ];
+        if (command === "start_stack")
+          throw {
+            said: "Synthetic saved credential is unavailable.",
+            detail: "Synthetic denial",
+          };
+        return setupHandler(command, args);
+      };
+      const view = await renderApp();
+      await userEvent.click(
+        await view.findByRole("button", { name: "Set up OpenBot" }),
+      );
+      await userEvent.click(
+        await view.findByRole("button", { name: "Continue" }),
+      );
+      await userEvent.click(
+        await view.findByRole("radio", { name: new RegExp(provider.name) }),
+      );
+      if (login === "api-key")
+        await userEvent.click(
+          view.getByRole("tab", { name: "Use an API key" }),
+        );
+      await userEvent.click(
+        view.getByRole("button", {
+          name:
+            login === "plan"
+              ? `Use a saved ${provider.plan} sign-in`
+              : `Use a saved ${provider.name} API key`,
+        }),
+      );
+      await userEvent.click(view.getByRole("button", { name: "Continue" }));
+      expect(
+        view.getByRole("button", { name: "Start OpenBot" }),
+      ).toHaveProperty("disabled", true);
+      await userEvent.click(
+        view.getByRole("button", { name: "Use a saved connection" }),
+      );
+      expect(view.queryByText("Connected to CopilotKit.")).toBeNull();
+      // Returning to the provider screen retains deliberate reuse without signing in automatically.
+      await userEvent.click(
+        view.getByRole("button", { name: "Change AI connection" }),
+      );
+      await userEvent.click(
+        await view.findByRole("button", { name: "Continue" }),
+      );
+      expect(
+        invokeCalls.some((call) =>
+          /sign_in|start_stack|ask_the_bot/.test(call.command),
+        ),
+      ).toBe(false);
+      await userEvent.click(
+        view.getByRole("button", { name: "Start OpenBot" }),
+      );
+      await view.findByText("Synthetic saved credential is unavailable.");
+      expect(getStartStackPayload()).toMatchObject({
+        apiKey: "",
+        model: { provider: provider.id, login, saved: true },
+      });
+      expect(getStartStackPayload().model).not.toHaveProperty("token");
+      expect(getStartStackPayload().model).not.toHaveProperty("apiKey");
+      expect(
+        view.getByRole("button", { name: "Sign in to CopilotKit again" }),
+      ).toBeTruthy();
+    });
+  }
 }
