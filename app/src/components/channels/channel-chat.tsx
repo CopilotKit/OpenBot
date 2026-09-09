@@ -25,6 +25,7 @@ import {
 } from "@/lib/channels/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { ConversationProvider } from "@/lib/copilot/conversation";
+import { continueHandoffOnce } from "@/lib/copilot/handoff-continuation";
 import { afterMs, joinWithin } from "@/lib/copilot/join-thread";
 import { repairUnansweredToolCalls } from "@/lib/copilot/repair-history";
 import { stoppedReason } from "@/lib/copilot/stopped-turn";
@@ -54,9 +55,13 @@ const SEND_WITHOUT_RUNTIME_AFTER_MS = 1500;
  */
 export function ChannelChat({
   channel,
+  continueHandoff = false,
+  onHandoffContinued,
   runtimeAgentId,
 }: {
   channel: AgentChannel;
+  continueHandoff?: boolean;
+  onHandoffContinued?: () => void;
   runtimeAgentId: string;
 }) {
   // The core attaches the frontend tool registry; direct agent runs do not.
@@ -457,6 +462,22 @@ export function ChannelChat({
   /** Stable reference for effects and component callbacks. */
   const sayRef = useRef(say);
   sayRef.current = say;
+
+  const continuationClaimed = useRef(false);
+  const onHandoffContinuedRef = useRef(onHandoffContinued);
+  onHandoffContinuedRef.current = onHandoffContinued;
+  useEffect(() => {
+    if (!continueHandoff) {
+      continuationClaimed.current = false;
+      return;
+    }
+    void continueHandoffOnce({
+      requested: true,
+      claimed: continuationClaimed,
+      clear: () => onHandoffContinuedRef.current?.(),
+      send: (message) => sayRef.current(message),
+    });
+  }, [continueHandoff]);
 
   /**
    * Component buttons speak as user turns without forcing every transcript card to re-render.

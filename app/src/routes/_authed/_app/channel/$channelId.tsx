@@ -31,6 +31,8 @@ const chatSearchSchema = z.object({
   settings: z.boolean().optional(),
   /** Opens the Bot's screen in the shared detail pane. */
   watch: z.boolean().optional(),
+  /** Starts a recorded interactive handoff after the person follows its receipt link. */
+  continueHandoff: z.boolean().optional(),
 });
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -78,7 +80,7 @@ function ComputerViewPanel({
 
 function RouteComponent() {
   const { channelId } = Route.useParams();
-  const { settings, watch } = Route.useSearch();
+  const { continueHandoff, settings, watch } = Route.useSearch();
   const channel = useQuery(channelQueryOptions(channelId));
   const navigate = Route.useNavigate();
   const isSettingsOpen = settings === true;
@@ -251,8 +253,18 @@ function RouteComponent() {
       </div>
       <ChannelBody
         channel={channel.data}
+        continueHandoff={continueHandoff === true}
         isPending={channel.isPending}
         hasError={Boolean(channel.error)}
+        onHandoffContinued={() =>
+          navigate({
+            replace: true,
+            search: (previous) => ({
+              ...previous,
+              continueHandoff: undefined,
+            }),
+          })
+        }
       />
     </DetailPanel>
   );
@@ -264,12 +276,16 @@ function RouteComponent() {
  */
 function ChannelBody({
   channel,
+  continueHandoff,
   isPending,
   hasError,
+  onHandoffContinued,
 }: {
   channel: AgentChannel | undefined;
+  continueHandoff: boolean;
   isPending: boolean;
   hasError: boolean;
+  onHandoffContinued: () => void;
 }) {
   // Nothing while the channel loads: a placeholder inside a local round-trip is a flicker.
   if (isPending) return null;
@@ -295,7 +311,9 @@ function ChannelBody({
   return (
     <ChannelChat
       channel={channel}
+      continueHandoff={continueHandoff}
       key={channel.id}
+      onHandoffContinued={onHandoffContinued}
       runtimeAgentId={runtimeAgentId}
     />
   );

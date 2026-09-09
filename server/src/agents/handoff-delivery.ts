@@ -238,8 +238,8 @@ export function createHandoffDelivery(options: {
       if (continuation) {
         const name = work.toName ?? work.toBotId;
         const receipt =
-          `The request has been recorded for ${name}. Please continue in ` +
-          `[the conversation with ${name}](/channel/${encodeURIComponent(continuation.channelId)}) ` +
+          `The request has been recorded for ${name}. ` +
+          `[Continue with ${name}](/channel/${encodeURIComponent(continuation.channelId)}?continueHandoff=true) ` +
           (work.attachments?.length
             ? "to review the attached files and request any required approval. No upload or ingestion has happened yet."
             : "before browser work or document selection/approval. Those steps and any saving remain pending.");

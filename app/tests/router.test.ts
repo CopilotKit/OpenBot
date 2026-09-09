@@ -10,3 +10,12 @@ test("provides the protected credential administration route", () => {
     "/admin/credentials",
   );
 });
+
+test("keeps the one-click handoff continuation trigger in channel search", () => {
+  const validate = router.routesByPath["/channel/$channelId"]?.options
+    .validateSearch as { parse: (search: unknown) => unknown };
+
+  expect(validate.parse({ continueHandoff: true })).toEqual({
+    continueHandoff: true,
+  });
+});

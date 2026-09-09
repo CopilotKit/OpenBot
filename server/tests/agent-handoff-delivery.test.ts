@@ -145,7 +145,9 @@ describe("interactive handoff continuation", () => {
     expect(kept).toContain("A selection table");
     expect(kept).toContain("jefe-erp");
     expect(modelRuns).toBe(0);
-    expect(result.answer).toContain("/channel/collector-channel");
+    expect(result.answer).toContain(
+      "/channel/collector-channel?continueHandoff=true",
+    );
     expect(result.answer).toContain("continue");
     expect(result.answer).toContain("pending");
     expect(result.continuation).toEqual({
