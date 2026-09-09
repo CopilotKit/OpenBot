@@ -30,6 +30,24 @@ const riskRow = {
   roleDescription: "Investigate policies and controls.",
 };
 
+type RemoteAgentProbe = {
+  remote?: unknown;
+  run?: unknown;
+  clone?: unknown;
+};
+
+function expectWrappedHttpTransport(agent: unknown): HttpAgent {
+  expect(agent).not.toBeInstanceOf(HttpAgent);
+  expect(agent).toMatchObject({
+    run: expect.any(Function),
+    clone: expect.any(Function),
+  });
+
+  const transport = (agent as RemoteAgentProbe).remote;
+  expect(transport).toBeInstanceOf(HttpAgent);
+  return transport as HttpAgent;
+}
+
 describe("registered Copilot agents", () => {
   test("normalizes built-in and remote rows", () => {
     expect(
@@ -166,7 +184,7 @@ describe("registered Copilot agents", () => {
     );
 
     expect(agents["general-assistant"]).toBeInstanceOf(BuiltInAgent);
-    expect(agents.risk).toBeInstanceOf(HttpAgent);
+    expectWrappedHttpTransport(agents.risk);
   });
 
   /*
@@ -208,7 +226,7 @@ describe("registered Copilot agents", () => {
     );
 
     expect(watched).toEqual([{ id: "risk", name: "Risk" }]);
-    expect(agents.risk).toBeInstanceOf(HttpAgent);
+    expectWrappedHttpTransport(agents.risk);
   });
 
   /*
@@ -245,9 +263,7 @@ describe("registered Copilot agents", () => {
         dialler,
       )
     ).risk;
-    if (!(plain instanceof HttpAgent))
-      throw new Error("Expected the remote agent");
-    expect(plain.fetch).toBe(dialler);
+    expect(expectWrappedHttpTransport(plain).fetch).toBe(dialler);
 
     // With a timeout configured the watch wraps it, so the guard is handed the dialling fetch rather
     // than replacing it. A deployment gets both, not whichever was wired last.
@@ -272,8 +288,7 @@ describe("registered Copilot agents", () => {
         dialler,
       )
     ).risk;
-    if (!(watched instanceof HttpAgent))
-      throw new Error("Expected the remote agent");
+    expectWrappedHttpTransport(watched);
     expect(handed).toBe(dialler);
   });
 
@@ -308,9 +323,7 @@ describe("registered Copilot agents", () => {
     );
 
     const risk = agents.risk;
-    if (!(risk instanceof HttpAgent))
-      throw new Error("Expected the remote agent");
-    expect(risk.fetch).toBe(dialler);
+    expect(expectWrappedHttpTransport(risk).fetch).toBe(dialler);
   });
 
   /*
@@ -343,12 +356,9 @@ describe("registered Copilot agents", () => {
       })
     ).risk;
     const unguarded = (await buildAgents(registered, model, null)).risk;
-    if (!(guarded instanceof HttpAgent) || !(unguarded instanceof HttpAgent)) {
-      throw new Error("Expected the remote agent");
-    }
 
-    expect(guarded.fetch).toBe(sentinel);
-    expect(unguarded.fetch).not.toBe(sentinel);
+    expect(expectWrappedHttpTransport(guarded).fetch).toBe(sentinel);
+    expect(expectWrappedHttpTransport(unguarded).fetch).not.toBe(sentinel);
   });
 
   test("resolves fresh built-in agents and credentials for every request", async () => {
@@ -407,7 +417,7 @@ describe("registered Copilot agents", () => {
       },
     );
 
-    expect(agents.risk).toBeInstanceOf(HttpAgent);
+    expectWrappedHttpTransport(agents.risk);
     expect(resolverInvoked).toBe(false);
   });
 });
@@ -533,7 +543,7 @@ describe("standing agent roles", () => {
 
     expect(seen.request).toBe(request);
     expect(seen.actors).toEqual([{ id: "user-7", role: "user" }]);
-    expect(resolved.agent_expense).toBeInstanceOf(HttpAgent);
+    expectWrappedHttpTransport(resolved.agent_expense);
   });
 
   test("rebuilds each agent from the loader so an edited role applies to the next run", async () => {
