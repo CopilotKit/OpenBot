@@ -2613,6 +2613,126 @@ describe("a dynamic client the vendor has evicted", () => {
   });
 
   /**
+   * The classification an MCP server has always had, over a real listing that really happened.
+   *
+   * The three columns the refresh now writes are Composio's, and every other transport has to keep
+   * coming out of that insert as null and false — because `classifyTool` prefers a recorded effect to
+   * the reviewed write list, so a value appearing here for Notion would silently reclassify every one
+   * of its reads as a write, on a connector nobody touched. Asserted on the rows AND on what the
+   * Plugins page derives from them, because it is the second one that an administrator reads.
+   *
+   * It lives in this suite because this is the only place a `user-oauth` listing can actually be
+   * made to happen: the refresh runs on the grant of whoever pressed the button, so a Notion row with
+   * nobody connected records a refusal in `lastError` and writes no tools at all — which is a test
+   * that passes by having nothing to check.
+   */
+  test("a refreshed MCP server records no effect, no marker and no version", async () => {
+    await putClient(EVICTED);
+    await connect();
+    accepted = new Set([EVICTED.clientId]);
+
+    const mock = new MCPMock();
+    mock
+      .addTool({
+        name: "notion-fetch",
+        description: "A read no write list names.",
+        inputSchema: { type: "object", properties: {} },
+      })
+      .addTool({
+        name: "notion-create-pages",
+        description: "A write the list already names.",
+        inputSchema: { type: "object", properties: {} },
+      });
+    const mockUrl = await mock.start();
+
+    // What the deployment currently advertises for this server, because a refresh replaces the list
+    // wholesale and this one is pointing the vendor at a mock.
+    const advertisedBefore = await database
+      .select()
+      .from(mcpTools)
+      .where(eq(mcpTools.serverId, dynamicServerId));
+    const [stampBefore] = await database
+      .select({
+        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+        lastError: mcpServers.lastError,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, dynamicServerId));
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input instanceof Request ? input.url : input);
+      return realFetch(
+        target.startsWith("https://mcp.notion.com") ? mockUrl : input,
+        init,
+      );
+    }) as typeof fetch;
+
+    try {
+      // Two tools listed, so the assertions below have something to be about: `every` over an empty
+      // list is true, and a refusal recorded in `lastError` would leave exactly that.
+      expect(
+        await dynamicStore.refreshTools(dynamicServerId, dynamicUserId),
+      ).toEqual({ tools: 2 });
+
+      const rows = await database
+        .select({
+          name: mcpTools.name,
+          effect: mcpTools.effect,
+          destructive: mcpTools.destructive,
+          version: mcpTools.version,
+        })
+        .from(mcpTools)
+        .where(eq(mcpTools.serverId, dynamicServerId))
+        .orderBy(asc(mcpTools.name));
+
+      expect(rows).toEqual([
+        {
+          name: "notion-create-pages",
+          effect: null,
+          destructive: false,
+          version: null,
+        },
+        {
+          name: "notion-fetch",
+          effect: null,
+          destructive: false,
+          version: null,
+        },
+      ]);
+
+      const listed = (await dynamicStore.listServers()).find(
+        (server) => server.id === dynamicServerId,
+      );
+
+      // The reviewed write list, still deciding: the name it covers is a write and the name it does
+      // not is a read. A recorded effect on either row is what would take this over.
+      expect(
+        listed?.tools.map((tool) => ({ name: tool.name, effect: tool.effect })),
+      ).toEqual([
+        { name: "notion-create-pages", effect: "write" },
+        { name: "notion-fetch", effect: "read" },
+      ]);
+    } finally {
+      globalThis.fetch = realFetch;
+      await mock.stop?.();
+      await database
+        .delete(mcpTools)
+        .where(eq(mcpTools.serverId, dynamicServerId));
+      if (advertisedBefore.length > 0) {
+        await database.insert(mcpTools).values(advertisedBefore);
+      }
+      await database
+        .update(mcpServers)
+        .set({
+          toolsRefreshedAt: stampBefore?.toolsRefreshedAt ?? null,
+          lastError: stampBefore?.lastError ?? null,
+        })
+        .where(eq(mcpServers.id, dynamicServerId));
+    }
+  });
+
+  /**
    * What a failed refresh writes into `lastError`, and how much of it.
    *
    * The column is drawn on the admin page and parts of the sentence come from a vendor, so it is not
@@ -3675,4 +3795,79 @@ test("the Plugins page shows a brokered action with the effect the vendor record
   expect(
     gmail?.tools.map((tool) => ({ name: tool.name, effect: tool.effect })),
   ).toEqual([{ name: "GMAIL_FETCH_EMAILS", effect: "read" }]);
+});
+
+test("refreshing a Composio app records each action's effect, destructive marker and version", async () => {
+  const { store, database } = await freshStore();
+  useComposioClient({
+    listActions: async () => [
+      {
+        slug: "GMAIL_FETCH_EMAILS",
+        description: "Fetch emails.",
+        inputParameters: { type: "object", properties: {} },
+        tags: ["readOnlyHint"],
+        version: "20260903_00",
+      },
+      {
+        slug: "GMAIL_DELETE_MESSAGE",
+        description: "Delete a message.",
+        inputParameters: { type: "object", properties: {} },
+        tags: ["destructiveHint"],
+        version: "20260903_00",
+      },
+      {
+        slug: "GMAIL_SEND_EMAIL",
+        description: "Send an email.",
+        inputParameters: { type: "object", properties: {} },
+        tags: ["createHint"],
+        version: "20260903_00",
+      },
+    ],
+    execute: async () => ({}),
+  });
+
+  await database.insert(mcpServers).values({
+    id: "gmail",
+    title: "Gmail",
+    vendor: "Composio",
+    url: "composio://gmail",
+    provenance: "composio",
+  });
+
+  await store.refreshTools("gmail", "admin_user");
+
+  const rows = await database
+    .select({
+      name: mcpTools.name,
+      effect: mcpTools.effect,
+      destructive: mcpTools.destructive,
+      version: mcpTools.version,
+    })
+    .from(mcpTools)
+    .where(eq(mcpTools.serverId, "gmail"))
+    .orderBy(asc(mcpTools.name));
+
+  // The vendor's own three answers, as the listing gave them: a label, a marker, and the version a
+  // call is impossible without. `createHint` is a write with no marker — an ordinary write is not
+  // dangerous, and marking it so teaches an approver to click through the colour.
+  expect(rows).toEqual([
+    {
+      name: "GMAIL_DELETE_MESSAGE",
+      effect: "write",
+      destructive: true,
+      version: "20260903_00",
+    },
+    {
+      name: "GMAIL_FETCH_EMAILS",
+      effect: "read",
+      destructive: false,
+      version: "20260903_00",
+    },
+    {
+      name: "GMAIL_SEND_EMAIL",
+      effect: "write",
+      destructive: false,
+      version: "20260903_00",
+    },
+  ]);
 });
