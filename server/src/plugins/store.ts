@@ -3027,23 +3027,21 @@ export function createPluginStore(options: PluginStoreOptions) {
        * The version this action was listed at, handed to the transport that needs one.
        *
        * Under a reserved key rather than as a parameter on the shared signature, because that
-       * signature is MCP's and three other transports implement it. The Composio transport strips the
-       * key before anything reaches the vendor, and asserts that it did.
+       * signature is MCP's and three other transports implement it. The Composio transport strips
+       * the key before anything reaches the vendor, and asserts that it did.
        *
-       * The recorded version is merged LAST, so a `__version` a model supplied in its own arguments
-       * cannot win. Reversing the spread would let a model choose which revision of an action runs —
-       * a revision that was never listed, classified or granted.
+       * A `__version` in the model's own arguments is not an argument: it is this key, and no
+       * vendor publishes it. So it is stripped unconditionally, whatever its value, and that strip
+       * is the whole protection. The recorded version is then merged into arguments that provably
+       * cannot carry the key, which makes both spread orders identical: the merge order has no
+       * reachable failure mode. Do not read the strip as belt-and-braces on top of an ordering
+       * guarantee — the ordering is the redundant half, and removing the strip is what would let a
+       * model choose which revision of an action runs.
        *
-       * Absent when the app has not been refreshed since the column existed, and because the key is
-       * stripped below there is then no version at all for the transport to read, which is what makes
-       * its refusal hold rather than guessing — a guessed version is a call against an action's other
-       * behaviour.
-       */
-
-      /*
-       * A `__version` in the model's own arguments is not an argument: it is this key, and no vendor
-       * publishes it. Dropped before the recorded one is merged, so the absent-version case refuses at
-       * the transport rather than running at a revision a model chose.
+       * Absent when the app has not been refreshed since the column existed, and because the key
+       * was stripped there is then no version at all for the transport to read, which is what makes
+       * its refusal hold rather than guessing — a guessed version is a call against an action's
+       * other behaviour.
        */
       const { [VERSION_ARG]: _dropped, ...modelArgs } = args;
       const vendorArgs = advertised[0]?.version

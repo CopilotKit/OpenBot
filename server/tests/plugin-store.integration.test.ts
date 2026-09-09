@@ -3686,6 +3686,15 @@ test("a Composio call sends the version recorded for that action", async () => {
   ]);
 });
 
+/*
+ * The composite end-to-end outcome: a model that supplies the reserved key itself does not change
+ * which revision runs. What holds it is the unconditional strip above the merge in `store.ts`.
+ *
+ * This is not a mutation gate, and no single mutation isolates it: reverting the strip, keeping the
+ * strip but falling back to the raw arguments, and reversing the spread all leave it green, and its
+ * assertion is already covered by `a Composio call sends the version recorded for that action`. It
+ * is kept because the property is one somebody will want to confirm, not because it guards it.
+ */
 test("a version a model supplied in its own arguments cannot beat the recorded one", async () => {
   const { store, database } = await freshStore();
   const calls: { slug: string; version: string }[] = [];
@@ -3700,17 +3709,16 @@ test("a version a model supplied in its own arguments cannot beat the recorded o
 
   await store.callTool({
     ref: "gmail/GMAIL_FETCH_EMAILS",
-    // A model filling in the reserved key itself. It reaches `args` intact — nothing strips a
-    // non-empty value — so the only thing standing between it and the vendor is that the recorded
-    // version is merged after it.
+    // A model filling in the reserved key itself. Stripped unconditionally, non-empty value and
+    // all, before the recorded version is merged — so it never reaches the vendor under either
+    // spread order.
     args: { __version: "19700101_00" },
     botId: "bot_helper",
     actorId: "user_asker",
   });
 
-  // The listed revision, not the one the model asked for. Reversed, this call would run against a
-  // revision that was never listed, never classified and never granted — and the audit row would
-  // name the action without naming which of its revisions actually ran.
+  // The listed revision, not the one the model asked for: supplying the reserved key changed
+  // nothing about which revision ran.
   expect(calls).toEqual([
     { slug: "GMAIL_FETCH_EMAILS", version: "20260903_00" },
   ]);
@@ -3726,9 +3734,9 @@ test("a version a model supplied cannot stand in for an action with none recorde
       return {};
     },
   });
-  // The action with no recorded version, which is the branch the test above does not cover: there is
-  // nothing to merge last, so the merge order guards nothing and the model's key is the only version
-  // in the arguments.
+  // The action with no recorded version, which is the branch the test above does not cover: there
+  // is nothing to merge in, and because the model's key was stripped there is no version in the
+  // arguments at all — which is what the transport refuses on.
   await seedComposioGmail(database, store, { version: null });
 
   const result = await store.callTool({
@@ -3738,15 +3746,18 @@ test("a version a model supplied cannot stand in for an action with none recorde
     actorId: "user_asker",
   });
 
+  // Never dialled. Honoured, the model's version runs a granted action at a revision that was never
+  // listed, never classified and never granted, and the audit row carries no version field to say
+  // which revision that was.
+  //
+  // Asserted before the refusal, so a regression fails here and names the version that reached the
+  // vendor, rather than failing on a boolean that names nothing.
+  expect(calls).toEqual([]);
+
   // The transport's refusal, which is the advertised answer for an action with no recorded version —
   // and an operator's one-click fix, rather than a call against a revision a model named.
   expect(result.isError).toBe(true);
   expect(result.text).toMatch(/Refresh this app's tools on its Plugins page/);
-
-  // Never dialled. Honoured, the model's version runs a granted action at a revision that was never
-  // listed, never classified and never granted, and the audit row carries no version field to say
-  // which revision that was.
-  expect(calls).toEqual([]);
 });
 
 test("a Composio call is recorded as reaching the vendor as the person, not as the deployment", async () => {
