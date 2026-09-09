@@ -15,8 +15,8 @@ import {
   PROVENANCE_GUIDANCE,
 } from "../../shared/bot-prompt";
 import { sanitizeSeededHistory } from "./agents/history-sanitize";
-import type { AuditInitiator } from "./audit";
 import type { AgentActor } from "./agents/profile-types";
+import type { AuditInitiator } from "./audit";
 import type { AgentFetch, StallGuard } from "./channels/stall-guard";
 import type { DeploymentConfig } from "./config";
 import type { SelectableSkill, Selection } from "./plugins/selection";
@@ -394,7 +394,19 @@ export async function buildAgents(
   loadInstructions?: LoadInstructions,
   initiator?: AuditInitiator,
 ): Promise<Record<string, AbstractAgent>> {
-  const vendors = await loadVendors().catch(() => [] as readonly string[]);
+  let vendors: readonly string[] = [];
+  try {
+    vendors = await loadVendors();
+  } catch {
+    // Vendor guidance is best-effort: losing it must not prevent a run or change its grants.
+    // Report once per build here, including failures from the production plugin-store loader.
+    // Never log the thrown value: database errors can contain connection details or row contents.
+    console.error({
+      error: "connected_vendor_lookup_failed",
+      context: { operation: "loadVendors", agentCount: agents.length },
+      timestamp: new Date().toISOString(),
+    });
+  }
   /*
    * Read once per build and only when somebody will be told it, like the vendors above and the model
    * key below: it is a fact about the person, not about a coworker, and asking per Bot would be the

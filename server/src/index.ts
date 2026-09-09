@@ -6,6 +6,7 @@ import {
 import { serve } from "bun";
 import { eq } from "drizzle-orm";
 import { COMPUTER_GUIDANCE } from "../../shared/bot-prompt";
+import { workOwner } from "../../shared/work-owner";
 import { mintRunAssertion, readRunAssertion } from "./agents/callback-token";
 import { createAgentFetch } from "./agents/endpoint";
 import { askTheirOwnPerson, escalationTool } from "./agents/escalation";
@@ -97,7 +98,6 @@ import {
   startWorkOfferedListener,
   type WorkOfferedListener,
 } from "./work/queue";
-import { workOwner } from "../../shared/work-owner";
 
 /**
  * Who is asking, for a CopilotKit request.
@@ -564,16 +564,11 @@ const signRunForActor =
  * Google's sign-in page and asked a person to sign in to an account the deployment had already
  * connected. Naming them lets it say which one it has not been granted instead.
  *
- * Read per request rather than held, because a connector added a minute ago has to count, and
- * failing is the same as having none: a Bot that cannot be told loses a sentence, not a run.
+ * Read per request rather than held, because a connector added a minute ago has to count.
+ * Let failures reach buildAgents, which reports the missing guidance once and keeps the run usable.
  */
-const loadVendors = async () => {
-  try {
-    return (await pluginStore.listServers()).map((server) => server.id);
-  } catch {
-    return [];
-  }
-};
+const loadVendors = async () =>
+  (await pluginStore.listServers()).map((server) => server.id);
 
 /*
  * How a run's tools are narrowed to the ones it is about.

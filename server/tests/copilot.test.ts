@@ -592,6 +592,76 @@ function userMessage(content: string) {
   return { id: `user-${content}`, role: "user" as const, content };
 }
 
+describe("connected-vendor lookup diagnostics", () => {
+  async function runWithVendors(loadVendors: () => Promise<readonly string[]>) {
+    await using endpoint = fakeAgUiEndpoint();
+    const agents = await buildAgents(
+      [
+        { ...assistantRow, type: "built_in", systemPrompt: "Be helpful." },
+        {
+          ...riskRow,
+          endpoint: endpoint.url,
+          standingMessage: standingRoleMessage(riskRow),
+        },
+      ],
+      { provider: "openai", defaultModel: "gpt-5.6-terra" },
+      "synthetic-model-key",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      loadVendors,
+    );
+    expect(agents["general-assistant"]).toBeInstanceOf(BuiltInAgent);
+    const remote = agents.risk;
+    if (!remote) throw new Error("Fixture remote agent was not built.");
+    await remote.clone().runAgent();
+    expect(endpoint.requests).toHaveLength(1);
+    expect(endpoint.requests[0]).toMatchObject({ tools: [] });
+    return JSON.stringify(endpoint.requests[0]);
+  }
+
+  test("reports a failed lookup once for the roster and still completes the run", async () => {
+    const diagnostic = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await runWithVendors(async () => {
+        throw new Error(
+          "postgres://fixture:secret@localhost/fixture private prompt",
+        );
+      });
+      expect(diagnostic).toHaveBeenCalledTimes(1);
+      expect(diagnostic).toHaveBeenCalledWith({
+        error: "connected_vendor_lookup_failed",
+        context: { operation: "loadVendors", agentCount: 2 },
+        timestamp: expect.any(String),
+      });
+      expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("secret");
+      expect(JSON.stringify(diagnostic.mock.calls)).not.toContain(
+        "private prompt",
+      );
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
+  test.each([[], ["google-drive"]])(
+    "a successful vendor lookup stays quiet: %j",
+    async (...vendors: string[]) => {
+      const diagnostic = spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const sent = await runWithVendors(async () => vendors);
+        expect(sent.includes("This deployment also connects to:")).toBe(
+          vendors.length > 0,
+        );
+        if (vendors.length > 0) expect(sent).toContain("google-drive");
+        expect(diagnostic).not.toHaveBeenCalled();
+      } finally {
+        diagnostic.mockRestore();
+      }
+    },
+  );
+});
+
 /**
  * An AG-UI server that records what it was sent and answers with a complete run, so the standing
  * role can be asserted on the wire rather than on the object that was supposed to send it.
