@@ -1680,39 +1680,46 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("the OpenBot window could not be created")
         .run(|app, event| {
-            // Nothing this started may outlive it.
-            //
-            // A child that survives the window is the failure Tauri has a standing issue about: an
-            // orphaned server keeps port 3001, the next launch cannot bind it, and nothing on
-            // screen says why. Asked to stop first, then made to, because a server given a moment
-            // closes its database connections and one that is shot does not.
-            // `Exit` only. `ExitRequested` fires first and for the same quit, and running this
-            // twice means a second SIGTERM to a process that has already gone and another wait
-            // nobody is watching.
-            if matches!(event, tauri::RunEvent::Exit) {
-                let shell = app.state::<Shell>();
-                let default = PathBuf::from(default_root());
-                let root = shutdown_root(&shell, &default);
-                {
-                    let mut children = shell.children.lock().unwrap();
-                    for (_, child) in children.iter_mut() {
-                        ask_to_stop(child);
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
-                    for (_, child) in children.iter_mut() {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                    }
-                    children.clear();
+            match event {
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => {
+                    show_whichever_applies(app);
                 }
+                tauri::RunEvent::Exit => {
+                    // Nothing this started may outlive it.
+                    //
+                    // A child that survives the window is the failure Tauri has a standing issue about: an
+                    // orphaned server keeps port 3001, the next launch cannot bind it, and nothing on
+                    // screen says why. Asked to stop first, then made to, because a server given a moment
+                    // closes its database connections and one that is shot does not.
+                    // `Exit` only. `ExitRequested` fires first and for the same quit, and running this
+                    // twice means a second SIGTERM to a process that has already gone and another wait
+                    // nobody is watching.
+                    let shell = app.state::<Shell>();
+                    let default = PathBuf::from(default_root());
+                    let root = shutdown_root(&shell, &default);
+                    {
+                        let mut children = shell.children.lock().unwrap();
+                        for (_, child) in children.iter_mut() {
+                            ask_to_stop(child);
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+                        for (_, child) in children.iter_mut() {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                        }
+                        children.clear();
+                    }
 
-                // The containers too. Leaving five of them running behind an application that is
-                // no longer on screen is the one outcome nobody can act on: there is no window to
-                // stop them from and nothing to say they are there.
-                stack::stop_processes_under(&root);
-                if let Some(found) = engine::detect().address {
-                    let _ = stack::down(&found, &root);
+                    // The containers too. Leaving five of them running behind an application that is
+                    // no longer on screen is the one outcome nobody can act on: there is no window to
+                    // stop them from and nothing to say they are there.
+                    stack::stop_processes_under(&root);
+                    if let Some(found) = engine::detect().address {
+                        let _ = stack::down(&found, &root);
+                    }
                 }
+                _ => {}
             }
         });
 }
