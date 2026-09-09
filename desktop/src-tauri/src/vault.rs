@@ -182,13 +182,21 @@ fn cache() -> &'static std::sync::Mutex<BTreeMap<String, Option<String>>> {
 
 /// Read a stored secret, asking the store at most once per name per run.
 pub fn recall(name: &str) -> Option<String> {
-    if let Ok(held) = cache().lock() {
+    recall_cached(name, cache(), recall_from_store)
+}
+
+fn recall_cached(
+    name: &str,
+    cache: &std::sync::Mutex<BTreeMap<String, Option<String>>>,
+    recall_one: impl FnOnce(&str) -> Option<String>,
+) -> Option<String> {
+    if let Ok(held) = cache.lock() {
         if let Some(known) = held.get(name) {
             return known.clone();
         }
     }
-    let found = recall_from_store(name);
-    if let Ok(mut held) = cache().lock() {
+    let found = recall_one(name);
+    if let Ok(mut held) = cache.lock() {
         held.insert(name.to_string(), found.clone());
     }
     found
@@ -196,8 +204,17 @@ pub fn recall(name: &str) -> Option<String> {
 
 /// Store a secret, and keep the cache in step so the next read does not ask again.
 pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
-    remember_in_store(name, value)?;
-    if let Ok(mut held) = cache().lock() {
+    remember_cached(name, value, cache(), remember_in_store)
+}
+
+fn remember_cached(
+    name: &str,
+    value: &str,
+    cache: &std::sync::Mutex<BTreeMap<String, Option<String>>>,
+    remember_one: impl FnOnce(&str, &str) -> Result<(), Problem>,
+) -> Result<(), Problem> {
+    remember_one(name, value)?;
+    if let Ok(mut held) = cache.lock() {
         held.insert(name.to_string(), Some(value.to_string()));
     }
     Ok(())
@@ -205,8 +222,16 @@ pub fn remember(name: &str, value: &str) -> Result<(), Problem> {
 
 /// Drop a secret from the store and from the cache.
 pub fn forget(name: &str) {
-    forget_in_store(name);
-    if let Ok(mut held) = cache().lock() {
+    forget_cached(name, cache(), forget_in_store)
+}
+
+fn forget_cached(
+    name: &str,
+    cache: &std::sync::Mutex<BTreeMap<String, Option<String>>>,
+    forget_one: impl FnOnce(&str),
+) {
+    forget_one(name);
+    if let Ok(mut held) = cache.lock() {
         held.insert(name.to_string(), None);
     }
 }
@@ -402,6 +427,68 @@ fn owner_only(_path: &std::path::Path) {}
 
 #[cfg(test)]
 mod cache_tests {
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn unignored_tests_do_not_call_real_store_entrypoints() {
+        let source = include_str!("vault.rs");
+        let mut pending_test = false;
+        let mut ignored = false;
+        let mut in_body = false;
+        let mut braces = 0isize;
+        let mut name = String::new();
+        let mut body = String::new();
+
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if !in_body {
+                if trimmed.starts_with("#[ignore") {
+                    ignored = true;
+                } else if trimmed == "#[test]" {
+                    pending_test = true;
+                } else if pending_test && trimmed.starts_with("fn ") {
+                    name = trimmed
+                        .trim_start_matches("fn ")
+                        .split('(')
+                        .next()
+                        .unwrap_or_default()
+                        .to_string();
+                    body.clear();
+                    in_body = true;
+                    pending_test = false;
+                    braces =
+                        line.matches('{').count() as isize - line.matches('}').count() as isize;
+                    body.push_str(line);
+                    body.push('\n');
+                    continue;
+                } else if !trimmed.starts_with("#[") && !trimmed.is_empty() {
+                    pending_test = false;
+                    ignored = false;
+                }
+            }
+
+            if in_body {
+                body.push_str(line);
+                body.push('\n');
+                braces += line.matches('{').count() as isize - line.matches('}').count() as isize;
+                if braces == 0 {
+                    if !ignored {
+                        for entrypoint in ["recall", "remember", "forget"] {
+                            let direct = format!("{entrypoint}(");
+                            let qualified = format!("super::{entrypoint}(");
+                            assert!(
+                                !body.contains(&direct) && !body.contains(&qualified),
+                                "{name} must use injected fake stores, not {entrypoint}()"
+                            );
+                        }
+                    }
+                    in_body = false;
+                    ignored = false;
+                }
+            }
+        }
+    }
+
     /// The store is asked once per name, then not again.
     ///
     /// The failure this pins is not a slow read, it is a person clicking Deny four times every
@@ -410,18 +497,66 @@ mod cache_tests {
     #[test]
     fn a_secret_is_read_from_the_store_once_per_run() {
         let name = format!("OPENBOT_TEST_CACHE_{}", std::process::id());
+        let cache = std::sync::Mutex::new(BTreeMap::new());
+        let store = std::sync::Mutex::new(BTreeMap::<String, String>::new());
+        let reads = std::sync::Mutex::new(Vec::new());
+
         // Absent to begin with, and the absence is remembered rather than asked again.
-        assert_eq!(super::recall(&name), None);
-        assert_eq!(super::recall(&name), None);
+        assert_eq!(
+            super::recall_cached(&name, &cache, |key| {
+                reads.lock().unwrap().push(key.to_string());
+                store.lock().unwrap().get(key).cloned()
+            }),
+            None
+        );
+        assert_eq!(
+            super::recall_cached(&name, &cache, |key| {
+                reads.lock().unwrap().push(key.to_string());
+                store.lock().unwrap().get(key).cloned()
+            }),
+            None
+        );
+        assert_eq!(reads.lock().unwrap().as_slice(), [name.clone()]);
 
         // A write goes through and updates what a read sees, without asking the store.
-        super::remember(&name, "a-value").expect("the store should accept a write");
-        assert_eq!(super::recall(&name).as_deref(), Some("a-value"));
-        assert_eq!(super::recall(&name).as_deref(), Some("a-value"));
+        super::remember_cached(&name, "a-value", &cache, |key, value| {
+            store
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), value.to_string());
+            Ok(())
+        })
+        .expect("the store should accept a write");
+        assert_eq!(
+            super::recall_cached(&name, &cache, |key| {
+                reads.lock().unwrap().push(key.to_string());
+                store.lock().unwrap().get(key).cloned()
+            })
+            .as_deref(),
+            Some("a-value")
+        );
+        assert_eq!(
+            super::recall_cached(&name, &cache, |key| {
+                reads.lock().unwrap().push(key.to_string());
+                store.lock().unwrap().get(key).cloned()
+            })
+            .as_deref(),
+            Some("a-value")
+        );
+        assert_eq!(reads.lock().unwrap().as_slice(), [name.clone()]);
 
         // And forgetting is reflected in both.
-        super::forget(&name);
-        assert_eq!(super::recall(&name), None);
+        super::forget_cached(&name, &cache, |key| {
+            store.lock().unwrap().remove(key);
+        });
+        assert_eq!(
+            super::recall_cached(&name, &cache, |key| {
+                reads.lock().unwrap().push(key.to_string());
+                store.lock().unwrap().get(key).cloned()
+            }),
+            None
+        );
+        assert_eq!(reads.lock().unwrap().as_slice(), [name.clone()]);
     }
 }
 

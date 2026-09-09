@@ -790,6 +790,14 @@ async fn ask_the_bot(
             "MANAGED_AGENT_TOKEN",
         ],
     );
+    ask_the_bot_with_settings(root, question, settings).await
+}
+
+async fn ask_the_bot_with_settings(
+    root: PathBuf,
+    question: String,
+    settings: std::collections::BTreeMap<String, String>,
+) -> Result<String, openbot_desktop_lib::problem::Problem> {
     // The picked harness if there is one, and the Bot that ships with OpenBot if there is not.
     // Both speak AG-UI at the same address shape, so this screen does not care which it got.
     let endpoint = settings
@@ -1470,6 +1478,23 @@ mod tests {
     use std::io::{Read, Write};
 
     #[test]
+    fn ask_transport_regressions_do_not_load_from_the_vault() {
+        let source = include_str!("main.rs");
+        let test = source
+            .split("\n    fn ask_the_bot_uses_native_mastra_for_a_picked_mastra_harness()")
+            .nth(1)
+            .expect("ID12 regression")
+            .split("struct TestRequest")
+            .next()
+            .expect("ID12 regression body");
+
+        assert!(
+            !test.contains("ask_the_bot("),
+            "ID12 must test dispatch with resolved settings instead of loading vault-backed settings"
+        );
+    }
+
+    #[test]
     fn ask_the_bot_uses_native_mastra_for_a_picked_mastra_harness() {
         let server = TestServer::new(
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
@@ -1477,22 +1502,21 @@ mod tests {
              data: {\"type\":\"finish\",\"payload\":{\"stepResult\":{\"reason\":\"stop\"}}}\n\n",
         );
         let root = temp_root("openbot-mastra-ask");
-        std::fs::create_dir_all(&root).expect("root");
-        std::fs::write(
-            root.join(".env"),
-            format!(
-                "PICKED_HARNESS_URL={}\n\
-                 PICKED_HARNESS_KIND=remote-mastra\n\
-                 PICKED_HARNESS_AGENT_ID=openbot\n\
-                 MANAGED_AGENT_TOKEN=managed-token\n",
-                server.url
-            ),
-        )
-        .expect("env");
-
-        let answer = tauri::async_runtime::block_on(ask_the_bot(
-            root.to_string_lossy().into_owned(),
+        let answer = tauri::async_runtime::block_on(ask_the_bot_with_settings(
+            root.clone(),
             "What is 17 times 23?".to_string(),
+            std::collections::BTreeMap::from([
+                ("PICKED_HARNESS_URL".to_string(), server.url.clone()),
+                (
+                    "PICKED_HARNESS_KIND".to_string(),
+                    "remote-mastra".to_string(),
+                ),
+                ("PICKED_HARNESS_AGENT_ID".to_string(), "openbot".to_string()),
+                (
+                    "MANAGED_AGENT_TOKEN".to_string(),
+                    "managed-token".to_string(),
+                ),
+            ]),
         ))
         .expect("answer");
 
