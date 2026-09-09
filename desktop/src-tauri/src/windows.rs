@@ -140,7 +140,51 @@ impl Blocker {
 /// a Server 2022 machine where `wsl --install` had enabled the features and done nothing else.
 /// The caller must check probe success first: command failure is not evidence of a missing kernel.
 pub fn wsl_kernel_present(version_output: &str, kernel_file_exists: bool) -> bool {
-    kernel_file_exists || version_output.to_lowercase().contains("kernel version")
+    if kernel_file_exists {
+        return true;
+    }
+    let component = |line: &str, dotted: bool| {
+        line.split_once([':', '：']).is_some_and(|(label, value)| {
+            let value = value.trim();
+            let (numbers, suffix) = value.split_once('-').unwrap_or((value, ""));
+            !label.trim().is_empty()
+                && (!dotted || numbers.contains('.'))
+                && numbers
+                    .split('.')
+                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+                && (!value.contains('-')
+                    || (!suffix.is_empty()
+                        && suffix.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
+                        })))
+        })
+    };
+    // Keep compact English responses, but a label without a version is not positive evidence.
+    if version_output.lines().any(|line| {
+        line.split_once(':')
+            .is_some_and(|(label, _)| label.trim().eq_ignore_ascii_case("kernel version"))
+            && component(line, false)
+    }) {
+        return true;
+    }
+    // Microsoft's MessagePackageVersions places WSL then kernel first in all shipped locales
+    // (pinned resources in test-fixtures/wsl-component-version-formats.json). Only labels and
+    // punctuation vary. Require both dotted values; unrelated prose or a lone version is not enough.
+    let mut rows = version_output
+        .lines()
+        .filter(|line| !line.trim().is_empty());
+    let (Some(wsl), Some(kernel)) = (rows.next(), rows.next()) else {
+        return false;
+    };
+    wsl.split_once([':', '：']).is_some_and(|(label, _)| {
+        label
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .any(|word| word.eq_ignore_ascii_case("WSL"))
+    }) && kernel
+        .split_once([':', '：'])
+        .is_some_and(|(label, _)| !label.contains("WSL"))
+        && component(wsl, true)
+        && component(kernel, true)
 }
 
 pub fn state_path(data_dir: &Path) -> PathBuf {
@@ -461,6 +505,129 @@ mod tests {
             status: std::process::ExitStatus::from_raw(code as u32),
             stdout: stdout.as_bytes().to_vec(),
             stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct ComponentVersionFormats {
+        formats: Vec<ComponentVersionFormat>,
+    }
+
+    #[derive(Deserialize)]
+    struct ComponentVersionFormat {
+        locale: String,
+        #[serde(rename = "MessagePackageVersions")]
+        template: String,
+    }
+
+    fn component_version_formats() -> Vec<ComponentVersionFormat> {
+        serde_json::from_str::<ComponentVersionFormats>(include_str!(
+            "../test-fixtures/wsl-component-version-formats.json"
+        ))
+        .unwrap()
+        .formats
+    }
+
+    fn component_version_output(format: &ComponentVersionFormat) -> String {
+        let mut text = format.template.clone();
+        for version in [
+            "2.7.13.0",
+            "6.18.33.2-2",
+            "1.0.71",
+            "1.2.6353",
+            "1.611.1",
+            "10.0.26100.1",
+            "10.0.26100.4061",
+        ] {
+            text = text.replacen("{}", version, 1);
+        }
+        text
+    }
+
+    fn component_version_for_locale(locale: &str) -> String {
+        let format = component_version_formats()
+            .into_iter()
+            .find(|format| format.locale == locale)
+            .unwrap();
+        component_version_output(&format)
+    }
+
+    #[test]
+    fn successful_french_version_does_not_block_a_working_kernel() {
+        let text = component_version_for_locale("fr-FR");
+        assert_eq!(fail_probe_at(5, Ok(probe_output(0, &text, ""))), Ok(None));
+    }
+
+    #[test]
+    fn localized_component_versions_are_healthy_in_utf8_and_utf16() {
+        let formats = component_version_formats();
+        assert_eq!(formats.len(), 22);
+        for format in formats {
+            let text = component_version_output(&format);
+            for bytes in [
+                text.as_bytes().to_vec(),
+                text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+            ] {
+                let mut output = probe_output(0, "", "");
+                output.stdout = bytes;
+                assert_eq!(fail_probe_at(5, Ok(output)), Ok(None), "{}", format.locale);
+            }
+        }
+    }
+
+    #[test]
+    fn successful_version_output_needs_positive_component_values() {
+        for text in [
+            "WSL version: 2.7.13.0",
+            "Version WSL : 2.7.13.0\nVersion du noyau : ",
+            "Version WSL : \nVersion du noyau : 6.18.33.2-2",
+            "Version WSL : 2.7.13.0\nVersion du noyau : unavailable",
+            "Version WSL : 2.7.13.0\nVersion du noyau : 6..18",
+            "Version WSL : 2.7.13.0\nVersion du noyau : 6.18 please install",
+            "Version WSL : 2.7.13.0\nVersion du noyau : 6.18-",
+            "Version WSL : 2-build.1\nVersion du noyau : 6.18.33.2",
+            "Version WSL : 2.7.13.0\nVersion du noyau : 6-build.1",
+            "Version WSL : 2.7.13.0\n: 6.18.33.2",
+            "Unrelated version: 2.7.13.0\nAnother version: 6.18.33.2",
+            "WSL version: 2.7.13.0\nWSLg version: 1.0.71",
+            "Please install version 6.18.33.2",
+            "Kernel version:",
+            "Kernel version: unavailable",
+        ] {
+            assert_eq!(
+                fail_probe_at(5, Ok(probe_output(0, text, ""))),
+                Ok(Some(Blocker::WslNoKernel)),
+                "accepted {text:?}"
+            );
+        }
+        for text in [
+            "Kernel version: 6",
+            "Kernel version: 6.18.33.2-2",
+            "\r\n Version WSL : 2.7.13.0 \r\n\r\n Version du noyau : 6.6.87.2-microsoft-standard-WSL2 \r\n",
+        ] {
+            assert!(wsl_kernel_present(text, false), "rejected {text:?}");
+        }
+    }
+
+    #[test]
+    fn localized_version_probe_failures_remain_detection_errors() {
+        let text = component_version_for_locale("fr-FR");
+        let error =
+            fail_probe_at(5, Ok(probe_output(17, &text, "version query denied"))).unwrap_err();
+        assert!(error.said.contains("wsl.exe --version"));
+        let detail = error.detail.unwrap();
+        assert!(detail.contains(&text));
+        assert!(detail.contains("version query denied"));
+        assert!(detail.contains("17"));
+        for bytes in [vec![0xff], vec![0xff, 0xfe, 0x00]] {
+            let mut output = probe_output(0, "", "");
+            output.stdout = bytes;
+            let error = fail_probe_at(5, Ok(output)).unwrap_err();
+            assert!(error.said.contains("wsl.exe --version"));
+            assert!(error
+                .detail
+                .unwrap()
+                .contains("Could not decode probe stdout"));
         }
     }
 
