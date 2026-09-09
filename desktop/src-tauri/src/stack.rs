@@ -806,21 +806,32 @@ pub fn services_that_exited(
 
     let mut dead = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
         let Some((service, state)) = line.split_once('\t') else {
             return Err(crate::problem::Problem::with(
                 "OpenBot could not inspect its Compose services.",
                 format!("unusable {operation} row: {line}"),
             ));
         };
+        let service = service.trim();
+        let state = state.trim();
+        if service.is_empty() || state.is_empty() {
+            return Err(crate::problem::Problem::with(
+                "OpenBot could not inspect its Compose services.",
+                format!("unusable {operation} row: {line}"),
+            ));
+        }
         if !state.trim().eq_ignore_ascii_case("exited") {
             continue;
         }
         // `migrate` is meant to exit: it is run to completion, not raised.
-        if service.trim() == "migrate" {
+        if service == "migrate" {
             continue;
         }
         let why = compose_command(engine, root, &Secrets::new())
-            .args(["logs", "--tail", "3", service.trim()])
+            .args(["logs", "--tail", "3", service])
             .output()
             .ok()
             .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
@@ -831,7 +842,7 @@ pub fn services_that_exited(
             .unwrap_or("no reason in its log")
             .trim()
             .to_string();
-        dead.push((service.trim().to_string(), why));
+        dead.push((service.to_string(), why));
     }
     Ok(dead)
 }
@@ -1198,37 +1209,58 @@ mod tests {
 
     struct PathFixture {
         previous: Option<std::ffi::OsString>,
+        previous_record: Option<std::ffi::OsString>,
+        previous_scenario: Option<std::ffi::OsString>,
         bin: PathBuf,
         _guard: std::sync::MutexGuard<'static, ()>,
     }
 
     impl PathFixture {
-        fn with_docker(script: &str) -> Self {
-            Self::with_docker_and_inherited_path(script, true)
+        fn with_fake_engine(scenario: &str) -> Self {
+            Self::with_fake_engine_and_inherited_path(scenario, true)
         }
 
-        fn with_only_docker(script: &str) -> Self {
-            Self::with_docker_and_inherited_path(script, false)
+        fn with_broken_engine() -> Self {
+            Self::with_fake_engine_and_inherited_path("spawn", false)
         }
 
-        fn with_docker_and_inherited_path(script: &str, inherit_path: bool) -> Self {
+        fn with_fake_engine_and_inherited_path(scenario: &str, inherit_path: bool) -> Self {
             static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
             let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             let previous = std::env::var_os("PATH");
+            let previous_record = std::env::var_os("OPENBOT_TEST_ENGINE_RECORD");
+            let previous_scenario = std::env::var_os("OPENBOT_FAKE_ENGINE_SCENARIO");
             let bin = temp_root("openbot-stack-fake-engine-bin");
             std::fs::create_dir_all(&bin).unwrap();
             let docker = bin.join(if cfg!(windows) {
-                "docker.bat"
+                "docker.exe"
             } else {
                 "docker"
             });
-            std::fs::write(&docker, script).unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut permissions = std::fs::metadata(&docker).unwrap().permissions();
-                permissions.set_mode(0o755);
-                std::fs::set_permissions(&docker, permissions).unwrap();
+            if scenario == "spawn" {
+                std::fs::write(&docker, "not an executable").unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut permissions = std::fs::metadata(&docker).unwrap().permissions();
+                    permissions.set_mode(0o644);
+                    std::fs::set_permissions(&docker, permissions).unwrap();
+                }
+            } else {
+                let source = bin.join("fake_engine.rs");
+                std::fs::write(&source, FAKE_ENGINE_SOURCE).unwrap();
+                let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+                let output = Command::new(rustc)
+                    .arg(&source)
+                    .arg("-o")
+                    .arg(&docker)
+                    .output()
+                    .expect("rustc should run for the fake engine");
+                assert!(
+                    output.status.success(),
+                    "fake engine did not compile: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
             let mut path = std::ffi::OsString::from(&bin);
             if inherit_path {
@@ -1242,8 +1274,11 @@ mod tests {
                 path.push(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()));
             }
             std::env::set_var("PATH", path);
+            std::env::set_var("OPENBOT_FAKE_ENGINE_SCENARIO", scenario);
             Self {
                 previous,
+                previous_record,
+                previous_scenario,
                 bin,
                 _guard: guard,
             }
@@ -1257,21 +1292,68 @@ mod tests {
             } else {
                 std::env::remove_var("PATH");
             }
+            if let Some(previous) = &self.previous_record {
+                std::env::set_var("OPENBOT_TEST_ENGINE_RECORD", previous);
+            } else {
+                std::env::remove_var("OPENBOT_TEST_ENGINE_RECORD");
+            }
+            if let Some(previous) = &self.previous_scenario {
+                std::env::set_var("OPENBOT_FAKE_ENGINE_SCENARIO", previous);
+            } else {
+                std::env::remove_var("OPENBOT_FAKE_ENGINE_SCENARIO");
+            }
             std::fs::remove_dir_all(&self.bin).ok();
         }
     }
 
+    const FAKE_ENGINE_SOURCE: &str = r#"
+use std::io::Write;
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let joined = args.join(" ");
+    if let Ok(path) = std::env::var("OPENBOT_TEST_ENGINE_RECORD") {
+        let cwd = std::env::current_dir().unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        writeln!(file, "{}\t{}", cwd.display(), joined).unwrap();
+    }
+    match (std::env::var("OPENBOT_FAKE_ENGINE_SCENARIO").unwrap().as_str(), joined.as_str()) {
+        ("exit17", args) if args.starts_with("compose ps ") => {
+            print!("agent-computer\tUp\n");
+            eprint!("compose ps refused\n");
+            std::process::exit(17);
+        }
+        ("empty", args) if args.starts_with("compose ps ") => {}
+        ("blank-lines", args) if args.starts_with("compose ps ") => {
+            print!("\n  \n\t\n");
+        }
+        ("empty-service", args) if args.starts_with("compose ps ") => {
+            print!("\tExited\n");
+        }
+        ("empty-state", args) if args.starts_with("compose ps ") => {
+            print!("agent-computer\t \n");
+        }
+        ("mixed", args) if args.starts_with("compose ps ") => {
+            print!("agent-computer\tUp\nmigrate\tExited\nserver\tExited\n");
+        }
+        ("mixed", args) if args == "compose logs --tail 3 server" => {
+            print!("line one\nlast reason\n");
+        }
+        _ => {
+            eprintln!("unexpected: {joined}");
+            std::process::exit(2);
+        }
+    }
+}
+"#;
+
     #[test]
     fn service_inspection_spawn_failure_is_a_problem() {
-        let fixture = PathFixture::with_only_docker("not executable");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let docker = fixture.bin.join("docker");
-            let mut permissions = std::fs::metadata(&docker).unwrap().permissions();
-            permissions.set_mode(0o644);
-            std::fs::set_permissions(&docker, permissions).unwrap();
-        }
+        let _fixture = PathFixture::with_broken_engine();
         let root = temp_root("openbot-service-inspection-spawn");
         std::fs::create_dir_all(&root).unwrap();
 
@@ -1295,9 +1377,7 @@ mod tests {
 
     #[test]
     fn service_inspection_nonzero_status_is_a_problem() {
-        let _fixture = PathFixture::with_docker(
-            "#!/bin/sh\nif [ \"$1 $2\" = \"compose ps\" ]; then printf 'agent-computer\\tUp\\n'; printf 'compose ps refused\\n' >&2; exit 17; fi\nexit 2\n",
-        );
+        let _fixture = PathFixture::with_fake_engine("exit17");
         let root = temp_root("openbot-service-inspection-status");
         std::fs::create_dir_all(&root).unwrap();
 
@@ -1321,9 +1401,7 @@ mod tests {
 
     #[test]
     fn service_inspection_empty_success_is_healthy() {
-        let _fixture = PathFixture::with_docker(
-            "#!/bin/sh\nif [ \"$1 $2\" = \"compose ps\" ]; then exit 0; fi\nexit 2\n",
-        );
+        let _fixture = PathFixture::with_fake_engine("empty");
         let root = temp_root("openbot-service-inspection-empty");
         std::fs::create_dir_all(&root).unwrap();
 
@@ -1335,36 +1413,47 @@ mod tests {
     }
 
     #[test]
+    fn service_inspection_blank_lines_are_healthy_empty_output() {
+        let _fixture = PathFixture::with_fake_engine("blank-lines");
+        let root = temp_root("openbot-service-inspection-blank-lines");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let dead = services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+            .expect("blank service inspection output is empty health evidence");
+
+        assert!(dead.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn malformed_service_inspection_rows_are_a_problem() {
-        let _fixture = PathFixture::with_docker(
-            "#!/bin/sh\nif [ \"$1 $2\" = \"compose ps\" ]; then printf 'agent-computer Up without a separator\\n'; exit 0; fi\nexit 2\n",
-        );
         let root = temp_root("openbot-service-inspection-malformed");
         std::fs::create_dir_all(&root).unwrap();
 
-        let problem =
-            services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
-                .expect_err("a malformed nonempty row cannot prove health");
+        for scenario in ["empty-service", "empty-state"] {
+            let _fixture = PathFixture::with_fake_engine(scenario);
+            let problem =
+                services_that_exited(&Address::new(crate::engine::Engine::Docker, None), &root)
+                    .expect_err("a malformed nonempty row cannot prove health");
 
-        assert_eq!(
-            problem.said,
-            "OpenBot could not inspect its Compose services."
-        );
-        assert!(
-            problem
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains("unusable docker compose ps -a row")),
-            "{problem:?}"
-        );
+            assert_eq!(
+                problem.said,
+                "OpenBot could not inspect its Compose services."
+            );
+            assert!(
+                problem
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("unusable docker compose ps -a row")),
+                "{problem:?}"
+            );
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn service_inspection_reports_only_unexpected_exited_services() {
-        let _fixture = PathFixture::with_docker(
-            "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = ps ]; then printf 'agent-computer\\tUp\\nmigrate\\tExited\\nserver\\tExited\\n'; exit 0; fi\nif [ \"$1\" = compose ] && [ \"$2\" = logs ] && [ \"$5\" = server ]; then printf 'line one\\nlast reason\\n'; exit 0; fi\nprintf 'unexpected: %s\\n' \"$*\" >&2; exit 2\n",
-        );
+        let _fixture = PathFixture::with_fake_engine("mixed");
         let root = temp_root("openbot-service-inspection-rows");
         std::fs::create_dir_all(&root).unwrap();
 
