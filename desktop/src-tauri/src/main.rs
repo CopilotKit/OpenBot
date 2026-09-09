@@ -749,7 +749,9 @@ async fn start_stack<R: tauri::Runtime>(
      * port 3001 was held. By its own server. These are found by working directory, so anything this
      * stops belongs to this deployment and to no other.
      */
-    let reclaimed = stack::stop_processes_under(&root);
+    let reclaimed = stack::stop_processes_under(&root).inspect_err(|problem| {
+        report(&app, "cleanup", false, problem.said.clone());
+    })?;
 
     // Before spawning: if these are still held, whatever answers later is not ours.
     let ports = openbot_env::Ports::default();
@@ -862,12 +864,30 @@ fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
 /// right to call that a bug.
 fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), String> {
     let shell = app.state::<Shell>();
+    stop_everything_with(&shell, fallback_root, stack::stop_processes_under, |root| {
+        match engine::detect().address {
+            Some(found) => stack::down(&found, root),
+            None => Ok(()),
+        }
+    })
+}
+
+fn stop_everything_with<C, D>(
+    shell: &Shell,
+    fallback_root: &Path,
+    cleanup: C,
+    down: D,
+) -> Result<(), String>
+where
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+    D: FnOnce(&Path) -> Result<(), String>,
+{
     // Ended first, so the watcher stops before anything is killed and does not read a death it
     // caused as one worth answering.
     shell
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let root = shutdown_root(&shell, fallback_root);
+    let root = shutdown_root(shell, fallback_root);
     for (_, mut child) in shell.children.lock().unwrap().drain(..) {
         let _ = child.kill();
         let _ = child.wait();
@@ -876,12 +896,56 @@ fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), S
     // The window may be a second one, holding no handles to a stack that is still up. Stop what is
     // there rather than only what this window started, or Stop is a button that does nothing and
     // reports success.
-    stack::stop_processes_under(&root);
-
-    match engine::detect().address {
-        Some(found) => stack::down(&found, &root),
-        None => Ok(()),
+    let mut failures = Vec::new();
+    if let Err(problem) = cleanup(&root) {
+        failures.push(problem_detail(problem));
     }
+
+    if let Err(problem) = down(&root) {
+        failures.push(format!("Compose down failed: {problem}"));
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
+fn problem_detail(problem: openbot_desktop_lib::problem::Problem) -> String {
+    match problem.detail {
+        Some(detail) => format!("{}\n{}", problem.said, detail),
+        None => problem.said,
+    }
+}
+
+fn exit_cleanup_with<C, D>(shell: &Shell, fallback_root: &Path, cleanup: C, down: D) -> Vec<String>
+where
+    C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
+    D: FnOnce(&Path) -> Result<(), String>,
+{
+    let root = shutdown_root(shell, fallback_root);
+    {
+        let mut children = shell.children.lock().unwrap();
+        for (_, child) in children.iter_mut() {
+            ask_to_stop(child);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        for (_, child) in children.iter_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        children.clear();
+    }
+
+    let mut failures = Vec::new();
+    if let Err(problem) = cleanup(&root) {
+        failures.push(problem_detail(problem));
+    }
+    if let Err(problem) = down(&root) {
+        failures.push(format!("Compose down failed: {problem}"));
+    }
+    failures
 }
 
 /// Show OpenBot itself in this window.
@@ -1736,26 +1800,19 @@ fn main() {
                     // nobody is watching.
                     let shell = app.state::<Shell>();
                     let default = PathBuf::from(default_root());
-                    let root = shutdown_root(&shell, &default);
-                    {
-                        let mut children = shell.children.lock().unwrap();
-                        for (_, child) in children.iter_mut() {
-                            ask_to_stop(child);
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(1500));
-                        for (_, child) in children.iter_mut() {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                        }
-                        children.clear();
-                    }
 
                     // The containers too. Leaving five of them running behind an application that is
                     // no longer on screen is the one outcome nobody can act on: there is no window to
                     // stop them from and nothing to say they are there.
-                    stack::stop_processes_under(&root);
-                    if let Some(found) = engine::detect().address {
-                        let _ = stack::down(&found, &root);
+                    for failure in
+                        exit_cleanup_with(&shell, &default, stack::stop_processes_under, |root| {
+                            match engine::detect().address {
+                                Some(found) => stack::down(&found, root),
+                                None => Ok(()),
+                            }
+                        })
+                    {
+                        eprintln!("[exit] cleanup failed: {failure}");
                     }
                 }
                 _ => {}
@@ -2485,6 +2542,105 @@ mod tests {
         stack::down(&engine, &selected).expect("fake compose down");
 
         assert_compose_down_ran_under(&record, &active);
+        assert!(shell.root.lock().unwrap().is_none());
+        let _ = std::fs::remove_dir_all(active);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn stop_reports_cleanup_and_down_failures_after_using_the_active_root() {
+        let active = temp_root("openbot-active-stop-failures");
+        let fallback = temp_root("openbot-default-stop-failures");
+        std::fs::create_dir_all(&active).unwrap();
+        std::fs::create_dir_all(&fallback).unwrap();
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(active.clone());
+        let phases = std::cell::RefCell::new(Vec::new());
+
+        let problem = stop_everything_with(
+            &shell,
+            &fallback,
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("cleanup:{}", root.display()));
+                Err(Problem::with(
+                    "OpenBot could not inspect or stop its host processes.",
+                    "lsof exited with status 2",
+                ))
+            },
+            |root| {
+                phases.borrow_mut().push(format!("down:{}", root.display()));
+                Err("compose refused".to_string())
+            },
+        )
+        .expect_err("Stop must surface both cleanup and Compose failures");
+
+        assert_eq!(
+            phases.into_inner(),
+            vec![
+                format!("cleanup:{}", active.display()),
+                format!("down:{}", active.display())
+            ]
+        );
+        assert!(
+            problem.contains("OpenBot could not inspect or stop its host processes."),
+            "{problem}"
+        );
+        assert!(problem.contains("lsof exited with status 2"), "{problem}");
+        assert!(
+            problem.contains("Compose down failed: compose refused"),
+            "{problem}"
+        );
+        assert!(shell.root.lock().unwrap().is_none());
+        let _ = std::fs::remove_dir_all(active);
+        let _ = std::fs::remove_dir_all(fallback);
+    }
+
+    #[test]
+    fn exit_cleanup_body_records_cleanup_and_down_failures_after_using_the_active_root() {
+        let active = temp_root("openbot-active-exit-failures");
+        let fallback = temp_root("openbot-default-exit-failures");
+        std::fs::create_dir_all(&active).unwrap();
+        std::fs::create_dir_all(&fallback).unwrap();
+        let shell = Shell::default();
+        *shell.root.lock().unwrap() = Some(active.clone());
+        let phases = std::cell::RefCell::new(Vec::new());
+
+        let failures = exit_cleanup_with(
+            &shell,
+            &fallback,
+            |root| {
+                phases
+                    .borrow_mut()
+                    .push(format!("cleanup:{}", root.display()));
+                Err(Problem::with(
+                    "OpenBot could not inspect or stop its host processes.",
+                    "taskkill exited with status 5",
+                ))
+            },
+            |root| {
+                phases.borrow_mut().push(format!("down:{}", root.display()));
+                Err("compose down refused".to_string())
+            },
+        );
+
+        assert_eq!(
+            phases.into_inner(),
+            vec![
+                format!("cleanup:{}", active.display()),
+                format!("down:{}", active.display())
+            ]
+        );
+        assert_eq!(failures.len(), 2, "{failures:?}");
+        assert!(
+            failures[0].contains("taskkill exited with status 5"),
+            "{failures:?}"
+        );
+        assert!(
+            failures[1].contains("Compose down failed: compose down refused"),
+            "{failures:?}"
+        );
         assert!(shell.root.lock().unwrap().is_none());
         let _ = std::fs::remove_dir_all(active);
         let _ = std::fs::remove_dir_all(fallback);

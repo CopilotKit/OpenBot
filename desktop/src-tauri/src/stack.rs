@@ -18,6 +18,7 @@ use crate::quiet::{command, said as command_said};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::Address;
+use crate::problem::Problem;
 
 /// The services Compose owns. `migrate` is deliberately absent: it is run once, to completion,
 /// rather than raised, and treating it as a long-lived service makes it look like a crash loop.
@@ -464,22 +465,52 @@ pub fn spawn_host_process(
 /// `bun … src/index.ts`, and the only thing that says which deployment they belong to is where they
 /// are running. That is also how this session's own orphans hid twice.
 #[cfg(unix)]
-pub fn stop_processes_under(root: &Path) -> usize {
+pub fn stop_processes_under(root: &Path) -> Result<usize, Problem> {
     // One call, not one per process. Asking lsof about every pid in turn is what makes Stop look
     // like a hang: a busy machine has several hundred processes, each invocation costs a fork and a
     // few hundred milliseconds, and the person watching has been given no reason to think anything
     // is happening. `-d cwd` over all processes is a single pass.
-    let Ok(listing) = command("/usr/sbin/lsof")
+    let operation = "/usr/sbin/lsof -d cwd -Fpn";
+    let listing = command("/usr/sbin/lsof")
         .args(["-d", "cwd", "-Fpn"])
         .output()
-    else {
-        return 0;
-    };
+        .map_err(|error| cleanup_spawn_problem(operation, error))?;
 
+    if !listing.status.success() {
+        return Err(cleanup_status_problem(operation, &listing));
+    }
+
+    stop_processes_in_lsof(root, &String::from_utf8_lossy(&listing.stdout), |pid| {
+        terminate_unix_process(pid)
+    })
+}
+
+#[cfg(unix)]
+fn terminate_unix_process(pid: i32) -> Result<bool, Problem> {
+    // Asked first; the caller waits before it insists.
+    let killed = unsafe { libc::kill(pid, libc::SIGTERM) };
+    if killed == 0 {
+        return Ok(true);
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(false);
+    }
+    Err(Problem::with(
+        "OpenBot could not stop one of its host processes.",
+        format!("could not send SIGTERM to pid {pid}: {error}"),
+    ))
+}
+
+#[cfg(unix)]
+fn stop_processes_in_lsof<F>(root: &Path, listing: &str, mut terminate: F) -> Result<usize, Problem>
+where
+    F: FnMut(i32) -> Result<bool, Problem>,
+{
     let mut stopped = 0;
     let mut pid = None;
     // -F output is one field per line: `p<pid>` starts a process, `n<path>` gives its directory.
-    for line in String::from_utf8_lossy(&listing.stdout).lines() {
+    for line in listing.lines() {
         if let Some(found) = line.strip_prefix('p') {
             pid = found.parse::<i32>().ok();
             continue;
@@ -493,17 +524,15 @@ pub fn stop_processes_under(root: &Path) -> usize {
         if !Path::new(dir).starts_with(root) {
             continue;
         }
-        // Asked first; the caller waits before it insists.
-        unsafe {
-            libc::kill(found, libc::SIGTERM);
+        if terminate(found)? {
+            stopped += 1;
         }
-        stopped += 1;
     }
-    stopped
+    Ok(stopped)
 }
 
 #[cfg(not(unix))]
-pub fn stop_processes_under(_root: &Path) -> usize {
+pub fn stop_processes_under(_root: &Path) -> Result<usize, Problem> {
     /*
      * Windows cannot be asked which process is in which directory cheaply, so this used to answer
      * 0 and say the host processes end with the session. They do not, and the case it dismissed is
@@ -528,15 +557,10 @@ pub fn stop_processes_under(_root: &Path) -> usize {
      * 3001 and 3010 were free and the worker was still running.
      */
     let recorded = recorded_host_processes(_root);
-    let processes = windows_processes();
+    let processes = windows_processes()?;
     let roots = verified_openbot_root_pids(&recorded, &processes);
     for pid in &roots {
-        let ended = command("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false);
-        if ended {
+        if taskkill_process_tree(*pid)? {
             stopped_recorded += 1;
         }
     }
@@ -547,25 +571,81 @@ pub fn stop_processes_under(_root: &Path) -> usize {
     // Compose's to stop, and killing whatever holds a container's published port would reach into
     // the engine's own plumbing.
     let ours = [ports.app, ports.server];
-    let Ok(listing) = command("netstat").args(["-ano", "-p", "tcp"]).output() else {
-        return stopped_recorded;
-    };
+    let operation = "netstat -ano -p tcp";
+    let listing = command("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .output()
+        .map_err(|error| cleanup_spawn_problem(operation, error))?;
+    if !listing.status.success() {
+        return Err(cleanup_status_problem(operation, &listing));
+    }
 
     let listed = String::from_utf8_lossy(&listing.stdout);
-    let mut stopped = stopped_recorded;
-    for pid in verified_openbot_pids_listening_on(&listed, &ours, &recorded, &processes) {
+    stop_windows_processes_in(&recorded, &processes, &listed, |pid| {
+        taskkill_process_tree(pid)
+    })
+    .map(|stopped| stopped_recorded + stopped)
+}
+
+#[cfg(not(unix))]
+fn taskkill_process_tree(pid: u32) -> Result<bool, Problem> {
+    let operation = format!("taskkill /PID {pid} /T /F");
+    let output = command("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .output()
+        .map_err(|error| cleanup_spawn_problem(&operation, error))?;
+    if output.status.success() {
+        return Ok(true);
+    }
+    Err(cleanup_status_problem(&operation, &output))
+}
+
+#[cfg(any(not(unix), test))]
+fn stop_windows_processes_in<F>(
+    recorded: &[RecordedHostProcess],
+    processes: &[WindowsProcess],
+    listing: &str,
+    mut taskkill: F,
+) -> Result<usize, Problem>
+where
+    F: FnMut(u32) -> Result<bool, Problem>,
+{
+    let ports = crate::env::Ports::default();
+    let ours = [ports.app, ports.server];
+    let mut stopped = 0;
+    for pid in verified_openbot_pids_listening_on(listing, &ours, recorded, processes) {
         // With its children: `bun run serve` starts the real server as a grandchild, so ending
         // only the process holding the port leaves that one behind.
-        let ended = command("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false);
-        if ended {
+        if taskkill(pid)? {
             stopped += 1;
         }
     }
-    stopped
+    Ok(stopped)
+}
+
+fn cleanup_spawn_problem(operation: &str, error: std::io::Error) -> Problem {
+    Problem::with(
+        "OpenBot could not inspect or stop its host processes.",
+        format!("could not run {operation}: {error}"),
+    )
+}
+
+fn cleanup_status_problem(operation: &str, output: &std::process::Output) -> Problem {
+    let stderr = command_said(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut detail = format!("{operation} exited with status {}", output.status);
+    if !stderr.is_empty() {
+        detail.push_str("\nstderr:\n");
+        detail.push_str(&stderr);
+    }
+    if !stdout.is_empty() {
+        detail.push_str("\nstdout:\n");
+        detail.push_str(&stdout);
+    }
+    Problem::with(
+        "OpenBot could not inspect or stop its host processes.",
+        detail,
+    )
 }
 
 /// The processes listening on any of `ports`, from `netstat -ano` output.
@@ -643,8 +723,9 @@ impl RecordedHostProcess {
 }
 
 #[cfg(windows)]
-fn windows_processes() -> Vec<WindowsProcess> {
-    let Ok(output) = command("powershell")
+fn windows_processes() -> Result<Vec<WindowsProcess>, Problem> {
+    let operation = "powershell Get-CimInstance Win32_Process";
+    let output = command("powershell")
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -652,19 +733,19 @@ fn windows_processes() -> Vec<WindowsProcess> {
             "@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,CreationDate) | ConvertTo-Json -Compress",
         ])
         .output()
-    else {
-        return Vec::new();
-    };
+        .map_err(|error| cleanup_spawn_problem(operation, error))?;
     if !output.status.success() {
-        return Vec::new();
+        return Err(cleanup_status_problem(operation, &output));
     }
-    windows_processes_in(&String::from_utf8_lossy(&output.stdout))
+    Ok(windows_processes_in(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 #[cfg(not(windows))]
 #[allow(dead_code)]
-fn windows_processes() -> Vec<WindowsProcess> {
-    Vec::new()
+fn windows_processes() -> Result<Vec<WindowsProcess>, Problem> {
+    Ok(Vec::new())
 }
 
 #[derive(Deserialize)]
@@ -1465,6 +1546,124 @@ fn main() {
             vec![("server".to_string(), "last reason".to_string())]
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lsof_owned_processes_return_kill_failures_instead_of_partial_success() {
+        let root = temp_root("openbot-lsof-kill-failure");
+        std::fs::create_dir_all(root.join("server")).unwrap();
+        let listing = format!(
+            "p101\nn{}\np202\nn{}\n",
+            root.join("server").display(),
+            root.display()
+        );
+        let mut attempted = Vec::new();
+
+        let problem = stop_processes_in_lsof(&root, &listing, |pid| {
+            attempted.push(pid);
+            if pid == 202 {
+                Err(Problem::with(
+                    "OpenBot could not stop one of its host processes.",
+                    "could not send SIGTERM to pid 202: synthetic refusal",
+                ))
+            } else {
+                Ok(true)
+            }
+        })
+        .expect_err("a failed kill must not be reported as a partial cleanup");
+
+        assert_eq!(attempted, vec![101, 202]);
+        assert_eq!(
+            problem.said,
+            "OpenBot could not stop one of its host processes."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("pid 202")),
+            "{problem:?}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lsof_no_match_and_already_gone_are_successful_controls() {
+        let root = temp_root("openbot-lsof-safe-controls");
+        let stranger = temp_root("openbot-lsof-stranger");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&stranger).unwrap();
+
+        let no_match =
+            stop_processes_in_lsof(&root, &format!("p303\nn{}\n", stranger.display()), |_| {
+                panic!("a process outside the root must not be signaled")
+            })
+            .expect("a successful inventory with no owned process is healthy");
+        assert_eq!(no_match, 0);
+
+        let already_gone =
+            stop_processes_in_lsof(&root, &format!("p404\nn{}\n", root.display()), |_| {
+                Ok(false)
+            })
+            .expect("an already-gone process is a completed cleanup");
+        assert_eq!(already_gone, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(stranger).unwrap();
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn windows_cleanup_returns_taskkill_failures_instead_of_partial_success() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9000\r\n";
+        let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
+        let processes = [
+            live_process(8636, 7000, "20260909010101.000000-420"),
+            live_process(9000, 8636, "20260909010102.000000-420"),
+        ];
+
+        let problem = stop_windows_processes_in(&recorded, &processes, listing, |pid| {
+            Err(Problem::with(
+                "OpenBot could not inspect or stop its host processes.",
+                format!("taskkill /PID {pid} /T /F exited with status 5"),
+            ))
+        })
+        .expect_err("taskkill failure must be reported");
+
+        assert_eq!(
+            problem.said,
+            "OpenBot could not inspect or stop its host processes."
+        );
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("taskkill /PID 9000")),
+            "{problem:?}"
+        );
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn windows_cleanup_success_counts_verified_listening_children() {
+        let listing = "\r\nActive Connections\r\n\r\n  Proto  Local Address          Foreign Address        State           PID\r\n  TCP    127.0.0.1:3001         0.0.0.0:0              LISTENING       424242\r\n  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       9000\r\n";
+        let recorded = [recorded_process("app", 8636, "20260909010101.000000-420")];
+        let processes = [
+            live_process(8636, 7000, "20260909010101.000000-420"),
+            live_process(9000, 8636, "20260909010102.000000-420"),
+        ];
+        let mut attempted = Vec::new();
+
+        let stopped = stop_windows_processes_in(&recorded, &processes, listing, |pid| {
+            attempted.push(pid);
+            Ok(true)
+        })
+        .expect("verified child cleanup should succeed");
+
+        assert_eq!(stopped, 1);
+        assert_eq!(attempted, vec![9000]);
     }
 
     /// Real `netstat -ano` output, because the column layout is what went wrong.
