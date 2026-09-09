@@ -6,8 +6,12 @@ import {
   expect,
   test,
 } from "bun:test";
+import type { RunAgentInput } from "@ag-ui/client";
+import { MastraAgent } from "@ag-ui/mastra";
 import { buildAGUITextResponse, LLMock } from "@copilotkit/aimock";
 import { AGUIMock } from "@copilotkit/aimock/agui";
+import { CopilotRuntime } from "@copilotkit/runtime/v2";
+import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
 import { z } from "zod";
 import {
   buildAgents,
@@ -162,6 +166,21 @@ const remoteAgent = (): RegisteredAgent => ({
     content: "You are Risk.",
   },
 });
+
+function mastraAgent(): RegisteredAgent {
+  return {
+    id: "risk-mastra",
+    name: "Risk Mastra",
+    type: "remote_mastra",
+    endpoint: "http://mastra.test",
+    remoteAgentId: "openbot",
+    standingMessage: {
+      id: "standing-role:risk-mastra",
+      role: "system",
+      content: "You are Risk Mastra.",
+    },
+  };
+}
 
 /**
  * Run one Bot the way the runtime does, including the clone.
@@ -413,6 +432,104 @@ describe("a remote Bot", () => {
     expect(run?.forwardedProps?.openbotDeploymentTools).not.toContain(
       "mcp__drive__tool_0",
     );
+  });
+});
+
+describe("a remote Mastra Bot", () => {
+  test("keeps OpenBot middleware through the runtime's request clone", async () => {
+    answerWith(["slack-digest"]);
+    const sentToMastraAgent: RunAgentInput[] = [];
+    const originalRun = MastraAgent.prototype.run;
+    MastraAgent.prototype.run = function (input: RunAgentInput) {
+      sentToMastraAgent.push(input);
+      return originalRun.call(this, input);
+    };
+    const mastraFetch = async (
+      input: string | URL | Request,
+      _init?: RequestInit,
+    ) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/agents") {
+        return Response.json({ openbot: { name: "OpenBot" } });
+      }
+      if (url.pathname === "/api/agents/openbot/stream") {
+        return new Response(
+          `data: ${JSON.stringify({
+            type: "finish",
+            runId: "run-1",
+            from: "AGENT",
+            payload: { stepResult: { reason: "stop" } },
+          })}\n\n`,
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    };
+    try {
+      const agents = await buildAgents(
+        [mastraAgent()],
+        model,
+        "test-key",
+        undefined,
+        async () => granted,
+        () => "signed-assertion",
+        undefined,
+        undefined,
+        selection(),
+        mastraFetch,
+      );
+      const runtime = new CopilotRuntime({ agents });
+      const handler = createCopilotHonoHandler({ runtime, basePath: "/api" });
+
+      const response = await handler.fetch(
+        new Request("http://localhost/api/agent/risk-mastra/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            threadId: "thread-1",
+            runId: "run-1",
+            state: {},
+            messages: [
+              {
+                id: "message-1",
+                role: "user",
+                content: "summarise the Slack channel",
+              },
+            ],
+            tools: [],
+            context: [],
+            forwardedProps: {},
+          }),
+        }),
+      );
+      await response.text();
+
+      expect(response.status).toBe(200);
+      expect(sentToMastraAgent).toHaveLength(1);
+      const run = sentToMastraAgent[0];
+      expect(run?.messages?.[0]?.id).toBe("standing-role:risk-mastra");
+      const holdings = (run?.messages ?? []).find(
+        (message) => message.id === "granted-tools:risk-mastra",
+      );
+      expect(String(holdings?.content ?? "")).toContain("slack");
+      expect(String(holdings?.content ?? "")).not.toContain("drive: tool_0");
+      expect(run?.tools?.map((tool) => tool.name)).toContain(
+        "mcp__slack__tool_0",
+      );
+      expect(run?.tools?.map((tool) => tool.name)).not.toContain(
+        "mcp__drive__tool_0",
+      );
+      expect(run?.forwardedProps?.openbotBotId).toBe("risk-mastra");
+      expect(run?.forwardedProps?.openbotRun).toBe("signed-assertion");
+      expect(run?.forwardedProps?.openbotDeploymentTools).toContain(
+        "mcp__slack__tool_0",
+      );
+      expect(run?.forwardedProps?.openbotDeploymentTools).not.toContain(
+        "mcp__drive__tool_0",
+      );
+    } finally {
+      MastraAgent.prototype.run = originalRun;
+    }
   });
 });
 

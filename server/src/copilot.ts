@@ -100,6 +100,8 @@ export type RegisteredAgent =
 type AgentRunInput = Parameters<AbstractAgent["run"]>[0];
 type AgentMessage = AgentRunInput["messages"][number];
 export type StandingRoleMessage = Extract<AgentMessage, { role: "system" }>;
+type AgentHeaders = Record<string, string>;
+type HeaderBearingAgent = AbstractAgent & { headers?: AgentHeaders };
 
 /** The durable part of a coworker: who it is and what its standing job is. */
 export type AgentStandingProfile = {
@@ -893,15 +895,62 @@ function remoteAgentWithStandingRole(
    * straight away. `defer` puts the work on the subscription, which is where the run actually
    * begins, so nothing happens until somebody is listening and a retried run chooses again.
    */
-  remote.use((input, next) =>
-    defer(() =>
-      from(narrow ? narrow(input) : Promise.resolve(tools)).pipe(
-        switchMap((offered) => runWith(offered, input, next)),
+  return new CloningRemoteAgent(remote, (target) => {
+    target.use((input, next) =>
+      defer(() =>
+        from(narrow ? narrow(input) : Promise.resolve(tools)).pipe(
+          switchMap((offered) => runWith(offered, input, next)),
+        ),
       ),
-    ),
-  );
+    );
+  });
+}
 
-  return remote;
+class CloningRemoteAgent extends AbstractAgent {
+  headers?: AgentHeaders;
+  private readonly remote: HeaderBearingAgent;
+
+  constructor(
+    remote: AbstractAgent,
+    private readonly attachOpenBotMiddleware: (target: AbstractAgent) => void,
+  ) {
+    super({
+      agentId: remote.agentId,
+      description: remote.description,
+      threadId: remote.threadId,
+      initialMessages: remote.messages,
+      initialState: remote.state,
+      debug: remote.debug,
+    });
+    this.remote = remote as HeaderBearingAgent;
+    if (this.remote.headers) {
+      this.headers = { ...this.remote.headers };
+    }
+    this.attachOpenBotMiddleware(this);
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    if (this.headers) {
+      this.remote.headers = { ...this.headers };
+    }
+    return this.remote.run(input);
+  }
+
+  async getCapabilities() {
+    return this.remote.getCapabilities?.() ?? {};
+  }
+
+  clone() {
+    const clonedRemote = this.remote.clone() as AbstractAgent;
+    const clone = new CloningRemoteAgent(
+      clonedRemote,
+      this.attachOpenBotMiddleware,
+    );
+    if (this.headers) {
+      clone.headers = { ...this.headers };
+    }
+    return clone;
+  }
 }
 
 /**
