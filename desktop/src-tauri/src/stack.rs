@@ -344,15 +344,8 @@ enum RecordedHostPidFile {
 }
 
 /// Record the pids of the processes this window started.
-pub fn record_host_pids(root: &Path, pids: &[u32]) {
-    let path = host_pids_path(root);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(
-        &path,
-        serde_json::to_vec(pids).unwrap_or_else(|_| b"[]".to_vec()),
-    );
+pub fn record_host_pids(root: &Path, pids: &[u32]) -> Result<(), Problem> {
+    write_host_pid_file(root, &pids)
 }
 
 /// Record the host processes this window started.
@@ -364,7 +357,7 @@ pub fn record_host_processes(root: &Path, processes: &[(&str, u32)]) -> Result<(
         record_host_pids(
             root,
             &processes.iter().map(|(_, pid)| *pid).collect::<Vec<_>>(),
-        );
+        )?;
     }
     Ok(())
 }
@@ -386,7 +379,7 @@ fn record_windows_host_processes_with(
     write_host_pid_file(
         root,
         &serde_json::json!({ "version": 1, "processes": records }),
-    );
+    )?;
     Ok(())
 }
 
@@ -436,16 +429,58 @@ fn recorded_host_pid_file(root: &Path) -> Result<Option<RecordedHostPidFile>, Pr
     Ok(Some(recorded))
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
-fn write_host_pid_file<T: Serialize>(root: &Path, value: &T) {
+/// Commit a complete pidfile with one replacement. Every fallible preparation step happens
+/// before the rename, so an error leaves the previous ownership evidence available for retry.
+fn write_host_pid_file<T: Serialize>(root: &Path, value: &T) -> Result<(), Problem> {
+    use std::io::Write;
+
     let path = host_pids_path(root);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    let problem = |operation: &str, error: &dyn std::fmt::Display| {
+        Problem::with(
+            "OpenBot could not record its host processes.",
+            format!("{}: {operation}: {error}", path.display()),
+        )
+    };
+    let bytes = serde_json::to_vec(value)
+        .map_err(|error| problem("could not serialize pidfile", &error))?;
+    let parent = path.parent().expect("host pidfile has a .logs parent");
+    std::fs::create_dir_all(parent)
+        .map_err(|error| problem("could not create pidfile parent directory", &error))?;
+    let temporary = parent.join(format!(".host-pids-{:016x}.tmp", rand::random::<u64>()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
-    let _ = std::fs::write(
-        &path,
-        serde_json::to_vec(value).unwrap_or_else(|_| b"[]".to_vec()),
-    );
+    // Only clean up a temporary file this call created, including on a name collision.
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| problem("could not create temporary pidfile", &error))?;
+    let prepared = file
+        .write_all(&bytes)
+        .map_err(|error| problem("could not write temporary pidfile", &error))
+        .and_then(|()| {
+            file.sync_all()
+                .map_err(|error| problem("could not sync temporary pidfile", &error))
+        });
+    drop(file);
+    let result = prepared.and_then(|()| {
+        std::fs::rename(&temporary, &path)
+            .map_err(|error| problem("could not replace pidfile", &error))
+    });
+    if let Err(mut failure) = result {
+        if let Err(error) = std::fs::remove_file(&temporary) {
+            failure.detail = Some(format!(
+                "{}; could not remove temporary pidfile {}: {error}",
+                failure.detail.as_deref().unwrap_or_default(),
+                temporary.display(),
+            ));
+        }
+        return Err(failure);
+    }
+    Ok(())
 }
 
 pub fn spawn_host_process(
@@ -2129,7 +2164,8 @@ fn main() {
         write_host_pid_file(
             &root,
             &serde_json::json!({"version": 1, "processes": recorded}),
-        );
+        )
+        .unwrap();
         let path = host_pids_path(&root);
         let before = std::fs::read(&path).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -2173,7 +2209,8 @@ fn main() {
         write_host_pid_file(
             &root,
             &serde_json::json!({"version": 1, "processes": recorded}),
-        );
+        )
+        .unwrap();
         let path = host_pids_path(&root);
         let before = std::fs::read(&path).unwrap();
         let fixture = CleanupCommandFixture::new(&root);
@@ -2214,7 +2251,8 @@ fn main() {
             write_host_pid_file(
                 &root,
                 &serde_json::json!({"version": 1, "processes": recorded}),
-            );
+            )
+            .unwrap();
             fixture.scenario("pidfile-ok");
             assert_eq!(
                 stop_windows_processes_under_with(
@@ -2342,6 +2380,90 @@ fn main() {
         assert_eq!(found, vec![9000]);
     }
 
+    struct UnserializablePidfile;
+
+    impl Serialize for UnserializablePidfile {
+        fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom("synthetic serializer refusal"))
+        }
+    }
+
+    #[test]
+    fn pidfile_serialization_failure_preserves_prior_evidence() {
+        let root = temp_root("pidfile-serialization");
+        let path = host_pids_path(&root);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"[42]").unwrap();
+        let problem = write_host_pid_file(&root, &UnserializablePidfile).unwrap_err();
+        let detail = problem.detail.unwrap();
+        assert!(
+            detail.contains("serialize pidfile") && detail.contains("synthetic serializer refusal")
+        );
+        assert!(detail.contains(&path.display().to_string()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"[42]");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pidfile_writes_report_filesystem_obstructions_without_partial_files() {
+        let root = temp_root("pidfile-obstruction");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = host_pids_path(&root);
+        let logs = root.join(".logs");
+        std::fs::write(&logs, b"prior obstruction").unwrap();
+        let problem = record_host_pids(&root, &[42]).unwrap_err();
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(&path.display().to_string()));
+        assert!(detail.contains("parent directory"));
+        assert_eq!(std::fs::read(&logs).unwrap(), b"prior obstruction");
+        std::fs::remove_file(&logs).unwrap();
+        std::fs::create_dir_all(&path).unwrap();
+        let problem = record_host_pids(&root, &[42]).unwrap_err();
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(&path.display().to_string()));
+        assert!(detail.contains("replace pidfile"));
+        assert!(path.is_dir());
+        assert_eq!(std::fs::read_dir(&logs).unwrap().count(), 1);
+        std::fs::remove_dir(&path).unwrap();
+        record_host_pids(&root, &[42]).unwrap();
+        record_host_pids(&root, &[43, 44]).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"[43,44]");
+        assert_eq!(recorded_host_pids(&root).unwrap(), [43, 44]);
+        assert_eq!(std::fs::read_dir(&logs).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pidfile_denied_replacement_preserves_previous_record_and_removes_temporary() {
+        let root = temp_root("pidfile-denied-replacement");
+        record_host_pids(&root, &[42]).unwrap();
+        let path = host_pids_path(&root);
+        assert!(Command::new("/usr/bin/chflags")
+            .arg("uchg")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let result = record_host_processes(&root, &[("server", 43)]);
+        // Release the fixture's immutable flag before assertions, including on a writer failure.
+        assert!(Command::new("/usr/bin/chflags")
+            .arg("nouchg")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let detail = result.unwrap_err().detail.unwrap();
+        assert!(detail.contains("replace pidfile"), "{detail}");
+        assert!(detail.contains(&path.display().to_string()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"[42]");
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// The pids survive the window that started them, which is the whole point of writing them.
     #[test]
     fn recorded_pids_are_read_back_and_a_missing_file_is_not_an_error() {
@@ -2352,7 +2474,7 @@ fn main() {
         // has no pidfile at all.
         assert!(recorded_host_pids(&dir).unwrap().is_empty());
 
-        record_host_pids(&dir, &[4242, 4243, 4244]);
+        record_host_pids(&dir, &[4242, 4243, 4244]).unwrap();
         assert_eq!(recorded_host_pids(&dir).unwrap(), vec![4242, 4243, 4244]);
 
         // Corrupt evidence must stop cleanup before any process is selected.
@@ -2368,7 +2490,7 @@ fn main() {
         let path = host_pids_path(&root);
         assert!(recorded_host_pids(&root).unwrap().is_empty());
         assert!(recorded_host_processes(&root).unwrap().is_empty());
-        record_host_pids(&root, &[42]);
+        record_host_pids(&root, &[42]).unwrap();
         assert_eq!(recorded_host_pids(&root).unwrap(), [42]);
         let legacy = recorded_host_processes(&root).unwrap();
         assert!(verified_openbot_root_pids(&legacy, &[live_process(42, 0, "created")]).is_empty());
@@ -2376,7 +2498,8 @@ fn main() {
         write_host_pid_file(
             &root,
             &serde_json::json!({"version": 1, "processes": [recorded]}),
-        );
+        )
+        .unwrap();
         assert_eq!(recorded_host_pids(&root).unwrap(), [42]);
         assert_eq!(recorded_host_processes(&root).unwrap(), [recorded]);
         for bytes in [
