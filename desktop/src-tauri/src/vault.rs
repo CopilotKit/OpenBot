@@ -628,11 +628,19 @@ fn open_secret_file(path: &std::path::Path) -> Result<std::fs::File, Problem> {
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
-    Ok(
-        std::fs::read_to_string(vault_dir()?.join(format!("{name}.secret")))
-            .ok()
-            .map(|value| value.trim().to_string()),
-    )
+    recall_secret_file(&vault_dir()?.join(format!("{name}.secret")))
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn recall_secret_file(path: &std::path::Path) -> Result<Option<String>, Problem> {
+    match std::fs::read_to_string(path) {
+        Ok(value) => Ok(Some(value.trim().to_string())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(Problem::with(
+            "OpenBot could not read your saved sign-in details on this computer.",
+            format!("{}: {error}", path.display()),
+        )),
+    }
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -678,7 +686,7 @@ fn owner_only(_path: &std::path::Path) -> Result<(), Problem> {
 
 #[cfg(all(test, unix, not(target_os = "macos")))]
 mod file_permissions_tests {
-    use super::{open_secret_file, owner_only};
+    use super::{open_secret_file, owner_only, recall_secret_file};
     use crate::test_support::temp_root;
     use std::os::unix::fs::PermissionsExt;
 
@@ -726,6 +734,74 @@ mod file_permissions_tests {
             problem.detail,
             Some(format!("{}: {expected}", path.display()))
         );
+    }
+
+    #[test]
+    fn missing_secret_file_is_absent() {
+        let root = temp_root("vault-missing-secret");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("OPENAI_API_KEY.secret");
+
+        assert_eq!(recall_secret_file(&path), Ok(None));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn readable_secret_file_trims_surrounding_whitespace() {
+        let root = temp_root("vault-readable-secret");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("OPENAI_API_KEY.secret");
+        std::fs::write(&path, "\n  synthetic-secret-value  \n").unwrap();
+
+        assert_eq!(
+            recall_secret_file(&path),
+            Ok(Some("synthetic-secret-value".to_string()))
+        );
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn directory_secret_path_reports_the_path_and_os_error() {
+        let root = temp_root("vault-directory-secret");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("OPENAI_API_KEY.secret");
+        std::fs::create_dir(&path).unwrap();
+
+        let problem = recall_secret_file(&path).expect_err("directories are unreadable secrets");
+        assert_eq!(
+            problem.said,
+            "OpenBot could not read your saved sign-in details on this computer."
+        );
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(path.to_string_lossy().as_ref()), "{detail}");
+        assert!(detail.contains("directory"), "{detail}");
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn invalid_utf8_secret_file_reports_the_path_and_os_error_without_bytes() {
+        let root = temp_root("vault-invalid-utf8-secret");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("OPENAI_API_KEY.secret");
+        std::fs::write(&path, b"synthetic-prefix-\xff-secret").unwrap();
+
+        let problem = recall_secret_file(&path).expect_err("invalid UTF-8 is unreadable");
+        assert_eq!(
+            problem.said,
+            "OpenBot could not read your saved sign-in details on this computer."
+        );
+        let detail = problem.detail.unwrap();
+        assert!(detail.contains(path.to_string_lossy().as_ref()), "{detail}");
+        assert!(
+            detail.contains("stream did not contain valid UTF-8"),
+            "{detail}"
+        );
+        assert!(!detail.contains("synthetic-prefix"), "{detail}");
+
+        std::fs::remove_dir_all(root).ok();
     }
 }
 
