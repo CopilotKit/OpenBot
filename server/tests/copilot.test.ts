@@ -497,32 +497,62 @@ describe("standing agent roles", () => {
     expect(JSON.stringify(sent?.state ?? {})).not.toContain("standing-role");
   });
 
-  test("resolves a deleted coworker as a tombstone that never reaches its endpoint", async () => {
-    await using endpoint = fakeAgUiEndpoint();
-    const agents = await buildAgents(
-      [
-        {
-          id: "agent_expense",
-          name: "Expense Manager",
-          type: "unavailable",
-          reason: "Expense Manager has been deleted.",
-        },
-      ],
-      { provider: "openai", defaultModel: "gpt-5.6-terra" },
-      null,
-    );
-
+  test("preserves the deleted coworker refusal through runtime clones without network calls", async () => {
+    const reason =
+      "Expense Manager has been deleted and can no longer run. Its conversations remain readable.";
+    let modelKeyRequests = 0;
+    const network = spyOn(globalThis, "fetch").mockImplementation(() => {
+      throw new Error("An unavailable agent must not make network calls");
+    });
     const consoleError = spyOn(console, "error").mockImplementation(() => {});
     try {
-      await expect(agents.agent_expense?.runAgent()).rejects.toThrow(
-        "Expense Manager has been deleted.",
+      const agents = await resolveRuntimeAgents(
+        async () => [
+          {
+            id: "agent_expense",
+            name: "Expense Manager",
+            type: "unavailable",
+            reason,
+          },
+        ],
+        { provider: "openai", defaultModel: "gpt-5.6-terra" },
+        async () => {
+          modelKeyRequests += 1;
+          return null;
+        },
       );
+
+      const original = agents.agent_expense;
+      // The runtime calls agents[agentId].clone() before each run.
+      const cloned = original.clone();
+      const clonedAgain = cloned.clone();
+      expect(cloned).not.toBe(original);
+      expect(clonedAgain).not.toBe(cloned);
+      for (const agent of [original, cloned, clonedAgain]) {
+        expect(agent.agentId).toBe("agent_expense");
+        expect(agent.description).toBe("Expense Manager");
+        const events: string[] = [];
+        await expect(
+          agent.runAgent(
+            { threadId: "deleted-bot-history", runId: "refused-run" },
+            {
+              onEvent: () => {
+                events.push("event");
+              },
+              onRunError: () => {
+                events.push("error");
+              },
+            },
+          ),
+        ).rejects.toMatchObject({ message: reason });
+        expect(events).toEqual([]);
+      }
+      expect(modelKeyRequests).toBe(0);
+      expect(network).not.toHaveBeenCalled();
     } finally {
       consoleError.mockRestore();
+      network.mockRestore();
     }
-    // A tombstone exists so Intelligence can restore the thread, not so it can run.
-    expect(agents.agent_expense).toBeDefined();
-    expect(endpoint.requests).toEqual([]);
   });
 
   test("resolves agents per request from the requesting actor", async () => {

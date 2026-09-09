@@ -1225,11 +1225,18 @@ class RunBuiltAgent extends AbstractAgent {
 }
 
 class UnavailableAgent extends AbstractAgent {
-  private readonly reason: string;
+  private reason: string;
 
   constructor(agent: RegisteredUnavailableAgent) {
     super({ agentId: agent.id, description: agent.name });
     this.reason = agent.reason;
+  }
+
+  clone(): UnavailableAgent {
+    const cloned = super.clone() as UnavailableAgent;
+    // The runtime clones before running; the base clone only carries base-class fields.
+    cloned.reason = this.reason;
+    return cloned;
   }
 
   // Refused here rather than at the endpoint: a deleted coworker has no endpoint worth contacting,
