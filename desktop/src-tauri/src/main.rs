@@ -21,6 +21,7 @@ use tauri::{Emitter, Manager};
 /// What the shell is running, so the window and the tray say the same thing.
 #[derive(Default)]
 struct Shell {
+    recovery: openbot_desktop_lib::recovery::Recovery,
     /// Named, because a restart policy that cannot say which process died cannot start it again.
     children: Mutex<Vec<(&'static str, std::process::Child)>>,
     /// Which run is the current one.
@@ -179,6 +180,7 @@ fn windows_blocker_instruction(blocker: win::Blocker) -> String {
 /// nothing moving in it reads as a hang.
 #[tauri::command]
 async fn prepare_engine(app: tauri::AppHandle) -> Result<engine::EngineStatus, Problem> {
+    app.state::<Shell>().recovery.cancel(None)?;
     engine_ready(&app).await?;
     Ok(engine::detect())
 }
@@ -539,6 +541,25 @@ async fn start_stack<R: tauri::Runtime>(
     // Both registers on the way out: see `problem.rs`. Anything that still returns a bare string
     // converts to the plain half, so a path without its own sentence reads as it always did.
 ) -> Result<(), openbot_desktop_lib::problem::Problem> {
+    let recovery = app.state::<Shell>().recovery.clone();
+    let attempt = recovery.begin(
+        Path::new(&root),
+        openbot_desktop_lib::recovery::Action::Start,
+    )?;
+    let result =
+        start_stack_inner(app, root, api_url, gateway_ws_url, api_key, model, harness).await;
+    recovery.finish(attempt, result)
+}
+
+async fn start_stack_inner<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
+    api_url: String,
+    gateway_ws_url: String,
+    api_key: String,
+    model: ChosenModel,
+    harness: Option<harness::HarnessChoice>,
+) -> Result<(), Problem> {
     let root = PathBuf::from(root);
 
     /*
@@ -840,6 +861,29 @@ async fn start_stack<R: tauri::Runtime>(
     Ok(())
 }
 
+/// This dedicated command accepts no setting, value, root or policy from the webview.
+#[tauri::command]
+async fn recover_credential<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    ticket: String,
+) -> Result<(), Problem> {
+    let recovery = app.state::<Shell>().recovery.clone();
+    tauri::async_runtime::spawn_blocking(move || recovery.recover(&ticket))
+        .await
+        .map_err(|_| {
+            Problem::plain(
+                "Credential recovery stopped unexpectedly. Restart OpenBot before trying again.",
+            )
+        })?
+}
+#[tauri::command]
+fn cancel_credential_recovery<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    ticket: Option<String>,
+) -> Result<(), Problem> {
+    app.state::<Shell>().recovery.cancel(ticket.as_deref())
+}
+
 /// Stop what this started, and only what this started.
 ///
 /// A Bot's computer belongs to the supervisor rather than to Compose and is deliberately left
@@ -884,6 +928,7 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    shell.recovery.stop();
     // Ended first, so the watcher stops before anything is killed and does not read a death it
     // caused as one worth answering.
     shell
@@ -953,6 +998,7 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    shell.recovery.stop();
     #[cfg(unix)]
     shell
         .generation
@@ -1119,10 +1165,18 @@ The endpoint and the token come out of the `.env` this run just wrote, not from 
 facts about the deployment, and a window carrying them would be a second copy to keep in step.
 */
 #[tauri::command]
-async fn ask_the_bot(
+async fn ask_the_bot<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     root: String,
     question: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
+    let recovery = app.state::<Shell>().recovery.clone();
+    let attempt = recovery.begin(Path::new(&root), openbot_desktop_lib::recovery::Action::Ask)?;
+    let result = ask_the_bot_inner(root, question).await;
+    recovery.finish(attempt, result)
+}
+
+async fn ask_the_bot_inner(root: String, question: String) -> Result<String, Problem> {
     let root = PathBuf::from(root);
     // The addresses come from the file and the token from the credential store, which is where
     // this run put it. Asked for together, because one without the other cannot ask anything.
@@ -1296,6 +1350,7 @@ fn harnesses() -> Vec<harness::Harness> {
 /// that on the UI thread is a window that stops repainting mid-setup.
 #[tauri::command]
 async fn begin_claude_sign_in(app: tauri::AppHandle) -> Result<String, Problem> {
+    app.state::<Shell>().recovery.cancel(None)?;
     /*
      * The image is decided here, not by the window, and it is the Claude Agent SDK harness whatever
      * harness the person picked. It is not being used as a Bot: it is the container that happens to
@@ -1357,6 +1412,7 @@ async fn finish_claude_sign_in(app: tauri::AppHandle, code: String) -> Result<St
 async fn begin_chatgpt_sign_in(
     app: tauri::AppHandle,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
+    app.state::<Shell>().recovery.cancel(None)?;
     // Set up rather than refused: see `engine_ready`.
     let address = engine_ready(&app).await?;
     let image = sign_in_image(&app, openbot_desktop_lib::plan::CHATGPT_SIGN_IN_IMAGE).await?;
@@ -1398,6 +1454,10 @@ async fn finish_chatgpt_sign_in(app: tauri::AppHandle) -> Result<String, String>
 /// Start signing in to Intelligence and return the address a browser has to open.
 #[tauri::command]
 async fn begin_intelligence_sign_in(app: tauri::AppHandle) -> Result<String, String> {
+    app.state::<Shell>()
+        .recovery
+        .cancel(None)
+        .map_err(|p| p.said)?;
     let (signing, url) = openbot_desktop_lib::intelligence::SigningInToIntelligence::begin()?;
     *app.state::<Shell>()
         .signing_in_to_intelligence
@@ -1444,6 +1504,7 @@ async fn intelligence_key_for(
     app: tauri::AppHandle,
     project: String,
 ) -> Result<String, openbot_desktop_lib::problem::Problem> {
+    app.state::<Shell>().recovery.cancel(None)?;
     let credential = app
         .state::<Shell>()
         .intelligence_credential
@@ -1715,7 +1776,10 @@ fn chose(app: &tauri::AppHandle, item: &str) {
         }
         // Exit rather than hide: quitting is a decision to stop, and the exit handler is what stops
         // the processes with it.
-        "quit" => app.exit(0),
+        "quit" => {
+            app.state::<Shell>().recovery.stop();
+            app.exit(0);
+        }
         _ => {}
     }
 }
@@ -1737,6 +1801,8 @@ fn main() {
             windows_blocker_instruction,
             prepare_engine,
             start_stack,
+            recover_credential,
+            cancel_credential_recovery,
             stop_stack,
             show_openbot,
             show_setup,
@@ -2242,7 +2308,7 @@ mod tests {
         std::fs::create_dir_all(root.join(".env")).unwrap();
         let before = protected_store_trap::CALLS.load(std::sync::atomic::Ordering::SeqCst);
 
-        let problem = tauri::async_runtime::block_on(ask_the_bot(
+        let problem = tauri::async_runtime::block_on(ask_the_bot_inner(
             root.to_string_lossy().into_owned(),
             "hello".into(),
         ))

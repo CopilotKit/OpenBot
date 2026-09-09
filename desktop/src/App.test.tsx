@@ -1457,3 +1457,161 @@ for (const provider of [
     });
   }
 }
+
+test("Start recovery explains one step and never automatically retries Start", async () => {
+  useCompatibleEndpointSetup({
+    INTELLIGENCE_API_KEY: "synthetic-intelligence",
+  });
+  const previous = invokeHandler;
+  const recovery = deferred<null>();
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw {
+        said: "Saved credential needs authorization.",
+        detail: "synthetic item refusal",
+        recovery: {
+          ticket: "synthetic-one-use",
+          operation: "read",
+          setting: "INTELLIGENCE_API_KEY",
+          label: "Restore access to saved setup",
+          explanation:
+            "This Mac is protecting a credential from your saved OpenBot setup. Restoring access may ask macOS to confirm this app. Your saved data stays in place.",
+        },
+      };
+    if (command === "recover_credential") return recovery.promise;
+    if (command === "cancel_credential_recovery") return null;
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint(
+    "https://models.example/v1",
+    "synthetic-model-key",
+  );
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const restore = await view.findByRole("button", {
+    name: "Restore access to saved setup",
+  });
+  expect(view.getByText(/This Mac is protecting/)).toBeTruthy();
+  expect(
+    invokeCalls.filter((c) => c.command === "recover_credential"),
+  ).toHaveLength(0);
+  await userEvent.click(restore);
+  await userEvent.click(restore);
+  expect(invokeCalls.filter((c) => c.command === "recover_credential")).toEqual(
+    [{ command: "recover_credential", args: { ticket: "synthetic-one-use" } }],
+  );
+  expect(view.getByRole("button", { name: "Start OpenBot" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  expect(view.getByLabelText("Where OpenBot lives")).toHaveProperty(
+    "disabled",
+    true,
+  );
+  await act(async () => recovery.resolve(null));
+  expect(
+    await view.findByText("Access restored for this step. Press Start again."),
+  ).toBeTruthy();
+  expect(invokeCalls.filter((c) => c.command === "start_stack")).toHaveLength(
+    1,
+  );
+  expect(
+    view.queryByRole("button", { name: "Restore access to saved setup" }),
+  ).toBeNull();
+});
+
+const syntheticRecovery = {
+  ticket: "synthetic-ask-ticket",
+  operation: "read",
+  setting: "MANAGED_AGENT_TOKEN",
+  label: "Restore access to saved setup",
+  explanation:
+    "This Mac is protecting a credential from your saved OpenBot setup. Restoring access may ask macOS to confirm this app. Your saved data stays in place.",
+};
+
+test("Ask recovery retains the question and waits for a separate explicit Ask", async () => {
+  useCompatibleEndpointSetup({
+    INTELLIGENCE_API_KEY: "synthetic-intelligence",
+  });
+  const previous = invokeHandler;
+  let recovered = false;
+  invokeHandler = async (command, args) => {
+    if (command === "ask_the_bot") {
+      if (!recovered)
+        throw {
+          said: "Saved agent credential needs authorization.",
+          recovery: syntheticRecovery,
+        };
+      return "Synthetic answer";
+    }
+    if (command === "recover_credential") {
+      recovered = true;
+      return null;
+    }
+    if (command === "cancel_credential_recovery") return null;
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint("https://models.example/v1");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  const question = await view.findByLabelText("Your question");
+  await userEvent.setup({ document: question.ownerDocument }).clear(question);
+  await userEvent.type(question, "Keep this question");
+  await userEvent.click(view.getByRole("button", { name: "Ask" }));
+  expect(await view.findByText(/This Mac is protecting/)).toBeTruthy();
+  expect(invokeCalls.some((c) => c.command === "recover_credential")).toBe(
+    false,
+  );
+  await userEvent.click(
+    view.getByRole("button", { name: syntheticRecovery.label }),
+  );
+  expect(
+    await view.findByText("Access restored for this step. Press Ask again."),
+  ).toBeTruthy();
+  expect(question).toHaveProperty("value", "Keep this question");
+  expect(invokeCalls.filter((c) => c.command === "ask_the_bot")).toHaveLength(
+    1,
+  );
+  expect(invokeCalls.filter((c) => c.command === "recover_credential")).toEqual(
+    [
+      {
+        command: "recover_credential",
+        args: { ticket: syntheticRecovery.ticket },
+      },
+    ],
+  );
+  await userEvent.click(view.getByRole("button", { name: "Ask" }));
+  expect(await view.findByText("Synthetic answer")).toBeTruthy();
+});
+
+test("changing the root cancels its exact ticket and removes recovery immediately", async () => {
+  useCompatibleEndpointSetup({
+    INTELLIGENCE_API_KEY: "synthetic-intelligence",
+  });
+  const previous = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "start_stack")
+      throw { said: "Synthetic refusal", recovery: syntheticRecovery };
+    if (command === "cancel_credential_recovery") return null;
+    return previous(command, args);
+  };
+  const view = await enterCompatibleEndpoint("https://models.example/v1");
+  await userEvent.click(view.getByRole("button", { name: "Continue" }));
+  await userEvent.click(view.getByRole("button", { name: "Start OpenBot" }));
+  expect(
+    await view.findByRole("button", { name: syntheticRecovery.label }),
+  ).toBeTruthy();
+  await userEvent.type(view.getByLabelText("Where OpenBot lives"), "-other");
+  expect(
+    view.queryByRole("button", { name: syntheticRecovery.label }),
+  ).toBeNull();
+  expect(
+    invokeCalls.filter((c) => c.command === "cancel_credential_recovery"),
+  ).toContainEqual({
+    command: "cancel_credential_recovery",
+    args: { ticket: syntheticRecovery.ticket },
+  });
+  expect(invokeCalls.some((c) => c.command === "recover_credential")).toBe(
+    false,
+  );
+});

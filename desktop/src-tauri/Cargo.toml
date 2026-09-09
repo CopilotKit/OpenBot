@@ -37,6 +37,8 @@ tauri-plugin-opener = "2.5.5"
 # OpenAI project key. This has no such limit and puts nothing on a command line.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
+security-framework-sys = "2.17"
+core-foundation = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

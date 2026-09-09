@@ -64,10 +64,9 @@ impl StepOutcome {
 
     /// This step's failure, for a caller that has to return one.
     pub fn problem(&self) -> crate::problem::Problem {
-        crate::problem::Problem {
-            said: self.said.clone(),
-            detail: self.detail.clone(),
-        }
+        let mut problem = crate::problem::Problem::plain(self.said.clone());
+        problem.detail = self.detail.clone();
+        problem
     }
 }
 

@@ -256,6 +256,14 @@ fn remember_cached(
     remember_one: impl FnOnce(&str, &str) -> Result<(), Problem>,
 ) -> Result<(), Problem> {
     let mut held = cache.lock().map_err(|_| cache_problem())?;
+    // A successful store read/write confirms these exact bytes for this process. In particular,
+    // do not repeat a just-authorized write on the person's explicit ordinary Start retry.
+    if held
+        .get(name)
+        .is_some_and(|known| matches!(known, Ok(Some(saved)) if saved == value))
+    {
+        return Ok(());
+    }
     // A failed restoration can follow a successful OS write. Discard any stale cache entry.
     held.remove(name);
     remember_one(name, value)?;
@@ -308,43 +316,184 @@ pub fn recall_all(keys: &[&str]) -> Result<BTreeMap<String, String>, Problem> {
 mod keychain;
 
 #[cfg(target_os = "macos")]
+fn mutate_primitive(
+    primitive: crate::recovery::Primitive,
+    name: &str,
+    value: Option<&str>,
+) -> Result<(), Problem> {
+    use crate::recovery::Primitive;
+    use core_foundation::string::CFString;
+    use core_foundation::{base::TCFType, data::CFData, dictionary::CFDictionary};
+    use security_framework_sys::item::{
+        kSecAttrAccount, kSecAttrService, kSecClass, kSecClassGenericPassword,
+    };
+    use security_framework_sys::{
+        item::kSecValueData,
+        keychain_item::{SecItemAdd, SecItemUpdate},
+    };
+    // Exactly the legacy generic-password selector used by security-framework, with no new
+    // access-group, ACL, access-control or data-protection attributes.
+    let mut pairs = unsafe {
+        vec![
+            (
+                CFString::wrap_under_get_rule(kSecClass),
+                CFString::wrap_under_get_rule(kSecClassGenericPassword).as_CFType(),
+            ),
+            (
+                CFString::wrap_under_get_rule(kSecAttrService),
+                CFString::new(SERVICE).as_CFType(),
+            ),
+            (
+                CFString::wrap_under_get_rule(kSecAttrAccount),
+                CFString::new(name).as_CFType(),
+            ),
+        ]
+    };
+    let status = match primitive {
+        Primitive::Add => {
+            pairs.push((
+                unsafe { CFString::wrap_under_get_rule(kSecValueData) },
+                CFData::from_buffer(value.ok_or_else(|| Problem::plain("The captured credential mutation has no value. Start this step again."))?.as_bytes()).as_CFType(),
+            ));
+            let query = CFDictionary::from_CFType_pairs(&pairs);
+            unsafe { SecItemAdd(query.as_concrete_TypeRef(), std::ptr::null_mut()) }
+        }
+        Primitive::Update => {
+            let query = CFDictionary::from_CFType_pairs(&pairs);
+            let data = CFData::from_buffer(
+                value
+                    .ok_or_else(|| {
+                        Problem::plain(
+                            "The captured credential mutation has no value. Start this step again.",
+                        )
+                    })?
+                    .as_bytes(),
+            );
+            let attributes = CFDictionary::from_CFType_pairs(&[(
+                unsafe { core_foundation::string::CFString::wrap_under_get_rule(kSecValueData) }
+                    .as_CFType(),
+                data.as_CFType(),
+            )]);
+            unsafe {
+                SecItemUpdate(
+                    query.as_concrete_TypeRef(),
+                    attributes.as_concrete_TypeRef(),
+                )
+            }
+        }
+        Primitive::Delete => {
+            match security_framework::passwords::delete_generic_password(SERVICE, name) {
+                Ok(()) => 0,
+                Err(error) => error.code(),
+            }
+        }
+        Primitive::Read => return Err(Problem::plain("A read is not a credential mutation.")),
+    };
+    if status == 0 || (primitive == Primitive::Delete && status == -25300) {
+        Ok(())
+    } else {
+        Err(keychain::item_problem(primitive, name, status, value))
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn remember_in_store(name: &str, value: &str) -> Result<(), Problem> {
+    use crate::recovery::Primitive;
     keychain::without_ui("save", name, || {
-        // The framework tries Add then Update on duplicate; both stay inside this boundary.
-        security_framework::passwords::set_generic_password(SERVICE, name, value.as_bytes())
-            .map_err(|error| keychain::problem("save", name, "item", Some(error.code())))
+        match mutate_primitive(Primitive::Add, name, Some(value)) {
+            // A duplicate may update only on the ordinary no-UI path. The interactive command
+            // calls exactly its captured primitive and cannot enter this branch.
+            Err(error)
+                if error
+                    .item
+                    .as_ref()
+                    .is_some_and(|item| item.status == -25299) =>
+            {
+                mutate_primitive(Primitive::Update, name, Some(value))
+            }
+            result => result,
+        }
     })
 }
 
 #[cfg(target_os = "macos")]
-fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
-    keychain::without_ui(
-        "read",
-        name,
-        || match security_framework::passwords::get_generic_password(SERVICE, name) {
-            Ok(raw) => String::from_utf8(raw)
-                .map(Some)
-                .map_err(|_| keychain::problem("read", name, "invalid-utf8", None)),
-            Err(error) if error.code() == -25300 => Ok(None),
-            Err(error) => Err(keychain::problem("read", name, "item", Some(error.code()))),
-        },
-    )
+fn read_primitive(name: &str) -> Result<Option<String>, Problem> {
+    match security_framework::passwords::get_generic_password(SERVICE, name) {
+        Ok(raw) => String::from_utf8(raw)
+            .map(Some)
+            .map_err(|_| keychain::problem("read", name, "invalid-utf8", None)),
+        Err(error) if error.code() == -25300 => Ok(None),
+        Err(error) => Err(keychain::item_problem(
+            crate::recovery::Primitive::Read,
+            name,
+            error.code(),
+            None,
+        )),
+    }
 }
-
+#[cfg(target_os = "macos")]
+fn recall_from_store(name: &str) -> Result<Option<String>, Problem> {
+    keychain::without_ui("read", name, || read_primitive(name))
+}
 #[cfg(target_os = "macos")]
 fn forget_in_store(name: &str) -> Result<(), Problem> {
     keychain::without_ui("delete", name, || {
-        match security_framework::passwords::delete_generic_password(SERVICE, name) {
-            Ok(()) => Ok(()),
-            Err(error) if error.code() == -25300 => Ok(()),
-            Err(error) => Err(keychain::problem(
-                "delete",
-                name,
-                "item",
-                Some(error.code()),
-            )),
+        mutate_primitive(crate::recovery::Primitive::Delete, name, None)
+    })
+}
+
+pub(crate) fn recover_claimed(
+    state: &crate::recovery::Recovery,
+    claimed: crate::recovery::Claimed,
+) -> Result<(), Problem> {
+    // Preserve cache -> policy-gate order. No native state lock is held while waiting for macOS.
+    let mut held = match cache().lock() {
+        Ok(held) => held,
+        Err(_) => return state.complete(claimed, Err::<(), _>(cache_problem()), |_| {}),
+    };
+    let name = claimed.operation.setting.clone();
+    let result = state.dispatch(&claimed).and_then(|()| {
+        // A mutation may reach the OS before restoration fails. Invalidate before dispatch;
+        // no late success or cancellation is permitted to publish new cache bytes.
+        if claimed.operation.primitive != crate::recovery::Primitive::Read {
+            held.remove(&name);
+        }
+        recover_one(&claimed.operation)
+    });
+    state.complete(claimed, result, |value| {
+        held.remove(&name);
+        if let Some(value) = value {
+            held.insert(name, Ok(Some(value)));
         }
     })
+}
+#[cfg(target_os = "macos")]
+fn recover_one(operation: &crate::recovery::RefusedOperation) -> Result<Option<String>, Problem> {
+    use crate::recovery::Primitive;
+    keychain::with_ui(operation.primitive.name(), &operation.setting, || {
+        if operation.primitive == Primitive::Read {
+            let value = read_primitive(&operation.setting)?.filter(|value| !value.trim().is_empty()).ok_or_else(|| Problem::plain("That saved credential is missing or empty. Authorization cannot recreate it."))?;
+            if operation.setting == "KEY_ENCRYPTION_KEY"
+                && !crate::env::usable_encryption_key(&value)
+            {
+                return Err(Problem::plain("This installation's original saved encryption key is invalid or public. Restore its original private key; authorization cannot recreate it."));
+            }
+            Ok(Some(value))
+        } else {
+            mutate_primitive(
+                operation.primitive,
+                &operation.setting,
+                operation.value.as_deref(),
+            )?;
+            Ok(operation.value.clone())
+        }
+    })
+}
+#[cfg(not(target_os = "macos"))]
+fn recover_one(_: &crate::recovery::RefusedOperation) -> Result<Option<String>, Problem> {
+    Err(Problem::plain(
+        "macOS credential authorization is unavailable on this platform.",
+    ))
 }
 
 /*
@@ -918,6 +1067,26 @@ mod cache_tests {
             super::recall_no_ui_cached(name, &cache, |_| Ok(None)),
             Ok(None)
         );
+    }
+
+    #[test]
+    fn an_unchanged_confirmed_value_skips_persistence_but_a_change_never_does() {
+        let cache = std::sync::Mutex::new(BTreeMap::from([(
+            "OPENAI_API_KEY".into(),
+            Ok(Some("confirmed".into())),
+        )]));
+        super::remember_cached("OPENAI_API_KEY", "confirmed", &cache, |_, _| {
+            panic!("redundant persistence after recovery")
+        })
+        .unwrap();
+        let error = super::remember_cached("OPENAI_API_KEY", "changed", &cache, |key, value| {
+            assert_eq!(key, "OPENAI_API_KEY");
+            assert_eq!(value, "changed");
+            Err(Problem::plain("synthetic no-UI refusal"))
+        })
+        .unwrap_err();
+        assert_eq!(error.said, "synthetic no-UI refusal");
+        assert!(cache.lock().unwrap().is_empty());
     }
 
     #[test]

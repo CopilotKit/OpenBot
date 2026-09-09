@@ -55,6 +55,25 @@ fn with_policy<T>(
     name: &str,
     run: impl FnOnce() -> Result<T, Problem>,
 ) -> Result<T, Problem> {
+    with_interaction(gate, policy, operation, name, false, run)
+}
+
+pub(super) fn with_ui<T>(
+    operation: &str,
+    name: &str,
+    run: impl FnOnce() -> Result<T, Problem>,
+) -> Result<T, Problem> {
+    with_interaction(&OPERATIONS, &SystemPolicy, operation, name, true, run)
+}
+
+fn with_interaction<T>(
+    gate: &Mutex<Option<bool>>,
+    policy: &impl InteractionPolicy,
+    operation: &str,
+    name: &str,
+    allowed: bool,
+    run: impl FnOnce() -> Result<T, Problem>,
+) -> Result<T, Problem> {
     let mut held = gate
         .lock()
         .map_err(|_| problem(operation, name, "gate-poisoned", None))?;
@@ -75,8 +94,13 @@ fn with_policy<T>(
         name,
         armed: true,
     };
-    if let Err(status) = policy.set(false) {
-        return session.finish(Err(problem(operation, name, "disable-ui", Some(status))));
+    if let Err(status) = policy.set(allowed) {
+        return session.finish(Err(problem(
+            operation,
+            name,
+            if allowed { "enable-ui" } else { "disable-ui" },
+            Some(status),
+        )));
     }
     session.finish(run())
 }
@@ -155,6 +179,32 @@ pub(super) fn problem(operation: &str, name: &str, phase: &str, status: Option<i
     )
 }
 
+/// Only exact item refusals can carry a captured operation, and policy restoration may replace
+/// this entire error before it reaches the action owner.
+pub(super) fn item_problem(
+    primitive: crate::recovery::Primitive,
+    name: &str,
+    status: i32,
+    value: Option<&str>,
+) -> Problem {
+    let mut error = problem(primitive.name(), name, "item", Some(status));
+    if super::is_secret(name) {
+        error.item = Some(Box::new(crate::recovery::ItemFailure {
+            primitive,
+            setting: name.into(),
+            status,
+        }));
+    }
+    if super::is_secret(name) && matches!(status, -25293 | -25308 | -128) {
+        error.refused = Some(Box::new(crate::recovery::RefusedOperation {
+            primitive,
+            setting: name.into(),
+            value: value.map(str::to_string),
+        }));
+    }
+    error
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +246,70 @@ mod tests {
                 .unwrap_or(Ok(()))?;
             self.allowed.store(allowed, SeqCst);
             Ok(())
+        }
+    }
+
+    #[test]
+    fn deliberate_primitive_restores_both_prior_policies_and_never_offers_policy_failures() {
+        use crate::recovery::Primitive;
+        for prior in [false, true] {
+            for primitive in [
+                Primitive::Read,
+                Primitive::Add,
+                Primitive::Update,
+                Primitive::Delete,
+            ] {
+                let gate = Mutex::new(None);
+                let policy = FakePolicy::new(prior, vec![]);
+                let error = with_interaction(
+                    &gate,
+                    &policy,
+                    primitive.name(),
+                    "OPENAI_API_KEY",
+                    true,
+                    || {
+                        assert!(policy.allowed.load(SeqCst));
+                        Err::<(), _>(item_problem(
+                            primitive,
+                            "OPENAI_API_KEY",
+                            -25308,
+                            Some("synthetic-secret"),
+                        ))
+                    },
+                )
+                .unwrap_err();
+                assert_eq!(policy.allowed.load(SeqCst), prior);
+                assert!(error.refused.is_some());
+                assert!(!serde_json::to_string(&error)
+                    .unwrap()
+                    .contains("synthetic-secret"));
+                let policy = FakePolicy::new(prior, vec![Ok(()), Err(-50)]);
+                let error = with_interaction(
+                    &gate,
+                    &policy,
+                    primitive.name(),
+                    "OPENAI_API_KEY",
+                    true,
+                    || {
+                        Err::<(), _>(item_problem(
+                            primitive,
+                            "OPENAI_API_KEY",
+                            -25293,
+                            Some("synthetic-secret"),
+                        ))
+                    },
+                )
+                .unwrap_err();
+                assert!(error.refused.is_none());
+                assert!(error.detail.unwrap().contains("restore-policy"));
+            }
+        }
+        for status in [-25300, -25299, -50] {
+            assert!(
+                item_problem(Primitive::Read, "KEY_ENCRYPTION_KEY", status, None)
+                    .refused
+                    .is_none()
+            );
         }
     }
 
