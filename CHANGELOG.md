@@ -16,6 +16,17 @@ turned back into `null` by the hop to the Bot's computer, which reads the field 
 its own default distance. The caller was answered 200 for a scroll it had not asked for. A `deltaY`
 that is not a finite number now answers 400 and the page is not touched, the way the timeout on
 `exec` and the coordinates behind a person's click already did.
+### An MCP call carrying `x-api-key` is stopped the same as one carrying `api-key`
+
+The check that keeps credentials out of MCP tool arguments compared each argument name against a
+list, and `api-key` was on it while `x-api-key` was not -- so the spelling that is more obviously a
+credential header was the one that went out. `x-` is the conventional prefix for a non-standard
+header and says nothing about the value, so it is now dropped before the comparison. The same pass
+adds the spellings of names already on the list that were missing from it: `passwd` and `pwd` for
+`password`, `auth_token` and `bearer_token` and `session_token` for `token`, `api_secret` and
+`secret_key` and `signing_key` for `secret`, and `ssh_key` for `private_key`. Nothing new counts as
+a credential: an argument named `x_axis`, `token_count`, `max_tokens` or `secretary` is passed as
+before.
 
 ### One command to stop what `start.sh` started
 
