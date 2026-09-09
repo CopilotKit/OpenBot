@@ -39,6 +39,7 @@ import {
   resolveServerUrl,
   serverCredentialKind,
 } from "./catalogue";
+import { accessFor, type ServerAccess } from "./access";
 import { inspectToolArguments } from "./content-governance";
 import { McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
@@ -312,21 +313,15 @@ const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
 
 /**
- * Whose credential reaches this server, as the trail names it.
+ * Whose account this call went out as, for the trail.
  *
- * One definition, because this was two: `connectionTokenFor` returned it and the audit payload
- * recomputed the same condition a few lines later. Two expressions for one fact can disagree, and
- * the one place that would show is an audit row claiming a call ran as somebody it did not — which is
- * the row a per-person connector exists to be able to trust.
- *
- * `deployment` for a shared token; the asker's own id for a server reached as the person asking.
- * `builtin` is the third case and the only one with no credential at all — the actor is not whose
- * token was used, it is whose rows were touched.
+ * Reads the resolved descriptor rather than re-deriving from the entry's auth kind. That derivation
+ * had no answer for a Composio app — the entry is null, so it fell through to `deployment` for a call
+ * that ran in one person's own mailbox, which is the trail being wrong about the one thing a
+ * per-person connector exists for.
  */
-const reachedAsFor = (entry: CatalogueEntry | null, actorId: string): string =>
-  entry?.auth.kind === "user-oauth" || entry?.auth.kind === "builtin"
-    ? actorId
-    : "deployment";
+const reachedAsFor = (access: ServerAccess, actorId: string): string =>
+  access.reachedAs === "person" ? actorId : "deployment";
 
 /**
  * Where this server actually is, when the stored row and the catalogue disagree.
@@ -1594,7 +1589,14 @@ export function createPluginStore(options: PluginStoreOptions) {
       throw new CatalogueEntryUnknownError(row.id);
     }
     // Null for a custom server, and every caller handles that by assuming the worst about it.
-    return { row, entry };
+    /*
+     * Resolved here so every caller reads the same answer.
+     *
+     * Three call sites used to derive their own — the transport, the credential and the audit row —
+     * and a Composio app made all three of them wrong at once. One derivation means they cannot
+     * disagree, and `access.ts` is the only place a new kind of server has to be taught about.
+     */
+    return { row, entry, access: accessFor(row, entry) };
   }
 
   return {
@@ -2906,7 +2908,7 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(decision.reason, null);
       }
 
-      const { row, entry } = await requireServer(serverId);
+      const { row, entry, access } = await requireServer(serverId);
 
       const advertised = await database
         .select({ name: mcpTools.name, inputSchema: mcpTools.inputSchema })
@@ -2978,7 +2980,7 @@ export function createPluginStore(options: PluginStoreOptions) {
          * a per-person connector raises — two rows for the same tool and the same Bot can legitimately
          * have seen entirely different documents, and nothing else in the row says why.
          */
-        reachedAs: reachedAsFor(entry, input.actorId),
+        reachedAs: reachedAsFor(access, input.actorId),
         decision: {
           allowed: verdict.allowed,
           mode: verdict.mode,
