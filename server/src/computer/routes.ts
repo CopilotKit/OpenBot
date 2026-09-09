@@ -331,11 +331,12 @@ export function createComputerRoutes(
   );
 
   routes.post("/:botId/scroll", (context) =>
-    act(context, (botId, actor, body) =>
-      gateway.scroll(botId, actor, {
+    act(context, (botId, actor, body) => {
+      if (!usableDeltaY(body?.deltaY)) return badDeltaY;
+      return gateway.scroll(botId, actor, {
         ...(typeof body?.deltaY === "number" ? { deltaY: body.deltaY } : {}),
-      }),
-    ),
+      });
+    }),
   );
 
   /**
@@ -481,6 +482,9 @@ export function createComputerRoutes(
       string,
       unknown
     > | null;
+    if (kind === "scroll" && !usableDeltaY(body?.deltaY)) {
+      return context.json(badDeltaY, 400);
+    }
     try {
       return context.json(
         await gateway.humanInput(context.req.param("botId"), {
@@ -700,6 +704,24 @@ const badRef: BadRequest = {
   error:
     "A ref and the snapshotId it came from are both required. Take a snapshot first.",
 };
+
+const badDeltaY: BadRequest = {
+  error: "deltaY must be a finite number of pixels.",
+};
+
+/**
+ * Whether a wheel delta from an untrusted body can be carried out.
+ *
+ * `typeof value === "number"` is true of `Infinity`, and JSON carries it: `1e999` parses to it. It
+ * then survives every comparison on the way down and is erased by `JSON.stringify` on the hop to the
+ * computer, which reads the missing field as absent and scrolls its own default distance instead --
+ * so the caller is answered 200 for a scroll nobody asked for. Every other number on this surface is
+ * already checked at the edge: the timeout on `exec`, the coordinates behind `human/click`. This one
+ * was not.
+ */
+function usableDeltaY(value: unknown): boolean {
+  return value === undefined || Number.isFinite(value);
+}
 
 /**
  * Shared plumbing for acting routes that use this helper: resolve who is asking, run, and map

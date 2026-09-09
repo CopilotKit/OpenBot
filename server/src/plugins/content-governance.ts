@@ -26,24 +26,43 @@ export type ToolArgumentInspection =
       findings: SensitiveArgumentFinding[];
     };
 
+// Each entry is a spelling of a field already named here, not a widening of what counts as a
+// credential: `passwd` is `password`, `api_secret` is `secret`, `ssh_key` is `private_key`. A tool
+// argument carrying one of these carries the same thing under a different name.
 const sensitiveFieldNames = new Set([
   "access_token",
   "accesstoken",
   "api_key",
+  "api_secret",
   "apikey",
+  "apisecret",
+  "auth_token",
   "authorization",
+  "authtoken",
+  "bearer_token",
+  "bearertoken",
   "client_secret",
   "clientsecret",
   "credential",
   "credentials",
   "id_token",
   "idtoken",
+  "passwd",
   "password",
   "private_key",
   "privatekey",
+  "pwd",
   "refresh_token",
   "refreshtoken",
   "secret",
+  "secret_key",
+  "secretkey",
+  "session_token",
+  "sessiontoken",
+  "signing_key",
+  "signingkey",
+  "ssh_key",
+  "sshkey",
   "token",
 ]);
 
@@ -61,7 +80,12 @@ const MAX_FINDINGS = 20;
 const MAX_STRING_LENGTH = 64 * 1024;
 
 function normalizedFieldName(value: string): string {
-  return value.toLowerCase().replace(/[-.\s]/g, "_");
+  const normalized = value.toLowerCase().replace(/[-.\s]/g, "_");
+  // `x_` is the conventional prefix for a non-standard header and says nothing about the value, so
+  // `x-api-key` is the same field as `api-key`. Without this the list caught `api-key` -- which
+  // normalises exactly onto `api_key` -- and let through the spelling that is more obviously a
+  // credential, not less.
+  return normalized.startsWith("x_") ? normalized.slice(2) : normalized;
 }
 
 function categoryForValue(value: string): SensitiveArgumentCategory | null {

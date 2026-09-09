@@ -204,8 +204,14 @@ const MAX_LIVE_BROWSERS = numberFromEnv("COMPUTER_MAX_BROWSERS", 8);
  *
  * The other half. A deployment under the cap still holds a browser per Bot that was used once last
  * Tuesday, and that memory is doing nothing for anybody.
+ *
+ * Zero is the documented way to say "keep them resident", which is why it is read as a value here
+ * rather than as a value that is not set. Read like the cap, an operator who wrote it got the
+ * default back and the sweep they had switched off carried on closing their browsers.
  */
-const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000);
+const IDLE_TIMEOUT_MS = numberFromEnv("COMPUTER_BROWSER_IDLE_MS", 30 * 60_000, {
+  zeroSwitchesItOff: true,
+});
 
 /** How often the idle sweep looks. Cheap: it walks a map of at most `MAX_LIVE_BROWSERS`. */
 const IDLE_SWEEP_MS = 60_000;
