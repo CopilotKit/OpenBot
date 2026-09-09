@@ -3680,6 +3680,36 @@ test("a Composio call sends the version recorded for that action", async () => {
   ]);
 });
 
+test("a version a model supplied in its own arguments cannot beat the recorded one", async () => {
+  const { store, database } = await freshStore();
+  const calls: { slug: string; version: string }[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug, _userId, version) => {
+      calls.push({ slug, version });
+      return {};
+    },
+  });
+  await seedComposioGmail(database, store);
+
+  await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    // A model filling in the reserved key itself. It reaches `args` intact — nothing strips a
+    // non-empty value — so the only thing standing between it and the vendor is that the recorded
+    // version is merged after it.
+    args: { __version: "19700101_00" },
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  // The listed revision, not the one the model asked for. Reversed, this call would run against a
+  // revision that was never listed, never classified and never granted — and the audit row would
+  // name the action without naming which of its revisions actually ran.
+  expect(calls).toEqual([
+    { slug: "GMAIL_FETCH_EMAILS", version: "20260903_00" },
+  ]);
+});
+
 test("a Composio call is recorded as reaching the vendor as the person, not as the deployment", async () => {
   const { store, database, auditStore } = await freshStore();
   useComposioClient({
