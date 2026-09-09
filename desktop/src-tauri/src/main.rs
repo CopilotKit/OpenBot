@@ -1507,6 +1507,35 @@ fn show_whichever_applies(app: &tauri::AppHandle) {
     let _ = window.set_focus();
 }
 
+fn schedule_second_instance_restore<T, F>(
+    context: T,
+    restore: F,
+) -> std::io::Result<std::thread::JoinHandle<()>>
+where
+    T: Send + 'static,
+    F: FnOnce(T) + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("openbot-second-instance-restore".into())
+        .spawn(move || restore(context))
+}
+
+fn restore_after_second_instance(app: &tauri::AppHandle) {
+    let app = app.clone();
+    let reporting_app = app.clone();
+    if let Err(error) = schedule_second_instance_restore(app, |app| {
+        show_whichever_applies(&app);
+    }) {
+        eprintln!("[single-instance] restore scheduling failed: {error}");
+        report(
+            &reporting_app,
+            "open",
+            false,
+            format!("OpenBot could not show the existing window: {error}"),
+        );
+    }
+}
+
 /// What each of the three items does, wherever it was chosen from.
 ///
 /// The tray and the window menu carry the same items, so they share one function: two copies would
@@ -1549,7 +1578,7 @@ fn main() {
         // second stack. Without this both copies bind the same ports and the loser reports a
         // failure that belongs to the winner.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            show_whichever_applies(app);
+            restore_after_second_instance(app);
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
@@ -1883,6 +1912,40 @@ mod tests {
         assert_eq!(configured.saved.model_sessions.anthropic, Some(true));
         assert!(!configured.values.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn second_instance_restore_runs_blocking_probe_outside_the_async_listener() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 512];
+            let _ = stream.read(&mut request).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+        });
+        let (sent, received) = std::sync::mpsc::channel();
+
+        let scheduled = tauri::async_runtime::block_on(async move {
+            tauri::async_runtime::spawn(async move {
+                schedule_second_instance_restore(port, move |port| {
+                    sent.send(stack::app_url(port).is_some()).unwrap();
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+            })
+            .await
+        });
+
+        assert!(
+            scheduled.is_ok(),
+            "the async single-instance listener must not panic while scheduling restore"
+        );
+        assert!(received.recv().unwrap());
+        server.join().unwrap();
     }
 
     #[test]
