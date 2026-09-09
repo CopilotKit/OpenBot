@@ -51,20 +51,21 @@ export function channelHistoryNotice({
   messageCount,
   lastMessageAt,
   historyAvailability,
+  historyRefreshFailed = false,
   unreadable,
 }: {
   restoring: boolean;
   messageCount: number;
   lastMessageAt: string | null;
   historyAvailability: "ready" | "unavailable";
+  historyRefreshFailed?: boolean;
   unreadable: number;
 }): string | null {
   if (restoring) return null;
 
   if (
     historyAvailability === "unavailable" &&
-    messageCount === 0 &&
-    lastMessageAt !== null
+    (historyRefreshFailed || (messageCount === 0 && lastMessageAt !== null))
   ) {
     return "Earlier messages are temporarily unavailable. You can keep using this conversation.";
   }
@@ -166,6 +167,9 @@ export function ChannelChat({
   const [historyAvailability, setHistoryAvailability] = useState<
     "ready" | "unavailable"
   >("ready");
+  const [historyRefreshFailed, setHistoryRefreshFailed] = useState(false);
+  // Mount reads and Bot refreshes share one ordering: only the newest read owns the notice.
+  const historyReadVersion = useRef(0);
   useEffect(() => {
     if (isReady) openReadyGate.current();
   }, [isReady]);
@@ -174,6 +178,7 @@ export function ChannelChat({
   useEffect(() => {
     if (!isReady) return;
     let current = true;
+    const version = ++historyReadVersion.current;
 
     void (async () => {
       try {
@@ -215,7 +220,8 @@ export function ChannelChat({
         const storeIsAhead =
           stored.messages.length > local.length &&
           local.every((m) => storedIds.has(m.id));
-        if (current && stored.messages.length > 0 && storeIsAhead) {
+        const isCurrent = current && version === historyReadVersion.current;
+        if (isCurrent && stored.messages.length > 0 && storeIsAhead) {
           agent.setMessages(stored.messages);
         }
         /*
@@ -224,8 +230,11 @@ export function ChannelChat({
          * it that nothing accounts for. Set even when nothing was restored: a thread whose every turn
          * is unreadable is exactly the case where silence would read as "this conversation is empty".
          */
-        if (current) setUnreadable(stored.unreadable);
-        if (current) setHistoryAvailability(stored.availability);
+        if (isCurrent) {
+          setUnreadable(stored.unreadable);
+          setHistoryAvailability(stored.availability);
+          setHistoryRefreshFailed(false);
+        }
       } finally {
         // Cleared on failure too: placeholders over an empty transcript promise messages that are
         // never coming.
@@ -275,17 +284,35 @@ export function ChannelChat({
     };
 
     let lastSeen = authoredAt();
+    let cancelled = false;
 
     const pull = () => {
+      const version = ++historyReadVersion.current;
+      const isCurrent = () =>
+        !cancelled && version === historyReadVersion.current;
       void (async () => {
         for (const delayMs of [0, 750, 1500]) {
           if (delayMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, delayMs));
           }
+          if (!isCurrent()) return;
           const stored = await readThreadMessages(
             channel.threadId,
             runtimeAgentId,
           );
+          if (!isCurrent()) return;
+          if (stored.availability === "unavailable") {
+            // Only an exhausted refresh is a failure to announce. Keep the last known hole count.
+            if (delayMs === 1500) {
+              setHistoryAvailability("unavailable");
+              setHistoryRefreshFailed(true);
+            }
+            continue;
+          }
+          // A ready read owns the notice even when every readable id is already on screen.
+          setUnreadable(stored.unreadable);
+          setHistoryAvailability("ready");
+          setHistoryRefreshFailed(false);
           const current = agentRef.current;
           const seen = new Set(current.messages.map((message) => message.id));
           const fresh = stored.messages.filter(
@@ -298,13 +325,17 @@ export function ChannelChat({
       })();
     };
 
-    return queryClient.getQueryCache().subscribe(() => {
+    const unsubscribe = queryClient.getQueryCache().subscribe(() => {
       const at = authoredAt();
       if (at && at !== lastSeen) {
         lastSeen = at;
         pull();
       }
     });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [channel.id, channel.threadId, runtimeAgentId]);
 
   // Tool calls from this conversation act on this coworker's own computer.
@@ -316,6 +347,7 @@ export function ChannelChat({
     messageCount: agent.messages.length,
     lastMessageAt: channel.lastMessageAt,
     historyAvailability,
+    historyRefreshFailed,
     unreadable,
   });
 

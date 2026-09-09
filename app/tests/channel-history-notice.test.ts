@@ -40,4 +40,16 @@ describe("channel history notice", () => {
       }),
     ).toBeNull();
   });
+  test("a failed Bot refresh remains visible over an existing transcript", () => {
+    expect(
+      channelHistoryNotice({
+        restoring: false,
+        messageCount: 3,
+        lastMessageAt: null,
+        historyAvailability: "unavailable",
+        unreadable: 1,
+        historyRefreshFailed: true,
+      }),
+    ).toContain("temporarily unavailable");
+  });
 });
