@@ -3457,6 +3457,32 @@ test("a Composio connection row survives the person being deleted", async () => 
   expect(rows).toEqual([{ toolkit: "gmail" }]);
 });
 
+test("a Composio app is listed through the Composio transport, not dialled as MCP", async () => {
+  const { store, database } = await freshStore();
+  const asked: string[] = [];
+  useComposioClient({
+    listActions: async (toolkit) => {
+      asked.push(toolkit);
+      return [];
+    },
+    execute: async () => ({}),
+  });
+  await database.insert(mcpServers).values({
+    id: "gmail",
+    title: "Gmail",
+    vendor: "Composio",
+    url: "composio://gmail",
+    provenance: "composio",
+  });
+
+  await store.refreshTools("gmail", "admin_user");
+
+  // The transport comes from the resolved kind, not from the absent entry. Derived from the entry,
+  // this reached the MCP module instead and dialled `composio://gmail` as an HTTP server — which
+  // `refreshTools` swallows into `lastError`, so nothing but this reaches the vendor stub.
+  expect(asked).toEqual(["gmail"]);
+});
+
 test("an action's effect, destructive marker and version round-trip", async () => {
   const database = await freshDatabase();
 

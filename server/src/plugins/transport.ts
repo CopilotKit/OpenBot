@@ -5,7 +5,7 @@ import type { ListedTool, McpCallResult } from "./mcp";
 import * as mcp from "./mcp";
 
 /**
- * How this deployment reaches one vendor: which protocol, chosen per catalogue entry.
+ * How this deployment reaches one vendor: which protocol, from the kind `./access` resolved.
  *
  * WHY THIS EXISTS. Every connector used to be MCP, so "the transport" was an import. Google's Drive
  * MCP server turned out to be gated behind a developer preview, and the same product's ordinary REST
@@ -74,10 +74,11 @@ export type VendorTransport = {
 };
 
 /**
- * The protocols a catalogue entry may name.
+ * The protocols this deployment can dial.
  *
  * A closed union rather than a string, so adding one is a change to this file and to the registry
- * below together. An entry naming a transport that does not exist should not typecheck.
+ * below together. Named by a catalogue entry for a curated vendor and by `./access` from the row's
+ * provenance for a Composio app; either way, a kind that does not exist should not typecheck.
  */
 export type TransportKind =
   | "mcp"

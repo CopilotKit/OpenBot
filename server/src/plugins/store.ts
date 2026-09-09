@@ -1580,6 +1580,7 @@ export function createPluginStore(options: PluginStoreOptions) {
       .limit(1);
     if (!row) throw new CatalogueEntryUnknownError(serverId);
 
+    // Null for a custom server, and every caller handles that by assuming the worst about it.
     const entry = catalogueEntry(row.id);
     if (row.provenance === "first-party" && !entry) {
       // The row outlived its catalogue entry, which means a build removed a vendor while a
@@ -1588,7 +1589,6 @@ export function createPluginStore(options: PluginStoreOptions) {
       // is one we agreed to talk to.
       throw new CatalogueEntryUnknownError(row.id);
     }
-    // Null for a custom server, and every caller handles that by assuming the worst about it.
     /*
      * Resolved here so every caller reads the same answer.
      *
@@ -1991,7 +1991,8 @@ export function createPluginStore(options: PluginStoreOptions) {
       const { row, entry, access } = await requireServer(serverId);
 
       try {
-        // The entry decides the protocol. For a custom server there is no entry, and MCP is right.
+        // How a row is reached is resolved once, in `requireServer`. Derived from the entry here,
+        // a Composio app — which has no entry — was dialled as MCP at `composio://gmail`.
         const transport = transportFor(access.transport);
 
         /*

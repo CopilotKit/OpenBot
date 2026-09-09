@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { accessFor } from "../src/plugins/access";
 import { catalogueEntry } from "../src/plugins/catalogue";
 import { callTool, listTools } from "../src/plugins/google-drive-rest";
+import { callTool as mcpCallTool } from "../src/plugins/mcp";
 import { transportFor } from "../src/plugins/transport";
 
 /**
@@ -55,11 +56,12 @@ describe("the adapter is the transport the catalogue asks for", () => {
 
   test("a server with no catalogue entry falls back to MCP", () => {
     // A custom server an administrator added by URL is somebody else's MCP endpoint by definition.
-    // Composed through `accessFor`, which is where the absent-entry fallback now lives.
+    // Composed through `accessFor`, which is where the absent-entry fallback now lives — and asserted
+    // as MCP rather than as "not Drive", which any wrongly resolved kind would also satisfy.
     expect(
       transportFor(accessFor({ provenance: "custom" }, null).transport)
         .callTool,
-    ).not.toBe(callTool);
+    ).toBe(mcpCallTool);
   });
 
   test("every advertised tool is one the dispatcher handles", async () => {
