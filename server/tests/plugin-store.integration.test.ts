@@ -3623,3 +3623,56 @@ test("an action listed before these columns existed reads as unclassified and un
   // reclassify every already-listed Notion read as a write the moment the migration ran.
   expect(row).toEqual({ effect: null, destructive: false, version: null });
 });
+
+test("a brokered call is judged by the effect the vendor recorded, not by the absent catalogue entry", async () => {
+  const { store, database, auditStore } = await freshStore();
+  useComposioClient({
+    listActions: async () => [],
+    execute: async () => ({}),
+  });
+  // `effect: "read"` on the seeded action, and no catalogue entry for `gmail` at all — so the two
+  // sources disagree and the row records which one decided.
+  expect(catalogueEntry("gmail")).toBeNull();
+  await seedComposioGmail(database, store);
+
+  const result = await store.callTool({
+    ref: "gmail/GMAIL_FETCH_EMAILS",
+    args: {},
+    botId: "bot_helper",
+    actorId: "user_asker",
+  });
+
+  // The call itself does not complete: nothing hands the transport the recorded version yet, so it
+  // refuses rather than guessing one. Irrelevant to what is under test — `effect` is decided before
+  // the vendor is dialled and the failure row carries the decision either way, which is the whole
+  // point of holding `decided` rather than writing it.
+  expect(result.isError).toBe(true);
+
+  const call = auditStore
+    .recorded()
+    .find((event) => event.eventType === "mcp.call_failed");
+  // "read", because Composio labelled the action and the classifier prefers that label. "write" is
+  // what an unlisted-in-`writeTools` tool on a server with no entry behind it comes out as, and that
+  // is what this row said while the recorded effect was being selected and never passed on: every
+  // Gmail read gated as a write, and `intent` in the policy context reading `write_tool`.
+  expect((call?.payload as { effect?: string } | undefined)?.effect).toBe(
+    "read",
+  );
+});
+
+test("the Plugins page shows a brokered action with the effect the vendor recorded", async () => {
+  const { store, database } = await freshStore();
+  await seedComposioGmail(database, store);
+
+  const gmail = (await store.listServers()).find(
+    (server) => server.id === "gmail",
+  );
+
+  // Same disagreement as the call path, on the surface an administrator reads: no catalogue entry
+  // behind `gmail`, so the reviewed-list branch has nothing to say and would call every one of the
+  // app's actions a write. Shown as a write, this page tells an administrator that granting a Bot
+  // "fetch emails" grants it something that changes their mailbox.
+  expect(
+    gmail?.tools.map((tool) => ({ name: tool.name, effect: tool.effect })),
+  ).toEqual([{ name: "GMAIL_FETCH_EMAILS", effect: "read" }]);
+});
