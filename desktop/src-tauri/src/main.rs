@@ -158,7 +158,7 @@ fn detect_engine() -> engine::EngineStatus {
 }
 
 #[tauri::command]
-fn windows_blocker() -> Option<win::Blocker> {
+fn windows_blocker() -> Result<Option<win::Blocker>, Problem> {
     win::blocker()
 }
 

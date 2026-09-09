@@ -176,6 +176,72 @@ function useRootConfigurationSetup(
   };
 }
 
+test("Windows detection failure blocks setup and displays its diagnostic", async () => {
+  useRootConfigurationSetup("/tmp/openbot-windows-detection-test", async () =>
+    emptyConfiguration(),
+  );
+  const setupHandler = invokeHandler;
+  const problem = {
+    said: "OpenBot could not check Windows virtualization support.",
+    detail: "powershell exited with 17: synthetic CIM access denied",
+  };
+  invokeHandler = async (command, args) => {
+    if (command === "windows_blocker") throw problem;
+    return setupHandler(command, args);
+  };
+
+  const view = await renderApp();
+  const alert = await view.findByRole("alert");
+  expect(alert.textContent).toContain(problem.said);
+  await userEvent.click(view.getByText("Technical details"));
+  expect(alert.textContent).toContain(problem.detail);
+  expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
+  expect(view.queryByRole("button", { name: "Start OpenBot" })).toBeNull();
+  expect(
+    view.queryByText(/firmware settings|wsl --install|wsl --update/),
+  ).toBeNull();
+  expect(
+    invokeCalls.some((call) => call.command === "windows_blocker_instruction"),
+  ).toBe(false);
+});
+
+test("a failed Windows blocker instruction is visible instead of an empty blocker", async () => {
+  useRootConfigurationSetup("/tmp/openbot-windows-detection-test", async () =>
+    emptyConfiguration(),
+  );
+  const setupHandler = invokeHandler;
+  invokeHandler = async (command, args) => {
+    if (command === "windows_blocker") return "wsl-absent";
+    if (command === "windows_blocker_instruction") {
+      throw { said: "The blocker instruction could not be read." };
+    }
+    return setupHandler(command, args);
+  };
+  const view = await renderApp();
+  expect((await view.findByRole("alert")).textContent).toContain(
+    "The blocker instruction could not be read.",
+  );
+  expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
+});
+
+test("a successfully detected missing WSL feature keeps its setup instruction", async () => {
+  useRootConfigurationSetup("/tmp/openbot-windows-detection-test", async () =>
+    emptyConfiguration(),
+  );
+  const setupHandler = invokeHandler;
+  const instruction =
+    "Run wsl --install, restart Windows, and start OpenBot again.";
+  invokeHandler = async (command, args) => {
+    if (command === "windows_blocker") return "wsl-absent";
+    if (command === "windows_blocker_instruction") return instruction;
+    return setupHandler(command, args);
+  };
+  const view = await renderApp();
+  expect(await view.findByText(instruction)).toBeTruthy();
+  expect(view.queryByRole("alert")).toBeNull();
+  expect(view.queryByRole("button", { name: "Set up OpenBot" })).toBeNull();
+});
+
 type ExistingConfigurationValues = {
   INTELLIGENCE_API_KEY?: string;
   INTELLIGENCE_API_URL?: string;

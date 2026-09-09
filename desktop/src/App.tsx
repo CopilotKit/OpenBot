@@ -55,6 +55,7 @@ const SUGGESTED_QUESTION = "What is 17 times 23?";
 export function App() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
   const [blocker, setBlocker] = useState<Blocker | null>(null);
+  const [blockerFailure, setBlockerFailure] = useState<Problem | null>(null);
   const [instruction, setInstruction] = useState("");
   const [root, setRoot] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -217,7 +218,7 @@ export function App() {
           );
         }
       })
-      .catch(() => undefined);
+      .catch((error) => setBlockerFailure(asProblem(error)));
     // Why the stack stopped, if it did while this screen was not loaded. The supervisor gives up
     // and sends the window back here, and without this the person arrives at a setup screen with
     // no indication that anything happened.
@@ -326,6 +327,15 @@ export function App() {
   }
 
   // Nothing else on this screen can be done until the machine allows it, so nothing else is shown.
+  if (blockerFailure) {
+    return (
+      <main>
+        <h1>OpenBot could not check Windows setup</h1>
+        <Failure problem={blockerFailure} />
+      </main>
+    );
+  }
+
   if (blocker) {
     return (
       <main>
