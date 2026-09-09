@@ -279,6 +279,7 @@ test("normalizes the picked LangGraph harness's blank OpenAI endpoint before mod
 test("passes the selected Anthropic provider and model into the picked harness", () => {
   const config = runComposeConfig({
     ANTHROPIC_API_KEY: "sk-ant-synthetic",
+    ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
     BOT_PROVIDER: "anthropic",
     BOT_MODEL: "claude-sonnet-4-5",
     OPENAI_API_KEY: "",
@@ -286,6 +287,7 @@ test("passes the selected Anthropic provider and model into the picked harness",
 
   expect(config.services["agent-harness"].environment).toMatchObject({
     ANTHROPIC_API_KEY: "sk-ant-synthetic",
+    ANTHROPIC_BASE_URL: "https://anthropic-gateway.example",
     BOT_PROVIDER: "anthropic",
     BOT_MODEL: "claude-sonnet-4-5",
     OPENAI_API_KEY: "",
@@ -304,12 +306,15 @@ test("passes the selected Anthropic provider and model into the picked harness",
 
   const openaiConfig = runComposeConfig({
     OPENAI_API_KEY: "sk-openai-synthetic",
+    OPENAI_BASE_URL: "https://openai-compatible.example/v1",
   });
   expect(openaiConfig.services["agent-harness"].environment).toMatchObject({
     OPENAI_API_KEY: "sk-openai-synthetic",
+    OPENAI_BASE_URL: "https://openai-compatible.example/v1",
     BOT_PROVIDER: "openai",
     BOT_MODEL: "gpt-5.5",
     ANTHROPIC_API_KEY: "",
+    ANTHROPIC_BASE_URL: "",
   });
 });
 
