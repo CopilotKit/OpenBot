@@ -85,6 +85,25 @@ export type McpTool = {
   inputSchema: Record<string, unknown>;
 };
 
+/**
+ * A tool as a transport listed it, including anything that transport happens to know about it.
+ *
+ * Three optional fields rather than a separate type per transport, so `refreshTools` reads
+ * `tool.effect` with no cast and no `"effect" in tool` sniffing. Optional because most transports
+ * know none of it: an MCP server publishes no effect and no version, and a field it always left
+ * undefined would be an invitation to read it as meaning something.
+ *
+ * `McpTool` stays exactly what a `tools/list` answer contains, because that is what it is for.
+ */
+export type ListedTool = McpTool & {
+  /** What the vendor said this action does, when it said anything. */
+  effect?: "read" | "write";
+  /** Whether the vendor marked it as destroying something. */
+  destructive?: boolean;
+  /** The vendor's version string, when calling the action requires one. */
+  version?: string;
+};
+
 export class McpServerError extends Error {
   constructor(message: string) {
     super(message);
