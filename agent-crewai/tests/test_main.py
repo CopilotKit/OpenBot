@@ -1,4 +1,3 @@
-import os
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -36,7 +35,7 @@ def run_input(messages):
 
 
 def test_crewai_endpoint_preserves_leading_bot_role_for_provider(monkeypatch):
-    os.environ["MANAGED_AGENT_TOKEN"] = "test-token"
+    monkeypatch.setenv("MANAGED_AGENT_TOKEN", "test-token")
     provider_messages = []
 
     async def record_completion(*, model, messages, stream):
