@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { asProblem, InlineFailure, type Problem } from "./Problem";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Mark } from "./Mark";
 
 export type Login = "plan" | "api-key" | "endpoint";
@@ -70,7 +70,9 @@ export function ProviderPicker({
    */
   const [signInUrl, setSignInUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
-  const [token, setToken] = useState(chosen?.token ?? "");
+  const [tokens, setTokens] = useState<Record<string, string>>(
+    chosen?.provider && chosen.token ? { [chosen.provider]: chosen.token } : {},
+  );
   const [busy, setBusy] = useState(false);
   /*
    * What the sign-in is doing, while it is doing it.
@@ -83,6 +85,12 @@ export function ProviderPicker({
   // A problem, not a string: a sign-in failure carries the container's own output, and
   // stringifying it printed "[object Object]" where the diagnosis should have been.
   const [failure, setFailure] = useState<Problem | null>(null);
+  const openRef = useRef(open);
+  const signInRunRef = useRef(0);
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   /*
    * The two plans sign in differently, and the screen has to know which.
@@ -93,43 +101,68 @@ export function ProviderPicker({
    */
   async function beginSignIn() {
     if (!row) return;
+    const providerId = row.id;
+    const run = signInRunRef.current + 1;
+    signInRunRef.current = run;
+    const stillCurrent = () =>
+      signInRunRef.current === run && openRef.current === providerId;
     setBusy(true);
     setFailure(null);
     setProgress(null);
     try {
       const start =
-        row.id === "anthropic"
+        providerId === "anthropic"
           ? "begin_claude_sign_in"
           : "begin_chatgpt_sign_in";
-      setSignInUrl(await invoke<string>(start));
+      const nextSignInUrl = await invoke<string>(start);
+      if (!stillCurrent()) return;
+      setSignInUrl(nextSignInUrl);
       // ChatGPT needs no code, so the wait starts straight away.
-      if (row.id !== "anthropic") {
-        setToken(await invoke<string>("finish_chatgpt_sign_in"));
-        setSignInUrl(null);
+      if (providerId !== "anthropic") {
+        const nextToken = await invoke<string>("finish_chatgpt_sign_in");
+        if (stillCurrent()) {
+          setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
+          setSignInUrl(null);
+        }
       }
     } catch (error) {
-      setFailure(asProblem(error));
-      setSignInUrl(null);
+      if (stillCurrent()) {
+        setFailure(asProblem(error));
+        setSignInUrl(null);
+      }
     } finally {
-      setBusy(false);
-      setProgress(null);
+      if (stillCurrent()) {
+        setBusy(false);
+        setProgress(null);
+      }
     }
   }
 
   async function finishSignIn() {
+    if (!row) return;
+    const providerId = row.id;
+    const run = signInRunRef.current + 1;
+    signInRunRef.current = run;
+    const stillCurrent = () =>
+      signInRunRef.current === run && openRef.current === providerId;
     setBusy(true);
     setFailure(null);
     try {
       // Held, not shown. It goes on to `start_stack` the same way a typed key does.
-      setToken(await invoke<string>("finish_claude_sign_in", { code }));
-      setSignInUrl(null);
-      setCode("");
+      const nextToken = await invoke<string>("finish_claude_sign_in", { code });
+      if (stillCurrent()) {
+        setTokens((previous) => ({ ...previous, [providerId]: nextToken }));
+        setSignInUrl(null);
+        setCode("");
+      }
     } catch (error) {
-      setFailure(asProblem(error));
-      // The flow is single-use, so a refused code means starting again rather than retyping.
-      setSignInUrl(null);
+      if (stillCurrent()) {
+        setFailure(asProblem(error));
+        // The flow is single-use, so a refused code means starting again rather than retyping.
+        setSignInUrl(null);
+      }
     } finally {
-      setBusy(false);
+      if (stillCurrent()) setBusy(false);
     }
   }
 
@@ -152,6 +185,7 @@ export function ProviderPicker({
   }, []);
 
   const row = rows.find((r) => r.id === open) ?? null;
+  const token = row ? (tokens[row.id] ?? "") : "";
 
   // What "done" means differs by the way in, and each is checked before Continue lights up rather
   // than after a run fails with something unreadable.
@@ -190,11 +224,16 @@ export function ProviderPicker({
               value={r.id}
               checked={open === r.id}
               onChange={() => {
+                signInRunRef.current += 1;
                 setOpen(r.id);
                 // A failure belongs to the row that produced it. Left in place, a refused OpenAI
                 // sign-in stayed on screen under the endpoint row's fields, where it read as a
                 // complaint about the address just typed.
                 setFailure(null);
+                setSignInUrl(null);
+                setCode("");
+                setBusy(false);
+                setProgress(null);
                 // The first way in is the default, which is the plan wherever there is one.
                 setLogin(r.logins[0] ?? null);
                 // Fill from what is already on this machine, if anything.
@@ -398,7 +437,7 @@ export function ProviderPicker({
               provider: row.id,
               login,
               apiKey: apiKey.trim() || undefined,
-              token: token.trim() || undefined,
+              token: login === "plan" ? token.trim() || undefined : undefined,
               baseUrl: baseUrl.trim() || undefined,
               model: model.trim() || undefined,
             })
