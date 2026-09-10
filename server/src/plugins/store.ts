@@ -356,7 +356,15 @@ function storableTools(serverId: string, listed: ListedTool[]) {
     byName.set(name, {
       serverId,
       name,
-      description: tool.description.replaceAll(NUL, ""),
+      /*
+       * Defaulted where the COLUMN has a default, because that is what the previous mapping leaned
+       * on: it passed these two straight through, so a transport handing back undefined got the
+       * `""` and `{}` the schema declares. Reading a method off the value instead would turn the
+       * same absence into a TypeError thrown from outside the vendor `try`. Both fields are
+       * required by `McpTool` and supplied by every transport here; this keeps the tolerance the
+       * insert already had rather than adding a new answer.
+       */
+      description: (tool.description ?? "").replaceAll(NUL, ""),
       /*
        * Through JSON rather than by walking the object, because the escape is what has to go and
        * the schema is JSON by definition — it is stored in a `jsonb` column and came off the wire
@@ -364,7 +372,7 @@ function storableTools(serverId: string, listed: ListedTool[]) {
        * is the sequence removed here; a schema with none is rebuilt identical.
        */
       inputSchema: JSON.parse(
-        JSON.stringify(tool.inputSchema).replaceAll("\\u0000", ""),
+        JSON.stringify(tool.inputSchema ?? {}).replaceAll("\\u0000", ""),
       ),
       /*
        * What the vendor said, when the vendor said anything.
@@ -2321,10 +2329,29 @@ export function createPluginStore(options: PluginStoreOptions) {
           await recordAuditEvent(auditStore, {
             eventType: "mcp.account_disconnected",
             targetType: "mcp_server",
-            targetId: serverId,
+            /*
+             * THE APP, not this row's id, and the same key `retireConnectionsFor` files under.
+             *
+             * CRITERION. Every `mcp.account_disconnected` row a brokered connection produces is
+             * keyed on the app at the broker, whichever act produced it, so one query answers
+             * what happened to one person's brokered access.
+             *
+             * REASON. The two acts that can end such a connection were keyed differently: this
+             * one on `mcp_servers.id`, offboarding on `composio_connections.toolkit` — which is
+             * all that row records and all that is left once the server row is gone. Nothing
+             * holds the two strings equal, so on any renamed row half the trail is filed under a
+             * name the other half never mentions, and the disagreement is invisible everywhere
+             * they happen to match.
+             *
+             * THE APP IS WHAT WAS CONSENTED TO. The gate is `(toolkit, user_id)`, the delete
+             * above is by toolkit, and the row outlives the server row entirely; the id is a
+             * display key that may not exist by the time somebody asks. Which server row was
+             * removed is not lost — the `configuration.changed` row written below names it.
+             */
+            targetId: toolkit,
             payload: {
               actor: by,
-              server: serverId,
+              server: toolkit,
               owner: connection.userId,
               // The same three-way distinction the vault loop above draws, and the same answer: an
               // administrator took the whole app away and the person did nothing.

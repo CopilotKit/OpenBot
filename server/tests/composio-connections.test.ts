@@ -62,6 +62,14 @@ const botId = `agent_revoke_${suite}`;
 const askerId = `user_asker_${suite}`;
 /** Somebody who connected it and whose `users` row is then deleted out from under the connection. */
 const leaverId = `user_leaver_${suite}`;
+/**
+ * The same app under a display id that is NOT its slug, which is a legal row and an ordinary one.
+ *
+ * `mcp_servers.id` is what an operator sees and what a grant is written against; the slug in the
+ * url is what the broker is asked about. Nothing holds the two equal, and every fixture above
+ * spells them the same — which is exactly why a defect that only shows when they differ survived.
+ */
+const renamedId = `renamed-${suite}`;
 const admin = "admin@openbot.local";
 
 const policy: ActionPolicy = { mode: "enforce", deny: [], allow: ["true"] };
@@ -155,8 +163,12 @@ function useAnsweringClient(actions: Partial<ComposioActions> = {}) {
 async function clean() {
   await database.delete(pluginGrants).where(eq(pluginGrants.agentId, botId));
   await database.delete(agents).where(eq(agents.id, botId));
-  await database.delete(mcpTools).where(eq(mcpTools.serverId, toolkit));
-  await database.delete(mcpServers).where(eq(mcpServers.id, toolkit));
+  await database
+    .delete(mcpTools)
+    .where(inArray(mcpTools.serverId, [toolkit, renamedId]));
+  await database
+    .delete(mcpServers)
+    .where(inArray(mcpServers.id, [toolkit, renamedId]));
   await database
     .delete(composioConnections)
     .where(eq(composioConnections.toolkit, toolkit));
@@ -383,6 +395,77 @@ test("removing the app takes every brokered connection to it", async () => {
     reason: "mcp_server_removed",
     vendorRevoked: false,
   });
+});
+
+/**
+ * ONE KEY FOR "WHAT HAPPENED TO THIS PERSON'S ACCESS", across both acts that can end it.
+ *
+ * CRITERION. Every `mcp.account_disconnected` row a brokered connection produces names the APP at
+ * the broker — in `targetId` and in `payload.server` — whichever act produced it.
+ *
+ * REASON. The two acts were written in different waves and keyed differently. Offboarding files
+ * under `connection.toolkit`, which is all a connection row records and all that is left once the
+ * server row is gone. Removing the app filed under the `mcp_servers` id. Where the two spellings
+ * agree — which they do in every other fixture in this file, and in the product whenever nobody
+ * renamed anything — the disagreement is invisible; where they differ, no single query answers
+ * what happened to one person's access, because half the rows are filed under a name the other
+ * half never mentions.
+ *
+ * THE APP IS THE RIGHT KEY, not the row id. A brokered connection is consent to an app: the gate
+ * is `(toolkit, user_id)`, `removeServer` clears it by toolkit, and the row outlives the
+ * `mcp_servers` row entirely — so the id is not always available and is never what was consented
+ * to. Which server row was removed is not lost either: the `configuration.changed` row written in
+ * the same call names it.
+ */
+test("both acts that end a brokered connection file it under the app", async () => {
+  await database.insert(agents).values({
+    id: botId,
+    name: "Helper",
+    type: "built_in",
+    configuration: {},
+  });
+  // The row id and the app slug deliberately different, which is the only shape that can tell the
+  // two keys apart.
+  await database.insert(mcpServers).values({
+    id: renamedId,
+    title: "Revocable App",
+    vendor: "Composio",
+    url: `composio://${toolkit}`,
+    provenance: "composio",
+  });
+  await database.insert(composioConnections).values([
+    { toolkit, userId: askerId },
+    { toolkit, userId: leaverId },
+  ]);
+
+  // Offboarding one person, then removing the app out from under the other.
+  expect((await store.retireConnectionsFor(leaverId, admin)).retired).toBe(1);
+  await store.removeServer(renamedId, admin);
+
+  const disconnected = recordedOfType("mcp.account_disconnected");
+  expect(disconnected).toHaveLength(2);
+  // Both rows, under one key. Asked as the set of keys rather than row by row, because what the
+  // criterion is about is a query finding all of them at once.
+  expect(new Set(disconnected.map((event) => event.targetId))).toEqual(
+    new Set([toolkit]),
+  );
+  expect(
+    new Set(
+      disconnected.map((event) => (event.payload as { server: string }).server),
+    ),
+  ).toEqual(new Set([toolkit]));
+
+  // And each still says which person and which of the three things happened to them, which is the
+  // other half of the question and was never the part that was wrong.
+  expect(
+    disconnected
+      .map((event) => event.payload as { owner: string; reason: string })
+      .map(({ owner, reason }) => ({ owner, reason }))
+      .sort((left, right) => left.owner.localeCompare(right.owner)),
+  ).toEqual([
+    { owner: askerId, reason: "mcp_server_removed" },
+    { owner: leaverId, reason: "person_removed" },
+  ]);
 });
 
 /**
