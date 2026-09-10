@@ -805,6 +805,13 @@ export async function synchronizeTenantPackage(
         and(
           eq(pluginGrants.kind, "skill"),
           eq(pluginGrants.grantedBy, PACKAGE_GRANT),
+          inArray(
+            pluginGrants.agentId,
+            transaction
+              .select({ id: agentTable.id })
+              .from(agentTable)
+              .where(eq(agentTable.packageId, deploymentPackage.id)),
+          ),
         ),
       );
 

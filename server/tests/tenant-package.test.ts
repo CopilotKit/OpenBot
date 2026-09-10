@@ -1220,6 +1220,57 @@ describe("pairing a package's coworkers with its skills", () => {
     expect(await grantsFor(agentId)).toHaveLength(0);
   });
 
+  test("a redeploy takes back only grants from the package being synchronized", async () => {
+    const slugA = `pkg-a-${randomUUID().slice(0, 8)}`;
+    const slugB = `pkg-b-${randomUUID().slice(0, 8)}`;
+    const userGrant = `user-grant-${randomUUID().slice(0, 8)}`;
+    const packageA = packageGiving([slugA]);
+    const packageB = packageGiving([slugB]);
+    createdSkillIds.push(userGrant);
+
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, packageA)).id,
+    );
+    const [packageAAgent] = packageA.agents;
+    if (!packageAAgent)
+      throw new Error("Expected package A to declare an agent.");
+    const agentA = packageAAgent.id;
+    expect((await grantsFor(agentA)).map((row) => row.ref)).toEqual([slugA]);
+
+    await database.insert(pluginGrants).values({
+      kind: "skill",
+      ref: userGrant,
+      agentId: agentA,
+      grantedBy: "an-administrator",
+    });
+
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, packageB)).id,
+    );
+    const [packageBAgent] = packageB.agents;
+    if (!packageBAgent)
+      throw new Error("Expected package B to declare an agent.");
+    const agentB = packageBAgent.id;
+
+    expect((await grantsFor(agentA)).map((row) => row.ref).sort()).toEqual(
+      [slugA, userGrant].sort(),
+    );
+    expect((await grantsFor(agentB)).map((row) => row.ref)).toEqual([slugB]);
+
+    const packageAWithoutSkill = {
+      ...packageA,
+      agents: [{ ...packageAAgent, skills: [] }],
+    };
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, packageAWithoutSkill)).id,
+    );
+
+    expect((await grantsFor(agentA)).map((row) => row.ref)).toEqual([
+      userGrant,
+    ]);
+    expect((await grantsFor(agentB)).map((row) => row.ref)).toEqual([slugB]);
+  });
+
   test("a grant an administrator made by hand survives a redeploy", async () => {
     const slug = `pkg-${randomUUID().slice(0, 8)}`;
     const loaded = packageGiving([slug]);
