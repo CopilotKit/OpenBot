@@ -740,7 +740,7 @@ export async function synchronizeTenantPackage(
     }
 
     for (const channel of tenantPackage.channels) {
-      await transaction
+      const [ownedChannel] = await transaction
         .insert(channelTable)
         .values({
           id: channel.id,
@@ -751,6 +751,7 @@ export async function synchronizeTenantPackage(
         })
         .onConflictDoUpdate({
           target: channelTable.id,
+          setWhere: eq(channelTable.packageId, deploymentPackage.id),
           set: {
             name: channel.name,
             description: channel.description,
@@ -758,7 +759,15 @@ export async function synchronizeTenantPackage(
             packageId: deploymentPackage.id,
             updatedAt: new Date(),
           },
-        });
+        })
+        .returning({ id: channelTable.id });
+
+      if (!ownedChannel) {
+        throw new Error(
+          `Tenant package channel "${channel.id}" collides with a channel this package does not own`,
+        );
+      }
+
       await transaction
         .delete(channelAgents)
         .where(eq(channelAgents.channelId, channel.id));

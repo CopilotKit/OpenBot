@@ -34,11 +34,15 @@ const database = createDatabase(
   TEST_POOL,
 );
 const createdAgentIds: string[] = [];
+const createdChannelIds: string[] = [];
 const createdPackageIds: string[] = [];
 const createdTenantIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterEach(async () => {
+  for (const channelId of createdChannelIds.splice(0)) {
+    await database.delete(channels).where(eq(channels.id, channelId));
+  }
   for (const agentId of createdAgentIds.splice(0)) {
     await database.delete(agents).where(eq(agents.id, agentId));
   }
@@ -720,6 +724,149 @@ describe("tenant package agent profile synchronization", () => {
       sourcePath: deploymentPackage.sourcePath,
       checksum: deploymentPackage.checksum,
     });
+  });
+
+  test("a package cannot take over a channel another package or user owns", async () => {
+    const channelId = `tenant-channel-${randomUUID().slice(0, 8)}`;
+    const packageAAgent = packageAgent({ name: "Package A Agent" });
+    const packageBAgent = packageAgent({ name: "Package B Agent" });
+    const packageA = {
+      ...loadedPackage(packageAAgent),
+      channels: [
+        {
+          id: channelId,
+          name: "Package A Channel",
+          description: "Owned by package A.",
+          permittedAgents: [packageAAgent.id],
+          allowedGroups: ["all"],
+        },
+      ],
+    };
+    const packageB = {
+      ...loadedPackage(packageBAgent),
+      channels: [
+        {
+          id: channelId,
+          name: "Package B Channel",
+          description: "Owned by package B.",
+          permittedAgents: [packageBAgent.id],
+          allowedGroups: ["all"],
+        },
+      ],
+    };
+
+    createdAgentIds.push(packageAAgent.id, packageBAgent.id);
+    createdChannelIds.push(channelId);
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, packageA)).id,
+    );
+
+    const snapshot = async () => ({
+      channel: (
+        await database
+          .select({
+            id: channels.id,
+            name: channels.name,
+            description: channels.description,
+            packageId: channels.packageId,
+          })
+          .from(channels)
+          .where(eq(channels.id, channelId))
+      )[0],
+      agents: (
+        await database
+          .select({ agentId: channelAgents.agentId })
+          .from(channelAgents)
+          .where(eq(channelAgents.channelId, channelId))
+      ).map((row) => row.agentId),
+    });
+
+    const beforePackageB = await snapshot();
+    await expect(synchronizeTenantPackage(database, packageB)).rejects.toThrow(
+      `Tenant package channel "${channelId}" collides with a channel this package does not own`,
+    );
+    expect(await snapshot()).toEqual(beforePackageB);
+
+    await database
+      .delete(channelAgents)
+      .where(eq(channelAgents.channelId, channelId));
+    await database.delete(channels).where(eq(channels.id, channelId));
+    await database.insert(channels).values({
+      id: channelId,
+      name: "User Channel",
+      description: "Owned by a user.",
+      allowedGroups: [],
+      packageId: null,
+    });
+    await database.insert(channelAgents).values({
+      channelId,
+      agentId: packageAAgent.id,
+    });
+
+    const beforeUserChannel = await snapshot();
+    await expect(synchronizeTenantPackage(database, packageB)).rejects.toThrow(
+      `Tenant package channel "${channelId}" collides with a channel this package does not own`,
+    );
+    expect(await snapshot()).toEqual(beforeUserChannel);
+  });
+
+  test("a redeploy updates and removes agents only for the package's own channel", async () => {
+    const channelId = `tenant-channel-${randomUUID().slice(0, 8)}`;
+    const firstAgent = packageAgent({ name: "First Agent" });
+    const secondAgent = packageAgent({ name: "Second Agent" });
+    const firstPackage = {
+      ...loadedPackage(firstAgent),
+      agents: [firstAgent, secondAgent],
+      channels: [
+        {
+          id: channelId,
+          name: "First Name",
+          description: "Before redeploy.",
+          permittedAgents: [firstAgent.id],
+          allowedGroups: ["all"],
+        },
+      ],
+    };
+    const secondPackage = {
+      ...firstPackage,
+      checksum: randomUUID(),
+      channels: [
+        {
+          id: channelId,
+          name: "Second Name",
+          description: "After redeploy.",
+          permittedAgents: [secondAgent.id],
+          allowedGroups: ["all", "support"],
+        },
+      ],
+    };
+
+    createdAgentIds.push(firstAgent.id, secondAgent.id);
+    createdChannelIds.push(channelId);
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, firstPackage)).id,
+    );
+    createdPackageIds.push(
+      (await synchronizeTenantPackage(database, secondPackage)).id,
+    );
+
+    const [channel] = await database
+      .select()
+      .from(channels)
+      .where(eq(channels.id, channelId));
+    const permittedAgents = (
+      await database
+        .select({ agentId: channelAgents.agentId })
+        .from(channelAgents)
+        .where(eq(channelAgents.channelId, channelId))
+    ).map((row) => row.agentId);
+
+    expect(channel).toMatchObject({
+      name: "Second Name",
+      description: "After redeploy.",
+      allowedGroups: ["all", "support"],
+    });
+    expect(permittedAgents).toEqual([secondAgent.id]);
   });
 
   test("rejects a cross-package agent collision and rolls back both packages", async () => {
