@@ -20,11 +20,19 @@ import * as mcp from "./mcp";
  *
  * What has been added since is a SUPERSET of that shape rather than a departure from it, so an
  * MCP-shaped implementation still satisfies the seam unchanged. `listTools` answers `ListedTool[]`,
- * which is `McpTool` plus optional fields a broker publishes and an MCP server does not; the
- * connection carries an `actorId` and a `botId` for the transports whose authorization is the
- * actor rather than a credential; and one reserved key on `args` hands a transport the recorded
- * version of the action being called. Every addition is optional, which is why `mcp.ts` reads none
- * of them and is still an implementation of this interface rather than an exception to it.
+ * which is `McpTool` plus fields describing what a listing said about an action; the connection
+ * carries an `actorId` and a `botId` for the transports whose authorization is the actor rather
+ * than a credential; and one reserved key on `args` hands a transport the recorded version of the
+ * action being called. Every addition is OPTIONAL, and that is what keeps an MCP-shaped
+ * implementation an implementation of this interface rather than an exception to it.
+ *
+ * This paragraph used to say those fields were ones "a broker publishes and an MCP server does
+ * not", and that `mcp.ts` therefore read none of them. Both were false: the MCP specification
+ * defines `annotations.destructiveHint`, servers do publish it, and `mcp.ts` was dropping it — so a
+ * tool a vendor declared destructive classified as a read wherever a curated write list omitted it.
+ * `mcp.ts` now reads that hint, and deliberately does not read `readOnlyHint`, because a hint may
+ * narrow what a Bot may do and may never widen it. The effect column is therefore not one
+ * transport's vocabulary; it is what any listing was willing to say.
  *
  * There are exactly two call sites in the whole system — the tool listing and the tool call — and
  * both take a transport from here. Nothing else reads a `TransportKind` at all: the OAuth flow,
