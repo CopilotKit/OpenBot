@@ -3583,6 +3583,56 @@ test("a Composio call with nobody attributed is refused before it reaches the ve
   expect(reached).toEqual([]);
 });
 
+/**
+ * The same refusal, with a legal row sitting at the anonymous actor.
+ *
+ * `composio_connections.user_id` is text notNull with NO foreign key — the property that lets a
+ * connection outlive its person, so offboarding can still find it and revoke it at the broker. And
+ * `notNull` does not exclude the empty string, so a row at `("gmail", "")` is legal: without the
+ * guard ahead of the lookup, that row IS the match, the connection gate passes, and the run goes
+ * out in whatever account Composio holds against "". The sibling `user-oauth` path cannot reach
+ * this state — `mcp_user_credentials.user_id` carries a foreign key to `users.id` — so its test
+ * asserts only the sentence, and borrowing that shape here would leave this property untested.
+ *
+ * A rejection, not a failed result, and that is the assertion doing the work: the transport repeats
+ * the refusal as its own last line, but it answers with `isError` rather than throwing. So a
+ * `rejects` here is what separates this gate from its twin downstream of the lookup.
+ */
+test("a Composio call with nobody attributed is refused even when a connection row exists for the empty actor", async () => {
+  const { store, database } = await freshStore();
+  const reached: string[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug) => {
+      reached.push(slug);
+      return {};
+    },
+  });
+  await seedComposioGmail(database, store);
+  await database
+    .insert(composioConnections)
+    .values({ toolkit: "gmail", userId: "" });
+
+  try {
+    await expect(
+      store.callTool({
+        ref: "gmail/GMAIL_FETCH_EMAILS",
+        args: {},
+        botId: "bot_helper",
+        actorId: "",
+      }),
+    ).rejects.toThrow(/not attributed to anybody/i);
+
+    expect(reached).toEqual([]);
+  } finally {
+    // Inline, because `freshDatabase` clears this table by the two people this file invents and the
+    // anonymous actor is neither — so nothing else in the run would ever remove this row.
+    await database
+      .delete(composioConnections)
+      .where(eq(composioConnections.userId, ""));
+  }
+});
+
 test("a Composio call by somebody who has not connected the app is refused with a sentence they can act on", async () => {
   const { store, database } = await freshStore();
   const reached: string[] = [];
@@ -3975,5 +4025,55 @@ test("refreshing a Composio app records each action's effect, destructive marker
       destructive: false,
       version: "20260903_00",
     },
+  ]);
+});
+
+/**
+ * A grant on a Composio action the vendor has stopped listing, still reported as held.
+ *
+ * Confirmed for a brokered row rather than built: `listServers` derives `withdrawn` from the grants
+ * no advertised action covers, with no transport-specific branch, so the Drive suite above gates
+ * the mechanism. What a Composio row adds is that it inherits it — the app's page lists what the
+ * last refresh advertised, so with nothing reporting the gap a permission on an action Composio
+ * dropped is invisible and the Bot loses a capability nobody revoked.
+ *
+ * The refreshed listing names a DIFFERENT action rather than none at all, because an empty list is
+ * also what a refresh the vendor refused leaves behind: every grant would come out withdrawn and
+ * this would hold for a reason that has nothing to do with the action being gone.
+ */
+test("a granted Composio action that the vendor withdrew is still shown as granted", async () => {
+  const { store, database } = await freshStore();
+  useComposioClient({
+    listActions: async () => [
+      {
+        slug: "GMAIL_SEND_EMAIL",
+        description: "Send an email.",
+        inputParameters: { type: "object", properties: {} },
+        tags: ["createHint"],
+        version: "20260903_00",
+      },
+    ],
+    execute: async () => ({}),
+  });
+  await seedComposioGmail(database, store);
+
+  // The granted action is absent from what the vendor now lists, and another action is not.
+  await store.refreshTools("gmail", "admin_user");
+
+  const gmail = (await store.listServers()).find(
+    (server) => server.id === "gmail",
+  );
+
+  expect(gmail?.withdrawn).toEqual([
+    {
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      name: "GMAIL_FETCH_EMAILS",
+      grantedTo: ["bot_helper"],
+    },
+  ]);
+  // The advertised action came through as a tool, which is what says the refresh actually listed
+  // rather than failing into the empty list that would withdraw everything.
+  expect(gmail?.tools.map((tool) => tool.ref)).toEqual([
+    "gmail/GMAIL_SEND_EMAIL",
   ]);
 });
