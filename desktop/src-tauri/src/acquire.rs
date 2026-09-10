@@ -78,21 +78,53 @@ impl StepOutcome {
 pub const MACHINE: &str = "openbot";
 
 fn podman(args: &[&str]) -> Result<String, String> {
+    podman_with(args, || {
+        crate::engine::tool(Engine::Podman).args(args).output()
+    })
+}
+
+fn podman_with(
+    args: &[&str],
+    run: impl FnOnce() -> std::io::Result<std::process::Output>,
+) -> Result<String, String> {
     // Resolved, not named: right after OpenBot installs it, `podman` is not yet on this process's
     // PATH. See the PATH rule in `engine.rs`.
-    let output = crate::engine::tool(Engine::Podman)
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not run podman: {error}"))?;
+    let output = run().map_err(|error| format!("could not run podman: {error}"))?;
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
     }
-    Err(command_said(&output.stderr))
+    Err(command_failure("podman", args, &output))
+}
+
+fn command_failure(binary: &str, args: &[&str], output: &std::process::Output) -> String {
+    let status = output.status.code().map_or_else(
+        || "terminated by signal".to_string(),
+        |code| code.to_string(),
+    );
+    let stdout = command_said(&output.stdout);
+    let stderr = command_said(&output.stderr);
+    let command = std::iter::once(binary)
+        .chain(args.iter().copied())
+        .collect::<Vec<_>>()
+        .join(" ");
+    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+        (true, true) => format!("{command} exited with status {status}"),
+        (false, true) => format!("{command} exited with status {status}; stdout: {stdout}"),
+        (true, false) => format!("{command} exited with status {status}; stderr: {stderr}"),
+        (false, false) => {
+            format!("{command} exited with status {status}; stdout: {stdout}; stderr: {stderr}")
+        }
+    }
+}
+
+fn machine_exists_with(run: impl FnOnce() -> Result<String, String>) -> Result<bool, String> {
+    let names = run()?;
+    Ok(names.lines().any(|name| name.trim() == MACHINE))
 }
 
 /// Does this app's machine already exist?
-pub fn machine_exists() -> bool {
-    podman(&["machine", "inspect", MACHINE]).is_ok()
+pub fn machine_exists() -> Result<bool, String> {
+    machine_exists_with(|| podman(&["machine", "list", "--quiet"]))
 }
 
 /// Create the machine.
@@ -101,10 +133,24 @@ pub fn machine_exists() -> bool {
 /// asks for what you already get. The libkrun bind-mount trouble that the pin was written for
 /// belonged to 5.7, where libkrun was the default.
 pub fn create_machine(cpus: u32, memory_mib: u32, disk_gib: u32) -> StepOutcome {
-    if machine_exists() {
-        return StepOutcome::went(Step::CreateMachine, format!("{MACHINE} already exists."));
+    create_machine_with(cpus, memory_mib, disk_gib, machine_exists, podman)
+}
+
+fn create_machine_with(
+    cpus: u32,
+    memory_mib: u32,
+    disk_gib: u32,
+    exists: impl FnOnce() -> Result<bool, String>,
+    mut run: impl FnMut(&[&str]) -> Result<String, String>,
+) -> StepOutcome {
+    match exists() {
+        Ok(true) => {
+            return StepOutcome::went(Step::CreateMachine, format!("{MACHINE} already exists."));
+        }
+        Ok(false) => {}
+        Err(error) => return StepOutcome::stopped(Step::CreateMachine, &error),
     }
-    match podman(&[
+    match run(&[
         "machine",
         "init",
         MACHINE,
@@ -192,7 +238,11 @@ pub fn health_gate(address: &Address) -> StepOutcome {
         // them is chosen from what they say.
         Ok(out) => StepOutcome::stopped(
             Step::HealthGate,
-            &format!("{binary} did not answer: {}", command_said(&out.stderr)),
+            &command_failure(
+                binary,
+                &["version", "--format", "{{.Server.APIVersion}}"],
+                &out,
+            ),
         ),
         Err(error) => StepOutcome::stopped(
             Step::HealthGate,
@@ -240,6 +290,7 @@ pub fn download_dir(cache: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::temp_root;
 
     /// Whatever platform the tests run on, the sentence must not send somebody to a tool that
     /// platform does not have. Windows measured this the hard way: the generic wording named a
@@ -270,6 +321,140 @@ mod tests {
             !said.contains("7 errors"),
             "the engine's own wording helps nobody: {said}"
         );
+    }
+
+    #[cfg(unix)]
+    fn output(status: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(status << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_podman_commands_keep_status_stdout_and_stderr() {
+        let failure = podman_with(&["machine", "inspect", MACHINE], || {
+            Ok(output(125, "stdout diagnostic", "stderr diagnostic"))
+        })
+        .expect_err("nonzero podman must fail");
+
+        assert!(
+            failure.contains("podman machine inspect openbot"),
+            "{failure}"
+        );
+        assert!(failure.contains("status 125"), "{failure}");
+        assert!(failure.contains("stdout: stdout diagnostic"), "{failure}");
+        assert!(failure.contains("stderr: stderr diagnostic"), "{failure}");
+    }
+
+    #[test]
+    fn machine_existence_uses_the_quiet_machine_list_names() {
+        assert!(machine_exists_with(|| Ok("default\nopenbot\n".into())).unwrap());
+        assert!(!machine_exists_with(|| Ok("default\nopenbot-old\n".into())).unwrap());
+    }
+
+    #[test]
+    fn machine_list_failures_stop_create_before_init() {
+        let mut init_called = false;
+        let result = create_machine_with(
+            2,
+            4096,
+            20,
+            || Err("podman machine list exited with status 125; stdout: denied".into()),
+            |_args| {
+                init_called = true;
+                Ok(String::new())
+            },
+        );
+
+        assert!(!init_called, "machine init must not run after list failure");
+        assert!(!result.ok);
+        assert_eq!(result.step, Step::CreateMachine);
+        assert!(
+            result
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("stdout: denied")),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn absent_machine_creates_with_requested_resources() {
+        let mut captured = Vec::new();
+        let result = create_machine_with(
+            4,
+            8192,
+            64,
+            || Ok(false),
+            |args| {
+                captured = args.iter().map(|arg| (*arg).to_string()).collect();
+                Ok(String::new())
+            },
+        );
+
+        assert!(result.ok, "{result:?}");
+        assert_eq!(
+            captured,
+            [
+                "machine",
+                "init",
+                "openbot",
+                "--cpus",
+                "4",
+                "--memory",
+                "8192",
+                "--disk-size",
+                "64"
+            ]
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_health_gate_detail_keeps_stdout_as_well_as_stderr() {
+        let detail = command_failure(
+            "podman",
+            &["version", "--format", "{{.Server.APIVersion}}"],
+            &output(77, "server says no", "stderr says why"),
+        );
+
+        assert!(detail.contains("status 77"), "{detail}");
+        assert!(detail.contains("stdout: server says no"), "{detail}");
+        assert!(detail.contains("stderr: stderr says why"), "{detail}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn failed_podman_process_boundary_keeps_stdout_stderr_and_status() {
+        let dir = temp_root("podman-process-proof");
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("podman");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\necho stdout-from-podman\necho stderr-from-podman >&2\nexit 42\n",
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let failure = podman_with(&["machine", "list", "--quiet"], || {
+            std::process::Command::new(&fake)
+                .args(["machine", "list", "--quiet"])
+                .output()
+        })
+        .expect_err("fake podman exits nonzero");
+
+        assert!(failure.contains("podman machine list --quiet"), "{failure}");
+        assert!(failure.contains("status 42"), "{failure}");
+        assert!(failure.contains("stdout: stdout-from-podman"), "{failure}");
+        assert!(failure.contains("stderr: stderr-from-podman"), "{failure}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
