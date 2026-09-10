@@ -1,12 +1,6 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  expect,
-  mock,
-  test,
-} from "bun:test";
+import "./bot-route-default-agent.fixture";
+
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -19,65 +13,13 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render } from "@testing-library/react";
 import { type AgentProfile, agentKeys } from "@/lib/agents/queries";
+import { Route as BotRoute } from "@/routes/_authed/_app/bot";
 
-type BotRouteModule = typeof import("@/routes/_authed/_app/bot");
+beforeAll(() => GlobalRegistrator.register());
 
-let BotRoute: BotRouteModule["Route"];
-let pristineBotRouteState: Record<string, unknown>;
-let botRouteSnapshot: Record<string, unknown>;
-
-beforeAll(async () => {
-  GlobalRegistrator.register();
-
-  mock.module("@copilotkit/react-core/v2", () => ({
-    CopilotChat: ({ agentId }: { agentId: string }) => (
-      <div data-agent-id={agentId} data-testid="copilot-chat" />
-    ),
-  }));
-  mock.module("@/lib/copilot/active-bot", () => ({
-    useActiveBot: () => undefined,
-  }));
-  mock.module("@/lib/copilot/bot-thread", () => ({
-    useBotThread: (agentId: string) => ({
-      history: "ready",
-      startNew: () => undefined,
-      threadId: `thread-${agentId}`,
-    }),
-  }));
-  mock.module("@/lib/copilot/stopped-turn", () => ({
-    useStoppedTurn: () => null,
-  }));
-
-  BotRoute = (await import("@/routes/_authed/_app/bot")).Route;
-  pristineBotRouteState = captureRouteState(BotRoute);
-});
-
-beforeEach(() => {
-  botRouteSnapshot = captureRouteState(pristineBotRouteState);
-});
-
-afterEach(() => {
-  cleanup();
-  restoreRouteState(BotRoute, botRouteSnapshot);
-});
+afterEach(() => cleanup());
 
 afterAll(() => GlobalRegistrator.unregister());
-
-function captureRouteState(route: object): Record<string, unknown> {
-  return { ...route, options: { ...(route as { options: object }).options } };
-}
-
-function restoreRouteState(
-  route: object,
-  snapshot: Record<string, unknown>,
-): void {
-  for (const key of Object.keys(route)) {
-    if (!(key in snapshot)) {
-      delete (route as Record<string, unknown>)[key];
-    }
-  }
-  Object.assign(route, snapshot);
-}
 
 function agent(
   overrides: Partial<AgentProfile> & { id: string },
@@ -113,35 +55,34 @@ function queryClientWithAgents(agents: AgentProfile[]) {
   return queryClient;
 }
 
+const rootRoute = createRootRoute({ component: Outlet });
+const authedRoute = createRoute({
+  id: "/_authed",
+  getParentRoute: () => rootRoute,
+  component: Outlet,
+});
+const appRoute = createRoute({
+  id: "/_app",
+  getParentRoute: () => authedRoute,
+  component: Outlet,
+});
+const testBotRoute = BotRoute.update({
+  id: "/bot",
+  path: "/bot",
+  getParentRoute: () => appRoute,
+});
+const routeTree = rootRoute.addChildren([
+  authedRoute.addChildren([appRoute.addChildren([testBotRoute])]),
+]);
+
 function renderBot(queryClient: QueryClient, initialEntry = "/bot") {
-  const rootRoute = createRootRoute({ component: Outlet });
-  const authedRoute = createRoute({
-    id: "/_authed",
-    getParentRoute: () => rootRoute,
-    component: Outlet,
-  });
-  const appRoute = createRoute({
-    id: "/_app",
-    getParentRoute: () => authedRoute,
-    component: Outlet,
-  });
-  const wired = (
-    BotRoute as unknown as { update: (options: unknown) => typeof BotRoute }
-  ).update({
-    id: "/bot",
-    path: "/bot",
-    getParentRoute: () => appRoute,
-  });
-  const tree = rootRoute.addChildren([
-    authedRoute.addChildren([appRoute.addChildren([wired])]),
-  ]);
   const router = createRouter({
-    routeTree: tree,
+    routeTree,
     history: createMemoryHistory({ initialEntries: [initialEntry] }),
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router as never} />
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
 }
