@@ -835,28 +835,11 @@ async fn start_stack_inner<R: tauri::Runtime>(
     .map_err(|error| format!("the wait did not run: {error}"))?;
 
     let shell = app.state::<Shell>();
-    // Recorded before the handles are stashed, so a window that never gets to Stop still leaves
-    // something the next one can stop. See `stack::host_pids_path`.
-    let recorded = stack::record_host_processes(
-        &root,
-        &started
-            .iter()
-            .map(|(name, child)| (*name, child.id()))
-            .collect::<Vec<_>>(),
-    );
-    shell.children.lock().unwrap().extend(started);
-    *shell.root.lock().unwrap() = Some(root.clone());
-    // Even when inventory cannot be recorded, Stop must still own every child we started.
-    recorded.inspect_err(|problem| report(&app, "processes", false, problem.said.clone()))?;
-
-    // From here the shell is the restart policy `worker/src/index.ts` says it does not have.
-    let generation = shell
-        .generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        + 1;
+    let generation = finish_host_start(&shell, &root, started, outcome)
+        .inspect_err(|problem| report(&app, "answering", false, problem_detail(problem.clone())))?;
+    // Only a stack that answered successfully acquires a restart policy.
     supervise_host_processes(app.clone(), root, logs, bun, secrets, generation);
 
-    outcome.inspect_err(|error| report(&app, "answering", false, error.clone()))?;
     report(&app, "answering", true, "the API and the app are answering");
     Ok(())
 }
@@ -894,6 +877,7 @@ fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
     stop_everything(&app, &PathBuf::from(&root))
 }
 
+#[cfg(test)]
 fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
     let mut active = shell.root.lock().unwrap();
     let root = active
@@ -929,28 +913,14 @@ where
     D: FnOnce(&Path) -> Result<(), String>,
 {
     shell.recovery.stop();
-    // Ended first, so the watcher stops before anything is killed and does not read a death it
-    // caused as one worth answering.
-    shell
-        .generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let root = shutdown_root(shell, fallback_root);
+    let root = shell
+        .root
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| fallback_root.to_path_buf());
     let mut failures = Vec::new();
-    #[cfg(unix)]
-    let held_result = stack::stop_host_children(&root, &mut shell.children.lock().unwrap());
-    #[cfg(unix)]
-    if let Err(problem) = held_result {
-        failures.push(problem_detail(problem));
-    } else {
-        stop_held_children(shell);
-    }
-    #[cfg(not(unix))]
-    stop_held_children(shell);
-
-    // The window may be a second one, holding no handles to a stack that is still up. Stop what is
-    // there rather than only what this window started, or Stop is a button that does nothing and
-    // reports success.
-    if let Err(problem) = cleanup(&root) {
+    if let Err(problem) = retire_host_processes(shell, &root, cleanup) {
         failures.push(problem_detail(problem));
     }
 
@@ -965,11 +935,91 @@ where
     }
 }
 
-fn stop_held_children(shell: &Shell) {
-    for (_, mut child) in shell.children.lock().unwrap().drain(..) {
-        let _ = child.kill();
-        let _ = child.wait();
+/// Reclaim held replacements before consulting durable inventory. Keep the handles and pidfile
+/// if any phase fails, so the next Stop or Start can retry with the same ownership evidence.
+fn cleanup_host_children<C>(
+    root: &Path,
+    children: &mut Vec<(&'static str, std::process::Child)>,
+    cleanup: C,
+) -> Result<usize, Problem>
+where
+    C: FnOnce(&Path) -> Result<usize, Problem>,
+{
+    let held = stack::stop_host_children(root, children)?;
+    for (name, child) in children.iter_mut() {
+        let failure = |error| {
+            Problem::with(
+                "OpenBot could not stop one of its host processes.",
+                format!("could not finish stopping held {name}: {error}"),
+            )
+        };
+        if child.try_wait().map_err(failure)?.is_none() {
+            child.kill().map_err(failure)?;
+        }
+        child.wait().map_err(failure)?;
     }
+    let recorded = cleanup(root)?;
+    children.clear();
+    Ok(held + recorded)
+}
+
+fn retire_host_processes<C>(shell: &Shell, root: &Path, cleanup: C) -> Result<usize, Problem>
+where
+    C: FnOnce(&Path) -> Result<usize, Problem>,
+{
+    // Invalidate before waiting for a restart that already owns the lock. That restart either
+    // observes retirement before spawning, or publishes its handle before cleanup can proceed.
+    shell
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let mut children = shell.children.lock().unwrap();
+    let selected = shell
+        .root
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| root.to_path_buf());
+    let result = cleanup_host_children(&selected, &mut children, cleanup);
+    if result.is_ok() {
+        *shell.root.lock().unwrap() = None;
+    }
+    result
+}
+
+fn finish_host_start(
+    shell: &Shell,
+    root: &Path,
+    started: Vec<(&'static str, std::process::Child)>,
+    outcome: Result<(), String>,
+) -> Result<u64, Problem> {
+    let mut children = shell.children.lock().unwrap();
+    children.extend(started);
+    *shell.root.lock().unwrap() = Some(root.to_path_buf());
+    if let Err(original) = outcome {
+        shell
+            .generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // The initial failure is the reason Start failed, even if its cleanup also needs help.
+        return match cleanup_host_children(root, &mut children, stack::stop_processes_under) {
+            Ok(_) => {
+                *shell.root.lock().unwrap() = None;
+                Err(original.into())
+            }
+            Err(cleanup) => Err(Problem::with(original, problem_detail(cleanup))),
+        };
+    }
+    // Keep handles even if durable recording fails; no supervisor is installed on that path.
+    stack::record_host_processes(
+        root,
+        &children
+            .iter()
+            .map(|(name, child)| (*name, child.id()))
+            .collect::<Vec<_>>(),
+    )?;
+    Ok(shell
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1)
 }
 
 fn cleanup_before_start<R, C>(
@@ -981,8 +1031,8 @@ where
     R: tauri::Runtime,
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
 {
-    cleanup(root).inspect_err(|problem| {
-        report(app, "cleanup", false, problem.said.clone());
+    retire_host_processes(&app.state::<Shell>(), root, cleanup).inspect_err(|problem| {
+        report(app, "cleanup", false, problem_detail(problem.clone()));
     })
 }
 
@@ -999,36 +1049,14 @@ where
     D: FnOnce(&Path) -> Result<(), String>,
 {
     shell.recovery.stop();
-    #[cfg(unix)]
-    shell
-        .generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let root = shutdown_root(shell, fallback_root);
+    let root = shell
+        .root
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| fallback_root.to_path_buf());
     let mut failures = Vec::new();
-    #[cfg(unix)]
-    let held_verified = match stack::stop_host_children(&root, &mut shell.children.lock().unwrap())
-    {
-        Ok(_) => true,
-        Err(problem) => {
-            failures.push(problem_detail(problem));
-            false
-        }
-    };
-    #[cfg(not(unix))]
-    let held_verified = true;
-    if held_verified {
-        let mut children = shell.children.lock().unwrap();
-        // Unix's verified tree cleanup has already requested shutdown. Do not signal raw
-        // held PIDs here: try_wait may have reaped an exited child and its PID can be reused.
-        std::thread::sleep(std::time::Duration::from_millis(1500));
-        for (_, child) in children.iter_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        children.clear();
-    }
-
-    if let Err(problem) = cleanup(&root) {
+    if let Err(problem) = retire_host_processes(shell, &root, cleanup) {
         failures.push(problem_detail(problem));
     }
     if let Err(problem) = down(&root) {
@@ -1610,11 +1638,14 @@ fn supervise_host_processes<R: tauri::Runtime>(
                     // later, and forever after: the count climbs past what actually happened, the
                     // window is sent back to the setup screen on a loop, and the giving up that was
                     // supposed to stop a hot laptop becomes one.
-                    shell
-                        .children
-                        .lock()
-                        .unwrap()
-                        .retain(|(held, _)| *held != name);
+                    {
+                        let mut children = shell.children.lock().unwrap();
+                        if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+                        {
+                            return;
+                        }
+                        children.retain(|(held, _)| *held != name);
+                    }
 
                     let reason = watch.gave_up();
                     report(&app, name, false, reason.clone());
@@ -1657,45 +1688,53 @@ fn supervise_host_processes<R: tauri::Runtime>(
                 else {
                     continue;
                 };
-                // Serialize Unix restart publication with Stop's held-child cleanup. Recheck
-                // after acquiring the lock so a stopped generation cannot publish a new launch.
-                #[cfg(unix)]
-                let mut children = shell.children.lock().unwrap();
-                #[cfg(unix)]
-                if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
-                    || shell.root.lock().unwrap().is_none()
-                {
-                    return;
-                }
-                match stack::spawn_host_process(process, &root, &logs, &bun, &secrets) {
-                    Ok(child) => {
-                        #[cfg(not(unix))]
-                        let mut children = shell.children.lock().unwrap();
-                        #[cfg(not(unix))]
-                        {
-                            children.retain(|(held, _)| *held != name);
-                            children.push((name, child));
-                            report(&app, name, true, "started again");
-                        }
-                        #[cfg(unix)]
-                        match stack::replace_host_process(&root, &mut children, name, child) {
-                            Ok(()) => report(&app, name, true, "started again"),
-                            Err(problem) => {
-                                report(&app, name, false, problem.said.clone());
-                                *shell.last_failure.lock().unwrap() = Some(problem);
-                            }
-                        }
+                match restart_host_process_with(&shell, &root, name, generation, || {
+                    stack::spawn_host_process(process, &root, &logs, &bun, &secrets)
+                }) {
+                    Ok(true) => report(&app, name, true, "started again"),
+                    Ok(false) => return,
+                    Err(problem) => {
+                        report(&app, name, false, problem.said.clone());
+                        *shell.last_failure.lock().unwrap() = Some(problem);
                     }
-                    Err(error) => report(
-                        &app,
-                        name,
-                        false,
-                        format!("{name} would not start: {error}"),
-                    ),
                 }
             }
         }
     });
+}
+
+/// The same lock covers generation validation, launch, publication, and owned cleanup on every
+/// platform. Stop can retire during spawn, but cannot finish before receiving that child handle.
+fn restart_host_process_with<F>(
+    shell: &Shell,
+    root: &Path,
+    name: &'static str,
+    generation: u64,
+    spawn: F,
+) -> Result<bool, Problem>
+where
+    F: FnOnce() -> std::io::Result<std::process::Child>,
+{
+    let mut children = shell.children.lock().unwrap();
+    if shell.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+        || shell.root.lock().unwrap().as_deref() != Some(root)
+    {
+        return Ok(false);
+    }
+    let child = spawn().map_err(|error| {
+        Problem::with(
+            format!("OpenBot could not restart {name}."),
+            error.to_string(),
+        )
+    })?;
+    #[cfg(unix)]
+    stack::replace_host_process(root, &mut children, name, child)?;
+    #[cfg(not(unix))]
+    {
+        children.retain(|(held, _)| *held != name);
+        children.push((name, child));
+    }
+    Ok(shell.generation.load(std::sync::atomic::Ordering::SeqCst) == generation)
 }
 
 /// Point the window at OpenBot if it is up, and at the setup screen if it is not.
@@ -2770,7 +2809,7 @@ mod tests {
             problem.contains("Compose down failed: compose refused"),
             "{problem}"
         );
-        assert!(shell.root.lock().unwrap().is_none());
+        assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&active));
         let _ = std::fs::remove_dir_all(active);
         let _ = std::fs::remove_dir_all(fallback);
     }
@@ -2819,7 +2858,7 @@ mod tests {
             failures[1].contains("Compose down failed: compose down refused"),
             "{failures:?}"
         );
-        assert!(shell.root.lock().unwrap().is_none());
+        assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&active));
         let _ = std::fs::remove_dir_all(active);
         let _ = std::fs::remove_dir_all(fallback);
     }
@@ -3181,6 +3220,138 @@ fi\n";
             self.done.take().expect("thread").join().expect("join");
             request
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_readiness_retires_children_and_preserves_original_failure() {
+        let root = temp_root("failed-readiness-lifecycle");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut failed = std::process::Command::new("/bin/sh")
+            .args(["-c", "exit 71"])
+            .spawn()
+            .unwrap();
+        failed.wait().unwrap();
+        let worker = std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .current_dir(&root)
+            .spawn()
+            .unwrap();
+        let mut children = vec![("server", failed), ("worker", worker)];
+        let original = stack::wait_until_answering(
+            &mut children,
+            &root,
+            &stack::Ready { api: 0, app: 0 },
+            std::time::Duration::from_secs(1),
+        )
+        .unwrap_err();
+        let shell = Shell::default();
+        let result = finish_host_start(&shell, &root, children, Err(original.clone())).unwrap_err();
+        assert_eq!(result.said, original);
+        assert!(result.detail.is_none());
+        assert!(shell.children.lock().unwrap().is_empty());
+        assert!(shell.root.lock().unwrap().is_none());
+        assert_eq!(
+            shell.generation.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert!(
+            !restart_host_process_with(&shell, &root, "server", 0, || panic!(
+                "failed attempt restarted"
+            ))
+            .unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_serializes_with_a_restart_already_inside_spawn() {
+        use std::sync::{atomic::Ordering::SeqCst, Arc, Barrier};
+        let root = temp_root("restart-stop-barrier");
+        std::fs::create_dir_all(&root).unwrap();
+        let shell = Arc::new(Shell::default());
+        *shell.root.lock().unwrap() = Some(root.clone());
+        shell.generation.store(1, SeqCst);
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let restart = {
+            let (shell, root, entered, release) = (
+                shell.clone(),
+                root.clone(),
+                entered.clone(),
+                release.clone(),
+            );
+            std::thread::spawn(move || {
+                restart_host_process_with(&shell, &root, "server", 1, || {
+                    entered.wait();
+                    release.wait();
+                    std::process::Command::new("/bin/sleep")
+                        .arg("60")
+                        .current_dir(&root)
+                        .spawn()
+                })
+            })
+        };
+        entered.wait();
+        let (sent, completed) = std::sync::mpsc::channel();
+        let stop = {
+            let (shell, root) = (shell.clone(), root.clone());
+            std::thread::spawn(move || {
+                let result =
+                    stop_everything_with(&shell, &root, stack::stop_processes_under, |_| Ok(()));
+                sent.send(()).unwrap();
+                result
+            })
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while shell.generation.load(SeqCst) == 1 {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(matches!(
+            completed.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        release.wait();
+        assert!(!restart.join().unwrap().unwrap());
+        stop.join().unwrap().unwrap();
+        assert!(shell.children.lock().unwrap().is_empty());
+        assert!(shell.root.lock().unwrap().is_none());
+        assert!(
+            !restart_host_process_with(&shell, &root, "server", 1, || panic!(
+                "retired restart spawned"
+            ))
+            .unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_retry_cleanup_retires_generation_and_retains_selected_root() {
+        let shell = Shell::default();
+        let root = temp_root("retry-cleanup-failure");
+        *shell.root.lock().unwrap() = Some(root.clone());
+        shell
+            .generation
+            .store(4, std::sync::atomic::Ordering::SeqCst);
+        let problem = retire_host_processes(&shell, Path::new("unused-fallback"), |selected| {
+            assert_eq!(selected, root);
+            Err(Problem::plain("synthetic cleanup refused"))
+        })
+        .unwrap_err();
+        assert_eq!(problem.said, "synthetic cleanup refused");
+        assert_eq!(
+            shell.generation.load(std::sync::atomic::Ordering::SeqCst),
+            5
+        );
+        assert_eq!(shell.root.lock().unwrap().as_ref(), Some(&root));
+        assert!(
+            !restart_host_process_with(&shell, &root, "server", 4, || panic!(
+                "old generation resumed"
+            ))
+            .unwrap()
+        );
     }
 
     fn temp_root(name: &str) -> PathBuf {

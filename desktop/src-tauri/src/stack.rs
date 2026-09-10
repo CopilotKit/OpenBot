@@ -792,6 +792,71 @@ pub fn stop_host_children(
     stop_unix_records(root, &unix_host_records(root, &live)?)
 }
 
+/// Windows replacements may not be in the initial pidfile. A live Child plus its current direct
+/// parent and complete instance identity authorizes adding it to the existing verified inventory.
+#[cfg(not(unix))]
+pub fn stop_host_children(
+    root: &Path,
+    children: &mut [(&str, std::process::Child)],
+) -> Result<usize, Problem> {
+    stop_windows_host_children_with(
+        root,
+        children,
+        Path::new("powershell"),
+        Path::new("netstat"),
+        Path::new("taskkill"),
+    )
+}
+
+#[cfg(any(not(unix), test))]
+fn stop_windows_host_children_with(
+    root: &Path,
+    children: &mut [(&str, std::process::Child)],
+    powershell: &Path,
+    netstat: &Path,
+    taskkill: &Path,
+) -> Result<usize, Problem> {
+    let mut held = Vec::new();
+    for (name, child) in children.iter_mut() {
+        if child
+            .try_wait()
+            .map_err(|error| {
+                Problem::with(
+                    "OpenBot could not inspect a held host process.",
+                    format!("{name}: {error}"),
+                )
+            })?
+            .is_none()
+        {
+            held.push((*name, child.id()));
+        }
+    }
+    if held.is_empty() {
+        return Ok(0);
+    }
+    let snapshot = windows_processes_with(powershell)?;
+    let mut records = recorded_host_processes(root)?;
+    for (name, pid) in held {
+        let live = snapshot.iter().find(|live| {
+            live.process_id == pid
+                && live.parent_process_id == std::process::id()
+                && HOST_PROCESSES.iter().any(|process| process.name == name)
+        });
+        let record = live.and_then(|live| RecordedHostProcess::from_live(name, live))
+            .filter(|record| !record.executable_path.is_empty() && !record.command_line.is_empty() && !record.creation_date.is_empty())
+            .ok_or_else(|| Problem::with(
+                "OpenBot could not verify a held host process.",
+                format!("{name}, pid {pid}: current direct-child identity is unavailable; ownership retained"),
+            ))?;
+        // Preserve any earlier instance too. Each is independently verified before termination.
+        if !records.contains(&record) {
+            records.push(record);
+        }
+    }
+    write_host_pid_file(root, &serde_json::json!({"version":1,"processes":records}))?;
+    stop_windows_processes_under_with(root, &records, &snapshot, netstat, taskkill)
+}
+
 #[cfg(unix)]
 fn stop_unix_records(root: &Path, records: &[UnixHostProcess]) -> Result<usize, Problem> {
     if records.is_empty() {
@@ -2084,6 +2149,121 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn windows_initial_inventory_does_not_own_a_direct_sibling_replacement() {
+        let original = recorded_process("server", 9000, "original");
+        let rows = [
+            live_process(9000, 7000, "original"),
+            live_process(9001, 7000, "replacement"),
+            live_process(9002, 8000, "foreign"),
+        ];
+        let listing = "TCP 127.0.0.1:3001 0.0.0.0:0 LISTENING 9001\nTCP 127.0.0.1:3010 0.0.0.0:0 LISTENING 9002\n";
+        assert_eq!(
+            verified_openbot_root_pids(std::slice::from_ref(&original), &rows),
+            [9000]
+        );
+        assert!(verified_openbot_pids_listening_on(
+            listing,
+            &[3001, 3010],
+            std::slice::from_ref(&original),
+            &rows
+        )
+        .is_empty());
+        let replacement = recorded_process("server", 9001, "replacement");
+        assert_eq!(
+            verified_openbot_pids_listening_on(
+                listing,
+                &[3001, 3010],
+                &[original, replacement],
+                &rows
+            ),
+            [9001]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn windows_held_replacement_cleanup_keeps_evidence_on_refusal() {
+        let root = temp_root("windows-held-replacement-refusal");
+        std::fs::create_dir_all(&root).unwrap();
+        let fixture = CleanupCommandFixture::new(&root);
+        fixture.scenario("held-refusal");
+        let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        let pid = replacement.id();
+        let mut children = vec![("server", replacement)];
+        let old = recorded_process("server", 9000, "original");
+        write_host_pid_file(
+            &root,
+            &serde_json::json!({"version":1,"processes":[old.clone()]}),
+        )
+        .unwrap();
+        let row = live_process(pid, std::process::id(), "replacement");
+        std::fs::write(root.join("synthetic-inventory.json"), serde_json::to_vec(&serde_json::json!([{
+            "ProcessId":pid,"ParentProcessId":row.parent_process_id,"ExecutablePath":row.executable_path,"CommandLine":row.command_line,"CreationDate":row.creation_date
+        }])).unwrap()).unwrap();
+        let result = stop_windows_host_children_with(
+            &root,
+            &mut children,
+            &fixture.command("powershell"),
+            &fixture.command("netstat"),
+            &fixture.command("taskkill"),
+        );
+        let alive = children[0].1.try_wait().unwrap().is_none();
+        children[0].1.kill().unwrap();
+        children[0].1.wait().unwrap();
+        let problem = result.unwrap_err();
+        assert!(
+            problem
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("synthetic held cleanup refused"),
+            "{problem:?}"
+        );
+        assert!(alive);
+        assert_eq!(
+            recorded_host_processes(&root).unwrap(),
+            [old, recorded_process("server", pid, "replacement")]
+        );
+        assert!(fixture
+            .log()
+            .contains(&format!("taskkill\t/PID {pid} /T /F")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn windows_held_cleanup_refuses_missing_or_wrong_parent_identity_without_killing() {
+        for parent in [0, std::process::id()] {
+            let root = temp_root("windows-held-identity-refusal");
+            std::fs::create_dir_all(&root).unwrap();
+            let fixture = CleanupCommandFixture::new(&root);
+            fixture.scenario("held-refusal");
+            let replacement = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+            let pid = replacement.id();
+            let mut children = vec![("server", replacement)];
+            let original = serde_json::to_vec(&serde_json::json!({"version":1,"processes":[recorded_process("server",9000,"original")]})).unwrap();
+            std::fs::create_dir_all(root.join(".logs")).unwrap();
+            std::fs::write(host_pids_path(&root), &original).unwrap();
+            std::fs::write(root.join("synthetic-inventory.json"),serde_json::to_vec(&serde_json::json!([{"ProcessId":pid,"ParentProcessId":parent,"ExecutablePath":"synthetic","CommandLine":"synthetic","CreationDate":if parent==0 {"instance"} else {""}}])).unwrap()).unwrap();
+            let result = stop_windows_host_children_with(
+                &root,
+                &mut children,
+                &fixture.command("powershell"),
+                &fixture.command("netstat"),
+                &fixture.command("taskkill"),
+            );
+            let alive = children[0].1.try_wait().unwrap().is_none();
+            children[0].1.kill().unwrap();
+            children[0].1.wait().unwrap();
+            assert!(result.unwrap_err().said.contains("verify"));
+            assert!(alive);
+            assert_eq!(std::fs::read(host_pids_path(&root)).unwrap(), original);
+            assert!(!fixture.log().contains("taskkill\t"));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
     fn ipv6_loopback_listener() -> Option<std::net::TcpListener> {
         match std::net::TcpListener::bind("[::1]:0") {
             Ok(listener) => Some(listener),
@@ -2387,6 +2567,9 @@ fn main() {
     let scenario = std::env::var("DTA028_CLEANUP_SCENARIO").unwrap();
     let root = std::env::var("DTA028_CLEANUP_ROOT").unwrap_or_default();
     match (program.as_str(), scenario.as_str()) {
+        ("powershell", "held-refusal") => print!("{}", std::fs::read_to_string(std::path::Path::new(&root).join("synthetic-inventory.json")).unwrap()),
+        ("netstat", "held-refusal") => {},
+        ("taskkill", "held-refusal") => { eprintln!("synthetic held cleanup refused"); std::process::exit(5); },
         ("powershell", "inventory-fail") => {
             print!("synthetic partial inventory that must not be trusted");
             std::process::exit(17);
