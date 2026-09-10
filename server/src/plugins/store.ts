@@ -569,6 +569,20 @@ const iso = (value: Date | string | null): string | null =>
  *
  * Neither is an address, so neither can collide with a user id: every actor written here otherwise
  * is `users.id` or the email a session resolved to.
+ *
+ * NOT THE SAME AXIS AS `initiator_kind`, and a row carrying both is not contradicting itself.
+ * `initiator_kind` answers what set a run in motion; this field answers whose account it reached
+ * and who can be named for it. So `initiator_kind: "person"` beside `actor: "unattributed"` reads
+ * correctly as a person-initiated request whose person this deployment could not identify. That is
+ * the honest reading, and it is the reason this is NOT recorded as `deployment`: that would assert
+ * the call went out on the deployment's own credential, and it did not go out at all.
+ *
+ * `DEPLOYMENT_INITIATOR`'s own doc claims the case of "refusing a caller it could not identify",
+ * which overlaps this one and would answer it the other way. Nothing sends it there — the tool path
+ * defaults its initiator to person and `identifyActor` returns an empty id rather than a deployment
+ * — so the overlap is in the prose, not in the behaviour. It is left alone deliberately rather than
+ * resolved by widening either vocabulary unilaterally; whoever owns that constant should narrow its
+ * sentence, or a third initiator kind should exist, and neither is this branch's call to make.
  */
 const DEPLOYMENT_ACTOR = "deployment";
 const UNATTRIBUTED_ACTOR = "unattributed";
