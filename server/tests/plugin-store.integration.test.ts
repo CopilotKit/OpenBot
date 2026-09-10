@@ -3659,6 +3659,33 @@ test("a Composio call by somebody who has not connected the app is refused with 
   expect(reached).toEqual([]);
 });
 
+test("a Composio call whose url names no app is refused rather than falling back to the row id", async () => {
+  const { store, database } = await freshStore();
+  const reached: string[] = [];
+  useComposioClient({
+    listActions: async () => [],
+    execute: async (slug) => {
+      reached.push(slug);
+      return {};
+    },
+  });
+  // Brokered by provenance, with a url that names no Composio app: `accessFor` answers
+  // `{ credential: "brokered", toolkit: null }`, and falling back to the row id would check a
+  // Gmail connection and then dial a hostname.
+  await seedComposioGmail(database, store, { url: "https://example.com/mcp" });
+
+  await expect(
+    store.callTool({
+      ref: "gmail/GMAIL_FETCH_EMAILS",
+      args: {},
+      botId: "bot_helper",
+      actorId: "user_asker",
+    }),
+  ).rejects.toThrow(/no Composio app in its url/i);
+
+  expect(reached).toEqual([]);
+});
+
 test("a Composio call whose row id and url name different apps is refused", async () => {
   const { store, database } = await freshStore();
   const reached: string[] = [];

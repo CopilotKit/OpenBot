@@ -764,7 +764,9 @@ export function createPluginStore(options: PluginStoreOptions) {
    * object, an error or an audit row. What this function contributes instead is the two refusals
    * that have to happen before a call is spent at the broker: a run nobody is attributed for, and an
    * asker who has not connected the app — so a person is told their own next step rather than shown
-   * the broker's error about an account it cannot find.
+   * the broker's error about an account it cannot find. A third refusal sits between those two, for
+   * a brokered row whose url names no Composio app; nothing in the product creates such a row, so no
+   * person's situation reaches it.
    *
    * For a `person-oauth` server it is the asker's own, and every branch that cannot prove it has the
    * asker's grant refuses. There is deliberately no fallback. A fallback is the one bug this design
@@ -798,8 +800,10 @@ export function createPluginStore(options: PluginStoreOptions) {
      * broker's error about an account it cannot find into a sentence naming the person's own next
      * step.
      *
-     * The throw between the two is not a third refusal. It is the narrowing that keeps this gate
-     * keyed on the app the url names, and its own comment says why neither fallback is available.
+     * The throw between the two is a third refusal, but not one anybody can act on: it fires only
+     * for a brokered row whose url names no Composio app, which nothing in the product can create.
+     * It is what keeps this gate keyed on the app the url names, and its own comment says why
+     * neither fallback is available.
      *
      * There is no token. The key belongs to the transport and never travels through this function, so
      * nothing here can leak it into a connection object, an error or an audit row.
@@ -813,17 +817,20 @@ export function createPluginStore(options: PluginStoreOptions) {
       }
 
       /*
-       * Narrowing, not a second decision.
+       * Narrowing, and a refusal that is genuinely reachable.
        *
-       * `access.toolkit` is the app slug read off this row's url in `access.ts`, and it is non-null
-       * for every row whose credential resolved to `brokered` — but the descriptor declares it
-       * nullable because every other kind of row has no broker to name an app at, and the compiler
-       * cannot follow the credential back to the url it was derived beside.
+       * `access.toolkit` is the app slug read off this row's url in `access.ts`, and it is NULL
+       * whenever that url does not name a Composio app — `accessFor` still answers `brokered` for
+       * any row whose provenance column says composio, so `{ credential: "brokered", toolkit: null }`
+       * is a state a hand-edited or restored row really produces. The test beside `accessFor`
+       * asserts it, and `plugin-store.integration.test.ts` gates this branch end to end.
        *
        * A throw rather than a fallback, for the reason the `user-oauth` narrowing below throws: both
        * alternatives fail open. Falling back to `row.id` checks the connection against a spelling
        * nothing dials, and skipping the gate spends the deployment's shared key on a connector whose
-       * whole purpose is to keep one person's account out of another's.
+       * whole purpose is to keep one person's account out of another's. The compiler forces SOME
+       * narrowing here — drizzle's `eq` will not take `string | null` — but only the test named
+       * above stops that narrowing from being the fallback.
        */
       if (!access.toolkit) {
         throw new Error(
