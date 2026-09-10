@@ -160,6 +160,20 @@ test("/bot defaults to the picked harness when this setup selected one", async (
   );
 });
 
+test("/bot with an empty agent query uses the normal default Bot", async () => {
+  const view = renderBot(
+    queryClientWithAgents([GENERAL_ASSISTANT, PICKED_HARNESS]),
+    "/bot?agent=",
+  );
+
+  expect(await view.findByRole("heading", { name: "LangGraph" })).toBeTruthy();
+  expect(view.getByTestId("copilot-chat").dataset.agentId).toBe(
+    "picked-harness",
+  );
+  expect(view.queryByText('This deployment has no Bot called "".')).toBeNull();
+  expect(view.queryByText("This deployment has no Bots yet.")).toBeNull();
+});
+
 test("/bot reports a failed initial roster load instead of claiming there are no Bots", async () => {
   const view = renderBot(queryClientWithFailingAgents());
 

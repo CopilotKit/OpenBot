@@ -62,7 +62,8 @@ async function loadExplicitBot(agentId: string): Promise<BotDetailLookup> {
 }
 
 function RouteComponent() {
-  const { agent } = Route.useSearch();
+  const search = Route.useSearch();
+  const agent = search.agent === "" ? undefined : search.agent;
   const {
     data: agents,
     isError,
