@@ -767,14 +767,52 @@ fn remove_secret_file(path: &Path) -> Result<(), Problem> {
 /// Where the platforms that keep a file keep it. Created owner-only, not merely written so.
 pub(crate) fn vault_dir(root: &Path) -> Result<PathBuf, Problem> {
     let dir = root.join(".secrets");
-    std::fs::create_dir_all(&dir).map_err(|error| {
+    let prepare = || -> std::io::Result<()> {
+        match require_credential_directory(&dir) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let mut builder = std::fs::DirBuilder::new();
+                builder.recursive(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::DirBuilderExt;
+                    builder.mode(0o700);
+                }
+                builder.create(&dir)?;
+                // Check again when another creator won the race to create this directory.
+                require_credential_directory(&dir)
+            }
+            Err(error) => Err(error),
+        }
+    };
+    prepare().map_err(|error| {
         Problem::with(
-            "OpenBot could not create the place it keeps your sign-in details.",
+            "OpenBot could not access the place it keeps your sign-in details.",
             format!("{}: {error}", dir.display()),
         )
     })?;
     owner_only(&dir)?;
     Ok(dir)
+}
+
+/// Checking the final credential file alone does not stop `.secrets` redirecting into another
+/// deployment. Validate the directory before changing its permissions or accessing any item.
+fn require_credential_directory(path: &Path) -> std::io::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    let redirected = metadata.file_type().is_symlink();
+    #[cfg(windows)]
+    let redirected = {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_REPARSE_POINT also covers junctions, not just symbolic links.
+        const REPARSE_POINT: u32 = 0x400;
+        redirected || metadata.file_attributes() & REPARSE_POINT != 0
+    };
+    if redirected || !metadata.is_dir() {
+        return Err(std::io::Error::other(
+            "credential directory is not a plain directory",
+        ));
+    }
+    Ok(())
 }
 
 /// Owner-only where the platform has the notion, and a no-op where it does not.
@@ -803,6 +841,53 @@ mod file_store_tests {
     use crate::test_support::temp_root;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    #[test]
+    fn secret_directory_symlink_cannot_read_write_or_remove_another_root() {
+        let root = temp_root("vault-parent-symlink");
+        let selected = root.join("selected");
+        let other = root.join("other");
+        std::fs::create_dir_all(&selected).unwrap();
+        std::fs::create_dir_all(other.join(".secrets")).unwrap();
+        let other_dir = other.join(".secrets");
+        std::fs::set_permissions(&other_dir, std::fs::Permissions::from_mode(0o750)).unwrap();
+        let key = "SYNTHETIC_PARENT_SYMLINK";
+        let original = other_dir.join(format!("{key}.secret"));
+        std::fs::write(&original, "other-root-public-sentinel").unwrap();
+        std::os::unix::fs::symlink(&other_dir, selected.join(".secrets")).unwrap();
+
+        // Run all three public boundaries even on the old implementation, then clean up before
+        // asserting so a failing regression never leaves synthetic credentials behind.
+        let read = super::recall(&selected, key);
+        let write = super::remember(&selected, key, "selected-root-public-sentinel");
+        let remove = super::forget(&selected, key);
+        let remaining = std::fs::read_to_string(&original);
+        let mode = std::fs::metadata(&other_dir).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir_all(&root).unwrap();
+
+        for result in [read.map(|_| ()), write, remove] {
+            let problem = result.expect_err("a redirected credential directory must be refused");
+            let detail = problem.detail.unwrap();
+            assert!(detail.contains(".secrets"));
+            assert!(!detail.contains("public-sentinel"));
+        }
+        assert_eq!(remaining.unwrap(), "other-root-public-sentinel");
+        assert_eq!(mode, 0o750);
+    }
+
+    #[test]
+    fn secret_directory_file_is_rejected_without_modification() {
+        let root = temp_root("vault-parent-file");
+        std::fs::create_dir_all(&root).unwrap();
+        let dir = root.join(".secrets");
+        std::fs::write(&dir, "public-sentinel").unwrap();
+        let result = vault_dir(&root);
+        let remaining = std::fs::read_to_string(&dir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_err());
+        assert_eq!(remaining, "public-sentinel");
+    }
 
     #[test]
     fn secret_directory_is_owner_only() {

@@ -785,20 +785,9 @@ pub fn write(
         out.push_str(&format!("{key}={value}\n"));
     }
 
-    std::fs::write(path, &out)?;
-
-    // The file holds `KEY_ENCRYPTION_KEY` and every minted token, and those are now long-lived: the
-    // first start writes them and every later start reads them back. `fs::write` creates the file at
-    // the process umask, which is `0644` by default, so on a shared macOS or Linux box another local
-    // user could read the vault key. Narrow it to the owner. Windows has no equivalent mode, and its
-    // single-user desktop profile is already the boundary, so this is Unix-only.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-
-    Ok(())
+    // Publish only after the replacement is private and durable. Tightening permissions after
+    // writing exposes new bytes through the old mode (and through any links to the old inode).
+    write_private_file(path, out.as_bytes())
 }
 
 #[cfg(test)]
@@ -886,6 +875,32 @@ HTTPS_PROXY=http://proxy:8080
         assert!(text.contains("HTTPS_PROXY=http://proxy:8080"));
         assert_eq!(text.matches("# our proxy needs this").count(), 1);
         assert_eq!(text.matches(BANNER).count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn env_replacement_does_not_publish_new_bytes_through_an_old_inode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_root("env-private-replacement");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".env");
+        std::fs::write(&path, "PUBLIC_SETTING=previous\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let previous = dir.join("previous-public-copy");
+        std::fs::hard_link(&path, &previous).unwrap();
+        let owned = BTreeMap::from([("SYNTHETIC_TOKEN".into(), "new-private-value".into())]);
+
+        let result = write(&path, &owned, &BTreeMap::new());
+        let previous_bytes = std::fs::read_to_string(&previous).unwrap();
+        let current_bytes = std::fs::read_to_string(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir_all(dir).unwrap();
+
+        result.unwrap();
+        assert_eq!(previous_bytes, "PUBLIC_SETTING=previous\n");
+        assert!(current_bytes.contains("SYNTHETIC_TOKEN=new-private-value"));
+        assert!(current_bytes.contains("PUBLIC_SETTING=previous"));
+        assert_eq!(mode, 0o600);
     }
 
     #[cfg(unix)]
