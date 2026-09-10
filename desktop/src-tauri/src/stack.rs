@@ -856,8 +856,13 @@ fn unix_host_records(
         .collect()
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn unix_process(pid: u32) -> Result<Option<UnixProcess>, Problem> {
+    Ok(unix_process_state(pid)?.map(|(process, _)| process))
+}
+
+#[cfg(target_os = "macos")]
+fn unix_process_state(pid: u32) -> Result<Option<(UnixProcess, bool)>, Problem> {
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
     let read = unsafe {
@@ -887,15 +892,18 @@ fn unix_process(pid: u32) -> Result<Option<UnixProcess>, Problem> {
             "proc_pidinfo({pid}) returned invalid identity"
         )));
     }
-    Ok(Some(UnixProcess {
-        pid,
-        parent: info.pbi_ppid,
-        start: format!("macos:{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec),
-    }))
+    Ok(Some((
+        UnixProcess {
+            pid,
+            parent: info.pbi_ppid,
+            start: format!("macos:{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec),
+        },
+        info.pbi_status == libc::SSTOP,
+    )))
 }
 
 #[cfg(target_os = "linux")]
-fn unix_process(pid: u32) -> Result<Option<UnixProcess>, Problem> {
+fn unix_process_state(pid: u32) -> Result<Option<(UnixProcess, bool)>, Problem> {
     let path = format!("/proc/{pid}/stat");
     let raw = match std::fs::read_to_string(&path) {
         Ok(raw) => raw,
@@ -905,11 +913,20 @@ fn unix_process(pid: u32) -> Result<Option<UnixProcess>, Problem> {
     let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|error| {
         unix_ownership_problem(format!("could not read Linux boot identity: {error}"))
     })?;
-    parse_linux_process(pid, &raw, boot.trim())
+    parse_linux_process_state(pid, &raw, boot.trim())
+}
+
+#[cfg(all(unix, test))]
+fn parse_linux_process(pid: u32, raw: &str, boot: &str) -> Result<Option<UnixProcess>, Problem> {
+    Ok(parse_linux_process_state(pid, raw, boot)?.map(|(process, _)| process))
 }
 
 #[cfg(all(unix, any(target_os = "linux", test)))]
-fn parse_linux_process(pid: u32, raw: &str, boot: &str) -> Result<Option<UnixProcess>, Problem> {
+fn parse_linux_process_state(
+    pid: u32,
+    raw: &str,
+    boot: &str,
+) -> Result<Option<(UnixProcess, bool)>, Problem> {
     let invalid =
         || unix_ownership_problem(format!("invalid Linux process inventory for pid {pid}"));
     let (head, tail) = raw.rsplit_once(')').ok_or_else(invalid)?;
@@ -930,15 +947,18 @@ fn parse_linux_process(pid: u32, raw: &str, boot: &str) -> Result<Option<UnixPro
     if fields.first() == Some(&"Z") {
         return Ok(None);
     }
-    Ok(Some(UnixProcess {
-        pid,
-        parent,
-        start: format!("linux:{boot}:{start}"),
-    }))
+    Ok(Some((
+        UnixProcess {
+            pid,
+            parent,
+            start: format!("linux:{boot}:{start}"),
+        },
+        fields.first() == Some(&"T"),
+    )))
 }
 
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
-fn unix_process(_pid: u32) -> Result<Option<UnixProcess>, Problem> {
+fn unix_process_state(_pid: u32) -> Result<Option<(UnixProcess, bool)>, Problem> {
     Err(unix_ownership_problem(
         "process-instance verification is unsupported on this Unix platform",
     ))
@@ -1100,20 +1120,26 @@ fn stop_unix_records(root: &Path, records: &[UnixHostProcess]) -> Result<usize, 
         records,
         &inventory,
         unix_process,
+        quiesce_unix_process,
+        unix_inventory,
         terminate_unix_process,
     )
 }
 
 #[cfg(unix)]
-fn stop_unix_records_with<I, T>(
+fn stop_unix_records_with<I, Q, L, T>(
     deployment: &Path,
     records: &[UnixHostProcess],
     inventory: &[(u32, u32)],
     mut inspect: I,
+    mut quiesce: Q,
+    mut inventory_now: L,
     mut terminate: T,
 ) -> Result<usize, Problem>
 where
     I: FnMut(u32) -> Result<Option<UnixProcess>, Problem>,
+    Q: FnMut(i32, &mut dyn FnMut() -> Result<bool, Problem>) -> Result<(), Problem>,
+    L: FnMut() -> Result<Vec<(u32, u32)>, Problem>,
     T: FnMut(i32, &mut dyn FnMut() -> Result<bool, Problem>) -> Result<bool, Problem>,
 {
     let mut stopped = 0;
@@ -1147,7 +1173,18 @@ where
             let mut index = 0;
             while index < tree.len() {
                 let parent = tree[index].0.pid;
-                for (pid, ppid) in inventory.iter().filter(|(_, ppid)| *ppid == parent) {
+                // Freeze the verified parent before enumerating its children. A snapshot taken
+                // while a launcher can run misses children born during build-to-serve transitions.
+                quiesce(parent as i32, &mut || {
+                    unix_tree_owned(&tree, index, &mut inspect)
+                })?;
+                let children = inventory_now()?;
+                if !unix_tree_owned(&tree, index, &mut inspect)? {
+                    return Err(unix_ownership_problem(format!(
+                        "quiesced process {parent} exited before its descendants were inventoried"
+                    )));
+                }
+                for (pid, ppid) in children.iter().filter(|(_, ppid)| *ppid == parent) {
                     if !safe_unix_pid(*pid) || !seen.insert(*pid) {
                         return Err(unix_ownership_problem(
                             "unsafe or cyclic owned process ancestry",
@@ -1165,26 +1202,11 @@ where
                 index += 1;
             }
             let mut count = 0;
-            // Descendants must actually exit before their ownership ancestor is signaled.
-            // The same complete chain is revalidated during waits and before escalation.
+            // Descendants must actually exit before their ownership ancestor is killed.
+            // Failed cleanup leaves the anchors stopped and the durable records available
+            // for another Stop; resuming an incomplete tree would reopen the spawn race.
             for index in (0..tree.len()).rev() {
-                let mut still_owned = || {
-                    let mut ancestor = Some(index);
-                    while let Some(at) = ancestor {
-                        match inspect(tree[at].0.pid)? {
-                            Some(now) if now == tree[at].0 => {}
-                            None if at == index => return Ok(false),
-                            _ => {
-                                return Err(unix_ownership_problem(format!(
-                                    "process identity or ancestry changed for pid {}",
-                                    tree[at].0.pid
-                                )))
-                            }
-                        }
-                        ancestor = tree[at].1;
-                    }
-                    Ok(true)
-                };
+                let mut still_owned = || unix_tree_owned(&tree, index, &mut inspect);
                 if still_owned()? && terminate(tree[index].0.pid as i32, &mut still_owned)? {
                     count += 1;
                 }
@@ -1197,6 +1219,84 @@ where
         }
     }
     cleanup_result(stopped, failures)
+}
+
+#[cfg(unix)]
+fn unix_tree_owned<I>(
+    tree: &[(UnixProcess, Option<usize>)],
+    index: usize,
+    inspect: &mut I,
+) -> Result<bool, Problem>
+where
+    I: FnMut(u32) -> Result<Option<UnixProcess>, Problem>,
+{
+    let mut ancestor = Some(index);
+    while let Some(at) = ancestor {
+        match inspect(tree[at].0.pid)? {
+            Some(now) if now == tree[at].0 => {}
+            None if at == index => return Ok(false),
+            _ => {
+                return Err(unix_ownership_problem(format!(
+                    "process identity or ancestry changed for pid {}",
+                    tree[at].0.pid
+                )))
+            }
+        }
+        ancestor = tree[at].1;
+    }
+    Ok(true)
+}
+
+#[cfg(unix)]
+fn quiesce_unix_process(
+    pid: i32,
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+) -> Result<(), Problem> {
+    quiesce_unix_process_with(
+        pid,
+        still_owned,
+        signal_unix_process,
+        |pid| Ok(unix_process_state(pid)?.is_some_and(|(_, stopped)| stopped)),
+        std::time::Duration::from_secs(2),
+    )
+}
+
+#[cfg(unix)]
+fn quiesce_unix_process_with<S, Q>(
+    pid: i32,
+    still_owned: &mut dyn FnMut() -> Result<bool, Problem>,
+    mut signal: S,
+    mut is_stopped: Q,
+    patience: std::time::Duration,
+) -> Result<(), Problem>
+where
+    S: FnMut(i32, i32) -> Result<bool, Problem>,
+    Q: FnMut(u32) -> Result<bool, Problem>,
+{
+    let unresolved = || {
+        unix_ownership_problem(format!(
+        "could not confirm pid {pid} stopped before descendant inventory; ownership ancestor and records retained"
+    ))
+    };
+    if !still_owned()? || !signal(pid, libc::SIGSTOP)? {
+        return Err(unresolved());
+    }
+    let deadline = std::time::Instant::now() + patience;
+    loop {
+        let stopped = is_stopped(pid as u32)?;
+        // Status is not identity. Revalidate the complete chain after the status query too.
+        if !still_owned()? {
+            return Err(unresolved());
+        }
+        if stopped {
+            return Ok(());
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(unresolved());
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(25)));
+    }
 }
 
 #[cfg(unix)]
@@ -1222,16 +1322,11 @@ fn terminate_unix_process_with<S>(
 where
     S: FnMut(i32, i32) -> Result<bool, Problem>,
 {
-    if !still_owned()? || !signal(pid, libc::SIGTERM)? {
-        return Ok(false);
-    }
-    if wait_for_verified_unix_exit(still_owned, patience)? {
-        return Ok(true);
-    }
-    // Signal delivery is not termination. Keep the ancestor alive until the same descendant
-    // exits; if its identity or ancestry changes, refuse escalation and retain retry evidence.
+    // Keep the complete tree stopped through removal: SIGCONT would let a launcher or
+    // TERM handler spawn again. SIGKILL is delivered to stopped processes without resuming
+    // them. Orderly handlers do not run; all exits still require verified ownership.
     if !still_owned()? || !signal(pid, libc::SIGKILL)? {
-        return Ok(true);
+        return Ok(false);
     }
     if wait_for_verified_unix_exit(still_owned, patience)? {
         return Ok(true);
@@ -2586,6 +2681,8 @@ fn main() {
             &records,
             &unix_inventory().unwrap(),
             unix_process,
+            quiesce_unix_process,
+            unix_inventory,
             |pid, _| {
                 attempts.push(pid);
                 Err(unix_ownership_problem(
@@ -2599,7 +2696,7 @@ fn main() {
             fixture.parent.try_wait().unwrap().is_none(),
             "retry ancestor must stay alive"
         );
-        assert!(something_answers(fixture.port));
+        assert!(unix_process_state(fixture.leaf.pid).unwrap().unwrap().1);
         assert_eq!(
             std::fs::read(host_pids_path(&fixture.root)).unwrap(),
             original
@@ -2608,12 +2705,17 @@ fn main() {
             unix_process(fixture.leaf.pid).unwrap(),
             Some(fixture.leaf.clone())
         );
-        // Drop kills/reaps these exact owned fixtures and checks both PIDs and the port are gone.
+        // Retrying the durable record also handles ancestors left stopped by the failed attempt.
+        assert!(stop_processes_under(&fixture.root).is_ok());
+        assert!(!something_answers(fixture.port));
+        assert!(unix_process(fixture.leaf.pid).unwrap().is_none());
+        assert_eq!(stop_processes_under(&fixture.root).unwrap(), 0);
+        // Drop independently checks the retained instances and port before removing the fixture.
     }
 
     #[cfg(unix)]
     #[test]
-    fn unix_descendant_escalation_refuses_changed_identity_and_retains_ancestor_on_failure() {
+    fn unix_descendant_removal_refuses_changed_identity_and_retains_ancestor_on_failure() {
         for failure in [
             "reused",
             "reparented",
@@ -2641,6 +2743,8 @@ fn main() {
                     }
                     Ok(Some(live))
                 },
+                |_, _| Ok(()),
+                || Ok([(101, 100), (102, 101)].to_vec()),
                 |pid, still_owned| {
                     terminate_unix_process_with(
                         pid,
@@ -2659,11 +2763,7 @@ fn main() {
                 },
             );
             assert!(result.is_err(), "{failure} must remain a cleanup failure");
-            let expected = if failure == "stuck" {
-                vec![(102, libc::SIGTERM), (102, libc::SIGKILL)]
-            } else {
-                vec![(102, libc::SIGTERM)]
-            };
+            let expected = vec![(102, libc::SIGKILL)];
             assert_eq!(
                 attempts, expected,
                 "{failure}: ancestor or changed instance must never be signaled"
@@ -2689,6 +2789,8 @@ fn main() {
             &[unix_record(101)],
             &rows,
             |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+            |_, _| Ok(()),
+            || Ok(rows.clone()),
             |pid, _| {
                 attempted.push(pid);
                 Ok(true)
@@ -2703,6 +2805,8 @@ fn main() {
                 &[unix_record(101)],
                 &rows,
                 |_| panic!("a different deployment is not inspected"),
+                |_, _| Ok(()),
+                || Ok(rows.clone()),
                 |_, _| panic!("a different deployment is not signaled")
             )
             .is_err());
@@ -2713,6 +2817,8 @@ fn main() {
                 &[],
                 &rows,
                 |_| panic!("an unrecorded process is not inspected"),
+                |_, _| Ok(()),
+                || Ok(rows.clone()),
                 |_, _| panic!("an unrecorded process is not signaled")
             )
             .unwrap(),
@@ -2733,6 +2839,8 @@ fn main() {
                 &[unix_record(101)],
                 &[(101, 100)],
                 |_| Ok(Some(changed.clone())),
+                |_, _| Ok(()),
+                || Ok([(101, 100)].to_vec()),
                 |_, _| panic!("reused PID")
             )
             .unwrap(),
@@ -2754,6 +2862,8 @@ fn main() {
                     unix_fixture(pid, if pid == 102 { 101 } else { 100 })
                 }))
             },
+            |_, _| Ok(()),
+            || Ok([(101, 100), (102, 101)].to_vec()),
             |_, _| panic!("changed instance must be revalidated")
         )
         .is_err());
@@ -2762,6 +2872,8 @@ fn main() {
             &[unix_record(101)],
             &[(101, 100), (102, 101)],
             |pid| Ok(Some(unix_fixture(pid, 100))),
+            |_, _| Ok(()),
+            || Ok([(101, 100), (102, 101)].to_vec()),
             |_, _| panic!("changed parent")
         )
         .is_err());
@@ -2777,6 +2889,8 @@ fn main() {
                 &[unix_record(pid)],
                 &[],
                 |_| panic!("unsafe PID"),
+                |_, _| Ok(()),
+                || Ok([].to_vec()),
                 |_, _| panic!("unsafe PID")
             )
             .is_err());
@@ -2797,6 +2911,8 @@ fn main() {
             &[unix_record(101), unix_record(201)],
             &[(101, 100), (102, 101), (201, 100)],
             |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+            |_, _| Ok(()),
+            || Ok([(101, 100), (102, 101), (201, 100)].to_vec()),
             |pid, _| {
                 attempted.push(pid);
                 if pid == 102 {
@@ -2817,6 +2933,8 @@ fn main() {
                 &[unix_record(101)],
                 &[(101, 100)],
                 |_| Ok(Some(unix_fixture(101, 100))),
+                |_, _| Ok(()),
+                || Ok([(101, 100)].to_vec()),
                 |_, _| Ok(false)
             )
             .unwrap(),
@@ -2827,9 +2945,166 @@ fn main() {
             &[unix_record(101)],
             &[],
             |_| Err(unix_ownership_problem("inventory denied")),
+            |_, _| Ok(()),
+            || Ok([].to_vec()),
             |_, _| panic!("lost inventory")
         )
         .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_cleanup_inventories_children_only_after_verified_quiescence() {
+        use std::cell::RefCell;
+        // 103 is born under 102 after the initial snapshot. 201 is a foreign neighbor.
+        let live = [
+            unix_fixture(101, 100),
+            unix_fixture(102, 101),
+            unix_fixture(103, 102),
+            unix_fixture(201, 100),
+        ];
+        let frozen = RefCell::new(Vec::new());
+        let mut killed = Vec::new();
+        let count = stop_unix_records_with(
+            Path::new("/owned"),
+            &[unix_record(101)],
+            &[(101, 100), (102, 101), (201, 100)],
+            |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+            |pid, still_owned| {
+                assert!(still_owned()?);
+                frozen.borrow_mut().push(pid);
+                Ok(())
+            },
+            || {
+                assert!(
+                    !frozen.borrow().is_empty(),
+                    "inventory ran before its parent stopped"
+                );
+                Ok(live.iter().map(|p| (p.pid, p.parent)).collect())
+            },
+            |pid, still_owned| {
+                assert_eq!(*frozen.borrow(), [101, 102, 103]);
+                assert!(still_owned()?);
+                killed.push(pid);
+                Ok(true)
+            },
+        )
+        .unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(killed, [103, 102, 101]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_quiescence_failure_preserves_anchors_and_attempts_other_roots() {
+        use std::cell::RefCell;
+        for failure in ["stop-denied", "inventory-denied"] {
+            let live = [
+                unix_fixture(101, 100),
+                unix_fixture(102, 101),
+                unix_fixture(201, 100),
+            ];
+            let frozen = RefCell::new(Vec::new());
+            let mut killed = Vec::new();
+            let result = stop_unix_records_with(
+                Path::new("/owned"),
+                &[unix_record(101), unix_record(201)],
+                &[(101, 100), (102, 101), (201, 100)],
+                |pid| Ok(live.iter().find(|p| p.pid == pid).cloned()),
+                |pid, still_owned| {
+                    assert!(still_owned()?);
+                    if failure == "stop-denied" && pid == 102 {
+                        return Err(unix_ownership_problem("synthetic stop denied"));
+                    }
+                    frozen.borrow_mut().push(pid);
+                    Ok(())
+                },
+                || {
+                    if failure == "inventory-denied" && frozen.borrow().last() == Some(&102) {
+                        return Err(unix_ownership_problem("synthetic inventory denied"));
+                    }
+                    Ok(live.iter().map(|p| (p.pid, p.parent)).collect())
+                },
+                |pid, _| {
+                    killed.push(pid);
+                    Ok(true)
+                },
+            );
+            assert!(result.is_err(), "{failure} must remain an error");
+            assert_eq!(
+                killed,
+                [201],
+                "{failure}: unresolved tree must retain its anchors"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_quiescence_requires_confirmed_stop_and_revalidates_identity() {
+        for failure in [
+            "unconfirmed",
+            "missing",
+            "changed",
+            "status-denied",
+            "signal-denied",
+        ] {
+            let status_read = std::cell::Cell::new(false);
+            let mut signals = Vec::new();
+            let result = quiesce_unix_process_with(
+                101,
+                &mut || {
+                    if status_read.get() {
+                        if failure == "missing" {
+                            return Ok(false);
+                        }
+                        if failure == "changed" {
+                            return Err(unix_ownership_problem("changed instance"));
+                        }
+                    }
+                    Ok(true)
+                },
+                |pid, signal| {
+                    signals.push((pid, signal));
+                    if failure == "signal-denied" {
+                        return Err(unix_ownership_problem("signal denied"));
+                    }
+                    Ok(true)
+                },
+                |_| {
+                    status_read.set(true);
+                    if failure == "status-denied" {
+                        return Err(unix_ownership_problem("status denied"));
+                    }
+                    Ok(failure != "unconfirmed")
+                },
+                std::time::Duration::ZERO,
+            );
+            assert!(result.is_err(), "{failure}");
+            assert_eq!(signals, [(101, libc::SIGSTOP)]);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_stop_state_is_separate_from_process_instance_identity() {
+        let stat = |state| format!("101 (owned) {state} 100 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 42");
+        let running = parse_linux_process_state(101, &stat("S"), "boot")
+            .unwrap()
+            .unwrap();
+        let stopped = parse_linux_process_state(101, &stat("T"), "boot")
+            .unwrap()
+            .unwrap();
+        assert_eq!(running.0, stopped.0);
+        assert!(!running.1);
+        assert!(stopped.1);
+        // A ptrace stop is not proof of our SIGSTOP quiescence.
+        assert!(
+            !parse_linux_process_state(101, &stat("t"), "boot")
+                .unwrap()
+                .unwrap()
+                .1
+        );
     }
 
     #[cfg(unix)]
