@@ -287,22 +287,38 @@ fn install_podman(into: &Path) -> Result<(), Problem> {
     let download = podman_download()?;
     let msi = fetch_verified(&download, into)?;
     let log = into.join("podman-install.log");
+    install_podman_msi(&msi, &log, msiexec)
+}
 
-    match msiexec(&["/i"], &msi, &log) {
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn install_podman_msi(
+    msi: &Path,
+    log: &Path,
+    mut run: impl FnMut(&[&str], &Path, &Path) -> Result<(), MsiexecFailure>,
+) -> Result<(), Problem> {
+    match run(&["/i"], msi, log) {
         Ok(()) => return Ok(()),
         // 1603 is "fatal error during installation", which is what Windows says when a product it
         // still believes is installed cannot be repaired. Measured on a machine where a previous
         // Podman had been removed by deleting its folder: the registration survived, so `/i`
         // became a reconfigure, and the reconfigure had no source to read from. Somebody who once
         // uninstalled Podman by dragging it to the bin arrives here.
-        Err(1603) => {}
-        Err(code) => return Err(installer_stopped(&msi, code, &log)),
+        Err(MsiexecFailure::Exit(1603)) => {}
+        Err(error) => return Err(installer_stopped("/i", msi, error, log)),
     }
 
     // Remove the registration, then install cleanly. `/x` does not need the original source, so
-    // it succeeds where the repair could not.
-    let _ = msiexec(&["/x"], &msi, &log);
-    msiexec(&["/i"], &msi, &log).map_err(|code| installer_stopped(&msi, code, &log))
+    // it succeeds where the repair could not. If cleanup itself fails, retrying `/i` only hides the
+    // step that left the broken registration behind.
+    run(&["/x"], msi, log).map_err(|error| installer_stopped("/x", msi, error, log))?;
+    run(&["/i"], msi, log).map_err(|error| installer_stopped("/i", msi, error, log))
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MsiexecFailure {
+    Exit(i32),
+    Start(String),
 }
 
 /// Run msiexec quietly and answer with its exit code when it is not success.
@@ -311,30 +327,40 @@ fn install_podman(into: &Path) -> Result<(), Problem> {
 /// step, which says what is happening and can be retried. The log is kept because msiexec's exit
 /// code alone does not say which action failed, and it is what turned 1603 into a diagnosis.
 #[cfg(target_os = "windows")]
-fn msiexec(verb: &[&str], msi: &Path, log: &Path) -> Result<(), i32> {
+fn msiexec(verb: &[&str], msi: &Path, log: &Path) -> Result<(), MsiexecFailure> {
     let output = crate::quiet::command("msiexec")
         .args(verb)
         .arg(msi)
         .args(["/qn", "/norestart", "/l*v"])
         .arg(log)
         .output()
-        .map_err(|_| -1)?;
+        .map_err(|error| MsiexecFailure::Start(error.to_string()))?;
     if output.status.success() {
         return Ok(());
     }
-    Err(output.status.code().unwrap_or(-1))
+    Err(MsiexecFailure::Exit(output.status.code().unwrap_or(-1)))
 }
 
-#[cfg(target_os = "windows")]
-fn installer_stopped(msi: &Path, code: i32, log: &Path) -> Problem {
-    Problem::with(
-        "Installing the software OpenBot needs did not finish. Try again.",
-        format!(
-            "msiexec /i {} stopped with exit code {code}; its log is at {}",
-            msi.display(),
-            log.display()
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn installer_stopped(verb: &str, msi: &Path, failure: MsiexecFailure, log: &Path) -> Problem {
+    match failure {
+        MsiexecFailure::Start(error) => Problem::with(
+            "OpenBot could not start the installer for the software it needs. Try again.",
+            format!(
+                "msiexec {verb} {} could not start: {error}; intended log path is {}",
+                msi.display(),
+                log.display()
+            ),
         ),
-    )
+        MsiexecFailure::Exit(code) => Problem::with(
+            "Installing the software OpenBot needs did not finish. Try again.",
+            format!(
+                "msiexec {verb} {} stopped with exit code {code}; its log is at {}",
+                msi.display(),
+                log.display()
+            ),
+        ),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -538,6 +564,169 @@ mod tests {
             let download = podman_download().expect("Apple silicon has a package");
             assert!(download.file.contains("arm64"), "{download:?}");
         }
+    }
+
+    fn synthetic_msi_paths(name: &str) -> (PathBuf, PathBuf) {
+        let dir = temp_root(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        (dir.join("podman.msi"), dir.join("podman-install.log"))
+    }
+
+    #[test]
+    fn windows_msi_cleanup_failure_stops_before_retry() {
+        let (msi, log) = synthetic_msi_paths("msi-cleanup-fails");
+        let mut calls = Vec::new();
+        let result = install_podman_msi(&msi, &log, |verb, _msi, _log| {
+            calls.push(verb[0].to_string());
+            match calls.len() {
+                1 => Err(MsiexecFailure::Exit(1603)),
+                2 => Err(MsiexecFailure::Exit(1619)),
+                _ => panic!("cleanup failure must stop before retrying install"),
+            }
+        });
+
+        let problem = result.expect_err("cleanup failure must be reported");
+        assert_eq!(calls, ["/i", "/x"]);
+        let detail = problem
+            .detail
+            .expect("developer detail keeps msiexec evidence");
+        assert!(detail.contains("msiexec /x"), "{detail}");
+        assert!(detail.contains("exit code 1619"), "{detail}");
+        assert!(detail.contains(&log.display().to_string()), "{detail}");
+        let _ = std::fs::remove_dir_all(msi.parent().unwrap());
+    }
+
+    #[test]
+    fn windows_msi_spawn_failure_is_not_reported_as_exit_code_minus_one() {
+        let (msi, log) = synthetic_msi_paths("msi-spawn-fails");
+        let result = install_podman_msi(&msi, &log, |_verb, _msi, _log| {
+            Err(MsiexecFailure::Start("program not found".into()))
+        });
+
+        let problem = result.expect_err("spawn failure must be reported");
+        assert!(problem.said.contains("could not start"), "{problem:?}");
+        let detail = problem
+            .detail
+            .expect("developer detail keeps spawn evidence");
+        assert!(
+            detail.contains("could not start: program not found"),
+            "{detail}"
+        );
+        assert!(!detail.contains("exit code -1"), "{detail}");
+        let _ = std::fs::remove_dir_all(msi.parent().unwrap());
+    }
+
+    #[test]
+    fn windows_msi_1603_recovery_removes_registration_then_retries_install() {
+        let (msi, log) = synthetic_msi_paths("msi-recovery-succeeds");
+        let mut calls = Vec::new();
+        install_podman_msi(&msi, &log, |verb, _msi, _log| {
+            calls.push(verb[0].to_string());
+            match calls.len() {
+                1 => Err(MsiexecFailure::Exit(1603)),
+                2 | 3 => Ok(()),
+                _ => panic!("unexpected extra msiexec call"),
+            }
+        })
+        .expect("cleanup and retry should recover the broken registration");
+
+        assert_eq!(calls, ["/i", "/x", "/i"]);
+        let _ = std::fs::remove_dir_all(msi.parent().unwrap());
+    }
+
+    #[test]
+    fn windows_msi_non_recovery_install_failure_stops_without_cleanup() {
+        let (msi, log) = synthetic_msi_paths("msi-install-fails");
+        let mut calls = Vec::new();
+        let result = install_podman_msi(&msi, &log, |verb, _msi, _log| {
+            calls.push(verb[0].to_string());
+            Err(MsiexecFailure::Exit(1619))
+        });
+
+        let problem = result.expect_err("non-1603 install failure must be reported");
+        assert_eq!(calls, ["/i"]);
+        let detail = problem
+            .detail
+            .expect("developer detail keeps exit evidence");
+        assert!(detail.contains("msiexec /i"), "{detail}");
+        assert!(detail.contains("exit code 1619"), "{detail}");
+        let _ = std::fs::remove_dir_all(msi.parent().unwrap());
+    }
+
+    #[test]
+    fn windows_msi_recovery_uses_actual_child_process_boundary() {
+        let (msi, log) = synthetic_msi_paths("msi-process-boundary");
+        let fake = msi.parent().unwrap().join("fake-msiexec.sh");
+        let calls = msi.parent().unwrap().join("calls.txt");
+        let script = format!(
+            r#"#!/bin/sh
+set -eu
+echo "$1|$2|$3|$4|$5|$6" >> '{}'
+case "$1" in
+  /i)
+    count=$(grep -c '^/i|' '{}' 2>/dev/null || true)
+    if [ "$count" = 1 ]; then echo MSI_EXIT=1603; exit 67; fi
+    exit 0
+    ;;
+  /x) exit 0 ;;
+  *) exit 99 ;;
+esac
+"#,
+            calls.display(),
+            calls.display()
+        );
+        std::fs::write(&fake, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        install_podman_msi(&msi, &log, |verb, msi, log| {
+            let output = std::process::Command::new(&fake)
+                .args(verb)
+                .arg(msi)
+                .args(["/qn", "/norestart", "/l*v"])
+                .arg(log)
+                .output()
+                .map_err(|error| MsiexecFailure::Start(error.to_string()))?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // Unix test processes cannot return Windows Installer's 1603 directly: exit
+                // statuses are truncated to 8 bits. The fake executable writes the intended
+                // Windows code so this process-boundary proof can still exercise the production
+                // recovery branch.
+                let code = stdout
+                    .trim()
+                    .strip_prefix("MSI_EXIT=")
+                    .and_then(|value| value.parse::<i32>().ok())
+                    .unwrap_or_else(|| output.status.code().unwrap_or(-1));
+                Err(MsiexecFailure::Exit(code))
+            }
+        })
+        .expect("the fake executable should exercise the production recovery order");
+
+        let calls = std::fs::read_to_string(&calls).unwrap();
+        assert!(
+            calls.contains(&format!(
+                "/i|{}|/qn|/norestart|/l*v|{}",
+                msi.display(),
+                log.display()
+            )),
+            "{calls}"
+        );
+        assert!(
+            calls.contains(&format!(
+                "/x|{}|/qn|/norestart|/l*v|{}",
+                msi.display(),
+                log.display()
+            )),
+            "{calls}"
+        );
+        assert_eq!(calls.lines().count(), 3, "{calls}");
+        let _ = std::fs::remove_dir_all(msi.parent().unwrap());
     }
 
     /// Podman looks a provider up by name, so this one is not negotiable.
