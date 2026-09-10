@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Read, Write};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -39,6 +39,31 @@ fn main() {
                 "{}",
                 r#"{"services":{"supervisor":{"environment":{"COMPUTER_NAMESPACE":"openbot"}}}}"#
             );
+        }
+        return;
+    }
+    if SCENARIO == "stop-ipc" && joined.contains("config --format json") {
+        println!("{{\"services\":{{\"supervisor\":{{\"environment\":{{\"COMPUTER_NAMESPACE\":\"stop-ipc\"}}}}}}}}");
+        return;
+    }
+    if SCENARIO == "stop-ipc" && (joined.starts_with("ps ") || joined.contains("stop supervisor")) {
+        return;
+    }
+    if SCENARIO == "stop-ipc" && joined == "compose -f docker-compose.yml --profile harness down" {
+        let mut barrier = std::net::TcpStream::connect(
+            std::fs::read_to_string("stop-barrier-address")
+                .unwrap()
+                .trim(),
+        )
+        .unwrap();
+        barrier
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        let mut result = [0];
+        barrier.read_exact(&mut result).unwrap();
+        if result[0] != 0 {
+            eprintln!("synthetic Compose refusal");
+            std::process::exit(71);
         }
         return;
     }

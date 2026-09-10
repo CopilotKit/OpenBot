@@ -974,8 +974,15 @@ async fn start_stack_inner<R: tauri::Runtime>(
 /// running: its files and browser profile are volumes, and killing it here would sign somebody out
 /// of everything their Bot had logged into.
 #[tauri::command]
-fn stop_stack(app: tauri::AppHandle, root: String) -> Result<(), String> {
-    stop_everything(&app, &stack::root_from(&root))
+async fn stop_stack<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    root: String,
+) -> Result<(), String> {
+    // Inventory, held-child cleanup and Compose all block. Keep the complete shutdown off both
+    // Tauri's event loop and its async workers, and resolve IPC only when shutdown has finished.
+    tauri::async_runtime::spawn_blocking(move || stop_everything(&app, &stack::root_from(&root)))
+        .await
+        .map_err(|error| format!("the shutdown did not run: {error}"))?
 }
 
 #[cfg(test)]
@@ -994,7 +1001,10 @@ fn shutdown_root(shell: &Shell, fallback_root: &Path) -> PathBuf {
 /// One implementation, because there are three ways to ask for it (the button, the menu bar, and
 /// quitting) and a person who used one of them and got a different amount of stopping would be
 /// right to call that a bug.
-fn stop_everything(app: &tauri::AppHandle, fallback_root: &Path) -> Result<(), String> {
+fn stop_everything<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    fallback_root: &Path,
+) -> Result<(), String> {
     let shell = app.state::<Shell>();
     let root = root_for_stop(&shell, fallback_root);
     stop_everything_with(
@@ -2509,6 +2519,8 @@ fn main() {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    include!("stop_ipc_tests.rs");
 
     #[test]
     fn responsive_quit_returns_while_cleanup_is_blocked_then_exits_in_order() {
