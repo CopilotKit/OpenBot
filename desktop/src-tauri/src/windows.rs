@@ -127,20 +127,8 @@ impl Blocker {
 }
 
 /// The persisted step, beside the rest of the app's data.
-/// Whether WSL has a kernel to run, given what `wsl --version` said and whether the kernel file
-/// that the update package installs is on disk.
-///
-/// Both are asked because either alone is wrong. `wsl --version` is absent from the older inbox
-/// `wsl.exe` on builds where WSL2 nevertheless works perfectly, having had its kernel installed by
-/// the standalone update package, so refusing on that alone would block a machine that is fine.
-/// The kernel file alone is not enough either: a modern WSL reports its kernel version without
-/// that path necessarily being the one in use.
-///
-/// So this only says "no kernel" when **neither** answers, which is the state actually measured on
-/// a Server 2022 machine where `wsl --install` had enabled the features and done nothing else.
-/// The caller must check probe success first: command failure is not evidence of a missing kernel.
 fn default_wsl_version_probe_command() -> &'static str {
-    "$ErrorActionPreference = 'Stop';      $key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';      if (Test-Path $key) {        $value = (Get-ItemProperty -Path $key -Name DefaultVersion -ErrorAction SilentlyContinue).DefaultVersion;        if ($null -eq $value) { 2 } else { $value }      } else { 2 }"
+    "$ErrorActionPreference = 'Stop';      $path = 'Software\Microsoft\Windows\CurrentVersion\Lxss';      $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path);      if ($null -eq $key) { 2; return };      try {        $value = $key.GetValue('DefaultVersion', $null);        if ($null -eq $value) { 2; return };        if ($value -isnot [int]) { throw 'DefaultVersion is not a registry DWORD' };        $value      } finally {        $key.Dispose()      }"
 }
 
 fn parse_default_wsl_version(operation: &str, output: &str) -> Result<u8, Problem> {
@@ -154,6 +142,18 @@ fn parse_default_wsl_version(operation: &str, output: &str) -> Result<u8, Proble
     }
 }
 
+/// Whether WSL has a kernel to run, given what `wsl --version` said and whether the kernel file
+/// that the update package installs is on disk.
+///
+/// Both are asked because either alone is wrong. `wsl --version` is absent from the older inbox
+/// `wsl.exe` on builds where WSL2 nevertheless works perfectly, having had its kernel installed by
+/// the standalone update package, so refusing on that alone would block a machine that is fine.
+/// The kernel file alone is not enough either: a modern WSL reports its kernel version without
+/// that path necessarily being the one in use.
+///
+/// So this only says "no kernel" when **neither** answers, which is the state actually measured on
+/// a Server 2022 machine where `wsl --install` had enabled the features and done nothing else.
+/// The caller must check probe success first: command failure is not evidence of a missing kernel.
 pub fn wsl_kernel_present(version_output: &str, kernel_file_exists: bool) -> bool {
     if kernel_file_exists {
         return true;
