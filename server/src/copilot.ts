@@ -977,6 +977,9 @@ function remoteAgentWithStandingRole(
 const RESERVED_MASTRA_CONTEXT_DESCRIPTIONS = new Set([
   "OpenBot standing role",
   "OpenBot granted tools guidance",
+  "OpenBot Bot id",
+  "OpenBot deployment tools",
+  "OpenBot signed run assertion",
 ]);
 
 function callerMastraContext(context: AgentContext[]): AgentContext[] {
