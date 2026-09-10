@@ -1074,6 +1074,11 @@ class CloningRemoteAgent extends AbstractAgent {
     return this.remote.getCapabilities?.() ?? {};
   }
 
+  abortRun(): void {
+    this.remote.abortRun();
+    super.abortRun();
+  }
+
   clone() {
     const clonedRemote = this.remote.clone() as AbstractAgent;
     const clone = new CloningRemoteAgent(

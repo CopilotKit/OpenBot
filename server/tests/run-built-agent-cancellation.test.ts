@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import { EventType, HttpAgent } from "@ag-ui/client";
 import type { AbstractAgent, BaseEvent, RunAgentInput } from "@ag-ui/client";
 import { LLMock } from "@copilotkit/aimock";
 import { BuiltInAgent } from "@copilotkit/runtime/v2";
@@ -351,4 +352,186 @@ test("an aborted pending run does not cancel its clone or the next run on the sa
     gate.resolve(null);
     first.subscription.unsubscribe();
   }
+});
+
+async function remoteSseEndpoint() {
+  const entered = deferred<void>();
+  const aborted = deferred<void>();
+  const release = deferred<void>();
+  const finished = deferred<void>();
+  let requests = 0;
+  const bodies: RunAgentInput[] = [];
+  const encoder = new TextEncoder();
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      requests++;
+      const body = (await request.clone().json()) as RunAgentInput;
+      bodies.push(body);
+      request.signal.addEventListener("abort", () => aborted.resolve(), {
+        once: true,
+      });
+      entered.resolve();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: EventType.RUN_STARTED,
+                threadId: body.threadId,
+                runId: body.runId,
+                input: body,
+              })}\n\n`,
+            ),
+          );
+          await release.promise;
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: EventType.RUN_FINISHED,
+                threadId: body.threadId,
+                runId: body.runId,
+                result: "released",
+              })}\n\n`,
+            ),
+          );
+          controller.close();
+          finished.resolve();
+        },
+        cancel() {
+          aborted.resolve();
+        },
+      });
+      return new Response(stream, {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    server,
+    entered,
+    aborted,
+    release,
+    finished,
+    url: server.url.href,
+    counts: () => ({ requests, bodies: [...bodies] }),
+    async [Symbol.asyncDispose]() {
+      release.resolve();
+      await server.stop(true);
+    },
+  };
+}
+
+type RemoteSseEndpoint = Awaited<ReturnType<typeof remoteSseEndpoint>>;
+
+async function resolvesWithin<T>(
+  promise: Promise<T>,
+  ms: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runRemoteAndStop(
+  label: string,
+  agent: AbstractAgent,
+  endpoint: RemoteSseEndpoint,
+) {
+  const started = deferred<void>();
+  const run = agent
+    .runAgent(input, {
+      onRunStartedEvent() {
+        started.resolve();
+      },
+    })
+    .catch((error: unknown) => ({
+      error: String(error instanceof Error ? error.message : error),
+    }));
+  await bounded(endpoint.entered.promise, `${label} request arrival`);
+  await bounded(started.promise, `${label} RUN_STARTED event`);
+  const closedBeforeStop = await resolvesWithin(endpoint.aborted.promise, 100);
+  agent.abortRun();
+  const closedAfterStop = await resolvesWithin(endpoint.aborted.promise, 1000);
+  endpoint.release.resolve();
+  await Promise.race([run, resolvesWithin(endpoint.finished.promise, 1500)]);
+  return { closedBeforeStop, closedAfterStop, ...endpoint.counts() };
+}
+
+test("Stop aborts a production wrapped remote AG-UI HTTP stream", async () => {
+  const never = Promise.withResolvers<void>();
+  expect(await resolvesWithin(never.promise, 20)).toBe(false);
+  expect(await resolvesWithin(Promise.resolve(), 1500)).toBe(true);
+
+  await using directEndpoint = await remoteSseEndpoint();
+  const direct = await runRemoteAndStop(
+    "direct remote",
+    new HttpAgent({ url: directEndpoint.url }),
+    directEndpoint,
+  );
+  expect(direct.closedBeforeStop).toBe(false);
+  expect(direct.closedAfterStop).toBe(true);
+  expect(direct.requests).toBe(1);
+  expect(direct.bodies[0]?.runId).toBe(input.runId);
+  expect(typeof direct.bodies[0]?.threadId).toBe("string");
+
+  await using wrappedEndpoint = await remoteSseEndpoint();
+  const agents = await buildAgents(
+    [
+      {
+        id: "remote-fixture",
+        name: "Remote Fixture",
+        type: "remote_ag_ui",
+        endpoint: wrappedEndpoint.url,
+        standingMessage: {
+          id: "standing-role:remote-fixture",
+          role: "system",
+          content: "You are Remote Fixture.",
+        },
+      },
+    ],
+    model,
+    "unused-synthetic-key",
+  );
+  const wrapped = agents["remote-fixture"];
+  if (!wrapped) throw new Error("remote fixture not built");
+
+  const wrappedResult = await runRemoteAndStop(
+    "production wrapped remote",
+    wrapped,
+    wrappedEndpoint,
+  );
+  expect(wrappedResult.closedBeforeStop).toBe(false);
+  expect(wrappedResult.closedAfterStop).toBe(true);
+  expect(wrappedResult.requests).toBe(1);
+  expect(wrappedResult.bodies[0]?.runId).toBe(input.runId);
+  expect(typeof wrappedResult.bodies[0]?.threadId).toBe("string");
+  expect(wrappedResult.bodies[0]?.messages[0]).toMatchObject({
+    id: "standing-role:remote-fixture",
+    role: "system",
+  });
+  console.log(
+    JSON.stringify({
+      proof: "production-wrapped-remote-http-stop",
+      direct: {
+        closedBeforeStop: direct.closedBeforeStop,
+        closedAfterStop: direct.closedAfterStop,
+        requests: direct.requests,
+      },
+      wrapped: {
+        closedBeforeStop: wrappedResult.closedBeforeStop,
+        closedAfterStop: wrappedResult.closedAfterStop,
+        requests: wrappedResult.requests,
+      },
+    }),
+  );
 });
