@@ -377,3 +377,70 @@ test("adding the app back does not restore a connection nobody re-granted", asyn
   ).rejects.toThrow(/have not connected/i);
   expect(reached).toEqual([actionName]);
 });
+
+/**
+ * THE TRAIL, WHERE NOBODY WAS ASKING.
+ *
+ * An empty string in a field whose purpose is to name who did something is worse than an absent
+ * field: it reads as a value, and a reader counting rows by actor gets a person called "".
+ *
+ * `reachedAs` and `actor` are the two on this row, and both are the run's actor verbatim. A brokered
+ * app is reached AS THE PERSON, so a run nobody could be attributed to has no name to put in either
+ * — and the refusal is recorded, which is exactly when the trail matters.
+ */
+test("an unattributed run is recorded as unattributed rather than as a blank", async () => {
+  await seedApp();
+  useAnsweringClient();
+
+  await expect(
+    store.callTool({ ref, args: {}, botId, actorId: "" }),
+  ).rejects.toThrow(/not attributed to anybody/i);
+  expect(reached).toEqual([]);
+
+  const failed = recordedOfType("mcp.call_failed");
+  expect(failed).toHaveLength(1);
+  expect(failed[0].payload).toMatchObject({
+    actor: "unattributed",
+    reachedAs: "unattributed",
+  });
+  // Not "deployment" either: this call did not go out on a shared credential, it did not go out at
+  // all, and saying the deployment reached the app would assert an attribution that never happened.
+  expect(failed[0].payload.reachedAs).not.toBe("deployment");
+});
+
+/**
+ * THE TRAIL, WHERE THE DEPLOYMENT WAS THE ONE ACTING.
+ *
+ * `refreshTools` defaults its actor to the empty string, and `addServer` and `addCustomServer` both
+ * take that default — deliberately, because that argument doubles as the credential to list with and
+ * nobody can have connected an app in the moment it is added. So the absence is real and permanent,
+ * and what the trail owes a reader is the distinction: not a person, and not nobody either, but the
+ * deployment refreshing on its own behalf. `reachedAs` already spells that "deployment".
+ */
+test("the refresh that follows an add is attributed to the deployment", async () => {
+  await seedApp();
+  // A different action, so the granted one is left held and not advertised — which is the audit row
+  // under test.
+  useAnsweringClient({
+    listActions: async () => [
+      {
+        slug: "APP_SOMETHING_ELSE",
+        description: "Not the one anybody holds.",
+        version: "20260903_00",
+      },
+    ],
+  });
+
+  // No actor, which is exactly what the add path passes.
+  await store.refreshTools(toolkit);
+
+  const stranded = events.filter(
+    (event) =>
+      (event.payload as { change?: string }).change === "grants_not_advertised",
+  );
+  expect(stranded).toHaveLength(1);
+  expect(stranded[0].payload).toMatchObject({
+    actor: "deployment",
+    refs: [ref],
+  });
+});

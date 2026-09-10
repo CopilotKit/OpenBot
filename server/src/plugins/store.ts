@@ -344,15 +344,42 @@ const iso = (value: Date | string | null): string | null =>
   value === null ? null : value instanceof Date ? value.toISOString() : value;
 
 /**
+ * The two things an actor field says when the actor is not a person, and they are not the same
+ * thing.
+ *
+ * CRITERION. A field whose purpose is to name who did something must never be written as the empty
+ * string. An absent field reads as absent; `""` reads as a value, so a reader grouping the trail by
+ * actor gets a person called nothing, and every count of "acts by X" is quietly wrong about them.
+ *
+ * `deployment` is a positive answer: nobody was asking because the deployment itself acted — a
+ * shared credential, a public endpoint, a refresh it ran on its own behalf immediately after an app
+ * was added. `unattributed` is the opposite, and the distinction is the whole point of having two:
+ * something happened that SHOULD have had a person behind it and this deployment could not say who.
+ * `identifyActor` answers `{ id: "" }` for exactly that, and the run is then refused — which is
+ * precisely the moment the trail is worth reading, so it must not be the moment it goes blank.
+ *
+ * Neither is an address, so neither can collide with a user id: every actor written here otherwise
+ * is `users.id` or the email a session resolved to.
+ */
+const DEPLOYMENT_ACTOR = "deployment";
+const UNATTRIBUTED_ACTOR = "unattributed";
+
+/**
  * Whose account this call went out as, for the trail.
  *
  * Reads the resolved descriptor rather than re-deriving from the entry's auth kind. That derivation
  * had no answer for a Composio app — the entry is null, so it fell through to `deployment` for a call
  * that ran in one person's own mailbox, which is the trail being wrong about the one thing a
  * per-person connector exists for.
+ *
+ * A person-reached server with no actor is `unattributed` and never `deployment`: the call did not
+ * go out on a shared credential, it did not go out at all, and naming the deployment would assert
+ * an attribution that never happened. See {@link DEPLOYMENT_ACTOR}.
  */
 const reachedAsFor = (access: ServerAccess, actorId: string): string =>
-  access.reachedAs === "person" ? actorId : "deployment";
+  access.reachedAs === "person"
+    ? actorId || UNATTRIBUTED_ACTOR
+    : DEPLOYMENT_ACTOR;
 
 /**
  * Where this server actually is, when the stored row and the catalogue disagree.
@@ -2202,6 +2229,23 @@ export function createPluginStore(options: PluginStoreOptions) {
     ): Promise<{ tools: number }> {
       const { row, entry, access } = await requireServer(serverId);
 
+      /*
+       * Who the trail says asked for this listing, which is not the same value as who to list AS.
+       *
+       * CRITERION. The two audit rows below must never name an actor of `""`.
+       *
+       * REASON. `actorId` does double duty: it selects the person's credential where listing needs
+       * one, and it is copied into those rows. The add paths pass neither, deliberately — nobody can
+       * have connected an app in the second it is added, and the comment above this method says why
+       * requiring one there was wrong. So the absence is permanent and correct for the credential,
+       * and meaningless for the trail, which was left writing `actor: ""` on every row an add
+       * produced. The deployment refreshing on its own behalf is a real answer and `reachedAs`
+       * already spells it that way; see {@link DEPLOYMENT_ACTOR}. Held separately rather than
+       * defaulting the parameter, because defaulting it would hand `connectionTokenFor` a person
+       * called "deployment" to look a grant up by.
+       */
+      const auditActor = actorId || DEPLOYMENT_ACTOR;
+
       // How a row is reached is resolved once, in `requireServer`. Derived from the entry here,
       // a Composio app — which has no entry — was dialled as MCP at `composio://gmail`.
       const transport = transportFor(access.transport);
@@ -2445,7 +2489,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetType: "mcp_server",
           targetId: serverId,
           payload: {
-            actor: actorId,
+            actor: auditActor,
             change: "grants_not_advertised",
             server: serverId,
             // The refs, because that is what a grant is keyed on and what an administrator revokes.
@@ -2475,7 +2519,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetType: "mcp_server",
           targetId: serverId,
           payload: {
-            actor: actorId,
+            actor: auditActor,
             change: "unlisted_tools_advertised",
             server: serverId,
             tools: unlisted,
@@ -3287,6 +3331,17 @@ export function createPluginStore(options: PluginStoreOptions) {
         throw new PluginRefusedError(`${input.ref} is not a tool.`, null);
       }
 
+      /*
+       * Who the trail says made this call, which is not what the call is made AS.
+       *
+       * `input.actorId` stays the value every gate is decided on, and the empty string must go on
+       * matching no grant and no connection anywhere. This is only what the row says: a run nobody
+       * could be attributed to is `unattributed` rather than blank, on the criterion at
+       * {@link DEPLOYMENT_ACTOR}, and never `deployment` — a run this deployment could not put a
+       * name to is not the deployment having acted.
+       */
+      const auditActor = input.actorId || UNATTRIBUTED_ACTOR;
+
       const decision = await this.decide("mcp", input.ref, input.botId);
       if (!decision.allowed) {
         await recordAuditEvent(auditStore, {
@@ -3295,7 +3350,7 @@ export function createPluginStore(options: PluginStoreOptions) {
           targetId: input.ref,
           ...(input.initiator ? { initiator: input.initiator } : {}),
           payload: {
-            actor: input.actorId,
+            actor: auditActor,
             bot: input.botId,
             server: serverId,
             tool: toolName,
@@ -3402,7 +3457,7 @@ export function createPluginStore(options: PluginStoreOptions) {
        * the row goes down once, after the outcome exists.
        */
       const decided = {
-        actor: input.actorId,
+        actor: auditActor,
         bot: input.botId,
         server: serverId,
         tool: toolName,
