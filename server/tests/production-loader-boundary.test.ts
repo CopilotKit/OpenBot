@@ -81,6 +81,8 @@ describe("production server loader boundary", () => {
     expect(output).not.toContain("require() async module");
     expect(output).not.toContain("OPENBOT_SERVER_LOADER_SMOKE");
     expect(output).toContain("Failed query: insert into");
-    expect(output).toMatch(/Connection closed|Failed to connect|ERR_POSTGRES_CONNECTION_REFUSED/);
+    expect(output).toMatch(
+      /Connection closed|Failed to connect|ERR_POSTGRES_CONNECTION_REFUSED/,
+    );
   });
 });
