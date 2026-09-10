@@ -106,6 +106,16 @@ export function parseAgentInput(
       if (!/^[A-Za-z0-9-]+$/.test(header)) {
         return { ok: false, error: "That is not a valid header name." };
       }
+      // Refused here rather than discovered on the first run. This value is encrypted and stored,
+      // and then sent as a header on every turn the Bot takes; one that cannot be a header value
+      // throws inside `fetch` every one of those times, long after the form said it was saved.
+      const unsendable = unsendableHeaderValue(value);
+      if (unsendable) {
+        return {
+          ok: false,
+          error: `That key contains ${unsendable}, so it cannot be sent as a header.`,
+        };
+      }
       auth = { header, value };
     }
   }
@@ -118,6 +128,31 @@ export function parseAgentInput(
 
 function isAgentInputObject(input: unknown): input is AgentInputObject {
   return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+/**
+ * What in this value stops it being a header, or null when nothing does.
+ *
+ * `new Headers()` refuses a line break, a NUL, and any code point above U+00FF, and it refuses them
+ * by throwing a TypeError from inside `fetch` — which is not a decision this deployment gets to
+ * take part in. Both surfaces below take a header value from the same box on the same form and
+ * neither looked, so the throw arrived somewhere that reads as something else entirely: on the
+ * connection test it lands in the catch written for a dead host, and the person is told "this server
+ * could not reach that address", which sends them to their tunnel and their firewall over a key
+ * they had just pasted with a wrapped line in it. A hyphen a document turned into an en dash does
+ * the same thing, and looks like nothing at all in a password box.
+ *
+ * The description never contains the value. This is asked of a credential on one of the two paths,
+ * and one character of a secret in an error message is one character too many.
+ */
+function unsendableHeaderValue(value: string): string | null {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code === 0x0a || code === 0x0d) return "a line break";
+    if (code === 0) return "a null character";
+    if (code > 0xff) return "a character that cannot go in a header value";
+  }
+  return null;
 }
 
 /**
@@ -175,6 +210,13 @@ export function parseConnectionHeaders(
       return {
         ok: false,
         error: `Header "${name}" must be at most 4096 characters.`,
+      };
+    }
+    const unsendable = unsendableHeaderValue(value);
+    if (unsendable) {
+      return {
+        ok: false,
+        error: `Header "${name}" contains ${unsendable}, so it cannot be sent.`,
       };
     }
     headers[name] = value;

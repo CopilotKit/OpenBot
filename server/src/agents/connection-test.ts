@@ -20,6 +20,41 @@ const TEST_TIMEOUT_MS = 15_000;
 /** Enough of the stream to prove it is an agent. Reading it all could mean reading a whole reply. */
 const MAX_BYTES = 8_000;
 
+/**
+ * The opening of the answer, and then stop reading.
+ *
+ * The cap above was applied to a string this process had already taken in full, because
+ * `response.text()` reads a body to its end. An agent that streams — which is what an agent does —
+ * therefore held the form open for as long as its run took, and if that outlasted the timeout the
+ * abort came back through `text()` as a rejected read: `ok: false`, status 200, "The agent started
+ * answering and the connection broke." Nothing broke. The agent had answered correctly, in the first
+ * two events, and the person registering it was told to go and look at their own service.
+ *
+ * Counted in bytes, which is what the cap is named in and what a chunk off the wire is measured in.
+ * The chunk that crosses the cap is kept whole rather than cut at it: it is one read past the cap at
+ * most, and a cut through a multi-byte character would put a replacement character in the middle of
+ * a line the scan is about to read.
+ */
+async function readOpening(body: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  try {
+    while (bytes < MAX_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    // The agent is very likely still writing. Nothing is going to read the rest, and leaving it open
+    // holds a socket into somebody's agent for as long as that run cares to go on.
+    void reader.cancel().catch(() => undefined);
+  }
+  return text;
+}
+
 export type ConnectionTestResult =
   | {
       ok: true;
@@ -152,7 +187,7 @@ export async function testAgentConnection(
 
   let body: string;
   try {
-    body = (await response.text()).slice(0, MAX_BYTES);
+    body = response.body ? await readOpening(response.body) : "";
   } catch {
     return {
       ok: false,
