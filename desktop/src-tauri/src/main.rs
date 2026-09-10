@@ -32,6 +32,8 @@ struct Shell {
     /// alive beside the new one, both answering the same death, and a process restarted twice is
     /// one process and one orphan holding a port.
     generation: std::sync::atomic::AtomicU64,
+    /// Cancellation of pending Start is independent of the hosts still serving the previous run.
+    start_generation: std::sync::atomic::AtomicU64,
     /// Stop serializes with synchronous startup side effects, never with an async wait.
     startup: Mutex<()>,
     /// A cancelled attempt must finish returning its unpublished children before another starts.
@@ -83,14 +85,14 @@ impl<'a> StartAttempt<'a> {
         })?;
         Ok(Self {
             shell,
-            generation: shell.generation.fetch_add(1, SeqCst) + 1,
+            generation: shell.start_generation.fetch_add(1, SeqCst) + 1,
         })
     }
 
     fn require_current(&self) -> Result<(), Problem> {
         if self
             .shell
-            .generation
+            .start_generation
             .load(std::sync::atomic::Ordering::SeqCst)
             == self.generation
         {
@@ -1035,6 +1037,9 @@ where
     D: FnOnce(&Path) -> Result<(), String>,
 {
     shell
+        .start_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    shell
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let _startup = shell.startup.lock().unwrap();
@@ -1314,7 +1319,7 @@ fn finish_host_start_locked(
         );
     }
     attempt.require_current()?;
-    Ok(attempt.generation)
+    Ok(shell.generation.load(std::sync::atomic::Ordering::SeqCst))
 }
 
 fn require_no_exited_compose_services(
@@ -1358,6 +1363,13 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
 {
     attempt.require_current()?;
+    // Preflight can fail while the previous run still owns live hosts. Retire that watcher only
+    // when replacement actually begins reclaiming them, before taking the children lock, so a
+    // restart already in progress hands its child to this cleanup and never adopts the new run.
+    attempt
+        .shell
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     cleanup_host_state(attempt.shell, root, cleanup).inspect_err(|problem| {
         report(app, "cleanup", false, problem_detail(problem.clone()));
     })
@@ -1375,6 +1387,9 @@ where
     C: FnOnce(&Path) -> Result<usize, openbot_desktop_lib::problem::Problem>,
     D: FnOnce(&Path) -> Result<(), String>,
 {
+    shell
+        .start_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     shell
         .generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -2089,7 +2104,7 @@ fn supervise_host_processes<R: tauri::Runtime>(
     // already wrong, and a credential prompt at that moment is the worst time to ask for one.
     secrets: stack::Secrets,
     generation: u64,
-) {
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         eprintln!(
             "[watch] supervising {} host processes",
@@ -2198,7 +2213,7 @@ fn supervise_host_processes<R: tauri::Runtime>(
                 }
             }
         }
-    });
+    })
 }
 
 /// The same lock covers generation validation, launch, publication, and owned cleanup on every
@@ -4942,6 +4957,205 @@ mod tests {
     }
 
     #[cfg(unix)]
+    struct SupervisionFixture {
+        host: InitialHostFixture,
+        app: tauri::App<tauri::test::MockRuntime>,
+        watcher: Option<std::thread::JoinHandle<()>>,
+    }
+
+    #[cfg(unix)]
+    impl Drop for SupervisionFixture {
+        fn drop(&mut self) {
+            let shell = self.app.state::<Shell>();
+            shell
+                .generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            stop_held_process_handles(
+                &mut shell
+                    .children
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            )
+            .unwrap();
+            *shell
+                .root
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            if let Some(watcher) = self.watcher.take() {
+                watcher.join().unwrap();
+            }
+            eprintln!(
+                "{}",
+                serde_json::json!({"supervisionCleanup": self.host.root,
+                "heldChildren": shell.children.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len(), "watcherJoined": true})
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    fn failed_retry_keeps_survivor_supervised(failed_role: &str) {
+        let host = InitialHostFixture::new("success");
+        std::fs::write(
+            &host.bun,
+            "#!/bin/sh\nprintf '%s' \"$$\" > child.pid\nif [ -f fail ]; then exit 71; fi\nexec /bin/sleep 300\n",
+        ).unwrap();
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .invoke_handler(tauri::generate_handler![start_stack])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let mut fixture = SupervisionFixture {
+            host,
+            app,
+            watcher: None,
+        };
+        let shell = fixture.app.state::<Shell>();
+        let setup = "tauri://localhost/failed-retry-setup";
+        *shell.setup_url.lock().unwrap() = Some(setup.into());
+        let attempt = StartAttempt::begin(&shell).unwrap();
+        let generation = tauri::async_runtime::block_on(start_host_processes(
+            &attempt,
+            &fixture.host.root,
+            &fixture.host.root.join(".logs"),
+            &fixture.host.bun,
+            &stack::Secrets::new(),
+            |name| fixture.host.observe(name),
+            |_| Ok(()),
+        ))
+        .unwrap();
+        drop(attempt);
+        fixture.watcher = Some(supervise_host_processes(
+            fixture.app.handle().clone(),
+            fixture.host.root.clone(),
+            fixture.host.root.join(".logs"),
+            fixture.host.bun.clone(),
+            stack::Secrets::new(),
+            generation,
+        ));
+        // The actual watcher exhausts its actual budget and backoffs after this role fails.
+        std::fs::write(fixture.host.root.join(failed_role).join("fail"), "").unwrap();
+        {
+            let mut children = shell.children.lock().unwrap();
+            children
+                .iter_mut()
+                .find(|(name, _)| *name == failed_role)
+                .unwrap()
+                .1
+                .kill()
+                .unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(70);
+        loop {
+            if shell
+                .last_failure
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|p| p.said.contains("could not be started again"))
+                && window.url().unwrap().as_str() == setup
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "watcher did not produce recovery setup"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let survivor_pid = {
+            let mut children = shell.children.lock().unwrap();
+            assert!(!children.iter().any(|(name, _)| *name == failed_role));
+            let (_, survivor) = children
+                .iter_mut()
+                .find(|(name, _)| *name == "worker")
+                .unwrap();
+            assert!(survivor.try_wait().unwrap().is_none());
+            survivor.id()
+        };
+        // Deliberate invalid input rejects before saved-secret/deployment/engine access. This is
+        // the generated production Start handler, after recovery has exposed ordinary Start.
+        let problem = tauri::test::get_ipc_response(&window, tauri::webview::InvokeRequest {
+            cmd: "start_stack".into(), callback: tauri::ipc::CallbackFn(0), error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(serde_json::json!({
+                "root": fixture.host.root, "apiUrl": "https://intelligence.example.test",
+                "gatewayWsUrl": "wss://gateway.example.test", "apiKey": "synthetic-unused-key",
+                "model": {"provider": "synthetic-invalid-provider", "login": "api-key"}, "harness": null,
+            })),
+            headers: Default::default(), invoke_key: tauri::test::INVOKE_KEY.into(),
+        }).expect_err("credential preflight must reject the synthetic provider");
+        assert!(problem["said"]
+            .as_str()
+            .unwrap()
+            .contains("synthetic-invalid-provider"));
+        assert_eq!(
+            shell.root.lock().unwrap().as_ref(),
+            Some(&fixture.host.root)
+        );
+        assert!(!shell.starting.load(std::sync::atomic::Ordering::SeqCst));
+        {
+            let mut children = shell.children.lock().unwrap();
+            let (_, survivor) = children
+                .iter_mut()
+                .find(|(name, _)| *name == "worker")
+                .unwrap();
+            assert_eq!(survivor.id(), survivor_pid);
+            assert!(
+                survivor.try_wait().unwrap().is_none(),
+                "preflight unexpectedly reclaimed survivor"
+            );
+            survivor.kill().unwrap();
+        }
+        // A subsequent real child death must still cause the existing watcher to restart it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        let replacement = loop {
+            let replacement = shell
+                .children
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|(name, child)| *name == "worker" && child.id() != survivor_pid)
+                .and_then(|(_, child)| child.try_wait().unwrap().is_none().then_some(child.id()));
+            if replacement.is_some()
+                || fixture.watcher.as_ref().unwrap().is_finished()
+                || std::time::Instant::now() >= deadline
+            {
+                break replacement;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "failedRole": failed_role, "recoveryUrl": window.url().unwrap().as_str(),
+                "ipcError": problem, "survivorPid": survivor_pid, "replacementPid": replacement,
+                "watcherRetired": fixture.watcher.as_ref().unwrap().is_finished(),
+                "generationBefore": generation,
+                "generationAfterPreflight": shell.generation.load(std::sync::atomic::Ordering::SeqCst),
+            })
+        );
+        assert!(
+            replacement.is_some(),
+            "failed retry preflight abandoned the surviving host's watcher"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_retry_after_server_exhaustion_keeps_survivor_supervised() {
+        failed_retry_keeps_survivor_supervised("server");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_retry_after_app_exhaustion_keeps_survivor_supervised() {
+        failed_retry_keeps_survivor_supervised("app");
+    }
+
+    #[cfg(unix)]
     fn initial_host_case(mode: &'static str) {
         let fixture = InitialHostFixture::new(mode);
         let shell = Shell::default();
@@ -5131,7 +5345,7 @@ mod tests {
 
     #[test]
     fn initial_start_side_effects_serialize_with_stop_and_quit_cleanup() {
-        use std::sync::{atomic::Ordering::SeqCst, Arc};
+        use std::sync::Arc;
         for quitting in [false, true] {
             let shell = Arc::new(Shell::default());
             let attempt = StartAttempt::begin(&shell).unwrap();
@@ -5157,7 +5371,7 @@ mod tests {
                 })
             };
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while shell.generation.load(SeqCst) == attempt.generation {
+            while attempt.require_current().is_ok() {
                 assert!(
                     std::time::Instant::now() < deadline,
                     "shutdown did not invalidate Start"
@@ -5250,7 +5464,7 @@ mod tests {
         assert!(shell.root.lock().unwrap().is_none());
         assert_eq!(
             shell.generation.load(std::sync::atomic::Ordering::SeqCst),
-            2
+            1
         );
         assert!(
             !restart_host_process_with(&shell, &root, "worker", 0, || panic!(
@@ -5388,7 +5602,7 @@ mod tests {
         assert!(shell.root.lock().unwrap().is_none());
         assert_eq!(
             shell.generation.load(std::sync::atomic::Ordering::SeqCst),
-            2
+            1
         );
         assert!(
             !restart_host_process_with(&shell, &root, "server", 0, || panic!(
@@ -5464,18 +5678,41 @@ mod tests {
 
     #[test]
     fn failed_retry_cleanup_retires_generation_and_retains_selected_root() {
-        let shell = Shell::default();
+        let app = tauri::test::mock_builder()
+            .manage(Shell::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let shell = app.state::<Shell>();
         let root = temp_root("retry-cleanup-failure");
         *shell.root.lock().unwrap() = Some(root.clone());
         shell
             .generation
             .store(4, std::sync::atomic::Ordering::SeqCst);
-        let problem = retire_host_processes(&shell, Path::new("unused-fallback"), |selected| {
-            assert_eq!(selected, root);
-            Err(Problem::plain("synthetic cleanup refused"))
-        })
+        let attempt = StartAttempt::begin(&shell).unwrap();
+        let _startup = attempt.lock_current().unwrap();
+        assert_eq!(
+            shell.generation.load(std::sync::atomic::Ordering::SeqCst),
+            4
+        );
+        assert!(
+            StartAttempt::begin(&shell).is_err(),
+            "replacement Starts must remain serialized"
+        );
+        let problem = cleanup_before_start(
+            app.handle(),
+            &attempt,
+            Path::new("unused-fallback"),
+            |selected| {
+                assert_eq!(selected, root);
+                Err(Problem::plain("synthetic cleanup refused"))
+            },
+        )
         .unwrap_err();
         assert_eq!(problem.said, "synthetic cleanup refused");
+        assert!(
+            attempt.require_current().is_ok(),
+            "reclaim must not cancel its own Start"
+        );
         assert_eq!(
             shell.generation.load(std::sync::atomic::Ordering::SeqCst),
             5

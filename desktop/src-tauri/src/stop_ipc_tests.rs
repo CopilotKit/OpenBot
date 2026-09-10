@@ -255,7 +255,7 @@ mod stop_ipc {
         let attempt = StartAttempt::begin(&shell).unwrap();
         let startup = attempt.lock_current().unwrap();
         let dispatch = fixture.dispatch();
-        wait_until(|| shell.generation.load(SeqCst) != attempt.generation);
+        wait_until(|| attempt.require_current().is_err());
         let cancelled = attempt.require_current().is_err();
         let pending = matches!(dispatch.response.try_recv(), Err(mpsc::TryRecvError::Empty));
         drop(startup);
