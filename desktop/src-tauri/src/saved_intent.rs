@@ -80,10 +80,11 @@ impl SavedIntent {
             self.categories.remove(&Category::OpenAiApiKey);
         }
         // write_plan_store persists the selected plan, and clears it for other selections.
+        self.categories.remove(&Category::ChatGptPlan);
         if matches!(credential, ModelCredential::None) {
+            self.model = None;
             return;
         }
-        self.categories.remove(&Category::ChatGptPlan);
         self.model = Some(match credential {
             ModelCredential::None => unreachable!("no model selection was handled above"),
             ModelCredential::OpenAi { .. } => ModelIntent::OpenAiApiKey,
@@ -455,6 +456,60 @@ mod tests {
             std::fs::remove_dir_all(root).unwrap();
         }
     }
+    #[test]
+    fn selecting_no_model_clears_the_saved_model_intent() {
+        let root = temp_root("clear-model-intent");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut secrets = BTreeMap::from([
+            (
+                "INTELLIGENCE_API_KEY".into(),
+                "synthetic-intelligence".into(),
+            ),
+            ("OPENAI_API_KEY".into(), "synthetic-openai".into()),
+        ]);
+
+        persist_configuration_with(
+            &root,
+            &BTreeMap::new(),
+            &secrets,
+            &secrets,
+            &ModelCredential::OpenAi {
+                api_key: "synthetic-openai".into(),
+            },
+            |seen_root, _| {
+                assert_eq!(seen_root, root);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            SavedIntent::read(&root).model,
+            Some(ModelIntent::OpenAiApiKey)
+        );
+
+        secrets.insert("OPENAI_API_KEY".into(), String::new());
+        persist_configuration_with(
+            &root,
+            &BTreeMap::new(),
+            &secrets,
+            &secrets,
+            &ModelCredential::None,
+            |seen_root, _| {
+                assert_eq!(seen_root, root);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let recorded = SavedIntent::read(&root);
+        assert_eq!(recorded.model, None);
+        assert!(!recorded.categories.contains(&Category::OpenAiApiKey));
+        assert!(!recorded.categories.contains(&Category::ChatGptPlan));
+        let json = std::fs::read_to_string(root.join(FILE)).unwrap();
+        assert!(!json.contains("open-ai-api-key"), "{json}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn compatible_endpoint_key_does_not_record_an_openai_provider_hint() {
         let (root, secrets, _) = fixture("compatible-intent");
