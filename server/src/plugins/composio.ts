@@ -147,10 +147,42 @@ export type ComposioActions = {
     toolkit: string,
     page: { limit: number },
   ): Promise<ComposioAction[]>;
+  /**
+   * One action, of one app, as one person, at one version.
+   *
+   * THE APP IS PART OF THE CALL AND NOT A CHECK BESIDE IT, which is the whole reason this takes a
+   * named record rather than four strings. {@link callTool} resolves the app from the connection's
+   * url and the brokered gate in `./access` looks a person's `composio_connections` row up by that
+   * same name — and then the call used to go out as the slug alone. A slug is what a LISTING
+   * recorded, so a url edited between a refresh and a call was gated on the app it names NOW and
+   * run against the app it named THEN: somebody's Slack connection satisfying the gate for a Gmail
+   * action that still runs in their Gmail. The gate and the call have to be about one fact.
+   *
+   * THE VENDOR'S WIRE CANNOT CARRY THE PAIR, so the obligation is written down here instead. The
+   * REST parameters have no toolkit field and the client's method takes the slug alone —
+   * `execute(toolSlug, params, options)` with `ToolExecuteParams` of `arguments`, `user_id`,
+   * `version` and connection overrides (`@composio/client` 0.1.0-alpha.76,
+   * `resources/tools.d.ts:41` and `:480-532`) — and the core SDK sends exactly that,
+   * `clientWithoutRetries.tools.execute(tool.slug, executeBody)` (`@composio/core` 0.18.1,
+   * `src/models/Tools.ts:1013`).
+   *
+   * SO AN IMPLEMENTATION MUST REFUSE A MISMATCH RATHER THAN FORWARD ONE, and it has what it needs
+   * to. `tools.execute` already resolves the tool by slug before running it
+   * (`src/models/Tools.ts:1163`, resolver at `:693`), and the resolved tool carries the app the
+   * vendor will actually run it against as `Tool.toolkit.slug` (`src/types/tool.types.ts:189`).
+   * Where that disagrees with `call.toolkit`, an implementation is required to throw instead of
+   * executing — which {@link callTool} already turns into a refusal with a sentence, because a
+   * throw out of here is the vendor-reported failure it is written to catch.
+   */
   execute(
-    slug: string,
-    userId: string,
-    version: string,
+    call: {
+      /** The app the connection's url names, resolved by {@link toolkitOf} at call time. */
+      toolkit: string;
+      slug: string;
+      /** Never from `args`. See the module comment. */
+      userId: string;
+      version: string;
+    },
     args: Record<string, unknown>,
   ): Promise<ComposioResult>;
 };
@@ -681,6 +713,12 @@ function reportedFailure(
  * mid-run with a person waiting; an exception ends the turn with nothing said, and the refusal is in
  * the audit trail either way.
  *
+ * THE APP THIS CALL RUNS AGAINST IS THE ONE THE URL NAMES RIGHT NOW, and it goes out WITH the call
+ * rather than being checked beside it. `toolkitOf`'s answer used to be validated and then dropped,
+ * which left the brokered gate and the vendor's call resting on two different facts — the app the
+ * url names today, and the app whose listing recorded the slug. See {@link ComposioActions.execute}
+ * for why the pair has to travel together and what an implementation owes it.
+ *
  * THREE KINDS OF FAILURE, all of them `isError: true` and each with its own sentence, because
  * `store.ts` records that sentence beside the audit row: this transport refused before dialling, the
  * vendor reported a failure — by throwing, or in the `successful` field of a 200 answer — or the
@@ -742,7 +780,10 @@ export async function callTool(
    */
   let answer: ComposioResult;
   try {
-    answer = await installed.execute(toolName, userId, version, rest);
+    answer = await installed.execute(
+      { toolkit, slug: toolName, userId, version },
+      rest,
+    );
   } catch (error) {
     // The vendor's own sentence when there is one, because a generic message costs a diagnosis.
     const thrown = error instanceof Error ? error.message.trim() : "";

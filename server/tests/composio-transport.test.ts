@@ -30,7 +30,12 @@ import { MAX_RESULT_CHARS } from "../src/plugins/mcp";
 
 afterEach(() => useComposioClient(null));
 
-type Recorded = { slug: string; userId: string; version: string };
+type Recorded = {
+  toolkit: string;
+  slug: string;
+  userId: string;
+  version: string;
+};
 
 /**
  * An answer in the shape `ToolExecuteResponseSchema` actually permits.
@@ -87,8 +92,8 @@ function recording(answers: Partial<ComposioActions> = {}): {
       listActions: answers.listActions ?? (async () => []),
       execute:
         answers.execute ??
-        (async (slug, userId, version) => {
-          calls.push({ slug, userId, version });
+        (async (call) => {
+          calls.push({ ...call });
           return answered({ ok: true });
         }),
     },
@@ -836,6 +841,7 @@ describe("calling one action", () => {
 
     expect(calls).toEqual([
       {
+        toolkit: "gmail",
         slug: "GMAIL_FETCH_EMAILS",
         userId: "user_asker",
         version: "20260903_00",
@@ -844,24 +850,61 @@ describe("calling one action", () => {
     expect(result.isError).toBe(false);
   });
 
+  test("the app goes out with the call, and follows the url when the url changes", async () => {
+    /*
+     * THE DEEPEST HOLE THIS TRANSPORT HAD. `toolkitOf` resolved the app, `accessFor` gated the
+     * person's `composio_connections` row on it, and then the call went out as the slug alone —
+     * and a slug is what a LISTING recorded, not what the url says now. A url edited between a
+     * refresh and a call was therefore gated on the app it names today and run against the app it
+     * named when the tools were last read: a person who connected Slack satisfying the gate for a
+     * Gmail action that still runs in their Gmail.
+     *
+     * Composio's wire cannot carry the pair — `ToolExecuteParams` has no toolkit field and
+     * `tools.execute(toolSlug, params)` takes the slug alone (`@composio/client` 0.1.0-alpha.76,
+     * `resources/tools.d.ts:480-493` and `:41`) — so what binds them here is that the app is an
+     * argument of the call this module makes and an implementation has to reconcile it with the
+     * tool it resolves. Asserting it is passed asserts the implementation was handed the fact it
+     * needs; asserting it FOLLOWS the url is the part a check performed and then discarded could
+     * never show, and discarding it was the defect.
+     */
+    const { client, calls } = recording();
+    useComposioClient(client);
+
+    for (const app of ["gmail", "slack"]) {
+      await callTool(
+        { url: `composio://${app}`, actorId: "user_asker" },
+        "GMAIL_FETCH_EMAILS",
+        { __version: "20260903_00" },
+      );
+    }
+
+    expect(calls.map((call) => call.toolkit)).toEqual(["gmail", "slack"]);
+  });
+
   test("the version is not passed on to the vendor as an argument", async () => {
     const seen: Record<string, unknown>[] = [];
     useComposioClient(
       recording({
-        execute: async (_slug, _userId, _version, args) => {
+        execute: async (_call, args) => {
           seen.push(args);
           return answered({});
         },
       }).client,
     );
 
+    // Held in a variable rather than written inline, because `seen` showing the version absent
+    // shows it only of whatever object the module chose to pass on. Deleting the key from the
+    // CALLER'S object and forwarding that satisfies the assertion below while destroying the
+    // record the call path still holds — the same identity-for-value mistake the schema test had.
+    const args = { query: "is:unread", __version: "20260903_00" };
     await callTool(
       { url: "composio://gmail", actorId: "user_asker" },
       "GMAIL_FETCH_EMAILS",
-      { query: "is:unread", __version: "20260903_00" },
+      args,
     );
 
     expect(seen).toEqual([{ query: "is:unread" }]);
+    expect(args).toEqual({ query: "is:unread", __version: "20260903_00" });
   });
 
   test("a call with no recorded version refuses rather than guessing one", async () => {
@@ -909,6 +952,7 @@ describe("calling one action", () => {
     // and the only structural defence is that the argument name is never read.
     expect(calls).toEqual([
       {
+        toolkit: "gmail",
         slug: "GMAIL_FETCH_EMAILS",
         userId: "user_asker",
         version: "20260903_00",
