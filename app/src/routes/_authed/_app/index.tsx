@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/carousel";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import { agentListQueryOptions, isSharedWithYou } from "@/lib/agents/queries";
 import { routeMessage } from "@/lib/channels/route";
 import { useStartChannel } from "@/lib/channels/start";
@@ -33,7 +34,7 @@ function RouteComponent() {
   const [error, setError] = useState<string | null>(null);
 
   /** Default recipient when the composer draft has no mention. */
-  const fallback = explore?.[0] ?? agents?.[0];
+  const fallback = defaultAgentProfile(agents, explore?.[0]);
 
   return (
     <>

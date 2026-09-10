@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AgentProfileStore } from "../agents/profile-store";
+import type { AgentProfile } from "../agents/profile-types";
 import type { AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
@@ -9,6 +10,18 @@ import type {
   RoutingCandidate,
   RoutingUndecided,
 } from "./classify";
+
+const PICKED_HARNESS_AGENT_ID = "picked-harness";
+
+export function defaultRoutingProfile(
+  roster: readonly AgentProfile[],
+): AgentProfile | undefined {
+  return (
+    roster.find((agent) => agent.id === PICKED_HARNESS_AGENT_ID) ??
+    roster.find((agent) => agent.visibility === "public") ??
+    roster[0]
+  );
+}
 
 const DEV_ACTOR_EMAIL = "dev@openbot.local";
 
@@ -105,9 +118,8 @@ export function createRoutingRoutes(
 
     const actor = context.var.actor;
     const roster = await store.list(actor, false);
-    // The same default the composer shows: the first public coworker, else the first at all.
-    const preferred =
-      roster.find((a) => a.visibility === "public") ?? roster[0];
+    // The same default the composer shows: the package-picked harness, then the first public coworker.
+    const preferred = defaultRoutingProfile(roster);
     if (!preferred) {
       return context.json({ error: "No coworker is available." }, 409);
     }

@@ -15,6 +15,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "@/components/ui/combobox";
+import { defaultAgentProfile } from "@/lib/agents/default-agent";
 import {
   type AgentProfile,
   agentListQueryOptions,
@@ -56,7 +57,10 @@ function RouteComponent() {
     enabled: Boolean(agent) && !listed,
     retry: false,
   });
-  const chosen = listed ?? (fetched?.id === agent ? fetched : undefined);
+  const chosen =
+    listed ??
+    (fetched?.id === agent ? fetched : undefined) ??
+    (agent ? undefined : defaultAgentProfile(profiles));
   const recipients: Recipient[] = chosen
     ? [{ id: chosen.id, name: chosen.name }]
     : [];
@@ -69,7 +73,7 @@ function RouteComponent() {
         <span className="text-sm text-muted-foreground">To:</span>
         <Combobox
           // Do not auto-open when the recipient came from the URL; the field is already answered.
-          defaultOpen={!agent}
+          defaultOpen={!chosen}
           autoHighlight
           items={profiles ?? []}
           isItemEqualToValue={(item: AgentProfile, value: AgentProfile) =>
@@ -90,7 +94,7 @@ function RouteComponent() {
             // The popup opening is not enough on its own: typing filters through this input, so
             // the caret starts here whenever the recipient question is still open. Same condition
             // as `defaultOpen` — a recipient from the URL means the composer takes focus instead.
-            autoFocus={!agent}
+            autoFocus={!chosen}
             placeholder="Choose a coworker…"
             // InputGroup owns focus rings via `has-[…:focus-visible]`; disable that wrapper ring here.
             className="border-none w-full bg-transparent! text-sm has-[[data-slot=input-group-control]:focus-visible]:ring-0"
