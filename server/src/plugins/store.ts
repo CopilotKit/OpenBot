@@ -43,7 +43,7 @@ import {
 import { accessFor, type ServerAccess } from "./access";
 import { VERSION_ARG } from "./composio";
 import { inspectToolArguments } from "./content-governance";
-import { McpServerError } from "./mcp";
+import { type ListedTool, McpServerError } from "./mcp";
 import { registerDynamicClient } from "./oauth";
 import { transportFor } from "./transport";
 
@@ -221,6 +221,32 @@ export class CustomServerRefusedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CustomServerRefusedError";
+  }
+}
+
+/**
+ * A state this deployment's own code says cannot exist, found existing.
+ *
+ * CRITERION. Nothing here is a vendor's doing, a credential's doing or anything a person asking can
+ * act on, so no path may record one of these as though a vendor had misbehaved.
+ *
+ * REASON. `refreshTools` wrapped the listing, the replace and both audit writes in one `catch` that
+ * copied every message into `lastError` and answered `{ tools: 0 }`. A plain `Error` is what the
+ * narrowing throws in {@link createPluginStore}'s `connectionTokenFor` raise, so a row that resolved
+ * to a brokered credential with no app in its url — or to a per-person credential with no
+ * `user-oauth` entry — came out on the Plugins page as a sentence about the vendor, next to a
+ * refresh that looked like it had merely failed. An operator reading that is sent to somebody else's
+ * status page over a contradiction in our own tables.
+ *
+ * A class rather than a message, because telling these apart by prose is telling them apart by a
+ * substring that a reword would silently change. Distinct from {@link PluginRefusedError}, which is
+ * a refusal somebody CAN act on and which does belong in `lastError` — an administrator who has not
+ * connected their account is the honest reason a listing did not happen.
+ */
+export class PluginInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PluginInvariantError";
   }
 }
 
@@ -833,7 +859,7 @@ export function createPluginStore(options: PluginStoreOptions) {
        * above stops that narrowing from being the fallback.
        */
       if (!access.toolkit) {
-        throw new Error(
+        throw new PluginInvariantError(
           `${row.id} resolves to a brokered credential with no Composio app in its url.`,
         );
       }
@@ -889,7 +915,7 @@ export function createPluginStore(options: PluginStoreOptions) {
      * says must be impossible.
      */
     if (entry?.auth.kind !== "user-oauth") {
-      throw new Error(
+      throw new PluginInvariantError(
         `${row.id} resolves to a per-person credential with no user-oauth catalogue entry.`,
       );
     }
@@ -2106,11 +2132,54 @@ export function createPluginStore(options: PluginStoreOptions) {
     ): Promise<{ tools: number }> {
       const { row, entry, access } = await requireServer(serverId);
 
-      try {
-        // How a row is reached is resolved once, in `requireServer`. Derived from the entry here,
-        // a Composio app — which has no entry — was dialled as MCP at `composio://gmail`.
-        const transport = transportFor(access.transport);
+      // How a row is reached is resolved once, in `requireServer`. Derived from the entry here,
+      // a Composio app — which has no entry — was dialled as MCP at `composio://gmail`.
+      const transport = transportFor(access.transport);
 
+      /*
+       * A brokered row with no app in its url has nobody to ask, and saying so is not the transport's
+       * job.
+       *
+       * CRITERION. A listing this deployment could not even attempt must not be committed as a
+       * refresh, and must not be written down as a vendor's answer.
+       *
+       * REASON. `accessFor` answers `brokered` for every row whose provenance column says so, and
+       * reads the app slug off the url — so `{ credential: "brokered", toolkit: null }` is a real
+       * state, which a hand edit or a restored backup produces and nothing in the product does.
+       * `connectionTokenFor` already refuses it, but only where listing needs a credential, and a
+       * brokered listing needs none: the broker publishes an action's schema to anybody. So the gate
+       * was skipped on exactly the path that reaches the vendor with no app named, and the transport
+       * answered `[]` — indistinguishable, one line later, from an app that advertises nothing.
+       *
+       * READ AS FIELDS, not as a transport. `credential` and `toolkit` are both resolved in
+       * `access.ts` and this asks nothing about which protocol is underneath: any broker reached
+       * without an app named is unroutable, which is the property `toolkit` is documented to carry.
+       * A `transport === "composio"` test here would put back the per-call-site derivation that
+       * module exists to have removed.
+       */
+      if (access.credential === "brokered" && !access.toolkit) {
+        throw new PluginInvariantError(
+          `${row.id} resolves to a brokered credential with no app in its url, so there is nothing to ask what it offers.`,
+        );
+      }
+
+      /*
+       * ASKING THE VENDOR, and the only part of this method whose failure is a vendor's.
+       *
+       * CRITERION. What lands in `lastError` must be something a vendor, a credential or a person
+       * could have caused. An invariant this deployment violated and a fault in its own database must
+       * not read as a vendor misbehaving.
+       *
+       * REASON. This used to be one `try` around everything below as well — the wholesale replace,
+       * the server-row update and both audit writes — with a `catch` that copied any message into
+       * `lastError` and answered `{ tools: 0 }`. So a statement timeout, a duplicate-key refusal or an
+       * `audit_events` insert that would not go in all reported a vendor that had in fact answered
+       * correctly, and reported it beside actions the refresh had already committed. Narrowing that
+       * by error class would be narrowing by prose; narrowing it by SHAPE is what this split does, so
+       * a line added below cannot quietly acquire a vendor's excuse.
+       */
+      let listed: ListedTool[];
+      try {
         /*
          * A credential only when listing actually needs one.
          *
@@ -2130,127 +2199,21 @@ export function createPluginStore(options: PluginStoreOptions) {
           ? (await connectionTokenFor(row, entry, actorId, access)).token
           : undefined;
 
-        const tools = await transport.listTools({
+        listed = await transport.listTools({
           url: effectiveUrl(row, entry),
           token,
         });
-
-        /*
-         * ONE STEP, because the catch below promises that it is one.
-         *
-         * "The tools already held are left alone" is only true while nothing has been written yet.
-         * As two auto-committed statements the delete landed on its own whenever the insert did not:
-         * a pod killed mid-refresh, a dropped connection, a statement timeout — or, with no crash at
-         * all, a server that answers `tools/list` with the same `name` twice, which `mcp_tools`'
-         * `(server_id, name)` primary key refuses as one multi-row insert. `mcp_tools` is shared, so
-         * that is every replica at once, and nothing repopulates it: `refreshTools` is only ever
-         * called by `addServer`, `addCustomServer` and an administrator pressing Refresh. The
-         * connector kept every grant an administrator had made and offered none of them, and
-         * `grantedToolGuidance` then told the Bot outright that it holds none of that vendor's tools.
-         *
-         * Rolled back together, the vendor's bad answer is recorded in `lastError` and the Bots go
-         * on using what they were granted, which is what the comment said all along.
-         */
-        await database.transaction(async (transaction) => {
-          await transaction
-            .delete(mcpTools)
-            .where(eq(mcpTools.serverId, serverId));
-          if (tools.length > 0) {
-            await transaction.insert(mcpTools).values(
-              tools.map((tool) => ({
-                serverId,
-                name: tool.name,
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-                /*
-                 * What the vendor said, when the vendor said anything.
-                 *
-                 * Only Composio publishes any of this today, so all three stay null or false for
-                 * every other transport — which is what keeps `classifyTool` falling back to the
-                 * curated write list for Notion and Drive exactly as it did before.
-                 */
-                effect: tool.effect ?? null,
-                destructive: tool.destructive ?? false,
-                version: tool.version ?? null,
-              })),
-            );
-          }
-        });
-
-        await database
-          .update(mcpServers)
-          .set({
-            toolsRefreshedAt: new Date(),
-            lastError: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(mcpServers.id, serverId));
-
-        /*
-         * A grant left pointing at nothing goes in the trail, at the moment it starts pointing at
-         * nothing.
-         *
-         * Reporting it on a screen answers "what is true now", which somebody has to go and look at.
-         * This answers "when did it stop being offered, and what was holding it" — the question asked
-         * after a transport is swapped back and a name starts resolving again. Without the row, the
-         * only record of the gap is its absence.
-         *
-         * Not a refusal and not an error, so `configuration.changed` rather than a new event type:
-         * nothing was denied and the refresh succeeded. Written after the tool list is replaced, so
-         * what it names is what is actually left over.
-         */
-        const advertised = new Set(tools.map((tool) => tool.name));
-        const stranded = [...(await mcpGrantsForServers([serverId])).entries()]
-          .filter(([ref]) => !advertised.has(ref.slice(serverId.length + 1)))
-          .sort(([left], [right]) => left.localeCompare(right));
-
-        if (stranded.length > 0) {
-          await recordAuditEvent(auditStore, {
-            eventType: "configuration.changed",
-            targetType: "mcp_server",
-            targetId: serverId,
-            payload: {
-              actor: actorId,
-              change: "grants_not_advertised",
-              server: serverId,
-              // The refs, because that is what a grant is keyed on and what an administrator revokes.
-              refs: stranded.map(([ref]) => ref),
-              bots: [...new Set(stranded.flatMap(([, agents]) => agents))],
-              note: "Held by a Bot and not offered to any model, because this server no longer advertises the tool. Offered again if it starts.",
-            },
-          });
-        }
-
-        /*
-         * Tools the vendor advertises that this deployment's write list does not name.
-         *
-         * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
-         * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
-         * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
-         * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
-         *
-         * `configuration.changed` rather than a type of its own, the same as the stranded grants
-         * above and for the same reason: nothing was denied and the refresh succeeded. What changed
-         * is that the deployment now knows a name it had not classified.
-         */
-        const unlisted = unlistedAdvertisedTools(entry, [...advertised]);
-        if (unlisted.length > 0) {
-          await recordAuditEvent(auditStore, {
-            eventType: "configuration.changed",
-            targetType: "mcp_server",
-            targetId: serverId,
-            payload: {
-              actor: actorId,
-              change: "unlisted_tools_advertised",
-              server: serverId,
-              tools: unlisted,
-              note: "Advertised by this server and not named in its reviewed write list, so each is offered to models as a read. This vendor has no read-only scope behind that list, so anything here that writes should be added to the entry.",
-            },
-          });
-        }
-
-        return { tools: tools.length };
       } catch (error) {
+        /*
+         * The narrowing throws in `connectionTokenFor` are ours, not a vendor's.
+         *
+         * They fire for a row that resolved to a brokered credential with no app in its url, or to a
+         * per-person credential with no `user-oauth` entry — contradictions between this deployment's
+         * own tables and its own code. Raised rather than recorded, so the page does not send whoever
+         * reads it to somebody else's status page.
+         */
+        if (error instanceof PluginInvariantError) throw error;
+
         const message =
           error instanceof McpServerError || error instanceof Error
             ? error.message
@@ -2275,6 +2238,183 @@ export function createPluginStore(options: PluginStoreOptions) {
           .where(eq(mcpServers.id, serverId));
         return { tools: 0 };
       }
+
+      /*
+       * An empty listing never destroys what a real listing recorded.
+       *
+       * CRITERION ONE. An empty answer must not be committed as a healthy refresh where doing so
+       * would delete actions this deployment holds, and must not clear `lastError`.
+       *
+       * CRITERION TWO. "This app advertises nothing" stays recordable: an app with nothing held has
+       * nothing to lose, so the empty answer falls through to the replace below and commits — a
+       * refresh stamp, no error, no actions.
+       *
+       * REASON. `listTools` returning `[]` is supposed to mean "the vendor was asked and advertises
+       * none", and for three of the four transports it does. `composio.listTools` breaks it: it
+       * answers `[]` when no client is installed, and NOTHING IN THE SHIPPED PRODUCT CALLS
+       * `useComposioClient` — so on every real deployment that is the only answer a Composio refresh
+       * can produce. Committed, it deleted every `mcp_tools` row for the app, taking the recorded
+       * `effect`, `destructive` and `version` with it. `version` is the one that cannot be
+       * reconstructed: `callTool` refuses an action without it, so a refresh that reported success
+       * broke every subsequent call. The grants survived, pointing at rows that no longer existed —
+       * absent from `listServers`, and revived by a later refresh that worked.
+       *
+       * KEPT RATHER THAN TRUSTED, and that asymmetry is the whole argument. Holding actions the vendor
+       * has withdrawn is visible and reversible: the next listing replaces them. Deleting actions the
+       * vendor never withdrew is neither — `mcp_tools` is shared, so it is every replica at once, and
+       * only a refresh from a deployment that can actually reach the vendor puts it back.
+       *
+       * THE SEAM REQUIREMENT this leans on, which is not satisfied today: a transport that could not
+       * ask anybody must THROW rather than return `[]`. `composio.ts:141` returns `[]` for a missing
+       * client and for a url that names no app, and until it throws instead there is no field on the
+       * listing that tells the two apart. Nothing here asks which transport it is talking to, so the
+       * fix belongs in that one line and not in a branch on `access.transport`.
+       */
+      if (listed.length === 0) {
+        const held = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(eq(mcpTools.serverId, serverId));
+
+        if (held.length > 0) {
+          await database
+            .update(mcpServers)
+            .set({
+              // Named as the state it is, because "listed nothing" and "would not answer" send an
+              // operator to different places. No `toolsRefreshedAt`: that column says when this
+              // deployment last learned what the app offers, and it did not learn it here.
+              lastError: `This app listed no actions at all, so the ${held.length} already recorded for it were kept rather than deleted. Check that the connector is configured for this deployment, then refresh again.`,
+              updatedAt: new Date(),
+            })
+            .where(eq(mcpServers.id, serverId));
+          // What the app advertises, which is what it advertised before: the honest count, because
+          // nothing was replaced.
+          return { tools: held.length };
+        }
+      }
+
+      /*
+       * COMMITTING WHAT THE VENDOR SAID. Nothing from here down is a vendor's doing, so nothing from
+       * here down is caught — see the criterion on the `try` above.
+       *
+       * ONE STEP, because the paragraph above promises the held actions are left alone.
+       *
+       * "The tools already held are left alone" is only true while nothing has been written yet.
+       * As two auto-committed statements the delete landed on its own whenever the insert did not:
+       * a pod killed mid-refresh, a dropped connection, a statement timeout — or, with no crash at
+       * all, a server that answers `tools/list` with the same `name` twice, which `mcp_tools`'
+       * `(server_id, name)` primary key refuses as one multi-row insert. `mcp_tools` is shared, so
+       * that is every replica at once, and nothing repopulates it: `refreshTools` is only ever
+       * called by `addServer`, `addCustomServer` and an administrator pressing Refresh. The
+       * connector kept every grant an administrator had made and offered none of them, and
+       * `grantedToolGuidance` then told the Bot outright that it holds none of that vendor's tools.
+       *
+       * Rolled back together, the Bots go on using what they were granted — and the fault raises
+       * rather than being copied into `lastError`, because a transaction this database would not take
+       * is not something the vendor did.
+       */
+      await database.transaction(async (transaction) => {
+        await transaction
+          .delete(mcpTools)
+          .where(eq(mcpTools.serverId, serverId));
+        if (listed.length > 0) {
+          await transaction.insert(mcpTools).values(
+            listed.map((tool) => ({
+              serverId,
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+              /*
+               * What the vendor said, when the vendor said anything.
+               *
+               * Only Composio publishes any of this today, so all three stay null or false for
+               * every other transport — and `classifyTool` reads null as silence rather than as a
+               * value, which is what leaves Notion and Drive classified by their reviewed write list
+               * exactly as they were before.
+               */
+              effect: tool.effect ?? null,
+              destructive: tool.destructive ?? false,
+              version: tool.version ?? null,
+            })),
+          );
+        }
+      });
+
+      await database
+        .update(mcpServers)
+        .set({
+          toolsRefreshedAt: new Date(),
+          lastError: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(mcpServers.id, serverId));
+
+      /*
+       * A grant left pointing at nothing goes in the trail, at the moment it starts pointing at
+       * nothing.
+       *
+       * Reporting it on a screen answers "what is true now", which somebody has to go and look at.
+       * This answers "when did it stop being offered, and what was holding it" — the question asked
+       * after a transport is swapped back and a name starts resolving again. Without the row, the
+       * only record of the gap is its absence.
+       *
+       * Not a refusal and not an error, so `configuration.changed` rather than a new event type:
+       * nothing was denied and the refresh succeeded. Written after the tool list is replaced, so
+       * what it names is what is actually left over — and only ever after a listing that was
+       * committed, because the guard above returns before this on an empty answer that would have
+       * named every grant the app holds.
+       */
+      const advertised = new Set(listed.map((tool) => tool.name));
+      const stranded = [...(await mcpGrantsForServers([serverId])).entries()]
+        .filter(([ref]) => !advertised.has(ref.slice(serverId.length + 1)))
+        .sort(([left], [right]) => left.localeCompare(right));
+
+      if (stranded.length > 0) {
+        await recordAuditEvent(auditStore, {
+          eventType: "configuration.changed",
+          targetType: "mcp_server",
+          targetId: serverId,
+          payload: {
+            actor: actorId,
+            change: "grants_not_advertised",
+            server: serverId,
+            // The refs, because that is what a grant is keyed on and what an administrator revokes.
+            refs: stranded.map(([ref]) => ref),
+            bots: [...new Set(stranded.flatMap(([, agents]) => agents))],
+            note: "Held by a Bot and not offered to any model, because this server no longer advertises the tool. Offered again if it starts.",
+          },
+        });
+      }
+
+      /*
+       * Tools the vendor advertises that this deployment's write list does not name.
+       *
+       * The mechanical half of the reconciliation Notion's catalogue entry says is required. See
+       * {@link unlistedAdvertisedTools} for why only that shape of vendor is named here: an
+       * advertised tool absent from `writeTools` classifies as a READ, so an under-inclusive list
+       * is silent, and for a vendor with no scope strings there is nothing else standing behind it.
+       *
+       * `configuration.changed` rather than a type of its own, the same as the stranded grants
+       * above and for the same reason: nothing was denied and the refresh succeeded. What changed
+       * is that the deployment now knows a name it had not classified.
+       */
+      const unlisted = unlistedAdvertisedTools(entry, [...advertised]);
+      if (unlisted.length > 0) {
+        await recordAuditEvent(auditStore, {
+          eventType: "configuration.changed",
+          targetType: "mcp_server",
+          targetId: serverId,
+          payload: {
+            actor: actorId,
+            change: "unlisted_tools_advertised",
+            server: serverId,
+            tools: unlisted,
+            note: "Advertised by this server and not named in its reviewed write list, so each is offered to models as a read. This vendor has no read-only scope behind that list, so anything here that writes should be added to the entry.",
+          },
+        });
+      }
+
+      return { tools: listed.length };
     },
 
     async listServers(): Promise<ServerRecord[]> {

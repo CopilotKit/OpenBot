@@ -41,6 +41,7 @@ import {
   exchangeRefreshTokenOverHttp,
   INVALID_CLIENT,
   type OAuthClient,
+  PluginInvariantError,
   PluginRefusedError,
   type PluginStore,
   TokenRefusedError,
@@ -2647,9 +2648,14 @@ describe("a dynamic client the vendor has evicted", () => {
    * The classification an MCP server has always had, over a real listing that really happened.
    *
    * The three columns the refresh now writes are Composio's, and every other transport has to keep
-   * coming out of that insert as null and false — because `classifyTool` prefers a recorded effect to
-   * the reviewed write list, so a value appearing here for Notion would silently reclassify every one
-   * of its reads as a write, on a connector nobody touched. Asserted on the rows AND on what the
+   * coming out of that insert as null and false. `classifyTool` consults the reviewed `writeTools`
+   * list BEFORE the recorded `effect` column, on the criterion that a recorded value may narrow what
+   * a Bot is allowed and may never widen it — so a name the list covers stays a write whatever the
+   * column says, and a value appearing here can no longer turn one of Notion's reviewed writes into a
+   * read. The other direction is still open, which is what this test is for: a name the list does not
+   * cover falls through to the column, where PRESENCE rather than truthiness decides, so an effect
+   * recorded for Notion would silently reclassify every one of its reads as a write, on a connector
+   * nobody touched. Only `null` and `undefined` are silence. Asserted on the rows AND on what the
    * Plugins page derives from them, because it is the second one that an administrator reads.
    *
    * It lives in this suite because this is the only place a `user-oauth` listing can actually be
@@ -4103,4 +4109,210 @@ test("a granted Composio action that the vendor withdrew is still shown as grant
   expect(gmail?.tools.map((tool) => tool.ref)).toEqual([
     "gmail/GMAIL_SEND_EMAIL",
   ]);
+});
+
+/*
+ * A refresh that listed nothing, on the path every real deployment takes.
+ *
+ * NOTHING IN THE SHIPPED PRODUCT CALLS `useComposioClient`, so `installed` is null on every live
+ * install and the Composio transport answers `[]` — not a throw — for want of a client to ask with.
+ * The tests below install no stub, which is that state exactly rather than a fiction about it.
+ *
+ * A wholesale replace on that answer deletes what the last real listing recorded, and `version` is
+ * the column that cannot be reconstructed: `callTool` refuses without it, so an app whose actions
+ * were dropped this way stops working for everybody until somebody presses Refresh on a deployment
+ * that can actually reach the vendor. The grants survive the delete pointing at rows that no longer
+ * exist, which is invisible on the Plugins page and revived by the next refresh that works.
+ */
+describe("a refresh whose transport could not ask anybody", () => {
+  test("leaves the actions the app already advertises, with what the vendor said about them", async () => {
+    const { store, database } = await freshStore();
+    await seedComposioGmail(database, store);
+
+    await store.refreshTools("gmail", "admin_user");
+
+    const rows = await database
+      .select({
+        name: mcpTools.name,
+        effect: mcpTools.effect,
+        version: mcpTools.version,
+      })
+      .from(mcpTools)
+      .where(eq(mcpTools.serverId, "gmail"));
+
+    // The version above all: it is what `callTool` sends, so losing it breaks every later call on
+    // an app the refresh reported as fine.
+    expect(rows).toEqual([
+      { name: "GMAIL_FETCH_EMAILS", effect: "read", version: "20260903_00" },
+    ]);
+  });
+
+  test("does not report the app as healthy", async () => {
+    const { store, database } = await freshStore();
+    await seedComposioGmail(database, store);
+    await database
+      .update(mcpServers)
+      .set({ lastError: "The vendor would not answer." })
+      .where(eq(mcpServers.id, "gmail"));
+
+    await store.refreshTools("gmail", "admin_user");
+
+    const [row] = await database
+      .select({
+        lastError: mcpServers.lastError,
+        toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+      })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, "gmail"));
+
+    // Not cleared. An empty answer from a transport that reached no vendor is not evidence that
+    // whatever was wrong before has been put right.
+    expect(row?.lastError).not.toBeNull();
+    // And no refresh stamp, because nothing was listed: the column says when this deployment last
+    // learned what the app offers, and it did not learn it here.
+    expect(row?.toolsRefreshedAt).toBeNull();
+  });
+
+  test("does not strand the grants the app is holding", async () => {
+    const { store, database, auditStore } = await freshStore();
+    await seedComposioGmail(database, store);
+
+    await store.refreshTools("gmail", "admin_user");
+
+    const gmail = (await store.listServers()).find(
+      (server) => server.id === "gmail",
+    );
+
+    // Still offered and still not withdrawn.
+    expect(gmail?.tools.map((tool) => tool.ref)).toEqual([
+      "gmail/GMAIL_FETCH_EMAILS",
+    ]);
+    expect(gmail?.withdrawn).toEqual([]);
+    // Nor filed as having stopped being offered, which would be the trail asserting a withdrawal
+    // the vendor never made.
+    expect(
+      auditStore
+        .recorded()
+        .filter(
+          (event) =>
+            (event.payload as { change?: string }).change ===
+            "grants_not_advertised",
+        ),
+    ).toEqual([]);
+  });
+
+  test("a brokered row whose url names no app raises rather than blaming the vendor", async () => {
+    const { store, database } = await freshStore();
+    // `accessFor` still answers `brokered` for any row whose provenance says composio, so this is
+    // `{ credential: "brokered", toolkit: null }` — a row a hand edit or an old backup produces and
+    // nothing in the product can. There is no app to ask, so an empty answer is not the vendor's.
+    await seedComposioGmail(database, store, {
+      url: "https://example.com/mcp",
+    });
+
+    await expect(store.refreshTools("gmail", "admin_user")).rejects.toThrow(
+      PluginInvariantError,
+    );
+
+    const [row] = await database
+      .select({ lastError: mcpServers.lastError })
+      .from(mcpServers)
+      .where(eq(mcpServers.id, "gmail"));
+
+    // The state is this deployment's own, so it must not be written down as something a vendor did.
+    expect(row?.lastError).toBeNull();
+  });
+});
+
+/**
+ * The genuine empty listing, which has to stay recordable.
+ *
+ * The guard above must not turn "this app advertises nothing" into a state the deployment cannot
+ * hold, or an app that really offers no actions would read as broken for good. An app with nothing
+ * recorded against it has nothing to lose, so the empty answer commits: refreshed, no error and no
+ * actions, which is the honest reading of an app that advertises none.
+ */
+test("an app with nothing recorded against it can be refreshed to no actions at all", async () => {
+  const { store, database } = await freshStore();
+  useComposioClient({ listActions: async () => [], execute: async () => ({}) });
+  await database.insert(mcpServers).values({
+    id: "gmail",
+    title: "Gmail",
+    vendor: "Composio",
+    url: "composio://gmail",
+    provenance: "composio",
+    lastError: "Whatever was wrong last time.",
+  });
+
+  expect(await store.refreshTools("gmail", "admin_user")).toEqual({ tools: 0 });
+
+  const [row] = await database
+    .select({
+      lastError: mcpServers.lastError,
+      toolsRefreshedAt: mcpServers.toolsRefreshedAt,
+    })
+    .from(mcpServers)
+    .where(eq(mcpServers.id, "gmail"));
+
+  expect(row?.lastError).toBeNull();
+  expect(row?.toolsRefreshedAt).not.toBeNull();
+});
+
+/**
+ * An audit write that fails, which is not the vendor misbehaving.
+ *
+ * The refresh used to run the listing, the replace, the server-row update and both audit writes
+ * inside one `catch` that recorded everything as `lastError` and answered `{ tools: 0 }`. So a
+ * database that would not take an audit row reported a vendor which had in fact answered correctly,
+ * and reported it against actions the refresh had already committed — sending whoever reads the
+ * page to a vendor's status page over a fault in their own database.
+ *
+ * Its own store rather than {@link freshStore}, because the audit insert is the seam that has to
+ * fail and that fixture's is deliberately a real one.
+ */
+test("an audit write that fails is not recorded as the vendor misbehaving", async () => {
+  const database = await freshDatabase();
+  const failing = createPluginStore({
+    database,
+    auditStore: {
+      insert: async (event) => {
+        if (
+          (event.payload as { change?: string }).change ===
+          "grants_not_advertised"
+        ) {
+          throw new Error("audit_events would not take the row");
+        }
+      },
+    },
+    credentials: credentialsStub,
+    encryptionKey: "x".repeat(44),
+    policy: () => policy,
+  });
+
+  useComposioClient({
+    listActions: async () => [
+      {
+        slug: "GMAIL_SEND_EMAIL",
+        description: "Send an email.",
+        inputParameters: { type: "object", properties: {} },
+        tags: ["createHint"],
+        version: "20260903_00",
+      },
+    ],
+    execute: async () => ({}),
+  });
+  // The granted action is absent from what the vendor now lists, so the refresh reaches the audit
+  // write about grants nothing advertises — the one the stub above refuses.
+  await seedComposioGmail(database, failing);
+
+  await expect(failing.refreshTools("gmail", "admin_user")).rejects.toThrow(
+    "audit_events would not take the row",
+  );
+
+  const [row] = await database
+    .select({ lastError: mcpServers.lastError })
+    .from(mcpServers)
+    .where(eq(mcpServers.id, "gmail"));
+
+  expect(row?.lastError).toBeNull();
 });
