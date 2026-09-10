@@ -10,7 +10,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { MCPMock, type MCPToolDefinition } from "@copilotkit/aimock/mcp";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { and, asc, eq, gte, inArray, like, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, like, sql } from "drizzle-orm";
 import { createAuditStore } from "../src/audit";
 import type { ActionPolicy } from "../src/computer/policy";
 import {
@@ -252,6 +252,26 @@ let ownsFixtureIds = false;
  * So the deletes in {@link freshDatabase} are authorised by {@link ownsFixtureIds} and this is what
  * makes them safe.
  */
+/**
+ * Every `composio_connections` row this file may claim, as one clause used by all three sites.
+ *
+ * CRITERION. The refuse-to-run guard, the per-test sweep and the teardown ask exactly the same
+ * question, and a fixture added at a fourth pair has to change one place rather than three.
+ *
+ * REASON. They disagreed. The guard and the sweep asked by person across every app; one test's
+ * cleanup asked by the anonymous actor across every app; the pair `("gmail", "")` was in none of
+ * them. So the file refused to run on rows it does not create, deleted rows it did not create, and
+ * left behind one that it did — three faces of one confusion about what makes a row this file's.
+ * The app is half the answer: every row here is at `gmail`, because a Composio app IS its toolkit
+ * slug and this file asserts things about the real one.
+ */
+function ownedConnections() {
+  return and(
+    eq(composioConnections.toolkit, "gmail"),
+    inArray(composioConnections.userId, ["user_asker", "user_leaver", ""]),
+  );
+}
+
 beforeAll(async () => {
   /*
    * Stamped here, in the first hook the file registers, so no row this run writes is older than it
@@ -274,20 +294,25 @@ beforeAll(async () => {
         .from(agents)
         .where(eq(agents.id, "bot_helper")),
       /*
-       * The anonymous actor is one of these ids too, but only at the app this file writes it
-       * against.
+       * Brokered connections, keyed on the PAIR rather than on the person.
        *
-       * CRITERION. This guard refuses on the PAIR `("gmail", "")` and on no other row at the
-       * anonymous actor, because that pair is the only one this file inserts and the only one it
-       * deletes.
+       * CRITERION. This guard refuses on `("gmail", <one of these three>)` and on no other
+       * `composio_connections` row, because those three pairs are the only ones this file inserts
+       * and the only ones it deletes.
        *
-       * REASON. `composio_connections.user_id` is notNull and notNull does not exclude the empty
-       * string, so `("gmail", "")` is a row a deployment can legally hold — which is the whole
-       * point of the test that inserts one. Asked as `user_id = ''` alone, this also caught the
-       * anonymous row `composio-connections.test.ts` writes against its OWN run-suffixed app: a
-       * run of that file killed between its insert and its cleanup left a row nobody here owns,
-       * and every one of this file's tests then refused for good over it. Keyed on the pair, a
-       * stranded row belonging to another file is simply not this one's business.
+       * REASON. Every connection row this file writes is at `gmail` — the two people it invents
+       * and the anonymous actor alike — so the app is half of what makes a row this file's, and
+       * asking by person alone claims rows at every other app as well. Both spellings of that
+       * over-reach have already cost something. `user_id = ''` caught the anonymous row
+       * `composio-connections.test.ts` writes against its own run-suffixed app, so a run of that
+       * file killed before its cleanup refused every test here for good; `user_id IN (asker,
+       * leaver)` claims a `("slack", "user_asker")` row the same way, and `freshDatabase` would
+       * then DELETE it — a `composio_connections` row is the entire gate on a brokered call, and
+       * nothing else can find it again.
+       *
+       * The anonymous actor is one of the three because `user_id` is notNull and notNull does not
+       * exclude the empty string, so `("gmail", "")` is a row a deployment can legally hold, which
+       * is the whole point of the test that inserts one.
        */
       database
         .select({
@@ -295,15 +320,7 @@ beforeAll(async () => {
           userId: composioConnections.userId,
         })
         .from(composioConnections)
-        .where(
-          or(
-            inArray(composioConnections.userId, ["user_asker", "user_leaver"]),
-            and(
-              eq(composioConnections.toolkit, "gmail"),
-              eq(composioConnections.userId, ""),
-            ),
-          ),
-        ),
+        .where(ownedConnections()),
       /*
        * The person, who was missing from this guard entirely.
        *
@@ -3687,32 +3704,23 @@ async function freshDatabase(): Promise<Database> {
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, ["gmail", "notion"]));
-  // By person, never by toolkit: the table has no foreign key to `users` — which is the property the
-  // first test below is about, so nothing else removes these rows — and a delete by toolkit alone
-  // would take every person's Gmail connection, leaving one orphaned at the broker with no local row
-  // left to find it by. Only the two people this file invents.
-  await database.delete(composioConnections).where(
-    or(
-      inArray(composioConnections.userId, ["user_asker", "user_leaver"]),
-      /*
-       * And the one pair at the anonymous actor this file writes, which no person id names.
-       *
-       * CRITERION. Exactly `("gmail", "")`, never `user_id = ''` across every app: the second
-       * spelling reaches the anonymous row another file owns at its own run-suffixed app.
-       *
-       * REASON. The test that inserts this pair takes it back in a `finally`, which covers a
-       * failed assertion and not a killed process — and the row it would otherwise leave is
-       * precisely what the guard at the top of this file refuses on. Swept here, a pair stranded
-       * earlier in this same run is gone before the next test looks at it; a pair that was
-       * already there when the run started is still the guard's to refuse, because at that point
-       * nothing has established it is ours.
-       */
-      and(
-        eq(composioConnections.toolkit, "gmail"),
-        eq(composioConnections.userId, ""),
-      ),
-    ),
-  );
+  /*
+   * Brokered connections, by the pair and never by half of it.
+   *
+   * NEITHER HALF ALONE. By toolkit it would take every person's Gmail connection, leaving one
+   * orphaned at the broker with no local row to find it by — the table has no foreign key to
+   * `users`, which is the property the first test below is about, so nothing else would ever
+   * remove it. By person it would take a `("slack", "user_asker")` row belonging to somebody else,
+   * for the same reason and at the same cost. {@link ownedConnections} is what the guard at the
+   * top of this file has already established nothing else holds.
+   *
+   * The anonymous pair is swept here as well as in the `finally` of the test that inserts it,
+   * because that `finally` covers a failed assertion and not a killed process — and the row it
+   * would leave is what the guard refuses on. A pair stranded earlier in this run is therefore
+   * gone before the next test looks; a pair that was already there when the run started is still
+   * the guard's to refuse, because at that point nothing has established it is ours.
+   */
+  await database.delete(composioConnections).where(ownedConnections());
   // The person the connection outlives, who is a row in `users` like anybody else. Reached only
   // through the check at the top of this function, because there is no suffix on this id to tell a
   // fixture apart from somebody's account and ten cascades sit behind the difference.
@@ -3862,9 +3870,21 @@ afterAll(async () => {
   await database
     .delete(mcpServers)
     .where(inArray(mcpServers.id, ["gmail", "notion"]));
+  await database.delete(composioConnections).where(ownedConnections());
+  /*
+   * And the witness row, which is at neither `gmail` nor any person.
+   *
+   * CRITERION. Nothing at `sweep_witness_${suite}` outlives this run.
+   *
+   * REASON. It is removed in its own test's `finally`, which a killed process does not run — and
+   * nothing else would reach it: `ownedConnections` is keyed on `gmail`, and the anonymous actor
+   * is precisely what `retireConnectionsFor` refuses to act on, so no operation in the product
+   * could clear it either. Named exactly rather than by prefix, because another run's witness is
+   * that run's to take back.
+   */
   await database
     .delete(composioConnections)
-    .where(inArray(composioConnections.userId, ["user_asker", "user_leaver"]));
+    .where(eq(composioConnections.toolkit, `sweep_witness_${suite}`));
   await database.delete(agents).where(eq(agents.id, "bot_helper"));
   await database.delete(users).where(eq(users.id, "user_leaver"));
 });
@@ -3881,10 +3901,23 @@ test("a Composio connection row survives the person being deleted", async () => 
 
   await database.delete(users).where(eq(users.id, "user_leaver"));
 
+  /*
+   * Asked at the app this test connected, not at every app this person might hold.
+   *
+   * The guard at the top of this file is keyed on the pair, so a `("slack", "user_leaver")` row
+   * belonging to somebody else is deliberately allowed to exist — and asking by person alone would
+   * then read it into this assertion and fail over a row that has nothing to do with the property
+   * under test.
+   */
   const rows = await database
     .select({ toolkit: composioConnections.toolkit })
     .from(composioConnections)
-    .where(eq(composioConnections.userId, "user_leaver"));
+    .where(
+      and(
+        eq(composioConnections.toolkit, "gmail"),
+        eq(composioConnections.userId, "user_leaver"),
+      ),
+    );
 
   // The whole reason this table exists rather than reusing mcp_user_credentials: offboarding has to
   // still find the connection and revoke it at Composio after the person is gone, and there is no
@@ -4151,9 +4184,19 @@ test("a Composio call whose row id and url name different apps is refused", asyn
       return vendorAnswered();
     },
   });
-  // The row is called `gmail` and the person has connected `gmail`; the url dials Slack, which is
-  // the app the call would actually run in.
-  await seedComposioGmail(database, store, { url: "composio://slack" });
+  /*
+   * The row is called `gmail` and the person has connected `gmail`; the url dials some OTHER app,
+   * which is the one the call would actually run in.
+   *
+   * SUITE-SCOPED, and that is not cosmetic. Spelled `slack`, this test asserted a refusal on the
+   * strength of `("slack", "user_asker")` not existing anywhere in the database — so it depended
+   * on this file owning a production person id at every app in the world, and a real deployment
+   * row at that pair would have turned the refusal into a completed call and read as this gate
+   * being broken. An app nobody can have connected is what the property actually needs.
+   */
+  await seedComposioGmail(database, store, {
+    url: `composio://unconnected_${suite}`,
+  });
 
   await expect(
     store.callTool({
