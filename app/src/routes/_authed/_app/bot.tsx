@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
-import { agentListQueryOptions } from "@/lib/agents/queries";
+import { type AgentProfile, agentListQueryOptions } from "@/lib/agents/queries";
 import { useActiveBot } from "@/lib/copilot/active-bot";
 import { useBotThread } from "@/lib/copilot/bot-thread";
 import { useStoppedTurn } from "@/lib/copilot/stopped-turn";
@@ -28,10 +28,21 @@ export const Route = createFileRoute("/_authed/_app/bot")({
  * A named Bot that this deployment does not have is answered in a sentence rather than thrown,
  * for the same reason: a mistyped link is not a crash.
  */
+const PICKED_HARNESS_AGENT_ID = "picked-harness";
+
+function defaultAgentId(
+  agents: AgentProfile[] | undefined,
+): string | undefined {
+  return (
+    agents?.find((candidate) => candidate.id === PICKED_HARNESS_AGENT_ID)?.id ??
+    agents?.[0]?.id
+  );
+}
+
 function RouteComponent() {
   const { agent } = Route.useSearch();
   const { data: agents, isPending } = useQuery(agentListQueryOptions());
-  const agentId = agent ?? agents?.[0]?.id;
+  const agentId = agent ?? defaultAgentId(agents);
   const bot = agents?.find((candidate) => candidate.id === agentId);
   const known = bot !== undefined;
 
