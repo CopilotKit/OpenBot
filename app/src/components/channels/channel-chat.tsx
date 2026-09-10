@@ -322,7 +322,7 @@ export function ChannelChat({
       };
     };
 
-    let lastSeen = authoredActivity()?.at ?? null;
+    let lastSeen = authoredActivity();
     let cancelled = false;
 
     const pull = () => {
@@ -366,8 +366,8 @@ export function ChannelChat({
 
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
       const activity = authoredActivity();
-      if (activity && activity.at !== lastSeen) {
-        lastSeen = activity.at;
+      if (activity && !sameActivity(activity, lastSeen)) {
+        lastSeen = activity;
         if (sameActivity(selfReportedBotActivity.current, activity)) return;
         pull();
       }

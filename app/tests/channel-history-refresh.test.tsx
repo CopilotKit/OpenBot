@@ -340,6 +340,73 @@ test("a same-tab activity echo does not append a lagging durable partial beside 
   );
 });
 
+test("a same-timestamp different activity after a self echo still refreshes durable history", async () => {
+  const fullReply = {
+    id: "local-live-reply",
+    role: "assistant",
+    content: "Local reply already rendered",
+  } satisfies Message;
+  const relayed = {
+    id: "same-time-relayed-reply",
+    role: "assistant",
+    content: "Same timestamp relayed reply",
+  } satisfies Message;
+  const view = mounting(async () => stored([initial]), [initial]);
+  await view.findByText(initial.content);
+  runEvents = (input) => [
+    { type: "RUN_STARTED", threadId: input.threadId, runId: input.runId },
+    {
+      type: "TEXT_MESSAGE_START",
+      messageId: fullReply.id,
+      role: "assistant",
+    },
+    {
+      type: "TEXT_MESSAGE_CONTENT",
+      messageId: fullReply.id,
+      delta: fullReply.content,
+    },
+    { type: "TEXT_MESSAGE_END", messageId: fullReply.id },
+    { type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId },
+  ];
+
+  const user = userEvent.setup({ document: view.container.ownerDocument });
+  await user.type(
+    view.getByRole("textbox", { name: "Message" }),
+    "Ask before same-time relay",
+  );
+  await user.click(view.getByRole("button", { name: "Send message" }));
+  await view.findByText(fullReply.content);
+  await waitFor(() =>
+    expect(
+      activityRequests.some(
+        (activity) =>
+          activity.agentId === "refresh-bot" &&
+          activity.text === fullReply.content,
+      ),
+    ).toBe(true),
+  );
+  const selfActivity = activityRequests.find(
+    (activity) =>
+      activity.agentId === "refresh-bot" && activity.text === fullReply.content,
+  );
+  if (!selfActivity) throw new Error("Missing self-reported Bot activity");
+
+  await announce(1, channel, selfActivity);
+  expect(historyReads).toHaveLength(1);
+  history = async () => stored([initial, relayed]);
+  await announce(1, channel, {
+    ...selfActivity,
+    agentId: "relay-bot",
+    text: "Different same-time relay",
+  });
+
+  await view.findByText(relayed.content);
+  expect(historyReads).toHaveLength(2);
+  expect(currentAgent().messages.map((message) => message.id)).toContain(
+    relayed.id,
+  );
+});
+
 test.each([
   { name: "different timestamp", override: { at: "2026-09-09T00:00:10.000Z" } },
   {
